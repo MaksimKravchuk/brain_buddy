@@ -49,6 +49,12 @@ import { classifySessionFailure, resolveFailedProbe } from "./sessionOutcome";
 /** Monotonic across the process; see the note where it is used. */
 let identityEpoch = 0;
 
+/**
+ * Bumped by every `refreshSession` call, and only by `refreshSession` calls —
+ * see the note above that function.
+ */
+let sessionRefreshGeneration = 0;
+
 export type SessionStatus = "loading" | "signed-out" | "signed-in" | "signed-in-offline";
 
 export type ServerTimeAnchor = { serverTimeMs: number; monotonicTimeMs: number };
@@ -305,16 +311,29 @@ export function SessionProvider({ children }: PropsWithChildren) {
    * It also avoids `adoptProfile`, whose `resetPrivateAgentState` is a
    * transition-only concern: running it every fifteen seconds would clear the
    * private agent cache on a cadence nobody asked for.
+   *
+   * `identityEpoch` alone is not enough to order these calls against each
+   * other: it guards against a real transition (login/logout/probe), but
+   * `refreshSession` never bumps it, so two overlapping same-identity calls —
+   * the interval firing and the foreground-return handler calling this
+   * directly both reach `start()`'s effect within one tick of each other —
+   * would both pass that guard regardless of which resolves first. A slower
+   * older response could then resolve after a faster newer one and clobber
+   * its flags. `sessionRefreshGeneration` is bumped by every call to this
+   * function and checked before every state or persistence write, so only
+   * the most recently *started* call's response is ever applied — matching
+   * `authStore.refreshSession`'s guard on the web client.
    */
   const refreshSession = useCallback(async () => {
     const epoch = identityEpoch;
+    const requestGeneration = ++sessionRefreshGeneration;
     let profile: MeResponse;
     try {
       profile = await api.me();
     } catch {
       return;
     }
-    if (identityEpoch !== epoch) {
+    if (identityEpoch !== epoch || requestGeneration !== sessionRefreshGeneration) {
       return;
     }
     setMe(profile);
@@ -322,7 +341,7 @@ export function SessionProvider({ children }: PropsWithChildren) {
     // Keeps the persisted copy current too, so an offline launch resolves the
     // flag the operator most recently set rather than a stale one (FR-020).
     const record = await persistIdentity(currentServerUrl(), profile);
-    if (identityEpoch !== epoch) {
+    if (identityEpoch !== epoch || requestGeneration !== sessionRefreshGeneration) {
       return;
     }
     setIdentity(record);

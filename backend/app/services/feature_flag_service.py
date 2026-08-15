@@ -165,7 +165,8 @@ class FeatureFlagService:
     ) -> RuntimeFlagsView:
         """Put one managed flag into one of the three runtime-override modes."""
 
-        self._require_managed(flag, operator_id=operator_id, action="set_mode")
+        action = "set_mode"
+        self._require_managed(flag, operator_id=operator_id, action=action)
         resolved_mode = self._require_mode(flag, mode, operator_id=operator_id)
 
         def _apply(current: dict[str, FlagOverride]) -> dict[str, FlagOverride]:
@@ -175,17 +176,31 @@ class FeatureFlagService:
             current[flag] = FlagOverride(mode=resolved_mode, selected_users=retained)
             return current
 
-        overlay = self._mutate(_apply)
-        self._record("set_mode", flag=flag, operator_id=operator_id)
+        try:
+            overlay = self._mutate(_apply)
+        except DegradedRuntimeFlagsError:
+            self._record(
+                action, flag=flag, operator_id=operator_id, outcome="refused_degraded"
+            )
+            raise
+        self._record(action, flag=flag, operator_id=operator_id)
         return self._view(overlay)
 
     def clear_override(self, flag: str, *, operator_id: str) -> RuntimeFlagsView:
         """Delete one managed flag's whole runtime entry, cohort included (DD-3)."""
 
-        self._require_managed(flag, operator_id=operator_id, action="clear_override")
-        overlay = self.repository.clear(flag)
+        action = "clear_override"
+        self._require_managed(flag, operator_id=operator_id, action=action)
+
+        try:
+            overlay = self.repository.clear(flag)
+        except DegradedRuntimeFlagsError:
+            self._record(
+                action, flag=flag, operator_id=operator_id, outcome="refused_degraded"
+            )
+            raise
         self._invalidate()
-        self._record("clear_override", flag=flag, operator_id=operator_id)
+        self._record(action, flag=flag, operator_id=operator_id)
         return self._view(overlay)
 
     def add_selected_user(
@@ -198,34 +213,54 @@ class FeatureFlagService:
     ) -> RuntimeFlagsView:
         """Add one exactly-matched account to a SELECTED_USERS cohort (010-FR-007)."""
 
-        self._require_managed(flag, operator_id=operator_id, action="add_selected_user")
-        self._require_selected_users_mode(
-            flag, operator_id=operator_id, action="add_selected_user"
-        )
+        action = "add_selected_user"
+        self._require_managed(flag, operator_id=operator_id, action=action)
         found = self.admin_service.find_account(
             operator_id=operator_id, account_id=account_id, email=email
         )
         if found is None:
             self._record(
-                "add_selected_user",
-                flag=flag,
-                operator_id=operator_id,
-                outcome="no_account_found",
+                action, flag=flag, operator_id=operator_id, outcome="no_account_found"
             )
             raise SelectedUserNotFoundError()
 
         def _apply(current: dict[str, FlagOverride]) -> dict[str, FlagOverride]:
-            entry = current[flag]
+            entry = self._selected_users_entry(current, flag)
+            # Lock order matches purge (feature-flag lock, then user read):
+            # `found` was resolved before this lock was taken, so an account
+            # purge racing this add may have scrubbed and deleted it in the
+            # meantime. Re-checking existence here, under the same lock the
+            # write commits under, is what stops that purge's deletion from
+            # being resurrected by this cohort write (010-FR-007, DD-13).
+            if self.user_repo.get_by_id(found.id) is None:
+                raise SelectedUserNotFoundError()
             current[flag] = FlagOverride(
                 mode=entry.mode,
                 selected_users=tuple(sorted({*entry.selected_users, found.id})),
             )
             return current
 
-        overlay = self._mutate(_apply)
-        self._record(
-            "add_selected_user", flag=flag, operator_id=operator_id, account=found.id
-        )
+        try:
+            overlay = self._mutate(_apply)
+        except DegradedRuntimeFlagsError:
+            self._record(
+                action, flag=flag, operator_id=operator_id, outcome="refused_degraded"
+            )
+            raise
+        except ValidationFailure:
+            self._record(
+                action,
+                flag=flag,
+                operator_id=operator_id,
+                outcome="refused_mode_not_selected_users",
+            )
+            raise
+        except SelectedUserNotFoundError:
+            self._record(
+                action, flag=flag, operator_id=operator_id, outcome="no_account_found"
+            )
+            raise
+        self._record(action, flag=flag, operator_id=operator_id, account=found.id)
         return self._view(overlay)
 
     def remove_selected_user(
@@ -233,15 +268,17 @@ class FeatureFlagService:
     ) -> RuntimeFlagsView:
         """Remove one stored account ID. Idempotent by ID, no lookup at all (DD-7)."""
 
-        self._require_managed(
-            flag, operator_id=operator_id, action="remove_selected_user"
-        )
-        self._require_selected_users_mode(
-            flag, operator_id=operator_id, action="remove_selected_user"
+        action = "remove_selected_user"
+        self._require_managed(flag, operator_id=operator_id, action=action)
+        # The path-supplied id is raw request input, so it is named in a
+        # record only when it is account-ID shaped and can never be an email
+        # (DD-10).
+        record_account = (
+            account_id if ACCOUNT_ID_PATTERN.fullmatch(account_id) else None
         )
 
         def _apply(current: dict[str, FlagOverride]) -> dict[str, FlagOverride]:
-            entry = current[flag]
+            entry = self._selected_users_entry(current, flag)
             current[flag] = FlagOverride(
                 mode=entry.mode,
                 selected_users=tuple(
@@ -250,15 +287,22 @@ class FeatureFlagService:
             )
             return current
 
-        overlay = self._mutate(_apply)
-        self._record(
-            "remove_selected_user",
-            flag=flag,
-            operator_id=operator_id,
-            # The path-supplied id is raw request input, so it is named only
-            # when it is account-ID shaped and can never be an email (DD-10).
-            account=account_id if ACCOUNT_ID_PATTERN.fullmatch(account_id) else None,
-        )
+        try:
+            overlay = self._mutate(_apply)
+        except DegradedRuntimeFlagsError:
+            self._record(
+                action, flag=flag, operator_id=operator_id, outcome="refused_degraded"
+            )
+            raise
+        except ValidationFailure:
+            self._record(
+                action,
+                flag=flag,
+                operator_id=operator_id,
+                outcome="refused_mode_not_selected_users",
+            )
+            raise
+        self._record(action, flag=flag, operator_id=operator_id, account=record_account)
         return self._view(overlay)
 
     # ------------------------------------------------------------------
@@ -295,24 +339,26 @@ class FeatureFlagService:
                 f"modes are {[item.value for item in FlagMode]}."
             ) from exc
 
-    def _require_selected_users_mode(
-        self, flag: str, *, operator_id: str, action: str
-    ) -> None:
-        overlay = self._overlay()
-        if overlay.degraded:
-            raise DegradedRuntimeFlagsError()
-        entry = overlay.flags.get(flag)
+    def _selected_users_entry(
+        self, current: dict[str, FlagOverride], flag: str
+    ) -> FlagOverride:
+        """The flag's entry, iff its *locked, freshly read* mode is SELECTED_USERS.
+
+        Called only from inside a mutate callback, so `current` is the
+        snapshot taken under the repository lock rather than the service's
+        cached read — a concurrent `set_mode`/`clear_override` racing this
+        call is therefore always resolved one way or the other, never
+        observed half-applied, and a flag a concurrent `clear_override` just
+        removed is a normal refusal rather than a `KeyError` (010-FR-010).
+        """
+
+        entry = current.get(flag)
         if entry is None or entry.mode is not FlagMode.SELECTED_USERS:
-            self._record(
-                action,
-                flag=flag,
-                operator_id=operator_id,
-                outcome="refused_mode_not_selected_users",
-            )
             raise ValidationFailure(
                 f"'{flag}' must be in selected_users mode before its cohort "
                 "can be changed."
             )
+        return entry
 
     def _record(
         self,
