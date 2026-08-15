@@ -73,6 +73,14 @@ data/
 .codespeak/ignored/
 
 # Claude Code project-private state (track .claude/skills for Spec Kit)
+/.claude.json
+/.claude/.credentials.json
+/.claude/history.jsonl
+/.claude/debug/
+/.claude/projects/
+/.claude/session-env/
+/.claude/shell-snapshots/
+/.claude/todos/
 .claude/settings.local.json
 .claude/CLAUDE.local.md
 .claude/**/*.local.*

@@ -1,0 +1,64 @@
+[extend]
+useDefault = true
+
+# Every entry below exempts ONE complete, known-synthetic line — field name and
+# value together — and nothing else.
+#
+# Two things are deliberate and both are load-bearing:
+#
+# 1. No entry declares `paths`. A global allowlist that names `paths` is applied
+#    as a PATH FILTER before any rule runs: gitleaks 8.30.1 skips the whole file
+#    and never evaluates `condition` or `regexes`. So `paths` + a narrow regex
+#    does not narrow anything — it exempts every line of that file, forever.
+#    Verified against the pinned binary: with a `paths` entry the file scans as
+#    0 bytes; without one it scans in full and a credential added on any other
+#    line is reported.
+#
+# 2. The regex pins the VALUE, not the field name. A field-name-only condition
+#    (`"run_key"\s*:`) exempts the field rather than the fixture, so swapping a
+#    synthetic value for a live credential leaves the field name untouched and
+#    the scan stays green on the single change these entries exist to catch.
+#
+# Exempting a whole line including its literal is safe precisely because the
+# literal is synthetic and already public in this repository; no real credential
+# can equal one of these lines.
+#
+# `scripts/test_secret_scan_guardrails.py` proves mechanically that every
+# pattern here still matches its fixture line, stops matching as soon as the
+# value on that line changes, and that no entry has regained `paths`. Add a
+# fixture by adding its own entry; never widen an existing one.
+
+[[allowlists]]
+description = "Synthetic voice-report run key (live_report.900eeb8)"
+regexTarget = "line"
+regexes = ['''^\s*"run_key": "e8cb406f16b5ff9c6c776e872d5ff3c1af9c0091c8d2a89547877a18e1fea645",\s*$''']
+
+[[allowlists]]
+description = "Synthetic voice-report run key (live_report.317aca5)"
+regexTarget = "line"
+regexes = ['''^\s*"run_key": "bfd2defec8cd40eae754fe2eef538b77b3d29871f1cb165aaa354d00e6ac2eb8",\s*$''']
+
+[[allowlists]]
+description = "Synthetic voice-report run key (example_report.redacted.v2)"
+regexTarget = "line"
+regexes = ['''^\s*"run_key": "c407ddcc582e4541f2f13f14f485820137452c4ba21833634292a1615d90415e",\s*$''']
+
+[[allowlists]]
+description = "Synthetic repository idempotency key"
+regexTarget = "line"
+regexes = ['''^\s*record = make_idempotency\(key="k1-raw-idempotency-key"\)\s*$''']
+
+[[allowlists]]
+description = "Synthetic mobile integration password"
+regexTarget = "line"
+regexes = ['''^\s*const password = "correct-horse-battery-staple-1";\s*$''']
+
+[[allowlists]]
+description = "Synthetic agent relay inbound signing secret (frontend fixture)"
+regexTarget = "line"
+regexes = ['''^\s*inbound_signing_secret: "sk-inbound-9f2c"\s*$''']
+
+[[allowlists]]
+description = "Synthetic agent relay golden-vector signing secret (backend fixture)"
+regexTarget = "line"
+regexes = ['''^\s*fixed_secret = "golden-vector-signing-secret-v2"\s*$''']

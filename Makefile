@@ -131,6 +131,7 @@ validate-ci:
 	python3 -m unittest scripts/test_capture_fly_release_image.py -v
 	python3 -m unittest scripts/test_classify_path_risk.py -v
 	python3 -m unittest scripts/test_check_smoke_identity_cohort.py -v
+	python3 -m unittest scripts/test_secret_scan_guardrails.py -v
 	python3 scripts/validate_ci_artifacts.py workflow --ci .github/workflows/ci.yml --frontend-vite-config frontend/vite.config.ts --disallow-workflow frontend/.github/workflows/playwright.yml
 	python3 scripts/validate_ci_artifacts.py mutation-workflow \
 		--workflow .github/workflows/mutation-quality.yml \

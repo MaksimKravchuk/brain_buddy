@@ -84,6 +84,27 @@ jobs:
           python3 scripts/validate_trunk_delivery.py deploy \
             --workflow .github/workflows/deploy-fly-production.yml
 
+      - name: Validate the secret-scan guardrails
+        run: python3 -m unittest scripts/test_secret_scan_guardrails.py -v
+
+  # The secret scan has to be a job HERE, not a workflow of its own.
+  #
+  # A candidate lands by pushing trunk-candidate/<sha>, and the only verdict the
+  # default-branch release workflow consumes is the `Full CI` join below. A scan
+  # living in its own workflow is advisory for that path: it can be red while
+  # Full CI is green, and the candidate lands with the leak in it. Called from
+  # here it is inside the required graph, and because a skipped required job
+  # fails Full CI, a candidate cannot evade it by skipping it either.
+  #
+  # The scan itself stays defined once, in secret-scan.yml, which keeps the
+  # checksum-pinned Gitleaks install in one place and runs it exactly once per
+  # event. This job holds no `needs`: it is an independent cheap lane.
+  secret-scan:
+    name: Secret scan
+    uses: ./.github/workflows/secret-scan.yml
+    permissions:
+      contents: read
+
   # Which stacks a pull request actually touches. Every stack job still RUNS --
   # it just skips its expensive steps when nothing relevant changed. Skipping
   # the jobs themselves would produce a 'skipped' result, and ADR-0008 requires
@@ -1125,6 +1146,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - workflow-lint
+      - secret-scan
       - changes
       - spec-kit
       - backend
@@ -1321,6 +1343,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - workflow-lint
+      - secret-scan
       - changes
       - spec-kit
       - backend
