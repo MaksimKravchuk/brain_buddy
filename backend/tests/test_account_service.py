@@ -205,9 +205,7 @@ def test_010_FR_004_a_degraded_document_halts_the_purge_before_any_deletion(
     )
 
     assert (
-        container.agent_repo.get_connection(
-            owned["connection_id"], owner_id=member.id
-        )
+        container.agent_repo.get_connection(owned["connection_id"], owner_id=member.id)
         is not None
     )
 
