@@ -78,7 +78,7 @@ jobs:
       # below authenticates as the dedicated landing identity, never as the
       # (read-only) workflow token.
       - name: Check out the CI-tested revision
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
@@ -194,7 +194,7 @@ jobs:
       # classifier below still deepens defensively; that is a no-op on a
       # complete clone.
       - name: Check out the CI-tested revision
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0

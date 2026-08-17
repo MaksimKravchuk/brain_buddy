@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Run actionlint
         uses: raven-actions/actionlint@v2
@@ -131,7 +131,7 @@ jobs:
       mutation_scope: ${{ steps.mutation_scope.outputs.scope }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           # Full history: the floor comparison below needs a merge base, and
           # this is the one job that pays for it on behalf of the others.
@@ -262,7 +262,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Validate feature specs
         run: |
@@ -297,7 +297,7 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Python
         if: env.RUN == 'true'
@@ -413,7 +413,7 @@ jobs:
         working-directory: frontend
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Node.js
         if: env.RUN == 'true'
@@ -511,7 +511,7 @@ jobs:
         working-directory: mobile
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Node.js
         if: env.RUN == 'true'
@@ -652,14 +652,14 @@ jobs:
       RUN: ${{ needs.changes.outputs.mutation }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       # The base revision is measured with the HEAD revision's allow-list and
       # gate script. Reading either from the base would let a pull request pick
       # its own comparison by editing them.
       - name: Checkout the base revision
         if: env.RUN == 'true' && github.event_name == 'pull_request'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
@@ -751,7 +751,7 @@ jobs:
       RUN: ${{ needs.changes.outputs.mutation }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Python
         if: env.RUN == 'true'
@@ -875,7 +875,7 @@ jobs:
       RUN: ${{ needs.changes.outputs.mutation }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Download the head measurement
         if: env.RUN == 'true'
@@ -944,7 +944,7 @@ jobs:
     if: ${{ !cancelled() && needs.e2e.result != 'skipped' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -1016,7 +1016,7 @@ jobs:
       BRAIN_BUDDY_FRONTEND_IMAGE: brain-buddy-frontend:ci
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -1163,7 +1163,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       # Four artifacts match the `*-allure-results` pattern downloaded below,
       # and the predicate has to account for every one of them:
