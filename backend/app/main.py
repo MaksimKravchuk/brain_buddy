@@ -245,6 +245,7 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix=config.api_prefix)
 
     @app.get("/health", tags=["health"])
+    @app.get(f"{config.api_prefix}/health", tags=["health"])
     async def health_check() -> dict[str, str]:
         """Return a lightweight health check payload."""
         return {
