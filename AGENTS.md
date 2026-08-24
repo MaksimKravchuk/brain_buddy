@@ -28,6 +28,44 @@
 - Coverage floors (`backend/`, `frontend/`, `mobile/coverage-floor.json`) may only ratchet upward, and there is no per-file escape hatch — `scripts/validate_ci_artifacts.py coverage-suppressions` rejects every `istanbul ignore` form in `frontend/src` and `mobile/src`.
 - Ensure new features include targeted tests; run both test suites before pushing.
 
+## Definition of Done
+
+Writing or merging code is not completion. A product change is Done only when its product, design, quality, and production criteria below are satisfied with current evidence for the exact deployed commit SHA. A criterion that does not apply must be marked `N/A` with a reason; required behavior may not be silently deferred.
+
+### Product Outcome
+
+- Every frozen acceptance criterion has current passing evidence against the deployed build.
+- A representative intended user can complete the primary in-scope journey in production at the intended feature-flag stage, and the promised user-visible result is observed. Generic health checks and page loads are insufficient.
+- The expected user outcome and at least one relevant product signal or guardrail are named. Production evidence confirms that the signal is captured correctly; statistically significant adoption or business impact is not required before Done unless explicitly included in the acceptance criteria.
+- The intended feature-flag audience is verified. Where applicable, `OFF`, rollback, and recovery behavior must preserve existing user work and restore the documented safe behavior.
+
+### Design and UX
+
+These criteria apply only when rendered UI, copy, navigation, interaction, responsive layout, accessibility behavior, or another client-visible outcome changes. Backend-only changes mark this section `N/A`.
+
+- Exercise each changed critical path in production at the exact deployed SHA, intended configuration, feature-flag state, and affected supported viewport or device class.
+- Verify the materially affected reachable states: success and applicable loading, empty, validation, permission or disabled, error, and recovery states.
+- Verify that affected layouts have no blocked controls, clipping, unintended overlap, or horizontal scrolling. Changed interactions must support keyboard operation, visible focus, and accessible names, with no new serious or critical accessibility violations on the affected surface.
+- Record production screenshots or recordings of the changed surfaces and compare them with the accepted design, acceptance criteria, or approved baseline. Evidence remains bounded to the changed surfaces and risks.
+
+### Engineering Quality
+
+- All applicable required suites pass on the exact candidate SHA: backend pytest, frontend Vitest, Playwright product E2E, and, when mobile is affected, mobile Jest and real-backend integration tests. Skipped required checks are not passes.
+- New or changed behavior has targeted tests. Every applicable pytest, Vitest, Jest, and Playwright product test satisfies the Allure Report 3 taxonomy enforced by `scripts/validate_allure_taxonomy.py`: non-empty `epic`, `feature`, and `story`, a human-readable title, and at least one named step.
+- Required Spec Kit artifacts and accepted ADRs match the implemented behavior, and `python3 scripts/check_spec_kit_specs.py` passes when feature artifacts are affected. Hermes-managed outcomes additionally require the receipts and exact-SHA evidence defined by ADR-0010.
+- Affected critical operations, errors, and state transitions produce production-safe logs at an appropriate level with a request or correlation identifier where available. Critical-path exceptions must not be silently swallowed, and logs must not contain secrets or sensitive payloads.
+- Monitoring requirements must be concrete and proportional to the change. Existing reachability, production-smoke, canary, and structured-log signals must remain healthy. When a change introduces a new metric or alert requirement, its signal, threshold, owner, and response must be defined before it becomes a Done gate.
+- No regressions are detected by the full applicable required suite on the exact SHA. Absolute claims such as “no regressions exist” are not acceptable evidence.
+
+### Production and Release Evidence
+
+- SHIP and SHOW changes clear required CI on `trunk-candidate/<sha>`. The release workflow proves that `origin/main` equals the tested SHA, fast-forwards `main`, and re-verifies that same SHA immediately before deployment.
+- ASK changes require explicit recorded approval, green required CI on the exact SHA, and evidence of the audited temporary ruleset intervention required by ADR-0008. ASK changes never use automatic candidate promotion.
+- The deployed commit SHA matches the tested and independently reviewed SHA. Any SHA change invalidates prior review, QA, and release evidence.
+- `scripts/production_smoke.sh` passes against production, including the effective `delivery_canary` assertion, authenticated primary workflow, temporary-data cleanup, and cleanup read-back.
+- The release completes without rollback. A failed production smoke, rollback, partial deployment, missing evidence, or successful deployment of a different SHA means the change is not Done.
+- Evidence identifies the exact SHA and includes the applicable CI and release workflow runs, independent review and QA verdicts, production-smoke result, feature-flag read-back, and product or UX evidence.
+
 ## Commit & Pull Request Guidelines
 - Commit messages follow conventional prefix style (`feat:`, `fix:`, `docs:`, etc.).
 - Keep commits focused; include smoke-test or manual verification notes in body when relevant.
