@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import Never
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
+from app.ai.title_completion import build_title_completion_provider
 from app.core.config import (
     AppConfig,
     AppEnvironment,
@@ -23,6 +24,7 @@ from app.modules.agents.secrets import (
 )
 from app.modules.agents.service import AgentRelayService, TaskSnapshot
 from app.modules.tasks import TaskRepository, TaskService
+from app.modules.tasks.autocomplete import TaskTitleAutocompleteService
 from app.repositories import (
     FeatureFlagOverrideRepository,
     IndexRepository,
@@ -93,6 +95,7 @@ class Container:
     task_service: TaskService
     voice_brain_dump_service: VoiceBrainDumpService
     agent_relay_service: AgentRelayService
+    task_title_autocomplete_service: TaskTitleAutocompleteService
 
 
 class _UnavailableRelaySecretBox(SecretBox):
@@ -355,6 +358,14 @@ def build_container(config: AppConfig) -> Container:
         },
     )
     task_service = TaskService(task_repo)
+    task_title_autocomplete_service = TaskTitleAutocompleteService(
+        repository=task_repo,
+        provider=build_title_completion_provider(
+            config.task_title_autocomplete,
+            environment=config.environment,
+            environ=os.environ,
+        ),
+    )
 
     def _voice_enabled_for_owner(owner_id: str) -> bool:
         """Whether ``voice_brain_dump`` is effective for the operation's owner.
@@ -478,4 +489,5 @@ def build_container(config: AppConfig) -> Container:
         task_service=task_service,
         voice_brain_dump_service=voice_brain_dump_service,
         agent_relay_service=agent_relay_service,
+        task_title_autocomplete_service=task_title_autocomplete_service,
     )

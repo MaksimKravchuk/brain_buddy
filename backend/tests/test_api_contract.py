@@ -201,6 +201,19 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/tasks", "get"): {"400", "401", "404", "422"},
         ("/api/tasks", "post"): {"400", "401", "404", "409", "422"},
         ("/api/tasks/smart-add", "post"): {"400", "401", "404", "409", "422"},
+        ("/api/tasks/title-completion-provider", "get"): {"401", "404"},
+        ("/api/tasks/title-completions", "post"): {
+            "400",
+            "401",
+            "404",
+            "422",
+            "429",
+        },
+        ("/api/tasks/title-completions/accepted", "post"): {
+            "401",
+            "404",
+            "422",
+        },
         ("/api/tasks/{task_id}/agent-runs/preview", "post"): {
             "400",
             "401",

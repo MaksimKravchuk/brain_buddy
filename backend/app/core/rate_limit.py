@@ -67,6 +67,13 @@ sensitive_action_rate_limiter = InMemoryRateLimiter(
     window_seconds=SENSITIVE_ACTION_WINDOW_SECONDS,
 )
 
+TITLE_COMPLETION_MAX_ATTEMPTS = 20
+TITLE_COMPLETION_WINDOW_SECONDS = 60
+title_completion_rate_limiter = InMemoryRateLimiter(
+    max_attempts=TITLE_COMPLETION_MAX_ATTEMPTS,
+    window_seconds=TITLE_COMPLETION_WINDOW_SECONDS,
+)
+
 
 __all__ = [
     "InMemoryRateLimiter",
@@ -76,4 +83,5 @@ __all__ = [
     "SENSITIVE_ACTION_WINDOW_SECONDS",
     "login_rate_limiter",
     "sensitive_action_rate_limiter",
+    "title_completion_rate_limiter",
 ]

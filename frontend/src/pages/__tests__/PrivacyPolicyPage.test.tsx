@@ -57,21 +57,29 @@ describe("PrivacyPolicyPage", () => {
     renderPolicy();
 
     // docs/data-retention.md names this page as the user-facing summary that
-    // must stay in sync with it. Spec 010 moved the three managed flags
-    // (voice_brain_dump, mobile_task_classification, external_agent_relay)
+    // must stay in sync with it. The runtime store now covers four managed flags.
     // from a rollout file into one SQLite store; the decided facts pinned
     // here are what it holds, that purge scrubs it, and that it is outside
     // the export.
     expect(screen.getByText(/one SQLite store/i)).toBeInTheDocument();
-    expect(screen.getByText(/covering three managed flags/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering four managed flags/i)).toBeInTheDocument();
     expect(screen.getByText(/holds only your account id per flag/i)).toBeInTheDocument();
     expect(screen.getByText(/scrubbed when your account is purged/i)).toBeInTheDocument();
     expect(screen.getByText(/excluded from your data export/i)).toBeInTheDocument();
   });
 
+  it("012-FR-007: names OpenAI's title-suggestion processing purpose", () => {
+    renderPolicy();
+
+    const processors = screen.getByRole("heading", { name: /who else processes your data/i }).closest("section");
+    expect(processors).toHaveTextContent(
+      /OpenAI.*title suggestions.*current task draft.*selected Project name.*prior task titles/i
+    );
+  });
+
   it("records the date the policy last changed", () => {
     renderPolicy();
-    expect(screen.getByText(/August 15, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/August 25, 2026/)).toBeInTheDocument();
   });
 
   it("links back to sign in", () => {

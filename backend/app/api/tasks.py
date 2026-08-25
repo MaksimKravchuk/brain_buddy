@@ -2,25 +2,36 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Sequence
 from datetime import date
 from typing import Literal
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
+from app.ai.title_completion import TitleCompletionRequest
 from app.api.contracts import error_responses
 from app.api.dependencies import (
     get_config_dep,
     get_current_user,
     get_feature_flag_service,
     get_task_service,
+    get_task_title_autocomplete_service,
     get_voice_brain_dump_service,
     require_voice_brain_dump_enabled,
     voice_brain_dump_enabled,
 )
 from app.core.config import AppConfig
+from app.core.rate_limit import title_completion_rate_limiter
 from app.exceptions import ValidationFailure
 from app.modules.tasks import TaskService
+from app.modules.tasks.autocomplete import (
+    CompletionUnavailable,
+    InvalidCompletionRequest,
+    TaskTitleAutocompleteService,
+)
 from app.modules.tasks.domain import (
     ProjectDocument,
     SmartAddTaskResultDocument,
@@ -71,7 +82,11 @@ from app.schemas.tasks import (
     TaskSubtaskUpdateRequest,
     TaskTransitionRequest,
     TaskUpdateRequest,
+    TitleCompletionAcceptedRequest,
+    TitleCompletionProviderResponse,
+    TitleCompletionResponse,
 )
+from app.schemas.tasks import TitleCompletionRequest as TitleCompletionPayload
 from app.services import FeatureFlagService
 from app.workflows.voice_brain_dump.audio_media import canonical_audio_mime_type
 from app.workflows.voice_brain_dump.domain import (
@@ -86,6 +101,7 @@ from app.workflows.voice_brain_dump.service import (
 )
 
 router = APIRouter(tags=["tasks"])
+logger = logging.getLogger(__name__)
 
 # Privacy controls over an existing operation that stay reachable when the
 # ``voice_brain_dump`` exposure flag is OFF (ADR-0002 reversible authority). All
@@ -93,6 +109,131 @@ router = APIRouter(tags=["tasks"])
 _VOICE_OFF_REACHABLE_ACTIONS = frozenset(
     {"withdraw_consent", "cancel", "delete_raw_audio"}
 )
+
+
+@router.get(
+    "/tasks/title-completion-provider",
+    response_model=TitleCompletionProviderResponse,
+    responses=error_responses(401, 404),
+)
+def title_completion_provider(
+    current_user: User = Depends(get_current_user),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
+    autocomplete: TaskTitleAutocompleteService = Depends(
+        get_task_title_autocomplete_service
+    ),
+) -> TitleCompletionProviderResponse:
+    if not feature_flags.effective_flags(current_user).get(
+        "task_title_autocomplete", False
+    ):
+        raise HTTPException(status_code=404, detail="Not found")
+    provider = autocomplete.provider
+    return TitleCompletionProviderResponse(
+        provider=provider.category if provider is not None else None
+    )
+
+
+@router.post(
+    "/tasks/title-completions",
+    response_model=TitleCompletionResponse,
+    responses=error_responses(400, 401, 404, 422, 429, 503),
+)
+def title_completions(
+    payload: TitleCompletionPayload,
+    current_user: User = Depends(get_current_user),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
+    autocomplete: TaskTitleAutocompleteService = Depends(
+        get_task_title_autocomplete_service
+    ),
+) -> TitleCompletionResponse:
+    if not feature_flags.effective_flags(current_user).get(
+        "task_title_autocomplete", False
+    ):
+        raise HTTPException(status_code=404, detail="Not found")
+    provider = autocomplete.provider
+    provider_category = provider.category if provider is not None else None
+    if provider_category is None:
+        raise HTTPException(status_code=503, detail="Title completion unavailable")
+    if (
+        not payload.consent.external_processing_allowed
+        or payload.consent.provider != provider_category
+    ):
+        raise HTTPException(
+            status_code=400, detail="Valid provider consent is required"
+        )
+    started = time.monotonic()
+    try:
+        request = TitleCompletionRequest(
+            draft=payload.draft, project_id=payload.project_id
+        )
+        autocomplete.context(owner_id=current_user.id, request=request)
+    except (ValueError, InvalidCompletionRequest) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    if not title_completion_rate_limiter.check(current_user.id):
+        raise HTTPException(
+            status_code=429,
+            detail="Title completion rate limit exceeded",
+            headers={"Retry-After": "60"},
+        )
+    try:
+        result = autocomplete.complete(
+            owner_id=current_user.id,
+            request=request,
+        )
+    except InvalidCompletionRequest as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except CompletionUnavailable:
+        logger.info(
+            "title_completion outcome=unavailable owner_id=%s provider=%s duration_ms=%d",
+            current_user.id,
+            provider_category,
+            int((time.monotonic() - started) * 1000),
+        )
+        raise HTTPException(
+            status_code=503, detail="Title completion unavailable"
+        ) from None
+    request_id = str(uuid4())
+    logger.info(
+        "title_completion outcome=success request_id=%s owner_id=%s provider=%s "
+        "duration_ms=%d input_tokens=%s output_tokens=%s",
+        request_id,
+        current_user.id,
+        result.provider,
+        int((time.monotonic() - started) * 1000),
+        result.input_tokens,
+        result.output_tokens,
+    )
+    return TitleCompletionResponse(
+        request_id=request_id, candidates=list(result.candidates)
+    )
+
+
+@router.post(
+    "/tasks/title-completions/accepted",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(401, 404, 422),
+)
+def title_completion_accepted(
+    payload: TitleCompletionAcceptedRequest,
+    current_user: User = Depends(get_current_user),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
+) -> None:
+    if not feature_flags.effective_flags(current_user).get(
+        "task_title_autocomplete", False
+    ):
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        UUID(payload.request_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=422, detail="request_id must be a UUID"
+        ) from None
+    logger.info(
+        "title_completion_acceptance request_id=%s owner_id=%s rank=%d",
+        payload.request_id,
+        current_user.id,
+        payload.rank,
+    )
 
 
 def _require_idempotency_key(idempotency_key: str | None) -> str:

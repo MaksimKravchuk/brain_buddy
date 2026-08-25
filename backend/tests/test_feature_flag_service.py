@@ -604,7 +604,7 @@ def test_010_FR_006_describe_emits_exactly_one_aggregate_record(
     assert len(records) == 1
     message = records[0].getMessage()
     assert "operator=user_op" in message
-    assert "flags=3" in message
+    assert "flags=4" in message
     assert "resolved_accounts=1" in message
     assert "chosen@example.com" not in message
 

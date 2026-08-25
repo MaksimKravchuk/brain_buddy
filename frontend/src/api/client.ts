@@ -19,7 +19,10 @@ import type {
   TaskSubtaskTransitionRequest,
   TaskSubtaskUpdateRequest,
   TaskTransitionRequest,
-  TaskUpdateRequest
+  TaskUpdateRequest,
+  TitleCompletionProviderResponse,
+  TitleCompletionRequest,
+  TitleCompletionResponse
 } from "./taskTypes";
 import type {
   AccountDeletePayload,
@@ -237,6 +240,25 @@ export const apiClient = {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: payload
+    });
+  },
+
+  getTitleCompletionProvider(signal?: AbortSignal) {
+    return request<TitleCompletionProviderResponse>("/tasks/title-completion-provider", { signal });
+  },
+
+  generateTitleCompletions(payload: TitleCompletionRequest, signal?: AbortSignal) {
+    return request<TitleCompletionResponse>("/tasks/title-completions", {
+      method: "POST",
+      body: payload,
+      signal
+    });
+  },
+
+  recordTitleCompletionAccepted(requestId: string, rank: number) {
+    return request<void>("/tasks/title-completions/accepted", {
+      method: "POST",
+      body: { request_id: requestId, rank }
     });
   },
 

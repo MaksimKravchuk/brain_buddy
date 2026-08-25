@@ -83,6 +83,7 @@ KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "voice_brain_dump",
     "mobile_task_classification",
     "external_agent_relay",
+    "task_title_autocomplete",
 )
 
 # Every flag name ``BRAIN_BUDDY_FEATURE_FLAGS`` may configure. There is no
@@ -465,6 +466,19 @@ class VoiceSettings(BaseModel):
     lease_recovery_margin_seconds: float = Field(default=30.0, ge=0, le=600)
 
 
+class TaskTitleAutocompleteSettings(BaseModel):
+    """Fixed, privacy-bounded provider configuration for title completions."""
+
+    provider: str = "disabled"
+    model: str = "gpt-4o-mini"
+    api_key_env: str = "OPENAI_API_KEY"
+    timeout_seconds: float = Field(default=3.0, gt=0, le=3.0)
+    max_history_titles: int = Field(default=50, ge=1, le=50)
+    max_output_tokens: int = Field(default=120, ge=1, le=120)
+
+    model_config = ConfigDict(frozen=True)
+
+
 AGENT_EVENTS_PATH = "/agent-events"
 """The relay endpoint path below the application's configured API prefix."""
 
@@ -670,6 +684,9 @@ class AppConfig(BaseModel):
     session: SessionSettings = Field(default_factory=SessionSettings)
     password_policy: PasswordPolicy = Field(default_factory=PasswordPolicy)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    task_title_autocomplete: TaskTitleAutocompleteSettings = Field(
+        default_factory=TaskTitleAutocompleteSettings
+    )
     agent_relay: AgentRelaySettings = Field(default_factory=AgentRelaySettings)
     feature_flags: FeatureFlagSettings = Field(default_factory=FeatureFlagSettings)
     admin: AdminSettings = Field(default_factory=AdminSettings)
@@ -964,6 +981,23 @@ def _build_config() -> AppConfig:
         ),
     )
 
+    autocomplete_provider = os.getenv(
+        "BRAIN_BUDDY_TASK_TITLE_AUTOCOMPLETE_PROVIDER",
+        "deterministic" if environment is AppEnvironment.TEST else "disabled",
+    )
+    if (
+        environment is AppEnvironment.PRODUCTION
+        and autocomplete_provider == "deterministic"
+    ):
+        raise ValueError("Production cannot use deterministic title completion.")
+    task_title_autocomplete = TaskTitleAutocompleteSettings(
+        provider=autocomplete_provider,
+        model=os.getenv("BRAIN_BUDDY_TASK_TITLE_AUTOCOMPLETE_MODEL", "gpt-4o-mini"),
+        api_key_env=os.getenv(
+            "BRAIN_BUDDY_TASK_TITLE_AUTOCOMPLETE_API_KEY_ENV", "OPENAI_API_KEY"
+        ),
+    )
+
     agent_relay = AgentRelaySettings(
         public_base_url=_canonical_public_base_url(
             os.getenv("BRAIN_BUDDY_PUBLIC_BASE_URL", "http://localhost:8000"),
@@ -1005,6 +1039,7 @@ def _build_config() -> AppConfig:
         session=session_config,
         password_policy=password_policy,
         voice=voice,
+        task_title_autocomplete=task_title_autocomplete,
         agent_relay=agent_relay,
         feature_flags=_build_feature_flags(),
         admin=_build_admin_settings(),
@@ -1034,6 +1069,7 @@ __all__ = [
     "ManagedFlagMigrationSeed",
     "PasswordPolicy",
     "SessionSettings",
+    "TaskTitleAutocompleteSettings",
     "VoiceAudioLimits",
     "VoiceProviderSettings",
     "VoiceRetentionSettings",

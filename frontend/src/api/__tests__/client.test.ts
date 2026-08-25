@@ -400,6 +400,46 @@ describe("apiClient", () => {
     await expect(apiClient.listTags()).rejects.toThrow("Request failed");
   });
 
+  it("012-FR-012: preserves title-completion paths, payloads, status and AbortSignal", async () => {
+    const controller = new AbortController();
+    fetchMock
+      .mockResolvedValueOnce(response({ provider: "openai" }))
+      .mockResolvedValueOnce(
+        response({ request_id: "request-1", candidates: ["one", "two", "three"] })
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await apiClient.getTitleCompletionProvider(controller.signal);
+    await apiClient.generateTitleCompletions(
+      {
+        draft: "prepare launch notes",
+        project_id: null,
+        consent: { external_processing_allowed: true, provider: "openai" }
+      },
+      controller.signal
+    );
+    await apiClient.recordTitleCompletionAccepted("request-1", 2);
+
+    const [discoveryUrl, discoveryInit] = fetchMock.mock.calls[0];
+    expect(discoveryUrl).toBe("/api/tasks/title-completion-provider");
+    expect(discoveryInit.signal).toBe(controller.signal);
+
+    const [generationUrl, generationInit] = fetchMock.mock.calls[1];
+    expect(generationUrl).toBe("/api/tasks/title-completions");
+    expect(generationInit.method).toBe("POST");
+    expect(generationInit.signal).toBe(controller.signal);
+    expect(JSON.parse(generationInit.body)).toEqual({
+      draft: "prepare launch notes",
+      project_id: null,
+      consent: { external_processing_allowed: true, provider: "openai" }
+    });
+
+    const [acceptanceUrl, acceptanceInit] = fetchMock.mock.calls[2];
+    expect(acceptanceUrl).toBe("/api/tasks/title-completions/accepted");
+    expect(acceptanceInit.method).toBe("POST");
+    expect(JSON.parse(acceptanceInit.body)).toEqual({ request_id: "request-1", rank: 2 });
+  });
+
   // 010: the four runtime feature-flag routes. Every screen-level test mocks
   // `apiClient`, so without these the wire shape — method, path, encoding and
   // body — would be asserted nowhere at all.

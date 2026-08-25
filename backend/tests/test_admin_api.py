@@ -325,6 +325,7 @@ def test_009_FR_010_member_feature_flags_never_gain_the_admin_portal_key(
             "voice_brain_dump",
             "mobile_task_classification",
             "external_agent_relay",
+            "task_title_autocomplete",
         }
 
 

@@ -124,6 +124,24 @@ export interface SmartAddTaskResponse {
   };
 }
 
+export interface TitleCompletionProviderResponse {
+  provider: string | null;
+}
+
+export interface TitleCompletionRequest {
+  draft: string;
+  project_id: string | null;
+  consent: {
+    external_processing_allowed: true;
+    provider: string;
+  };
+}
+
+export interface TitleCompletionResponse {
+  request_id: string;
+  candidates: [string, string, string];
+}
+
 export interface TaskUpdateRequest {
   title?: string;
   details?: string | null;

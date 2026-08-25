@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 // Update these two constants when the policy text changes or the contact moves.
 const CONTACT_EMAIL = "maksim.v.kravchuk@gmail.com";
-const LAST_UPDATED = "August 15, 2026";
+const LAST_UPDATED = "August 25, 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -68,6 +68,12 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             and you can withdraw it or delete the raw audio at any time from the app.
           </p>
           <p>
+            With separate, current consent, title suggestions may send the current task draft,
+            the selected Project name when present, and at most 50 of your prior task titles to
+            the configured title-completion provider. Suggestions are session-local and do not
+            create or modify tasks.
+          </p>
+          <p>
             <strong>Legitimate interest</strong> (Art. 6(1)(f)): security logging and rate
             limiting to protect accounts, and account administration — an authorised
             operator can look up one account (its id, email, display name and whether
@@ -95,17 +101,19 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
           <p>
             To turn a feature on or off for particular accounts we keep one SQLite store
-            covering three managed flags: it holds only your account id per flag, it is
+            covering four managed flags: it holds only your account id per flag, it is
             scrubbed when your account is purged, and it is excluded from your data export.
           </p>
         </Section>
 
         <Section title="Who else processes your data">
           <p>
-            <strong>OpenAI</strong> (and, where configured, <strong>Deepgram</strong>) — speech
-            transcription, text reconciliation, and AI validation, only when you have consented.
-            API data is not used to train their models and is retained by OpenAI for up to 30
-            days for abuse monitoring. A data processing agreement is in place.
+            <strong>OpenAI</strong> — title suggestions processing the current task draft, selected
+            Project name, and up to 50 prior task titles, plus speech transcription, text
+            reconciliation, and AI validation; and, where configured, <strong>Deepgram</strong> —
+            speech transcription. These purposes run only when you have consented. API data is
+            not used to train their models and is retained by OpenAI for up to 30 days for abuse
+            monitoring. A data processing agreement is in place.
           </p>
           <p>
             <strong>Fly.io</strong> — hosting. Servers are operated by Fly.io, a US company;

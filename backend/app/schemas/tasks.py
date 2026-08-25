@@ -16,6 +16,40 @@ TaskPriority = Literal["none", "low", "medium", "high"]
 TaskSort = Literal["manual", "due", "priority", "title"]
 
 
+class TitleCompletionConsent(StrictBaseModel):
+    external_processing_allowed: bool
+    provider: str = Field(min_length=1, max_length=64)
+
+
+class TitleCompletionRequest(StrictBaseModel):
+    draft: str
+    project_id: str | None = Field(default=None, min_length=1, max_length=500)
+    consent: TitleCompletionConsent
+
+    @model_validator(mode="after")
+    def require_trimmed_draft_length(self) -> TitleCompletionRequest:
+        if not 1 <= len(self.draft.strip()) <= 500:
+            raise PydanticCustomError(
+                "title_completion_draft_length",
+                "Title completion draft must contain 1-500 trimmed characters.",
+            )
+        return self
+
+
+class TitleCompletionProviderResponse(StrictBaseModel):
+    provider: str | None = None
+
+
+class TitleCompletionResponse(StrictBaseModel):
+    request_id: str
+    candidates: list[str] = Field(min_length=3, max_length=3)
+
+
+class TitleCompletionAcceptedRequest(StrictBaseModel):
+    request_id: str = Field(min_length=36, max_length=36)
+    rank: int = Field(ge=1, le=3)
+
+
 class ProjectCreateRequest(StrictBaseModel):
     name: str = Field(min_length=1, max_length=500)
     color: str | None = Field(default=None, max_length=64)

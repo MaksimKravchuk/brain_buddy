@@ -27,6 +27,9 @@ vi.mock("../../../api/client", async () => {
       listTags: vi.fn(),
       createTask: vi.fn(),
       smartAddTask: vi.fn(),
+      getTitleCompletionProvider: vi.fn(),
+      generateTitleCompletions: vi.fn(),
+      recordTitleCompletionAccepted: vi.fn(),
       updateTask: vi.fn(),
       transitionTask: vi.fn(),
       createSubtask: vi.fn(),
@@ -138,6 +141,12 @@ beforeEach(() => {
     tags: [],
     created: { project_id: null, tag_ids: [] }
   }));
+  mocked.getTitleCompletionProvider.mockResolvedValue({ provider: "deterministic" });
+  mocked.generateTitleCompletions.mockResolvedValue({
+    request_id: "8f3d2f73-0e55-4f47-9f9b-1a0b6c7a9c6e",
+    candidates: ["Prepare launch notes today", "Prepare launch notes this week", "Prepare launch notes tomorrow"]
+  });
+  mocked.recordTitleCompletionAccepted.mockResolvedValue(undefined);
   mocked.updateTask.mockImplementation(async () => taskFixture({ revision: 5 }));
   mocked.transitionTask.mockImplementation(async () => taskFixture({ state: "completed", revision: 5 }));
   mocked.createSubtask.mockResolvedValue({ id: "subtask-1", title: "Draft", state: "open", order_key: 1, revision: 1 });
@@ -507,6 +516,74 @@ describe("TaskListPage rows", () => {
 });
 
 describe("TaskListPage capture", () => {
+  // 012-FR-005 012-FR-013 012-FR-014 012-SC-006: Smart Add arbitration,
+  // no pre-submit write, and safe OFF/dismiss behavior preserve capture.
+  it("accepts a consented completion without writing, then submits once on the next Enter", async () => {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { task_title_autocomplete: true }
+        },
+        status: "authed"
+      });
+    });
+    const user = userEvent.setup();
+    renderPage("/tasks/next");
+
+    const field = await screen.findByRole("combobox", { name: "New task title" });
+    await user.type(field, "Prepare launch notes");
+    const consent = await screen.findByRole("checkbox", { name: /Allow deterministic/ });
+    await user.click(consent);
+    const listbox = await screen.findByRole("listbox", { name: "Task title suggestions" });
+    expect(within(listbox).getAllByRole("option")).toHaveLength(3);
+
+    await user.click(field);
+    await user.keyboard("{Enter}");
+    expect(field).toHaveValue("Prepare launch notes today");
+    expect(mocked.createTask).not.toHaveBeenCalled();
+    expect(mocked.smartAddTask).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox", { name: "Task title suggestions" })).not.toBeInTheDocument();
+
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(1));
+    expect(mocked.recordTitleCompletionAccepted).toHaveBeenCalledWith(
+      "8f3d2f73-0e55-4f47-9f9b-1a0b6c7a9c6e",
+      1
+    );
+  });
+
+  it("navigates completions upward and dismisses them with Escape without writing", async () => {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { task_title_autocomplete: true }
+        },
+        status: "authed"
+      });
+    });
+    const user = userEvent.setup();
+    renderPage("/tasks/next");
+
+    const field = await screen.findByRole("combobox", { name: "New task title" });
+    await user.type(field, "Prepare launch notes");
+    await user.click(await screen.findByRole("checkbox", { name: /Allow deterministic/ }));
+    const listbox = await screen.findByRole("listbox", { name: "Task title suggestions" });
+
+    await user.click(field);
+    await user.keyboard("{ArrowUp}");
+    expect(within(listbox).getAllByRole("option")[2]).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("listbox", { name: "Task title suggestions" })).not.toBeInTheDocument();
+    expect(field).toHaveValue("Prepare launch notes");
+    expect(mocked.createTask).not.toHaveBeenCalled();
+    expect(mocked.smartAddTask).not.toHaveBeenCalled();
+  });
+
   it("creates a plain task in the current list and clears the field", async () => {
     const user = userEvent.setup();
     renderPage("/tasks/next");
@@ -593,6 +670,34 @@ describe("TaskListPage capture", () => {
         expect.stringContaining("task-shell-smart-add")
       )
     );
+  });
+
+  it("suppresses autocomplete after a Smart Add token is completed and its popup closes", async () => {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { task_title_autocomplete: true }
+        },
+        status: "authed"
+      });
+    });
+    const user = userEvent.setup();
+    renderPage("/tasks/next");
+
+    const field = await screen.findByRole("combobox", { name: "New task title" });
+    await user.type(field, "Prepare launch notes");
+    await user.click(await screen.findByRole("checkbox", { name: /Allow deterministic/ }));
+    await screen.findByRole("listbox", { name: "Task title suggestions" });
+    mocked.generateTitleCompletions.mockClear();
+
+    await user.type(field, " #calls ");
+
+    expect(await screen.findByLabelText("Smart Add classification chips")).toHaveTextContent("#calls");
+    expect(screen.queryByRole("listbox", { name: "Task title suggestions" })).not.toBeInTheDocument();
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    expect(mocked.generateTitleCompletions).not.toHaveBeenCalled();
   });
 
   it("surfaces a rejected capture as an alert", async () => {

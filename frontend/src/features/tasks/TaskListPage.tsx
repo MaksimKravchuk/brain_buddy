@@ -17,7 +17,9 @@ import { getErrorMessage } from "../../utils/error";
 import { applySmartAddSuggestion, parseSmartAdd, smartAddChips, smartAddSuggestions } from "./smartAdd";
 import type { SmartAddDraft, SmartAddSuggestion } from "./smartAdd";
 import { SmartAddSuggestions } from "./SmartAddSuggestions";
+import { TaskTitleAutocompleteSuggestions } from "./TaskTitleAutocompleteSuggestions";
 import { TaskDetailEmptyPanel, TaskDetailPanel } from "./TaskDetailPanel";
+import { useTaskTitleAutocomplete } from "./useTaskTitleAutocomplete";
 
 const stateLabels: Record<OpenTaskState, string> = {
   inbox: "Inbox",
@@ -775,6 +777,7 @@ function TaskCreator({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [caret, setCaret] = useState(0);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [activeCompletionIndex, setActiveCompletionIndex] = useState(0);
   const [suggestionsOpen, setSuggestionsOpen] = useState(true);
   const smartAddSuggestionsId = "smart-add-suggestions";
   const smartAddOptions = useMemo(
@@ -786,6 +789,17 @@ function TaskCreator({
   const suggestions = smartAddSuggestions(newTitle, caret, smartAddOptions);
   const popupOpen = suggestionsOpen && suggestions.length > 0;
   const selectedSuggestionIndex = Math.min(activeSuggestionIndex, Math.max(suggestions.length - 1, 0));
+  const autocompleteEnabled = useAuthStore(
+    (store) => store.user?.feature_flags?.task_title_autocomplete === true
+  );
+  const autocomplete = useTaskTitleAutocomplete({
+    enabled: autocompleteEnabled,
+    draft: newTitle,
+    projectId: contextProjectId ?? null,
+    smartAddActive: popupOpen || draft.hasCompletedTokens
+  });
+  const completionListboxId = "task-title-completions";
+  const completionsOpen = !popupOpen && autocomplete.candidates.length === 3;
 
   const placeholder = state === "next"
     ? "Add a next action — or dump everything on your mind with the mic above"
@@ -818,6 +832,16 @@ function TaskCreator({
     }, 0);
   };
 
+  const applyCompletion = (candidate: string, rank: number) => {
+    onTitleChange(candidate);
+    autocomplete.dismiss(candidate);
+    setActiveCompletionIndex(0);
+    inputRef.current?.focus();
+    if (autocomplete.requestId) {
+      void autocomplete.recordAcceptance(autocomplete.requestId, rank);
+    }
+  };
+
   return (
     <div className="mt-2 space-y-3">
       {/* The prototype's dashed "add task" row; the smart-add form lives inside
@@ -835,9 +859,17 @@ function TaskCreator({
           ref={inputRef}
           id="new-task-title"
           aria-label="New task title"
-          aria-expanded={popupOpen}
-          aria-controls={popupOpen ? smartAddSuggestionsId : undefined}
-          aria-activedescendant={popupOpen ? `${smartAddSuggestionsId}-option-${selectedSuggestionIndex}` : undefined}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={popupOpen || completionsOpen}
+          aria-controls={popupOpen ? smartAddSuggestionsId : completionsOpen ? completionListboxId : undefined}
+          aria-activedescendant={
+            popupOpen
+              ? `${smartAddSuggestionsId}-option-${selectedSuggestionIndex}`
+              : completionsOpen
+                ? `${completionListboxId}-option-${activeCompletionIndex}`
+                : undefined
+          }
           className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
           placeholder={placeholder}
           value={newTitle}
@@ -856,6 +888,23 @@ function TaskCreator({
               return;
             }
             if (!popupOpen) {
+              if (!completionsOpen) return;
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                const direction = event.key === "ArrowDown" ? 1 : -1;
+                setActiveCompletionIndex((current) => (current + direction + 3) % 3);
+                return;
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                autocomplete.dismiss();
+                return;
+              }
+              if (event.key === "Enter") {
+                event.preventDefault();
+                const candidate = autocomplete.candidates[activeCompletionIndex];
+                if (candidate) applyCompletion(candidate, activeCompletionIndex + 1);
+              }
               return;
             }
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -912,6 +961,33 @@ function TaskCreator({
           onSelect={applySuggestion}
         />
       ) : null}
+      {!popupOpen && autocomplete.provider ? (
+        <label className="flex items-start gap-2 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            checked={autocomplete.consent}
+            onChange={(event) => autocomplete.setConsent(event.currentTarget.checked)}
+          />
+          <span>
+            Allow {autocomplete.provider} to process this draft, the selected Project name, and up to 50 prior task titles from this account for this request.
+          </span>
+        </label>
+      ) : null}
+      {completionsOpen ? (
+        <TaskTitleAutocompleteSuggestions
+          candidates={autocomplete.candidates}
+          activeIndex={activeCompletionIndex}
+          listboxId={completionListboxId}
+          onSelect={applyCompletion}
+        />
+      ) : null}
+      <div
+        className="text-xs text-slate-500"
+        role={autocomplete.loading || autocomplete.error ? "status" : undefined}
+        aria-live="polite"
+      >
+        {autocomplete.loading ? "Finding title suggestions…" : autocomplete.error}
+      </div>
       {chips.length ? (
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600" aria-label="Smart Add classification chips">
           <span>Will add:</span>

@@ -122,12 +122,10 @@ def test_010_FR_001_database_lands_at_feature_flags_sqlite3(tmp_path: Path) -> N
     assert expected.is_file()
 
 
-def test_010_FR_004_a_fresh_data_directory_reads_healthy_with_all_three_rows(
+def test_010_FR_004_a_fresh_data_directory_reads_healthy_with_all_four_rows(
     tmp_path: Path,
 ) -> None:
-    """A never-yet-touched data directory migrates on first construction and
-    reads healthy with all three managed flags present (DD-2: there is no
-    more "absence is healthy" branch)."""
+    """A never-yet-touched data directory migrates with all four managed rows."""
 
     overlay = _repo(tmp_path).read()
 
@@ -136,6 +134,27 @@ def test_010_FR_004_a_fresh_data_directory_reads_healthy_with_all_three_rows(
     for flag in MANAGED_FLAGS:
         assert overlay.flags[flag].mode is FlagMode.OFF
         assert overlay.flags[flag].selected_users == ()
+
+
+def test_012_FR_009_fresh_store_forces_autocomplete_off_despite_environment(
+    tmp_path: Path,
+) -> None:
+    """The new runtime flag is always OFF on a genuine fresh store."""
+    repo = FeatureFlagOverrideRepository(
+        tmp_path / "data",
+        legacy_states={"task_title_autocomplete": FeatureFlagState.ON},
+    )
+
+    overlay = repo.read()
+
+    assert overlay.degraded is False
+    assert set(overlay.flags) == {
+        "voice_brain_dump",
+        "mobile_task_classification",
+        "external_agent_relay",
+        "task_title_autocomplete",
+    }
+    assert overlay.flags["task_title_autocomplete"].mode is FlagMode.OFF
 
 
 # ---------------------------------------------------------------------------
@@ -606,17 +625,17 @@ def test_010_FR_001_a_malformed_legacy_entry_falls_back_to_the_env_baseline(
 # ---------------------------------------------------------------------------
 
 
-def test_010_DD_15_migration_seeds_exactly_the_three_managed_flags_plus_a_ledger_row(
+def test_010_DD_15_migration_seeds_exactly_the_four_managed_flags_plus_a_ledger_row(
     tmp_path: Path,
 ) -> None:
-    """A fresh data directory ends up with one SQLite row per managed flag —
-    now three, including `external_agent_relay` — plus a migration-ledger
-    marker, all inside one `feature_flags.sqlite3` database on the volume."""
+    """A fresh data directory ends up with one SQLite row per managed flag,
+    including the default-OFF autocomplete flag, plus a migration ledger."""
 
     assert set(MANAGED_FLAGS) == {
         "voice_brain_dump",
         "mobile_task_classification",
         "external_agent_relay",
+        "task_title_autocomplete",
     }
 
     _sqlite_repo(tmp_path)

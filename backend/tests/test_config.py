@@ -17,6 +17,7 @@ from app.core.config import (
     AppEnvironment,
     VoiceProviderSettings,
     VoiceSettings,
+    _canonical_public_base_url,
     get_config,
     public_callback_host_is_reachable,
 )
@@ -58,6 +59,29 @@ def test_get_config_uses_environment(
     assert config.log_level == "DEBUG"
     assert config.api_prefix == "/custom"
     assert config.data.schema_version == "2024.04"
+    assert config.data.schema_version_path == tmp_path.resolve() / "schema_version"
+
+
+def test_public_base_url_reports_an_unparseable_port() -> None:
+    with pytest.raises(ValueError, match="could not parse"):
+        _canonical_public_base_url(
+            "https://brain-buddy.example:not-a-port",
+            environment=AppEnvironment.PRODUCTION,
+        )
+
+
+def test_production_rejects_deterministic_title_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "BRAIN_BUDDY_PUBLIC_BASE_URL", "https://brain-buddy-backend.fly.dev"
+    )
+    monkeypatch.setenv("BRAIN_BUDDY_TASK_TITLE_AUTOCOMPLETE_PROVIDER", "deterministic")
+
+    with pytest.raises(ValueError, match="Production cannot use deterministic"):
+        get_config()
 
 
 def test_relay_manifest_callback_uses_the_configured_api_prefix(

@@ -12,6 +12,7 @@ from app.core.config import AppConfig
 from app.core.logging import get_correlation_id
 from app.modules.agents.service import AgentRelayService
 from app.modules.tasks import TaskService
+from app.modules.tasks.autocomplete import TaskTitleAutocompleteService
 from app.schemas.auth import User
 from app.services import (
     AccountService,
@@ -95,6 +96,12 @@ def get_feature_flag_service(
 
 def get_task_service(container: Container = Depends(get_container)) -> TaskService:
     return container.task_service
+
+
+def get_task_title_autocomplete_service(
+    container: Container = Depends(get_container),
+) -> TaskTitleAutocompleteService:
+    return container.task_title_autocomplete_service
 
 
 def get_voice_brain_dump_service(

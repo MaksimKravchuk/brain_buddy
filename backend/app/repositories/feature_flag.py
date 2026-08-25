@@ -85,12 +85,17 @@ MANAGED_FLAGS: tuple[str, ...] = (
     "voice_brain_dump",
     "mobile_task_classification",
     "external_agent_relay",
+    "task_title_autocomplete",
 )
 """The three runtime-manageable flags after ADR-0019 (DD-1, DD-15, DD-16).
 
 `admin_portal` is not excluded — it does not exist as a flag at all (DD-14).
 `delivery_canary` stays a separate, environment-owned release-smoke input.
 """
+
+_ADR_0019_MANAGED_FLAGS: frozenset[str] = frozenset(
+    {"voice_brain_dump", "mobile_task_classification", "external_agent_relay"}
+)
 
 _LEGACY_JSON_MANAGED_FLAGS: frozenset[str] = frozenset(
     {"voice_brain_dump", "mobile_task_classification"}
@@ -387,6 +392,8 @@ class FeatureFlagOverrideRepository(BaseRepository):
                             json.dumps({"managed_flags": list(MANAGED_FLAGS)}),
                         ),
                     )
+                else:
+                    self._upgrade_adr_0019_store(conn)
                 conn.commit()
             except BaseException:
                 conn.rollback()
@@ -402,7 +409,36 @@ class FeatureFlagOverrideRepository(BaseRepository):
         seed = self._load_seed()
         legacy_document = self._read_legacy_document()
         for flag in MANAGED_FLAGS:
-            self._upsert_row(conn, flag, self._seed_entry(flag, legacy_document, seed))
+            entry = (
+                FlagOverride(mode=FlagMode.OFF)
+                if flag == "task_title_autocomplete"
+                else self._seed_entry(flag, legacy_document, seed)
+            )
+            self._upsert_row(conn, flag, entry)
+
+    def _upgrade_adr_0019_store(self, conn: sqlite3.Connection) -> None:
+        """Add the fourth row only to a complete, healthy ADR-0019 store."""
+        rows = conn.execute(
+            "SELECT flag, mode, selected_users FROM feature_flags"
+        ).fetchall()
+        if {row["flag"] for row in rows} != _ADR_0019_MANAGED_FLAGS:
+            return
+        for row in rows:
+            try:
+                mode = FlagMode(row["mode"])
+                raw_cohort = json.loads(row["selected_users"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return
+            if not isinstance(raw_cohort, list):
+                return
+            cohort = tuple(raw_cohort)
+            if not _is_canonical_cohort(cohort):
+                return
+            if mode is not FlagMode.SELECTED_USERS and cohort:
+                return
+        self._upsert_row(
+            conn, "task_title_autocomplete", FlagOverride(mode=FlagMode.OFF)
+        )
 
     def _load_seed(self) -> ManagedFlagMigrationSeed:
         try:
