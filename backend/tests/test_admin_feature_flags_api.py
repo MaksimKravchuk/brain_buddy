@@ -356,7 +356,9 @@ def test_010_SC_007_no_route_added_by_this_feature_can_enumerate_accounts(
         path for path in world.app.openapi()["paths"] if path.startswith("/api/admin")
     ]
     assert sorted(paths) == [
+        "/api/admin/accounts",
         "/api/admin/accounts/lookup",
+        "/api/admin/accounts/{account_id}",
         "/api/admin/accounts/{account_id}/revoke-sessions",
         "/api/admin/feature-flags",
         "/api/admin/feature-flags/{flag}/mode",

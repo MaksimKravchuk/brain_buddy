@@ -463,6 +463,9 @@ def build_container(config: AppConfig) -> Container:
         reserved_emails=config.admin.operator_emails,
         deletion_grace=deletion_grace,
     )
+    admin_service.set_mutation_services(
+        auth_service=auth_service, account_service=account_service
+    )
 
     return Container(
         tree_repo=tree_repo,

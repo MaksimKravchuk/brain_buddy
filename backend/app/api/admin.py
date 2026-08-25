@@ -15,8 +15,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.schemas.admin import (
+    AdminAccountCreateRequest,
+    AdminAccountDeleteResponse,
+    AdminAccountListResponse,
     AdminAccountLookupRequest,
     AdminAccountResponse,
+    AdminAccountUpdateRequest,
     AdminFeatureFlagMode,
     AdminFeatureFlagModeRequest,
     AdminFeatureFlagSelectedUser,
@@ -85,6 +89,70 @@ def _account_response(user: User) -> AdminAccountResponse:
         display_name=user.display_name,
         deletion_requested=user.deletion_requested_at is not None,
     )
+
+
+@router.get(
+    "/accounts",
+    response_model=AdminAccountListResponse,
+    responses=error_responses(401, 403),
+)
+def list_accounts(
+    operator: User = Depends(require_operator),
+    admin_service: AdminService = Depends(get_admin_service),
+) -> AdminAccountListResponse:
+    accounts = admin_service.list_accounts(operator_id=operator.id)
+    return AdminAccountListResponse(
+        accounts=[_account_response(user) for user in accounts]
+    )
+
+
+@router.post(
+    "/accounts",
+    response_model=AdminAccountResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(401, 403, 409, 422),
+)
+def create_account(
+    payload: AdminAccountCreateRequest,
+    operator: User = Depends(require_operator),
+    admin_service: AdminService = Depends(get_admin_service),
+) -> AdminAccountResponse:
+    return _account_response(
+        admin_service.create_account(operator_id=operator.id, **payload.model_dump())
+    )
+
+
+@router.put(
+    "/accounts/{account_id}",
+    response_model=AdminAccountResponse,
+    responses=error_responses(401, 403, 404, 409, 422),
+)
+def update_account(
+    account_id: str,
+    payload: AdminAccountUpdateRequest,
+    operator: User = Depends(require_operator),
+    admin_service: AdminService = Depends(get_admin_service),
+) -> AdminAccountResponse:
+    return _account_response(
+        admin_service.update_account(
+            operator_id=operator.id, account_id=account_id, **payload.model_dump()
+        )
+    )
+
+
+@router.delete(
+    "/accounts/{account_id}",
+    response_model=AdminAccountDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    responses=error_responses(401, 403, 404, 422),
+)
+def delete_account(
+    account_id: str,
+    operator: User = Depends(require_operator),
+    admin_service: AdminService = Depends(get_admin_service),
+) -> AdminAccountDeleteResponse:
+    admin_service.delete_account(operator_id=operator.id, account_id=account_id)
+    return AdminAccountDeleteResponse(account_id=account_id)
 
 
 @router.get(

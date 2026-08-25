@@ -34,6 +34,10 @@ import type {
 } from "./accountTypes";
 import type {
   AdminAccountLookupRequest,
+  AdminAccountCreateRequest,
+  AdminAccountDeleteResponse,
+  AdminAccountListResponse,
+  AdminAccountUpdateRequest,
   AdminAccountResponse,
   AdminFeatureFlagMode,
   AdminFeatureFlagsResponse,
@@ -615,6 +619,22 @@ export const apiClient = {
       `/admin/accounts/${encodeURIComponent(accountId)}/revoke-sessions`,
       { method: "POST" }
     );
+  },
+
+  listAdminAccounts(signal?: AbortSignal) {
+    return request<AdminAccountListResponse>("/admin/accounts", { signal });
+  },
+
+  createAdminAccount(payload: AdminAccountCreateRequest) {
+    return request<AdminAccountResponse>("/admin/accounts", { method: "POST", body: payload });
+  },
+
+  updateAdminAccount(accountId: string, payload: AdminAccountUpdateRequest) {
+    return request<AdminAccountResponse>(`/admin/accounts/${encodeURIComponent(accountId)}`, { method: "PUT", body: payload });
+  },
+
+  deleteAdminAccount(accountId: string) {
+    return request<AdminAccountDeleteResponse>(`/admin/accounts/${encodeURIComponent(accountId)}`, { method: "DELETE" });
   },
 
   // Runtime feature-flag management (010). Every mutation returns the full

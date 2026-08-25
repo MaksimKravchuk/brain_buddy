@@ -8,6 +8,7 @@ export interface AdminKeyset {
   all: readonly ["admin", string];
   status: () => readonly ["admin", string, "status"];
   featureFlags: () => readonly ["admin", string, "feature-flags"];
+  accounts: () => readonly ["admin", string, "accounts"];
 }
 
 /**
@@ -23,7 +24,8 @@ export function adminKeysFor(ownerId: string | null): AdminKeyset {
   return {
     all,
     status: () => [...all, "status"] as const,
-    featureFlags: () => [...all, "feature-flags"] as const
+    featureFlags: () => [...all, "feature-flags"] as const,
+    accounts: () => [...all, "accounts"] as const
   };
 }
 
@@ -118,5 +120,18 @@ export function useAdminFeatureFlags() {
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false
+  });
+}
+
+export function useAdminAccounts() {
+  const isAuthed = useAuthStore((state) => state.status === "authed");
+  const ownerId = useAuthStore((state) => state.user?.id ?? null);
+  const keys = useMemo(() => adminKeysFor(ownerId), [ownerId]);
+  return useQuery({
+    enabled: isAuthed,
+    queryKey: keys.accounts(),
+    queryFn: ({ signal }) => apiClient.listAdminAccounts(signal),
+    retry: false,
+    refetchOnWindowFocus: false
   });
 }

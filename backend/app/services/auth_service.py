@@ -157,6 +157,23 @@ class AuthService:
     # Signup / login
     # ------------------------------------------------------------------
 
+    def create_admin_user(
+        self, *, email: str, password: str, display_name: str | None
+    ) -> User:
+        """Create an account without consuming an invite or issuing a session."""
+        self._validate_password_format(password)
+        normalized = self.user_repo.normalize_email(email)
+        if normalized in self.reserved_emails:
+            raise ConflictError("User", normalized)
+        user = User(
+            id=f"user_{uuid.uuid4().hex[:12]}",
+            email=normalized,
+            password_hash=self.hash_password(password),
+            created_at=utcnow(),
+            display_name=display_name.strip() or None if display_name else None,
+        )
+        return self.user_repo.create(user)
+
     def signup(
         self, *, email: str, password: str, invite_code: str
     ) -> tuple[User, str]:

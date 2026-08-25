@@ -242,6 +242,13 @@ describe("apiClient external agent relay contract", () => {
     expect(inits[3].body).toBeUndefined();
   });
 
+  it("preserves an array returned by the agent run list contract", async () => {
+    const runs = [{ id: "run-1" }];
+    fetchMock.mockResolvedValue(response(runs));
+
+    await expect(apiClient.listAgentRuns("task-1")).resolves.toEqual(runs);
+  });
+
   it("batches compact run summaries for every requested task without losing task identity", async () => {
     fetchMock.mockResolvedValue(
       response({

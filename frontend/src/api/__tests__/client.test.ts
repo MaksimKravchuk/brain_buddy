@@ -65,6 +65,26 @@ describe("apiClient", () => {
     expect(JSON.parse(String(deleteInit.body))).toEqual({ current_password: "pw" });
   });
 
+  it("uses the admin account management API contracts", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(response({ accounts: [] })));
+
+    await apiClient.lookupAdminAccount({ email: "member@example.com" });
+    await apiClient.listAdminAccounts();
+    await apiClient.revokeAdminAccountSessions("user-1");
+    await apiClient.createAdminAccount({ email: "member@example.com", display_name: null, password: "long-password" });
+    await apiClient.updateAdminAccount("user-1", { email: "renamed@example.com", display_name: "Renamed" });
+    await apiClient.deleteAdminAccount("user-1");
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, (init as RequestInit).method])).toEqual([
+      ["/api/admin/accounts/lookup", "POST"],
+      ["/api/admin/accounts", "GET"],
+      ["/api/admin/accounts/user-1/revoke-sessions", "POST"],
+      ["/api/admin/accounts", "POST"],
+      ["/api/admin/accounts/user-1", "PUT"],
+      ["/api/admin/accounts/user-1", "DELETE"]
+    ]);
+  });
+
   it("uses the public task, project, and tag API contracts", async () => {
     fetchMock.mockImplementation(() => Promise.resolve(response({ items: [], counts_by_state: {} })));
 

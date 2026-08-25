@@ -81,6 +81,17 @@ describe("smartAdd", () => {
     expect(suggestions[2]).toMatchObject({ kind: "project", ref: { name: "la" }, create: true });
   });
 
+  it("uses stable ids to order duplicate local suggestion names", () => {
+    const duplicateTags = [
+      { id: "tag-z", name: "duplicate", state: "active" as const, revision: 1, open_task_count: 0 },
+      { id: "tag-a", name: "duplicate", state: "active" as const, revision: 1, open_task_count: 0 }
+    ];
+
+    const suggestions = smartAddSuggestions("Plan #dup", 9, { projects: [], tags: duplicateTags });
+
+    expect(suggestions.slice(0, 2).map((item) => item.ref)).toEqual([{ id: "tag-a" }, { id: "tag-z" }]);
+  });
+
   it("offers deterministic local choices for bare sigils without creating an option", () => {
     const suggestions = smartAddSuggestions("Plan #", 6, { projects, tags });
 

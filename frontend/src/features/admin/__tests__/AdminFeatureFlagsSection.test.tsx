@@ -489,6 +489,18 @@ describe("AdminFeatureFlagsSection (010-FR-010, design F-01…F-13)", () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
+  it("010-SC-008: F-13 shows a failed initial read without inventing a correlation reference", async () => {
+    vi.spyOn(apiClient, "getAdminFeatureFlags").mockRejectedValue(
+      new ApiError("Service unavailable", 503, null)
+    );
+
+    renderSection();
+
+    expect(await screen.findByText(/couldn't load feature flags/i)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Service unavailable");
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/ref:/i);
+  });
+
   it("010-FR-007: sends the typed value as typed, classifying it exactly as feature 009 does", async () => {
     vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue(
       bothFlags({ mode: "selected_users" })

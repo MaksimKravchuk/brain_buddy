@@ -9,12 +9,13 @@ from pathlib import Path
 
 from app.exceptions import ConflictError, NotFoundError
 from app.schemas.auth import User
-from app.utils.file_ops import ensure_directory, read_json
+from app.utils.file_ops import ensure_directory, read_json, write_json
 
 from .base import BaseRepository
 
 USERS_DIRNAME = "users"
 BY_EMAIL_INDEX_FILENAME = "_by_email.json"
+PROFILE_TRANSACTION_FILENAME = "_profile_transaction.json"
 
 
 class UserRepository(BaseRepository):
@@ -24,6 +25,7 @@ class UserRepository(BaseRepository):
         super().__init__(root)
         self.users_dir = ensure_directory(self.resolve(USERS_DIRNAME))
         self.index_path = self.users_dir / BY_EMAIL_INDEX_FILENAME
+        self.transaction_path = self.users_dir / PROFILE_TRANSACTION_FILENAME
         # Serializes every user-record and email-index write in this process.
         # Request handlers hold a request-scoped copy of the user, so two
         # concurrent full-record saves would silently drop each other's
@@ -31,6 +33,51 @@ class UserRepository(BaseRepository):
         # was scheduled after that request resolved its user). All mutations
         # must go through `mutate` or otherwise hold this lock.
         self._write_lock = threading.RLock()
+
+    def _recover_pending_transaction(self) -> None:
+        """Recover an interrupted profile/index transaction before any read."""
+        if not self.transaction_path.exists():
+            return
+        journal = read_json(self.transaction_path)
+        committed = journal.get("phase") == "committed"
+        write_json(
+            self.index_path,
+            journal["new_index"] if committed else journal["old_index"],
+        )
+        user_path = self._user_path(str(journal["user_id"]))
+        payload = journal["new_user"] if committed else journal["old_user"]
+        if payload is None:
+            user_path.unlink(missing_ok=True)
+        else:
+            write_json(user_path, payload)
+        self.transaction_path.unlink(missing_ok=True)
+
+    def _begin_profile_transaction(
+        self,
+        *,
+        user_id: str,
+        old_user: User,
+        new_user: User,
+        old_index: dict[str, str],
+        new_index: dict[str, str],
+    ) -> None:
+        write_json(
+            self.transaction_path,
+            {
+                "phase": "prepared",
+                "user_id": user_id,
+                "old_user": old_user.model_dump(mode="json"),
+                "new_user": new_user.model_dump(mode="json"),
+                "old_index": old_index,
+                "new_index": new_index,
+            },
+        )
+
+    def _commit_profile_transaction(self) -> None:
+        journal = read_json(self.transaction_path)
+        journal["phase"] = "committed"
+        write_json(self.transaction_path, journal)
+        self._recover_pending_transaction()
 
     def _user_path(self, user_id: str) -> Path:
         return self.users_dir / f"{user_id}.json"
@@ -51,18 +98,25 @@ class UserRepository(BaseRepository):
         return email.strip().lower()
 
     def get_by_id(self, user_id: str) -> User | None:
+        with self._write_lock:
+            self._recover_pending_transaction()
+            return self._get_by_id(user_id)
+
+    def _get_by_id(self, user_id: str) -> User | None:
         path = self._user_path(user_id)
         if not path.exists():
             return None
         return self.load_model(path, User)
 
     def get_by_email(self, email: str) -> User | None:
-        normalized = self.normalize_email(email)
-        index = self._load_email_index()
-        user_id = index.get(normalized)
-        if user_id is None:
-            return None
-        return self.get_by_id(user_id)
+        with self._write_lock:
+            self._recover_pending_transaction()
+            normalized = self.normalize_email(email)
+            index = self._load_email_index()
+            user_id = index.get(normalized)
+            if user_id is None:
+                return None
+            return self._get_by_id(user_id)
 
     def create(self, user: User) -> User:
         """Persist a new user.
@@ -71,6 +125,7 @@ class UserRepository(BaseRepository):
         """
 
         with self._write_lock:
+            self._recover_pending_transaction()
             normalized = self.normalize_email(user.email)
             index = self._load_email_index()
             if normalized in index:
@@ -92,6 +147,7 @@ class UserRepository(BaseRepository):
         """
 
         with self._write_lock:
+            self._recover_pending_transaction()
             self.dump_model(self._user_path(user.id), user)
 
     def mutate(self, user_id: str, mutator: Callable[[User], User]) -> User:
@@ -107,7 +163,8 @@ class UserRepository(BaseRepository):
         """
 
         with self._write_lock:
-            current = self.get_by_id(user_id)
+            self._recover_pending_transaction()
+            current = self._get_by_id(user_id)
             if current is None:
                 raise NotFoundError("User", user_id)
             updated = mutator(current)
@@ -115,39 +172,74 @@ class UserRepository(BaseRepository):
             return updated
 
     def update_email(self, user_id: str, new_email: str) -> User:
-        """Move an account to a new email address, keeping the index correct.
-
-        Raises `NotFoundError` if the user doesn't exist and `ConflictError`
-        if the address is already registered to another account. The index is
-        rewritten first (new key added, old keys for this user removed) in a
-        single atomic write, then the user file: if we crash between the two,
-        the new address already resolves and the old one no longer does, so
-        login behaves correctly and only the user file's `email` field is
-        stale until the change is retried.
-        """
-
+        """Move an account using a recoverable transaction journal."""
         with self._write_lock:
-            user = self.get_by_id(user_id)
+            self._recover_pending_transaction()
+            user = self._get_by_id(user_id)
             if user is None:
                 raise NotFoundError("User", user_id)
-
             normalized = self.normalize_email(new_email)
             if normalized == user.email:
                 return user
-
             index = self._load_email_index()
-            existing_owner = index.get(normalized)
-            if existing_owner is not None and existing_owner != user_id:
+            if (owner := index.get(normalized)) is not None and owner != user_id:
                 raise ConflictError("User", normalized)
-
             updated_index = {
                 key: value for key, value in index.items() if value != user_id
             }
             updated_index[normalized] = user_id
-            self._save_email_index(updated_index)
-
             updated = user.model_copy(update={"email": normalized})
-            self.dump_model(self._user_path(user_id), updated)
+            self._begin_profile_transaction(
+                user_id=user_id,
+                old_user=user,
+                new_user=updated,
+                old_index=index,
+                new_index=updated_index,
+            )
+            try:
+                self._save_email_index(updated_index)
+                self.dump_model(self._user_path(user_id), updated)
+                self._commit_profile_transaction()
+            except Exception:
+                self._recover_pending_transaction()
+                raise
+            return updated
+
+    def update_profile(
+        self, user_id: str, *, email: str, display_name: str | None
+    ) -> User:
+        """Atomically update the public profile and its email index."""
+        with self._write_lock:
+            self._recover_pending_transaction()
+            user = self._get_by_id(user_id)
+            if user is None:
+                raise NotFoundError("User", user_id)
+            normalized = self.normalize_email(email)
+            original_index = self._load_email_index()
+            owner = original_index.get(normalized)
+            if owner is not None and owner != user_id:
+                raise ConflictError("User", normalized)
+            index = {
+                key: value for key, value in original_index.items() if value != user_id
+            }
+            index[normalized] = user_id
+            updated = user.model_copy(
+                update={"email": normalized, "display_name": display_name}
+            )
+            self._begin_profile_transaction(
+                user_id=user_id,
+                old_user=user,
+                new_user=updated,
+                old_index=original_index,
+                new_index=index,
+            )
+            try:
+                self._save_email_index(index)
+                self.dump_model(self._user_path(user_id), updated)
+                self._commit_profile_transaction()
+            except Exception:
+                self._recover_pending_transaction()
+                raise
             return updated
 
     def delete(self, user_id: str) -> None:
@@ -160,6 +252,7 @@ class UserRepository(BaseRepository):
         """
 
         with self._write_lock:
+            self._recover_pending_transaction()
             index = self._load_email_index()
             pruned = {key: value for key, value in index.items() if value != user_id}
             if len(pruned) != len(index):
@@ -170,9 +263,11 @@ class UserRepository(BaseRepository):
     def list_users(self) -> list[User]:
         """Return every stored user (used by the account purge sweep)."""
 
+        with self._write_lock:
+            self._recover_pending_transaction()
         users: list[User] = []
         for path in sorted(self.users_dir.glob("*.json")):
-            if path.name == BY_EMAIL_INDEX_FILENAME:
+            if path.name in {BY_EMAIL_INDEX_FILENAME, PROFILE_TRANSACTION_FILENAME}:
                 continue
             users.append(self.load_model(path, User))
         return users

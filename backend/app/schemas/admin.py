@@ -37,6 +37,26 @@ class AdminAccountResponse(StrictBaseModel):
     )
 
 
+class AdminAccountCreateRequest(StrictBaseModel):
+    email: str = Field(min_length=3)
+    display_name: str | None = Field(default=None, max_length=200)
+    password: str = Field(min_length=1)
+
+
+class AdminAccountUpdateRequest(StrictBaseModel):
+    email: str = Field(min_length=3)
+    display_name: str | None = Field(default=None, max_length=200)
+
+
+class AdminAccountListResponse(StrictBaseModel):
+    accounts: list[AdminAccountResponse]
+
+
+class AdminAccountDeleteResponse(StrictBaseModel):
+    account_id: str
+    deleted: bool = True
+
+
 class AdminRevokeSessionsResponse(StrictBaseModel):
     """Result of a session-revoke mutation; zero is success (009-FR-007)."""
 
@@ -125,6 +145,10 @@ class AdminFeatureFlagSelectedUserRequest(StrictBaseModel):
 
 __all__ = [
     "AdminAccountLookupRequest",
+    "AdminAccountCreateRequest",
+    "AdminAccountDeleteResponse",
+    "AdminAccountUpdateRequest",
+    "AdminAccountListResponse",
     "AdminAccountResponse",
     "AdminFeatureFlagMode",
     "AdminFeatureFlagModeRequest",

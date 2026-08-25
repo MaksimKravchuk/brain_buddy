@@ -40,6 +40,18 @@ COMPOSE_LOG_DIR="${ROOT_DIR}/frontend/test-results/compose"
 PLAYWRIGHT_ALLURE_DIR="${ROOT_DIR}/frontend/allure-results/playwright"
 PLAYWRIGHT_REPORT_DIR="${ROOT_DIR}/frontend/playwright-report"
 
+# The acceptance journey needs a real operator, but its credential must never
+# live in the repository or depend on a developer's private .env. Generate a
+# disposable identity per isolated Compose project and pass the exact same
+# values to both the backend seed path and Playwright.
+export BRAIN_BUDDY_ADMIN_EMAIL="${BRAIN_BUDDY_E2E_OPERATOR_EMAIL:-admin-${PROJECT_NAME}@example.com}"
+export BRAIN_BUDDY_ADMIN_PASSWORD="${BRAIN_BUDDY_E2E_OPERATOR_PASSWORD:-$(python3 - <<'PY'
+import secrets
+print(f"e2e-{secrets.token_urlsafe(24)}")
+PY
+)}"
+export BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"
+
 rm -rf "${PLAYWRIGHT_ALLURE_DIR}" "${PLAYWRIGHT_REPORT_DIR}"
 mkdir -p "${COMPOSE_LOG_DIR}" "${PLAYWRIGHT_ALLURE_DIR}" "${PLAYWRIGHT_REPORT_DIR}"
 touch "${PLAYWRIGHT_ALLURE_DIR}/.run-started-at"
@@ -63,6 +75,9 @@ echo "[e2e] Image mode: ${COMPOSE_BUILD_MODE}"
 
 COMPOSE_PROJECT_NAME="${PROJECT_NAME}" \
 BRAIN_BUDDY_ENV=test \
+BRAIN_BUDDY_ADMIN_EMAIL="${BRAIN_BUDDY_ADMIN_EMAIL}" \
+BRAIN_BUDDY_ADMIN_PASSWORD="${BRAIN_BUDDY_ADMIN_PASSWORD}" \
+BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS}" \
 BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST=1 \
 BRAIN_BUDDY_VOICE_SWEEP_INTERVAL_SECONDS=1 \
 BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER=openai \

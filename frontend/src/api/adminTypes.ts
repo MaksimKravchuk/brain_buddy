@@ -9,6 +9,11 @@ export type AdminAccountResponse = {
   deletion_requested: boolean;
 };
 
+export type AdminAccountCreateRequest = { email: string; display_name?: string | null; password: string };
+export type AdminAccountUpdateRequest = { email: string; display_name?: string | null };
+export type AdminAccountListResponse = { accounts: AdminAccountResponse[] };
+export type AdminAccountDeleteResponse = { account_id: string; deleted: boolean };
+
 export type AdminRevokeSessionsResponse = {
   revoked_count: number;
 };

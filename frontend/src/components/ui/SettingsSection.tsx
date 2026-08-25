@@ -36,7 +36,8 @@ export function Field({
   autoComplete,
   name,
   placeholder,
-  hint
+  hint,
+  disabled = false
 }: {
   label: string;
   type: string;
@@ -45,6 +46,7 @@ export function Field({
   autoComplete?: string;
   name: string;
   placeholder?: string;
+  disabled?: boolean;
   /** Rendered under the input and wired to it, for policy the server enforces. */
   hint?: string;
 }): React.JSX.Element {
@@ -64,6 +66,7 @@ export function Field({
           className="rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-soft transition-colors duration-200 ease-smooth focus:border-brand-primary focus:outline-none"
           autoComplete={autoComplete}
           placeholder={placeholder}
+          disabled={disabled}
           aria-describedby={hintId}
         />
       </label>

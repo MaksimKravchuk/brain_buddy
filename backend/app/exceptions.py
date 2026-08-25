@@ -64,6 +64,10 @@ class ValidationFailure(BrainBuddyError):
         self.estimated_cost_usd = estimated_cost_usd
 
 
+class AdminAuthorizationError(BrainBuddyError):
+    """A permitted operator attempted a forbidden account mutation."""
+
+
 class ProviderRetryableError(BrainBuddyError):
     """Raised by a provider port when a call fails but a retry may succeed."""
 
@@ -81,6 +85,7 @@ class ProviderTerminalError(BrainBuddyError):
 
 
 __all__ = [
+    "AdminAuthorizationError",
     "BrainBuddyError",
     "ConflictError",
     "NotFoundError",

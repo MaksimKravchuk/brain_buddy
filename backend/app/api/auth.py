@@ -126,7 +126,9 @@ def login(
     config: AppConfig = Depends(get_config_dep),
     feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
 ) -> MeResponse:
-    if not login_rate_limiter.check(_client_ip(request)):
+    client_ip = _client_ip(request)
+    reservation = login_rate_limiter.reserve(client_ip)
+    if reservation is None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Try again in a few minutes.",
@@ -136,10 +138,12 @@ def login(
             email=payload.email, password=payload.password
         )
     except InvalidCredentialsError as exc:
+        login_rate_limiter.record(client_ip, reservation)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)
         ) from exc
-
+    finally:
+        login_rate_limiter.release(client_ip, reservation)
     _set_session_cookie(response, raw_token, config)
     return _me_response(user, feature_flags, deletion_cancelled=deletion_cancelled)
 

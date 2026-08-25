@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +12,7 @@ from fastapi.testclient import TestClient
 from app.container import Container
 from app.core import get_config
 from app.core.config import KNOWN_FEATURE_FLAGS
-from app.core.rate_limit import LOGIN_MAX_ATTEMPTS
+from app.core.rate_limit import LOGIN_MAX_ATTEMPTS, InMemoryRateLimiter
 from app.main import create_app
 from app.repositories.feature_flag import FlagMode, FlagOverride
 from app.schemas.auth import Invite
@@ -122,6 +124,51 @@ def test_login_wrong_password_returns_401(tmp_path, monkeypatch) -> None:
     assert resp.status_code == 401
 
 
+def test_successful_login_releases_only_its_reservation(tmp_path, monkeypatch) -> None:
+    client, _, code = _bootstrap(tmp_path, monkeypatch, subdir="mixed-ratelimit")
+    client.post(
+        "/api/auth/signup",
+        json={
+            "email": "user@example.com",
+            "password": "very-long-password",
+            "invite_code": code,
+        },
+    )
+    client.cookies.clear()
+
+    for _ in range(LOGIN_MAX_ATTEMPTS - 1):
+        assert (
+            client.post(
+                "/api/auth/login",
+                json={"email": "user@example.com", "password": "wrong"},
+            ).status_code
+            == 401
+        )
+
+    assert (
+        client.post(
+            "/api/auth/login",
+            json={"email": "user@example.com", "password": "very-long-password"},
+        ).status_code
+        == 200
+    )
+    client.cookies.clear()
+    assert (
+        client.post(
+            "/api/auth/login",
+            json={"email": "user@example.com", "password": "wrong"},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/auth/login",
+            json={"email": "user@example.com", "password": "very-long-password"},
+        ).status_code
+        == 429
+    )
+
+
 def test_login_rate_limiter_triggers_429(tmp_path, monkeypatch) -> None:
     client, _, code = _bootstrap(tmp_path, monkeypatch, subdir="ratelimit")
     client.post(
@@ -146,6 +193,48 @@ def test_login_rate_limiter_triggers_429(tmp_path, monkeypatch) -> None:
         json={"email": "user@example.com", "password": "very-long-password"},
     )
     assert limited.status_code == 429
+
+
+def test_concurrent_invalid_logins_admit_at_most_ten_requests(
+    tmp_path, monkeypatch
+) -> None:
+    client, _, _ = _bootstrap(tmp_path, monkeypatch, subdir="concurrent-ratelimit")
+
+    def attempt() -> int:
+        return client.post(
+            "/api/auth/login",
+            json={"email": "unknown@example.com", "password": "wrong"},
+        ).status_code
+
+    with ThreadPoolExecutor(max_workers=11) as executor:
+        statuses = list(
+            executor.map(lambda _: attempt(), range(LOGIN_MAX_ATTEMPTS + 1))
+        )
+
+    assert statuses.count(429) >= 1
+    assert statuses.count(401) <= LOGIN_MAX_ATTEMPTS
+    assert set(statuses) <= {401, 429}
+
+
+def test_limiter_atomic_reservation_rejects_contested_eleventh_party() -> None:
+    limiter = InMemoryRateLimiter(max_attempts=10, window_seconds=60)
+    gate = Barrier(LOGIN_MAX_ATTEMPTS + 1)
+
+    def reserve_after_contested_admission() -> int | None:
+        gate.wait()
+        return limiter.reserve("contested")
+
+    with ThreadPoolExecutor(max_workers=LOGIN_MAX_ATTEMPTS + 1) as executor:
+        reservations = list(
+            executor.map(
+                lambda _: reserve_after_contested_admission(),
+                range(LOGIN_MAX_ATTEMPTS + 1),
+            )
+        )
+
+    admitted = [reservation for reservation in reservations if reservation is not None]
+    assert len(admitted) == LOGIN_MAX_ATTEMPTS
+    assert len(set(admitted)) == LOGIN_MAX_ATTEMPTS
 
 
 def test_me_requires_authentication(anonymous_api_client) -> None:

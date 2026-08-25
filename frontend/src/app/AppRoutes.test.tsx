@@ -942,6 +942,9 @@ describe("AppRoutes /admin (009-FR-005, 009-FR-010)", () => {
         if (url.includes("/admin/status")) {
           return Promise.resolve(jsonResponse({ is_operator: true }));
         }
+        if (url.includes("/admin/accounts")) {
+          return Promise.resolve(jsonResponse({ accounts: [] }));
+        }
         if (url.endsWith("/tasks") || url.includes("/tasks?")) {
           return Promise.resolve(jsonResponse(taskResponse));
         }
@@ -957,7 +960,7 @@ describe("AppRoutes /admin (009-FR-005, 009-FR-010)", () => {
 
     renderRoutes("/admin");
 
-    expect(await screen.findByLabelText(/account id or email/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Users" })).toBeInTheDocument();
     expect(screen.queryByText("Access denied")).not.toBeInTheDocument();
   });
 

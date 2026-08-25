@@ -239,11 +239,22 @@ def test_time_identifier_rate_limit_and_auth_branches(
         ensure_acyclic([("node", "node")])
 
     limiter = InMemoryRateLimiter(max_attempts=1, window_seconds=5)
-    clock = iter([0.0, 6.0])
+    clock = iter([0.0, 6.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0])
     monkeypatch.setattr("app.core.rate_limit.time.monotonic", lambda: next(clock))
     assert limiter.check("key")
     assert limiter.check("key")
     limiter.reset("key")
+
+    assert limiter.is_allowed("key") is True
+    assert limiter.record("key") is True
+    assert limiter.is_allowed("key") is False
+    limiter.reset("key")
+
+    reservation = limiter.reserve("key")
+    assert reservation is not None
+    assert limiter.reserve("key") is None
+    assert limiter.release("key", reservation) is True
+    assert limiter.reserve("key") is not None
 
     with pytest.raises(ValidationFailure, match="at most"):
         container.auth_service._validate_password_format("x" * 1000)

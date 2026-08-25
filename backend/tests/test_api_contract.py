@@ -44,6 +44,21 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         # No rollout gate: `admin_portal` is deleted outright (ADR-0019 DD-14),
         # so an allow-listed operator's authorization check is the whole story.
         ("/api/admin/status", "get"): {"401", "403"},
+        ("/api/admin/accounts", "get"): {"401", "403"},
+        ("/api/admin/accounts", "post"): {"401", "403", "409", "422"},
+        ("/api/admin/accounts/{account_id}", "put"): {
+            "401",
+            "403",
+            "404",
+            "409",
+            "422",
+        },
+        ("/api/admin/accounts/{account_id}", "delete"): {
+            "401",
+            "403",
+            "404",
+            "422",
+        },
         ("/api/admin/accounts/lookup", "post"): {"401", "403", "404", "422"},
         ("/api/admin/accounts/{account_id}/revoke-sessions", "post"): {
             "401",

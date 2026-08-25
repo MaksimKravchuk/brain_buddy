@@ -12,14 +12,20 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any, cast
 
-from app.exceptions import NotFoundError
+from app.exceptions import (
+    AdminAuthorizationError,
+    ConflictError,
+    NotFoundError,
+)
 from app.repositories import SessionRepository, UserRepository
 from app.schemas.auth import User
 
 logger = logging.getLogger(__name__)
 
 ACCOUNT_ID_PATTERN = re.compile(r"\A[A-Za-z0-9_-]{1,128}\Z")
+UNKNOWN_TARGET_ACCOUNT_ID = "unknown-target"
 """Every character an account id may contain.
 
 `UserRepository` stores one JSON file per account and builds that path by
@@ -41,10 +47,126 @@ class AdminService:
         user_repo: UserRepository,
         session_repo: SessionRepository,
         operator_emails: frozenset[str],
+        auth_service: Any = None,
+        account_service: Any = None,
     ) -> None:
         self.user_repo = user_repo
         self.session_repo = session_repo
         self.operator_emails = operator_emails
+        self.auth_service = auth_service
+        self.account_service = account_service
+
+    def set_mutation_services(self, *, auth_service: Any, account_service: Any) -> None:
+        self.auth_service = auth_service
+        self.account_service = account_service
+
+    def list_accounts(self, *, operator_id: str) -> list[User]:
+        try:
+            accounts = sorted(
+                self.user_repo.list_users(), key=lambda user: (user.email, user.id)
+            )
+        except Exception:
+            self._audit(operator_id, "list", "-", "error")
+            raise
+        self._audit(operator_id, "list", "-", "success")
+        return accounts
+
+    def create_account(
+        self,
+        *,
+        operator_id: str,
+        email: str,
+        password: str,
+        display_name: str | None,
+    ) -> User:
+        if self.auth_service is None:
+            self._audit(operator_id, "create", "-", "error")
+            raise RuntimeError("Admin account creation is not configured")
+        try:
+            user = self.auth_service.create_admin_user(
+                email=email, password=password, display_name=display_name
+            )
+        except ConflictError:
+            self._audit(operator_id, "create", "-", "conflict")
+            raise ConflictError("User", "account") from None
+        except Exception:
+            self._audit(operator_id, "create", "-", "error")
+            raise
+        self._audit(operator_id, "create", user.id, "success")
+        return cast(User, user)
+
+    def update_account(
+        self, *, operator_id: str, account_id: str, email: str, display_name: str | None
+    ) -> User:
+        try:
+            target = self._get_by_exact_id(account_id)
+        except Exception:
+            self._audit(operator_id, "update", UNKNOWN_TARGET_ACCOUNT_ID, "error")
+            raise
+        if target is None:
+            self._audit(operator_id, "update", UNKNOWN_TARGET_ACCOUNT_ID, "not_found")
+            raise NotFoundError("Account", account_id)
+        normalized = self.user_repo.normalize_email(email)
+        if normalized != target.email and (
+            target.email in self.operator_emails
+            or (target.id == operator_id and normalized not in self.operator_emails)
+        ):
+            self._audit(operator_id, "update", target.id, "forbidden")
+            raise AdminAuthorizationError("Account update is not allowed.")
+        if normalized != target.email and normalized in self.operator_emails:
+            self._audit(operator_id, "update", target.id, "conflict")
+            raise ConflictError("User", "account")
+        try:
+            updated = self.user_repo.update_profile(
+                target.id,
+                email=normalized,
+                display_name=display_name.strip() or None if display_name else None,
+            )
+        except ConflictError:
+            self._audit(operator_id, "update", target.id, "conflict")
+            raise ConflictError("User", "account") from None
+        except Exception:
+            self._audit(operator_id, "update", target.id, "error")
+            raise
+        self._audit(operator_id, "update", target.id, "success")
+        return updated
+
+    def delete_account(self, *, operator_id: str, account_id: str) -> None:
+        try:
+            target = self._get_by_exact_id(account_id)
+        except Exception:
+            self._audit(operator_id, "delete", UNKNOWN_TARGET_ACCOUNT_ID, "error")
+            raise
+        if target is None:
+            self._audit(operator_id, "delete", UNKNOWN_TARGET_ACCOUNT_ID, "not_found")
+            raise NotFoundError("Account", account_id)
+        if target.id == operator_id or target.email in self.operator_emails:
+            self._audit(operator_id, "delete", target.id, "forbidden")
+            raise AdminAuthorizationError("Account deletion is not allowed.")
+        if self.account_service is None:
+            self._audit(operator_id, "delete", target.id, "error")
+            raise RuntimeError("Admin account deletion is not configured")
+        try:
+            self.account_service.purge_account(target.id)
+        except Exception:
+            self._audit(operator_id, "delete", target.id, "error")
+            raise
+        self._audit(operator_id, "delete", target.id, "success")
+
+    def _audit(
+        self, operator_id: str, operation: str, account_id: str, outcome: str
+    ) -> None:
+        if account_id == UNKNOWN_TARGET_ACCOUNT_ID or not ACCOUNT_ID_PATTERN.fullmatch(
+            account_id
+        ):
+            account_id = UNKNOWN_TARGET_ACCOUNT_ID
+        logger.info(
+            "admin_audit operation=%s operator_account=%s target_account=%s outcome=%s",
+            operation,
+            operator_id,
+            account_id,
+            outcome,
+        )
 
     def is_operator(self, email: str) -> bool:
         """Whether `email` is on the server-owned operator allow-list."""
@@ -122,16 +244,28 @@ class AdminService:
         sessions.
         """
 
-        target = self._get_by_exact_id(account_id)
+        try:
+            target = self._get_by_exact_id(account_id)
+        except Exception:
+            self._audit(operator_id, "revoke", UNKNOWN_TARGET_ACCOUNT_ID, "error")
+            raise
         if target is None:
+            self._audit(operator_id, "revoke", UNKNOWN_TARGET_ACCOUNT_ID, "not_found")
             raise NotFoundError("Account", account_id)
-        revoked = self.session_repo.delete_all_for_user(target.id)
+        try:
+            revoked = self.session_repo.delete_all_for_user(target.id)
+        except Exception:
+            self._audit(operator_id, "revoke", target.id, "error")
+            raise
         logger.info(
-            "Admin session revoke: operator=%s account=%s outcome=%s revoked=%s",
+            "Admin session revoke admin_audit operation=%s operator=%s account=%s "
+            "operator_account=%s target_account=%s outcome=%s",
+            "revoke",
+            operator_id,
+            target.id,
             operator_id,
             target.id,
             "revoked",
-            revoked,
         )
         return revoked
 

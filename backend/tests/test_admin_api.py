@@ -132,7 +132,7 @@ def _messages(caplog: pytest.LogCaptureFixture, logger: str) -> str:
     )
 
 
-def test_009_FR_002_unauthenticated_lookup_is_401(
+def test_013_FR_001_unauthenticated_lookup_is_401(
     anonymous_api_client: TestClient,
 ) -> None:
     resp = anonymous_api_client.post(
@@ -590,7 +590,7 @@ def test_009_SC_004_denied_lookup_never_reaches_the_admin_service(
     )
 
 
-def test_009_SC_002_a_denied_revoke_leaves_the_target_sessions_valid(
+def test_013_SC_002_a_denied_revoke_leaves_the_target_sessions_valid(
     admin_world,
 ) -> None:
     """The effect, not just the status: the operator is still signed in after."""
@@ -925,3 +925,78 @@ def test_009_FR_008_an_unresolvable_route_stays_redacted_and_fail_closed(
     """No template, no guess: never fall back to the raw caller-supplied path."""
 
     assert _route_for(route) == "unmatched"
+
+
+def test_013_FR_014_admin_crud_wire_contract_and_operator_protection(
+    admin_world,
+) -> None:
+    operator_client, operator_me, _member_client, member_me = admin_world
+    created = operator_client.post(
+        "/api/admin/accounts",
+        json={"email": "created-crud@example.com", "password": TEST_USER_PASSWORD},
+    )
+    assert created.status_code == 201
+    assert created.json()["email"] == "created-crud@example.com"
+
+    deleted = operator_client.delete(f"/api/admin/accounts/{member_me['id']}")
+    assert deleted.status_code == 200
+    assert deleted.json() == {"account_id": member_me["id"], "deleted": True}
+
+    updated = operator_client.put(
+        f"/api/admin/accounts/{operator_me['id']}",
+        json={"email": "authority-lost@example.com", "display_name": None},
+    )
+    assert updated.status_code == 403
+    assert operator_client.get("/api/auth/me").json()["email"] == operator_me["email"]
+
+
+def test_013_FR_003_FR_004_FR_008_FR_009_FR_011_FR_014_SC_001_SC_004_SC_005_admin_list_update_and_delete_read_back(
+    admin_world,
+) -> None:
+    operator_client, _operator_me, _member_client, _member_me = admin_world
+    created = operator_client.post(
+        "/api/admin/accounts",
+        json={
+            "email": "crud-readback@example.com",
+            "display_name": "CRUD Member",
+            "password": "very-long-password",
+        },
+    )
+    assert created.status_code == 201, created.text
+    account = created.json()
+    listed = operator_client.get("/api/admin/accounts")
+    assert listed.status_code == 200
+    assert set(listed.json()) == {"accounts"}
+    assert all(
+        set(row) == {"id", "email", "display_name", "deletion_requested"}
+        for row in listed.json()["accounts"]
+    )
+    assert any(row["id"] == account["id"] for row in listed.json()["accounts"])
+
+    updated = operator_client.put(
+        f"/api/admin/accounts/{account['id']}",
+        json={"email": "crud-renamed@example.com", "display_name": "Renamed"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["email"] == "crud-renamed@example.com"
+
+    deleted = operator_client.delete(f"/api/admin/accounts/{account['id']}")
+    assert deleted.status_code == 200
+    assert not any(
+        row["id"] == account["id"]
+        for row in operator_client.get("/api/admin/accounts").json()["accounts"]
+    )
+
+
+def test_013_FR_008_reserved_operator_address_uses_generic_conflict_contract(
+    admin_world,
+) -> None:
+    operator_client, _operator_me, _member_client, member_me = admin_world
+
+    conflict = operator_client.put(
+        f"/api/admin/accounts/{member_me['id']}",
+        json={"email": TEST_USER_EMAIL, "display_name": "Member"},
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["message"] == "User 'account' already exists."
