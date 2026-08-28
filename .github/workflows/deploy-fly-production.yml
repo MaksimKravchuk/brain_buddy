@@ -264,12 +264,12 @@ jobs:
           while IFS= read -r -d '' path; do
             seen=true
             case "${path}" in
-              backend/*|frontend/*|fly.*|docker-compose*|scripts/*|.github/*|Makefile)
+              backend/*|frontend/*|fly.*|docker-compose*|Dockerfile*|compose.y*ml|.dockerignore|.env)
                 needed=true
                 echo "Deploy-relevant change: ${path}"
                 break
                 ;;
-              mobile/*|docs/*|specs/*|.claude/*|.design-sync/*|*.md|.gitignore|LICENSE|.env.example)
+              .github/*|.specify/*|.claude/*|.design-sync/*|docs/*|specs/*|mobile/*|scripts/*|*.md|Makefile|.gitignore|LICENSE|.env.example)
                 ;;
               *)
                 needed=true

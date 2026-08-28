@@ -232,6 +232,29 @@ class DeployContractTest(unittest.TestCase):
     def test_repo_deploy_workflow_passes(self) -> None:
         self.assertEqual(validate_deploy_workflow(DEPLOY_WORKFLOW), 0)
 
+    def test_policy_only_landing_skips_runtime_deploy(self) -> None:
+        """The deploy gate must not treat delivery machinery as image input."""
+
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            ".github/*|.specify/*|.claude/*|.design-sync/*|docs/*|specs/*|"
+            "mobile/*|scripts/*|*.md|Makefile|.gitignore|LICENSE|.env.example",
+            text,
+        )
+        self.assertNotIn(
+            "backend/*|frontend/*|fly.*|docker-compose*|scripts/*|.github/*",
+            text,
+        )
+
+    def test_deploy_gate_keeps_runtime_unknown_and_empty_fail_open(self) -> None:
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "backend/*|frontend/*|fly.*|docker-compose*|Dockerfile*|compose.y*ml",
+            text,
+        )
+        self.assertIn("Unclassified change (deploying to stay safe)", text)
+        self.assertIn("Empty change listing; deploying (fail-open).", text)
+
     def test_missing_workflow_fails(self) -> None:
         self.assertEqual(validate_deploy_workflow(Path("/nonexistent/deploy.yml")), 1)
 
