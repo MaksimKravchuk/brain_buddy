@@ -23,6 +23,12 @@ These are only local pre-freeze writer gates. Independent review and QA, exact-S
 CI, landing, deployment, and production smoke are post-freeze obligations; they
 remain governed by ADR-0008 and cannot be claimed or replaced by this receipt.
 
+`scripts/submit_to_trunk.sh` requires the explicit, non-secret environment
+variable `SUBMIT_TRUNK_PRE_FREEZE_RECEIPT`, pointing to that local JSON file.
+It freezes `HEAD`, then invokes the validator with that exact SHA before path
+classification or any candidate-ref push. The variable has no default: an
+absent, unreadable, malformed, or SHA-mismatched receipt fails closed.
+
 ## Verified trunk landing (SHIP/SHOW changes)
 
 ADR-0008 makes PR-less serial landing the normal path for low-risk (SHIP) and

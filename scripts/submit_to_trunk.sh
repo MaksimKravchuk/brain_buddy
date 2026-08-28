@@ -13,6 +13,9 @@ set -euo pipefail
 # This script never pushes to main and never force-pushes anything.
 # SUBMIT_TRUNK_SKIP_CHECKS=1 skips the fast local checks (offline contract
 # tests and emergencies only — CI remains the authoritative gate). The
+# SUBMIT_TRUNK_PRE_FREEZE_RECEIPT variable is required and must point to a
+# local, non-secret JSON receipt; it is validated against the frozen HEAD SHA.
+# There is intentionally no default receipt path.
 # Ship/Show/Ask path classification below is NOT skippable: ASK-class
 # changes require a reviewed PR or an explicitly authorized manual
 # high-risk landing (ADR-0008), never automatic trunk promotion.
@@ -56,6 +59,17 @@ if [[ "${parent_sha}" != "${main_sha}" ]]; then
   fail "candidate must contain exactly one commit whose parent is the current \
 origin/main (${main_sha}); rebase/squash onto origin/main and retry"
 fi
+
+# Freeze the exact candidate before any submission side effect. The receipt is
+# a local writer artifact and contains no secrets; requiring an explicit path
+# prevents a missing receipt from silently becoming a successful submission.
+receipt_validator="${script_dir}/validate_pre_freeze_receipt.py"
+[[ -f "${receipt_validator}" ]] || fail "missing pre-freeze receipt validator ${receipt_validator}"
+receipt_path="${SUBMIT_TRUNK_PRE_FREEZE_RECEIPT:-}"
+[[ -n "${receipt_path}" ]] || fail "pre-freeze receipt is required; set SUBMIT_TRUNK_PRE_FREEZE_RECEIPT to a receipt JSON path"
+log "validating pre-freeze receipt for frozen candidate ${head_sha}..."
+python3 "${receipt_validator}" "${receipt_path}" --sha "${head_sha}" \
+  || fail "pre-freeze receipt validation failed for frozen candidate ${head_sha}"
 
 # Mechanical Ship/Show/Ask enforcement (ADR-0008), never skippable.
 command -v python3 >/dev/null 2>&1 || fail "python3 is required to classify candidate risk"

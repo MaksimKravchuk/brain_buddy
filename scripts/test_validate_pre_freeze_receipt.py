@@ -66,9 +66,16 @@ class PreFreezeReceiptTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, status)
 
     def test_sha_must_be_full_lowercase_exact_match(self) -> None:
-        for sha in ("b" * 40, SHA[:39], SHA.upper()):
+        for sha in ("b" * 40, SHA[:39], SHA.upper(), f" {SHA}", f"{SHA} "):
             result = self.run_receipt(valid_receipt(), sha=sha)
             self.assertNotEqual(result.returncode, 0, sha)
+
+    def test_implementation_sha_rejects_leading_or_trailing_whitespace(self) -> None:
+        for implementation_sha in (f" {SHA}", f"{SHA} "):
+            payload = valid_receipt()
+            payload["implementation_sha"] = implementation_sha
+            result = self.run_receipt(payload)
+            self.assertNotEqual(result.returncode, 0, implementation_sha)
 
     def test_duplicate_and_unknown_gate_are_rejected(self) -> None:
         duplicate = valid_receipt()

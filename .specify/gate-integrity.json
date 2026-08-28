@@ -16,6 +16,6 @@
     "scripts/classify_path_risk.py": "332fc4fd01c3d222ac800312fe33be7fe60032d543d549c909b89ce52acb291c",
     "scripts/mutation_gate.py": "4452787971ea6bcfa9bbf1c10df97bf1f3d172711098f69e1b2cf6e8f57ed96a",
     "scripts/spec_kit_planning_review.py": "e3d5aa65c51f7ff5a690c1ee56249519d768d41a0c87f2bb341a7e92a083695b",
-    "scripts/validate_pre_freeze_receipt.py": "9dacec40c81979d864ab09904bd868586a267e6781680c9fb454ceb32536a4d1"
+    "scripts/validate_pre_freeze_receipt.py": "4ef19b7f397f4b0a1b2964548e4de00d82b9c8b514466304764b81bbc6cf9e02"
   }
 }

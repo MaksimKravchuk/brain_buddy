@@ -9,6 +9,7 @@ is verified offline.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
@@ -80,6 +81,21 @@ class SubmitToTrunkScriptTest(unittest.TestCase):
              ) -> subprocess.CompletedProcess[str]:
         env = _git_env()
         env["SUBMIT_TRUNK_SKIP_CHECKS"] = "1"
+        if "SUBMIT_TRUNK_PRE_FREEZE_RECEIPT" not in (env_overrides or {}):
+            receipt = Path(self.tmp.name) / "pre-freeze-receipt.json"
+            sha = _git(self.clone, "rev-parse", "HEAD")
+            receipt.write_text(json.dumps({
+                "contract": "brainbuddy.pre-freeze-writer-receipt/v1",
+                "implementation_sha": sha,
+                "inventory": ["feature.txt"],
+                "gates": [
+                    {"id": gate_id, "status": "PASS", "command": "test",
+                     "observation": "passed", "evidence": "captured"}
+                    for gate_id in ("writer.tests", "writer.verify_all",
+                                    "writer.path_classification", "writer.diff_review")
+                ],
+            }), encoding="utf-8")
+            env["SUBMIT_TRUNK_PRE_FREEZE_RECEIPT"] = str(receipt)
         env.update(env_overrides or {})
         return subprocess.run(
             ["bash", str(SCRIPT)],
@@ -119,6 +135,21 @@ class SubmitToTrunkScriptTest(unittest.TestCase):
         self.assertIn(f"trunk-candidate/{sha}", combined)
         # main is untouched by submission
         self.assertNotEqual(refs["refs/heads/main"], sha)
+
+    def test_missing_pre_freeze_receipt_fails_before_submission(self) -> None:
+        self._commit("feature.txt")
+        result = self._run({"SUBMIT_TRUNK_PRE_FREEZE_RECEIPT": ""})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("pre-freeze receipt", (result.stdout + result.stderr).lower())
+        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
+
+    def test_pre_freeze_receipt_must_match_frozen_candidate_sha(self) -> None:
+        self._commit("feature.txt")
+        receipt = Path(self.tmp.name) / "wrong-receipt.json"
+        receipt.write_text(json.dumps({"implementation_sha": "a" * 40}), encoding="utf-8")
+        result = self._run({"SUBMIT_TRUNK_PRE_FREEZE_RECEIPT": str(receipt)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
 
     def test_dirty_working_tree_fails_closed(self) -> None:
         self._commit("feature.txt")

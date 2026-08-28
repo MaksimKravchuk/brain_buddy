@@ -38,7 +38,9 @@ def validate_receipt(payload: Any, expected_sha: str) -> None:
         raise ValueError(f"unknown receipt fields: {sorted(unknown_fields)}")
     if payload.get("contract") != CONTRACT:
         raise ValueError(f"contract must be {CONTRACT!r}")
-    actual_sha = _text(payload.get("implementation_sha"), "implementation_sha")
+    actual_sha = payload.get("implementation_sha")
+    if not isinstance(actual_sha, str) or not actual_sha:
+        raise ValueError("implementation_sha must be a non-empty string")
     if not SHA_RE.fullmatch(actual_sha) or actual_sha != expected_sha:
         raise ValueError("implementation_sha must be the full lowercase exact SHA")
     inventory = payload.get("inventory")

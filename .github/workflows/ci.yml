@@ -268,6 +268,7 @@ jobs:
         run: |
           python3 -m unittest scripts/test_check_spec_kit_specs.py -v
           python3 scripts/check_spec_kit_specs.py
+          python3 -m unittest scripts/test_validate_pre_freeze_receipt.py -v
 
       # The gate-integrity guard asserts that `make check-specs` runs it, but
       # nothing ran `make check-specs` here — so the guard, its invariants and
