@@ -5,6 +5,12 @@
 **Graded**: [date]  **Implementation SHA**: [sha]
 **Auditor**: `acceptance-auditor` (did not write the code under grade)
 
+Writer-owned pre-freeze evidence is a separate artifact validated by
+`scripts/validate_pre_freeze_receipt.py`; this post-freeze acceptance verdict
+must not substitute for it. Review, QA, CI, landing, deploy, and smoke are
+post-freeze obligations under ADR-0008.
+<!-- BrainBuddy pre-freeze receipt contract: acceptance. Preserve this section. -->
+
 <!--
   Produced by /speckit-accept. This grades whether the tests that pass actually
   cover what the spec promised — a different question from "is the suite

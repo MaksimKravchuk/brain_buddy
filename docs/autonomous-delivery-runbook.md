@@ -7,6 +7,22 @@ verified trunk landings, agent-created PRs (ASK class), visual review apps, norm
 production releases, and incidents involving those paths. It does not grant authority to
 mutate remote resources.
 
+## Writer pre-freeze receipt (local, typed, fail-closed)
+
+Before freezing a candidate, the implementation writer owns a receipt conforming
+to `.specify/templates/pre-freeze-receipt.schema.json` and validates it with
+`python3 scripts/validate_pre_freeze_receipt.py <receipt> --sha <full-lowercase-sha>`.
+The contract is `brainbuddy.pre-freeze-writer-receipt/v1`: it records the full
+lowercase implementation SHA, changed-path inventory, and each stable writer gate
+(`writer.tests`, `writer.verify_all`, `writer.path_classification`, and
+`writer.diff_review`) as `PASS` or concretely justified `NOT_APPLICABLE`, with
+the exact command, observation, and evidence. Missing, failed, unverified,
+duplicate, unknown, malformed-SHA, or unjustified-N/A entries are rejected.
+
+These are only local pre-freeze writer gates. Independent review and QA, exact-SHA
+CI, landing, deployment, and production smoke are post-freeze obligations; they
+remain governed by ADR-0008 and cannot be claimed or replaced by this receipt.
+
 ## Verified trunk landing (SHIP/SHOW changes)
 
 ADR-0008 makes PR-less serial landing the normal path for low-risk (SHIP) and

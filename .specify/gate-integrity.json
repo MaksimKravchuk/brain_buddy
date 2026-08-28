@@ -3,17 +3,19 @@
   "files": {
     ".claude/settings.json": "3bea393fe4d953e200fe1e79b33410e83c315719d24ac28aa52741312438ac8d",
     ".specify/extensions.yml": "e66f8dc51ca47e9d40550ab3bd9dc53b6be411ee9a00dd4064a9879e7c898817",
+    ".specify/templates/pre-freeze-receipt.schema.json": "44abf5960fd42e7130f889ecda463c186c46953b461e3abbeed043f78050ca8d",
     ".specify/workflows/speckit/handoff.schema.json": "089076b6df81ada79d7ba596b873c686a9d1748b8a921c592cce31f98dc82bf1",
     ".specify/workflows/speckit/review.schema.json": "59ddb9c1a8b3bdf2c0a572c12131426a7beea5fd68673d5d12a91251ee24b3c0",
     ".specify/workflows/speckit/workflow.yml": "019a936511cde48cee35c3832ec5078a45557da85869b170998da4d1df869832",
-    "Makefile": "712621444a10f38a9fe9c5337ad97fa4adce8c653b9626ee130af8f9dc60eef7",
+    "Makefile": "30923645344000080310c5eb507ff8533c966d6dbd73a2cd2f5e61356f5ce9f8",
     "backend/mutation-enforced-scope.txt": "6d301c35b52b2366d4b3df01116c7fc44a7e0e10fef700ebdec4169cc10e5a5d",
-    "scripts/check_gate_integrity.py": "365631462465c5388ed42ae996a19ee5076c106036f6fcdefedb1e7fdeb2ca1d",
+    "scripts/check_gate_integrity.py": "e3f3dc0d9358bde96e4df078acec150015ba0d152147c41fd4b61014471d69c7",
     "scripts/check_requirement_coverage.py": "755229af528cd0a1ca678cca0a5403b58669d1383577c1d5e8cf929f51c92b70",
     "scripts/check_spec_kit_specs.py": "dc56ef6f5d3a7eef316483fb856f751934daf4ca8a89c726dba80503fe8d0c5b",
-    "scripts/check_speckit_manifests.py": "89d94268cdf01a5e408c93e018b197d044d02f865b4fe4851c396a2b6fa2c182",
+    "scripts/check_speckit_manifests.py": "ebe37a8f292c657b89d6c1ada252d6453ca1561f8d5dce209a25ed65a3cdef7a",
     "scripts/classify_path_risk.py": "332fc4fd01c3d222ac800312fe33be7fe60032d543d549c909b89ce52acb291c",
     "scripts/mutation_gate.py": "4452787971ea6bcfa9bbf1c10df97bf1f3d172711098f69e1b2cf6e8f57ed96a",
-    "scripts/spec_kit_planning_review.py": "e3d5aa65c51f7ff5a690c1ee56249519d768d41a0c87f2bb341a7e92a083695b"
+    "scripts/spec_kit_planning_review.py": "e3d5aa65c51f7ff5a690c1ee56249519d768d41a0c87f2bb341a7e92a083695b",
+    "scripts/validate_pre_freeze_receipt.py": "9dacec40c81979d864ab09904bd868586a267e6781680c9fb454ceb32536a4d1"
   }
 }

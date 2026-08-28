@@ -38,6 +38,13 @@ the landing and release gates.
 - [ ] CHK005 Item with specific criteria
 - [ ] CHK006 Final item in this category
 
+## Pre-freeze evidence
+
+<!-- BrainBuddy constitution gates: typed writer receipt is required before freeze. -->
+<!-- BrainBuddy pre-freeze receipt contract: checklist. Preserve this section. -->
+
+- [ ] CHK007 Writer receipt validates with `scripts/validate_pre_freeze_receipt.py` against the full lowercase implementation SHA
+
 ## Notes
 
 - Check items off as completed: `[x]`

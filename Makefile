@@ -143,6 +143,7 @@ validate-ci:
 	python3 scripts/validate_trunk_delivery.py deploy --workflow .github/workflows/deploy-fly-production.yml
 
 check-specs:
+	python3 -m unittest scripts/test_validate_pre_freeze_receipt.py -v
 	python3 -m unittest scripts/test_check_spec_kit_specs.py -v
 	python3 -m unittest scripts/test_check_speckit_manifests.py -v
 	python3 -m unittest scripts/test_check_gate_integrity.py -v

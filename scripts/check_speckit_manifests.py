@@ -50,11 +50,19 @@ PRESERVED_OVERRIDES: dict[str, tuple[str, str]] = {
     ".specify/templates/tasks-template.md": (
         "Groups tasks by independently testable user story with real file "
         "paths and BrainBuddy delivery gates.",
-        "BrainBuddy override: delivery gates",
+        "BrainBuddy pre-freeze receipt contract: tasks",
     ),
     ".specify/templates/checklist-template.md": (
         "Encodes the BrainBuddy constitution gates.",
-        "BrainBuddy constitution gates",
+        "BrainBuddy pre-freeze receipt contract: checklist",
+    ),
+    ".specify/templates/acceptance-template.md": (
+        "Keeps post-freeze acceptance separate from writer-owned pre-freeze evidence.",
+        "BrainBuddy pre-freeze receipt contract: acceptance",
+    ),
+    ".specify/templates/pre-freeze-receipt.schema.json": (
+        "Defines the typed writer-owned pre-freeze evidence contract.",
+        "brainbuddy.pre-freeze-writer-receipt/v1",
     ),
 }
 

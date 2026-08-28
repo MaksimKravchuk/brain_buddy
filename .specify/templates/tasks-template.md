@@ -26,8 +26,16 @@ graded by an agent that did not write the code; landing class decided by
 `scripts/classify_path_risk.py`, with SHIP and SHOW landing PR-less through
 verified trunk and ASK-class changes never landing automatically — a PR carries
 their review evidence, but merging it does not by itself update `main` (ADR-0008;
-see `AGENTS.md` and `docs/autonomous-delivery-runbook.md` for the recorded
+ADR-0008; see `AGENTS.md` and `docs/autonomous-delivery-runbook.md` for the recorded
 approval and ruleset requirements).
+
+Before freeze, the implementation writer MUST produce a typed receipt using
+`.specify/templates/pre-freeze-receipt.schema.json` and run
+`python3 scripts/validate_pre_freeze_receipt.py <receipt> --sha <full-lowercase-sha>`.
+<!-- BrainBuddy pre-freeze receipt contract: tasks. Preserve this section. -->
+The receipt covers only writer-owned pre-freeze gates. Independent review, QA,
+CI, landing, deploy, and production smoke remain post-freeze obligations under
+ADR-0008 and must never be represented as writer PASS evidence.
 
 **Tests**: Tests are expected for behavior changes; include backend pytest/FastAPI
 TestClient, frontend Vitest/Testing Library, operation-state, or deterministic

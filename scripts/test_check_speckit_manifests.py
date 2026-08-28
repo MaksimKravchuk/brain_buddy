@@ -46,6 +46,44 @@ class PreservedOverrideTests(unittest.TestCase):
         for name in ("spec", "plan", "tasks", "checklist"):
             self.assertIn(f".specify/templates/{name}-template.md", protected)
 
+    def test_each_pre_freeze_receipt_section_is_mutation_protected(self) -> None:
+        sections = {
+            ".specify/templates/tasks-template.md": (
+                "Before freeze, the implementation writer MUST produce a typed receipt",
+                "**Tests**:",
+            ),
+            ".specify/templates/checklist-template.md": (
+                "## Pre-freeze evidence",
+                "## Notes",
+            ),
+            ".specify/templates/acceptance-template.md": (
+                "<!-- BrainBuddy pre-freeze receipt contract: acceptance.",
+                "<!--\n  Produced by /speckit-accept",
+            ),
+        }
+        for relative, (start, end) in sections.items():
+            with self.subTest(relative=relative):
+                path = ROOT / relative
+                text = path.read_text(encoding="utf-8")
+                start_at = text.index(start)
+                end_at = text.index(end, start_at + len(start))
+                mutated = text[:start_at] + text[end_at:]
+                with tempfile.TemporaryDirectory() as tmp:
+                    fake_root = Path(tmp)
+                    for protected in self.module.PRESERVED_OVERRIDES:
+                        source = ROOT / protected
+                        destination = fake_root / protected
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        destination.write_bytes(source.read_bytes())
+                    target = fake_root / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(mutated, encoding="utf-8")
+                    failures = self.module.check(fake_root)
+                self.assertTrue(
+                    any(relative in failure for failure in failures),
+                    f"removing the receipt section from {relative} was accepted",
+                )
+
     def test_reverted_file_is_reported(self) -> None:
         """A file overwritten with upstream content loses its marker."""
         with tempfile.TemporaryDirectory() as tmp:

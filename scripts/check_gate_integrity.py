@@ -39,6 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = REPO_ROOT / ".specify" / "gate-integrity.json"
 
 GUARDED_FILES: tuple[str, ...] = (
+    "scripts/validate_pre_freeze_receipt.py",
     "scripts/spec_kit_planning_review.py",
     "scripts/check_spec_kit_specs.py",
     "scripts/check_speckit_manifests.py",
@@ -56,6 +57,7 @@ GUARDED_FILES: tuple[str, ...] = (
     ".specify/workflows/speckit/handoff.schema.json",
     ".specify/extensions.yml",
     "Makefile",
+    ".specify/templates/pre-freeze-receipt.schema.json",
 )
 
 
@@ -90,6 +92,20 @@ class MustNotMatch(Invariant):
 
 
 INVARIANTS: tuple[Invariant, ...] = (
+    MustMatch(
+        "scripts/validate_pre_freeze_receipt.py",
+        "pre-freeze receipt has a stable contract and gate set",
+        r'CONTRACT\s*=\s*"brainbuddy\.pre-freeze-writer-receipt/v1".*'
+        r'GATE_IDS\s*=\s*frozenset',
+        "The writer receipt validator must retain one stable typed contract and "
+        "a closed set of gate IDs; otherwise malformed evidence can be admitted.",
+    ),
+    MustMatch(
+        "scripts/validate_pre_freeze_receipt.py",
+        "pre-freeze receipt rejects prohibited statuses",
+        r'if status not in \{"PASS", "NOT_APPLICABLE"\}:',
+        "FAIL and UNVERIFIED are not evidence and must fail closed.",
+    ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
         "aggregation honors reviewer verdicts",
