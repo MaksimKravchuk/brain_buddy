@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 import sqlite3
@@ -20,9 +19,10 @@ from app.exceptions import (
     ConflictError,
     NotFoundError,
     RepositoryError,
-    StorageUnavailableError,
 )
 from app.repositories.base import BaseRepository
+from app.repositories.sqlite import SQLiteRepositorySupport
+from app.utils.idempotency import idempotency_key_digest
 from app.utils.time import utcnow
 
 from .domain import (
@@ -38,28 +38,6 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 
 IDEMPOTENCY_RETENTION = timedelta(hours=24)
 """How long replayed command results stay addressable by their key."""
-
-
-@contextmanager
-def _sqlite_guard(resource: str, identifier: str) -> Iterator[None]:
-    """Translate raw ``sqlite3`` failures into the app's domain exceptions."""
-
-    try:
-        yield
-    except sqlite3.IntegrityError as exc:
-        raise ConflictError(
-            resource,
-            identifier,
-            f"{resource} '{identifier}' conflicts with existing records.",
-        ) from exc
-    except sqlite3.OperationalError as exc:
-        raise StorageUnavailableError(
-            "Task storage is temporarily unavailable; retry the request."
-        ) from exc
-    except sqlite3.Error as exc:
-        raise RepositoryError(
-            f"Task storage failed while writing {resource} '{identifier}'."
-        ) from exc
 
 
 def normalize_task_name(value: str, *, strip_tag_prefix: bool = False) -> str:
@@ -82,7 +60,7 @@ def display_project_name(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).strip().split())
 
 
-class TaskRepository(BaseRepository):
+class TaskRepository(SQLiteRepositorySupport, BaseRepository):
     """Store task-module records in one owner-isolated SQLite database."""
 
     _thread_state: ClassVar[threading.local] = threading.local()
@@ -98,49 +76,25 @@ class TaskRepository(BaseRepository):
     def command_lock(self, owner_id: str) -> Iterator[None]:
         """Serialize owner-scoped commands and wrap writes in one transaction."""
 
-        # Owner serialization is global for SQLite's single writer.
-        with self._process_lock:
-            conn = self._connect()
-            previous = getattr(self._thread_state, "conn", None)
-            self._thread_state.conn = conn
-            try:
-                with _sqlite_guard("Task command", owner_id):
-                    conn.execute("BEGIN IMMEDIATE")
-                    yield
-                    conn.commit()
-            except BaseException:
-                conn.rollback()
-                raise
-            finally:
-                self._thread_state.conn = previous
-                conn.close()
-
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=5.0, isolation_level=None)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 5000")
-        conn.execute("PRAGMA journal_mode = WAL")
-        return conn
+        with super()._command_lock(
+            owner_id,
+            lock=self._process_lock,
+            thread_state=self._thread_state,
+            resource="Task command",
+            operational_message="Task storage is temporarily unavailable; retry the request.",
+            repository_message=f"Task storage failed while writing Task command '{owner_id}'.",
+        ):
+            yield
 
     @contextmanager
-    def _owned_connection(self) -> Iterator[sqlite3.Connection]:
-        """Open a private connection and always close it on exit."""
-
-        conn = self._connect()
-        try:
-            yield conn
-        finally:
-            conn.close()
-
-    @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
-        active = getattr(self._thread_state, "conn", None)
-        if active is not None:
-            yield active
-            return
-        with self._owned_connection() as conn:
-            yield conn
+    def _sqlite_guard(self, resource: str, identifier: str) -> Iterator[None]:
+        with super().sqlite_guard(
+            resource,
+            identifier,
+            "Task storage is temporarily unavailable; retry the request.",
+            f"Task storage failed while writing {resource} '{identifier}'.",
+        ):
+            yield
 
     def _initialize_database(self) -> None:
         with self._owned_connection() as conn:
@@ -300,7 +254,7 @@ class TaskRepository(BaseRepository):
         return self.resolve("tasks", owner_id, f"{task_id}.json")
 
     def idempotency_path(self, owner_id: str, key: str) -> Path:
-        key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        key_hash = idempotency_key_digest(key)
         return self.resolve("task-commands", owner_id, f"{key_hash}.json")
 
     @staticmethod
@@ -385,23 +339,35 @@ class TaskRepository(BaseRepository):
         BaseRepository.dump_model(self.task_path(task.owner_id, task.id), task)
 
     def create_project(self, project: ProjectDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Project", project.id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Project", project.id),
+        ):
             if self._exists(conn, "projects", project.owner_id, project.id):
                 raise ConflictError("Project", project.id)
             self._upsert_project(conn, project)
 
     def save_project(self, project: ProjectDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Project", project.id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Project", project.id),
+        ):
             self._upsert_project(conn, project)
 
     def create_tag(self, tag: TagDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Tag", tag.id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Tag", tag.id),
+        ):
             if self._exists(conn, "tags", tag.owner_id, tag.id):
                 raise ConflictError("Tag", tag.id)
             self._upsert_tag(conn, tag)
 
     def save_tag(self, tag: TagDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Tag", tag.id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Tag", tag.id),
+        ):
             self._upsert_tag(conn, tag)
 
     def get_project_for_owner(
@@ -421,13 +387,19 @@ class TaskRepository(BaseRepository):
         return self._list("tags", TagDocument, owner_id=owner_id)
 
     def create(self, task: TaskDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Task", task.id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Task", task.id),
+        ):
             if self._exists(conn, "tasks", task.owner_id, task.id):
                 raise ConflictError("Task", task.id)
             self._upsert_task(conn, task)
 
     def save(self, task: TaskDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Task", task.id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Task", task.id),
+        ):
             self._upsert_task(conn, task)
 
     def get_for_owner(self, task_id: str, *, owner_id: str) -> TaskDocument:
@@ -437,7 +409,10 @@ class TaskRepository(BaseRepository):
         return self._list("tasks", TaskDocument, owner_id=owner_id)
 
     def create_subtask(self, subtask: TaskSubtaskDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Task subtask", subtask.id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Task subtask", subtask.id),
+        ):
             conn.execute(
                 "INSERT INTO subtasks (owner_id, task_id, id, payload) VALUES (?, ?, ?, ?)",
                 (subtask.owner_id, subtask.task_id, subtask.id, self._payload(subtask)),
@@ -447,7 +422,10 @@ class TaskRepository(BaseRepository):
         )
 
     def save_subtask(self, subtask: TaskSubtaskDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Task subtask", subtask.id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Task subtask", subtask.id),
+        ):
             conn.execute(
                 """
                 UPDATE subtasks SET payload = ?
@@ -462,7 +440,7 @@ class TaskRepository(BaseRepository):
     def list_subtasks(
         self, *, owner_id: str, task_id: str
     ) -> list[TaskSubtaskDocument]:
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             rows = conn.execute(
                 "SELECT payload FROM subtasks WHERE owner_id = ? AND task_id = ?",
                 (owner_id, task_id),
@@ -475,7 +453,7 @@ class TaskRepository(BaseRepository):
     def get_subtask_for_owner(
         self, subtask_id: str, *, owner_id: str, task_id: str
     ) -> TaskSubtaskDocument:
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             row = conn.execute(
                 """
                 SELECT payload FROM subtasks
@@ -488,7 +466,10 @@ class TaskRepository(BaseRepository):
         return TaskSubtaskDocument.model_validate(json.loads(row["payload"]))
 
     def create_comment(self, comment: TaskCommentDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Task comment", comment.id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Task comment", comment.id),
+        ):
             conn.execute(
                 "INSERT INTO comments (owner_id, task_id, id, payload) VALUES (?, ?, ?, ?)",
                 (comment.owner_id, comment.task_id, comment.id, self._payload(comment)),
@@ -498,7 +479,10 @@ class TaskRepository(BaseRepository):
         )
 
     def save_comment(self, comment: TaskCommentDocument) -> None:
-        with self._connection() as conn, _sqlite_guard("Task comment", comment.id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Task comment", comment.id),
+        ):
             conn.execute(
                 """
                 UPDATE comments SET payload = ?
@@ -513,7 +497,7 @@ class TaskRepository(BaseRepository):
     def list_comments(
         self, *, owner_id: str, task_id: str
     ) -> list[TaskCommentDocument]:
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             rows = conn.execute(
                 "SELECT payload FROM comments WHERE owner_id = ? AND task_id = ?",
                 (owner_id, task_id),
@@ -526,7 +510,7 @@ class TaskRepository(BaseRepository):
     def get_comment_for_owner(
         self, comment_id: str, *, owner_id: str, task_id: str
     ) -> TaskCommentDocument:
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             row = conn.execute(
                 """
                 SELECT payload FROM comments
@@ -539,8 +523,8 @@ class TaskRepository(BaseRepository):
         return TaskCommentDocument.model_validate(json.loads(row["payload"]))
 
     def get_idempotency(self, *, owner_id: str, key: str) -> IdempotencyRecord | None:
-        key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
-        with self._connection() as conn:
+        key_hash = idempotency_key_digest(key)
+        with self._connection(self._thread_state) as conn:
             row = conn.execute(
                 """
                 SELECT key, command, request_hash, resource_id, response_body, created_at
@@ -560,8 +544,11 @@ class TaskRepository(BaseRepository):
         )
 
     def save_idempotency(self, *, owner_id: str, record: IdempotencyRecord) -> None:
-        key_hash = hashlib.sha256(record.key.encode("utf-8")).hexdigest()
-        with self._connection() as conn, _sqlite_guard("Idempotency-Key", record.key):
+        key_hash = idempotency_key_digest(record.key)
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Idempotency-Key", record.key),
+        ):
             conn.execute(
                 """
                 INSERT OR REPLACE INTO idempotency_records
@@ -594,7 +581,10 @@ class TaskRepository(BaseRepository):
         """
 
         cutoff = (now - IDEMPOTENCY_RETENTION).isoformat()
-        with self._connection() as conn, _sqlite_guard("Idempotency-Key", owner_id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Idempotency-Key", owner_id),
+        ):
             rows = conn.execute(
                 """
                 SELECT key FROM idempotency_records
@@ -618,7 +608,7 @@ class TaskRepository(BaseRepository):
         return len(rows)
 
     def list_idempotency_for_owner(self, *, owner_id: str) -> list[IdempotencyRecord]:
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             rows = conn.execute(
                 """
                 SELECT key, command, request_hash, resource_id, response_body, created_at
@@ -648,7 +638,7 @@ class TaskRepository(BaseRepository):
         (tasks before tags/projects).
         """
 
-        with self.command_lock(owner_id), self._connection() as conn:
+        with self.command_lock(owner_id), self._connection(self._thread_state) as conn:
             for table in (
                 "task_tags",
                 "subtasks",
@@ -677,7 +667,7 @@ class TaskRepository(BaseRepository):
             shutil.rmtree(self.resolve(dirname, owner_id), ignore_errors=True)
 
     def next_order_key(self, *, owner_id: str, state: str) -> int:
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             value = conn.execute(
                 "SELECT MAX(order_key) FROM tasks WHERE owner_id = ? AND state = ?",
                 (owner_id, state),
@@ -710,7 +700,10 @@ class TaskRepository(BaseRepository):
         *,
         owner_id: str,
     ) -> ModelT:
-        with self._connection() as conn, _sqlite_guard(resource, record_id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard(resource, record_id),
+        ):
             row = conn.execute(
                 f"SELECT payload FROM {table} WHERE owner_id = ? AND id = ?",  # noqa: S608
                 (owner_id, record_id),
@@ -725,7 +718,10 @@ class TaskRepository(BaseRepository):
     def _list(
         self, table: str, model_cls: type[ModelT], *, owner_id: str
     ) -> list[ModelT]:
-        with self._connection() as conn, _sqlite_guard(table, owner_id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard(table, owner_id),
+        ):
             rows = conn.execute(
                 f"SELECT payload FROM {table} WHERE owner_id = ?",  # noqa: S608
                 (owner_id,),

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
@@ -29,6 +28,11 @@ from app.schemas.tasks import (
     TaskSubtaskUpdateRequest,
     TaskTransitionRequest,
     TaskUpdateRequest,
+)
+from app.utils.idempotency import (
+    ReplayFingerprint,
+    request_fingerprint,
+    require_matching_replay,
 )
 from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
@@ -1107,8 +1111,12 @@ class TaskService:
         record = self.task_repo.get_idempotency(owner_id=owner_id, key=key)
         if record is None:
             return None
-        if record.command != command or record.request_hash != request_hash:
-            raise ConflictError("Idempotency-Key", key)
+        require_matching_replay(
+            ReplayFingerprint(record.command, record.request_hash),
+            key=key,
+            command=command,
+            request_hash=request_hash,
+        )
         return record
 
     def _reconcile_idempotent_result(self, *, owner_id: str, key: str) -> None:
@@ -1296,17 +1304,7 @@ class TaskService:
             | TaskUpdateRequest
         ),
     ) -> str:
-        body = payload.model_dump(mode="json")
-        encoded = json.dumps(
-            {
-                "command": command,
-                "body": body,
-                "fields_set": sorted(payload.model_fields_set),
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+        return request_fingerprint(command, payload)
 
     @staticmethod
     def _assert_current(task: TaskDocument, expected_revision: int) -> None:

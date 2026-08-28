@@ -22,12 +22,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.exceptions import (
-    ConflictError,
     NotFoundError,
     RepositoryError,
-    StorageUnavailableError,
 )
 from app.repositories.base import BaseRepository
+from app.repositories.sqlite import SQLiteRepositorySupport
+from app.utils.idempotency import idempotency_key_digest
 from app.utils.time import utcnow
 
 from .domain import (
@@ -43,29 +43,7 @@ _BRAIN_DUMP_SCHEMA_VERSION = 2
 _LEGACY_TERMINAL_STATUSES = frozenset({"completed", "cancelled"})
 
 
-@contextmanager
-def _sqlite_guard(resource: str, identifier: str) -> Iterator[None]:
-    """Translate raw ``sqlite3`` failures into the app's domain exceptions."""
-
-    try:
-        yield
-    except sqlite3.IntegrityError as exc:
-        raise ConflictError(
-            resource,
-            identifier,
-            f"{resource} '{identifier}' conflicts with existing records.",
-        ) from exc
-    except sqlite3.OperationalError as exc:
-        raise StorageUnavailableError(
-            "Voice operation storage is temporarily unavailable; retry the request."
-        ) from exc
-    except sqlite3.Error as exc:
-        raise RepositoryError(
-            f"Voice operation storage failed while writing {resource} '{identifier}'."
-        ) from exc
-
-
-class OperationRepository(BaseRepository):
+class OperationRepository(SQLiteRepositorySupport, BaseRepository):
     """Store voice Brain Dump AsyncOperation records in their own database."""
 
     _thread_state: threading.local = threading.local()
@@ -84,48 +62,25 @@ class OperationRepository(BaseRepository):
         # Owner serialization is global for SQLite's single writer. This lock
         # is private to this repository's own database, so it never contends
         # with TaskRepository.command_lock.
-        with self._process_lock:
-            conn = self._connect()
-            previous = getattr(self._thread_state, "conn", None)
-            self._thread_state.conn = conn
-            try:
-                with _sqlite_guard("Voice operation command", owner_id):
-                    conn.execute("BEGIN IMMEDIATE")
-                    yield
-                    conn.commit()
-            except BaseException:
-                conn.rollback()
-                raise
-            finally:
-                self._thread_state.conn = previous
-                conn.close()
-
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=5.0, isolation_level=None)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 5000")
-        conn.execute("PRAGMA journal_mode = WAL")
-        return conn
+        with super()._command_lock(
+            owner_id,
+            lock=self._process_lock,
+            thread_state=self._thread_state,
+            resource="Voice operation command",
+            operational_message="Voice operation storage is temporarily unavailable; retry the request.",
+            repository_message=f"Voice operation storage failed while writing Voice operation command '{owner_id}'.",
+        ):
+            yield
 
     @contextmanager
-    def _owned_connection(self) -> Iterator[sqlite3.Connection]:
-        """Open a private connection and always close it on exit."""
-
-        conn = self._connect()
-        try:
-            yield conn
-        finally:
-            conn.close()
-
-    @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
-        active = getattr(self._thread_state, "conn", None)
-        if active is not None:
-            yield active
-            return
-        with self._owned_connection() as conn:
-            yield conn
+    def _sqlite_guard(self, resource: str, identifier: str) -> Iterator[None]:
+        with super().sqlite_guard(
+            resource,
+            identifier,
+            "Voice operation storage is temporarily unavailable; retry the request.",
+            f"Voice operation storage failed while writing {resource} '{identifier}'.",
+        ):
+            yield
 
     def _initialize_database(self) -> None:
         with self._owned_connection() as conn:
@@ -207,7 +162,7 @@ class OperationRepository(BaseRepository):
         return self.resolve("brain-dump-media", owner_id, operation_id)
 
     def idempotency_path(self, owner_id: str, key: str) -> Path:
-        key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        key_hash = idempotency_key_digest(key)
         return self.resolve("voice-operation-commands", owner_id, f"{key_hash}.json")
 
     @staticmethod
@@ -336,8 +291,8 @@ class OperationRepository(BaseRepository):
 
     def save_brain_dump_operation(self, operation: BrainDumpOperationDocument) -> None:
         with (
-            self._connection() as conn,
-            _sqlite_guard("Brain dump operation", operation.id),
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Brain dump operation", operation.id),
         ):
             self._upsert_brain_dump_operation(conn, operation)
 
@@ -409,7 +364,7 @@ class OperationRepository(BaseRepository):
         # document's own anchor against the current time to decide whether
         # it is actually due, exactly like the provider-lease sweep does for
         # ``lease_expires_at``.
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             rows = conn.execute("""
                 SELECT payload FROM brain_dump_operations
                 """).fetchall()
@@ -430,7 +385,7 @@ class OperationRepository(BaseRepository):
         due before claiming it.
         """
 
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             rows = conn.execute("""
                 SELECT payload FROM brain_dump_operations
                 WHERE status IN ('accurate_transcribing', 'reconciling')
@@ -448,7 +403,7 @@ class OperationRepository(BaseRepository):
         owner-serialized, deterministic-child-key commit path.
         """
 
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             rows = conn.execute("""
                 SELECT payload FROM brain_dump_operations
                 WHERE status = 'committing'
@@ -467,7 +422,7 @@ class OperationRepository(BaseRepository):
         touched), including abandoned ``recording``/``awaiting_confirmation``
         operations no one ever finished or discarded."""
 
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             rows = conn.execute(
                 """
                 SELECT payload FROM brain_dump_operations
@@ -481,7 +436,7 @@ class OperationRepository(BaseRepository):
         ]
 
     def list_brain_dump_operations(self) -> list[BrainDumpOperationDocument]:
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             rows = conn.execute("SELECT payload FROM brain_dump_operations").fetchall()
         return [
             self._decode_brain_dump_operation(json.loads(row["payload"]))[0]
@@ -493,7 +448,7 @@ class OperationRepository(BaseRepository):
     ) -> list[BrainDumpOperationDocument]:
         """Every operation belonging to one owner (GDPR export support)."""
 
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             rows = conn.execute(
                 "SELECT payload FROM brain_dump_operations WHERE owner_id = ?",
                 (owner_id,),
@@ -512,7 +467,7 @@ class OperationRepository(BaseRepository):
         again.
         """
 
-        with self.command_lock(owner_id), self._connection() as conn:
+        with self.command_lock(owner_id), self._connection(self._thread_state) as conn:
             conn.execute(
                 "DELETE FROM brain_dump_operations WHERE owner_id = ?",
                 (owner_id,),
@@ -619,7 +574,7 @@ class OperationRepository(BaseRepository):
     def _load_brain_dump_operation(
         self, operation_id: str, *, owner_id: str
     ) -> tuple[BrainDumpOperationDocument, bool] | None:
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             row = conn.execute(
                 """
                 SELECT payload FROM brain_dump_operations
@@ -632,8 +587,8 @@ class OperationRepository(BaseRepository):
         return self._decode_brain_dump_operation(json.loads(row["payload"]))
 
     def get_idempotency(self, *, owner_id: str, key: str) -> IdempotencyRecord | None:
-        key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
-        with self._connection() as conn:
+        key_hash = idempotency_key_digest(key)
+        with self._connection(self._thread_state) as conn:
             row = conn.execute(
                 """
                 SELECT key, command, request_hash, resource_id, response_body, created_at
@@ -653,8 +608,11 @@ class OperationRepository(BaseRepository):
         )
 
     def save_idempotency(self, *, owner_id: str, record: IdempotencyRecord) -> None:
-        key_hash = hashlib.sha256(record.key.encode("utf-8")).hexdigest()
-        with self._connection() as conn, _sqlite_guard("Idempotency-Key", record.key):
+        key_hash = idempotency_key_digest(record.key)
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Idempotency-Key", record.key),
+        ):
             conn.execute(
                 """
                 INSERT OR REPLACE INTO idempotency_records
@@ -692,7 +650,10 @@ class OperationRepository(BaseRepository):
         """
 
         payload = json.dumps(response_body, sort_keys=True)
-        with self._connection() as conn, _sqlite_guard("Idempotency-Key", operation_id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Idempotency-Key", operation_id),
+        ):
             rows = conn.execute(
                 """
                 SELECT key, command, request_hash, created_at
@@ -728,7 +689,10 @@ class OperationRepository(BaseRepository):
         """Drop idempotency records past retention so history stays bounded."""
 
         cutoff = (now - IDEMPOTENCY_RETENTION).isoformat()
-        with self._connection() as conn, _sqlite_guard("Idempotency-Key", owner_id):
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Idempotency-Key", owner_id),
+        ):
             rows = conn.execute(
                 """
                 SELECT key FROM idempotency_records
@@ -747,7 +711,7 @@ class OperationRepository(BaseRepository):
         return len(rows)
 
     def list_idempotency_for_owner(self, *, owner_id: str) -> list[IdempotencyRecord]:
-        with self._connection() as conn:
+        with self._connection(self._thread_state) as conn:
             rows = conn.execute(
                 """
                 SELECT key, command, request_hash, resource_id, response_body, created_at

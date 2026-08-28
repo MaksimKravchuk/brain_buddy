@@ -33,6 +33,11 @@ from app.schemas.tasks import (
     BrainDumpTranscriptAppendRequest,
     ExpectedRevisionRequest,
 )
+from app.utils.idempotency import (
+    ReplayFingerprint,
+    request_fingerprint,
+    require_matching_replay,
+)
 from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
 
@@ -3008,8 +3013,12 @@ class VoiceBrainDumpService:
         record = self.operation_repo.get_idempotency(owner_id=owner_id, key=key)
         if record is None:
             return None
-        if record.command != command or record.request_hash != request_hash:
-            raise ConflictError("Idempotency-Key", key)
+        require_matching_replay(
+            ReplayFingerprint(record.command, record.request_hash),
+            key=key,
+            command=command,
+            request_hash=request_hash,
+        )
         return record
 
     def _reconcile_idempotent_result(self, *, owner_id: str, key: str) -> None:
@@ -3077,17 +3086,7 @@ class VoiceBrainDumpService:
             | ExpectedRevisionRequest
         ),
     ) -> str:
-        body = payload.model_dump(mode="json")
-        encoded = json.dumps(
-            {
-                "command": command,
-                "body": body,
-                "fields_set": sorted(payload.model_fields_set),
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+        return request_fingerprint(command, payload)
 
     @staticmethod
     def _brain_dump_manifest_hash(chunks: list[BrainDumpAudioChunkDocument]) -> str:
