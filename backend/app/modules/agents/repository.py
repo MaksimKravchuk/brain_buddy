@@ -103,9 +103,11 @@ class AgentRepository(BaseRepository):
         """Whether any relay-owned table contains a durable record."""
 
         with self._connection() as conn:
-            row = conn.execute("""
+            row = conn.execute(
+                """
                 SELECT 1 FROM agent_connections LIMIT 1
-                """).fetchone()
+                """
+            ).fetchone()
             if row is not None:
                 return True
             for query in (
@@ -202,7 +204,8 @@ class AgentRepository(BaseRepository):
 
     def _initialize_database(self) -> None:
         with self._owned_connection() as conn:
-            conn.executescript("""
+            conn.executescript(
+                """
                 CREATE TABLE IF NOT EXISTS agent_connections (
                     owner_id TEXT NOT NULL,
                     id TEXT NOT NULL,
@@ -281,7 +284,8 @@ class AgentRepository(BaseRepository):
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_idempotency_created
                     ON agent_idempotency(created_at);
-                """)
+                """
+            )
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS agent_schema_migrations ("
                 "name TEXT PRIMARY KEY)"

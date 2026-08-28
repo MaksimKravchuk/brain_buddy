@@ -144,7 +144,8 @@ class TaskRepository(BaseRepository):
 
     def _initialize_database(self) -> None:
         with self._owned_connection() as conn:
-            conn.executescript("""
+            conn.executescript(
+                """
                 CREATE TABLE IF NOT EXISTS projects (
                     owner_id TEXT NOT NULL,
                     id TEXT NOT NULL,
@@ -228,7 +229,8 @@ class TaskRepository(BaseRepository):
                     ON task_tags(owner_id, tag_id, task_id);
                 CREATE INDEX IF NOT EXISTS idx_idempotency_owner_created
                     ON idempotency_records(owner_id, created_at);
-                """)
+                """
+            )
 
     def _migrate_legacy_json_once(self) -> None:
         with self._owned_connection() as conn:

@@ -4376,7 +4376,8 @@ class TestRelayFailureRecoveryEdges:
             else ""
         )
         with sqlite3.connect(database_path) as database:
-            database.executescript(f"""
+            database.executescript(
+                f"""
                 ALTER TABLE agent_idempotency RENAME TO agent_idempotency_new;
                 CREATE TABLE agent_idempotency (
                     owner_id TEXT NOT NULL,
@@ -4392,7 +4393,8 @@ class TestRelayFailureRecoveryEdges:
                     PRIMARY KEY (owner_id, key_hash)
                 );
                 DROP TABLE agent_idempotency_new;
-                """)
+                """
+            )
             database.execute(
                 "DELETE FROM agent_schema_migrations "
                 "WHERE name = 'delivery_attempted_backfill_v1'"
