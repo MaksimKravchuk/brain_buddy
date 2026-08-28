@@ -393,6 +393,16 @@ DEPLOY_REQUIREMENTS = (
         "after a successful first-transition deploy the authoritative "
         "rollout must return to delivery-only for the next release",
     ),
+    (
+        "deploy classifier diff input",
+        'git diff --no-renames --name-only -z "${TESTED_SHA}^" "${TESTED_SHA}"',
+        "the deploy gate must classify the exact tested NUL-separated diff",
+    ),
+    (
+        "deploy classifier output binding",
+        'scripts/classify_deploy_paths.sh >> "${GITHUB_OUTPUT}"',
+        "the deploy gate must publish the tested helper's needed result",
+    ),
 )
 
 DEPLOY_FORBIDDEN = (

@@ -241,24 +241,36 @@ class DeployContractTest(unittest.TestCase):
         return result.stdout.decode().strip()
 
     def test_deploy_classifier_covers_policy_and_fail_open_paths(self) -> None:
-        policy_only = (
-            "mobile/src/app.tsx",
-            "docs/deploy.md",
-            "specs/007-rollout/spec.md",
-            ".claude/agents/reviewer.md",
-            ".design-sync/manifest.json",
-            ".github/CODEOWNERS",
-            "README.md",
-            ".specify/memory/constitution.md",
+        rejected_parent_listing = (
+            ".github/workflows/ci.yml",
+            ".github/workflows/deploy-fly-production.yml",
+            ".specify/gate-integrity.json",
+            ".specify/templates/acceptance-template.md",
+            ".specify/templates/checklist-template.md",
+            ".specify/templates/pre-freeze-receipt.schema.json",
+            ".specify/templates/tasks-template.md",
             "Makefile",
-            ".gitignore",
-            "LICENSE",
-            ".env.example",
-            "mobile/README.md",
-            "docs/README.md",
-            "specs/README.md",
+            "docs/autonomous-delivery-runbook.md",
+            "scripts/check_gate_integrity.py",
+            "scripts/check_speckit_manifests.py",
+            "scripts/submit_to_trunk.sh",
+            "scripts/test_check_speckit_manifests.py",
+            "scripts/test_submit_to_trunk.py",
+            "scripts/test_validate_pre_freeze_receipt.py",
+            "scripts/validate_pre_freeze_receipt.py",
+            "scripts/test_validate_trunk_delivery.py",
         )
-        self.assertEqual(self._classify(policy_only), "needed=false")
+        current_cumulative_listing = rejected_parent_listing + (
+            "scripts/classify_deploy_paths.sh",
+        )
+        correction_listing = (
+            ".github/workflows/deploy-fly-production.yml",
+            "scripts/classify_deploy_paths.sh",
+            "scripts/test_validate_trunk_delivery.py",
+        )
+        self.assertEqual(self._classify(rejected_parent_listing), "needed=false")
+        self.assertEqual(self._classify(current_cumulative_listing), "needed=false")
+        self.assertEqual(self._classify(correction_listing), "needed=false")
 
         deploy_relevant = (
             "backend/app/main.py",
@@ -287,6 +299,44 @@ class DeployContractTest(unittest.TestCase):
         try:
             policy_only = ("mobile/src/app.tsx", "docs/deploy.md")
             self.assertNotEqual(self._classify(policy_only, mutant), "needed=false")
+        finally:
+            mutant.unlink()
+
+    def test_deploy_classifier_mutant_fails_scripts_correction_listing(self) -> None:
+        text = DEPLOY_CLASSIFIER.read_text(encoding="utf-8")
+        deploy_arm = "backend/*|frontend/*|fly.*|docker-compose*|Dockerfile*|compose.y*ml|.dockerignore|.env)"
+        self.assertIn(deploy_arm, text)
+        mutant = _temp_workflow(text.replace(
+            deploy_arm,
+            deploy_arm.replace(".env)", ".env|scripts/*)"),
+            1,
+        ))
+        try:
+            correction_listing = (
+                ".github/workflows/deploy-fly-production.yml",
+                "scripts/classify_deploy_paths.sh",
+                "scripts/test_validate_trunk_delivery.py",
+            )
+            self.assertNotEqual(
+                self._classify(correction_listing, mutant), "needed=false"
+            )
+        finally:
+            mutant.unlink()
+
+    def test_workflow_binds_exact_classifier_output_and_rejects_consumer_mutant(self) -> None:
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        exact_binding = (
+            'git diff --no-renames --name-only -z "${TESTED_SHA}^" "${TESTED_SHA}" \\\n'
+            '            | scripts/classify_deploy_paths.sh >> "${GITHUB_OUTPUT}"'
+        )
+        self.assertIn(exact_binding, text)
+        mutant = _temp_workflow(text.replace(
+            exact_binding,
+            'printf "needed=true\\n" >> "${GITHUB_OUTPUT}"',
+            1,
+        ))
+        try:
+            self.assertEqual(validate_deploy_workflow(mutant), 1)
         finally:
             mutant.unlink()
 
