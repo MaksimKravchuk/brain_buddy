@@ -259,33 +259,8 @@ jobs:
             echo "needed=true" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          needed=false
-          seen=false
-          while IFS= read -r -d '' path; do
-            seen=true
-            case "${path}" in
-              backend/*|frontend/*|fly.*|docker-compose*|Dockerfile*|compose.y*ml|.dockerignore|.env)
-                needed=true
-                echo "Deploy-relevant change: ${path}"
-                break
-                ;;
-              .github/*|.specify/*|.claude/*|.design-sync/*|docs/*|specs/*|mobile/*|scripts/*|*.md|Makefile|.gitignore|LICENSE|.env.example)
-                ;;
-              *)
-                needed=true
-                echo "Unclassified change (deploying to stay safe): ${path}"
-                break
-                ;;
-            esac
-          done < <(git diff --no-renames --name-only -z "${TESTED_SHA}^" "${TESTED_SHA}")
-          if [ "${seen}" = "false" ]; then
-            echo "Empty change listing; deploying (fail-open)."
-            needed=true
-          fi
-          if [ "${needed}" = "false" ]; then
-            echo "Every changed path is deploy-inert; skipping the production release."
-          fi
-          echo "needed=${needed}" >> "${GITHUB_OUTPUT}"
+          git diff --no-renames --name-only -z "${TESTED_SHA}^" "${TESTED_SHA}" \
+            | scripts/classify_deploy_paths.sh >> "${GITHUB_OUTPUT}"
 
       # Rolling back the IMAGES is not rolling back the RELEASE. Fly secrets
       # are app-scoped and survive an image swap, so the flag string this run

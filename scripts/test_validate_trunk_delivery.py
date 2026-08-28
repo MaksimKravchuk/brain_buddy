@@ -19,6 +19,7 @@ job anywhere holds GITHUB_TOKEN contents: write.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -36,6 +37,7 @@ validate_deploy_workflow = _MODULE.validate_deploy_workflow
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-fly-production.yml"
+DEPLOY_CLASSIFIER = REPO_ROOT / "scripts" / "classify_deploy_paths.sh"
 
 CI_REQUIRED_SNIPPETS = (
     "trunk-candidate/**",
@@ -229,31 +231,76 @@ class TrunkCiContractTest(unittest.TestCase):
 
 
 class DeployContractTest(unittest.TestCase):
+    def _classify(self, paths: tuple[str, ...], classifier: Path = DEPLOY_CLASSIFIER) -> str:
+        result = subprocess.run(
+            ["bash", str(classifier)],
+            input="".join(f"{path}\0" for path in paths).encode(),
+            capture_output=True,
+            check=True,
+        )
+        return result.stdout.decode().strip()
+
+    def test_deploy_classifier_covers_policy_and_fail_open_paths(self) -> None:
+        policy_only = (
+            "mobile/src/app.tsx",
+            "docs/deploy.md",
+            "specs/007-rollout/spec.md",
+            ".claude/agents/reviewer.md",
+            ".design-sync/manifest.json",
+            ".github/CODEOWNERS",
+            "README.md",
+            ".specify/memory/constitution.md",
+            "Makefile",
+            ".gitignore",
+            "LICENSE",
+            ".env.example",
+            "mobile/README.md",
+            "docs/README.md",
+            "specs/README.md",
+        )
+        self.assertEqual(self._classify(policy_only), "needed=false")
+
+        deploy_relevant = (
+            "backend/app/main.py",
+            "frontend/src/App.tsx",
+            "fly.toml",
+            "docker-compose.yml",
+            "Dockerfile",
+            "compose.yaml",
+            "auth-policy.txt",
+            ".env.production",
+            "unknown.bin",
+        )
+        for path in deploy_relevant:
+            with self.subTest(path=path):
+                self.assertEqual(self._classify((path,)), "needed=true")
+        self.assertEqual(
+            self._classify(("docs/README.md", "unknown.bin")), "needed=true"
+        )
+        self.assertEqual(self._classify(()), "needed=true")
+
+    def test_deploy_classifier_mutant_fails_policy_only_assertion(self) -> None:
+        text = DEPLOY_CLASSIFIER.read_text(encoding="utf-8")
+        inert_arm = ".github/*|.specify/*|.claude/*|.design-sync/*|docs/*|specs/*|mobile/*|scripts/*|*.md|Makefile|.gitignore|LICENSE|.env.example)"
+        self.assertIn(inert_arm, text)
+        mutant = _temp_workflow(text.replace(inert_arm, inert_arm + "\n                needed=true", 1))
+        try:
+            policy_only = ("mobile/src/app.tsx", "docs/deploy.md")
+            self.assertNotEqual(self._classify(policy_only, mutant), "needed=false")
+        finally:
+            mutant.unlink()
+
     def test_repo_deploy_workflow_passes(self) -> None:
         self.assertEqual(validate_deploy_workflow(DEPLOY_WORKFLOW), 0)
 
     def test_policy_only_landing_skips_runtime_deploy(self) -> None:
         """The deploy gate must not treat delivery machinery as image input."""
 
-        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn(
-            ".github/*|.specify/*|.claude/*|.design-sync/*|docs/*|specs/*|"
-            "mobile/*|scripts/*|*.md|Makefile|.gitignore|LICENSE|.env.example",
-            text,
-        )
-        self.assertNotIn(
-            "backend/*|frontend/*|fly.*|docker-compose*|scripts/*|.github/*",
-            text,
-        )
+        self.assertEqual(self._classify(("docs/deploy.md", "mobile/app.tsx")), "needed=false")
 
     def test_deploy_gate_keeps_runtime_unknown_and_empty_fail_open(self) -> None:
-        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn(
-            "backend/*|frontend/*|fly.*|docker-compose*|Dockerfile*|compose.y*ml",
-            text,
-        )
-        self.assertIn("Unclassified change (deploying to stay safe)", text)
-        self.assertIn("Empty change listing; deploying (fail-open).", text)
+        self.assertEqual(self._classify(("unknown.bin",)), "needed=true")
+        self.assertEqual(self._classify(()), "needed=true")
 
     def test_missing_workflow_fails(self) -> None:
         self.assertEqual(validate_deploy_workflow(Path("/nonexistent/deploy.yml")), 1)
