@@ -38,6 +38,33 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-fly-production.yml"
 DEPLOY_CLASSIFIER = REPO_ROOT / "scripts" / "classify_deploy_paths.sh"
+RISK_CLASSIFIER = REPO_ROOT / "scripts" / "classify_path_risk.py"
+
+OLD_17_PATHS = (
+    ".github/workflows/ci.yml",
+    ".github/workflows/deploy-fly-production.yml",
+    ".specify/gate-integrity.json",
+    ".specify/templates/acceptance-template.md",
+    ".specify/templates/checklist-template.md",
+    ".specify/templates/pre-freeze-receipt.schema.json",
+    ".specify/templates/tasks-template.md",
+    "Makefile",
+    "docs/autonomous-delivery-runbook.md",
+    "scripts/check_gate_integrity.py",
+    "scripts/check_speckit_manifests.py",
+    "scripts/submit_to_trunk.sh",
+    "scripts/test_check_speckit_manifests.py",
+    "scripts/test_submit_to_trunk.py",
+    "scripts/test_validate_pre_freeze_receipt.py",
+    "scripts/validate_pre_freeze_receipt.py",
+    "scripts/test_validate_trunk_delivery.py",
+)
+PRIOR_18_PATHS = OLD_17_PATHS + ("scripts/classify_deploy_paths.sh",)
+SUCCESSOR_2_PATHS = (
+    "scripts/test_validate_trunk_delivery.py",
+    "scripts/validate_trunk_delivery.py",
+)
+CURRENT_19_PATHS = PRIOR_18_PATHS + ("scripts/validate_trunk_delivery.py",)
 
 CI_REQUIRED_SNIPPETS = (
     "trunk-candidate/**",
@@ -231,6 +258,59 @@ class TrunkCiContractTest(unittest.TestCase):
 
 
 class DeployContractTest(unittest.TestCase):
+    def _risk_classes(self, paths: tuple[str, ...]) -> tuple[int, dict[str, int]]:
+        result = subprocess.run(
+            ["python3", str(RISK_CLASSIFIER), "--null"],
+            input="".join(f"{path}\0" for path in paths).encode(),
+            capture_output=True,
+            check=False,
+        )
+        counts = {"ASK": 0, "SHIP": 0}
+        for line in result.stdout.decode().splitlines():
+            classification = line.split("\t", 1)[0]
+            if classification in counts:
+                counts[classification] += 1
+        return result.returncode, counts
+
+    def test_exact_classifier_path_fixtures_cover_all_revisions(self) -> None:
+        for name, paths, expected in (
+            ("old 17-path listing", OLD_17_PATHS, {"ASK": 11, "SHIP": 6}),
+            ("prior 18-path listing", PRIOR_18_PATHS, {"ASK": 12, "SHIP": 6}),
+            (
+                "80cc5e4 successor correction listing",
+                SUCCESSOR_2_PATHS,
+                {"ASK": 2, "SHIP": 0},
+            ),
+            ("current 19-path listing", CURRENT_19_PATHS, {"ASK": 13, "SHIP": 6}),
+        ):
+            with self.subTest(listing=name):
+                self.assertEqual(len(paths), sum(expected.values()))
+                returncode, counts = self._risk_classes(paths)
+                self.assertEqual(counts, expected)
+                self.assertEqual(
+                    returncode, 1, "overall ASK must block automatic promotion"
+                )
+
+    def test_deploy_classifier_mutant_marks_only_successor_validator_as_needed(
+        self,
+    ) -> None:
+        text = DEPLOY_CLASSIFIER.read_text(encoding="utf-8")
+        deploy_arm = "backend/*|frontend/*|fly.*|docker-compose*|Dockerfile*|compose.y*ml|.dockerignore|.env)"
+        self.assertIn(deploy_arm, text)
+        mutant = _temp_workflow(
+            text.replace(
+                deploy_arm,
+                deploy_arm.replace(".env)", ".env|scripts/validate_trunk_delivery.py)"),
+                1,
+            )
+        )
+        try:
+            self.assertNotEqual(
+                self._classify(SUCCESSOR_2_PATHS, mutant), "needed=false"
+            )
+        finally:
+            mutant.unlink()
+
     def _classify(self, paths: tuple[str, ...], classifier: Path = DEPLOY_CLASSIFIER) -> str:
         result = subprocess.run(
             ["bash", str(classifier)],
@@ -263,11 +343,7 @@ class DeployContractTest(unittest.TestCase):
         current_cumulative_listing = rejected_parent_listing + (
             "scripts/classify_deploy_paths.sh",
         )
-        correction_listing = (
-            ".github/workflows/deploy-fly-production.yml",
-            "scripts/classify_deploy_paths.sh",
-            "scripts/test_validate_trunk_delivery.py",
-        )
+        correction_listing = SUCCESSOR_2_PATHS
         self.assertEqual(self._classify(rejected_parent_listing), "needed=false")
         self.assertEqual(self._classify(current_cumulative_listing), "needed=false")
         self.assertEqual(self._classify(correction_listing), "needed=false")
@@ -312,11 +388,7 @@ class DeployContractTest(unittest.TestCase):
             1,
         ))
         try:
-            correction_listing = (
-                ".github/workflows/deploy-fly-production.yml",
-                "scripts/classify_deploy_paths.sh",
-                "scripts/test_validate_trunk_delivery.py",
-            )
+            correction_listing = SUCCESSOR_2_PATHS
             self.assertNotEqual(
                 self._classify(correction_listing, mutant), "needed=false"
             )
