@@ -6,7 +6,7 @@ import { ApiError, apiClient } from "../../api/client";
 import type { AdminAccountResponse } from "../../api/adminTypes";
 import { useAuthStore } from "../../stores/authStore";
 import { Button } from "../../components/ui/Button";
-import { Field, SectionCard } from "../../components/ui/SettingsSection";
+import { Field } from "../../components/ui/SettingsSection";
 
 function errorMessage(error: unknown, action: string): string {
   const suffix = error instanceof ApiError && error.correlationId ? ` (reference ${error.correlationId})` : "";
@@ -51,8 +51,10 @@ export function AdminUsersSection(): React.JSX.Element {
   });
 
   return (
-    <SectionCard title="Users" description="Create, edit, revoke, or permanently delete member accounts.">
-      <div className="flex flex-col gap-4">
+    <section className="w-full">
+      <h2 className="text-subtitle font-semibold text-slate-900">Users</h2>
+      <p className="mt-1 text-sm text-slate-500">Create, edit, revoke, or permanently delete member accounts.</p>
+      <div className="mt-4 flex flex-col gap-4">
         {!showCreate ? <Button type="button" variant="primary" ref={(button) => { if (button) triggerRefs.current.set("create", button); else triggerRefs.current.delete("create"); }} onClick={() => setShowCreate(true)}>Create user</Button> : <AdminCreateForm onCreated={(account) => { setShowCreate(false); setMessage("Account created."); void refresh().then(() => setFocusAfterRefresh(account.id)); }} onError={(error) => setMessage(errorMessage(error, "create the account"))} onCancel={() => { setFocusCreateAfterClose(true); setShowCreate(false); }} />}
         {message ? <p role="status" className="text-sm text-slate-600">{message}</p> : null}
         {accounts.isPending ? <p role="status">Loading users…</p> : null}
@@ -93,7 +95,7 @@ export function AdminUsersSection(): React.JSX.Element {
         {revoking ? <ConfirmDialog title={`Revoke sessions for ${revoking.id} (${revoking.email})`} description={`This signs out ${revoking.id} (${revoking.email}) on every device.`} confirmLabel="Revoke sessions" isLoading={revokeMutation.isPending} onCancel={() => { setRevoking(null); triggerRefs.current.get(revoking.id)?.focus(); }} onConfirm={() => revokeMutation.mutate(revoking.id)} /> : null}
         {deleting ? <ConfirmDialog title={`Delete account ${deleting.id} (${deleting.email})`} description={`This permanently deletes ${deleting.id} (${deleting.email}) and all data they own. This cannot be undone.`} confirmLabel="Delete permanently" isLoading={deleteMutation.isPending} onCancel={() => { setDeleting(null); triggerRefs.current.get(`delete:${deleting.id}`)?.focus(); }} onConfirm={() => deleteMutation.mutate(deleting.id)} /> : null}
       </div>
-    </SectionCard>
+    </section>
   );
 }
 

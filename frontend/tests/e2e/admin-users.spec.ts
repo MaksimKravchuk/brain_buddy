@@ -145,6 +145,20 @@ test("013-FR-002 013-FR-003 013-FR-004 013-FR-009 013-FR-010 013-FR-012 013-FR-0
 
   await test.step("capture Users at desktop and mobile widths without table overflow", async () => {
     await page.setViewportSize({ width: 1280, height: 800 });
+    const desktopGeometry = await page.evaluate(() => {
+      const main = document.querySelector("main");
+      const table = document.querySelector('[role="tabpanel"] table');
+      if (!main || !table) throw new Error("Users table geometry targets were not found");
+      return {
+        mainWidth: main.getBoundingClientRect().width,
+        tableWidth: table.getBoundingClientRect().width,
+      };
+    });
+    if (desktopGeometry.tableWidth <= desktopGeometry.mainWidth * 0.85) {
+      throw new Error(
+        `Users table did not fill the desktop workspace: ${desktopGeometry.tableWidth}px of ${desktopGeometry.mainWidth}px`
+      );
+    }
     await page.screenshot({ path: "test-results/admin-users-desktop.png", fullPage: true });
     await page.setViewportSize({ width: 390, height: 851 });
     await expect(page.locator("table")).toBeVisible();

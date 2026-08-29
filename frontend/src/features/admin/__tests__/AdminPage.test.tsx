@@ -36,6 +36,18 @@ describe("AdminPage capability and exclusive tabs", () => {
     expect(screen.queryByRole("tabpanel", { name: "Feature flags" })).not.toBeInTheDocument();
   });
 
+  it("uses the available workspace width for the admin portal", async () => {
+    vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue({ is_operator: true });
+    vi.spyOn(apiClient, "listAdminAccounts").mockResolvedValue({ accounts: [] });
+
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "Admin" })).toBeInTheDocument();
+    const workspace = screen.getByRole("heading", { name: "Admin" }).parentElement?.parentElement;
+    expect(workspace).toHaveClass("w-full");
+    expect(workspace).not.toHaveClass("max-w-[680px]");
+  });
+
   it("shows only access denied for a confirmed non-operator response", async () => {
     vi.spyOn(apiClient, "getAdminStatus").mockRejectedValue(new ApiError("Forbidden", 403, null));
     renderPage();

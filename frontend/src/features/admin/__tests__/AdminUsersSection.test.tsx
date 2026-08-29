@@ -17,6 +17,18 @@ function renderUsers() {
 describe("AdminUsersSection CRUD safety", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("renders Users as a full-width semantic section without card chrome", async () => {
+    vi.spyOn(apiClient, "listAdminAccounts").mockResolvedValue({ accounts: [] });
+
+    renderUsers();
+
+    const heading = await screen.findByRole("heading", { name: "Users" });
+    const section = heading.closest("section");
+    expect(section).toBeInTheDocument();
+    expect(section).not.toHaveClass("rounded-2xl", "border", "p-5", "shadow-soft");
+    expect(section).toHaveClass("w-full");
+  });
+
   it("013-FR-010 013-FR-012 013-SC-006 loads accounts and requires target-bound revoke confirmation", async () => {
     vi.spyOn(apiClient, "listAdminAccounts").mockResolvedValue({ accounts: [member] });
     const revoke = vi.spyOn(apiClient, "revokeAdminAccountSessions").mockResolvedValue({ revoked_count: 0 });
