@@ -28,6 +28,15 @@
 - Coverage floors (`backend/`, `frontend/`, `mobile/coverage-floor.json`) may only ratchet upward, and there is no per-file escape hatch — `scripts/validate_ci_artifacts.py coverage-suppressions` rejects every `istanbul ignore` form in `frontend/src` and `mobile/src`.
 - Ensure new features include targeted tests; run both test suites before pushing.
 
+## Minimal Sufficient Delivery
+
+- Before changing anything, state the accepted outcome, non-goals, acceptance evidence, and untouched scope.
+- Choose the smallest coherent diff that satisfies the accepted requirement. Every new abstraction, dependency, configuration layer, compatibility path, agent, task, or test must be necessary for that requirement or a binding repository gate; otherwise omit it.
+- Read the relevant code first and reuse existing mechanisms. Do not create parallel implementations, speculative future-proofing, or unrelated cleanup.
+- Default to one bounded serial path. Split work only when independent coordination is genuinely required; make trivial documentation, prompt, and configuration edits directly without creating Kanban work.
+- Run the smallest relevant existing checks first. Add tests only when changed behavior is not already protected, and keep them limited to that behavior and its critical failure mode. Do not introduce unrelated test infrastructure.
+- If code, tests, artifacts, or task count grows without increasing the accepted outcome, stop, remove the extra construction, and return adjacent improvements to backlog.
+
 ## Definition of Done
 
 Writing or merging code is not completion. A product change is Done only when its product, design, quality, and production criteria below are satisfied with current evidence for the exact deployed commit SHA. A criterion that does not apply must be marked `N/A` with a reason; required behavior may not be silently deferred.
