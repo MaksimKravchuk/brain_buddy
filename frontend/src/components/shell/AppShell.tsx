@@ -375,6 +375,8 @@ type NavigationDrawerProps = SidebarProps & { open: boolean; onClose: () => void
 
 function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): React.JSX.Element | null {
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) {
@@ -383,12 +385,12 @@ function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): R
     closeButtonRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        onClose();
+        onCloseRef.current();
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) {
     return null;
@@ -447,6 +449,7 @@ function Sidebar({
   const [newTagName, setNewTagName] = useState("");
   const [tagEdits, setTagEdits] = useState<Record<string, string>>({});
   const [openPopover, setOpenPopover] = useState<string | null>(null);
+  const removedActionRef = useRef<HTMLButtonElement | null>(null);
 
   const closePopover = () => setOpenPopover(null);
   const popoverKeyDown = (event: ReactKeyboardEvent) => {
@@ -455,6 +458,19 @@ function Sidebar({
       closePopover();
     }
   };
+
+  useEffect(() => {
+    const removedAction = removedActionRef.current;
+    if (!removedAction || removedAction.isConnected) {
+      return;
+    }
+    removedActionRef.current = null;
+    const drawerNextActions = document.querySelector<HTMLElement>(
+      '[role="dialog"][aria-label="Task navigation"] nav a[href="/tasks/next"]'
+    );
+    const successor = drawerNextActions ?? document.querySelector<HTMLElement>('nav[aria-label="Task navigation"] a[href="/tasks/next"]');
+    successor?.focus();
+  }, [projects, tags]);
 
   return (
     <nav aria-label="Task navigation" className="flex flex-col gap-5 text-sm">
@@ -547,7 +563,10 @@ function Sidebar({
                         aria-label={`Project options ${project.name}`}
                         aria-expanded={openPopover === popoverId}
                         className="absolute right-1 top-[7px] hidden h-5 w-5 items-center justify-center rounded-md text-slate-400 hover:bg-slate-200/70 hover:text-slate-600 focus-visible:inline-flex group-focus-within:inline-flex group-hover:inline-flex max-lg:inline-flex"
-                        onClick={() => setOpenPopover(openPopover === popoverId ? null : popoverId)}
+                        onClick={(event) => {
+                          removedActionRef.current = event.currentTarget;
+                          setOpenPopover(openPopover === popoverId ? null : popoverId);
+                        }}
                       >
                         <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
                       </button>
@@ -687,7 +706,10 @@ function Sidebar({
                         aria-label={`Tag options ${tag.name}`}
                         aria-expanded={openPopover === popoverId}
                         className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-soft group-focus-within:inline-flex group-hover:inline-flex max-lg:inline-flex"
-                        onClick={() => setOpenPopover(openPopover === popoverId ? null : popoverId)}
+                        onClick={(event) => {
+                          removedActionRef.current = event.currentTarget;
+                          setOpenPopover(openPopover === popoverId ? null : popoverId);
+                        }}
                       >
                         <MoreHorizontal className="h-2.5 w-2.5" aria-hidden />
                       </button>

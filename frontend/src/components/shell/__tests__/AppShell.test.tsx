@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -207,6 +208,88 @@ describe("AppShell canonical sidebar", () => {
     const reopened = screen.getByRole("dialog", { name: "Task navigation" });
     await user.click(within(reopened).getByRole("link", { name: "Overdue" }));
     expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+  });
+
+  it("moves focus to the visible drawer Next actions link when an archived Project opener is removed after refetch", async () => {
+      function ControlledShell() {
+        const [visibleProjects, setVisibleProjects] = useState(projects);
+        return (
+          <AppShell
+            counts={counts}
+            projects={visibleProjects}
+            tags={tags}
+            activeState="next"
+            onArchiveProject={(project) => setTimeout(() => setVisibleProjects((current) => current.filter((item) => item.id !== project.id)), 300)}
+          >
+            <RoutedTaskListContent />
+          </AppShell>
+        );
+      }
+
+      render(
+        <MemoryRouter initialEntries={["/tasks/next"]}>
+          <Routes><Route path="*" element={<ControlledShell />} /></Routes>
+        </MemoryRouter>
+      );
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Open task navigation" }));
+      const drawer = screen.getByRole("dialog", { name: "Task navigation" });
+      const hiddenDesktopNext = screen.getAllByRole("link", { name: /Next actions/ })[0];
+      await user.click(within(drawer).getByRole("button", { name: "Project options Onboarding drop-off" }));
+      const opener = within(drawer).getByRole("button", { name: "Project options Onboarding drop-off" });
+      await user.click(within(drawer).getByRole("button", { name: "Archive" }));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      });
+
+      await waitFor(() => {
+        expect(opener.isConnected).toBe(false);
+        expect(drawer.contains(document.activeElement)).toBe(true);
+        expect(document.activeElement?.getAttribute("href")).toBe("/tasks/next");
+      });
+      expect(document.activeElement).not.toBe(hiddenDesktopNext);
+      expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("moves focus to the visible drawer Next actions link when a deleted Tag opener is removed after refetch", async () => {
+      function ControlledShell() {
+        const [visibleTags, setVisibleTags] = useState(tags);
+        return (
+          <AppShell
+            counts={counts}
+            projects={projects}
+            tags={visibleTags}
+            activeState="next"
+            onDeleteTag={(tag) => setTimeout(() => setVisibleTags((current) => current.filter((item) => item.id !== tag.id)), 300)}
+          >
+            <RoutedTaskListContent />
+          </AppShell>
+        );
+      }
+
+      render(
+        <MemoryRouter initialEntries={["/tasks/next"]}>
+          <Routes><Route path="*" element={<ControlledShell />} /></Routes>
+        </MemoryRouter>
+      );
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Open task navigation" }));
+      const drawer = screen.getByRole("dialog", { name: "Task navigation" });
+      const hiddenDesktopNext = screen.getAllByRole("link", { name: /Next actions/ })[0];
+      await user.click(within(drawer).getByRole("button", { name: "Tag options @calls" }));
+      const opener = within(drawer).getByRole("button", { name: "Tag options @calls" });
+      await user.click(within(drawer).getByRole("button", { name: "Delete" }));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      });
+
+      await waitFor(() => {
+        expect(opener.isConnected).toBe(false);
+        expect(drawer.contains(document.activeElement)).toBe(true);
+        expect(document.activeElement?.getAttribute("href")).toBe("/tasks/next");
+      });
+      expect(document.activeElement).not.toBe(hiddenDesktopNext);
+      expect(document.activeElement).not.toBe(document.body);
   });
 
   it("closes each popover when its own trigger is pressed a second time", async () => {
