@@ -97,6 +97,7 @@ export function BrainDumpRoute(): React.JSX.Element {
   const operationRef = useRef<BrainDumpOperationResponse | null>(null);
   const localCaptureOperationIdRef = useRef<string | null>(null);
   const proposalMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const finishInFlightRef = useRef<Promise<void> | null>(null);
   const closeOverlay = useCloseBrainDump();
   // The overlay owns a URL for reload recovery, so every hop inside the flow has
   // to carry `backgroundLocation` forward or closing the panel would lose the
@@ -331,6 +332,12 @@ export function BrainDumpRoute(): React.JSX.Element {
           };
           recorder.stop();
         });
+      } else if (recorder) {
+        // A recorder can become inactive before Stop is handled (for example
+        // after a browser interruption) while its final `dataavailable` event
+        // is still queued. Yield one macrotask so that event can enqueue its
+        // upload; the caller awaits the resulting upload queue before sealing.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
     } finally {
       // Every live MediaStream track must be released even when there is no
@@ -419,7 +426,7 @@ export function BrainDumpRoute(): React.JSX.Element {
     }
   }
 
-  async function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "withdraw_consent" | "delete_raw_audio") {
+  async function commandInternal(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "withdraw_consent" | "delete_raw_audio") {
     if (!operationRef.current) {
       return;
     }
@@ -546,6 +553,18 @@ export function BrainDumpRoute(): React.JSX.Element {
         setIsSaving(false);
       }
     }
+  }
+
+  function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "withdraw_consent" | "delete_raw_audio") {
+    if (action !== "finish") {
+      return commandInternal(action);
+    }
+    if (!finishInFlightRef.current) {
+      finishInFlightRef.current = commandInternal(action).finally(() => {
+        finishInFlightRef.current = null;
+      });
+    }
+    return finishInFlightRef.current;
   }
 
   async function patchProposal(

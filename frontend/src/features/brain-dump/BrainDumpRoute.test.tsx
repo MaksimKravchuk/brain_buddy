@@ -663,6 +663,100 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
   });
 
+  it("waits for a queued final chunk when the recorder is already inactive and emits no stop event", async () => {
+    const pipeline: string[] = [];
+    let recorder: { state: string; ondataavailable: ((event: { data: Blob }) => void) | null } | null = null;
+    function InactiveRecorder() {
+      const instance = {
+        state: "recording",
+        ondataavailable: null as ((event: { data: Blob }) => void) | null,
+        onstop: null as ((event: Event) => void) | null,
+        mimeType: "audio/webm",
+        start() {},
+        stop() {}
+      };
+      recorder = instance;
+      return instance;
+    }
+    vi.stubGlobal("MediaRecorder", InactiveRecorder);
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(consentedOperation(), 201);
+      }
+      if (url.endsWith("/brain_dump_1/audio/0")) {
+        pipeline.push("upload");
+        return jsonResponse(consentedOperation({ revision: 2, audio_chunks: [{ chunk_number: 0, sha256: "a".repeat(64), size_bytes: 14 }] }));
+      }
+      if (url.endsWith("/brain_dump_1/seal")) {
+        pipeline.push("seal");
+        return jsonResponse(consentedOperation({ status: "awaiting_confirmation", revision: 3 }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    const activeRecorder = recorder as unknown as { state: string; ondataavailable: ((event: { data: Blob }) => void) | null };
+    expect(activeRecorder).not.toBeNull();
+    activeRecorder.state = "inactive";
+    setTimeout(() => {
+      activeRecorder.ondataavailable?.({
+        data: { size: 14, type: "audio/webm", arrayBuffer: async () => new ArrayBuffer(14) } as Blob
+      });
+    }, 0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop & review" }));
+
+    await waitFor(() => expect(pipeline).toEqual(["upload", "seal"]));
+    expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
+    expect(micTrackStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("serializes immediate double Stop into one final upload and seal", async () => {
+    const pipeline: string[] = [];
+    function DoubleStopRecorder() {
+      return {
+        state: "inactive",
+        mimeType: "audio/webm",
+        ondataavailable: null as ((event: { data: Blob }) => void) | null,
+        onstop: null as ((event: Event) => void) | null,
+        start(this: { state: string }) {
+          this.state = "recording";
+        },
+        stop(this: { state: string; ondataavailable: ((event: { data: Blob }) => void) | null; onstop: ((event: Event) => void) | null }) {
+          this.state = "inactive";
+          this.onstop?.(new Event("stop"));
+          queueMicrotask(() => this.ondataavailable?.({ data: { size: 14, type: "audio/webm", arrayBuffer: async () => new ArrayBuffer(14) } as Blob }));
+        }
+      };
+    }
+    vi.stubGlobal("MediaRecorder", DoubleStopRecorder);
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") return jsonResponse(consentedOperation(), 201);
+      if (url.endsWith("/brain_dump_1/audio/0")) {
+        pipeline.push("upload");
+        return jsonResponse(consentedOperation({ revision: 2, audio_chunks: [{ chunk_number: 0, sha256: "a".repeat(64), size_bytes: 14 }] }));
+      }
+      if (url.endsWith("/brain_dump_1/seal")) {
+        pipeline.push("seal");
+        return jsonResponse(consentedOperation({ status: "awaiting_confirmation", revision: 3 }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    const stopButton = screen.getByRole("button", { name: "Stop & review" });
+    fireEvent.click(stopButton);
+    fireEvent.click(stopButton);
+
+    await waitFor(() => expect(pipeline).toEqual(["upload", "seal"]));
+    expect(await screen.findByRole("main", { name: "Review brain dump proposals" })).toBeInTheDocument();
+    expect(micTrackStop).toHaveBeenCalledTimes(1);
+  });
+
   it("does not start browser capture or any upload pipeline without external processing consent", async () => {
     const mediaRecorderConstructor = vi.fn(function ChunkingMediaRecorder() {
       return {
