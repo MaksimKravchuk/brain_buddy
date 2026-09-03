@@ -3,7 +3,7 @@
 **Feature**: `specs/014-a2a-relay-wire-contract/`
 **Spec**: `spec.md` (Clarifications settled: 2026-09-03, session 2026-09-03, zero open markers)
 **Screens**: `design/*.html` — six self-contained static files, no script, no external font, no CDN
-**Human sign-off**: pending
+**Human sign-off**: Max, 2026-09-03 (decisions recorded in spec.md Clarifications)
 
 <!--
   Produced by /speckit-design via the design-architect subagent, after
@@ -38,26 +38,29 @@ additional run conditions.
 
 ### Vocabulary
 
-ADR-0006 makes `Tag` canonical and forbids the retired noun the spec still uses at the
-wire level. Two substitutions apply to every surface and every string in `design/`:
+ADR-0006 makes `Tag` canonical and forbids the retired taxonomy noun. Two substitutions
+apply to every surface and every string in `design/`. **Both were accepted at the
+2026-09-03 sign-off**, and `spec.md` now uses the same two terms:
 
 | Spec concept | UI label everywhere | Why |
 |---|---|---|
 | FR-005's optional user-selected extra payload items | **Supporting items** | The forbidden noun cannot appear in product copy. 007's design already used "supporting items". |
-| FR-006's third identifier, defined as equal to the run's stable correlation ID | **Correlation ID** | It *is* the correlation ID (007 FR-017), so this is the accurate name, not a euphemism. |
+| FR-006's conversation identifier, defined as equal to the run's stable correlation ID | **Correlation ID** | It *is* the correlation ID (007 FR-017), so this is the accurate name, not a euphemism. |
 
-The wire field names stay internal. The plan stage must not surface either spec noun in
-API responses that reach the clients, or the validator fails in CI.
+The two A2A wire field names these map onto — the per-message identifier and the
+conversation identifier, named verbatim in spec.md Assumptions — appear only in technical
+artifacts and are never returned in a client-facing response. The design CI validator
+enforces that, case-insensitively, over this file and `design/`.
 
 ## Screen inventory
 
 | id | surface | screen | purpose | FR refs |
 |---|---|---|---|---|
-| D-01 | desktop | Connected agents | Add by agent address, test, read the discovery result and guarantee tier, rotate, disconnect | FR-001, FR-002, FR-003, FR-004, FR-012, FR-014, FR-016 |
-| D-02 | desktop | Hand-off review | The consent boundary: the exact text that leaves, the destination, both disclosures, one confirmation | FR-003, FR-004, FR-005, FR-006, FR-010, FR-014, FR-016 |
+| D-01 | desktop | Connected agents | Add by agent address, test, read the discovery result and guarantee tier, rotate, disconnect | FR-001, FR-002, FR-003, FR-004, FR-011, FR-012, FR-014, FR-016 |
+| D-02 | desktop | Hand-off review | The consent boundary: the exact text that leaves, the destination, both disclosures, one confirmation | FR-003, FR-004, FR-005, FR-006, FR-010, FR-011, FR-014, FR-016 |
 | D-03 | desktop | Task agent panel and compact Task rows | Monitor, answer, request cancellation, read the result; every run condition from one projection | FR-006, FR-007, FR-008, FR-009, FR-010, FR-013, FR-014, FR-015, FR-016 |
-| M-01 | mobile | Connected agents | The same connection contract at iPhone width, forms as sheets | FR-001, FR-002, FR-003, FR-004, FR-012, FR-014, FR-016 |
-| M-02 | mobile | Hand to agent review sheet | The same manifest and both disclosures in a bottom sheet | FR-003, FR-004, FR-005, FR-006, FR-010, FR-014, FR-016 |
+| M-01 | mobile | Connected agents | The same connection contract at iPhone width, forms as sheets | FR-001, FR-002, FR-003, FR-004, FR-011, FR-012, FR-014, FR-016 |
+| M-02 | mobile | Hand to agent review sheet | The same manifest and both disclosures in a bottom sheet | FR-003, FR-004, FR-005, FR-006, FR-010, FR-011, FR-014, FR-016 |
 | M-03 | mobile | Task agent section and compact Task rows | The same run projection on iOS, label-for-label | FR-006 – FR-010, FR-013 – FR-016 |
 
 Files:
@@ -75,7 +78,7 @@ Files:
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| D-01-S01 default | one or more saved connections | Name, address, status pill, tier disclosure, credential scheme, last contact, last tested, stale threshold, four actions | "The last test reached this agent and it authenticated." | FR-001, FR-002, FR-003 |
+| D-01-S01 default | one or more saved connections | Name, address, status pill, tier disclosure (best-effort rows carry the extension link), credential scheme, last contact, last tested, stale threshold, four actions | "The last test reached this agent and it authenticated." | FR-001, FR-002, FR-003, FR-011 |
 | D-01-S02 loading | first server fetch | Settings frame intact, skeleton rows, "Loading connections…"; never the empty state | "Loading connections…" | 007 FR-017 |
 | D-01-S03 empty (first run) | no connection has ever been saved | Display heading, one-line hint, single primary action | "Connect an agent you operate" | FR-001 |
 | D-01-S04 empty (filtered to nothing) | — | Deliberately absent: the list has no filter, search or sort. The real case lives on D-02-S05 | "No filter, no search, no sort on this list" | scope boundary, FR-001 |
@@ -85,7 +88,7 @@ Files:
 | D-01-S08 add agent (bearer) | user opens the add form | Agent name, agent address, scheme radio, credential, password; egress rule stated on the address field | "BrainBuddy fetches the agent card from this address's standard well-known location…" | FR-001, FR-004 |
 | D-01-S09 add agent (API key) | user picks the API-key scheme | Read-only header name sourced from the card; before discovery it reads "Read from the agent card when you test" | "Read from the agent card after discovery. You do not type it." | FR-001 |
 | D-01-S10 test: ready, guaranteed | test succeeds, card declares the extension | Agent name, version, description, skills, streaming, push, protocol version, interface, then the tier | "**Guaranteed single start.** …a retry cannot start a second run." | AC-001, FR-002, FR-003, FR-011 |
-| D-01-S11 test: ready, best-effort | test succeeds, card does not declare it | Same discovery result, best-effort tier, plus the push-not-supported note | "**Best-effort single start.** …A duplicate remains possible if the agent forgets its tasks." | AC-005, FR-003 |
+| D-01-S11 test: ready, best-effort | test succeeds, card does not declare it | Same discovery result, best-effort tier, the link to the published extension specification, plus the push-not-supported note | "**Best-effort single start.** …A duplicate remains possible if the agent forgets its tasks." · "Read the single-start extension specification" | AC-005, FR-003, FR-011 |
 | D-01-S12 test: invalid credentials | agent rejects the credential | Rose pill, corrective action, correlation ID; the submitted secret is never echoed | "The agent answered and rejected the credential. Rotate it below, then test again." | AC-003, FR-002, SC-009 |
 | D-01-S13 test: unreachable | transport failure or test timeout | Rose pill, "Nothing was sent", correlation ID | "BrainBuddy could not reach this address before the test timeout." | AC-002, FR-002 |
 | D-01-S14 unsupported: not an A2A agent | address answers, no card at the well-known location | Its own sentence and its own corrective action | "There is no agent card at its well-known location." | AC-002, FR-002, SC-009 |
@@ -94,7 +97,7 @@ Files:
 | D-01-S17 unsupported: authentication scheme | card offers only OAuth2 or mutual TLS | Names the unsupported scheme, names the two supported ones | "This card requires **OAuth2**. BrainBuddy supports a bearer token or an API key…" | AC-004, FR-001 |
 | D-01-S18 private destination refused | loopback, link-local, metadata or private address | Refusal before any credential or content leaves | "Nothing left BrainBuddy." | AC-006, FR-004, 007 FR-004 |
 | D-01-S19 stale | last contact older than the threshold | Amber pill overriding an earlier ready; hand-off blocked | "Test it again before a hand-off." | FR-002 |
-| D-01-S20 agent changed | card fingerprint drift on interface address or authentication | Tested interface and current card interface shown side by side; new test plus reauthentication demanded | "BrainBuddy will not send task content to a destination you have not tested." | AC-012, FR-004 |
+| D-01-S20 **Agent changed** | card fingerprint drift on interface address or authentication | Tested interface and current card interface shown side by side; the connection behaves as untested until a new successful test; reauthentication demanded | "**Agent changed**" · "BrainBuddy will not send task content to a destination you have not tested." | FR-002, FR-014, AC-012, FR-004 |
 | D-01-S21 disconnected: superseded wire | a pre-existing bespoke connection record | Neutral disconnected pill with the reason; no path to reuse it | "Superseded wire contract." | FR-012, SC-010 |
 | D-01-S22 rollout OFF | deployment flag off | Add, edit, test and rotate unavailable; disconnect still available; runs keep reporting | "The external-agent relay rollout is off." | FR-016, 007 FR-019 |
 | D-01-S23 disconnect confirmation | user chooses Disconnect | Names what is destroyed, what stops, and what is *not* cancelled; password required | "Disconnecting does not cancel work the agent already accepted." | AC-022, FR-016 |
@@ -105,10 +108,10 @@ Files:
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
 | D-02-S01 default (guaranteed) | user picks a ready connection | Agent chooser, Task title, optional details toggle, removable supporting items, Task ID, run ID, correlation ID, destination, tier, cancellation disclosure, external-copy notice | "What will be sent" | AC-007, FR-005, SC-005 |
-| D-02-S02 review (best-effort) | the chosen agent lacks the extension | Same manifest, amber tier block restating the duplicate risk and the mitigation | "**Best-effort single start.**" | FR-003, AC-005 |
+| D-02-S02 review (best-effort) | the chosen agent lacks the extension | Same manifest, amber tier block restating the duplicate risk and the mitigation, plus the link to the published extension specification. This block appears in *every* best-effort review; S13–S15 are its three acknowledgement states | "**Best-effort single start.**" · "Read the single-start extension specification" | FR-003, FR-011, AC-005 |
 | D-02-S03 loading | preview being built server-side | Skeleton manifest, explicit "no task content has been sent" | "Building the hand-off preview…" | FR-005 |
 | D-02-S04 empty (first run) | account has no connection | Explanation plus a route to Connected agents | "No agents connected yet" | FR-001 |
-| D-02-S05 empty (filtered to nothing) | connections exist, none eligible | Every ineligible connection listed with *why* and its corrective action | "None of your agents can take this hand-off" | AC-011, FR-002 |
+| D-02-S05 empty (filtered to nothing) | connections exist, none eligible (stale, unsupported, disconnected or **Agent changed**) | Every ineligible connection listed with *why* and its corrective action | "None of your agents can take this hand-off" | AC-011, FR-002 |
 | D-02-S06 error | preview request fails | Category, correlation ID, retry; nothing was sent | "We couldn't build this hand-off" | SC-009 |
 | D-02-S07 partial failure | one connection's status could not be refreshed | That row is shown, marked "Status unknown", and is **not** selectable | "Could not be refreshed just now, so it is not offered." | FR-002 (fail closed) |
 | D-02-S08 re-review required | manifest token no longer matches | Warning above a rebuilt manifest; the earlier confirmation was not used | "What would be sent has changed. Review it again before confirming." | FR-005 |
@@ -116,6 +119,9 @@ Files:
 | D-02-S10 offline / interrupted | no network | Manifest stays readable, send disabled, nothing queued; reopening rebuilds from the server | "Sending is unavailable and nothing is queued." | 007 FR-018 |
 | D-02-S11 reauthentication required | first content-bearing send to this destination | Password field with the reason stated | "…so BrainBuddy re-checks your password." | FR-004, 007 FR-003 |
 | D-02-S12 sending | confirmation in flight | Disabled primary, replay explanation | "Confirming again while this is in flight returns the same run." | AC-010, SC-002, SC-008 |
+| D-02-S13 best-effort, first hand-off, not acknowledged | first hand-off on a best-effort connection | Disclosure, extension link, and an unticked acknowledgement; **Send to agent is disabled** | "I understand that a duplicate task is possible with this agent" · "Asked once, on your first hand-off to this agent." | FR-003, AC-026 |
+| D-02-S14 best-effort, first hand-off, acknowledged | user ticks the acknowledgement | Same review with the box ticked; Send to agent enabled | "Acknowledged. BrainBuddy will not ask again for this agent…" | FR-003, AC-026 |
+| D-02-S15 best-effort, later hand-off | a hand-off after the acknowledgement was recorded for that connection | Disclosure and extension link unchanged; no acknowledgement control; Send enabled | "You acknowledged the duplicate risk for this agent on your first hand-off…" | FR-003, AC-026 |
 
 ### D-03 — Task agent panel and compact Task rows (desktop)
 
@@ -154,7 +160,7 @@ Same semantics as D-01, state for state. Frames in `design/M-01-connected-agents
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| M-01-S01 default | saved connections exist | Cards at 14px radius; tier under the status line; actions wrap two-up at 44pt | as D-01-S01 | FR-001 – FR-003 |
+| M-01-S01 default | saved connections exist | Cards at 14px radius; tier under the status line, best-effort carrying the extension link; actions wrap two-up at 44pt | as D-01-S01 | FR-001 – FR-003, FR-011 |
 | M-01-S02 loading | first fetch | Skeleton cards | "Loading connections…" | 007 FR-017 |
 | M-01-S03 empty (first run) | none saved | 24px display heading, hint, one primary action | "Connect an agent you operate" | FR-001 |
 | M-01-S04 empty (filtered to nothing) | — | Deliberately absent, points at M-02-S03 | "No filter, no search, no sort" | scope boundary |
@@ -171,7 +177,7 @@ Same semantics as D-01, state for state. Frames in `design/M-01-connected-agents
 | M-01-S15 unsupported authentication scheme | OAuth2 or mutual TLS only | Names both | as D-01-S17 | AC-004 |
 | M-01-S16 private destination refused | refused network class | "Nothing left BrainBuddy." | as D-01-S18 | AC-006 |
 | M-01-S17 stale | threshold exceeded | Amber pill | as D-01-S19 | FR-002 |
-| M-01-S18 agent changed | card drift | New test plus password demanded | as D-01-S20 | AC-012 |
+| M-01-S18 **Agent changed** | card drift | Behaves as untested; new test plus password demanded | as D-01-S20 | FR-002, FR-014, AC-012, FR-004 |
 | M-01-S19 superseded wire contract | pre-existing bespoke record | Neutral disconnected pill with the reason | as D-01-S21 | FR-012, SC-010 |
 | M-01-S20 rollout OFF | flag off | Amber notice; disconnect still available | as D-01-S22 | FR-016 |
 | M-01-S21 disconnect sheet | user taps Disconnect | Destructive sheet, password, destructive action *below* the safe one | as D-01-S23 | AC-022 |
@@ -181,8 +187,8 @@ Same semantics as D-01, state for state. Frames in `design/M-01-connected-agents
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
 | M-02-S01 default (guaranteed) | ready connection chosen | Scrolling sheet; Send and Cancel pinned at the bottom in thumb reach | as D-02-S01 | AC-007, FR-005, SC-005 |
-| M-02-S02 review (best-effort) | agent lacks the extension | Amber tier block | "**Best-effort single start.**" | FR-003 |
-| M-02-S03 empty (filtered to nothing) | connections exist, none eligible | Each ineligible connection with its reason | "None of your agents can take this hand-off" | AC-011 |
+| M-02-S02 review (best-effort) | agent lacks the extension | Amber tier block plus the extension link; M-02-S12 – S14 are its three acknowledgement states | "**Best-effort single start.**" · "Read the single-start extension specification" | FR-003, FR-011 |
+| M-02-S03 empty (filtered to nothing) | connections exist, none eligible (stale, unsupported, disconnected or **Agent changed**) | Each ineligible connection with its reason | "None of your agents can take this hand-off" | AC-011, FR-002 |
 | M-02-S04 empty (first run) | no connection at all | Route to Connected agents | "No agents connected yet" | FR-001 |
 | M-02-S05 loading | preview being built | Skeleton, "No task content has been sent." | "Building the hand-off preview…" | FR-005 |
 | M-02-S06 error | preview fails | Category, correlation ID, retry | "We couldn't build this hand-off" | SC-009 |
@@ -191,6 +197,9 @@ Same semantics as D-01, state for state. Frames in `design/M-01-connected-agents
 | M-02-S09 reauthentication required | first send to this destination | Password field with the reason | as D-02-S11 | FR-004 |
 | M-02-S10 offline / interrupted | no network, or the app is closed mid-review | Send disabled, nothing queued; resume rebuilds from the server | "…reopening loads the server projection and rebuilds this review before anything can leave." | 007 FR-018 |
 | M-02-S11 sending | confirmation in flight | Sheet not swipe-dismissible while in flight; replay explained | "Confirming again while this is in flight returns the same run." | AC-010, SC-008 |
+| M-02-S12 best-effort, first hand-off, not acknowledged | first hand-off on a best-effort connection | Unticked 44pt acknowledgement row; **Send to agent disabled** | "I understand that a duplicate task is possible with this agent" | FR-003, AC-026 |
+| M-02-S13 best-effort, first hand-off, acknowledged | user taps the acknowledgement | Ticked; Send enabled | "Acknowledged. BrainBuddy will not ask again for this agent." | FR-003, AC-026 |
+| M-02-S14 best-effort, later hand-off | acknowledgement already recorded | Disclosure and link stay; no acknowledgement control | "…so there is no acknowledgement step here." | FR-003, AC-026 |
 
 ### M-03 — Task agent section and compact Task rows (iOS, 390×851)
 
@@ -241,7 +250,9 @@ Every D-03 run condition, label for label, from the same server projection.
 | D-02 / M-02 | Remove (supporting item) | Removes one item from what leaves; rebuilds the manifest so confirmation always matches what was read | FR-005, AC-008 |
 | D-02 / M-02 | Cancel | Abandons the review; no task is created at the agent and no run becomes visible | FR-005, AC-008 |
 | D-02 / M-02 | Current password | Server-verified reauthentication before the first content-bearing send to a destination, and again after an interface-address change | FR-004, 007 FR-003 |
-| D-02 / M-02 | Send to agent | Confirms the manifest by token; reserves run ID, message ID and correlation ID before anything is sent; a replay returns the same run | FR-005, FR-006 |
+| D-02 / M-02 | Acknowledge duplicate risk (best-effort, first hand-off only) | One-time per connection. Until it is ticked, **Send to agent** is disabled; once recorded, later hand-offs on that connection show the disclosure without the control | FR-003, AC-026 |
+| D-01 / M-01 / D-02 / M-02 | Read the single-start extension specification | Opens the published extension specification, on explicit user action only, marked as leaving BrainBuddy, so the owner knows what to ask their agent operator to declare | FR-003, FR-011 |
+| D-02 / M-02 | Send to agent | Confirms the manifest by token; reserves run ID, message ID and correlation ID before anything is sent; a replay returns the same run. Disabled on a best-effort connection until the one-time acknowledgement is recorded | FR-005, FR-006, AC-026 |
 | D-03 / M-03 | Send answer | One follow-up message in the same conversation and task with a stable command ID; shown unconfirmed until acknowledged | FR-010, AC-015 |
 | D-03 / M-03 | Request cancellation | One cancel request with a stable command ID; shows **Cancellation requested** until an observation says cancelled, or states the refusal | FR-010, AC-018 |
 | D-03 / M-03 | Try this hand-off again (on **Not sent**) | Reopens the review (never dispatches directly) so the same run ID and message ID can be retried after a rate limit | FR-005, FR-006, rate-limit edge case |
@@ -255,8 +266,9 @@ Every D-03 run condition, label for label, from the same server projection.
   definition)** — server contracts with no control of their own. Their effects are
   visible as D-03-S03/S04/S05, D-03-S17 and D-03-S18; the user never invokes the rule.
 - **FR-009** — a projection, not a control. Every label on D-03 and M-03 derives from it.
-- **FR-011** — the extension is a published specification, not a screen. Its only
-  user-visible consequence is the guarantee tier. **See the gap below.**
+- **FR-011** — the extension itself is a published specification, not a screen. It now
+  has one affordance: the best-effort disclosure links to it (D-01-S11, M-01-S01,
+  D-02-S02, M-02-S02). Its other user-visible consequence remains the guarantee tier.
 - **FR-012** — removal of the bespoke wire is invisible except as D-01-S21 / M-01-S19.
 - **FR-014** — a copy rule, satisfied by the strings in every table above.
 - **FR-016** — rendering, retention, correlation IDs, logs, interruption and rollout-OFF
@@ -264,13 +276,11 @@ Every D-03 run condition, label for label, from the same server projection.
 - **FR-017** — conformance checks against the a2a-sdk sample agent and the Hermes A2A
   plugin run in CI, plus one approval-gated attended live run. No UI, by design.
 
-**Gap — FR-011 has no route from the product to the published specification.** FR-011
-requires BrainBuddy to publish the single-start extension under a public, stable
-identifier so any third-party agent can declare it. A user on **Best-effort single
-start** therefore has no way, from the product, to learn what to ask their agent
-operator for. The obvious fix is a link from the best-effort disclosure to the published
-specification, but the spec does not require a link and I will not invent an outbound
-destination or a doc URL. Recorded for the plan stage to resolve.
+**Resolved at the 2026-09-03 sign-off.** The earlier finding — that a best-effort user
+had no route from the product to the published extension specification — is closed:
+FR-003 now requires the link, it opens only on explicit user action, and it is marked as
+an external destination. The plan stage owns the destination itself; the design shows it
+as the repository documentation path and must not be shipped pointing at a placeholder.
 
 ### Affordances with no requirement
 
@@ -353,20 +363,26 @@ matches `spec.md` line 19, which declares the same thing.
 
 ## Open decisions for the human
 
-1. **The best-effort tier is offerable at all, and only warns.** A best-effort agent can
-   produce a duplicate task. This design admits it with an amber disclosure in two places
-   (D-01-S11, D-02-S02) rather than a blocking confirmation. That follows the
-   2026-09-03 clarification, but the loudness is a product call: warn, or make the first
-   best-effort hand-off require an explicit "I accept a possible duplicate" checkbox?
-2. **The vocabulary substitution.** ADR-0006 forbids the noun `spec.md` uses for the
-   optional payload items and for the third wire identifier. The UI says **Supporting
-   items** and **Correlation ID** instead. Confirm this, and confirm the plan keeps the
-   wire field names off every client-facing response — the CI validator is unforgiving.
-3. **FR-011 has no route from a best-effort connection to the published extension
-   specification** (see "Requirements with no affordance"). Either add a link and accept
-   an outbound destination in settings copy, or accept that upgrading to guaranteed is
-   out-of-product knowledge.
-4. **"Agent changed" is a fifth connection condition that FR-002 does not name.** FR-002
-   defines four test outcomes; AC-012 and FR-004 imply a distinct card-drift condition
-   that blocks hand-off without being a failed test. D-01-S20 / M-01-S18 draw it as its
-   own amber state. Confirm that reading, or fold drift into `stale`.
+All four resolved by Max on 2026-09-03 and encoded in `spec.md` (commit `9afdcaf`:
+FR-002, FR-003, FR-014, AC-026 and the Clarifications session). Kept here as the record
+of what was decided, not as open questions.
+
+1. **Best-effort admission loudness — decided: acknowledge, once.** A warning alone was
+   not enough. The first hand-off on a best-effort connection now requires an explicit
+   acknowledgement that a duplicate task is possible before confirmation is enabled;
+   later hand-offs on that connection show the disclosure without it. Drawn as
+   D-02-S13 – S15 and M-02-S12 – S14, per FR-003 and AC-026.
+2. **The vocabulary substitution — decided: accepted.** "Supporting items" and
+   "Correlation ID" stand, and `spec.md` now uses them too. The two underlying A2A wire
+   field names stay in technical artifacts and never reach a client-facing response;
+   spec.md Assumptions names them, this design deliberately does not.
+3. **FR-011's missing route — decided: add the link.** The best-effort disclosure on
+   D-01, M-01, D-02 and M-02 links to the published single-start extension
+   specification. It opens only on explicit user action and is marked as leaving
+   BrainBuddy. **One thing still needs a person**: the design points the link at the
+   repository documentation path; the plan stage must bind it to the real published
+   location before rollout, and must not ship the placeholder.
+4. **"Agent changed" — decided: it is a named condition.** FR-002 now names it and
+   FR-014 fixes its wording. A changed connection behaves as untested and cannot take a
+   hand-off until a new successful test. D-01-S20 and M-01-S18 carry the updated refs,
+   and the ineligible-connection lists (D-02-S05, M-02-S03) now include it.
