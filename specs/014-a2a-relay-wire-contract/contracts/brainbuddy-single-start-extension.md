@@ -100,4 +100,8 @@ transports credentials or additional data.
 
 `v1` is frozen once feature 014 lands; edits are limited to clarifications. Any behavioral
 change is published as `…/single-start/v2.md` with a new URI. The identifier is a GitHub
-`blob/main` URL; a permanent redirect (w3id) may be added later without changing the URI.
+`blob/main` URL accepted for v1 by the product owner (2026-09-03): the path
+`docs/a2a-extensions/single-start/v1.md` is frozen by repository policy (never moved,
+renamed or deleted; `scripts/check_spec_kit_specs.py` or a sibling gate should assert its
+presence). A redirect-based permanent identifier (for example `w3id.org`) may be introduced
+in a later version without changing the v1 URI; agents declaring the v1 URI stay conformant.

@@ -43,13 +43,18 @@ Terminal B — BrainBuddy (`make dev-backend`, `make dev-frontend`), then in the
    *Bearer token*, any credential, your password → Save → **Test**.
    Expected (D-01-S11): status *Tested ready*, discovery result with the sample's name,
    version `0.0.1`, skill *Echo Bot*, streaming *yes*, push *no*, tier **Best-effort single
-   start** with the duplicate-risk sentence.
+   start** with the duplicate-risk sentence and a link to the published extension
+   specification (opens in a new tab only when clicked).
 2. Open any Task → Hand to agent → review (D-02-S02): title, details toggle, supporting
    items, Task ID, run ID, correlation ID, destination `http://127.0.0.1:9999`, tier and
-   cancellation disclosures, external-copy notice → Send.
+   cancellation disclosures, external-copy notice. Expected (AC-026): **Send** stays
+   disabled until you tick the one-time acknowledgement that a duplicate task is possible;
+   a confirm request without `acknowledge_duplicate_risk: true` (replay it from devtools)
+   is refused with `duplicate_risk_acknowledgement_required`. Tick it → Send.
    Expected (D-03): timeline shows **Sent** then **Agent reported complete** within the
    same request (the sample completes inside `SendMessage`); result text
-   `Hello, World! I have received your request (...)`; the Task stays open.
+   `Hello, World! I have received your request (...)`; the Task stays open. A second
+   hand-off on the same connection shows the disclosure only, with no acknowledgement.
 3. Replay: repeat the confirmation request three times with the same `Idempotency-Key`
    (browser devtools "replay XHR", or `curl` with the captured body and headers).
    Expected: identical `AgentRunResponse`; `curl -s -X POST http://127.0.0.1:9999/ -H
@@ -87,16 +92,23 @@ Terminal B — in BrainBuddy:
    replies (≤ 60 s, ≤ 5 s with the demo interval) the run shows **Agent reported complete**
    — and immediately if the stub's push arrived (`push_registration: registered` in the run
    JSON, timeline row `trigger: push`).
-3. Hand off a Task whose title contains `ask me`. Expected: *Needs you* with the stub's
+3. Hand off a Task whose title contains `ask me` (first hand-off on this best-effort
+   connection: tick the one-time acknowledgement). Expected: *Needs you* with the stub's
    question (D-03-S08); answer it. Expected: the answer is shown *sent but not acknowledged*
-   (D-03-S09) until the reply exchange returns; the timeline records `task_succeeded`
-   (Hermes creates a successor task for the follow-up) and then the terminal report.
+   (D-03-S09) until the reply exchange returns; because Hermes creates a successor task for
+   the follow-up, the timeline shows **Agent continued the run in a new task** with both
+   task ids, the reply is never refused, and then the terminal report follows.
 4. Hand off, then Request cancellation while the stub is delaying. Expected:
    **Cancellation requested** then **Cancelled** (Hermes resolves the blocked exchange with
    `TASK_STATE_CANCELED`).
 5. Restart the Hermes stub while a run is *Running*. Expected on the next observation:
    **Agent no longer reports this run** (D-03-S18), last contact preserved, reply/cancel
    withdrawn, no *Failed* claim.
+6. Restart the stub **without** `A2A_BEARER_TOKEN` (its card drops the security scheme)
+   and open a hand-off review. Expected (D-02-S09, D-01-S20): the review refuses with
+   `agent_card_changed`, the connection shows **Agent changed** with the tested and current
+   interface side by side, and a new successful test plus your password are required before
+   the next hand-off.
 
 Automated equivalent: `cd backend && pytest tests/test_agent_a2a_reference_hermes.py -v`
 (starts `run_stub.py` on a free port; `tests/test_vendor_provenance.py` proves the vendored

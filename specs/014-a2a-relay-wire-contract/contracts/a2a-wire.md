@@ -48,12 +48,21 @@ anything else is `a2a_response_invalid` (delivery unconfirmed for `SendMessage`)
 | Start | `SendMessage` | `{message:{messageId:"<run>:start", contextId:"<run>", role:"ROLE_USER", parts:[{text:title},{text:details}?,{text:"<label>\n<body>"}…], metadata:{"brainbuddy.task_id":…, "brainbuddy.run_id":…}, extensions:[<uri>]?}, configuration:{taskPushNotificationConfig:{url,token}?, historyLength:0}}` | `reply_window + 15 s` (blocking, `returnImmediately` absent) | `result.task` ⇒ observation (Decision E), `agent_task_id`; `result.message` ⇒ completed with text; `-32602` ⇒ not sent; 429 ⇒ not sent `a2a_rate_limited`; 401/403 ⇒ not sent `a2a_credentials_rejected`; timeout/5xx/transport ⇒ delivery unconfirmed |
 | Probe / lookup | `ListTasks` | `{contextId:"<run>", pageSize:5, includeArtifacts:false}` | short | newest task by `status.timestamp` (Hermes: first item) adopted; empty ⇒ nothing |
 | Observe | `GetTask` | `{id:<agent_task_id>, historyLength:20}` | short | observation; `-32001` ⇒ agent no longer reports this run |
-| Reply | `SendMessage` | `{message:{messageId:<command_id>, contextId:"<run>", taskId:<agent_task_id>, role:"ROLE_USER", parts:[{text:answer}], referenceTaskIds:[<agent_task_id>], metadata:{…,"brainbuddy.command_id":…}}, configuration:{historyLength:20}}` | `reply_window + 15 s` | returned Task ⇒ command confirmed + observation; a **different** task id ⇒ `task_succeeded`, becomes current; `-32004` (terminal task) ⇒ command rejected, observation refreshed; `-32001` ⇒ agent no longer reports |
+| Reply | `SendMessage` | `{message:{messageId:<command_id>, contextId:"<run>", taskId:<agent_task_id>, role:"ROLE_USER", parts:[{text:answer}], referenceTaskIds:[<agent_task_id>], metadata:{…,"brainbuddy.command_id":…}}, configuration:{historyLength:20}}` | `reply_window + 15 s` | returned Task ⇒ command confirmed + observation; a **different** task id in the same `contextId` ⇒ task succession (below); `-32004` (terminal task) ⇒ command rejected, observation refreshed; `-32001` ⇒ agent no longer reports |
 | Cancel | `CancelTask` | `{id:<agent_task_id>, metadata:{"brainbuddy.command_id":…}}` | short | Task ⇒ confirmed + observation; `-32002` ⇒ `cancel_outcome=not_cancelable`; `-32004`/`-32603` ⇒ `unsupported`; `-32001` ⇒ `task_missing` |
 | Register push (adopted task) | `CreateTaskPushNotificationConfig` | `{taskId, url, token}` | short | any error ⇒ `push_registration=refused`, silent |
 
 Parts are `text/plain`; `mediaType` omitted. The manifest lists each part verbatim; the
 agent's own joining of parts is agent-defined and not asserted.
+
+**Task succession** (product-owner decision 2026-09-03): Hermes mints a new task for every
+`SendMessage` and its watchdog fails an unanswered `INPUT_REQUIRED` task after 300 s, so a
+reply may come back as a Task whose `id` differs from the run's `agent_task_id`. When the
+returned Task's `contextId` equals the run's correlation id, BrainBuddy adopts it as the
+run's current agent task, appends the timeline event "Agent continued the run in a new
+task" carrying the previous and new task ids, confirms the reply command, and continues
+observing the new task. A reply is **never refused** because of succession; a returned
+Task with a foreign `contextId` is `a2a_response_invalid` (command unconfirmed).
 
 ## Error mapping (JSON-RPC `error.code`, A2A §5.4)
 
