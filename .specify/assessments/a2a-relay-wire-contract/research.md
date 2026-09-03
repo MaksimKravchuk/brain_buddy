@@ -15,6 +15,8 @@ No `intake.md` exists for this slug; the idea was supplied directly. Prior-art e
 - Demand for A2A among personal-agent operators exists in the Hermes community: the plugin's design traces its requirements to a cluster of issues (#514, #689, #4135, #7517, #8948, #11025, #14559, #23871, #25176, #56434, #56435). — [source: hermes-agent `plugins/platforms/a2a/DESIGN.md`, "Requirements traced to the cluster"] (confidence: high that the demand existed there; medium that it transfers to BrainBuddy users).
 - Further Hermes issues requesting A2A (#4454, #7708, #42349) appear in search results. — [source: search snippet, github.com issue titles, pages not fetched] (confidence: medium).
 - Who BrainBuddy's BYOA users are and which agent runtimes they operate (personal Hermes/OpenClaw-class agents versus enterprise-hosted ADK/AgentCore agents) is unknown; no tickets, interviews or usage data exist. — ASSUMPTION (confidence: low).
+- Product-owner interview, 2026-09-03 (Max, via AskUserQuestion in this session): target BYOA users operate both personal self-hosted agents (Hermes/OpenClaw class) and cloud-hosted agents (Bedrock AgentCore, Azure AI Foundry, Google ADK); any A2A v1.0 agent reachable over public HTTPS with bearer or API-key authentication is in the intended population; OAuth2 and mTLS schemes are deferred. — [source: product-owner answer recorded in this session] (confidence: high that this is the owner's intent; low as observed demand).
+- Product-owner interview, 2026-09-03: agents without a BrainBuddy-specific A2A extension MUST be admitted; BrainBuddy performs its own deduplication (query `ListTasks` by `contextId` before any resend) and discloses the residual duplicate-start risk honestly; agents implementing the extension get the strong single-start guarantee. — [source: product-owner answer] (confidence: high).
 
 ## Prior Art
 
@@ -52,6 +54,8 @@ No `intake.md` exists for this slug; the idea was supplied directly. Prior-art e
 - Hermes plugin deviations from the spec that touch 007 requirements: no handling of `return_immediately` (every `SendMessage` blocks up to `A2A_REPLY_TIMEOUT`, default 300 s, and returns FAILED on timeout); push only on terminal transition, once, no retry, HMAC-SHA256 over sorted JSON without timestamp or nonce, secret defaulting to the bearer token; no `messageId` deduplication; `stateTransitionHistory: false`; `CancelTask` marks canceled without aborting the live turn. — [source: hermes-agent adapter.py, security.py, protocol.py, DESIGN.md] (confidence: high, cited).
 - Governance: the 007 baseline is ratified by exact bytes; any wire-contract change is an amendment needing Max's approval, and landing still needs dual review on the exact SHA, CI and ASK merge authority. — [source: specs/007-external-agent-relay/ratification-provenance.md] (confidence: high, cited).
 - Compliance obligations unchanged by the choice of wire: FR-003 secrets, FR-015 retention, FR-016 disconnect, FR-019 rollout-OFF semantics, account purge. — [source: specs/007 spec.md] (confidence: high, cited).
+- Product-owner decisions, 2026-09-03: the change is a new feature (014) that supersedes the 007 wire contract; the ratified 007 baseline stays as history and is not re-ratified. All work lands on the session branch `claude/agent-delegation-yv9auj` and PR #192; any Spec Kit feature branch stays local. — [source: product-owner answers] (confidence: high).
+- Product-owner decisions, 2026-09-03 (second round): (5) the bespoke envelope is replaced entirely; the generic HTTP connector is removed and custom agents connect through an A2A SDK; (6) the relay MUST work with the unmodified Hermes A2A plugin (blocking `SendMessage` up to 300 s, terminal-only push); an upstream `return_immediately` patch may be proposed but nothing depends on it; (7) definition of done: end-to-end hand-off to the unmodified Hermes A2A plugin and to an official a2a-sdk sample agent, three replays produce one task, the 007 security suite (SC-003) passes on the new wire, web and iOS show one projection; (8) appetite medium (weeks), no calendar deadline; release through exact-SHA review, CI and ASK authority as for 007. — [source: product-owner answers recorded in this session] (confidence: high).
 
 ## Evidence Against the Idea
 
@@ -66,11 +70,11 @@ No `intake.md` exists for this slug; the idea was supplied directly. Prior-art e
 
 ## Gaps & Open Questions
 
-- [NEEDS CLARIFICATION: Who are the intended BYOA users and which agent runtimes do they actually operate? No usage data, tickets or interviews exist; the answer decides whether enterprise-centric A2A adoption is relevant at all.]
+- Resolved 2026-09-03 by the product owner: intended users operate both personal self-hosted and cloud-hosted A2A agents (bearer or API-key auth; OAuth2/mTLS deferred). Observed usage data still does not exist.
 - [NEEDS CLARIFICATION: Does OpenClaw serve A2A natively? Hermes documentation lists it as a compliant peer; a search snippet says the opposite; neither was verified.]
-- [NEEDS CLARIFICATION: Is a degraded mode (A2A agent without the BrainBuddy extension, no single-start guarantee) acceptable to the product at all, or must FR-006 remain a hard gate?]
-- [NEEDS CLARIFICATION: Would a wire-contract change be an amendment to the ratified 007 baseline or a new feature number, and who ratifies it?]
-- [NEEDS CLARIFICATION: Would Hermes maintainers accept `return_immediately` support? Without it the reference connector keeps blocking for up to 300 s.]
+- Resolved 2026-09-03 by the product owner: agents without the extension are admitted; BrainBuddy-side deduplication via `ListTasks` by `contextId` plus honest disclosure of the residual risk; extension-capable agents get the strong guarantee.
+- Resolved 2026-09-03 by the product owner: a new feature (014) supersedes the 007 wire contract; 007 stays ratified history.
+- Resolved 2026-09-03 by the product owner: no Hermes patch may be required; the relay must work with the plugin as-is, and any upstream patch is optional.
 - [NEEDS CLARIFICATION: Adoption figures (150+ organisations, hyperscaler GA, AAIF membership) come from unfetched search snippets; only the 172-entry partner list was verified from source.]
 - [NEEDS CLARIFICATION: Can the Fly deployment sustain a long-lived worker per active run? The existing background thread only runs periodic sweeps.]
 
