@@ -4,8 +4,11 @@ Base: `backend/app/api/agents.py` and `backend/app/schemas/agents.py` as ratifie
 Session cookie, owner scoping, `Idempotency-Key`, `X-Correlation-ID`, the
 `external_agent_relay` gate on *new-work* routes, and 404-for-wrong-owner are unchanged.
 Both clients (`frontend/src/api/agentTypes.ts`, `mobile/src/api/types.ts`) mirror these
-shapes one-to-one. Vocabulary per `design.md`: client-facing names use `supporting_items`
-and `correlation_id` (see research NEEDS CLARIFICATION 1).
+shapes one-to-one. Vocabulary (spec Clarifications 2026-09-03, ADR-0006): client-facing
+names are `supporting_items` and `correlation_id`; the protocol words never appear in any
+response, label or error message. Connection condition labels rendered verbatim from
+`status`/`last_test_error_code`: `Not tested`, `Tested ready`, `Stale`, `Invalid credentials`,
+`Unreachable`, `Unsupported`, **`Agent changed`**, `Disconnected`.
 
 ## Removed endpoints (FR-012)
 
@@ -55,13 +58,17 @@ Removed schemas: `AgentConnectionSecretResponse`, `AgentConnectionSigningSecretR
   "tier_disclosure_url": "https://github.com/…/single-start/v1.md",
   "capabilities": { "streaming": true, "push_notifications": false, "reply": true, "cancel": true },
   "cancellation_disclosure": "Cancellation depends on the agent …",
-  "card_changed": false, "disconnect_reason": null | "owner" | "superseded_wire_contract",
+  "agent_changed": false,                      // FR-002 fifth condition; true iff last_test_error_code == "agent_card_changed"
+  "best_effort_acknowledged_at": null | "…",  // FR-003 one-time acknowledgement (null until the first confirmed best-effort hand-off)
+  "disconnect_reason": null | "owner" | "superseded_wire_contract",
   "last_contact_at": "…", "last_tested_at": "…", "created_at": "…", "revision": 3 }
 ```
 
 `tier_disclosure` and `cancellation_disclosure` are server-owned sentences rendered
-verbatim (FR-003, FR-010, FR-014). `capabilities.reply`/`.cancel` are always `true` for a
-tested A2A connection; the run projection withdraws controls per run.
+verbatim (FR-003, FR-010, FR-014); `tier_disclosure_url` is the published extension
+specification the best-effort disclosure links to (FR-003), opened only on explicit user
+action with external-destination disclosure. `capabilities.reply`/`.cancel` are always
+`true` for a tested A2A connection; the run projection withdraws controls per run.
 
 ## Hand-off review and dispatch
 
@@ -75,14 +82,30 @@ Response `AgentManifestResponse`:
   "message_id": "agentrun_…:start", "correlation_id": "agentrun_…",
   "destination_interface": "https://…", "protocol_version": "1.0",
   "guarantee_tier": "best_effort", "tier_disclosure": "…",
+  "tier_disclosure_url": "https://github.com/…/single-start/v1.md",
+  "acknowledgement_required": true,          // best-effort tier and best_effort_acknowledged_at is null (AC-026)
   "cancellation_disclosure": "…", "external_copy_notice": "…",
   "reauthentication_required": false, "parts_preview": [ "<exact text of part 1>", "…" ] }
 ```
 
-Preview refetches the card; drift ⇒ `400 {reason: "agent_card_changed"}` (D-02-S09).
-`POST /tasks/{task_id}/agent-runs` (gate, Idempotency-Key) — request unchanged apart from
-`supporting_items`; may take up to `dispatch_wait_seconds` and returns `AgentRunResponse`.
-Replay with the same key returns the same run without a second exchange; replay on a
+Preview refetches the card; drift ⇒ `400 {reason: "agent_card_changed"}` and the connection
+becomes **Agent changed** (D-02-S09, D-01-S20).
+
+`POST /tasks/{task_id}/agent-runs` (gate, Idempotency-Key) — request:
+
+```json
+{ "connection_id": "…", "include_details": true, "supporting_items": [ … ],
+  "manifest_token": "<64 hex>", "current_password": null | "…",
+  "acknowledge_duplicate_risk": false | true }
+```
+
+`acknowledge_duplicate_risk` is part of the canonical request identity for replay. When the
+connection is best-effort and `best_effort_acknowledged_at` is null, a confirm without
+`acknowledge_duplicate_risk: true` is refused with `400 {reason:
+"duplicate_risk_acknowledgement_required"}` before any reservation is consumed; the first
+accepted confirm stamps the timestamp under the owner lock (the flag is ignored otherwise).
+The call may take up to `dispatch_wait_seconds` and returns `AgentRunResponse`. Replay with
+the same key returns the same run without a second exchange; replay on a
 `delivery_unconfirmed` run performs the context lookup (adopt or resend) once.
 
 ## Runs
@@ -103,7 +126,12 @@ Replay with the same key returns the same run without a second exchange; replay 
   "last_observed_at": "…", "observation_interval_seconds": 60,
   "identifiers_expired": false,
   "events": [ { "id": "…", "type": "running", "run_version": 2, "received_at": "…",
-                "summary": "…", "trigger": "schedule", "kind": "observation" } ],
+                "summary": "…", "trigger": "schedule", "kind": "observation",
+                "previous_agent_task_id": null, "new_agent_task_id": null },
+              { "id": "…", "type": "running", "run_version": 3, "received_at": "…",
+                "summary": "Agent continued the run in a new task", "trigger": "command",
+                "kind": "task_succession", "previous_agent_task_id": "task-a1",
+                "new_agent_task_id": "task-b2" } ],
   "commands": [ { "id": "agentcmd_…", "kind": "reply", "body": "…",
                   "delivery": "unconfirmed|confirmed|rejected", "outcome_code": null,
                   "created_at": "…", "confirmed_at": null } ] }
@@ -137,5 +165,6 @@ reply/cancel for existing non-terminal runs, the push route, the observer, reten
 ## Error reasons added to `ValidationFailure.detail.reason`
 
 `agent_card_changed`, `agent_task_missing`, `auth_scheme_unsupported`, `a2a_rate_limited`,
-`connection_not_ready` (unchanged), `superseded_wire_contract` (mutations on a migrated
-record). Every error carries `X-Correlation-ID`.
+`duplicate_risk_acknowledgement_required`, `connection_not_ready` (unchanged),
+`superseded_wire_contract` (mutations on a migrated record). Every error carries
+`X-Correlation-ID`.

@@ -107,11 +107,14 @@ not missing, `now >= last_contact_at + reporting_window`.
 | `trigger` | `dispatch\|schedule\|push\|command` | why the observation ran |
 | `agent_state` | raw `TASK_STATE_*` string ≤64 | coarse, 90 d with the row |
 | `agent_status_at` | datetime \| None | agent's `status.timestamp`, informational only |
-| `kind` | `observation\|task_succeeded\|push_rejected` | timeline vs. coarse markers |
+| `kind` | `observation\|task_succession\|push_rejected` | timeline vs. coarse markers |
+| `previous_agent_task_id`, `new_agent_task_id` | str \| None | only on `task_succession` rows; rendered as "Agent continued the run in a new task" (identifier tier) |
 
 Only differing observations create rows (no 60-second spam); rows are ordered by
-`run_version`. Retention: summaries redacted at 30 d with the run content; rows purged with
-the run's identifier expiry at 90 d.
+`run_version`. A `task_succession` row is appended (and `run_version` incremented) when a
+reply exchange returns a different task id in the same correlation context. Retention:
+summaries redacted at 30 d with the run content; rows purged with the run's identifier
+expiry at 90 d.
 
 ## 4. Run Command (`AgentRunCommandDocument`, extended) — FR-006, FR-010
 
