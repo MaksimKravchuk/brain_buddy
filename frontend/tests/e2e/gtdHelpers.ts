@@ -65,10 +65,10 @@ export async function createUserViaApi(request: APIRequestContext, testInfo: Tes
   return email;
 }
 
-export async function loginThroughUi(page: Page, email: string): Promise<void> {
+export async function loginThroughUi(page: Page, email: string, loginPassword = password): Promise<void> {
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
+  await page.getByLabel("Password").fill(loginPassword);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).not.toHaveURL(/\/login$/);
 }

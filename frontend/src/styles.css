@@ -37,6 +37,20 @@ body {
   border-radius: inherit;
 }
 
+.account-menu-trigger:focus-visible {
+  outline: 3px solid #075985;
+  outline-offset: 3px;
+  box-shadow: none;
+}
+
+@media (forced-colors: active) {
+  .account-menu-trigger:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 3px;
+    forced-color-adjust: auto;
+  }
+}
+
 @keyframes bbPulse {
   0% {
     transform: scale(1);
