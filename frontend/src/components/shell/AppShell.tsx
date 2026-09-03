@@ -197,6 +197,7 @@ function AccountMenu(): React.JSX.Element {
   const logout = useAuthStore((state) => state.logout);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const initial = (user?.display_name?.[0] ?? user?.email?.[0])?.toUpperCase() ?? "M";
 
   useEffect(() => {
@@ -211,6 +212,7 @@ function AccountMenu(): React.JSX.Element {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setOpen(false);
+        triggerRef.current?.focus();
       }
     };
     document.addEventListener("mousedown", onPointerDown);
@@ -227,6 +229,7 @@ function AccountMenu(): React.JSX.Element {
   return (
     <div ref={containerRef} className="relative">
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}

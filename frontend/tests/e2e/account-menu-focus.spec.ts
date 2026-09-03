@@ -147,10 +147,9 @@ async function assertAccountMenuJourney(page: import("@playwright/test").Page): 
   await expect(connectedAgents).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(accountSettings).toBeFocused();
-  await page.keyboard.press("Shift+Tab");
-  await expect(trigger).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
+  await expect(trigger).toBeFocused();
 
   await trigger.press("Space");
   await expect(menu).toBeVisible();
