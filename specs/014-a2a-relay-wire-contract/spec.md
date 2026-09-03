@@ -109,6 +109,8 @@ The user can disconnect an agent without exposing its secret or erasing the hone
 - Editing or completing the Task after dispatch does not rewrite the frozen sent content; a later hand-off creates a distinct run.
 - Mobile interruption, app closure and offline windows behave as 007 FR-018: reopening loads the server projection, offline clients label cached state as potentially stale and disable reply and cancel rather than queue them.
 - Rollout OFF blocks new connections, tests, credential changes, hand-off previews and fresh dispatches; observation of already-dispatched runs, verified push handling, safe reply and cancel for existing runs, purge and retention continue (007 FR-019).
+- An agent card that changes while a run is active: observation of that run continues at the interface recorded at dispatch; new hand-offs on that connection require a new successful test (AC-012). Observation of an active run is never redirected to an interface that was not tested.
+- Many concurrent runs for one owner: there is no per-owner cap; every non-terminal run is observed on the same schedule, and the deployment's general rate limiting is the only bound.
 
 ## Clarifications
 
@@ -123,6 +125,7 @@ The user can disconnect an agent without exposing its secret or erasing the hone
 - Q: Where is the best-effort single-start disclosure shown? → A: On the connection after every successful test and again in every hand-off review before confirmation (product owner).
 - Q: Is the BrainBuddy single-start extension published? → A: Yes, under a public, stable identifier with a short public specification in the repository documentation (product owner).
 - Q: How is the unmodified Hermes plugin verified? → A: In CI against the unmodified plugin code with a stub agent handler and no model, plus one attended live run against a real Hermes as release evidence before rollout (product owner).
+- Q: How many non-terminal runs may one owner have at once? → A: No per-owner limit; background observation scales with active runs and is bounded only by the deployment's general rate limiting (product owner).
 
 ## Requirements *(mandatory)*
 
@@ -179,3 +182,5 @@ The user can disconnect an agent without exposing its secret or erasing the hone
 - The official a2a-sdk sample agent serves plain HTTP on a loopback address, so automated end-to-end runs use the existing governed private-destination allowance in the test environment only; production keeps HTTPS and public destinations.
 - The Hermes A2A plugin is MIT-licensed and its inbound server can be driven by a stub agent handler without a model, which is how its own test suite exercises it.
 - The user owns the agent's hosting, model provider, tools, cost and output quality; BrainBuddy neither hosts nor verifies agents.
+- The default observation interval is 60 seconds and the default reply window is 300 seconds; both are deployment-configurable, and SC-006 is measured against those defaults.
+- There is no per-owner limit on concurrent non-terminal runs (product-owner decision, 2026-09-03).
