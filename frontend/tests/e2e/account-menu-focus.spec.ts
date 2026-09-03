@@ -92,6 +92,38 @@ async function assertRenderedFocus(page: import("@playwright/test").Page, forced
     assert.notEqual(snapshot.outlineColor, "transparent", "forced-colors outline must be visible");
     assert.notEqual(snapshot.outlineColor, "rgb(7, 89, 133)", "forced-colors outline must use the system color");
     assert.equal(snapshot.forcedColorAdjust, "auto", "forced-colors rendering must remain under browser control");
+
+    const forcedFocusRule = await page.evaluate(() => {
+      const findForcedColorRule = (rules: CSSRuleList): CSSStyleDeclaration | null => {
+        for (const rule of Array.from(rules)) {
+          if (rule instanceof CSSStyleRule && rule.selectorText === ".account-menu-trigger:focus-visible") {
+            return rule.style;
+          }
+        }
+        return null;
+      };
+
+      for (const sheet of Array.from(document.styleSheets)) {
+        for (const rule of Array.from(sheet.cssRules)) {
+          if (rule instanceof CSSMediaRule && rule.conditionText.includes("forced-colors")) {
+            const style = findForcedColorRule(rule.cssRules);
+            if (style) {
+              return {
+                outlineStyle: style.getPropertyValue("outline-style"),
+                outlineWidth: style.getPropertyValue("outline-width"),
+                outlineColor: style.getPropertyValue("outline-color"),
+              };
+            }
+          }
+        }
+      }
+      return null;
+    });
+    assert(forcedFocusRule, "forced-colors stylesheet focus rule must be present");
+    assert.equal(forcedFocusRule.outlineStyle, "solid", "forced-colors stylesheet must define a solid focus outline");
+    assert.equal(forcedFocusRule.outlineWidth, "2px", "forced-colors stylesheet must define a 2px focus outline");
+    assert.notEqual(forcedFocusRule.outlineColor, "", "forced-colors stylesheet must define a focus color");
+    assert.notEqual(forcedFocusRule.outlineColor, "#075985", "forced-colors stylesheet must not use the normal focus color");
   } else {
     assert.equal(snapshot.outlineColor, "rgb(7, 89, 133)", "normal focus must render the design-token outline color");
     assert(!snapshot.boxShadow.includes("7, 89, 133"), "normal focus evidence must come from the outline, not a shadow");
