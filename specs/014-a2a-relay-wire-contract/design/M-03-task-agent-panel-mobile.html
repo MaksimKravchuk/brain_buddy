@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M-03 · Task agent section and compact Task rows (iOS, 390×851)</title>
+<style>
+:root{
+  --brand:#0EA5E9; --brand-hover:#38BDF8; --brand-soft:rgba(14,165,233,.10);
+  --base:#F8FAFC; --sunken:#F1F5F9; --raised:#FFFFFF;
+  --fg1:#0F172A; --fg2:#1E293B; --fg3:#334155; --fg4:#475569;
+  --fg5:#64748B; --fg6:#94A3B8; --fg7:#CBD5E1;
+  --bd:#E2E8F0; --bd-hover:#CBD5E1;
+  --ok:#10B981; --ok-bg:#ECFDF5; --ok-bd:#A7F3D0; --ok-fg:#065F46; --ai-fg:#047857;
+  --warn:#D97706; --warn-bg:#FFFBEB; --warn-bd:#FDE68A; --warn-fg:#92400E;
+  --bad:#E11D48; --bad-bg:#FFF1F2; --bad-bd:#FECDD3; --bad-fg:#9F1239;
+  --info:#0EA5E9; --info-bg:#F0F9FF; --info-bd:#BAE6FD; --info-fg:#0369A1;
+  --tag-bg:#F1F5F9; --tag-fg:#475569; --due-bg:#FFF1F2; --due-bd:#FECDD3; --due-fg:#BE123C;
+  --r-sm:6px; --r-md:8px; --r-row:12px; --r-card:14px; --r-lg:16px; --r-xl:20px; --r-full:999px;
+  --sh-soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);
+  --sh-raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);
+  --sh-float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18);
+  --ease:cubic-bezier(0.22,1,0.36,1);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  font-feature-settings:"cv11","ss01","ss03";
+  background:var(--base); color:var(--fg1);
+  -webkit-font-smoothing:antialiased; font-size:14px; line-height:1.5;
+}
+.page{max-width:1360px;margin:0 auto;padding:28px 24px 72px}
+.pagehead{margin-bottom:24px}
+.pagehead h1{font-size:28px;line-height:1.15;letter-spacing:-.02em;font-weight:600;margin:0 0 6px}
+.pagehead p{margin:0;color:var(--fg5);font-size:14px;max-width:78ch}
+.pagehead .crumb{font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--fg5);margin-bottom:8px}
+.grid{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.panel{background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-xl);box-shadow:var(--sh-soft);overflow:hidden;flex:1 1 420px;min-width:380px;max-width:660px}
+.panel.wide{flex:1 1 660px;max-width:980px}
+.panel.full{flex:1 1 100%;max-width:100%}
+.panel-h{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--sunken);border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.sid{font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:#fff;background:var(--fg4);border-radius:var(--r-full);padding:3px 8px}
+.pname{font-size:12px;color:var(--fg4);font-weight:500}
+.pnote{font-size:11px;color:var(--fg5);flex-basis:100%;margin:0}
+.panel-b{padding:16px}
+.panel-b.sunk{background:var(--base)}
+
+h2.sec{font-size:20px;line-height:1.3;letter-spacing:-.015em;font-weight:600;margin:34px 0 14px}
+h2.sec:first-of-type{margin-top:6px}
+.label{font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--fg5);margin:0 0 6px}
+.micro{font-size:11px;line-height:1.35;color:var(--fg5);margin:0}
+.caption{font-size:12px;line-height:1.4;color:var(--fg5);margin:0}
+.body{font-size:14px;line-height:1.5;color:var(--fg2);margin:0}
+.subtitle{font-size:15px;line-height:1.4;letter-spacing:-.005em;font-weight:500;color:var(--fg2);margin:0}
+.title{font-size:20px;line-height:1.3;letter-spacing:-.015em;font-weight:600;margin:0}
+.display{font-size:28px;line-height:1.15;letter-spacing:-.02em;font-weight:600;margin:0}
+.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12px;color:var(--fg3)}
+.stack{display:flex;flex-direction:column}
+.g1{gap:4px}.g2{gap:8px}.g3{gap:12px}.g4{gap:16px}.g5{gap:20px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rowt{display:flex;align-items:flex-start;gap:8px}
+.spacer{margin-left:auto}
+.dim{color:var(--fg5)}
+.strong{font-weight:600;color:var(--fg1)}
+hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
+
+.card{background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-row);padding:14px;box-shadow:var(--sh-soft)}
+.card.flat{box-shadow:none}
+.card.tint-ok{background:var(--ok-bg);border-color:var(--ok-bd)}
+.card.tint-warn{background:var(--warn-bg);border-color:var(--warn-bd)}
+.card.tint-bad{background:var(--bad-bg);border-color:var(--bad-bd)}
+.card.tint-info{background:var(--info-bg);border-color:var(--info-bd)}
+.card.tint-sunk{background:var(--sunken)}
+.card.dashed{border-style:dashed;background:transparent;box-shadow:none}
+
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:var(--r-full);border:1px solid var(--bd);background:var(--raised);padding:2px 9px;font-size:11px;font-weight:500;color:var(--fg4);white-space:nowrap}
+.pill.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-fg)}
+.pill.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-fg)}
+.pill.bad{background:var(--bad-bg);border-color:var(--bad-bd);color:var(--bad-fg)}
+.pill.info{background:var(--info-bg);border-color:var(--info-bd);color:var(--info-fg)}
+.pill.mute{background:var(--sunken);border-color:var(--bd);color:var(--fg4)}
+.tag{display:inline-flex;align-items:center;border-radius:var(--r-full);background:var(--tag-bg);border:1px solid var(--bd);color:var(--tag-fg);font-size:11px;padding:2px 8px}
+.due{display:inline-flex;align-items:center;border-radius:var(--r-full);background:var(--due-bg);border:1px solid var(--due-bd);color:var(--due-fg);font-size:11px;padding:2px 8px}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--r-md);border:1px solid var(--bd);background:var(--raised);color:var(--fg2);font:inherit;font-size:13px;font-weight:500;padding:8px 12px;box-shadow:var(--sh-soft);cursor:default;transition:background 150ms var(--ease)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.danger{background:var(--raised);border-color:var(--bad-bd);color:var(--bad-fg)}
+.btn.ghost{background:transparent;border-color:transparent;box-shadow:none;color:var(--fg4)}
+.btn.sm{padding:6px 10px;font-size:12px}
+.btn[aria-disabled="true"]{opacity:.45}
+.btn.primary:hover{background:var(--brand-hover);border-color:var(--brand-hover)}
+.btn:active{transform:scale(.98)}
+
+.field{display:flex;flex-direction:column;gap:4px}
+.input{border:1px solid var(--bd);border-radius:var(--r-sm);background:var(--raised);padding:8px 10px;font-size:13px;color:var(--fg1);box-shadow:var(--sh-soft)}
+.input.ph{color:var(--fg6)}
+.input.focus{border-color:var(--brand);box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5)}
+.hint{font-size:11px;color:var(--fg5)}
+.radio{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--fg2)}
+.dot{width:14px;height:14px;border-radius:var(--r-full);border:1px solid var(--bd-hover);background:#fff;display:inline-block;flex:0 0 auto}
+.dot.on{border:4px solid var(--brand)}
+.box{width:14px;height:14px;border-radius:3px;border:1px solid var(--bd-hover);background:#fff;display:inline-block;flex:0 0 auto}
+.box.on{background:var(--brand);border-color:var(--brand)}
+.check{width:18px;height:18px;border-radius:var(--r-full);border:1.5px solid var(--fg7);flex:0 0 auto}
+
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12px}
+.kv dt{color:var(--fg5)}
+.kv dd{margin:0;color:var(--fg3)}
+
+.avatar{width:22px;height:22px;border-radius:8px;background:var(--ok-bg);color:var(--ai-fg);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex:0 0 auto}
+
+.runcard{border:1px solid var(--ok-bd);background:var(--ok-bg);border-radius:var(--r-row);padding:12px}
+.runcard.neutral{border-color:var(--bd);background:var(--sunken)}
+.runcard.needs{border-color:var(--warn-bd);background:var(--warn-bg)}
+.runcard.bad{border-color:var(--bad-bd);background:var(--bad-bg)}
+.runcard .head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.runcard .note{font-size:11px;color:var(--fg5);margin:6px 0 0}
+.timeline{list-style:none;margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--bd);display:flex;flex-direction:column;gap:5px}
+.timeline li{font-size:11px;color:var(--fg4);display:flex;gap:8px;flex-wrap:wrap}
+.timeline .when{color:var(--fg6)}
+.timeline .what{font-weight:500;color:var(--fg3)}
+.timeline .sum{flex-basis:100%;color:var(--fg5)}
+.artifact{border:1px dashed var(--bd-hover);border-radius:var(--r-md);background:var(--raised);padding:8px 10px;font-size:12px;color:var(--fg4)}
+.link{color:var(--brand);text-decoration:underline;font-size:12px;word-break:break-all}
+
+.taskrow{display:flex;align-items:center;gap:10px;background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-row);padding:10px 12px;box-shadow:var(--sh-soft)}
+.taskrow .t{font-size:14px;font-weight:500;color:var(--fg1)}
+.taskrow .meta{margin-left:auto;display:flex;align-items:center;gap:8px}
+.taskrow .proj{font-size:11px;color:var(--fg6);min-width:96px;text-align:right}
+
+.shell{display:flex;border:1px solid var(--bd);border-radius:var(--r-lg);overflow:hidden;background:var(--base)}
+.side{width:248px;flex:0 0 248px;background:var(--raised);border-right:1px solid var(--bd);padding:14px 12px;display:flex;flex-direction:column;gap:14px}
+.navitem{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--fg3);padding:7px 9px;border-radius:var(--r-sm)}
+.navitem.on{background:var(--brand-soft);color:var(--fg1);font-weight:500}
+.navitem .n{margin-left:auto;font-size:11px;color:var(--fg6)}
+.navitem .badge{margin-left:auto;background:var(--brand);color:#fff;font-size:10px;font-weight:600;border-radius:var(--r-full);padding:1px 7px}
+.navitem.deferred{color:var(--fg6)}
+.main{flex:1 1 auto;padding:18px;min-width:0}
+
+.phone{width:390px;height:851px;flex:0 0 auto;border:1px solid var(--bd-hover);border-radius:var(--r-xl);background:var(--base);overflow:hidden;box-shadow:var(--sh-raised);display:flex;flex-direction:column}
+.phone .status{height:34px;flex:0 0 auto;background:var(--raised);border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11px;color:var(--fg5)}
+.phone .navbar{flex:0 0 auto;background:var(--raised);border-bottom:1px solid var(--bd);padding:10px 16px;display:flex;align-items:center;gap:10px}
+.phone .navbar .t{font-size:15px;font-weight:600;letter-spacing:-.005em}
+.phone .content{flex:1 1 auto;overflow:hidden;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.phone .tabbar{flex:0 0 auto;height:66px;background:var(--raised);border-top:1px solid var(--bd);display:flex;align-items:center;justify-content:space-around;padding-bottom:10px;font-size:10px;color:var(--fg5)}
+.sheet{margin-top:auto;background:var(--raised);border:1px solid var(--bd);border-top-left-radius:var(--r-xl);border-top-right-radius:var(--r-xl);box-shadow:var(--sh-float);padding:16px;display:flex;flex-direction:column;gap:12px}
+.grabber{width:36px;height:4px;border-radius:var(--r-full);background:var(--fg7);margin:0 auto 4px}
+.scrim{position:relative;flex:1 1 auto;background:rgba(248,250,252,.8);display:flex;flex-direction:column}
+.tap44{min-height:44px}
+.phonewrap{display:flex;flex-direction:column;gap:8px;flex:0 0 auto}
+.phonecap{font-size:11px;color:var(--fg5);max-width:390px}
+.phonecap .sid{margin-right:6px}
+
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 22px}
+.legend .pill{font-size:11px}
+.dlg{background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-xl);box-shadow:var(--sh-float);padding:18px;display:flex;flex-direction:column;gap:12px}
+.overlay-head{display:flex;align-items:flex-start;gap:12px;border-bottom:1px solid var(--bd);padding-bottom:12px;margin-bottom:4px}
+.skel{background:var(--sunken);border-radius:var(--r-sm);height:12px}
+.skel.w60{width:60%}.skel.w40{width:40%}.skel.w80{width:80%}.skel.w30{width:30%}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="pagehead">
+    <p class="crumb">Feature 014 · A2A relay wire contract · design</p>
+    <h1>M-03 · Task agent section and compact Task rows (iOS, 390×851)</h1>
+    <p>The iOS projection of D-03. Both clients derive their labels from the same server projection, so a run can never be described one way on web and another on iOS. Static and non-interactive.</p>
+  </div>
+
+<h2 class="sec">Task detail without a run</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Task</span></div>
+    <div class="content">
+  <p class="title" style="font-size:17px">Write the migration runbook for the relay cutover</p>
+  <div class="row"><span class="tag">deep-work</span><span class="due">before Sat</span>
+    <span class="micro">Relay rollout</span></div>
+  <p class="body">Cover the pre-flight checks, the cutover order and the rollback trigger.</p>
+  <span class="btn tap44" style="padding:12px">Hand to agent</span>
+  <p class="micro">No agent runs on this task, so there is no run section at all.</p></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-03-S01</span>default — a task with no run</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Task</span></div>
+    <div class="content"><article class="runcard bad" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill bad">Not sent</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Best-effort single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Never</span></div>
+  <p class="body" style="font-size:12.5px;margin-top:8px">The agent is rate limiting. It refused the hand-off before creating a task, so nothing is running.</p><p class="note">Trying again reuses the same run ID and message ID.</p>
+</article><article class="runcard " style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill info">Sent</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:01</span></div>
+  <p class="body" style="font-size:12.5px;margin-top:8px">Waiting for the agent. Some agents answer only when the work is finished; BrainBuddy waits without inventing a failure.</p><ol class="timeline"><li><span class="what">Sent</span><span class="when">22:01</span></li></ol>
+</article><article class="runcard needs" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill warn">Delivery unconfirmed</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:01</span></div>
+  <p class="note">BrainBuddy could not confirm the agent received this hand-off. It was not re-sent. Before anything is sent again BrainBuddy looks this run up at the agent by its correlation ID.</p>
+</article><article class="runcard " style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill info">Accepted</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:02</span></div>
+  <ol class="timeline"><li><span class="what">Sent</span><span class="when">22:01</span></li><li><span class="what">Accepted</span><span class="when">22:02</span></li></ol>
+</article></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-03-S02 – S05</span>Not sent, Sent, Delivery unconfirmed, Accepted</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Task</span></div>
+    <div class="content"><article class="runcard " style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill info">Running</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:04</span></div>
+  <p class="body" style="font-size:12.5px;margin-top:8px">Reading the staging rehearsal notes and drafting the rollback section.</p><div class="row" style="gap:8px;margin-top:10px"><span class="btn ghost sm tap44" style="padding:12px">Request cancellation</span></div>
+</article><article class="runcard needs" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill warn">Needs you</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:07</span></div>
+  <div class="card" style="margin-top:8px;background:#fff;border-color:var(--warn-bd);border-radius:12px">
+    <p class="body" style="font-size:12.5px;color:var(--warn-fg)">Should the runbook assume the DNS change is done by
+    the platform team?</p>
+    <div class="input ph" style="margin-top:8px;min-height:56px">Your answer</div>
+    <div class="row" style="margin-top:8px;gap:8px"><span class="btn sm tap44" style="padding:12px">Send answer</span>
+    <span class="btn ghost sm tap44" style="padding:12px">Request cancellation</span></div></div>
+</article><article class="runcard needs" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill warn">Needs you</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:07</span></div>
+  <p class="note">Your answer was sent but the agent has not acknowledged it yet.</p><ol class="timeline"><li><span class="what">Sent</span><span class="when">22:01</span></li><li><span class="what">Your answer</span><span class="when">22:09</span><span class="sum">Sent, not yet acknowledged.</span></li></ol>
+</article></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-03-S06 – S08</span>Running, blocked with a reply, reply unconfirmed</p>
+  
+</div></div>
+<h2 class="sec">Agent-reported states</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Task</span></div>
+    <div class="content"><article class="runcard needs" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill warn">Needs you</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:06</span></div>
+  <div class="card" style="margin-top:8px;background:#fff;border-color:var(--warn-bd);border-radius:12px">
+    <p class="body" style="font-size:12.5px;color:var(--warn-fg)">Agent needs additional authentication.</p>
+    <p class="micro" style="margin-top:6px">This cannot be answered from BrainBuddy — there is no reply box. Sort it
+    out wherever you operate the agent.</p></div>
+</article><article class="runcard " style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill ok">Agent reported complete</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:19</span></div>
+  <p class="body" style="font-size:12.5px;margin-top:8px">Runbook drafted in five phases.</p>
+  <div class="stack g2" style="margin-top:8px">
+    <div class="artifact">Attachment · application/pdf · not fetched or opened by BrainBuddy</div>
+    <div class="artifact">Attachment · application/json · not fetched or opened by BrainBuddy</div>
+    <p style="margin:0"><a class="link" href="https://hermes.example.com/artifacts/runbook" rel="noopener noreferrer nofollow">https://hermes.example.com/artifacts/runbook</a></p>
+  </div>
+  <div class="card tint-sunk" style="margin-top:10px;border-radius:12px">
+    <p class="caption">This is what the agent said it did. The task is still open — completing it is your call.</p>
+    <div class="row tap44" style="margin-top:6px"><span class="check"></span>
+      <span style="font-size:13px">Mark this task complete</span></div></div>
+</article></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-03-S09 – S10</span>Agent needs additional authentication; Agent reported complete</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Task</span></div>
+    <div class="content"><article class="runcard bad" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill bad">Failed</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:11</span></div>
+  <p class="body" style="font-size:12.5px;margin-top:8px;color:var(--bad-fg)">The document store returned 403 for the rehearsal notes.</p><p class="note">BrainBuddy does not retry the work.</p>
+</article><article class="runcard bad" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill bad">Failed</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:01</span></div>
+  <p class="body" style="font-size:12.5px;margin-top:8px;color:var(--bad-fg)">Rejected by agent.</p>
+</article><article class="runcard needs" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill warn">Cancellation requested</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:08</span></div>
+  <p class="note">The agent has not confirmed it, so the work may still be running.</p>
+</article><article class="runcard neutral" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill mute">Cancelled</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:09</span></div>
+  
+</article></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-03-S11 – S14</span>Failed, Rejected by agent, Cancellation requested, Cancelled</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Task</span></div>
+    <div class="content"><article class="runcard " style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill info">Running</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:08</span></div>
+  <p class="note">Cancellation not supported by this agent. Your request was answered and refused, so the run keeps the last state BrainBuddy observed.</p>
+</article><article class="runcard needs" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill warn">Stopped reporting</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:04</span></div>
+  <p class="note">No successful contact since the last contact above. BrainBuddy does not know whether the agent is still working, and does not claim it stopped or failed.</p>
+</article><article class="runcard neutral" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill mute">Agent no longer reports this run</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:04</span></div>
+  <p class="note">The agent answered that it does not have this task. The timeline stays; replying and cancelling are no longer offered.</p>
+</article><article class="runcard neutral" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill mute">Agent reported complete</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Aug 1, 09:24</span></div>
+  <p class="body" style="font-size:12.5px;margin-top:8px;font-style:italic;color:var(--fg5)">Content expired under retention policy</p>
+</article></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-03-S15 – S18</span>Cancellation not supported, Stopped reporting, Agent no longer reports this run, expired</p>
+  
+</div></div>
+<h2 class="sec">Disconnection, failure, interruption and compact rows</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Task</span></div>
+    <div class="content"><article class="runcard neutral" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill mute">Running</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:04</span></div>
+  <p class="note">This agent was disconnected. Disconnecting did not cancel work it had already accepted, and BrainBuddy has stopped observing this run.</p>
+</article><p class="label" style="margin-top:12px">Agent run</p><p class="caption">Loading runs…</p>
+  <div class="card stack g2" style="border-radius:14px"><div class="skel w40"></div><div class="skel w80"></div></div>
+  <div class="card tint-bad stack g2" style="border-radius:14px;margin-top:12px">
+    <p class="caption" style="color:var(--bad-fg)">We couldn't load the runs for this task. The task itself is
+    unaffected.</p><p class="micro mono">Correlation ID 3ce8-b012-6da7</p>
+    <span class="btn sm tap44" style="padding:12px">Retry</span></div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-03-S19 – S21</span>Connection disconnected, loading, error</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Task</span></div>
+    <div class="content"><div class="card tint-warn stack g1" style="border-radius:14px">
+    <p class="caption" style="color:var(--warn-fg)">Offline. This is cached status and may be stale. Replies and
+    cancellation are unavailable and nothing is queued. Reopening online loads the server projection first.</p></div><article class="runcard neutral" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill mute">Needs you as of 22:07</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:07</span></div>
+  <div class="card" style="margin-top:8px;background:#fff;border-radius:12px">
+    <p class="body" style="font-size:12.5px">Should the runbook assume the DNS change is done by the platform team?</p>
+    <div class="row" style="margin-top:8px;gap:8px"><span class="btn sm tap44" style="padding:12px;opacity:.45">Send
+    answer</span><span class="btn ghost sm tap44" style="padding:12px;opacity:.45">Request cancellation</span></div>
+  </div>
+</article><div class="card tint-warn stack g1" style="border-radius:14px;margin-top:12px">
+    <p class="caption" style="color:var(--warn-fg)">Showing cached agent data because the refresh failed.</p>
+    <p class="micro mono" style="color:var(--warn-fg)">Correlation ID 77aa-3f19-0b52</p></div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-03-S22 – S23</span>offline / interrupted, and partial failure</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="t">Next actions</span></div>
+    <div class="content">
+  <p class="label">Next actions</p>
+  <div class="card stack g2" style="border-radius:14px;padding:12px">
+    <div class="row"><span class="check"></span><span style="font-size:14px;font-weight:500">Write the migration
+      runbook</span></div>
+    <div class="row"><span class="avatar">H</span><span class="pill info">Running</span>
+      <span class="spacer"></span><span class="tag">deep-work</span></div></div>
+  <div class="card stack g2" style="border-radius:14px;padding:12px;background:var(--warn-bg);border-color:var(--warn-bd)">
+    <div class="row"><span class="check"></span><span style="font-size:14px;font-weight:500">Draft the rollback
+      comms</span></div>
+    <div class="row"><span class="avatar">H</span><span class="pill warn">Needs you</span>
+      <span class="spacer"></span><span class="tag">calls</span></div></div>
+  <div class="card stack g2" style="border-radius:14px;padding:12px">
+    <div class="row"><span class="check"></span><span style="font-size:14px;font-weight:500">Collect provider
+      quotas</span></div>
+    <div class="row"><span class="avatar">S</span><span class="pill mute">Stopped reporting</span></div></div>
+  <p class="label" style="margin-top:8px">Tag · errands</p>
+  <div class="card stack g2" style="border-radius:14px;padding:12px">
+    <div class="row"><span class="check"></span><span style="font-size:14px;font-weight:500">Pick up the office
+      key</span><span class="spacer"></span><span class="tag">errands</span></div></div>
+  <p class="micro">A filtered view whose tasks have no runs shows no chips and no placeholder.</p></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-03-S24 – S25</span>compact task rows, and a Tag view with no runs</p>
+  
+</div></div>
+
+</div>
+</body>
+</html>
