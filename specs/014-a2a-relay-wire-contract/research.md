@@ -124,4 +124,4 @@
 5. **Extension identifier** — the GitHub URI is accepted for v1; the path is frozen by policy and a redirect-based identifier may be added in a later version without changing v1 (`contracts/brainbuddy-single-start-extension.md` §8).
 6. **Task succession on Hermes** — accepted: a reply that returns a new task in the same correlation context is adopted as the run's current agent task, the timeline records "Agent continued the run in a new task" with the old and new ids, and the reply is never refused (Decision E, `contracts/a2a-wire.md`).
 
-No [NEEDS CLARIFICATION] markers remain.
+No open clarification markers remain in this document.
