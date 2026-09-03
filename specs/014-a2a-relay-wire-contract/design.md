@@ -10,9 +10,10 @@
   /speckit-clarify. Screen ids (D-01…, M-01…) and state ids (D-01-S01…) are
   stable forever: the acceptance traceability matrix keys off them.
 
-  ADR-0006: the term is Tag. "Context" and "@context" are forbidden strings and
-  the design CI validator hard-fails on them. See "Vocabulary" below for how the
-  spec's wire-level nouns are rendered in the UI.
+  ADR-0006: the term is Tag. The retired taxonomy noun it replaced, and that noun's
+  at-prefixed form, are forbidden strings; the design CI validator hard-fails on them,
+  case-insensitively. See "Vocabulary" below for how this feature's wire-level nouns
+  are rendered in the UI.
 -->
 
 ## Applicability
@@ -120,7 +121,7 @@ Files:
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| D-03-S01 default | Task has never been handed over | Only "Hand to agent". No empty run heading | "Hand to agent" | FR-005 |
+| D-03-S01 default = empty (first run) | Task has never been handed over | Only "Hand to agent". No run section, no empty run heading — for this screen the first-run empty state *is* the default state, because an empty "Agent runs" heading would imply the feature had been used | "Hand to agent" | FR-005 |
 | D-03-S02 loading | runs being fetched | Heading plus skeleton run card | "Loading runs…" | 007 FR-017 |
 | D-03-S03 Not sent (rate limited) | agent rate-limits before creating a task | Rose card, actionable category, retry that reuses the same run and message IDs | "The agent is rate limiting." | FR-006, edge case |
 | D-03-S04 Sent | dispatch accepted, no agent state yet | Sky pill, waiting explained, no fabricated progress | "Some agents answer only when the work is finished." | AC-014, FR-006, FR-007, SC-006 |
@@ -197,7 +198,7 @@ Every D-03 run condition, label for label, from the same server projection.
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| M-03-S01 default | Task with no run | Only "Hand to agent"; no run section | "Hand to agent" | FR-005 |
+| M-03-S01 default = empty (first run) | Task with no run | Only "Hand to agent"; no run section at all. As on D-03, the first-run empty state and the default state are the same state | "Hand to agent" | FR-005 |
 | M-03-S02 Not sent (rate limited) | agent rate-limits | Rose card, category, same-IDs retry note | as D-03-S03 | FR-006 |
 | M-03-S03 Sent | dispatch accepted | Sky pill, waiting explained | as D-03-S04 | AC-014, SC-006 |
 | M-03-S04 Delivery unconfirmed | ambiguous dispatch | Amber pill, lookup-before-resend | "**Delivery unconfirmed**" | FR-006 |
@@ -342,12 +343,13 @@ matches `spec.md` line 19, which declares the same thing.
   secondary organization and `Weekly Review · coming later` non-interactive.
 - Tags render as neutral pills with plain names (`deep-work`, `calls`, `errands`), no
   retired prefixes.
-- Vocabulary check (ADR-0006, `Tag`): **pass** —
-  `grep -rn -i "context" design.md design/` returns nothing.
+- Vocabulary check (ADR-0006, `Tag`): **pass** — a case-insensitive grep for the
+  retired taxonomy noun and its at-prefixed form over `design.md` and `design/`
+  returns nothing.
 - Self-contained check: **pass** — no `<script>`, no `@import`, no `<link>`, no CDN and
   no external font in any of the six files.
 - `python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py`: **pass**
-  (7 tests, OK). This design changes no skill artifact.
+  (6 tests, OK). This design changes no skill artifact.
 
 ## Open decisions for the human
 
