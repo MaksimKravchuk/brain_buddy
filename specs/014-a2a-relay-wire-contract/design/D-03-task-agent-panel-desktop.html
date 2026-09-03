@@ -523,28 +523,39 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
 </section></div>
 <h2 class="sec">Compact rows, failure and interruption</h2>
 <div class="grid"><section class="panel wide">
-  <header class="panel-h"><span class="sid">D-03-S21</span><span class="pname">compact Task rows — the same projection, one line each</span><p class="pnote">SC-004 / FR-013. The last row has no run and looks exactly like it always has.</p></header>
+  <header class="panel-h"><span class="sid">D-03-S21</span><span class="pname">compact Task rows — the same projection, one line each</span><p class="pnote">SC-004 / FR-013. The tier is carried in full on the compact row, because FR-014 fixes the wording and an abbreviation would be a different claim. The last row has no run and looks exactly like it always has.</p></header>
   <div class="panel-b "><div class="stack g2">
   <p class="label">Next actions</p>
   <div class="taskrow"><span class="check"></span><span class="t">Write the migration runbook for the relay cutover</span>
     <span class="meta"><span class="avatar">H</span><span class="pill info">Running</span>
+    <span class="pill mute">Guaranteed single start</span>
     <span class="tag">deep-work</span><span class="proj">Relay rollout</span></span></div>
   <div class="taskrow" style="border-color:var(--warn-bd);background:var(--warn-bg)"><span class="check"></span>
     <span class="t">Draft the rollback comms</span>
     <span class="meta"><span class="avatar">H</span><span class="pill warn">Needs you</span>
+    <span class="pill mute">Guaranteed single start</span>
     <span class="tag">calls</span><span class="proj">Relay rollout</span></span></div>
   <div class="taskrow"><span class="check"></span><span class="t">Summarise the rehearsal findings</span>
     <span class="meta"><span class="avatar">S</span><span class="pill ok">Agent reported complete</span>
+    <span class="pill mute">Best-effort single start</span>
     <span class="tag">deep-work</span><span class="proj">Relay rollout</span></span></div>
   <div class="taskrow"><span class="check"></span><span class="t">Collect provider quotas</span>
     <span class="meta"><span class="avatar">S</span><span class="pill mute">Stopped reporting</span>
-    <span class="proj">Relay rollout</span></span></div>
+    <span class="pill mute">Best-effort single start</span><span class="proj">Relay rollout</span></span></div>
+  <div class="taskrow"><span class="check"></span><span class="t">Chase the vendor security review</span>
+    <span class="meta"><span class="avatar">S</span><span class="pill mute">Agent no longer reports this run</span>
+    <span class="pill mute">Best-effort single start</span><span class="proj">Relay rollout</span></span></div>
+  <div class="taskrow"><span class="check"></span><span class="t">Rehearse the rollback</span>
+    <span class="meta"><span class="avatar">H</span><span class="pill info">Running</span>
+    <span class="pill warn">Cancellation not supported by this agent</span>
+    <span class="pill mute">Guaranteed single start</span><span class="proj">Relay rollout</span></span></div>
   <div class="taskrow"><span class="check"></span><span class="t">Book the cutover window</span>
     <span class="meta"><span class="due">Sat</span><span class="tag">calls</span><span class="proj">Relay rollout</span></span></div>
 </div>
-<p class="micro" style="margin-top:10px">A row shows the latest run's agent, the projected state, a needs-you tint and
-the last contact on hover. It never shows a state the detail surface would contradict: both read the same server
-projection. Opening a row opens the task, it does not start or reopen a run.</p></div>
+<p class="micro" style="margin-top:10px">A row shows the latest run's agent, the projected state, the guarantee tier,
+the cancellation-unsupported outcome when it applies, a needs-you tint, and the last contact on hover. It never shows a
+state the detail surface would contradict: both read the same server projection. Opening a row opens the task, it does
+not start or reopen a run.</p></div>
 </section></div>
 <div class="grid"><section class="panel ">
   <header class="panel-h"><span class="sid">D-03-S22</span><span class="pname">empty (filtered to nothing) — a Tag view whose tasks have no runs</span></header>
