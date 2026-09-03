@@ -149,6 +149,57 @@ describe("TaskDetailEmptyPanel", () => {
 });
 
 describe("TaskDetailPanel chrome", () => {
+  it("normalizes cleared optional fields through the non-autosave fallback", () => {
+    const { onSave } = renderPanel({
+      task: taskFixture({ due_date: "2026-08-01", project_id: "project-launch" })
+    });
+
+    fireEvent.change(screen.getByLabelText("Due date"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Project"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "#deep-work" }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ due_date: null }));
+    expect(onSave).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ project_id: null }));
+    expect(onSave).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ tag_ids: [] }));
+  });
+
+  it("switches due dates with task identity without remounting on revisions", () => {
+    const first = taskFixture({ due_date: "2026-08-01" });
+    const second = taskFixture({ id: "task-2", due_date: "2026-09-15", revision: 5 });
+    const props = {
+      projects,
+      tags,
+      isLoading: false,
+      error: null,
+      headingRef: createRef<HTMLHeadingElement>(),
+      onClose: vi.fn(),
+      onSave: vi.fn(),
+      onTransition: vi.fn(),
+      onCreateSubtask: vi.fn(),
+      onTransitionSubtask: vi.fn(),
+      onCreateComment: vi.fn()
+    };
+    const queryClient = new QueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <TaskDetailPanel task={first} resetKey={0} {...props} />
+      </QueryClientProvider>
+    );
+    const dueDate = screen.getByLabelText("Due date");
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <TaskDetailPanel task={{ ...first, revision: 5 }} resetKey={0} {...props} />
+      </QueryClientProvider>
+    );
+    expect(screen.getByLabelText("Due date")).toBe(dueDate);
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <TaskDetailPanel task={second} resetKey={0} {...props} />
+      </QueryClientProvider>
+    );
+    expect(screen.getByLabelText("Due date")).toHaveValue("2026-09-15");
+  });
+
   it("ignores submit events after their named draft control has disappeared", () => {
     const { onCreateSubtask, onCreateComment } = renderPanel();
     const subtaskInput = screen.getByLabelText("New subtask title");
@@ -370,6 +421,90 @@ describe("TaskDetailPanel chrome", () => {
 });
 
 describe("TaskDetailPanel editing", () => {
+  it("resets a same-task draft when the canonical reset signal changes", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture({ title: "Canonical title", details: "Canonical details" });
+    const props = {
+      projects,
+      tags,
+      isLoading: false,
+      error: null,
+      headingRef: createRef<HTMLHeadingElement>(),
+      onClose: vi.fn(),
+      onSave: vi.fn(),
+      onTransition: vi.fn(),
+      onCreateSubtask: vi.fn(),
+      onTransitionSubtask: vi.fn(),
+      onCreateComment: vi.fn()
+    };
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <ShellToastContext.Provider value={vi.fn()}>
+          <TaskDetailPanel task={task} resetKey={0} {...props} />
+        </ShellToastContext.Provider>
+      </QueryClientProvider>
+    );
+
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "Rejected title");
+    await user.clear(screen.getByLabelText("Details"));
+    await user.type(screen.getByLabelText("Details"), "Rejected details");
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ShellToastContext.Provider value={vi.fn()}>
+          <TaskDetailPanel task={task} resetKey={1} {...props} />
+        </ShellToastContext.Provider>
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByLabelText("Title")).toHaveValue("Canonical title");
+    expect(screen.getByLabelText("Details")).toHaveValue("Canonical details");
+  });
+
+  it("keeps later metadata drafts through an older acknowledgement", async () => {
+    const user = userEvent.setup();
+    const initial = taskFixture({ due_date: "2026-08-01" });
+    const props = {
+      projects,
+      tags,
+      isLoading: false,
+      error: null,
+      headingRef: createRef<HTMLHeadingElement>(),
+      onClose: vi.fn(),
+      onSave: vi.fn(),
+      onTransition: vi.fn(),
+      onCreateSubtask: vi.fn(),
+      onTransitionSubtask: vi.fn(),
+      onCreateComment: vi.fn()
+    };
+    const queryClient = new QueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <TaskDetailPanel task={initial} resetKey={0} {...props} />
+      </QueryClientProvider>
+    );
+
+    await user.selectOptions(screen.getByLabelText("List"), "someday");
+    await user.selectOptions(screen.getByLabelText("Project"), "project-onboarding");
+    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    await user.click(screen.getByRole("checkbox", { name: "#calls" }));
+    fireEvent.change(screen.getByLabelText("Due date"), { target: { value: "2026-09-03" } });
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <TaskDetailPanel task={{ ...initial, details: "older acknowledgement", revision: 5 }} resetKey={0} {...props} />
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByLabelText("List")).toHaveValue("someday");
+    expect(screen.getByLabelText("Project")).toHaveValue("project-onboarding");
+    expect(screen.getByLabelText("Priority")).toHaveValue("high");
+    expect(screen.getByRole("checkbox", { name: "#calls" })).toBeChecked();
+    expect(screen.getByLabelText("Due date")).toHaveValue("2026-09-03");
+  });
+
   it("saves a changed title on blur and commits with Enter rather than inserting a newline", async () => {
     const user = userEvent.setup();
     const task = taskFixture();
@@ -441,7 +576,7 @@ describe("TaskDetailPanel editing", () => {
     });
 
     await user.click(screen.getByRole("checkbox", { name: "#deep-work" }));
-    expect(onSave).toHaveBeenLastCalledWith(task, { tag_ids: [], expected_revision: 4 });
+    expect(onSave).toHaveBeenLastCalledWith(task, { tag_ids: ["tag-calls"], expected_revision: 4 });
   });
 
   it("saves details only when the text actually changed", async () => {

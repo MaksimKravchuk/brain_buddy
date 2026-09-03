@@ -65,6 +65,10 @@ import { nowMs, recordTelemetry } from "../utils/telemetry";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
+export function getApiBaseUrl(): string {
+  return typeof window === "undefined" ? API_BASE_URL : new URL(API_BASE_URL, window.location.origin).href.replace(/\/$/, "");
+}
+
 type JsonRequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
   signal?: AbortSignal;
@@ -85,13 +89,15 @@ export class ApiError extends Error {
   status: number;
   payload: unknown;
   correlationId?: string;
+  retryAfterMs?: number;
 
-  constructor(message: string, status: number, payload: unknown, correlationId?: string) {
+  constructor(message: string, status: number, payload: unknown, correlationId?: string, retryAfterMs?: number) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.payload = payload;
     this.correlationId = correlationId;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -169,7 +175,13 @@ async function request<T>(path: string, options: JsonRequestOptions): Promise<T>
       },
       "warn"
     );
-    throw new ApiError(response.statusText || "Request failed", response.status, data, correlationId);
+    const retryAfter = response.headers.get("Retry-After");
+    const retryAfterSeconds = retryAfter === null ? NaN : Number(retryAfter);
+    const retryAfterDate = retryAfter === null ? NaN : Date.parse(retryAfter);
+    const retryAfterMs = Number.isFinite(retryAfterSeconds)
+      ? retryAfterSeconds * 1000
+      : Number.isFinite(retryAfterDate) ? Math.max(0, retryAfterDate - Date.now()) : undefined;
+    throw new ApiError(response.statusText || "Request failed", response.status, data, correlationId, retryAfterMs);
   }
 
   recordTelemetry({

@@ -7,7 +7,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAgentRunSummaries } from "../../api/agentHooks";
 import type { AgentRunSummaryResponse } from "../../api/agentTypes";
 
-import { apiClient } from "../../api/client";
+import { apiClient, getApiBaseUrl } from "../../api/client";
 import { useAuthStore } from "../../stores/authStore";
 import { parseOpenTaskState, parseTaskDateView, taskKeys, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskResponse, TaskSubtaskResponse, TaskSort } from "../../api/taskTypes";
@@ -19,6 +19,8 @@ import type { SmartAddDraft, SmartAddSuggestion } from "./smartAdd";
 import { SmartAddSuggestions } from "./SmartAddSuggestions";
 import { TaskTitleAutocompleteSuggestions } from "./TaskTitleAutocompleteSuggestions";
 import { TaskDetailEmptyPanel, TaskDetailPanel } from "./TaskDetailPanel";
+import { getTaskDetailAutosaveController } from "./taskDetailAutosave";
+import type { AutosaveResult } from "./taskDetailAutosave";
 import { useTaskTitleAutocomplete } from "./useTaskTitleAutocomplete";
 
 const stateLabels: Record<OpenTaskState, string> = {
@@ -70,6 +72,11 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const [showCompleted, setShowCompleted] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [autosaveConflict, setAutosaveConflict] = useState<Extract<AutosaveResult, { status: "conflict" }> | null>(null);
+  const [recoveryAvailable, setRecoveryAvailable] = useState(false);
+  const [canonicalResetKey, setCanonicalResetKey] = useState(0);
+  const conflictControllerRef = useRef<ReturnType<typeof getTaskDetailAutosaveController> | null>(null);
+  const discardFocusRef = useRef<HTMLElement | null>(null);
   const rowLinkRefs = useRef<Map<string, HTMLAnchorElement>>(new Map());
   const detailHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const listHeadingRef = useRef<HTMLHeadingElement | null>(null);
@@ -123,14 +130,109 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       }
     }
     previousTaskIdRef.current = taskId;
-  }, [detailQuery.data, taskId]);
+  }, [taskId]);
 
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
   const tasks = taskQuery.data?.items ?? [];
   const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
 
+  const accountId = useAuthStore((store) => store.user?.id);
+  const detailController = detailQuery.data && accountId
+    ? getTaskDetailAutosaveController(accountId, getApiBaseUrl(), detailQuery.data, (accepted) => {
+        queryClient.setQueryData(taskKeys.detail(accepted.id), accepted);
+        queryClient.setQueriesData<{ pages: Array<{ items: TaskResponse[] }>; pageParams: unknown[] }>(
+          { queryKey: ["tasks", "list"] },
+          (cached) => cached ? { ...cached, pages: cached.pages.map((page) => ({ ...page, items: page.items.map((item) => item.id === accepted.id ? accepted : item) })) } : cached
+        );
+        return invalidateTasks();
+      })
+    : null;
+
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
+  const applyCanonicalTask = (canonical: TaskResponse) => {
+    queryClient.setQueryData(taskKeys.detail(canonical.id), canonical);
+    queryClient.setQueriesData<{
+      pages: Array<{ items: TaskResponse[] }>;
+      pageParams: unknown[];
+    }>({ queryKey: ["tasks", "list"] }, (cached) => {
+      if (!cached) return cached;
+      return {
+        ...cached,
+        pages: cached.pages.map((page) => ({
+          ...page,
+          items: page.items.map((item) => item.id === canonical.id ? canonical : item)
+        }))
+      };
+    });
+    void invalidateTasks();
+  };
+  const refetchCanonicalProjections = async (canonical: TaskResponse) => {
+    // Apply the server-authoritative detail and list snapshot before waiting on
+    // the network refresh, so Discard never leaves a stale row/count visible.
+    applyCanonicalTask(canonical);
+    await taskQuery.refetch();
+  };
+  useEffect(() => {
+    setAutosaveConflict(null);
+    const available = Boolean(detailController?.recover());
+    setRecoveryAvailable(available);
+    if (available) setMutationError("Unsaved task change recovered. Retry or Discard.");
+  }, [detailController, taskId]);
+
+  useEffect(() => {
+    if (canonicalResetKey === 0 || !discardFocusRef.current) return;
+    discardFocusRef.current.focus();
+    discardFocusRef.current = null;
+  }, [canonicalResetKey]);
+
+  const handleAutosaveResult = (result: AutosaveResult, controller?: ReturnType<typeof getTaskDetailAutosaveController>) => {
+    if (result.status === "conflict") {
+      conflictControllerRef.current = controller ?? detailController;
+      setAutosaveConflict(result);
+      setMutationError("Task changed elsewhere. Choose Retry or Discard.");
+      return;
+    }
+    setAutosaveConflict(null);
+    setRecoveryAvailable(false);
+    setMutationError("Saved");
+    window.setTimeout(() => setMutationError((message) => message === "Saved" ? null : message), 1500);
+  };
+
+  const recoverAutosave = () => {
+    if (!detailController) return;
+    void detailController.resumeRecovery().then(handleAutosaveResult).catch((caught: unknown) => setMutationError(getErrorMessage(caught)));
+  };
+
+  const discardAutosave = async () => {
+    const controller = detailController ?? conflictControllerRef.current;
+    if (!controller || !window.confirm("Discard this unsaved change?")) return;
+    if (document.activeElement instanceof HTMLTextAreaElement && document.activeElement.getAttribute("aria-label") === "Title") {
+      discardFocusRef.current = document.activeElement;
+    } else {
+      discardFocusRef.current = detailHeadingRef.current ?? listHeadingRef.current;
+    }
+    if (autosaveConflict) {
+      await refetchCanonicalProjections(autosaveConflict.discard());
+      setCanonicalResetKey((key) => key + 1);
+      setAutosaveConflict(null);
+      setRecoveryAvailable(false);
+      setMutationError(null);
+      return;
+    }
+    controller.discardRecovery();
+    try {
+      const { data: canonical } = await detailQuery.refetch();
+      if (canonical) {
+        await refetchCanonicalProjections(canonical);
+        setCanonicalResetKey((key) => key + 1);
+      }
+      setRecoveryAvailable(false);
+      setMutationError(null);
+    } catch (caught: unknown) {
+      setMutationError(getErrorMessage(caught));
+    }
+  };
   const listPath = projectId
     ? `/projects/${projectId}`
     : tagId
@@ -194,44 +296,6 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       void invalidateTasks();
       void queryClient.invalidateQueries({ queryKey: ["tasks", "projects"] });
       void queryClient.invalidateQueries({ queryKey: ["tasks", "tags"] });
-    },
-    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
-  });
-
-  const transitionMutation = useMutation({
-    mutationFn: ({ task, action, toState }: { task: TaskResponse; action: "move" | "complete" | "reopen"; toState?: OpenTaskState }) =>
-      apiClient.transitionTask(task.id, { action, to_state: toState, expected_revision: task.revision }, idempotencyKey(action)),
-    onSuccess: () => {
-      setMutationError(null);
-      void invalidateTasks();
-    },
-    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
-  });
-
-  const detailUpdateMutation = useMutation({
-    mutationFn: ({ task, payload }: { task: TaskResponse; payload: Parameters<typeof apiClient.updateTask>[1] }) =>
-      apiClient.updateTask(task.id, payload, idempotencyKey("detail-edit")),
-    onSuccess: (updated) => {
-      setMutationError(null);
-      // Per-field saves need the bumped revision before the list refetch lands,
-      // or the next field edit would carry a stale expected_revision.
-      queryClient.setQueryData(taskKeys.detail(updated.id), updated);
-      void invalidateTasks();
-    },
-    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
-  });
-
-  const detailTransitionMutation = useMutation({
-    mutationFn: ({ task, action, toState, waitingFor }: { task: TaskResponse; action: "move" | "complete" | "reopen" | "cancel"; toState?: OpenTaskState; waitingFor?: string }) =>
-      apiClient.transitionTask(
-        task.id,
-        { action, to_state: toState, waiting_for: waitingFor || undefined, expected_revision: task.revision },
-        idempotencyKey(`detail-${action}`)
-      ),
-    onSuccess: (updated) => {
-      setMutationError(null);
-      queryClient.setQueryData(taskKeys.detail(updated.id), updated);
-      void invalidateTasks();
     },
     onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
   });
@@ -360,23 +424,36 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     taskSearch: searchParams.toString(),
     selectedTaskId: taskId,
     registerRowLink,
-    onComplete: (task: TaskResponse) => transitionMutation.mutate({ task, action: "complete" as const }),
+    onComplete: (task: TaskResponse) => {
+      if (!accountId) return;
+      const controller = getTaskDetailAutosaveController(accountId, getApiBaseUrl(), task, (accepted) => {
+        queryClient.setQueryData(taskKeys.detail(accepted.id), accepted);
+        return invalidateTasks();
+      });
+      conflictControllerRef.current = controller;
+      void controller.save({ kind: "transition", payload: { action: "complete" } }, idempotencyKey("complete"))
+        .then((result) => handleAutosaveResult(result, controller))
+        .catch((caught: unknown) => setMutationError(getErrorMessage(caught)));
+    },
     agentRuns: agentRunSummaries
   };
 
   const panel = !panelOpen ? null : taskId ? (
     <TaskDetailPanel
       task={detailQuery.data}
+      autosave={detailController ?? undefined}
+      resetKey={canonicalResetKey}
       projects={projects}
       tags={tags}
       isLoading={detailQuery.isLoading}
       error={detailQuery.error}
       headingRef={detailHeadingRef}
       onClose={() => navigate(closeTarget)}
-      onSave={(task, payload) => detailUpdateMutation.mutate({ task, payload })}
-      onTransition={(task, action, toState, waitingFor) =>
-        detailTransitionMutation.mutate({ task, action, toState, waitingFor })
-      }
+      // Autosave owns every mutation when a controller exists; these fallbacks
+      // are only reached with no account (and thus no controller), where there
+      // is nothing to save, so they stay no-ops rather than dead `.save()` calls.
+      onSave={() => undefined}
+      onTransition={() => undefined}
       onCreateSubtask={(task, subtaskTitle) => subtaskCreateMutation.mutate({ task, title: subtaskTitle })}
       onTransitionSubtask={(task, subtask, action) => subtaskTransitionMutation.mutate({ task, subtask, action })}
       onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
@@ -467,7 +544,13 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           </div>
         </div>
 
-        {mutationError ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{mutationError}</div> : null}
+        {mutationError ? (
+          <div role="alert" className="relative z-50 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            <span>{mutationError}</span>
+            {autosaveConflict ? <Button size="sm" variant="secondary" onClick={() => void autosaveConflict.retry().then(handleAutosaveResult).catch((caught: unknown) => setMutationError(getErrorMessage(caught)))}>Retry</Button> : recoveryAvailable ? <Button size="sm" variant="secondary" onClick={recoverAutosave}>Retry</Button> : null}
+            {(autosaveConflict || recoveryAvailable) ? <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={discardAutosave}>Discard</Button> : null}
+          </div>
+        ) : null}
 
         {hasFrameError ? (
           <ErrorState

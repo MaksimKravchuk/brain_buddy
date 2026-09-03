@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "../stores/authStore";
+import { resetTaskDetailAutosaveControllersForTests } from "../features/tasks/taskDetailAutosave";
 import { AppRoutes } from "./AppRoutes";
 
 vi.mock("../pages/TreeWorkspace", () => ({
@@ -89,6 +90,8 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 beforeEach(() => {
+  resetTaskDetailAutosaveControllersForTests();
+  sessionStorage.clear();
   act(() => {
     useAuthStore.setState({
       user: { id: "user-1", email: "max@example.test" },
@@ -98,7 +101,7 @@ beforeEach(() => {
 
   vi.stubGlobal(
     "fetch",
-    vi.fn((input: RequestInfo | URL) => {
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/tasks") && url.includes("/transitions")) {
         return Promise.resolve(jsonResponse({ ...taskResponse.items[0], state: "completed", revision: 2 }));
@@ -107,6 +110,20 @@ beforeEach(() => {
         return Promise.resolve(jsonResponse(taskResponse));
       }
       if (url.includes("/tasks/")) {
+        if (init?.method === "PATCH") {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown> & {
+            expected_revision?: number;
+          };
+          const { expected_revision: expectedRevision = taskResponse.items[0].revision, ...changes } = body;
+          return Promise.resolve(
+            jsonResponse({
+              ...taskResponse.items[0],
+              ...changes,
+              revision: expectedRevision + 1,
+              updated_at: "2026-02-24T12:00:01Z"
+            })
+          );
+        }
         return Promise.resolve(jsonResponse(taskResponse.items[0]));
       }
       if (url.includes("/projects")) {
@@ -121,6 +138,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetTaskDetailAutosaveControllersForTests();
+  sessionStorage.clear();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   act(() => {
@@ -622,7 +641,7 @@ describe("AppRoutes", () => {
           ([input, init]) => /\/tasks\/task-1$/.test(String(input)) && (init as RequestInit | undefined)?.method === "PATCH"
         );
       const tagCall = patchCalls[patchCalls.length - 1];
-      expect(JSON.parse(String(tagCall?.[1]?.body))).toMatchObject({ tag_ids: ["tag-deep-work", "tag-calls"] });
+      expect(JSON.parse(String(tagCall?.[1]?.body))).toMatchObject({ tag_ids: ["tag-calls", "tag-deep-work"] });
     });
   });
 

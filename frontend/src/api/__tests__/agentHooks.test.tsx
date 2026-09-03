@@ -134,6 +134,15 @@ describe("agentHooks", () => {
     expect(scoped.summaries(["task-1"])).toEqual([...scoped.all, "summaries", ["task-1"]]);
   });
 
+  it("keeps the configured API identity when query keys are built outside a browser", () => {
+    vi.stubGlobal("window", undefined);
+
+    expect(agentKeys.forOwner("account-a").all).toEqual([
+      "agents",
+      `${configuredApiBaseUrl.replace(/\/$/, "")}::account-a`
+    ]);
+  });
+
   it("uses distinct normalized API origins for the same owner", () => {
     const originalWindow = window;
     const atOrigin = (origin: string) => {
