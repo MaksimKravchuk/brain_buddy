@@ -165,8 +165,8 @@ test.describe("account trigger rendered keyboard focus", () => {
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
     await test.step("verify keyboard and pointer rendered focus states", async () => {
       await assertRenderedFocus(page, false);
-      await assertAccountMenuJourney(page);
       await page.screenshot({ path: testInfo.outputPath("tasks-normal-focus.png") });
+      await assertAccountMenuJourney(page);
     });
   });
 
@@ -185,8 +185,8 @@ test.describe("account trigger rendered keyboard focus", () => {
       await expect(forcedPage.getByRole("heading", { name: "Inbox" })).toBeVisible();
       await test.step("verify the Chromium forced-colors rendering contract", async () => {
         await assertRenderedFocus(forcedPage, true);
-        await assertAccountMenuJourney(forcedPage);
         await forcedPage.screenshot({ path: testInfo.outputPath("tasks-forced-colors-focus.png") });
+        await assertAccountMenuJourney(forcedPage);
       });
     } finally {
       await forcedContext.close();
@@ -201,8 +201,8 @@ test.describe("account trigger rendered keyboard focus", () => {
     await expect(page.getByRole("heading", { name: /Users|Admin/ }).first()).toBeVisible();
     await test.step("verify the same real AppShell trigger on admin", async () => {
       await assertRenderedFocus(page, false);
-      await assertAccountMenuJourney(page);
       await page.screenshot({ path: testInfo.outputPath("admin-normal-focus.png") });
+      await assertAccountMenuJourney(page);
     });
   });
 
@@ -221,8 +221,8 @@ test.describe("account trigger rendered keyboard focus", () => {
       await forcedPage.goto("/admin");
       await expect(forcedPage.getByRole("heading", { name: /Users|Admin/ }).first()).toBeVisible();
       await assertRenderedFocus(forcedPage, true);
-      await assertAccountMenuJourney(forcedPage);
       await forcedPage.screenshot({ path: testInfo.outputPath("admin-forced-colors-focus.png") });
+      await assertAccountMenuJourney(forcedPage);
     } finally {
       await forcedContext.close();
     }
