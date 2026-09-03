@@ -26,6 +26,8 @@ Content limits are unchanged: `MAX_PROGRESS_CHARS=2000`, `MAX_QUESTION_CHARS=400
 | `card_fingerprint` | 64-hex sha256 \| None | over canonical JSON of `{interface_url, protocol_version, security_schemes: {name: kind/header}, security_requirements, extension_uris}`; drift detection (AC-012) |
 | `card_drift_at` | datetime \| None | set when preview/dispatch sees a fingerprint mismatch; cleared by a successful test |
 | `guarantee_tier` | `Literal["guaranteed","best_effort"] \| None` | `guaranteed` iff the extension URI is declared; `None` until tested |
+| `best_effort_acknowledged_at` | datetime \| None | FR-003/AC-026: stamped by the first confirmed hand-off on this connection whose request carries `acknowledge_duplicate_risk: true`; while `None` and the tier is `best_effort`, a confirm without the flag is refused (`duplicate_risk_acknowledgement_required`); cleared when the tier becomes `guaranteed` after a re-test (irrelevant then) and never on rename |
+| `agent_changed` (derived) | bool | `last_test_error_code == "agent_card_changed"` — the fifth connection condition **Agent changed** (FR-002, D-01-S20 / M-01-S18) |
 | `status` | `untested\|ready\|invalid_credentials\|unreachable\|unsupported\|disconnected` | unchanged vocabulary; drift → `untested` |
 | `last_test_error_code` | str \| None | `a2a_unreachable`, `a2a_not_an_agent`, `a2a_protocol_version_unsupported`, `a2a_no_supported_interface`, `a2a_auth_scheme_unsupported`, `a2a_credentials_rejected`, `a2a_rate_limited`, `agent_card_changed`, plus every `destination_*` code from `egress.py` |
 | `last_contact_at`, `last_tested_at`, `scope_verified_at`, `first_dispatch_at`, `disconnected_at` | unchanged | reauth scope resets on address change, credential rotation **and card drift** |
@@ -41,8 +43,15 @@ description ≤500}`), `security_schemes_offered[]` (`{name, kind: bearer|api_ke
 
 **State transitions** (connection): `untested → (test) ready | invalid_credentials |
 unreachable | unsupported`; `ready → stale` is derived (`now >= last_contact_at + stale_after`);
-`ready|stale → untested` on address change, credential rotation or card drift; any →
-`disconnected` on owner disconnect or the wire migration; `disconnected` is terminal.
+`ready|stale → untested` on address change or credential rotation; `ready|stale → untested +
+agent_card_changed` (**Agent changed**) on card drift seen by preview, dispatch or test, which
+also resets `scope_verified_at` (FR-004); any → `disconnected` on owner disconnect or the wire
+migration; `disconnected` is terminal. Hand-off is refused for `untested`, `stale`, changed
+and `disconnected`.
+
+**Client-facing vocabulary** (spec Clarifications 2026-09-03): REST responses say
+`supporting_items` and `correlation_id`; the internal field names `context_items`/`context_id`
+below mirror the protocol and never leave `backend/app` (see `contracts/api-deltas.md`).
 
 ## 2. Execution Run (`AgentRunDocument`) — FR-005, FR-006, FR-007, FR-008, FR-013, FR-015
 
@@ -51,7 +60,7 @@ unreachable | unsupported`; `ready → stale` is derived (`now >= last_contact_a
 | `id`, `owner_id`, `connection_id`, `task_id`, `agent_name`, `manifest`, `dispatched_at`, `dispatch_state`, `dispatch_error_code`, `reported_state`, `progress_text`, `question_text`, `result_text`, `result_link`, `failure_reason`, `last_contact_at`, `cancel_requested_at`, `reply_pending_command_id`, `connection_disconnected_at`, `content_expires_at`, `content_expired`, `created_at`, `updated_at`, `revision` | unchanged | 007 |
 | `context_id` | str | `= id` (FR-006); identifier tier (90 d) |
 | `message_id` | str | `= f"{id}:start"`; identifier tier |
-| `agent_task_id` | str \| None | first known from the SendMessage response or the ListTasks probe; may be **succeeded** by the task returned by a reply exchange (timeline records `task_succeeded`); identifier tier |
+| `agent_task_id` | str \| None | first known from the SendMessage response or the ListTasks probe; **task succession** (Resolved 6): a reply exchange that returns a Task with a different id in the same correlation context replaces it, the previous id is kept in the succession timeline row, and the reply is never refused; identifier tier |
 | `interface_url` | str \| None | copied from the connection at dispatch; observation of this run always uses it (edge case "card changes while a run is active"); identifier tier |
 | `card_fingerprint` | str \| None | at dispatch; identifier tier |
 | `guarantee_tier` | `guaranteed\|best_effort` | copied at dispatch; shown on every surface (FR-013) |
