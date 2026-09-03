@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -32,4 +32,4 @@
 ## Notes
 
 - Items marked incomplete require spec updates before `/speckit-clarify` or `/speckit-plan`
-- 2026-09-03: three [NEEDS CLARIFICATION] markers remain by design (FR-003, FR-011, FR-017); they are put to the product owner during specify/clarify and the box above is ticked once the spec carries the answers.
+- 2026-09-03: the three specify-stage markers (FR-003, FR-011, FR-017) were answered by the product owner and encoded in the spec and its Clarifications section; no markers remain.
