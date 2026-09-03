@@ -337,6 +337,9 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <p class="caption" style="color:var(--warn-fg)"><strong>Best-effort single start.</strong> This agent does not
   declare BrainBuddy's single-start extension. Before any retry BrainBuddy asks the agent whether a task for this run
   already exists and adopts it instead of sending again. A duplicate remains possible if the agent forgets its tasks.</p>
+  <p class="caption" style="color:var(--warn-fg)"><a class="link" href="docs/a2a-single-start-extension.md"
+  rel="noopener noreferrer">Read the single-start extension specification</a> <span class="micro">Opens the published
+  specification outside BrainBuddy, so you can ask your agent's operator to declare it.</span></p>
 </div>
   <div class="card tint-info stack g1">
   <p class="label" style="color:var(--info-fg)">Cancellation</p>
@@ -380,13 +383,13 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   </div>
 </div></div>
 </section><section class="panel ">
-  <header class="panel-h"><span class="sid">D-02-S05</span><span class="pname">empty (filtered to nothing) — connections exist, none is eligible</span><p class="pnote">AC-011. The refusal happens before any task content is prepared, and it names the corrective action per row.</p></header>
+  <header class="panel-h"><span class="sid">D-02-S05</span><span class="pname">empty (filtered to nothing) — connections exist, none is eligible</span><p class="pnote">AC-011 / FR-002. A stale, untested or **Agent changed** connection cannot take a hand-off, so it is listed with its reason rather than silently hidden.</p></header>
   <div class="panel-b "><div class="dlg">
   <div class="overlay-head"><div class="stack g1"><p class="label">Review before sending</p>
   <p class="title">Hand this task to an agent</p></div></div>
   <div class="stack g2">
     <p class="subtitle">None of your agents can take this hand-off</p>
-    <p class="body">You have three connections. None of them is tested and fresh right now.</p>
+    <p class="body">You have four connections. None of them is tested and fresh right now.</p>
     <div class="stack g2">
       <div class="card flat row" style="padding:8px 10px"><span style="font-size:13px">Research runner</span>
         <span class="spacer"></span><span class="pill warn">Stale</span></div>
@@ -394,6 +397,8 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
         <span class="spacer"></span><span class="pill bad">Unsupported authentication scheme</span></div>
       <div class="card flat row" style="padding:8px 10px"><span style="font-size:13px">Old relay connector</span>
         <span class="spacer"></span><span class="pill mute">Disconnected</span></div>
+      <div class="card flat row" style="padding:8px 10px"><span style="font-size:13px">Hermes planner</span>
+        <span class="spacer"></span><span class="pill warn">Agent changed</span></div>
     </div>
     <p class="caption">Test a connection, or add a new agent. BrainBuddy will not offer a destination it would refuse.</p>
     <div class="row"><span class="btn primary sm">Open Connected agents</span></div>
@@ -426,6 +431,308 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
     </div>
   </div>
   <p class="micro mono">Correlation ID 5f0b-2c74-a913</p>
+</div></div>
+</section></div>
+<h2 class="sec">The one-time best-effort acknowledgement</h2>
+<div class="grid"><section class="panel wide">
+  <header class="panel-h"><span class="sid">D-02-S13</span><span class="pname">best-effort, first hand-off — not acknowledged, sending disabled</span><p class="pnote">AC-026 / FR-003. The one-time acknowledgement is the gate: until the box is ticked, Send to agent is disabled and no manifest can be confirmed.</p></header>
+  <div class="panel-b "><div class="dlg" style="gap:14px">
+  <div class="overlay-head">
+    <div class="stack g1">
+      <p class="label">Review before sending</p>
+      <p class="title">Hand this task to an agent</p>
+      <p class="caption">Write the migration runbook for the relay cutover</p>
+    </div>
+    <span class="spacer"></span><span class="btn ghost sm" aria-label="Close the review">Close</span>
+  </div>
+  
+  <div class="stack g2">
+    <p class="label">Choose an agent</p>
+    <div class="card flat stack g1" style="padding:10px 12px">
+      <label class="radio"><span class="dot on"></span><span class="strong" style="font-size:13px">Hermes planner</span>
+      <span class="pill ok" style="margin-left:6px">Tested ready</span></label>
+    </div>
+    <div class="card flat stack g1" style="padding:10px 12px;opacity:.55">
+      <label class="radio"><span class="dot"></span><span style="font-size:13px">Research runner</span>
+      <span class="pill warn" style="margin-left:6px">Stale</span></label>
+      <p class="micro" style="padding-left:22px">Test it again before a hand-off.</p>
+    </div>
+  </div>
+
+  <section class="card stack g3">
+    <p class="subtitle">What will be sent</p>
+
+    <div class="stack g1">
+      <p class="label">Task title</p>
+      <p class="body">Write the migration runbook for the relay cutover</p>
+    </div>
+
+    <div class="stack g1">
+      <label class="radio"><span class="box on"></span><span style="font-size:12px;color:var(--fg4)">Include task details</span></label>
+      <p class="body">Cover the pre-flight checks, the cutover order and the rollback trigger. Reference the staging
+      rehearsal from last week.</p>
+    </div>
+
+    <div class="stack g2">
+      <p class="label">Supporting items</p>
+      <div class="rowt card flat" style="padding:8px 10px">
+        <div class="stack g1" style="min-width:0">
+          <p class="micro" style="color:var(--fg4);font-weight:500">Staging rehearsal notes</p>
+          <p class="body" style="font-size:13px">Two rollbacks, both clean. The slow step was DNS propagation.</p>
+        </div>
+        <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Staging rehearsal notes">Remove</span>
+      </div>
+      <div class="rowt card flat" style="padding:8px 10px">
+        <div class="stack g1" style="min-width:0">
+          <p class="micro" style="color:var(--fg4);font-weight:500">Cutover window</p>
+          <p class="body" style="font-size:13px">Saturday 02:00–04:00 UTC.</p>
+        </div>
+        <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Cutover window">Remove</span>
+      </div>
+      <p class="hint">Remove anything you do not want to leave BrainBuddy. Removing an item rebuilds this review, so
+      what you confirm is always what you last read.</p>
+    </div>
+
+    <hr class="hair">
+    <dl class="kv">
+      <dt>Destination agent</dt><dd>Hermes planner · <span class="mono">https://hermes.example.com/a2a/v1</span></dd>
+      <dt>Task ID</dt><dd class="mono">tsk_8f21c0a4</dd>
+      <dt>Run ID</dt><dd class="mono">run_5b7e19d3</dd>
+      <dt>Correlation ID</dt><dd class="mono">run_5b7e19d3</dd>
+    </dl>
+    <p class="micro">The Task ID and the run ID travel with the message. The correlation ID is how BrainBuddy finds
+    this run again at the agent before it would ever resend.</p>
+  </section>
+
+  <div class="card tint-warn stack g1">
+  <p class="label" style="color:var(--warn-fg)">Guarantee</p>
+  <p class="caption" style="color:var(--warn-fg)"><strong>Best-effort single start.</strong> This agent does not
+  declare BrainBuddy's single-start extension. Before any retry BrainBuddy asks the agent whether a task for this run
+  already exists and adopts it instead of sending again. A duplicate remains possible if the agent forgets its tasks.</p>
+  <p class="caption" style="color:var(--warn-fg)"><a class="link" href="docs/a2a-single-start-extension.md"
+  rel="noopener noreferrer">Read the single-start extension specification</a> <span class="micro">Opens the published
+  specification outside BrainBuddy, so you can ask your agent's operator to declare it.</span></p>
+</div>
+  <div class="card tint-info stack g1">
+  <p class="label" style="color:var(--info-fg)">Cancellation</p>
+  <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Agent cards do
+  not advertise whether cancellation works, so BrainBuddy can only find out once you request it. If the agent refuses,
+  BrainBuddy says so and keeps the last state it observed.</p>
+</div>
+  <div class="card tint-warn stack g1">
+  <p class="caption" style="color:var(--warn-fg)">Everything listed above is copied out of BrainBuddy to an agent you
+  operate. BrainBuddy cannot recall it, cannot verify what the agent does with it, and does not control where the agent
+  stores it.</p>
+</div>
+  <div class="card tint-warn stack g2">
+  <label class="radio"><span class="box"></span><span style="font-size:13px;color:var(--warn-fg)">I understand that a
+  duplicate task is possible with this agent</span></label>
+  <p class="micro" style="color:var(--warn-fg)">Asked once, on your first hand-off to this agent. Sending stays
+  unavailable until you acknowledge it.</p>
+</div>
+
+  <div class="row"><span class="spacer"></span><span class="btn">Cancel</span>
+  <span class="btn primary" aria-disabled="true">Send to agent</span></div>
+</div></div>
+</section></div>
+<div class="grid"><section class="panel wide">
+  <header class="panel-h"><span class="sid">D-02-S14</span><span class="pname">best-effort, first hand-off — acknowledged, sending enabled</span><p class="pnote">AC-026. The acknowledgement is recorded against the connection, not against this run, so it is asked once.</p></header>
+  <div class="panel-b "><div class="dlg" style="gap:14px">
+  <div class="overlay-head">
+    <div class="stack g1">
+      <p class="label">Review before sending</p>
+      <p class="title">Hand this task to an agent</p>
+      <p class="caption">Write the migration runbook for the relay cutover</p>
+    </div>
+    <span class="spacer"></span><span class="btn ghost sm" aria-label="Close the review">Close</span>
+  </div>
+  
+  <div class="stack g2">
+    <p class="label">Choose an agent</p>
+    <div class="card flat stack g1" style="padding:10px 12px">
+      <label class="radio"><span class="dot on"></span><span class="strong" style="font-size:13px">Hermes planner</span>
+      <span class="pill ok" style="margin-left:6px">Tested ready</span></label>
+    </div>
+    <div class="card flat stack g1" style="padding:10px 12px;opacity:.55">
+      <label class="radio"><span class="dot"></span><span style="font-size:13px">Research runner</span>
+      <span class="pill warn" style="margin-left:6px">Stale</span></label>
+      <p class="micro" style="padding-left:22px">Test it again before a hand-off.</p>
+    </div>
+  </div>
+
+  <section class="card stack g3">
+    <p class="subtitle">What will be sent</p>
+
+    <div class="stack g1">
+      <p class="label">Task title</p>
+      <p class="body">Write the migration runbook for the relay cutover</p>
+    </div>
+
+    <div class="stack g1">
+      <label class="radio"><span class="box on"></span><span style="font-size:12px;color:var(--fg4)">Include task details</span></label>
+      <p class="body">Cover the pre-flight checks, the cutover order and the rollback trigger. Reference the staging
+      rehearsal from last week.</p>
+    </div>
+
+    <div class="stack g2">
+      <p class="label">Supporting items</p>
+      <div class="rowt card flat" style="padding:8px 10px">
+        <div class="stack g1" style="min-width:0">
+          <p class="micro" style="color:var(--fg4);font-weight:500">Staging rehearsal notes</p>
+          <p class="body" style="font-size:13px">Two rollbacks, both clean. The slow step was DNS propagation.</p>
+        </div>
+        <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Staging rehearsal notes">Remove</span>
+      </div>
+      <div class="rowt card flat" style="padding:8px 10px">
+        <div class="stack g1" style="min-width:0">
+          <p class="micro" style="color:var(--fg4);font-weight:500">Cutover window</p>
+          <p class="body" style="font-size:13px">Saturday 02:00–04:00 UTC.</p>
+        </div>
+        <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Cutover window">Remove</span>
+      </div>
+      <p class="hint">Remove anything you do not want to leave BrainBuddy. Removing an item rebuilds this review, so
+      what you confirm is always what you last read.</p>
+    </div>
+
+    <hr class="hair">
+    <dl class="kv">
+      <dt>Destination agent</dt><dd>Hermes planner · <span class="mono">https://hermes.example.com/a2a/v1</span></dd>
+      <dt>Task ID</dt><dd class="mono">tsk_8f21c0a4</dd>
+      <dt>Run ID</dt><dd class="mono">run_5b7e19d3</dd>
+      <dt>Correlation ID</dt><dd class="mono">run_5b7e19d3</dd>
+    </dl>
+    <p class="micro">The Task ID and the run ID travel with the message. The correlation ID is how BrainBuddy finds
+    this run again at the agent before it would ever resend.</p>
+  </section>
+
+  <div class="card tint-warn stack g1">
+  <p class="label" style="color:var(--warn-fg)">Guarantee</p>
+  <p class="caption" style="color:var(--warn-fg)"><strong>Best-effort single start.</strong> This agent does not
+  declare BrainBuddy's single-start extension. Before any retry BrainBuddy asks the agent whether a task for this run
+  already exists and adopts it instead of sending again. A duplicate remains possible if the agent forgets its tasks.</p>
+  <p class="caption" style="color:var(--warn-fg)"><a class="link" href="docs/a2a-single-start-extension.md"
+  rel="noopener noreferrer">Read the single-start extension specification</a> <span class="micro">Opens the published
+  specification outside BrainBuddy, so you can ask your agent's operator to declare it.</span></p>
+</div>
+  <div class="card tint-info stack g1">
+  <p class="label" style="color:var(--info-fg)">Cancellation</p>
+  <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Agent cards do
+  not advertise whether cancellation works, so BrainBuddy can only find out once you request it. If the agent refuses,
+  BrainBuddy says so and keeps the last state it observed.</p>
+</div>
+  <div class="card tint-warn stack g1">
+  <p class="caption" style="color:var(--warn-fg)">Everything listed above is copied out of BrainBuddy to an agent you
+  operate. BrainBuddy cannot recall it, cannot verify what the agent does with it, and does not control where the agent
+  stores it.</p>
+</div>
+  <div class="card tint-warn stack g2">
+  <label class="radio"><span class="box on"></span><span style="font-size:13px;color:var(--warn-fg)">I understand that
+  a duplicate task is possible with this agent</span></label>
+  <p class="micro" style="color:var(--warn-fg)">Acknowledged. BrainBuddy will not ask again for this agent; later
+  hand-offs show the disclosure on its own.</p>
+</div>
+
+  <div class="row"><span class="spacer"></span><span class="btn">Cancel</span>
+  <span class="btn primary">Send to agent</span></div>
+</div></div>
+</section></div>
+<div class="grid"><section class="panel wide">
+  <header class="panel-h"><span class="sid">D-02-S15</span><span class="pname">best-effort, later hand-off — disclosure without the acknowledgement</span><p class="pnote">AC-026 / FR-003. The tier disclosure and the extension link still appear in every hand-off review; only the acknowledgement step is one-time.</p></header>
+  <div class="panel-b "><div class="dlg" style="gap:14px">
+  <div class="overlay-head">
+    <div class="stack g1">
+      <p class="label">Review before sending</p>
+      <p class="title">Hand this task to an agent</p>
+      <p class="caption">Write the migration runbook for the relay cutover</p>
+    </div>
+    <span class="spacer"></span><span class="btn ghost sm" aria-label="Close the review">Close</span>
+  </div>
+  
+  <div class="stack g2">
+    <p class="label">Choose an agent</p>
+    <div class="card flat stack g1" style="padding:10px 12px">
+      <label class="radio"><span class="dot on"></span><span class="strong" style="font-size:13px">Hermes planner</span>
+      <span class="pill ok" style="margin-left:6px">Tested ready</span></label>
+    </div>
+    <div class="card flat stack g1" style="padding:10px 12px;opacity:.55">
+      <label class="radio"><span class="dot"></span><span style="font-size:13px">Research runner</span>
+      <span class="pill warn" style="margin-left:6px">Stale</span></label>
+      <p class="micro" style="padding-left:22px">Test it again before a hand-off.</p>
+    </div>
+  </div>
+
+  <section class="card stack g3">
+    <p class="subtitle">What will be sent</p>
+
+    <div class="stack g1">
+      <p class="label">Task title</p>
+      <p class="body">Write the migration runbook for the relay cutover</p>
+    </div>
+
+    <div class="stack g1">
+      <label class="radio"><span class="box on"></span><span style="font-size:12px;color:var(--fg4)">Include task details</span></label>
+      <p class="body">Cover the pre-flight checks, the cutover order and the rollback trigger. Reference the staging
+      rehearsal from last week.</p>
+    </div>
+
+    <div class="stack g2">
+      <p class="label">Supporting items</p>
+      <div class="rowt card flat" style="padding:8px 10px">
+        <div class="stack g1" style="min-width:0">
+          <p class="micro" style="color:var(--fg4);font-weight:500">Staging rehearsal notes</p>
+          <p class="body" style="font-size:13px">Two rollbacks, both clean. The slow step was DNS propagation.</p>
+        </div>
+        <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Staging rehearsal notes">Remove</span>
+      </div>
+      <div class="rowt card flat" style="padding:8px 10px">
+        <div class="stack g1" style="min-width:0">
+          <p class="micro" style="color:var(--fg4);font-weight:500">Cutover window</p>
+          <p class="body" style="font-size:13px">Saturday 02:00–04:00 UTC.</p>
+        </div>
+        <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Cutover window">Remove</span>
+      </div>
+      <p class="hint">Remove anything you do not want to leave BrainBuddy. Removing an item rebuilds this review, so
+      what you confirm is always what you last read.</p>
+    </div>
+
+    <hr class="hair">
+    <dl class="kv">
+      <dt>Destination agent</dt><dd>Hermes planner · <span class="mono">https://hermes.example.com/a2a/v1</span></dd>
+      <dt>Task ID</dt><dd class="mono">tsk_8f21c0a4</dd>
+      <dt>Run ID</dt><dd class="mono">run_5b7e19d3</dd>
+      <dt>Correlation ID</dt><dd class="mono">run_5b7e19d3</dd>
+    </dl>
+    <p class="micro">The Task ID and the run ID travel with the message. The correlation ID is how BrainBuddy finds
+    this run again at the agent before it would ever resend.</p>
+  </section>
+
+  <div class="card tint-warn stack g1">
+  <p class="label" style="color:var(--warn-fg)">Guarantee</p>
+  <p class="caption" style="color:var(--warn-fg)"><strong>Best-effort single start.</strong> This agent does not
+  declare BrainBuddy's single-start extension. Before any retry BrainBuddy asks the agent whether a task for this run
+  already exists and adopts it instead of sending again. A duplicate remains possible if the agent forgets its tasks.</p>
+  <p class="caption" style="color:var(--warn-fg)"><a class="link" href="docs/a2a-single-start-extension.md"
+  rel="noopener noreferrer">Read the single-start extension specification</a> <span class="micro">Opens the published
+  specification outside BrainBuddy, so you can ask your agent's operator to declare it.</span></p>
+</div>
+  <div class="card tint-info stack g1">
+  <p class="label" style="color:var(--info-fg)">Cancellation</p>
+  <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Agent cards do
+  not advertise whether cancellation works, so BrainBuddy can only find out once you request it. If the agent refuses,
+  BrainBuddy says so and keeps the last state it observed.</p>
+</div>
+  <div class="card tint-warn stack g1">
+  <p class="caption" style="color:var(--warn-fg)">Everything listed above is copied out of BrainBuddy to an agent you
+  operate. BrainBuddy cannot recall it, cannot verify what the agent does with it, and does not control where the agent
+  stores it.</p>
+</div>
+  <div class="card tint-sunk stack g1">
+  <p class="micro">You acknowledged the duplicate risk for this agent on your first hand-off, so there is no
+  acknowledgement step here. The disclosure above still applies to every hand-off.</p>
+</div>
+
+  <div class="row"><span class="spacer"></span><span class="btn">Cancel</span>
+  <span class="btn primary">Send to agent</span></div>
 </div></div>
 </section></div>
 <h2 class="sec">Refusals, interruption and confirmation</h2>
@@ -634,6 +941,9 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <p class="caption" style="color:var(--warn-fg)"><strong>Best-effort single start.</strong> This agent does not
   declare BrainBuddy's single-start extension. Before any retry BrainBuddy asks the agent whether a task for this run
   already exists and adopts it instead of sending again. A duplicate remains possible if the agent forgets its tasks.</p>
+  <p class="caption" style="color:var(--warn-fg)"><a class="link" href="docs/a2a-single-start-extension.md"
+  rel="noopener noreferrer">Read the single-start extension specification</a> <span class="micro">Opens the published
+  specification outside BrainBuddy, so you can ask your agent's operator to declare it.</span></p>
 </div>
   <div class="card tint-info stack g1">
   <p class="label" style="color:var(--info-fg)">Cancellation</p>
