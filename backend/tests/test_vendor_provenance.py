@@ -85,12 +85,10 @@ def _assert_tree_matches_provenance(
     )
 
     text = provenance.read_text(encoding="utf-8")
-    assert commit in text, (
-        f"{provenance} does not record the upstream commit {commit}."
-    )
-    assert licence_marker in text, (
-        f"{provenance} does not record the upstream licence ({licence_marker})."
-    )
+    assert commit in text, f"{provenance} does not record the upstream commit {commit}."
+    assert (
+        licence_marker in text
+    ), f"{provenance} does not record the upstream licence ({licence_marker})."
     assert (root / "LICENSE").is_file(), (
         f"{root / 'LICENSE'} is missing: the upstream licence travels with the "
         "vendored source."
@@ -117,9 +115,7 @@ def _assert_tree_matches_provenance(
             mismatched.append(f"{relative}: recorded {expected}, found {actual}")
 
     missing = sorted(
-        relative
-        for relative in recorded
-        if not (root / relative).is_file()
+        relative for relative in recorded if not (root / relative).is_file()
     )
 
     assert not unrecorded, (

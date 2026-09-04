@@ -709,9 +709,7 @@ class AgentRelaySettings(BaseModel):
     #: Larger than the card cap because ``GetTask`` has no ``includeArtifacts``
     #: switch. 1 MiB is a hard ceiling, not a default to raise: an unbounded
     #: task read is an unbounded allocation driven by an agent we do not run.
-    a2a_task_max_response_bytes: int = Field(
-        default=262_144, ge=1_024, le=1_048_576
-    )
+    a2a_task_max_response_bytes: int = Field(default=262_144, ge=1_024, le=1_048_576)
 
     model_config = ConfigDict(frozen=True)
 

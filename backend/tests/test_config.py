@@ -1129,9 +1129,7 @@ class TestAgentRelayWireSettings:
         assert referenced, "expected config.py to read BRAIN_BUDDY_AGENT_* variables"
         referenced.add("BRAIN_BUDDY_PUBLIC_BASE_URL")
 
-        undocumented = sorted(
-            name for name in referenced if name not in env_example
-        )
+        undocumented = sorted(name for name in referenced if name not in env_example)
         assert not undocumented, (
             ".env.example is the authoritative environment reference, so every "
             "relay variable config.py reads must appear in it; missing: "
