@@ -7,6 +7,8 @@
  *   projects & tags (create, classify, filter)
  *   brain dump — full seal protocol with the test-env text fixture
  *   brain dump — multi-chunk binary WAV upload (prefix inspection + manifest)
+ *   external agent relay — connection discovery and the authenticated probe
+ *     against a real loopback A2A agent (014-FR-002, 014-SC-009)
  *
  * Run with: npm run integration   (boots its own uvicorn; ~1 min)
  */
@@ -25,11 +27,15 @@ import {
 import { chunkSha256Hex, manifestHash } from "../src/braindump/manifest";
 import { uploadChunks } from "../src/braindump/uploader";
 import { startBackend } from "./backend";
+import { startFakeAgent } from "./fakeAgent";
 import { verifyNodeSafeClientImport } from "./clientNodeImport";
 import { createCookieFetch } from "./cookieFetch";
 import { makeWav } from "./wav";
 
 const key = () => randomUUID();
+
+/** One account password for the whole run; the relay re-checks it per action. */
+const ACCOUNT_PASSWORD = "correct-horse-battery-staple-1";
 
 let passed = 0;
 function ok(label: string) {
@@ -90,7 +96,7 @@ async function main() {
     // --- Auth ---
     console.log("auth");
     const email = `mobile-it-${Date.now()}@example.com`;
-    const password = "correct-horse-battery-staple-1";
+    const password = ACCOUNT_PASSWORD;
     const invite = backend.invite();
     const me = await client.signup({ email, password, invite_code: invite });
     assert.equal(me.email, email);
@@ -527,6 +533,14 @@ async function main() {
     assert.ok(["cancelled", "cancelling"].includes(wavFinal.status));
     ok("WAV operation cancelled after seal (409 → refetch → retry)");
 
+    // --- External agent relay: discovery and the authenticated probe ---
+    //
+    // Every assertion below goes through the shipped client against the real
+    // backend and a real agent socket. The categories are the ones a user acts
+    // on differently, so proving the *client* surfaces each distinctly is what
+    // makes the connection screen trustworthy (014-FR-002).
+    await runAgentConnectionChecks(client);
+
     // --- Logout closes the session ---
     await client.logout();
     await assert.rejects(
@@ -538,6 +552,92 @@ async function main() {
     console.log(`\nIntegration suite passed (${passed} checks).`);
   } finally {
     backend.stop();
+  }
+}
+
+/**
+ * Drive the four connection-test outcomes a user can act on, end to end.
+ *
+ * `ready`, `a2a_credentials_rejected`, `a2a_unreachable` and `a2a_not_an_agent`
+ * are four different next steps for the owner, and the client has to be able to
+ * tell them apart from the real server's answer rather than from a fixture.
+ */
+async function runAgentConnectionChecks(
+  client: ReturnType<typeof createApiClient>,
+): Promise<void> {
+  const agent = await startFakeAgent({ bearerToken: "integration-agent-token" });
+  const noCard = await startFakeAgent({ servesCard: false });
+  try {
+    const connect = async (name: string, address: string, credential: string) => {
+      const created = await client.createAgentConnection(
+        {
+          name,
+          agent_address: address,
+          auth_scheme: "bearer",
+          credential,
+          current_password: ACCOUNT_PASSWORD,
+        },
+        key(),
+      );
+      assert.equal(created.status, "untested");
+      assert.equal(created.agent_address, address);
+      assert.equal(created.auth_scheme, "bearer");
+      // Registration has no secret to carry, and never the credential.
+      assert.ok(!JSON.stringify(created).includes(credential));
+      assert.ok(!("inbound_signing_secret" in created));
+      return created;
+    };
+
+    const readyConnection = await connect(
+      "Integration agent",
+      agent.origin,
+      "integration-agent-token",
+    );
+    const tested = await client.testAgentConnection(readyConnection.id);
+    assert.equal(tested.status, "ready");
+    assert.equal(tested.ready_for_handoff, true);
+    assert.equal(tested.last_test_error_code, null);
+    assert.ok(tested.card, "a ready connection carries the discovered card");
+    assert.equal(tested.card?.protocol_version, "1.0");
+    assert.equal(tested.guarantee_tier, "best_effort");
+    assert.ok(tested.tier_disclosure?.startsWith("Best-effort single start."));
+    assert.ok(!JSON.stringify(tested).includes("integration-agent-token"));
+    ok("agent connection test reports ready with the discovered card and tier");
+
+    const wrongKey = await connect("Wrong key agent", agent.origin, "not-the-token");
+    const rejected = await client.testAgentConnection(wrongKey.id);
+    assert.equal(rejected.status, "invalid_credentials");
+    assert.equal(rejected.last_test_error_code, "a2a_credentials_rejected");
+    assert.equal(rejected.ready_for_handoff, false);
+    assert.ok(!JSON.stringify(rejected).includes("not-the-token"));
+    ok("a rejected credential is named as such and never echoed");
+
+    const notAnAgent = await connect("Bare socket", noCard.origin, "irrelevant");
+    const unsupported = await client.testAgentConnection(notAnAgent.id);
+    assert.equal(unsupported.status, "unsupported");
+    assert.equal(unsupported.last_test_error_code, "a2a_not_an_agent");
+    assert.equal(unsupported.card, null);
+    ok("a socket with no agent card reports a2a_not_an_agent, not unreachable");
+
+    // Stopped last so the two live agents above are untouched by it.
+    const dead = await startFakeAgent({});
+    const deadOrigin = dead.origin;
+    dead.stop();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const unreachableConnection = await connect("Dead agent", deadOrigin, "irrelevant");
+    const unreachable = await client.testAgentConnection(unreachableConnection.id);
+    assert.equal(unreachable.status, "unreachable");
+    assert.equal(unreachable.last_test_error_code, "a2a_unreachable");
+    ok("an address nothing answers on reports a2a_unreachable");
+
+    const listed = await client.listAgentConnections();
+    assert.equal(listed.length, 4);
+    assert.ok(!JSON.stringify(listed).includes("integration-agent-token"));
+    assert.ok(!JSON.stringify(listed).includes("inbound_signing_secret"));
+    ok("no connection read carries a credential or any secret");
+  } finally {
+    agent.stop();
+    noCard.stop();
   }
 }
 

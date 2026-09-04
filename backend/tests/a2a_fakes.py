@@ -124,6 +124,10 @@ class FakeA2AAgent:
         self.error_for_method = error_for_method or {}
         self.http_status_for_method = http_status_for_method or {}
         self.bearer_token = bearer_token
+        #: A socket that answers but serves no card is `a2a_not_an_agent`, which
+        #: is a different product category from "unreachable" and needs its own
+        #: fake.
+        self.serves_card = True
 
         self.calls: list[RecordedCall] = []
         self.card_fetches = 0
@@ -161,6 +165,9 @@ class FakeA2AAgent:
             def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
                 if self.path.startswith("/.well-known/agent-card.json"):
                     agent.card_fetches += 1
+                    if not agent.serves_card:
+                        agent._respond(self, 404, {"error": "not found"})
+                        return
                     agent._respond(self, 200, agent.card())
                     return
                 agent._respond(self, 404, {"error": "not found"})
@@ -675,6 +682,60 @@ class FakeA2AClient:
 
     def calls_to(self, method: str) -> list[tuple[str, A2ATarget, dict[str, Any]]]:
         return [call for call in self.calls if call[0] == method]
+
+
+def _serve_forever() -> None:  # pragma: no cover - exercised as a subprocess
+    """Run one fake agent until the parent kills it.
+
+    The mobile integration harness needs a *real* agent on a real socket: it
+    drives the shipped TypeScript client against a real backend, so a
+    Python-side double would prove nothing about that path. This entry point is
+    what that harness spawns. It prints the chosen port on stdout as its ready
+    signal — the port is bound to 0, so the parent cannot know it in advance and
+    a fixed one would collide with a parallel lane.
+    """
+
+    import argparse
+    import signal
+
+    parser = argparse.ArgumentParser(description="A loopback A2A agent for tests.")
+    parser.add_argument("--bearer-token", default=None)
+    parser.add_argument("--declares-extension", action="store_true")
+    parser.add_argument("--dedup", action="store_true")
+    parser.add_argument("--push-notifications", action="store_true")
+    parser.add_argument("--legacy-card-shape", action="store_true")
+    parser.add_argument(
+        "--not-an-agent",
+        action="store_true",
+        help="Serve no card at the well-known location.",
+    )
+    args = parser.parse_args()
+
+    agent = FakeA2AAgent(
+        bearer_token=args.bearer_token,
+        declares_extension=args.declares_extension,
+        dedup=args.dedup,
+        push_notifications=args.push_notifications,
+        legacy_card_shape=args.legacy_card_shape,
+    )
+    if args.not_an_agent:
+        # A socket that answers but has no card is its own product category
+        # (`a2a_not_an_agent`), and the harness has to be able to produce it.
+        agent.serves_card = False
+    agent.start()
+    print(f"PORT={agent.port}", flush=True)
+
+    stopping = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stopping.set())
+    signal.signal(signal.SIGINT, lambda *_: stopping.set())
+    try:
+        stopping.wait()
+    finally:
+        agent.stop()
+
+
+if __name__ == "__main__":  # pragma: no cover - subprocess entry point
+    _serve_forever()
 
 
 __all__ = [
