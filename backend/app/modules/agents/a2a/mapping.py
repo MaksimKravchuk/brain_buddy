@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal, cast
+from typing import Literal
 
 from app.modules.agents.a2a.types import (
     TERMINAL_TASK_STATES,
@@ -54,7 +54,14 @@ MAX_ARTIFACT_MEDIA_TYPE_CHARS = 128
 
 ResultAvailability = Literal["available", "too_large"]
 ArtifactKind = Literal["text", "file", "data", "link"]
-_SUMMARISED_PART_KINDS: frozenset[ArtifactKind] = frozenset({"file", "data", "link"})
+# Keyed by the wire part kind; the value is the summary kind it maps to. A
+# lookup (rather than a membership test plus a cast) narrows the type the
+# same way under every mypy version the project accepts.
+_SUMMARISED_PART_KINDS: dict[str, ArtifactKind] = {
+    "file": "file",
+    "data": "data",
+    "link": "link",
+}
 
 
 @dataclass(frozen=True)
@@ -150,11 +157,11 @@ def _artifact_summaries(task: Task, *, limit: int) -> tuple[ArtifactSummary, ...
     summaries: list[ArtifactSummary] = []
     for artifact in task.artifacts:
         for part in artifact.parts:
-            kind = part.kind
             # "text" is already in the result; "unknown" means the agent sent a
             # shape the spec does not name, and a placeholder that cannot say
             # what it stands for tells the user nothing.
-            if kind not in _SUMMARISED_PART_KINDS:
+            summarised_kind = _SUMMARISED_PART_KINDS.get(part.kind)
+            if summarised_kind is None:
                 continue
             raw_name = artifact.name or part.name
             raw_media_type = part.effective_media_type
@@ -166,7 +173,7 @@ def _artifact_summaries(task: Task, *, limit: int) -> tuple[ArtifactSummary, ...
                         if raw_media_type
                         else None
                     ),
-                    kind=cast(ArtifactKind, kind),
+                    kind=summarised_kind,
                 )
             )
             if len(summaries) >= limit:
