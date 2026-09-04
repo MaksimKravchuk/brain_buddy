@@ -64,7 +64,7 @@ def make_connection(
         "owner_id": owner_id,
         "name": "Hermes",
         "endpoint_url": "https://agent.example.com/hooks",
-        "capabilities": AgentCapabilities(progress=True, reply=True, cancel=False),
+        "capabilities": AgentCapabilities(streaming=True, push_notifications=False),
         "created_at": NOW,
         "updated_at": NOW,
     }
@@ -281,7 +281,7 @@ class TestConnections:
 
         stored = repo.get_connection("agentconn_1", owner_id="user_a")
         assert stored.name == "Hermes"
-        assert stored.capabilities.reply is True
+        assert stored.capabilities.streaming is True
 
     def test_another_owner_cannot_read_the_connection(
         self, repo: AgentRepository
@@ -482,7 +482,7 @@ class TestConnections:
             "agentconn_legacy", owner_id="user_a"
         )
 
-        assert repaired.auth_header_name == "X-Agent-Key"
+        assert repaired.auth_header_name is None
         assert repaired.revision == 2
         assert repaired.status == "untested"
         assert repaired.last_test_error_code == (

@@ -34,7 +34,7 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     content_expires_at: "2026-09-08T12:00:00Z",
     last_contact_at: "2026-08-09T12:00:00Z",
     reporting_window_seconds: 3600,
-    capabilities: { progress: true, reply: true, cancel: true },
+    capabilities: { reply: true, cancel: true },
     manifest: null,
     events: [],
     commands: [],
@@ -110,7 +110,7 @@ describe("AgentRunSection", () => {
         primary_state_label: "Needs you",
         needs_user: true,
         question_text: "Which environment?",
-        capabilities: { progress: true, reply: false, cancel: false }
+        capabilities: { reply: false, cancel: false }
       })
     ]);
 
@@ -147,7 +147,7 @@ describe("AgentRunSection", () => {
       makeRun({
         reported_state: "running",
         primary_state_label: "Running",
-        capabilities: { progress: true, reply: true, cancel: false }
+        capabilities: { reply: true, cancel: false }
       })
     ]);
 
@@ -281,7 +281,7 @@ describe("AgentRunSection", () => {
             { id: "evt_cancelled", type: "cancelled", run_version: 4, received_at: "2026-08-09T12:04:00Z", summary: null }
           ]
         }),
-        makeRun({ id: "agentrun_second", agent_name: "Claude", capabilities: { progress: true, reply: true, cancel: false } })
+        makeRun({ id: "agentrun_second", agent_name: "Claude", capabilities: { reply: true, cancel: false } })
       ],
       <AgentRunSection
         taskId="task_1"
@@ -302,7 +302,7 @@ describe("AgentRunSection", () => {
               { id: "evt_cancelled", type: "cancelled", run_version: 4, received_at: "2026-08-09T12:04:00Z", summary: null }
             ]
           }),
-          makeRun({ id: "agentrun_second", agent_name: "Claude", capabilities: { progress: true, reply: true, cancel: false } })
+          makeRun({ id: "agentrun_second", agent_name: "Claude", capabilities: { reply: true, cancel: false } })
         ]}
         isLoading
         error={null}

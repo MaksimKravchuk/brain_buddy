@@ -42,6 +42,11 @@ export function Button({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      // Stated, not merely implied: `disabled` alone stops the press but leaves
+      // VoiceOver announcing an ordinary button, so a screen-reader user is
+      // told the control is available when it is not (M-01-S07, AC-031 parity
+      // with the web surface's `aria-disabled`).
+      accessibilityState={{ disabled: inactive, busy: loading }}
       disabled={inactive}
       onPress={onPress}
       style={({ pressed }) => [

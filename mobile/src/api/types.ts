@@ -353,12 +353,75 @@ export type BrainDumpAction =
 // commands stay in separate fields so no client blends them into an invented
 // progress number.
 
-/** What the connector disclosed. A false capability hides its control. */
+/**
+ * What the agent's own card declared. Never a Brain Buddy claim.
+ *
+ * Kept apart from `AgentControls`: blending the two would let a product
+ * decision be rendered as something the agent promised (FR-002, FR-010).
+ */
 export interface AgentCapabilities {
-  progress: boolean;
+  streaming: boolean;
+  push_notifications: boolean;
+}
+
+/** The controls Brain Buddy offers here. Cards advertise neither (FR-010). */
+export interface AgentControls {
   reply: boolean;
   cancel: boolean;
 }
+
+export type AgentAuthScheme = "bearer" | "api_key";
+export type AgentGuaranteeTier = "guaranteed" | "best_effort";
+export type AgentDisconnectReason = "owner" | "superseded_wire_contract";
+export type AgentSchemeKind =
+  | "bearer"
+  | "api_key"
+  | "oauth2"
+  | "oidc"
+  | "mtls"
+  | "other";
+
+export interface AgentSkill {
+  id: string | null;
+  name: string | null;
+  description: string | null;
+}
+
+export interface AgentAuthSchemeOffer {
+  name: string;
+  kind: AgentSchemeKind;
+  header_name: string | null;
+}
+
+/**
+ * The discovery result read off the agent's published card.
+ *
+ * Every string here is untrusted agent text and is rendered inertly: never a
+ * `Linking` target, never auto-linked, never markup-interpreted, exactly as
+ * `result_link` is treated (FR-016, AC-031). `interface_url` is shown so the
+ * owner can see where their content would go — which is also why it is never
+ * made tappable.
+ */
+export interface AgentCard {
+  name: string | null;
+  version: string | null;
+  description: string | null;
+  protocol_version: string | null;
+  interface_url: string | null;
+  streaming: boolean;
+  push_notifications: boolean;
+  skills: AgentSkill[];
+  auth_schemes_offered: AgentAuthSchemeOffer[];
+  extension_uris: string[];
+  fetched_at: string | null;
+}
+
+/** Closed per-code shapes for the last test's coarse detail. */
+export type AgentTestErrorDetail =
+  | { found_version: string }
+  | { scheme: string }
+  | { retry_after_seconds: number | null }
+  | { interface_url: string | null };
 
 export type AgentConnectionStatus =
   | "untested"
@@ -384,14 +447,29 @@ export type AgentCommandDelivery = "unconfirmed" | "confirmed";
 export interface AgentConnectionResponse {
   id: string;
   name: string;
-  endpoint_url: string;
-  auth_header_name: string;
+  agent_address: string;
+  auth_scheme: AgentAuthScheme;
+  /** Card-sourced, and only for an API-key connection. Never user input. */
+  auth_header_name: string | null;
   status: AgentConnectionStatus;
   /** Server-derived from the clock: last contact older than the threshold. */
   stale: boolean;
   ready_for_handoff: boolean;
   capabilities: AgentCapabilities;
+  controls_offered: AgentControls;
+  card: AgentCard | null;
+  guarantee_tier: AgentGuaranteeTier | null;
+  /** Server-owned sentences. Rendered verbatim; never re-worded client-side. */
+  tier_disclosure: string | null;
+  tier_disclosure_url: string | null;
+  cancellation_disclosure: string | null;
+  /** The fifth connection condition: the card moved under the connection. */
+  agent_changed: boolean;
+  best_effort_acknowledged_at: string | null;
+  correlation_id_honoured: boolean | null;
+  disconnect_reason: AgentDisconnectReason | null;
   last_test_error_code: string | null;
+  last_test_error_detail: AgentTestErrorDetail | null;
   last_contact_at: string | null;
   last_tested_at: string | null;
   stale_after_seconds: number;
@@ -399,22 +477,18 @@ export interface AgentConnectionResponse {
   revision: number;
 }
 
-/** The only response that ever carries the inbound signing secret — once. */
-export interface AgentConnectionCreatedResponse extends AgentConnectionResponse {
-  inbound_signing_secret: string;
-}
-
 export interface AgentConnectionCreateRequest {
   name: string;
-  endpoint_url: string;
-  auth_header_name?: string;
+  agent_address: string;
+  auth_scheme?: AgentAuthScheme;
   credential: string;
   current_password: string;
 }
 
 export interface AgentConnectionUpdateRequest {
   name?: string;
-  endpoint_url?: string;
+  agent_address?: string;
+  auth_scheme?: AgentAuthScheme;
   current_password?: string;
   expected_revision: number;
 }
@@ -546,7 +620,8 @@ export interface AgentRunResponse {
   content_expires_at: string;
   last_contact_at: string | null;
   reporting_window_seconds: number;
-  capabilities: AgentCapabilities;
+  /** The controls still offered on *this* run. Never a card declaration. */
+  capabilities: AgentControls;
   manifest: AgentManifestResponse | null;
   events: AgentRunEvent[];
   commands: AgentRunCommand[];

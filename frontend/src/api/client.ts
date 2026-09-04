@@ -47,7 +47,6 @@ import type {
 } from "./adminTypes";
 import type {
   AgentConnectionCreateRequest,
-  AgentConnectionCreatedResponse,
   AgentConnectionDisconnectRequest,
   AgentConnectionResponse,
   AgentConnectionRotateRequest,
@@ -473,7 +472,9 @@ export const apiClient = {
   },
 
   createAgentConnection(payload: AgentConnectionCreateRequest, idempotencyKey: string) {
-    return request<AgentConnectionCreatedResponse>("/agent-connections", {
+    // A plain connection: registration issues no secret under the A2A wire, so
+    // there is nothing here for a caller to have to handle exactly once.
+    return request<AgentConnectionResponse>("/agent-connections", {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: payload

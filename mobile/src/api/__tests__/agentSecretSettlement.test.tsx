@@ -12,8 +12,7 @@ const publicConnection = {
   id: "connection-1",
   owner_id: "user-a",
   name: "Hermes",
-  endpoint_url: "https://agent.example.test/hook",
-  auth_header_name: "X-Agent-Key",
+  agent_address: "https://agent.example.test/hook",
   status: "connected" as const,
   last_error_code: null,
   consecutive_failures: 0,
@@ -69,9 +68,10 @@ const settlementCallbacks: string[] = [];
 let asyncSettlement: Promise<unknown> | undefined;
 
 function Harness() {
-  const createConnection = useCreateAgentConnection({
-    onSigningSecret: (secret) => hookSecrets.push(secret),
-  });
+  // Registration has no secret to consume under the A2A wire (014 FR-012): the
+  // response type cannot carry one, so there is nothing to strip on the way to
+  // the query cache.
+  const createConnection = useCreateAgentConnection();
   const rotateSecret = useRotateAgentSigningSecret({
     onSigningSecret: (secret) => hookSecrets.push(secret),
   });
@@ -84,7 +84,7 @@ function Harness() {
             {
               payload: {
                 name: "Hermes",
-                endpoint_url: "https://agent.example.test/hook",
+                agent_address: "https://agent.example.test/hook",
                 credential: "credential",
                 current_password: "password",
               },
@@ -105,7 +105,7 @@ function Harness() {
             {
               payload: {
                 name: "Hermes",
-                endpoint_url: "https://agent.example.test/hook",
+                agent_address: "https://agent.example.test/hook",
                 credential: "credential",
                 current_password: "password",
               },
@@ -166,10 +166,28 @@ describe("one-time signing-secret settlement", () => {
     mockApi.rotateAgentSigningSecret.mockReset();
   });
 
-  it.each([
-    ["Create", mockApi.createAgentConnection],
-    ["Rotate", mockApi.rotateAgentSigningSecret],
-  ] as const)("delivers %s plaintext once while all ordinary result surfaces are redacted", async (label, endpoint) => {
+  it("014-FR-012 a registration response has no secret to deliver or redact", async () => {
+    mockApi.createAgentConnection.mockResolvedValue(publicConnection);
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const renderer = await renderHarness(client);
+
+    await act(async () => {
+      renderer.root.findByProps({ accessibilityLabel: "Create" }).props.onPress();
+    });
+    await flush();
+
+    expect(hookSecrets).toEqual([]);
+    expect(ordinaryResults).toEqual([publicConnection]);
+    expect(renderer.root.findByProps({ testID: "create-state" }).props.children).toBe(
+      JSON.stringify(publicConnection),
+    );
+
+    await act(async () => renderer.unmount());
+    client.clear();
+  });
+
+  it.each([["Rotate", mockApi.rotateAgentSigningSecret]] as const)(
+    "delivers %s plaintext once while all ordinary result surfaces are redacted", async (label, endpoint) => {
     endpoint.mockResolvedValue({ ...publicConnection, inbound_signing_secret: "sk-plaintext" });
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     const renderer = await renderHarness(client);
@@ -187,7 +205,8 @@ describe("one-time signing-secret settlement", () => {
 
     await act(async () => renderer.unmount());
     client.clear();
-  });
+  },
+  );
 
   it("rejects a dispatch whose logout epoch is stale before transport I/O", async () => {
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
@@ -206,7 +225,7 @@ describe("one-time signing-secret settlement", () => {
   });
 
   it("promptly rejects stale mutateAsync without callbacks, canary retention, or an observer", async () => {
-    const pending = deferred<typeof publicConnection & { inbound_signing_secret: string }>();
+    const pending = deferred<typeof publicConnection>();
     mockApi.createAgentConnection.mockReturnValue(pending.promise);
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     const renderer = await renderHarness(client);
@@ -261,7 +280,7 @@ describe("one-time signing-secret settlement", () => {
     ["same-account origin switch", () => { mockEpoch += 1; mockServerUrl = "https://brain-b.example.test/api"; }],
     ["delayed 401 settlement", () => { mockEpoch += 1; mockAccountId = null; }],
   ] as const)("suppresses every stale %s settlement surface", async (_name, transition) => {
-    const pending = deferred<typeof publicConnection & { inbound_signing_secret: string }>();
+    const pending = deferred<typeof publicConnection>();
     mockApi.createAgentConnection.mockReturnValue(pending.promise);
     const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     const owner = "https://brain-a.example.test/api|user-a";
@@ -272,13 +291,13 @@ describe("one-time signing-secret settlement", () => {
     await flush();
     expect(mockApi.createAgentConnection).toHaveBeenCalledTimes(1);
     transition();
-    pending.resolve({ ...publicConnection, inbound_signing_secret: "stale-secret" });
+    pending.resolve({ ...publicConnection, name: "stale-canary" });
     await flush();
 
     expect(hookSecrets).toEqual([]);
     expect(ordinaryResults).toEqual([]);
     expect(client.getQueryState(agentKeys.connections(owner))?.isInvalidated).toBe(false);
-    expect(JSON.stringify(client.getMutationCache().getAll())).not.toContain("stale-secret");
+    expect(JSON.stringify(client.getMutationCache().getAll())).not.toContain("stale-canary");
     expect(client.getMutationCache().getAll()).toHaveLength(0);
     expect(renderer.root.findByProps({ testID: "create-state" }).props.children).toBe("null");
     expect(renderer.root.findByProps({ testID: "create-error" }).props.children).toBe("");
@@ -288,8 +307,8 @@ describe("one-time signing-secret settlement", () => {
   });
 
   it("settles only the current dispatch when overlapping requests cross an epoch", async () => {
-    const older = deferred<typeof publicConnection & { inbound_signing_secret: string }>();
-    const newer = deferred<typeof publicConnection & { inbound_signing_secret: string }>();
+    const older = deferred<typeof publicConnection>();
+    const newer = deferred<typeof publicConnection>();
     mockApi.createAgentConnection
       .mockReturnValueOnce(older.promise)
       .mockReturnValueOnce(newer.promise);
@@ -301,15 +320,15 @@ describe("one-time signing-secret settlement", () => {
     mockEpoch += 1;
     renderer.root.findByProps({ accessibilityLabel: "Create" }).props.onPress();
     await flush();
-    older.resolve({ ...publicConnection, inbound_signing_secret: "older-secret" });
+    older.resolve({ ...publicConnection, name: "older-canary" });
     await flush();
     expect(client.getMutationCache().getAll()).toHaveLength(1);
-    newer.resolve({ ...publicConnection, inbound_signing_secret: "newer-secret" });
+    newer.resolve(publicConnection);
     await flush();
 
-    expect(hookSecrets).toEqual(["newer-secret"]);
+    expect(hookSecrets).toEqual([]);
     expect(ordinaryResults).toEqual([publicConnection]);
-    expect(JSON.stringify(client.getMutationCache().getAll())).not.toContain("older-secret");
+    expect(JSON.stringify(client.getMutationCache().getAll())).not.toContain("older-canary");
 
     await act(async () => renderer.unmount());
     client.clear();

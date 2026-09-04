@@ -686,6 +686,12 @@ class AgentRepository(BaseRepository):
             payload = _decoded_payload(row["payload"])
             if payload is None:
                 continue
+            if "auth_header_name" not in payload:
+                # A bearer connection under the A2A wire stores no header name at
+                # all (data-model.md §1). Absence is the healthy shape, not the
+                # legacy failure this repair exists for — treating it as one
+                # would reset every 014 bearer connection on every startup.
+                continue
             raw_header = payload.get("auth_header_name")
             if isinstance(raw_header, str):
                 try:
@@ -695,10 +701,10 @@ class AgentRepository(BaseRepository):
                 else:
                     continue
             legacy_revision = _bumped_revision(payload)
+            payload.pop("auth_header_name", None)
             payload.update(
-                auth_header_name="X-Agent-Key",
                 credential=None,
-                capabilities={"progress": False, "reply": False, "cancel": False},
+                capabilities={"streaming": False, "push_notifications": False},
                 status="untested",
                 last_test_error_code=(
                     "legacy_invalid_auth_header_requires_reconfiguration"

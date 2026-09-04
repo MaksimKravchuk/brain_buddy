@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import timedelta
+from functools import partial
 from typing import Never
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
@@ -14,6 +15,7 @@ from app.core.config import (
     AppEnvironment,
     VoiceProviderSettings,
 )
+from app.modules.agents.a2a.card import fetch_card
 from app.modules.agents.a2a.client import A2AClient
 from app.modules.agents.connector import GenericHttpConnector
 from app.modules.agents.repository import AgentRepository
@@ -429,6 +431,15 @@ def build_container(config: AppConfig) -> Container:
         secret_box=agent_secret_box,
         task_snapshot=_task_snapshot,
         callback_url=config.agent_relay_callback_url,
+        # Deployment policy for discovery is bound here, once, rather than held
+        # by the service: the service's job is to decide what a card *means*,
+        # not how long BrainBuddy waits for one.
+        card_fetcher=partial(
+            fetch_card,
+            timeout_seconds=relay_settings.connector_timeout_seconds,
+            max_response_bytes=relay_settings.connector_max_response_bytes,
+            allow_private_destinations=relay_settings.allow_private_destinations,
+        ),
         stale_after=timedelta(seconds=relay_settings.stale_after_seconds),
         reporting_window=timedelta(seconds=relay_settings.reporting_window_seconds),
         content_retention=timedelta(seconds=relay_settings.content_retention_seconds),

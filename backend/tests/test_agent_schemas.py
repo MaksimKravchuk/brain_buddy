@@ -21,7 +21,6 @@ from app.modules.agents.domain import (
 )
 from app.modules.agents.egress import _is_governed_private, _is_publicly_routable
 from app.schemas.agents import (
-    AgentCapabilitiesResponse,
     AgentConnectionCreatedResponse,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
@@ -29,7 +28,9 @@ from app.schemas.agents import (
     AgentConnectionRotateRequest,
     AgentConnectionRotateSigningSecretRequest,
     AgentConnectionSigningSecretResponse,
+    AgentConnectionUpdateRequest,
     AgentContextItemRequest,
+    AgentControlsResponse,
     AgentEventIngestResponse,
     AgentHandoffConfirmRequest,
     AgentHandoffPreviewRequest,
@@ -45,16 +46,45 @@ from app.schemas.agents import (
 NOW = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
 
 
+def _card_payload() -> dict[str, object]:
+    return {
+        "name": "Hermes",
+        "version": "1.2.3",
+        "description": "A research agent.",
+        "protocol_version": "1.0",
+        "interface_url": "https://agent.example.com/a2a",
+        "streaming": True,
+        "push_notifications": False,
+        "skills": [{"id": "research", "name": "Research", "description": "Digs."}],
+        "auth_schemes_offered": [{"name": "bearer", "kind": "bearer"}],
+        "extension_uris": [],
+        "fetched_at": NOW,
+    }
+
+
 def _connection_payload() -> dict[str, object]:
     return {
         "id": "agentconn_1",
         "name": "Hermes",
-        "endpoint_url": "https://agent.example.com/hooks",
-        "auth_header_name": "X-Agent-Key",
+        "agent_address": "https://agent.example.com",
+        "auth_scheme": "bearer",
+        "auth_header_name": None,
         "status": "ready",
         "stale": False,
         "ready_for_handoff": True,
-        "capabilities": {"progress": True, "reply": True, "cancel": False},
+        "capabilities": {"streaming": True, "push_notifications": False},
+        "controls_offered": {"reply": True, "cancel": True},
+        "card": _card_payload(),
+        "guarantee_tier": "best_effort",
+        "tier_disclosure": "Best-effort single start. …",
+        "tier_disclosure_url": "https://example.invalid/single-start/v1.md",
+        "cancellation_disclosure": "Cancellation depends on the agent …",
+        "agent_changed": False,
+        "best_effort_acknowledged_at": None,
+        "correlation_id_honoured": None,
+        "disconnect_reason": None,
+        "last_test_error_code": None,
+        "last_test_error_detail": None,
         "last_contact_at": NOW,
         "last_tested_at": NOW,
         "stale_after_seconds": 300,
@@ -105,17 +135,17 @@ def test_connection_requests_normalize_names_and_enforce_sensitive_constraints()
 
     request = AgentConnectionCreateRequest(
         name="  Hermes  ",
-        endpoint_url="https://agent.example.com/hooks",
+        agent_address="https://agent.example.com",
         credential="secret-token",
         current_password="correct horse battery staple",
     )
 
     assert request.name == "Hermes"
-    assert request.auth_header_name == "X-Agent-Key"
+    assert request.auth_scheme == "bearer"
 
     for payload in (
-        {**request.model_dump(), "auth_header_name": "Authorization"},
-        {**request.model_dump(), "auth_header_name": "X-Agent-Key\r\nX-Evil: yes"},
+        {**request.model_dump(), "auth_header_name": "X-API-Key"},
+        {**request.model_dump(), "auth_scheme": "oauth2"},
         {**request.model_dump(), "name": "   "},
     ):
         with pytest.raises(ValidationError):
@@ -233,7 +263,7 @@ def test_endpoint_validation_error_never_echoes_endpoint_input(
         model = AgentConnectionCreateRequest
         payload = {
             "name": "Agent",
-            "endpoint_url": f"https://agent.example.com/{canary} here",
+            "agent_address": f"https://agent.example.com/{canary} here",
             "credential": "credential",
             "current_password": "password",
         }
@@ -289,7 +319,7 @@ def test_endpoint_validation_sanitizes_any_mapping_and_endpoint_value_type(
         model = AgentConnectionCreateRequest
         payload = {
             "name": "Agent",
-            "endpoint_url": endpoint_value,
+            "agent_address": endpoint_value,
             "credential": "credential",
             "current_password": "password",
         }
@@ -324,6 +354,10 @@ def test_mapping_payloads_cannot_bypass_endpoint_syntax_validation(
 
     if model_kind == "document":
         model = AgentConnectionDocument
+        # The storage key is deliberately still `endpoint_url` while the request
+        # says `agent_address` (data-model.md §1, rollback boundary), so this
+        # case parametrises the *field name* as well as the model.
+        field = "endpoint_url"
         payload: dict[str, object] = {
             "id": "agentconn_1",
             "owner_id": "owner_1",
@@ -334,19 +368,17 @@ def test_mapping_payloads_cannot_bypass_endpoint_syntax_validation(
         }
     else:
         model = AgentConnectionCreateRequest
+        field = "agent_address"
         payload = {
             "name": "Agent",
-            "endpoint_url": "https://agent.example.com/hooks",
+            "agent_address": "https://agent.example.com/hooks",
             "credential": "credential",
             "current_password": "password",
         }
 
-    assert (
-        model.model_validate(mapping_type(payload)).endpoint_url
-        == payload["endpoint_url"]
-    )
+    assert getattr(model.model_validate(mapping_type(payload)), field) == payload[field]
 
-    payload["endpoint_url"] = "https://agent.example.com/bad path"
+    payload[field] = "https://agent.example.com/bad path"
     with pytest.raises(ValidationError):
         model.model_validate(mapping_type(payload))
 
@@ -358,7 +390,7 @@ def test_endpoint_sanitization_does_not_strip_unrelated_model_inputs() -> None:
         AgentConnectionCreateRequest.model_validate(
             {
                 "name": [canary],
-                "endpoint_url": "https://agent.example.com/hooks",
+                "agent_address": "https://agent.example.com/hooks",
                 "credential": "credential",
                 "current_password": "password",
             }
@@ -424,7 +456,7 @@ def test_connection_responses_cannot_serialize_saved_credentials() -> None:
     dumped = connection.model_dump(mode="json")
 
     assert dumped["status"] == "ready"
-    assert dumped["capabilities"] == {"progress": True, "reply": True, "cancel": False}
+    assert dumped["capabilities"] == {"streaming": True, "push_notifications": False}
     assert "credential" not in dumped
     assert "inbound_signing_secret" not in dumped
 
@@ -442,6 +474,135 @@ def test_connection_responses_cannot_serialize_saved_credentials() -> None:
         )
         assert issued.inbound_signing_secret == "shown-once"
         assert "credential" not in issued.model_dump()
+
+
+def test_014_FR_001_connection_writes_name_a_scheme_and_never_a_header_name() -> None:
+    """The owner picks an authentication scheme; the header name comes from the card.
+
+    AC-002. ``auth_header_name`` is discovery output, not user input: accepting it
+    on a request would let an owner point their credential at a header the agent
+    never asked for, and the reserved-name check would then be the only thing
+    between a typo and a forged ``Authorization``.
+    """
+
+    create = AgentConnectionCreateRequest(
+        name="Hermes",
+        agent_address="https://agent.example.com",
+        auth_scheme="api_key",
+        credential="secret-token",
+        current_password="correct horse battery staple",
+    )
+    assert create.auth_scheme == "api_key"
+    assert not hasattr(create, "auth_header_name")
+
+    update = AgentConnectionUpdateRequest(
+        agent_address="https://second.example.com",
+        auth_scheme="bearer",
+        current_password="correct horse battery staple",
+        expected_revision=2,
+    )
+    assert update.auth_scheme == "bearer"
+    assert update.agent_address == "https://second.example.com"
+
+    for rejected in (
+        {"auth_header_name": "X-API-Key"},
+        {"endpoint_url": "https://agent.example.com"},
+        {"auth_scheme": "mtls"},
+    ):
+        with pytest.raises(ValidationError):
+            AgentConnectionUpdateRequest.model_validate(
+                {"expected_revision": 2, **rejected}
+            )
+
+    # Renaming alone is still a legitimate update; a body naming nothing is not.
+    assert AgentConnectionUpdateRequest(name="Hermes II", expected_revision=2)
+    with pytest.raises(ValidationError):
+        AgentConnectionUpdateRequest.model_validate({"expected_revision": 2})
+
+
+def test_014_FR_002_connection_reads_carry_discovery_tier_and_closed_error_detail() -> (
+    None
+):
+    """Every connection read states what was discovered and why the last test failed.
+
+    AC-003, AC-005. ``capabilities`` carries only what the card declared;
+    ``controls_offered`` is BrainBuddy's own statement about the controls it
+    offers on this connection's runs, so the two can never be confused for one
+    another.
+    """
+
+    connection = AgentConnectionResponse.model_validate(_connection_payload())
+
+    assert connection.agent_address == "https://agent.example.com"
+    assert connection.auth_scheme == "bearer"
+    assert connection.auth_header_name is None
+    assert connection.capabilities.model_dump() == {
+        "streaming": True,
+        "push_notifications": False,
+    }
+    assert connection.controls_offered.model_dump() == {"reply": True, "cancel": True}
+    assert connection.card is not None
+    assert connection.card.interface_url == "https://agent.example.com/a2a"
+    assert connection.card.skills[0].name == "Research"
+    assert connection.guarantee_tier == "best_effort"
+    assert connection.agent_changed is False
+    assert connection.best_effort_acknowledged_at is None
+    assert connection.correlation_id_honoured is None
+    assert connection.disconnect_reason is None
+
+    rate_limited = AgentConnectionResponse.model_validate(
+        {
+            **_connection_payload(),
+            "status": "untested",
+            "last_test_error_code": "a2a_rate_limited",
+            "last_test_error_detail": {"retry_after_seconds": 30},
+        }
+    )
+    assert rate_limited.last_test_error_detail == {"retry_after_seconds": 30}
+
+    changed = AgentConnectionResponse.model_validate(
+        {
+            **_connection_payload(),
+            "status": "untested",
+            "last_test_error_code": "agent_card_changed",
+            "agent_changed": True,
+        }
+    )
+    assert changed.agent_changed is True
+
+    superseded = AgentConnectionResponse.model_validate(
+        {
+            **_connection_payload(),
+            "status": "disconnected",
+            "disconnect_reason": "superseded_wire_contract",
+        }
+    )
+    assert superseded.disconnect_reason == "superseded_wire_contract"
+
+    with pytest.raises(ValidationError):
+        AgentConnectionResponse.model_validate(
+            {**_connection_payload(), "disconnect_reason": "because"}
+        )
+
+
+def test_014_FR_003_no_protocol_field_name_reaches_a_client_facing_schema() -> None:
+    """ADR-0006 vocabulary: the wire's own field names never leave the backend.
+
+    AC-006. The protocol calls them ``contextId``/``messageId``/``taskId``; the
+    product says correlation ID and supporting items. Asserting this on the JSON
+    schema rather than on one response keeps a future field from reintroducing
+    the vocabulary through a nested model nobody re-reads.
+    """
+
+    banned = ("contextid", "context_items", "endpoint_url", "jsonrpc", "a2a_version")
+    for model in (
+        AgentConnectionCreateRequest,
+        AgentConnectionUpdateRequest,
+        AgentConnectionResponse,
+    ):
+        rendered = str(model.model_json_schema()).casefold()
+        for word in banned:
+            assert word not in rendered, f"{model.__name__} leaks {word!r}"
 
 
 def test_handoff_schemas_bind_confirmation_to_an_exact_manifest() -> None:
@@ -508,7 +669,7 @@ def test_run_projection_keeps_reported_derived_and_requested_state_separate() ->
         content_expired=False,
         content_expires_at=NOW + timedelta(days=30),
         reporting_window_seconds=300,
-        capabilities=AgentCapabilitiesResponse(progress=True, reply=True),
+        capabilities=AgentControlsResponse(reply=True),
         manifest=AgentManifestResponse.model_validate(_manifest_payload()),
         events=[event],
         commands=[command],

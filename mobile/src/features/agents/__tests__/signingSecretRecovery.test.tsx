@@ -28,7 +28,6 @@ import {
   typeInto,
   visibleText,
 } from "@/test/render";
-import type { ReactTestInstance, ReactTestRenderer } from "react-test-renderer";
 
 const mockRotateSigningSecret = jest.fn();
 
@@ -90,50 +89,23 @@ function RecoveryHarness() {
   );
 }
 
-function pressableFor(renderer: ReactTestRenderer, text: string): ReactTestInstance | null {
-  let node = queryByText(renderer, text);
-  while (node && typeof node.props?.onPress !== "function") {
-    node = node.parent ?? null;
-  }
-  return node;
-}
-
 beforeEach(() => {
   mockKeys.issued = 0;
   mockRotateSigningSecret.mockReset();
 });
 
 describe("ConnectionCard signing-secret action", () => {
-  it("offers the replacement on a live connection", async () => {
-    const onReplaceSigningSecret = jest.fn();
+  it("014-FR-012 is not offered at all: no inbound secret exists to replace", async () => {
     const { renderer, unmount } = await renderWithProviders(
       <ConnectionCard
         connection={makeConnection()}
         onTest={jest.fn()}
         onRotate={jest.fn()}
-        onReplaceSigningSecret={onReplaceSigningSecret}
         onDisconnect={jest.fn()}
       />,
     );
 
-    await pressText(renderer, "Replace signing secret");
-
-    expect(onReplaceSigningSecret).toHaveBeenCalledTimes(1);
-    await unmount();
-  });
-
-  it("does not offer it on a disconnected connection, whose secret is already gone", async () => {
-    const { renderer, unmount } = await renderWithProviders(
-      <ConnectionCard
-        connection={makeConnection({ status: "disconnected", ready_for_handoff: false })}
-        onTest={jest.fn()}
-        onRotate={jest.fn()}
-        onReplaceSigningSecret={jest.fn()}
-        onDisconnect={jest.fn()}
-      />,
-    );
-
-    expect(pressableFor(renderer, "Replace signing secret")?.props.disabled).toBe(true);
+    expect(queryByText(renderer, "Replace signing secret")).toBeNull();
     await unmount();
   });
 });

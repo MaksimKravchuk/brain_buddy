@@ -12,17 +12,26 @@ import hmac
 import json
 import sqlite3
 from collections import OrderedDict
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread
 from typing import Annotated, Any, Literal
 
+import httpx
 import pytest
 from pydantic import AfterValidator, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
+from app.modules.agents.a2a.card import (
+    SINGLE_START_EXTENSION_URI,
+    AgentAuthSchemeOffer,
+    CardDiscovery,
+    fetch_card,
+)
+from app.modules.agents.a2a.client import A2AResult
 from app.modules.agents.connector import (
     ConnectorCommandOutcome,
     ConnectorStartOutcome,
@@ -53,6 +62,7 @@ from app.modules.agents.service import (
 from app.schemas.agents import (
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
+    AgentConnectionResponse,
     AgentConnectionRotateRequest,
     AgentConnectionRotateSigningSecretRequest,
     AgentConnectionUpdateRequest,
@@ -62,6 +72,13 @@ from app.schemas.agents import (
     AgentReplyRequest,
 )
 from app.schemas.common import StorageBaseModel
+
+from .a2a_fakes import (
+    FakeA2AClient,
+    FakeCardFetcher,
+    card_summary,
+    ready_discovery,
+)
 
 OWNER = "user_a"
 OTHER_OWNER = "user_b"
@@ -73,7 +90,7 @@ class FakeConnector:
 
     def __init__(self) -> None:
         self.test_outcome = ConnectorTestOutcome(
-            "ready", AgentCapabilities(progress=True, reply=True, cancel=True)
+            "ready", AgentCapabilities(streaming=True, push_notifications=True)
         )
         self.start_outcome = ConnectorStartOutcome("sent")
         self.command_outcome = ConnectorCommandOutcome("confirmed")
@@ -96,6 +113,62 @@ class FakeConnector:
     ) -> ConnectorCommandOutcome:
         self.commands.append(envelope)
         return self.command_outcome
+
+
+def mock_transport_card_fetcher(
+    handler: Callable[[httpx.Request], httpx.Response],
+) -> Callable[..., CardDiscovery]:
+    """The *real* discovery path over a scripted transport.
+
+    Two cases cannot be expressed as a `CardDiscovery` double, because they are
+    about what the fetch itself refuses: a body that is not JSON and a body over
+    the response cap. Both have to run `fetch_card` for real.
+    """
+
+    def client_factory(**kwargs: Any) -> httpx.Client:
+        kwargs.pop("transport", None)
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    def fetch(
+        address: str, *, auth_scheme: str, now: datetime | None = None
+    ) -> CardDiscovery:
+        return fetch_card(
+            address,
+            auth_scheme=auth_scheme,  # type: ignore[arg-type]
+            timeout_seconds=5.0,
+            max_response_bytes=64_000,
+            resolver=fake_resolver,
+            client_factory=client_factory,
+            now=now,
+        )
+
+    return fetch
+
+
+class BlockingCardFetcher(FakeCardFetcher):
+    """Discovery held open on a barrier, so a test can move the world under it.
+
+    Under 014 a connection test is discovery plus an authenticated probe, both
+    outside the owner lock. That is the window these races exercise: the fields
+    the test would merge back must lose to anything the owner did meanwhile.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = Event()
+        self.release = Event()
+
+    def __call__(
+        self,
+        address: str,
+        *,
+        auth_scheme: str,
+        now: datetime | None = None,
+    ) -> CardDiscovery:
+        self.calls.append((address, auth_scheme))
+        self.entered.set()
+        assert self.release.wait(timeout=5)
+        return self.discovery
 
 
 class BlockingTestConnector(FakeConnector):
@@ -177,6 +250,16 @@ def connector() -> FakeConnector:
     return FakeConnector()
 
 
+@pytest.fixture
+def card_fetcher() -> FakeCardFetcher:
+    return FakeCardFetcher()
+
+
+@pytest.fixture
+def a2a_client() -> FakeA2AClient:
+    return FakeA2AClient()
+
+
 def fake_resolver(host: str, port: int) -> list[str]:
     """Resolve the suite's example hosts without touching real DNS."""
 
@@ -193,6 +276,8 @@ def build_service(
     *,
     key: bytes = b"\x07" * 32,
     keys: OrderedDict[str, bytes] | None = None,
+    card_fetcher: Any | None = None,
+    a2a_client: Any | None = None,
 ) -> AgentRelayService:
     return AgentRelayService(
         repo,
@@ -200,6 +285,8 @@ def build_service(
         secret_box=SecretBox(keys if keys is not None else OrderedDict({"v1": key})),
         task_snapshot=task_snapshot,
         callback_url=CALLBACK,
+        card_fetcher=card_fetcher if card_fetcher is not None else FakeCardFetcher(),
+        a2a_client=a2a_client if a2a_client is not None else FakeA2AClient(),
         resolver=fake_resolver,
         now=clock,
     )
@@ -207,15 +294,25 @@ def build_service(
 
 @pytest.fixture
 def service(
-    tmp_path: Path, connector: FakeConnector, clock: Clock
+    tmp_path: Path,
+    connector: FakeConnector,
+    clock: Clock,
+    card_fetcher: FakeCardFetcher,
+    a2a_client: FakeA2AClient,
 ) -> AgentRelayService:
-    return build_service(AgentRepository(tmp_path), connector, clock)
+    return build_service(
+        AgentRepository(tmp_path),
+        connector,
+        clock,
+        card_fetcher=card_fetcher,
+        a2a_client=a2a_client,
+    )
 
 
 def create_request(**overrides: Any) -> AgentConnectionCreateRequest:
     payload: dict[str, Any] = {
         "name": "Hermes",
-        "endpoint_url": "https://agent.example.com/hooks",
+        "agent_address": "https://agent.example.com",
         "credential": "Bearer super-secret-token",
         "current_password": "correct-horse-battery-staple",
     }
@@ -232,6 +329,35 @@ def connect(service: AgentRelayService, key: str = "idem-create") -> str:
 
 def make_ready(service: AgentRelayService, connection_id: str) -> None:
     service.test_connection(connection_id, owner_id=OWNER)
+
+
+def issue_signing_secret(
+    service: AgentRelayService,
+    connection_id: str,
+    *,
+    key: str = "idem-signing",
+    revision: int | None = None,
+) -> str:
+    """Mint the bespoke inbound signing secret for a connection.
+
+    Registration no longer issues one (014 FR-012: the A2A wire has no inbound
+    secret), so the 007 event suites that still need one take it from the
+    rotation route — the only place it is ever shown — until T110–T114 remove
+    that surface with the rest of the bespoke wire.
+    """
+
+    current = service.get_connection(connection_id, owner_id=OWNER)
+    rotated = service.rotate_signing_secret(
+        connection_id,
+        AgentConnectionRotateSigningSecretRequest(
+            current_password="correct-horse-battery-staple",
+            expected_revision=revision if revision is not None else current.revision,
+        ),
+        owner_id=OWNER,
+        idempotency_key=key,
+        reauthenticated=True,
+    )
+    return rotated.inbound_signing_secret
 
 
 def review(
@@ -325,10 +451,16 @@ class TestConnectAnAgent:
         assert "credential" not in created.model_dump()
         assert "super-secret-token" not in json.dumps(created.model_dump(mode="json"))
 
-    def test_the_inbound_signing_secret_is_returned_exactly_once(
+    def test_014_FR_012_registration_issues_no_secret_for_the_owner_to_configure(
         self, service: AgentRelayService
     ) -> None:
-        """The owner needs it to configure their agent; we never show it again."""
+        """The A2A wire has no inbound secret, so the 201 has nothing to show.
+
+        014-FR-012. Under 007 this response carried a secret the owner had to
+        copy into their agent exactly once. There is nothing to copy any more:
+        push callbacks carry a per-run token BrainBuddy mints and the user never
+        sees, so the safest place for a secret is a response that cannot hold one.
+        """
 
         created = service.create_connection(
             create_request(),
@@ -337,12 +469,11 @@ class TestConnectAnAgent:
             reauthenticated=True,
         )
 
-        assert len(created.inbound_signing_secret) >= 32
+        assert isinstance(created, AgentConnectionResponse)
+        assert not hasattr(created, "inbound_signing_secret")
+        assert "inbound_signing_secret" not in created.model_dump()
         fetched = service.get_connection(created.id, owner_id=OWNER)
         assert not hasattr(fetched, "inbound_signing_secret")
-        assert created.inbound_signing_secret not in json.dumps(
-            fetched.model_dump(mode="json")
-        )
 
     def test_creating_a_connection_requires_reauthentication(
         self, service: AgentRelayService
@@ -373,7 +504,7 @@ class TestConnectAnAgent:
 
         with pytest.raises(ValidationFailure):
             service.create_connection(
-                create_request(endpoint_url=endpoint),
+                create_request(agent_address=endpoint),
                 owner_id=OWNER,
                 idempotency_key="idem-1",
                 reauthenticated=True,
@@ -402,71 +533,25 @@ class TestConnectAnAgent:
         assert first.id == second.id
         assert len(service.list_connections(owner_id=OWNER)) == 1
 
-    def test_a_successful_test_reports_ready_with_capabilities_and_contact(
-        self, service: AgentRelayService, connector: FakeConnector, clock: Clock
+    def test_014_FR_002_the_bespoke_connector_probe_is_no_longer_the_test_path(
+        self, service: AgentRelayService, connector: FakeConnector
     ) -> None:
-        """AC-001: after a good test the user sees what the agent can do."""
+        """The four 007 connector outcomes are gone, not merely unused.
+
+        007 decided readiness from a bespoke capability probe. 014 decides it
+        from the agent's published card plus an authenticated A2A call, and the
+        cases that used to live here are re-expressed against that path in
+        `TestConnectByAgentCard`. This case is what keeps the old path from
+        quietly coming back: a connection test must reach the wire, and the
+        bespoke connector must see nothing (014-FR-002, 014-FR-012).
+        """
 
         connection_id = connect(service)
 
         tested = service.test_connection(connection_id, owner_id=OWNER)
 
         assert tested.status == "ready"
-        assert tested.ready_for_handoff is True
-        assert tested.capabilities.reply is True
-        assert tested.last_contact_at == clock.now
-        assert connector.tests[0].credential == "Bearer super-secret-token"
-
-    def test_invalid_credentials_are_reported_without_echoing_the_secret(
-        self, service: AgentRelayService, connector: FakeConnector
-    ) -> None:
-        """AC-002: an auth rejection is actionable and leaks nothing."""
-
-        connection_id = connect(service)
-        connector.test_outcome = ConnectorTestOutcome(
-            "invalid_credentials",
-            AgentCapabilities(),
-            error_code="connector_credentials_rejected",
-        )
-
-        tested = service.test_connection(connection_id, owner_id=OWNER)
-
-        assert tested.status == "invalid_credentials"
-        assert tested.ready_for_handoff is False
-        assert tested.last_contact_at is None
-        assert "super-secret-token" not in json.dumps(tested.model_dump(mode="json"))
-
-    def test_unreachable_is_distinguished_from_invalid_credentials(
-        self, service: AgentRelayService, connector: FakeConnector
-    ) -> None:
-        """AC-003: the user can tell 'wrong key' from 'nothing answered'."""
-
-        connection_id = connect(service)
-        connector.test_outcome = ConnectorTestOutcome(
-            "unreachable", AgentCapabilities(), error_code="connector_unreachable"
-        )
-
-        tested = service.test_connection(connection_id, owner_id=OWNER)
-
-        assert tested.status == "unreachable"
-        assert tested.last_test_error_code == "connector_unreachable"
-
-    def test_a_connector_without_start_idempotency_is_never_ready(
-        self, service: AgentRelayService, connector: FakeConnector
-    ) -> None:
-        """FR-006: no dedup guarantee means no hand-off."""
-
-        connection_id = connect(service)
-        connector.test_outcome = ConnectorTestOutcome(
-            "unsupported",
-            AgentCapabilities(progress=True),
-            error_code="connector_start_not_idempotent",
-        )
-
-        tested = service.test_connection(connection_id, owner_id=OWNER)
-
-        assert tested.status == "unsupported"
-        assert tested.ready_for_handoff is False
+        assert connector.tests == []
 
     def test_a_ready_connection_goes_stale_once_contact_ages_out(
         self, service: AgentRelayService, clock: Clock
@@ -560,7 +645,7 @@ class TestConnectAnAgent:
         )
 
         assert updated.name == "Renamed agent"
-        assert updated.endpoint_url == current.endpoint_url
+        assert updated.agent_address == current.agent_address
         assert updated.status == "ready"
         assert updated.capabilities == current.capabilities
         assert updated.last_tested_at == current.last_tested_at
@@ -573,7 +658,7 @@ class TestConnectAnAgent:
         current = service.get_connection(connection_id, owner_id=OWNER)
         request = AgentConnectionUpdateRequest(
             name=current.name,
-            endpoint_url=current.endpoint_url,
+            agent_address=current.agent_address,
             expected_revision=current.revision,
         )
         stored_before = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
@@ -620,7 +705,7 @@ class TestConnectAnAgent:
         make_ready(service, connection_id)
         current = service.get_connection(connection_id, owner_id=OWNER)
         request = AgentConnectionUpdateRequest(
-            endpoint_url="https://second.example.com/hooks",
+            agent_address="https://second.example.com/hooks",
             expected_revision=current.revision,
         )
 
@@ -641,7 +726,7 @@ class TestConnectAnAgent:
         )
 
         assert refused.value.detail == {"reason": "reauthentication_required"}
-        assert updated.endpoint_url == "https://second.example.com/hooks"
+        assert updated.agent_address == "https://second.example.com/hooks"
         assert updated.status == "untested"
         assert updated.capabilities.model_dump() == AgentCapabilities().model_dump()
         assert updated.last_contact_at is None
@@ -712,15 +797,609 @@ class TestConnectAnAgent:
             )
 
 
+# --- 014 User Story 1: connect an agent by its published card ----------------
+
+
+class TestConnectByAgentCard:
+    """Discovery, the authenticated probe, the tier, and every named failure.
+
+    The organising rule of this class is that a connection only becomes **ready**
+    when two separate things happened: BrainBuddy read a card it can speak to,
+    and the stored credential authenticated against the interface that card
+    named. Anything less is one of six categories, each with its own sentence.
+    """
+
+    def test_014_FR_002_ready_requires_an_authenticated_list_tasks_probe(
+        self,
+        service: AgentRelayService,
+        card_fetcher: FakeCardFetcher,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-001. A card read proves an agent exists, not that we may talk to it."""
+
+        connection_id = connect(service)
+        before = service.get_connection(connection_id, owner_id=OWNER)
+        assert before.status == "untested"
+        assert before.card is None
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert card_fetcher.calls == [("https://agent.example.com", "bearer")]
+        probes = a2a_client.calls_to("ListTasks")
+        assert len(probes) == 1
+        assert probes[0][2]["page_size"] == 1
+        assert probes[0][1].interface_url == "https://agent.example.com/a2a"
+        assert probes[0][1].credential == "Bearer super-secret-token"
+        assert tested.status == "ready"
+        assert tested.ready_for_handoff is True
+        assert tested.last_test_error_code is None
+        assert tested.card is not None
+        assert tested.card.name == "Hermes"
+        assert tested.card.interface_url == "https://agent.example.com/a2a"
+        assert tested.capabilities.model_dump() == {
+            "streaming": True,
+            "push_notifications": False,
+        }
+        assert tested.controls_offered.model_dump() == {"reply": True, "cancel": True}
+
+    def test_014_FR_002_a_method_not_found_probe_falls_back_to_a_get_task_sentinel(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """AC-001. An agent without ListTasks is still an authenticated agent.
+
+        The sentinel read is the cheapest authenticated call left: a task id
+        nobody owns, whose ``-32001`` answer proves the credential was accepted
+        before the lookup failed.
+        """
+
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_method_not_found"),
+        )
+        a2a_client.script(
+            "GetTask",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_task_not_found"),
+        )
+        connection_id = connect(service)
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.status == "ready"
+        assert a2a_client.calls_to("GetTask")[0][2]["task_id"] == "brainbuddy-probe"
+
+    @pytest.mark.parametrize(
+        "probe",
+        [
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code="a2a_credentials_rejected",
+                http_status=401,
+            ),
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code="a2a_credentials_rejected",
+                http_status=403,
+            ),
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code="a2a_credentials_rejected",
+                a2a_error_code=-32050,
+            ),
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code="a2a_credentials_rejected",
+                a2a_error_code=-32052,
+            ),
+        ],
+    )
+    def test_014_FR_002_a_rejected_credential_is_named_and_never_echoed(
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
+        probe: A2AResult,
+    ) -> None:
+        """AC-003, 014-SC-009. The agent answered; only the credential failed."""
+
+        a2a_client.script("ListTasks", probe)
+        connection_id = connect(service)
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.status == "invalid_credentials"
+        assert tested.last_test_error_code == "a2a_credentials_rejected"
+        assert tested.ready_for_handoff is False
+        assert "super-secret-token" not in tested.model_dump_json()
+
+    @pytest.mark.parametrize("error_code", ["a2a_unreachable", "a2a_timeout"])
+    def test_014_FR_002_transport_failure_and_deadline_breach_read_as_unreachable(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient, error_code: str
+    ) -> None:
+        """AC-002. A deadline breach is still "we could not reach it in time"."""
+
+        a2a_client.script(
+            "ListTasks", A2AResult(ok=False, correlation_id="c", error_code=error_code)
+        )
+        connection_id = connect(service)
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.status == "unreachable"
+        assert tested.last_test_error_code == "a2a_unreachable"
+        assert tested.last_test_error_detail is None
+
+    @pytest.mark.parametrize(
+        ("failure_code", "failure_detail", "expected_detail"),
+        [
+            ("a2a_not_an_agent", None, None),
+            (
+                "a2a_protocol_version_unsupported",
+                {"found_version": "0.9.4"},
+                {"found_version": "0.9.4"},
+            ),
+            ("a2a_no_supported_interface", None, None),
+            (
+                "a2a_auth_scheme_unsupported",
+                {"scheme": "oauth2"},
+                {"scheme": "oauth2"},
+            ),
+        ],
+    )
+    def test_014_FR_002_the_four_unsupported_categories_keep_their_own_detail(
+        self,
+        service: AgentRelayService,
+        card_fetcher: FakeCardFetcher,
+        a2a_client: FakeA2AClient,
+        failure_code: str,
+        failure_detail: dict[str, Any] | None,
+        expected_detail: dict[str, Any] | None,
+    ) -> None:
+        """AC-002, AC-004. Four sentences, not one shrug (D-01-S14..S17)."""
+
+        card_fetcher.discovery = CardDiscovery(
+            failure_code=failure_code, failure_detail=failure_detail
+        )
+        connection_id = connect(service)
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.status == "unsupported"
+        assert tested.last_test_error_code == failure_code
+        assert tested.last_test_error_detail == expected_detail
+        assert tested.card is None
+        # Nothing authenticated was attempted: the card already said this agent
+        # cannot be spoken to, so sending the credential would leak it for
+        # nothing.
+        assert a2a_client.calls_to("ListTasks") == []
+
+    def test_014_FR_004_a_private_destination_is_refused_before_a_credential_leaves(
+        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+    ) -> None:
+        """AC-006, D-01-S18. Nothing left BrainBuddy."""
+
+        card_fetcher = FakeCardFetcher()
+        a2a_client = FakeA2AClient()
+        service = build_service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            card_fetcher=card_fetcher,
+            a2a_client=a2a_client,
+        )
+        connection_id = connect(service)
+        stored = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        service.agent_repo.save_connection(
+            stored.model_copy(update={"endpoint_url": "http://127.0.0.1:9/hooks"})
+        )
+
+        with pytest.raises(ValidationFailure) as excinfo:
+            service.test_connection(connection_id, owner_id=OWNER)
+
+        assert str(excinfo.value.detail["reason"]).startswith("destination_")
+        assert card_fetcher.calls == []
+        assert a2a_client.calls == []
+
+    def test_rate_limited_connection_test_keeps_status_untested_and_records_retry_after(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """AC-037, D-01-S25. A refusal to answer is not a verdict on the agent.
+
+        The connection stays **untested** — never ready — because the probe
+        learned nothing, and the retry hint is the agent's own number or nothing
+        at all rather than a countdown BrainBuddy invented.
+        """
+
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code="a2a_rate_limited",
+                http_status=429,
+                retry_after_seconds=30,
+            ),
+        )
+        connection_id = connect(service)
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.status == "untested"
+        assert tested.ready_for_handoff is False
+        assert tested.last_test_error_code == "a2a_rate_limited"
+        assert tested.last_test_error_detail == {"retry_after_seconds": 30}
+
+    def test_014_FR_002_a_rate_limit_without_a_hint_records_no_invented_countdown(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """CHK051. "Test again shortly." is the honest copy for a missing hint."""
+
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code="a2a_rate_limited",
+                http_status=429,
+            ),
+        )
+        connection_id = connect(service)
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.last_test_error_detail == {"retry_after_seconds": None}
+
+    def test_014_FR_011_the_guaranteed_tier_requires_the_declared_extension_uri(
+        self, service: AgentRelayService, card_fetcher: FakeCardFetcher
+    ) -> None:
+        """AC-001, AC-005. The tier is read off the card, never assumed."""
+
+        best_effort = service.test_connection(connect(service), owner_id=OWNER)
+        assert best_effort.guarantee_tier == "best_effort"
+        assert best_effort.tier_disclosure_url
+
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(extension_uris=[SINGLE_START_EXTENSION_URI])
+        )
+        guaranteed = service.test_connection(
+            connect(service, key="idem-guaranteed"), owner_id=OWNER
+        )
+
+        assert guaranteed.guarantee_tier == "guaranteed"
+        assert guaranteed.card is not None
+        assert guaranteed.card.extension_uris == [SINGLE_START_EXTENSION_URI]
+
+    def test_014_FR_014_tier_disclosures_carry_the_exact_server_owned_copy(
+        self, service: AgentRelayService, card_fetcher: FakeCardFetcher
+    ) -> None:
+        """FR-014. The two tier sentences are BrainBuddy's, asserted once here.
+
+        Both clients render them verbatim, so a drift in this copy is a drift in
+        the product's promise rather than a cosmetic one — which is why the exact
+        opening words are pinned rather than merely "some disclosure exists".
+        """
+
+        best_effort = service.test_connection(connect(service), owner_id=OWNER)
+        assert best_effort.tier_disclosure is not None
+        assert best_effort.tier_disclosure.startswith("Best-effort single start.")
+        assert best_effort.cancellation_disclosure is not None
+        assert best_effort.cancellation_disclosure.startswith(
+            "Cancellation depends on the agent"
+        )
+
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(extension_uris=[SINGLE_START_EXTENSION_URI])
+        )
+        guaranteed = service.test_connection(
+            connect(service, key="idem-guaranteed"), owner_id=OWNER
+        )
+        assert guaranteed.tier_disclosure is not None
+        assert guaranteed.tier_disclosure.startswith("Guaranteed single start.")
+
+    def test_014_FR_002_card_drift_returns_the_connection_to_untested(
+        self, service: AgentRelayService, card_fetcher: FakeCardFetcher, clock: Clock
+    ) -> None:
+        """AC-012, D-01-S20. A moved destination is not a destination we tested."""
+
+        connection_id = connect(service)
+        service.test_connection(connection_id, owner_id=OWNER)
+        acknowledged = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        service.agent_repo.save_connection(
+            acknowledged.model_copy(update={"best_effort_acknowledged_at": clock.now})
+        )
+
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(interface_url="https://second.example.com/a2a")
+        )
+        drifted = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert drifted.status == "untested"
+        assert drifted.agent_changed is True
+        assert drifted.last_test_error_code == "agent_card_changed"
+        assert drifted.ready_for_handoff is False
+        # The connection still describes the interface the owner *tested*; the
+        # one the card now advertises is named beside it (D-01-S20).
+        assert drifted.card is not None
+        assert drifted.card.interface_url == "https://agent.example.com/a2a"
+        assert drifted.last_test_error_detail == {
+            "interface_url": "https://second.example.com/a2a"
+        }
+
+        stored = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert stored.card_drift_at == clock.now
+        assert stored.scope_verified_at is None
+        assert stored.best_effort_acknowledged_at is None
+
+    def test_014_FR_002_a_successful_test_after_drift_clears_the_drift_marker(
+        self, service: AgentRelayService, card_fetcher: FakeCardFetcher
+    ) -> None:
+        """A tested destination is a tested destination, whichever card named it."""
+
+        connection_id = connect(service)
+        service.test_connection(connection_id, owner_id=OWNER)
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(interface_url="https://second.example.com/a2a")
+        )
+        service.test_connection(connection_id, owner_id=OWNER)
+
+        recovered = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert recovered.status == "ready"
+        assert recovered.agent_changed is False
+        assert recovered.card is not None
+        assert recovered.card.interface_url == "https://second.example.com/a2a"
+        stored = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert stored.card_drift_at is None
+
+    @pytest.mark.parametrize("change", ["address", "auth_scheme", "credential"])
+    def test_014_FR_004_a_scope_change_asks_for_the_acknowledgement_again(
+        self, service: AgentRelayService, clock: Clock, change: str
+    ) -> None:
+        """AC-026. A new destination is a new decision, so the promise resets."""
+
+        connection_id = connect(service)
+        service.test_connection(connection_id, owner_id=OWNER)
+        stored = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        service.agent_repo.save_connection(
+            stored.model_copy(update={"best_effort_acknowledged_at": clock.now})
+        )
+        revision = service.get_connection(connection_id, owner_id=OWNER).revision
+
+        if change == "credential":
+            service.rotate_credential(
+                connection_id,
+                AgentConnectionRotateRequest(
+                    credential="replacement",
+                    current_password="password",
+                    expected_revision=revision,
+                ),
+                owner_id=OWNER,
+                idempotency_key=f"idem-{change}",
+                reauthenticated=True,
+            )
+        else:
+            payload = (
+                {"agent_address": "https://second.example.com"}
+                if change == "address"
+                else {"auth_scheme": "api_key"}
+            )
+            service.update_connection(
+                connection_id,
+                AgentConnectionUpdateRequest(
+                    **payload,
+                    current_password="password",
+                    expected_revision=revision,
+                ),
+                owner_id=OWNER,
+                idempotency_key=f"idem-{change}",
+                reauthenticated=True,
+            )
+
+        after = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert after.status == "untested"
+        assert after.best_effort_acknowledged_at is None
+        assert after.scope_verified_at == clock.now
+        assert after.card is None
+        assert after.card_fingerprint is None
+
+    def test_014_FR_001_the_header_name_is_card_sourced_absent_for_bearer(
+        self,
+        service: AgentRelayService,
+        card_fetcher: FakeCardFetcher,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-002. The owner picks a scheme; the agent's card names the header."""
+
+        bearer_id = connect(service)
+        bearer = service.test_connection(bearer_id, owner_id=OWNER)
+        assert bearer.auth_header_name is None
+        assert "auth_header_name" not in service.agent_repo.get_connection(
+            bearer_id, owner_id=OWNER
+        ).model_dump(exclude_none=True)
+        assert a2a_client.calls_to("ListTasks")[0][1].auth_scheme == "bearer"
+
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(
+                auth_schemes_offered=[
+                    AgentAuthSchemeOffer(
+                        name="apiKey", kind="api_key", header_name="X-API-Key"
+                    )
+                ]
+            ),
+            auth_header_name="X-API-Key",
+        )
+        api_key_id = service.create_connection(
+            create_request(auth_scheme="api_key"),
+            owner_id=OWNER,
+            idempotency_key="idem-api-key",
+            reauthenticated=True,
+        ).id
+        api_key = service.test_connection(api_key_id, owner_id=OWNER)
+
+        assert api_key.auth_scheme == "api_key"
+        assert api_key.auth_header_name == "X-API-Key"
+
+    def test_014_FR_001_a_reserved_card_header_name_is_refused_as_unsupported(
+        self, service: AgentRelayService, card_fetcher: FakeCardFetcher
+    ) -> None:
+        """A card that names `Authorization` for its API key does not get to.
+
+        The reserved set is what stops a card from choosing the one header the
+        transport itself populates; refusing it as an unsupported scheme keeps
+        the failure in a category the owner can act on.
+        """
+
+        card_fetcher.discovery = ready_discovery(auth_header_name="Authorization")
+        connection_id = service.create_connection(
+            create_request(auth_scheme="api_key"),
+            owner_id=OWNER,
+            idempotency_key="idem-reserved",
+            reauthenticated=True,
+        ).id
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.status == "unsupported"
+        assert tested.last_test_error_code == "a2a_auth_scheme_unsupported"
+        assert tested.last_test_error_detail == {"scheme": "Authorization"}
+
+    def test_014_FR_002_a_successful_test_refreshes_contact_and_the_stale_rule_holds(
+        self, service: AgentRelayService, clock: Clock
+    ) -> None:
+        """FR-002, D-01-S19. Staleness is derived from the last authenticated call."""
+
+        connection_id = connect(service)
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+        assert tested.last_contact_at == clock.now
+        assert tested.stale is False
+
+        clock.advance(timedelta(days=8))
+        stale = service.get_connection(connection_id, owner_id=OWNER)
+        assert stale.stale is True
+        assert stale.ready_for_handoff is False
+
+        refreshed = service.test_connection(connection_id, owner_id=OWNER)
+        assert refreshed.stale is False
+        assert refreshed.last_contact_at == clock.now
+
+    def test_014_SC_003_a_connection_test_is_scoped_to_its_owner(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """014-SC-003. Re-targeting a stranger's connection is a 404, not a probe."""
+
+        connection_id = connect(service)
+
+        with pytest.raises(NotFoundError):
+            service.test_connection(connection_id, owner_id=OTHER_OWNER)
+
+        assert a2a_client.calls == []
+
+    @pytest.mark.parametrize("body", [b"not json at all", b'{"name": "x"'])
+    def test_014_SC_003_a_malformed_card_body_changes_nothing(
+        self, tmp_path: Path, connector: FakeConnector, clock: Clock, body: bytes
+    ) -> None:
+        """014-SC-003. A truncated card is not a card; parsing a prefix is worse."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=body)
+
+        service = build_service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            card_fetcher=mock_transport_card_fetcher(handler),
+        )
+        connection_id = connect(service)
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.status == "unsupported"
+        assert tested.last_test_error_code == "a2a_not_an_agent"
+        assert tested.card is None
+
+    def test_014_SC_003_an_oversized_card_body_is_refused_whole(
+        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+    ) -> None:
+        """014-SC-003. The cap is enforced on the stream, not after the fact."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b'{"name":"' + b"a" * 200_000 + b'"}')
+
+        service = build_service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            card_fetcher=mock_transport_card_fetcher(handler),
+        )
+        connection_id = connect(service)
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.status == "unsupported"
+        assert tested.last_test_error_code == "a2a_not_an_agent"
+
+    def test_014_SC_003_a_rebinding_answer_is_refused_by_the_pinned_resolver(
+        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+    ) -> None:
+        """014-SC-003. The network class is decided before the socket, once."""
+
+        def rebinding_resolver(host: str, port: int) -> list[str]:
+            return ["127.0.0.1"]
+
+        repo = AgentRepository(tmp_path)
+        connection_id = connect(
+            build_service(repo, connector, clock, a2a_client=FakeA2AClient())
+        )
+        # The host resolved publicly when the connection was saved and resolves
+        # inward now. Discovery is the *real* one here: the point is that the
+        # network class is decided from this resolver, before the socket.
+        rebound = AgentRelayService(
+            repo,
+            connector=connector,
+            secret_box=SecretBox(OrderedDict({"v1": b"\x07" * 32})),
+            task_snapshot=task_snapshot,
+            callback_url=CALLBACK,
+            a2a_client=FakeA2AClient(),
+            resolver=rebinding_resolver,
+            now=clock,
+        )
+
+        with pytest.raises(ValidationFailure) as excinfo:
+            rebound.test_connection(connection_id, owner_id=OWNER)
+
+        assert str(excinfo.value.detail["reason"]).startswith("destination_")
+
+    def test_014_SC_009_no_connection_read_ever_carries_the_credential(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """014-SC-009. There is no shape a saved secret could travel in."""
+
+        connection_id = connect(service)
+        for probe in (
+            A2AResult(ok=True, correlation_id="c"),
+            A2AResult(
+                ok=False, correlation_id="c", error_code="a2a_credentials_rejected"
+            ),
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_unreachable"),
+        ):
+            a2a_client.script("ListTasks", probe)
+            rendered = service.test_connection(
+                connection_id, owner_id=OWNER
+            ).model_dump_json()
+            assert "super-secret-token" not in rendered
+
+
 class TestConnectionTestConcurrency:
     def test_slow_test_cannot_restore_readiness_after_destination_update(
         self, tmp_path: Path, clock: Clock
     ) -> None:
-        connector = BlockingTestConnector()
+        blocking = BlockingCardFetcher()
         service = build_service(AgentRepository(tmp_path), FakeConnector(), clock)
         connection_id = connect(service)
         make_ready(service, connection_id)
-        service.connector = connector
+        service._card_fetcher = blocking
         tested: list[Any] = []
         worker = Thread(
             target=lambda: tested.append(
@@ -728,20 +1407,20 @@ class TestConnectionTestConcurrency:
             )
         )
         worker.start()
-        assert connector.entered.wait(timeout=5)
+        assert blocking.entered.wait(timeout=5)
 
         current = service.get_connection(connection_id, owner_id=OWNER)
         moved = service.update_connection(
             connection_id,
             AgentConnectionUpdateRequest(
-                endpoint_url="https://second.example.com/hooks",
+                agent_address="https://second.example.com/hooks",
                 expected_revision=current.revision,
             ),
             owner_id=OWNER,
             idempotency_key="idem-race-move",
             reauthenticated=True,
         )
-        connector.release.set()
+        blocking.release.set()
         worker.join(timeout=5)
 
         assert moved.status == "untested"
@@ -753,8 +1432,10 @@ class TestConnectionTestConcurrency:
     def test_a_slow_test_cannot_restore_a_concurrently_disconnected_connection(
         self, tmp_path: Path, clock: Clock
     ) -> None:
-        connector = BlockingTestConnector()
-        service = build_service(AgentRepository(tmp_path), connector, clock)
+        blocking = BlockingCardFetcher()
+        service = build_service(
+            AgentRepository(tmp_path), FakeConnector(), clock, card_fetcher=blocking
+        )
         connection_id = connect(service)
         tested: list[Any] = []
         worker = Thread(
@@ -763,7 +1444,7 @@ class TestConnectionTestConcurrency:
             )
         )
         worker.start()
-        assert connector.entered.wait(timeout=5)
+        assert blocking.entered.wait(timeout=5)
 
         current = service.get_connection(connection_id, owner_id=OWNER)
         service.disconnect_connection(
@@ -776,7 +1457,7 @@ class TestConnectionTestConcurrency:
             idempotency_key="idem-disconnect-race",
             reauthenticated=True,
         )
-        connector.release.set()
+        blocking.release.set()
         worker.join(timeout=5)
 
         persisted = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
@@ -789,8 +1470,10 @@ class TestConnectionTestConcurrency:
     def test_a_slow_test_cannot_restore_a_concurrently_rotated_credential(
         self, tmp_path: Path, clock: Clock
     ) -> None:
-        connector = BlockingTestConnector()
-        service = build_service(AgentRepository(tmp_path), connector, clock)
+        blocking = BlockingCardFetcher()
+        service = build_service(
+            AgentRepository(tmp_path), FakeConnector(), clock, card_fetcher=blocking
+        )
         connection_id = connect(service)
         tested: list[Any] = []
         worker = Thread(
@@ -799,7 +1482,7 @@ class TestConnectionTestConcurrency:
             )
         )
         worker.start()
-        assert connector.entered.wait(timeout=5)
+        assert blocking.entered.wait(timeout=5)
 
         current = service.get_connection(connection_id, owner_id=OWNER)
         service.rotate_credential(
@@ -813,7 +1496,7 @@ class TestConnectionTestConcurrency:
             idempotency_key="idem-rotate-race",
             reauthenticated=True,
         )
-        connector.release.set()
+        blocking.release.set()
         worker.join(timeout=5)
 
         persisted = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
@@ -937,6 +1620,7 @@ class TestExternalIoLockScope:
             idempotency_key="idem-callback-create",
             reauthenticated=True,
         )
+        created_secret = issue_signing_secret(service, created.id)
         make_ready(service, created.id)
         preview = service.preview_handoff(
             "task_1",
@@ -969,7 +1653,7 @@ class TestExternalIoLockScope:
                 raw_body=body,
                 connection_id=created.id,
                 timestamp=str(timestamp),
-                signature=sign(created.inbound_signing_secret, timestamp, body),
+                signature=sign(created_secret, timestamp, body),
             )
             assert accepted.accepted is True
             if expire_content:
@@ -1118,7 +1802,7 @@ class TestHandOffReview:
         assert preview.run_id
         assert preview.agent_name == "Hermes"
         assert preview.reporting_instructions
-        assert preview.destination_endpoint == "https://agent.example.com/hooks"
+        assert preview.destination_endpoint == "https://agent.example.com"
         assert "cannot guarantee" in preview.external_copy_notice
 
     def test_excluding_details_removes_them_from_the_manifest_and_the_token(
@@ -1332,28 +2016,23 @@ class TestHandOffReview:
         assert len(connector.starts) == 1
 
     @pytest.mark.parametrize(
-        "status,error",
-        [
-            ("untested", None),
-            ("invalid_credentials", "connector_credentials_rejected"),
-            ("unreachable", "connector_unreachable"),
-        ],
+        "probe_error",
+        [None, "a2a_credentials_rejected", "a2a_unreachable"],
     )
     def test_a_connection_that_is_not_ready_refuses_before_sending_content(
         self,
         service: AgentRelayService,
         connector: FakeConnector,
-        status: str,
-        error: str | None,
+        a2a_client: FakeA2AClient,
+        probe_error: str | None,
     ) -> None:
         """AC-010: task content never leaves through an unusable connection."""
 
         connection_id = connect(service)
-        if status != "untested":
-            connector.test_outcome = ConnectorTestOutcome(
-                status,  # type: ignore[arg-type]
-                AgentCapabilities(),
-                error_code=error,
+        if probe_error is not None:
+            a2a_client.script(
+                "ListTasks",
+                A2AResult(ok=False, correlation_id="c", error_code=probe_error),
             )
             service.test_connection(connection_id, owner_id=OWNER)
 
@@ -1361,6 +2040,7 @@ class TestHandOffReview:
             dispatch(service, connection_id)
 
         assert connector.starts == []
+        assert a2a_client.calls_to("SendMessage") == []
 
     def test_a_stale_connection_refuses_the_hand_off(
         self, service: AgentRelayService, connector: FakeConnector, clock: Clock
@@ -1448,7 +2128,9 @@ class Relay:
             reauthenticated=True,
         )
         self.connection_id = created.id
-        self.secret = created.inbound_signing_secret
+        self.secret = issue_signing_secret(
+            service, created.id, key="idem-relay-signing"
+        )
         service.test_connection(self.connection_id, owner_id=OWNER)
         self.run = dispatch(service, self.connection_id)
         self.service = service
@@ -1739,6 +2421,7 @@ class TestEventAuthentication:
             idempotency_key="idem-other",
             reauthenticated=True,
         )
+        other_secret = issue_signing_secret(service, other.id, key="idem-other-signing")
         # Signed correctly, by the right owner, and internally consistent: the
         # only thing wrong is that this run was never dispatched to *this*
         # connection.
@@ -1751,7 +2434,7 @@ class TestEventAuthentication:
                 raw_body=body,
                 connection_id=other.id,
                 timestamp=str(timestamp),
-                signature=sign(other.inbound_signing_secret, timestamp, body),
+                signature=sign(other_secret, timestamp, body),
             )
 
         assert relay.projection().reported_state is None
@@ -2277,30 +2960,25 @@ class TestReplyAndCancel:
         assert reply.delivery == "unconfirmed"
         assert run.reply_pending is True
 
-    def test_replying_through_a_connector_without_reply_support_is_refused(
-        self, service: AgentRelayService, connector: FakeConnector, clock: Clock
+    def test_014_FR_010_reply_is_offered_because_no_card_can_advertise_it(
+        self, service: AgentRelayService, clock: Clock
     ) -> None:
-        """AC-013: an unsupported control is unavailable, never simulated."""
+        """014-FR-010. An agent card says nothing about replies, so we offer it.
 
-        connector.test_outcome = ConnectorTestOutcome(
-            "ready", AgentCapabilities(progress=True, reply=False, cancel=False)
-        )
+        007 hid the control behind a declared capability. Under A2A there is no
+        such declaration to read, and hiding a control on the strength of a flag
+        no card carries would mean withdrawing it from every agent that does
+        support replies. BrainBuddy offers it and reports what the agent
+        actually answers.
+        """
+
         relay = Relay(service, clock)
         relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
 
         run = relay.projection()
-        assert run.capabilities.reply is False
 
-        with pytest.raises(ValidationFailure):
-            service.reply_to_run(
-                relay.run.id,
-                AgentReplyRequest(
-                    message="Use staging.",
-                    expected_revision=relay.projection().revision,
-                ),
-                owner_id=OWNER,
-                idempotency_key="idem-reply",
-            )
+        assert run.capabilities.reply is True
+        assert run.capabilities.cancel is True
 
     def test_cancel_is_requested_but_not_claimed_until_confirmed(
         self, relay: Relay, service: AgentRelayService
@@ -2358,21 +3036,6 @@ class TestReplyAndCancel:
         assert [
             command.kind for command in run.commands if command.kind == "cancel"
         ] == ["cancel"]
-
-    def test_cancelling_through_a_connector_without_cancel_support_is_refused(
-        self, service: AgentRelayService, connector: FakeConnector, clock: Clock
-    ) -> None:
-        """AC-017: without support the control is absent, not fake."""
-
-        connector.test_outcome = ConnectorTestOutcome(
-            "ready", AgentCapabilities(progress=True, reply=True, cancel=False)
-        )
-        relay = Relay(service, clock)
-
-        with pytest.raises(ValidationFailure):
-            service.cancel_run(
-                relay.run.id, owner_id=OWNER, idempotency_key="idem-cancel"
-            )
 
     def test_another_owner_cannot_reply_to_or_cancel_the_run(
         self, relay: Relay, service: AgentRelayService
@@ -2634,6 +3297,7 @@ class TestExternalIoMergeRaces:
             idempotency_key="idem-start-race-create",
             reauthenticated=True,
         )
+        created_secret = issue_signing_secret(service, created.id)
         make_ready(service, created.id)
         confirmation = review(service, created.id)
         reserved = service.agent_repo.list_runs_for_task("task_1", owner_id=OWNER)[0]
@@ -2670,7 +3334,7 @@ class TestExternalIoMergeRaces:
                 raw_body=body,
                 connection_id=created.id,
                 timestamp=str(timestamp),
-                signature=sign(created.inbound_signing_secret, timestamp, body),
+                signature=sign(created_secret, timestamp, body),
             )
         elif race == "rotation":
             current = service.get_connection(created.id, owner_id=OWNER)
@@ -3584,6 +4248,9 @@ class TestAudit:
             idempotency_key="idem-create-after-flood",
             reauthenticated=True,
         )
+        replacement_secret = issue_signing_secret(
+            service, replacement.id, key="idem-replacement-signing"
+        )
         make_ready(service, replacement.id)
         replacement_run = dispatch(
             service,
@@ -3606,11 +4273,7 @@ class TestAudit:
             raw_body=body,
             connection_id=replacement.id,
             timestamp=str(timestamp),
-            signature=sign(
-                replacement.inbound_signing_secret,
-                timestamp,
-                body,
-            ),
+            signature=sign(replacement_secret, timestamp, body),
         )
         assert accepted.accepted is True
 
@@ -4469,7 +5132,7 @@ class TestRelayFailureRecoveryEdges:
         migrated = restarted.agent_repo.get_connection(
             relay.connection_id, owner_id=OWNER
         )
-        assert migrated.auth_header_name == "X-Agent-Key"
+        assert migrated.auth_header_name is None
         assert migrated.credential is None
         assert migrated.status == "untested"
         assert migrated.revision == 2
@@ -4530,7 +5193,9 @@ class TestRelayFailureRecoveryEdges:
         )
 
         assert [item.id for item in listed] == [relay.connection_id]
-        assert listed[0].auth_header_name == "X-Agent-Key"
+        # 014: the repair leaves no header name at all. A bearer connection has
+        # none, and writing a placeholder would claim a scheme nobody chose.
+        assert listed[0].auth_header_name is None
         assert listed[0].status == "untested"
         assert (
             listed[0].last_test_error_code
@@ -4558,7 +5223,7 @@ class TestRelayFailureRecoveryEdges:
             AgentRepository(tmp_path), FakeConnector(), clock
         )
         persisted = restarted_again.get_connection(relay.connection_id, owner_id=OWNER)
-        assert persisted.auth_header_name == "X-Agent-Key"
+        assert persisted.auth_header_name is None
         assert persisted.last_test_error_code == (
             "legacy_invalid_auth_header_requires_reconfiguration"
         )
@@ -5072,20 +5737,23 @@ class TestRelayFailureRecoveryEdges:
             reauthenticated=True,
         )
         with sqlite3.connect(service.agent_repo.db_path) as database:
+            # The relay bundle also mints a signing secret, so target the row
+            # this test just wrote rather than whichever rotation comes first.
             stored = database.execute(
-                "SELECT response_body FROM agent_idempotency "
-                "WHERE owner_id = ? AND command = 'rotate_signing_secret'",
+                "SELECT key_hash, response_body FROM agent_idempotency "
+                "WHERE owner_id = ? AND command = 'rotate_signing_secret' "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1",
                 (OWNER,),
             ).fetchone()
             assert stored is not None
-            original = json.loads(stored[0])
+            original = json.loads(stored[1])
             receipt["installed_secret_fingerprint"] = original[
                 "installed_secret_fingerprint"
             ]
             database.execute(
                 "UPDATE agent_idempotency SET response_body = ? "
-                "WHERE owner_id = ? AND command = 'rotate_signing_secret'",
-                (json.dumps(receipt), OWNER),
+                "WHERE owner_id = ? AND key_hash = ?",
+                (json.dumps(receipt), OWNER, stored[0]),
             )
 
         with pytest.raises(ValidationFailure) as refused:

@@ -28,6 +28,10 @@ from app.core.config import FeatureFlagState
 from app.core.rate_limit import sensitive_action_rate_limiter
 from app.main import _run_privacy_maintenance_sweep, create_app
 from app.modules.agents import service as agent_service_module
+from app.modules.agents.a2a.card import (
+    MAX_CARD_DESCRIPTION_CHARS,
+    CardDiscovery,
+)
 from app.modules.agents.connector import (
     ConnectorCommandOutcome,
     ConnectorStartOutcome,
@@ -40,11 +44,18 @@ from app.schemas.auth import Invite, User
 from app.services.auth_service import AuthService
 from app.utils.time import utcnow
 
+from .a2a_fakes import (
+    A2AResult,
+    FakeA2AClient,
+    FakeCardFetcher,
+    card_summary,
+    ready_discovery,
+)
 from .conftest import TEST_USER_EMAIL, TEST_USER_PASSWORD
 
 SECOND_EMAIL = "second-relay@example.com"
 SECOND_PASSWORD = "another-horse-battery-staple"
-ENDPOINT = "https://agent.example.com/hooks"
+ENDPOINT = "https://agent.example.com"
 
 
 def test_sensitive_reauthentication_rejects_a_missing_password_before_rate_limiting(
@@ -118,7 +129,10 @@ class FakeConnector:
 
 
 def _resolver(host: str, port: int) -> list[str]:
-    return {"agent.example.com": ["93.184.216.34"]}[host]
+    return {
+        "agent.example.com": ["93.184.216.34"],
+        "second.example.com": ["93.184.216.35"],
+    }[host]
 
 
 @pytest.fixture
@@ -139,6 +153,11 @@ def relay_app(
     connector = FakeConnector()
     container.agent_relay_service.connector = connector
     container.agent_relay_service._resolver = _resolver
+    # Discovery and the A2A wire are scripted in-process: the HTTP contract is
+    # what these tests are about, and a real socket would make them a network
+    # test that happens to exercise routing.
+    container.agent_relay_service._card_fetcher = FakeCardFetcher()
+    container.agent_relay_service.a2a_client = FakeA2AClient()
 
     for code in ("invite_relay_a", "invite_relay_b"):
         container.invite_repo.create(Invite(code=code, created_at=utcnow()))
@@ -195,19 +214,44 @@ def connector(
     return relay_app[2]
 
 
-def create_connection(client: TestClient, *, key: str = "k-create") -> dict[str, Any]:
+def register_connection(client: TestClient, *, key: str = "k-create") -> dict[str, Any]:
+    """The registration response exactly as the route returns it (no secret)."""
+
     response = client.post(
         "/api/agent-connections",
         headers={"Idempotency-Key": key},
         json={
             "name": "Hermes",
-            "endpoint_url": ENDPOINT,
+            "agent_address": ENDPOINT,
             "credential": "Bearer super-secret-token",
             "current_password": TEST_USER_PASSWORD,
         },
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def create_connection(client: TestClient, *, key: str = "k-create") -> dict[str, Any]:
+    """A registered connection *plus* a usable bespoke signing secret.
+
+    Registration issues no secret under the A2A wire (014 FR-012), so the 007
+    inbound-event suites — which still need one until T110–T114 delete that
+    surface — take it from the rotation route, the only place it is ever shown.
+    The returned body is the connection as it stands after that rotation, so a
+    caller's `revision` is the real one.
+    """
+
+    created = register_connection(client, key=key)
+    rotated = client.post(
+        f"/api/agent-connections/{created['id']}/signing-secret",
+        headers={"Idempotency-Key": f"{key}-signing"},
+        json={
+            "current_password": TEST_USER_PASSWORD,
+            "expected_revision": created["revision"],
+        },
+    )
+    assert rotated.status_code == 200, rotated.text
+    return dict(rotated.json())
 
 
 def create_task(client: TestClient, title: str = "Draft the migration plan") -> str:
@@ -375,7 +419,7 @@ class TestAuthAndRollout:
                 headers={"Idempotency-Key": "off-create-again"},
                 json={
                     "name": "Other",
-                    "endpoint_url": ENDPOINT,
+                    "agent_address": ENDPOINT,
                     "credential": "Bearer other",
                     "current_password": TEST_USER_PASSWORD,
                 },
@@ -448,7 +492,7 @@ class TestConnectionRoutes:
             f"/api/agent-connections/{created['id']}",
             headers={"Idempotency-Key": "update-destination"},
             json={
-                "endpoint_url": "https://agent.example.com/new-hooks",
+                "agent_address": "https://second.example.com",
                 "current_password": TEST_USER_PASSWORD,
                 "expected_revision": renamed.json()["revision"],
             },
@@ -473,15 +517,22 @@ class TestConnectionRoutes:
 
         assert response.status_code == 404
 
-    def test_creating_a_connection_returns_the_secret_once_and_never_again(
+    def test_014_FR_012_creating_a_connection_returns_no_secret_at_all(
         self, client: TestClient
     ) -> None:
-        """AC-019: the credential is never a response field."""
+        """AC-019, 014-FR-012: neither the credential nor any inbound secret.
 
-        created = create_connection(client)
+        007's 201 carried a signing secret the owner had to copy into their
+        agent. The A2A wire has none, so the safest registration response is one
+        whose schema cannot hold a secret in the first place.
+        """
+
+        created = register_connection(client)
 
         assert created["status"] == "untested"
-        assert created["inbound_signing_secret"]
+        assert created["auth_scheme"] == "bearer"
+        assert created["agent_address"] == ENDPOINT
+        assert "inbound_signing_secret" not in created
         assert "credential" not in created
 
         listed = client.get("/api/agent-connections").json()
@@ -498,7 +549,7 @@ class TestConnectionRoutes:
             headers={"Idempotency-Key": "k1"},
             json={
                 "name": "Hermes",
-                "endpoint_url": ENDPOINT,
+                "agent_address": ENDPOINT,
                 "credential": "Bearer token",
             },
         )
@@ -515,7 +566,7 @@ class TestConnectionRoutes:
             headers={"Idempotency-Key": "k1"},
             json={
                 "name": "Hermes",
-                "endpoint_url": ENDPOINT,
+                "agent_address": ENDPOINT,
                 "credential": "Bearer token",
                 "current_password": "not-the-password",
             },
@@ -532,7 +583,7 @@ class TestConnectionRoutes:
             headers={"Idempotency-Key": "blank-name"},
             json={
                 "name": "   ",
-                "endpoint_url": ENDPOINT,
+                "agent_address": ENDPOINT,
                 "credential": "Bearer token",
                 "current_password": TEST_USER_PASSWORD,
             },
@@ -558,7 +609,7 @@ class TestConnectionRoutes:
             headers={"Idempotency-Key": f"bad-header-{auth_header_name}"},
             json={
                 "name": "Hermes",
-                "endpoint_url": ENDPOINT,
+                "agent_address": ENDPOINT,
                 "auth_header_name": auth_header_name,
                 "credential": "Bearer token",
                 "current_password": TEST_USER_PASSWORD,
@@ -579,7 +630,7 @@ class TestConnectionRoutes:
             "/api/agent-connections",
             json={
                 "name": "Hermes",
-                "endpoint_url": ENDPOINT,
+                "agent_address": ENDPOINT,
                 "credential": "Bearer token",
                 "current_password": TEST_USER_PASSWORD,
             },
@@ -605,7 +656,7 @@ class TestConnectionRoutes:
             headers={"Idempotency-Key": "k1"},
             json={
                 "name": "Hermes",
-                "endpoint_url": endpoint,
+                "agent_address": endpoint,
                 "credential": "Bearer token",
                 "current_password": TEST_USER_PASSWORD,
             },
@@ -614,10 +665,15 @@ class TestConnectionRoutes:
         assert response.status_code == 400
         assert client.get("/api/agent-connections").json() == []
 
-    def test_testing_a_connection_reports_readiness_and_capabilities(
+    def test_014_FR_002_testing_reports_the_discovery_result_and_the_tier(
         self, client: TestClient
     ) -> None:
-        """AC-001 over HTTP."""
+        """AC-001, AC-005 over HTTP. Two separate claims, kept separate.
+
+        `capabilities` is what the *card* declared; `controls_offered` is what
+        BrainBuddy offers on this connection's runs. A single blended object
+        would let a product decision be read as an agent's promise.
+        """
 
         created = create_connection(client)
 
@@ -627,11 +683,230 @@ class TestConnectionRoutes:
         body = response.json()
         assert body["status"] == "ready"
         assert body["ready_for_handoff"] is True
-        assert body["capabilities"] == {
-            "progress": True,
-            "reply": True,
-            "cancel": True,
+        assert body["capabilities"] == {"streaming": True, "push_notifications": False}
+        assert body["controls_offered"] == {"reply": True, "cancel": True}
+        assert body["guarantee_tier"] == "best_effort"
+        assert body["tier_disclosure"].startswith("Best-effort single start.")
+        assert body["tier_disclosure_url"]
+        assert body["cancellation_disclosure"].startswith(
+            "Cancellation depends on the agent"
+        )
+        assert body["agent_changed"] is False
+        assert body["correlation_id_honoured"] is None
+        assert body["disconnect_reason"] is None
+        assert body["last_test_error_detail"] is None
+        assert body["auth_header_name"] is None
+        assert body["card"]["interface_url"] == "https://agent.example.com/a2a"
+
+    def test_014_FR_001_the_create_route_rejects_a_caller_supplied_header_name(
+        self, client: TestClient
+    ) -> None:
+        """AC-002. The header a credential travels in comes from the card only."""
+
+        response = client.post(
+            "/api/agent-connections",
+            headers={"Idempotency-Key": "k-header-name"},
+            json={
+                "name": "Hermes",
+                "agent_address": ENDPOINT,
+                "auth_scheme": "api_key",
+                "auth_header_name": "X-API-Key",
+                "credential": "Bearer super-secret-token",
+                "current_password": TEST_USER_PASSWORD,
+            },
+        )
+
+        assert response.status_code == 422, response.text
+        assert "auth_header_name" in response.text
+        assert client.get("/api/agent-connections").json() == []
+
+    def test_card_text_is_returned_verbatim_and_bounded(
+        self,
+        client: TestClient,
+        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+    ) -> None:
+        """AC-031. Card text is returned exactly as the agent wrote it.
+
+        Not escaped, not stripped, not linkified: escaping here would hide what
+        the agent actually claims, and the clients are the layer that renders it
+        inertly. The bound is the only processing it receives.
+        """
+
+        container = relay_app[3]
+        hostile = "<script>alert(1)</script> **not markdown** [x](javascript:alert(2))"
+        fetcher = FakeCardFetcher()
+        fetcher.discovery = ready_discovery(
+            summary=card_summary(
+                name=hostile,
+                description=hostile * 8,
+                interface_url="javascript:alert(3)",
+            )
+        )
+        container.agent_relay_service._card_fetcher = fetcher
+        created = create_connection(client)
+
+        body = client.post(f"/api/agent-connections/{created['id']}/test").json()
+
+        card = body["card"]
+        assert card["name"] == hostile
+        assert card["description"] == hostile * 8
+        assert len(card["description"]) <= MAX_CARD_DESCRIPTION_CHARS
+        assert card["interface_url"] == "javascript:alert(3)"
+
+    def test_014_FR_002_a_rate_limited_test_stays_untested_with_its_retry_hint(
+        self,
+        client: TestClient,
+        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+    ) -> None:
+        """AC-037, D-01-S25 over HTTP: never `ready`, and never a hand-off."""
+
+        container = relay_app[3]
+        a2a_client = FakeA2AClient()
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code="a2a_rate_limited",
+                http_status=429,
+                retry_after_seconds=30,
+            ),
+        )
+        container.agent_relay_service.a2a_client = a2a_client
+        created = create_connection(client)
+
+        body = client.post(f"/api/agent-connections/{created['id']}/test").json()
+
+        assert body["status"] == "untested"
+        assert body["ready_for_handoff"] is False
+        assert body["last_test_error_code"] == "a2a_rate_limited"
+        assert body["last_test_error_detail"] == {"retry_after_seconds": 30}
+
+        task_id = create_task(client)
+        refused = client.post(
+            f"/api/tasks/{task_id}/agent-runs/preview",
+            json={"connection_id": created["id"]},
+        )
+        assert refused.status_code == 400
+        assert refused.json()["detail"]["reason"] == "a2a_rate_limited"
+        assert refused.headers["X-Correlation-ID"]
+
+    def test_014_FR_002_a_changed_agent_refuses_the_hand_off_by_name(
+        self,
+        client: TestClient,
+        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+    ) -> None:
+        """AC-012, D-01-S20 over HTTP."""
+
+        container = relay_app[3]
+        fetcher = FakeCardFetcher()
+        container.agent_relay_service._card_fetcher = fetcher
+        created = create_connection(client)
+        assert (
+            client.post(f"/api/agent-connections/{created['id']}/test").json()["status"]
+            == "ready"
+        )
+
+        fetcher.discovery = ready_discovery(
+            summary=card_summary(interface_url="https://second.example.com/a2a")
+        )
+        drifted = client.post(f"/api/agent-connections/{created['id']}/test").json()
+
+        assert drifted["status"] == "untested"
+        assert drifted["agent_changed"] is True
+        assert drifted["last_test_error_code"] == "agent_card_changed"
+        assert drifted["last_test_error_detail"] == {
+            "interface_url": "https://second.example.com/a2a"
         }
+
+        task_id = create_task(client)
+        refused = client.post(
+            f"/api/tasks/{task_id}/agent-runs/preview",
+            json={"connection_id": created["id"]},
+        )
+        assert refused.status_code == 400
+        assert refused.json()["detail"]["reason"] == "agent_card_changed"
+        assert refused.headers["X-Correlation-ID"]
+
+    def test_014_FR_001_an_unsupported_card_scheme_is_named_on_the_refusal(
+        self,
+        client: TestClient,
+        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+    ) -> None:
+        """AC-004. The owner is told which scheme their card demands."""
+
+        container = relay_app[3]
+        fetcher = FakeCardFetcher()
+        fetcher.discovery = CardDiscovery(
+            failure_code="a2a_auth_scheme_unsupported",
+            failure_detail={"scheme": "oauth2"},
+        )
+        container.agent_relay_service._card_fetcher = fetcher
+        created = create_connection(client)
+
+        body = client.post(f"/api/agent-connections/{created['id']}/test").json()
+        assert body["status"] == "unsupported"
+        assert body["last_test_error_detail"] == {"scheme": "oauth2"}
+
+        task_id = create_task(client)
+        refused = client.post(
+            f"/api/tasks/{task_id}/agent-runs/preview",
+            json={"connection_id": created["id"]},
+        )
+        assert refused.status_code == 400
+        assert refused.json()["detail"]["reason"] == "a2a_auth_scheme_unsupported"
+        assert refused.headers["X-Correlation-ID"]
+
+    def test_014_FR_016_rollout_off_blocks_every_connection_write_but_disconnect(
+        self, client: TestClient
+    ) -> None:
+        """D-01-S22, 014-FR-016. Disconnect stays: it only ever destroys."""
+
+        created = create_connection(client)
+        set_relay_flag(client, FeatureFlagState.OFF)
+
+        blocked = {
+            "create": client.post(
+                "/api/agent-connections",
+                headers={"Idempotency-Key": "off-create-2"},
+                json={
+                    "name": "Second",
+                    "agent_address": ENDPOINT,
+                    "credential": "Bearer other",
+                    "current_password": TEST_USER_PASSWORD,
+                },
+            ),
+            "update": client.put(
+                f"/api/agent-connections/{created['id']}",
+                headers={"Idempotency-Key": "off-update-2"},
+                json={"name": "Renamed", "expected_revision": created["revision"]},
+            ),
+            "test": client.post(f"/api/agent-connections/{created['id']}/test"),
+            "credential": client.post(
+                f"/api/agent-connections/{created['id']}/credential",
+                headers={"Idempotency-Key": "off-credential"},
+                json={
+                    "credential": "Bearer replacement",
+                    "current_password": TEST_USER_PASSWORD,
+                    "expected_revision": created["revision"],
+                },
+            ),
+        }
+        for name, response in blocked.items():
+            assert response.status_code == 404, f"{name}: {response.text}"
+
+        assert client.get("/api/agent-connections").status_code == 200
+        disconnected = client.post(
+            f"/api/agent-connections/{created['id']}/disconnect",
+            headers={"Idempotency-Key": "off-disconnect"},
+            json={
+                "current_password": TEST_USER_PASSWORD,
+                "expected_revision": created["revision"],
+            },
+        )
+        assert disconnected.status_code == 200, disconnected.text
+        assert disconnected.json()["status"] == "disconnected"
+        assert disconnected.json()["disconnect_reason"] == "owner"
 
     def test_another_owner_cannot_see_or_touch_the_connection(
         self, client: TestClient, other_client: TestClient
@@ -699,9 +974,13 @@ class TestSigningSecretRotationRoute:
         connection_id: str,
         *,
         key: str = "k-sign",
-        revision: int = 1,
+        revision: int | None = None,
         password: str = TEST_USER_PASSWORD,
     ) -> Any:
+        if revision is None:
+            revision = client.get(f"/api/agent-connections/{connection_id}").json()[
+                "revision"
+            ]
         return client.post(
             f"/api/agent-connections/{connection_id}/signing-secret",
             headers={"Idempotency-Key": key},

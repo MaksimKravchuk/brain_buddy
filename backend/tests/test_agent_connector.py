@@ -61,8 +61,18 @@ def json_handler(payload: dict[str, Any], status_code: int = 200) -> Any:
 
 
 class TestConnectionTest:
-    def test_a_conforming_connector_is_ready_and_discloses_capabilities(self) -> None:
-        """A healthy connector reports exactly what it can do."""
+    def test_014_FR_002_the_probe_no_longer_discloses_capabilities(self) -> None:
+        """Readiness comes from the agent's card now, not from this probe.
+
+        007 read `capabilities` and its three dedup promises out of a bespoke
+        envelope and used them to decide which controls a run could offer. 014
+        decides readiness from the published agent card plus an authenticated
+        A2A call, and offers reply and cancellation on every tested connection
+        because no card advertises either (FR-010). Nothing reads this outcome's
+        capabilities any more, so the probe reports none rather than reporting a
+        claim the product has stopped acting on. The module itself goes with the
+        rest of the bespoke wire (T115).
+        """
 
         connector, seen = build_connector(
             json_handler(
@@ -77,9 +87,10 @@ class TestConnectionTest:
         outcome = connector.test(TARGET)
 
         assert outcome.status == "ready"
-        assert outcome.capabilities.progress is True
-        assert outcome.capabilities.reply is True
-        assert outcome.capabilities.cancel is False
+        assert outcome.capabilities.model_dump() == {
+            "streaming": False,
+            "push_notifications": False,
+        }
         body = json.loads(seen[0].content)
         assert body["type"] == "capabilities"
         assert body["protocol_version"] == PROTOCOL_VERSION
@@ -197,120 +208,6 @@ class TestConnectionTest:
         assert outcome.status == "unsupported"
         assert outcome.error_code == "connector_start_not_idempotent"
 
-    @pytest.mark.parametrize(
-        ("capability", "guarantee"),
-        [("reply", "idempotent_reply"), ("cancel", "idempotent_cancel")],
-    )
-    def test_a_command_capability_without_its_dedup_promise_is_suppressed(
-        self, capability: str, guarantee: str
-    ) -> None:
-        """FR-006/FR-007: a control BrainBuddy cannot replay safely is not offered.
-
-        Reply and cancel are retried on an ambiguous send, reusing one command
-        ID. A connector that advertises the control but never promises to
-        deduplicate that ID could act twice on one user request, so the control
-        is withheld rather than exposed with a caveat.
-        """
-
-        connector, _ = build_connector(
-            json_handler(
-                {
-                    "capabilities": {"progress": True, "reply": True, "cancel": True},
-                    "idempotent_start": True,
-                    guarantee: False,
-                }
-            )
-        )
-
-        outcome = connector.test(TARGET)
-
-        assert outcome.status == "ready"
-        assert getattr(outcome.capabilities, capability) is False
-        assert outcome.capabilities.progress is True
-
-    def test_a_missing_dedup_promise_is_not_a_promise(self) -> None:
-        """Silence is not a guarantee: both controls stay off by default."""
-
-        connector, _ = build_connector(
-            json_handler(
-                {
-                    "capabilities": {"progress": True, "reply": True, "cancel": True},
-                    "idempotent_start": True,
-                }
-            )
-        )
-
-        outcome = connector.test(TARGET)
-
-        assert outcome.status == "ready"
-        assert outcome.capabilities.reply is False
-        assert outcome.capabilities.cancel is False
-
-    def test_a_dedup_promise_without_the_capability_grants_nothing(self) -> None:
-        """The guarantee qualifies a capability; it cannot conjure one."""
-
-        connector, _ = build_connector(
-            json_handler(
-                {
-                    "capabilities": {
-                        "progress": False,
-                        "reply": False,
-                        "cancel": False,
-                    },
-                    "idempotent_start": True,
-                    "idempotent_reply": True,
-                    "idempotent_cancel": True,
-                }
-            )
-        )
-
-        outcome = connector.test(TARGET)
-
-        assert outcome.capabilities.reply is False
-        assert outcome.capabilities.cancel is False
-
-    def test_both_controls_survive_when_both_are_guaranteed(self) -> None:
-        """A fully conforming connector keeps everything it advertised."""
-
-        connector, _ = build_connector(
-            json_handler(
-                {
-                    "capabilities": {"progress": True, "reply": True, "cancel": True},
-                    "idempotent_start": True,
-                    "idempotent_reply": True,
-                    "idempotent_cancel": True,
-                }
-            )
-        )
-
-        outcome = connector.test(TARGET)
-
-        assert outcome.status == "ready"
-        assert outcome.capabilities.reply is True
-        assert outcome.capabilities.cancel is True
-
-    @pytest.mark.parametrize("truthy", ["yes", 1, {}, None])
-    def test_only_an_explicit_boolean_true_counts_as_a_promise(
-        self, truthy: Any
-    ) -> None:
-        """A truthy-looking value is not the documented guarantee."""
-
-        connector, _ = build_connector(
-            json_handler(
-                {
-                    "capabilities": {"reply": True, "cancel": True},
-                    "idempotent_start": True,
-                    "idempotent_reply": truthy,
-                    "idempotent_cancel": truthy,
-                }
-            )
-        )
-
-        outcome = connector.test(TARGET)
-
-        assert outcome.capabilities.reply is False
-        assert outcome.capabilities.cancel is False
-
     def test_an_unparseable_body_is_not_ready(self) -> None:
         """A 200 that is not the agreed envelope proves nothing."""
 
@@ -354,9 +251,10 @@ class TestConnectionTest:
         assert outcome.error_code == "destination_network_not_allowed"
         assert seen == []
 
-    @pytest.mark.parametrize(
-        "auth_header_name", ["Host", "x-brainbuddy-run-id", "X Bad"]
-    )
+    # `X-BrainBuddy-Run-Id` left the reserved set with the bespoke outbound
+    # envelope that populated it (014 FR-012): reserving a header no request
+    # carries would refuse a legitimate card for a collision that cannot happen.
+    @pytest.mark.parametrize("auth_header_name", ["Host", "a2a-extensions", "X Bad"])
     def test_an_unsafe_auth_header_is_refused_before_network_io(
         self, auth_header_name: str
     ) -> None:

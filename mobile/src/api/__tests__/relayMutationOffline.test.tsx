@@ -66,7 +66,7 @@ function OfflineRelayHarness() {
           create.mutate({
             payload: {
               name: "Agent",
-              endpoint_url: "https://agent.example.test/relay",
+              agent_address: "https://agent.example.test/relay",
               credential: "secret",
               current_password: "password",
             },

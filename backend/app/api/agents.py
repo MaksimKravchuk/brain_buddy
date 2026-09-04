@@ -33,7 +33,6 @@ from app.core.rate_limit import sensitive_action_rate_limiter
 from app.exceptions import ReauthFailedError, ValidationFailure
 from app.modules.agents.service import AgentRelayService, EventRejected
 from app.schemas.agents import (
-    AgentConnectionCreatedResponse,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
     AgentConnectionResponse,
@@ -151,7 +150,7 @@ def list_agent_connections(
 
 @router.post(
     "/agent-connections",
-    response_model=AgentConnectionCreatedResponse,
+    response_model=AgentConnectionResponse,
     status_code=status.HTTP_201_CREATED,
     responses=error_responses(400, 401, 403, 404, 409, 422, 429),
 )
@@ -161,7 +160,13 @@ def create_agent_connection(
     current_user: User = Depends(require_external_agent_relay_enabled),
     service: AgentRelayService = Depends(get_agent_relay_service),
     auth_service: AuthService = Depends(get_auth_service),
-) -> AgentConnectionCreatedResponse:
+) -> AgentConnectionResponse:
+    """Register an agent by address. The 201 carries no secret of any kind.
+
+    Under the A2A wire there is nothing for the owner to copy into their agent:
+    push callbacks use a per-run token BrainBuddy mints and never shows (FR-012).
+    """
+
     key = _require_idempotency_key(idempotency_key)
     reauthenticated = _verify_password(
         auth_service, current_user, payload.current_password

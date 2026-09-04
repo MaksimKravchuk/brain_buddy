@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from typing import Literal, TypeGuard
 
 from app.modules.agents.a2a.types import (
     TERMINAL_TASK_STATES,
@@ -54,14 +54,20 @@ MAX_ARTIFACT_MEDIA_TYPE_CHARS = 128
 
 ResultAvailability = Literal["available", "too_large"]
 ArtifactKind = Literal["text", "file", "data", "link"]
-# Keyed by the wire part kind; the value is the summary kind it maps to. A
-# lookup (rather than a membership test plus a cast) narrows the type the
-# same way under every mypy version the project accepts.
-_SUMMARISED_PART_KINDS: dict[str, ArtifactKind] = {
-    "file": "file",
-    "data": "data",
-    "link": "link",
-}
+_SUMMARISED_PART_KINDS: frozenset[ArtifactKind] = frozenset({"file", "data", "link"})
+
+
+def _is_summarised(kind: str) -> TypeGuard[ArtifactKind]:
+    """Whether a part kind earns a placeholder row.
+
+    A ``TypeGuard`` rather than a bare membership test, so the narrowing to
+    ``ArtifactKind`` is one every supported mypy performs. Without it the caller
+    needs a ``cast``, and a checker that *does* narrow set membership on its own
+    then reports that cast as redundant — stating the narrowing once here keeps
+    both of them green with no suppression.
+    """
+
+    return kind in _SUMMARISED_PART_KINDS
 
 
 @dataclass(frozen=True)
@@ -157,11 +163,11 @@ def _artifact_summaries(task: Task, *, limit: int) -> tuple[ArtifactSummary, ...
     summaries: list[ArtifactSummary] = []
     for artifact in task.artifacts:
         for part in artifact.parts:
+            kind = part.kind
             # "text" is already in the result; "unknown" means the agent sent a
             # shape the spec does not name, and a placeholder that cannot say
             # what it stands for tells the user nothing.
-            summarised_kind = _SUMMARISED_PART_KINDS.get(part.kind)
-            if summarised_kind is None:
+            if not _is_summarised(kind):
                 continue
             raw_name = artifact.name or part.name
             raw_media_type = part.effective_media_type
@@ -173,7 +179,7 @@ def _artifact_summaries(task: Task, *, limit: int) -> tuple[ArtifactSummary, ...
                         if raw_media_type
                         else None
                     ),
-                    kind=summarised_kind,
+                    kind=kind,
                 )
             )
             if len(summaries) >= limit:

@@ -40,6 +40,17 @@ AgentReportedState = Literal[
 ]
 AgentCommandKind = Literal["start", "reply", "cancel"]
 AgentCommandDelivery = Literal["unconfirmed", "confirmed"]
+AgentAuthScheme = Literal["bearer", "api_key"]
+"""The two credential schemes BrainBuddy can present to an agent (FR-001).
+
+Deliberately closed. A card may *offer* OAuth2, OIDC or mutual TLS; naming those
+here would imply BrainBuddy can complete them, and the honest answer is to report
+the offered scheme back to the owner as unsupported instead.
+"""
+
+AgentGuaranteeTier = Literal["guaranteed", "best_effort"]
+AgentDisconnectReason = Literal["owner", "superseded_wire_contract"]
+AgentSchemeKind = Literal["bearer", "api_key", "oauth2", "oidc", "mtls", "other"]
 
 ConnectionName = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
@@ -52,11 +63,69 @@ AuthHeaderName = Annotated[
 
 
 class AgentCapabilitiesResponse(StrictBaseModel):
-    """What the connector disclosed. A false capability hides its control."""
+    """What the *card* declared. Nothing here is BrainBuddy's own claim.
 
-    progress: bool = False
+    Kept apart from ``AgentControlsResponse`` on purpose (FR-002): these two
+    booleans are the agent's statements about itself, and blending them with the
+    controls BrainBuddy offers would turn a product decision into something that
+    reads as an agent capability.
+    """
+
+    streaming: bool = False
+    push_notifications: bool = False
+
+
+class AgentControlsResponse(StrictBaseModel):
+    """The controls BrainBuddy offers on this connection's runs (FR-010).
+
+    Always true for a tested A2A connection, because agent cards do not advertise
+    cancellation and BrainBuddy offers the control regardless — the run
+    projection is what withdraws it per run, once an agent has actually refused.
+    """
+
     reply: bool = False
     cancel: bool = False
+
+
+class AgentSkillResponse(StrictBaseModel):
+    """One advertised skill. Untrusted agent text, rendered inertly (AC-031)."""
+
+    id: str | None = None
+    name: str | None = None
+    description: str | None = None
+
+
+class AgentAuthSchemeOfferResponse(StrictBaseModel):
+    """One security scheme the card offers, named back to the owner verbatim."""
+
+    name: str
+    kind: AgentSchemeKind
+    header_name: str | None = None
+
+
+class AgentCardResponse(StrictBaseModel):
+    """The bounded discovery result shown on the connection (FR-002).
+
+    Every string is untrusted agent text returned verbatim within the
+    ``data-model.md`` §1 bounds: both clients render it as inert plain text,
+    never an anchor or ``Linking`` target and never auto-linkified (FR-016,
+    AC-031). ``interface_url`` is included precisely so the owner can see where
+    their content would go — which is why it is shown, not made navigable.
+    """
+
+    name: str | None = None
+    version: str | None = None
+    description: str | None = None
+    protocol_version: str | None = None
+    interface_url: str | None = None
+    streaming: bool = False
+    push_notifications: bool = False
+    skills: list[AgentSkillResponse] = Field(default_factory=list)
+    auth_schemes_offered: list[AgentAuthSchemeOfferResponse] = Field(
+        default_factory=list
+    )
+    extension_uris: list[str] = Field(default_factory=list)
+    fetched_at: datetime | None = None
 
 
 class AgentConnectionCreateRequest(StrictBaseModel):
@@ -68,12 +137,18 @@ class AgentConnectionCreateRequest(StrictBaseModel):
     @classmethod
     def _sanitize_rejected_endpoint(cls, data: object) -> object:
         return sanitize_endpoint_input(
-            cls.__name__, data, _reject_endpoint_unsafe_components
+            cls.__name__,
+            data,
+            _reject_endpoint_unsafe_components,
+            field="agent_address",
         )
 
     name: ConnectionName
-    endpoint_url: str = Field(min_length=1, max_length=2_000)
-    auth_header_name: AuthHeaderName = "X-Agent-Key"
+    # The agent *origin* the owner typed. BrainBuddy fetches the card below it
+    # and learns the interface from there, so this is the only address a person
+    # ever has to know.
+    agent_address: str = Field(min_length=1, max_length=2_000)
+    auth_scheme: AgentAuthScheme = "bearer"
     credential: str = Field(min_length=1, max_length=4_000)
     current_password: str = Field(min_length=1, max_length=512)
 
@@ -87,15 +162,37 @@ class AgentConnectionRotateRequest(StrictBaseModel):
 class AgentConnectionUpdateRequest(StrictBaseModel):
     """Bounded metadata/destination update; credentials have their own operation."""
 
+    model_config = ConfigDict(
+        **(StrictBaseModel.model_config | {"hide_input_in_errors": True})
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sanitize_rejected_endpoint(cls, data: object) -> object:
+        return sanitize_endpoint_input(
+            cls.__name__,
+            data,
+            _reject_endpoint_unsafe_components,
+            field="agent_address",
+        )
+
     name: ConnectionName | None = None
-    endpoint_url: str | None = Field(default=None, min_length=1, max_length=2_000)
+    agent_address: str | None = Field(default=None, min_length=1, max_length=2_000)
+    # A scheme change is a scope change exactly as an address change is: the
+    # credential is presented differently, so the owner has to prove possession
+    # again before content moves under it (FR-004).
+    auth_scheme: AgentAuthScheme | None = None
     current_password: str | None = Field(default=None, min_length=1, max_length=512)
     expected_revision: int = Field(ge=1)
 
     @model_validator(mode="after")
     def _requires_an_update(self) -> AgentConnectionUpdateRequest:
-        if self.name is None and self.endpoint_url is None:
-            raise ValueError("name or endpoint_url is required")
+        if (
+            self.name is None
+            and self.agent_address is None
+            and self.auth_scheme is None
+        ):
+            raise ValueError("name, agent_address or auth_scheme is required")
         return self
 
 
@@ -116,15 +213,42 @@ class AgentConnectionResponse(StrictBaseModel):
 
     id: str
     name: str
-    endpoint_url: str
-    auth_header_name: str
+    agent_address: str
+    auth_scheme: AgentAuthScheme
+    # Present only for an ``api_key`` connection, and only once discovery has
+    # read it off the card. A bearer connection derives ``Authorization`` from
+    # the scheme, so it has no header name to show and shows none.
+    auth_header_name: str | None = None
     status: AgentConnectionStatus
     # Derived from the clock, not stored: a ready connection goes stale once its
     # last authenticated contact ages past the deployment threshold (FR-002).
     stale: bool
     ready_for_handoff: bool
     capabilities: AgentCapabilitiesResponse
+    controls_offered: AgentControlsResponse = Field(
+        default_factory=AgentControlsResponse
+    )
+    card: AgentCardResponse | None = None
+    guarantee_tier: AgentGuaranteeTier | None = None
+    # Server-owned sentences, rendered verbatim on both clients (FR-014). They
+    # are computed here rather than assembled client-side so web and iOS cannot
+    # drift into two different promises about the same agent.
+    tier_disclosure: str | None = None
+    tier_disclosure_url: str | None = None
+    cancellation_disclosure: str | None = None
+    # The fifth connection condition (FR-002): true exactly when the last test
+    # found the card had moved under the connection.
+    agent_changed: bool = False
+    best_effort_acknowledged_at: datetime | None = None
+    # False once an agent's first answer failed to keep the run's correlation
+    # ID. BrainBuddy never auto-resends on such a connection, because an empty
+    # lookup there proves nothing (FR-006).
+    correlation_id_honoured: bool | None = None
+    disconnect_reason: AgentDisconnectReason | None = None
     last_test_error_code: str | None = None
+    # Closed per-code shapes, bounded (data-model.md §1). Coarse metadata only —
+    # never card text beyond the values the codes name.
+    last_test_error_detail: dict[str, object] | None = None
     last_contact_at: datetime | None = None
     last_tested_at: datetime | None = None
     stale_after_seconds: int
@@ -269,7 +393,10 @@ class AgentRunResponse(StrictBaseModel):
     content_expires_at: datetime
     last_contact_at: datetime | None = None
     reporting_window_seconds: int
-    capabilities: AgentCapabilitiesResponse
+    # The controls still offered on *this* run. `progress` is gone with the
+    # bespoke wire (api-deltas.md): A2A carries no progress percentage, and a
+    # capability flag for something nothing can report is a promise, not a fact.
+    capabilities: AgentControlsResponse
     manifest: AgentManifestResponse | None = None
     events: list[AgentRunEventResponse] = Field(default_factory=list)
     commands: list[AgentRunCommandResponse] = Field(default_factory=list)
@@ -295,9 +422,16 @@ class AgentEventIngestResponse(StrictBaseModel):
 
 
 __all__ = [
+    "AgentAuthScheme",
+    "AgentAuthSchemeOfferResponse",
     "AgentCapabilitiesResponse",
+    "AgentCardResponse",
     "AgentCommandDelivery",
     "AgentCommandKind",
+    "AgentControlsResponse",
+    "AgentDisconnectReason",
+    "AgentGuaranteeTier",
+    "AgentSkillResponse",
     "AgentConnectionCreateRequest",
     "AgentConnectionCreatedResponse",
     "AgentConnectionDisconnectRequest",
