@@ -112,6 +112,54 @@ revisions of this section named a `Native Product Compose E2E` job, an
 artifact; none of the three has ever existed in this repository, and grading
 against them produces false violations.
 
+### External agent relay product matrix
+
+Spec 014 (A2A relay wire contract) adds a **second per-epic product matrix**.
+It is deliberately not extra rows in the native table above: that table is
+graded by `scripts/validate_ci_artifacts.py product-e2e-results`, which is
+unchanged by 014 and still requires exactly the native tasks and Voice Brain
+Dump stories under epic `BrainBuddy MVP loop`. The relay stories run under
+their own Allure epic, **`External agent relay`**, and an acceptance auditor
+must grade them against this section, not against the native story list.
+
+The suite proves the hand-off against two **unmodified third-party runtimes**
+with zero BrainBuddy-specific code on the agent side (014-FR-017). Both are
+Compose fixture services under the `agents` profile:
+
+- **`a2a-helloworld`** — the official `a2a-sdk` sample agent
+  (`scripts/fixtures/a2a-helloworld/`). The sample binds `127.0.0.1:9999`, so
+  the service joins the backend's network namespace
+  (`network_mode: "service:backend"`) instead of getting its own. It declares
+  no push capability, so its runs are observed on the schedule only.
+- **`hermes-a2a`** — the unmodified Hermes A2A plugin behind a stub handler
+  with no model (`scripts/fixtures/hermes-a2a/`), reachable in the stack as
+  `http://hermes-a2a:9900`. It is the runtime that can be scripted into
+  working, input-required, completed, failed and canceled outcomes and that
+  answers `ListTasks(contextId)`.
+
+`scripts/run_playwright_e2e.sh` enables the `agents` profile, sets
+`BRAIN_BUDDY_AGENT_ALLOW_PRIVATE_DESTINATIONS=1` on the backend service (the
+fixtures are private hosts), and turns `external_agent_relay` ON through the
+operator API for the duration of the run. All four stories live in
+`frontend/tests/e2e/agent-relay.compose.spec.ts`.
+
+| Success criteria | Executable story | Fixture service | Evidence gate |
+|---|---|---|---|
+| 014-SC-005 — the user can identify exactly what will be sent, the guarantee tier and the cancellation disclosure, and remove optional supporting items before confirming, at desktop width; 014-SC-001 — the hand-off completes through **Agent reported complete** against an unmodified runtime. | `A2A hand-off to the helloworld sample` | `a2a-helloworld` | Active Playwright Allure result with epic `External agent relay` |
+| 014-SC-004 — working, input-required, completed, failed and canceled are each distinguishable on the Task detail and compact surfaces from one projection, with no fabricated progress; 014-SC-006 — a delayed agent shows **Sent** with no fabricated failure and the true terminal state within one observation interval. | `A2A hand-off to the Hermes stub` | `hermes-a2a` | Same active Allure epic |
+| 014-SC-002 — three identical confirmations of one review produce exactly one task at the agent and one Task-linked run. | `A2A replay creates one task` | `hermes-a2a` (the stub's `ListTasks(contextId)`, called through the fixture's JSON-RPC endpoint, is the agent-side assertion) | Same active Allure epic |
+| 014-SC-003 — invalid credentials, a private destination, a forged push notification and agent-card drift are each rejected with zero accepted state change and zero secret disclosure. | `A2A security rejections` | `hermes-a2a` | Same active Allure epic |
+
+The CI `e2e` job builds both fixture images through the same buildx cache as
+the app images before `make test-e2e`. As with every scenario in this charter,
+these stories assert user-visible behavior through `data-testid` selectors
+against the Compose stack; the wire-level matrices (identifier reservation,
+the push-callback check order, the retention tiers) stay in the backend
+suites. The attended live run against a real Hermes installation is **not**
+part of this charter or of CI: it spends provider money, requires explicit
+human approval, and is release evidence recorded in
+`docs/external-agent-relay-release.md`.
+
 ### E2E-AUTH-01: invite signup creates a session and reaches the workspace
 
 Risk: broken invite/session cookie path blocks all product usage.
