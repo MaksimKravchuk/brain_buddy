@@ -14,6 +14,7 @@ from app.core.config import (
     AppEnvironment,
     VoiceProviderSettings,
 )
+from app.modules.agents.a2a.client import A2AClient
 from app.modules.agents.connector import GenericHttpConnector
 from app.modules.agents.repository import AgentRepository
 from app.modules.agents.secrets import (
@@ -416,6 +417,13 @@ def build_container(config: AppConfig) -> Container:
         connector=GenericHttpConnector(
             timeout_seconds=relay_settings.connector_timeout_seconds,
             max_response_bytes=relay_settings.connector_max_response_bytes,
+            allow_private_destinations=relay_settings.allow_private_destinations,
+        ),
+        a2a_client=A2AClient(
+            timeout_seconds=relay_settings.connector_timeout_seconds,
+            reply_window_seconds=relay_settings.reply_window_seconds,
+            max_response_bytes=relay_settings.connector_max_response_bytes,
+            task_max_response_bytes=relay_settings.a2a_task_max_response_bytes,
             allow_private_destinations=relay_settings.allow_private_destinations,
         ),
         secret_box=agent_secret_box,
