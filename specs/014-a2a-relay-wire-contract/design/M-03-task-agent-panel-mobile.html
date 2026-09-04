@@ -206,6 +206,8 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
     <span class="micro">Last contact Sep 3, 22:01</span></div>
   <p class="note">BrainBuddy could not confirm the agent received this hand-off. It was not re-sent. Before anything is sent again BrainBuddy looks this run up at the agent by its correlation ID.</p>
+  <div class="row" style="margin-top:10px;gap:8px"><span class="btn sm tap44" style="padding:12px">Check again</span></div>
+  <p class="note">Check again runs the same check with the same correlation ID and the same message ID. It is never a new send.</p>
 </article><article class="runcard " style="border-radius:14px">
   <div class="head"><span class="avatar">H</span>
     <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill info">Accepted</span></div>
@@ -215,7 +217,8 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
 </article></div>
     
   </div>
-  <p class="phonecap"><span class="sid">M-03-S02 – S05</span>Not sent, Sent, Delivery unconfirmed, Accepted</p>
+  <p class="phonecap"><span class="sid">M-03-S02 – S05</span>Not sent, Sent (with its queued variant), Delivery unconfirmed with <strong>Check again</strong>, Accepted</p>
+  <p class="phonecap">M-03-S04's <strong>Check again</strong> is a 44pt row that replays the same confirmation — lookup before resend, same correlation ID, same message ID, never a second send. M-03-S03's <strong>Queued</strong> variant is drawn in the variants frame below.</p>
   
 </div><div class="phonewrap">
   <div class="phone">
@@ -273,7 +276,12 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <div class="stack g2" style="margin-top:8px">
     <div class="artifact">Attachment · application/pdf · not fetched or opened by BrainBuddy</div>
     <div class="artifact">Attachment · application/json · not fetched or opened by BrainBuddy</div>
-    <p style="margin:0"><a class="link" href="https://hermes.example.com/artifacts/runbook" rel="noopener noreferrer nofollow">https://hermes.example.com/artifacts/runbook</a></p>
+    <div class="card flat stack g1" style="padding:8px 10px;border-radius:12px">
+      <p class="micro mono" style="word-break:break-all;color:var(--fg3)">https://hermes.example.com/artifacts/runbook</p>
+      <div class="row tap44"><span class="btn ghost sm tap44" style="padding:12px" aria-label="Copy link https://hermes.example.com/artifacts/runbook">Copy link</span></div>
+    </div>
+    <p class="micro">Addresses the agent reports stay inert text. BrainBuddy does not make one tappable and never opens
+    or fetches one — copy it if you want to go there yourself.</p>
   </div>
   <div class="card tint-sunk" style="margin-top:10px;border-radius:12px">
     <p class="caption">This is what the agent said it did. The task is still open — completing it is your call.</p>
@@ -283,6 +291,41 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
     
   </div>
   <p class="phonecap"><span class="sid">M-03-S09 – S10</span>Agent needs additional authentication; Agent reported complete</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Task</span></div>
+    <div class="content"><article class="runcard neutral" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill mute">Queued</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Never</span></div>
+  <p class="body" style="font-size:12.5px;margin-top:8px">Waiting for a free connection slot; nothing has been sent yet.</p>
+  <p class="note">The identifiers are reserved, but no message has left BrainBuddy. The card reads <strong>Sent</strong>
+  only once the exchange actually starts.</p>
+</article><article class="runcard " style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill ok">Agent reported complete</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Result too large to store</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:19</span></div>
+  <p class="body" style="font-size:12.5px;margin-top:8px"><strong>Result too large to store.</strong> The result was
+  larger than BrainBuddy keeps, so its text and attachment list were not stored.</p>
+  <p class="note">The state is the agent's own and is shown as observed. Only the content is missing, and BrainBuddy's
+  size limit is why — this is not a failure and it is not <strong>Stopped reporting</strong>. Read the result wherever
+  you operate the agent.</p>
+  <div class="card tint-sunk" style="margin-top:10px;border-radius:12px">
+    <p class="caption">The task is still open — completing it is your call.</p>
+    <div class="row tap44" style="margin-top:6px"><span class="check"></span>
+      <span style="font-size:13px">Mark this task complete</span></div></div>
+</article></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-03-S03 variant · M-03-S10 variant</span>Queued, and a result too large to store</p>
+  <p class="phonecap">Neither is a new state. <strong>Queued</strong> is M-03-S03 before a connection slot frees, so
+  “Sent” would be a false claim. <strong>Result too large to store</strong> is M-03-S10 when the agent's result exceeded
+  the size BrainBuddy keeps: the observed state stands, only the content is missing, and it is never rendered as
+  <strong>Stopped reporting</strong>.</p>
   
 </div><div class="phonewrap">
   <div class="phone">
@@ -436,6 +479,35 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   </div>
   <p class="phonecap"><span class="sid">M-03-S24 – S25</span>compact task rows, and a Tag view with no runs</p>
   
+</div></div>
+
+<h2 class="sec">Task succession</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Task</span></div>
+    <div class="content"><article class="runcard " style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill info">Running</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Sep 3, 22:11</span></div>
+  <p class="body" style="font-size:12.5px;margin-top:8px">Working through the rollback section with your answer.</p>
+  <p class="note">The agent continued this run in a new task. Same run, same correlation ID, same history — only the
+  agent's own task identifier changed. The projected state is unchanged by the succession itself.</p>
+  <ol class="timeline">
+    <li><span class="what">Sent</span><span class="when">22:01</span></li>
+    <li><span class="what">Needs you</span><span class="when">22:07</span></li>
+    <li><span class="what">Your answer</span><span class="when">22:09</span><span class="sum">Sent in the same conversation.</span></li>
+    <li><span class="what">The agent continued this run in a new task</span><span class="when">22:10</span><span class="sum">Both task identifiers kept. Correlation ID unchanged.</span></li>
+    <li><span class="what">Running</span><span class="when">22:11</span><span class="sum">First report from the successor task.</span></li>
+  </ol>
+  <div class="row" style="gap:8px;margin-top:10px"><span class="btn ghost sm tap44" style="padding:12px">Request cancellation</span></div>
+</article></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-03-S26</span>task succession — the agent continued this run in a new task</p>
+  <p class="phonecap">FR-010. The reply is never refused because the agent answered with a different task. BrainBuddy
+  adopts the successor, writes one timeline row, and keeps the run's single correlation ID.</p>
 </div></div>
 
 </div>

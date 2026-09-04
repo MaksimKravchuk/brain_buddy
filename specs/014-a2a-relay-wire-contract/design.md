@@ -3,7 +3,11 @@
 **Feature**: `specs/014-a2a-relay-wire-contract/`
 **Spec**: `spec.md` (Clarifications settled: 2026-09-03, session 2026-09-03, zero open markers)
 **Screens**: `design/*.html` — six self-contained static files, no script, no external font, no CDN
-**Human sign-off**: Max, 2026-09-03 (decisions recorded in spec.md Clarifications)
+**States**: **127 total** — D-01 24, D-02 15, D-03 27, M-01 21, M-02 14, M-03 26
+**Human sign-off**: Max, 2026-09-03 (decisions recorded in spec.md Clarifications).
+Amended after review campaign 1 (2026-09-03): D-03-S27, M-03-S26 added; Check again
+affordance on D-03-S05/M-03-S04; M-01 sheet order; focus rules; result links inert
+(D-03-S11/M-03-S10). Re-acknowledged by Max, 2026-09-04.
 
 <!--
   Produced by /speckit-design via the design-architect subagent, after
@@ -34,7 +38,9 @@ displays, copies or replaces a secret the agent must configure.
 What is new: connection by agent address plus one of exactly two credential schemes, a
 discovery result read from the agent's published card, four unsupported categories that
 are four different sentences, the guarantee-tier disclosure in two places, and eleven
-additional run conditions.
+additional run conditions — plus a task-succession timeline row (D-03-S27, M-03-S26) that
+adds no run condition of its own, and the push-notification callback registration disclosed
+in the hand-off manifest.
 
 ### Vocabulary
 
@@ -107,7 +113,7 @@ Files:
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| D-02-S01 default (guaranteed) | user picks a ready connection | Agent chooser, Task title, optional details toggle, removable supporting items, Task ID, run ID, correlation ID, destination, tier, cancellation disclosure, external-copy notice | "What will be sent" | AC-007, FR-005, SC-005 |
+| D-02-S01 default (guaranteed) | user picks a ready connection | Agent chooser, Task title, optional details toggle, removable supporting items, Task ID, run ID, correlation ID, destination, **the push callback address with its token masked**, tier, cancellation disclosure, external-copy notice | "What will be sent" · "This agent advertises push notifications, so BrainBuddy also registers the callback address above with it. It is private to this one run, its secret part is never shown to anyone, and the agent holds it until the run ends. The agent can only use it to ask BrainBuddy to check on the run — no task content ever comes back through it." | AC-007, FR-005, SC-005 |
 | D-02-S02 review (best-effort) | the chosen agent lacks the extension | Same manifest, amber tier block restating the duplicate risk and the mitigation, plus the link to the published extension specification. This block appears in *every* best-effort review; S13–S15 are its three acknowledgement states | "**Best-effort single start.**" · "Read the single-start extension specification" | FR-003, FR-011, AC-005 |
 | D-02-S03 loading | preview being built server-side | Skeleton manifest, explicit "no task content has been sent" | "Building the hand-off preview…" | FR-005 |
 | D-02-S04 empty (first run) | account has no connection | Explanation plus a route to Connected agents | "No agents connected yet" | FR-001 |
@@ -130,14 +136,14 @@ Files:
 | D-03-S01 default = empty (first run) | Task has never been handed over | Only "Hand to agent". No run section, no empty run heading — for this screen the first-run empty state *is* the default state, because an empty "Agent runs" heading would imply the feature had been used | "Hand to agent" | FR-005 |
 | D-03-S02 loading | runs being fetched | Heading plus skeleton run card | "Loading runs…" | 007 FR-017 |
 | D-03-S03 Not sent (rate limited) | agent rate-limits before creating a task | Rose card, actionable category, retry that reuses the same run and message IDs | "The agent is rate limiting." | FR-006, edge case |
-| D-03-S04 Sent | dispatch accepted, no agent state yet | Sky pill, waiting explained, no fabricated progress | "Some agents answer only when the work is finished." | AC-014, FR-006, FR-007, SC-006 |
-| D-03-S05 Delivery unconfirmed | ambiguous or timed-out dispatch | Amber pill, no resend, lookup-before-resend explained | "**Delivery unconfirmed** … It was not re-sent." | FR-006, edge case |
+| D-03-S04 Sent | dispatch accepted, no agent state yet | Sky pill, waiting explained, no fabricated progress. **Queued variant**: while no connection slot is free the same state reads **Queued** on a neutral pill, because nothing has left BrainBuddy yet; the identifiers are already reserved and it becomes **Sent** only once the message actually goes out | "Some agents answer only when the work is finished." · "Waiting for a free connection slot; nothing has been sent yet" | AC-014, FR-006, FR-007, SC-006 |
+| D-03-S05 Delivery unconfirmed | ambiguous or timed-out dispatch | Amber pill, nothing re-sent on its own, lookup-before-resend explained, and a **Check again** action. Check again replays the *same* confirmation — same correlation ID, same message ID — so it looks the run up at the agent first and adopts an existing task; only an empty lookup sends the identical message again. It is never a new send and never mints a second run | "**Delivery unconfirmed** … It was not re-sent." · "Runs the same check again with the same correlation ID and the same message ID. It is never a new send." | FR-006, edge case |
 | D-03-S06 Accepted | submitted observed | Sky pill, timeline entry | "Accepted" | FR-009 |
 | D-03-S07 Running | working observed | Sky pill plus the agent's own status text, attributed | "Running" | AC-013, FR-009 |
 | D-03-S08 blocked with a question | input-required observed | Amber card, the agent's question, a reply box and Send answer | "Needs you" | FR-009, FR-010 |
 | D-03-S09 reply unconfirmed | reply sent, not acknowledged | The answer shown as sent-not-acknowledged; state does not advance | "Your answer was sent but the agent has not acknowledged it yet." | AC-015, FR-010 |
 | D-03-S10 blocked, needs authentication | auth-required observed | Amber card, no reply control at all | "Agent needs additional authentication." | FR-009 |
-| D-03-S11 Agent reported complete | completed observed, or a direct message answer | Inert text, non-text artifacts as placeholders naming the content type, safe HTTPS link clickable, unsafe link left as plain text, Task still open | "**Agent reported complete**" · "This is what the agent said it did. The task is still open — completing it is your call." | AC-016, FR-009, 007 FR-012, FR-014 |
+| D-03-S11 Agent reported complete | completed observed, or a direct message answer | Inert text, non-text artifacts as placeholders naming the content type, Task still open. **Every address the agent reports is inert text beside a Copy link control** — no anchor, no new tab, nothing opened or fetched, whatever the scheme. **Too-large variant**: when the agent's result exceeded the size BrainBuddy stores, the observed state stands and carries a **Result too large to store** marker saying the text and attachment list were not kept; it is never rendered as **Stopped reporting** | "**Agent reported complete**" · "This is what the agent said it did. The task is still open — completing it is your call." · "Every address the agent reports stays inert text, whatever its scheme. BrainBuddy does not make one clickable and never opens or fetches one — copy it if you want to go there yourself." · "**Result too large to store.**" | AC-016, FR-009, 007 FR-012, FR-014 |
 | D-03-S12 Failed with reason | failed observed | Rose card, the agent's reason, no retry of the work | "Failed" | AC-017, FR-009 |
 | D-03-S13 Failed — rejected | rejected observed | Rose card with the fixed reason | "**Rejected by agent**." | AC-017, FR-009 |
 | D-03-S14 Cancellation requested | user requests cancellation, agent accepts the request | Amber pill; the work may still be running | "**Cancellation requested**" | AC-018, FR-010 |
@@ -153,6 +159,7 @@ Files:
 | D-03-S24 partial failure | cached runs shown, refresh fails | Cached run stamped with the time it was read | "Showing cached agent data because the refresh failed." | 007 FR-018 |
 | D-03-S25 offline / interrupted | no network | Cached state stamped, reply and cancel disabled, nothing queued | "Replies and cancellation are unavailable and nothing is queued." | 007 FR-018 |
 | D-03-S26 two runs on one Task | a later hand-off after a terminal run | Both runs listed, each with its own frozen sent content | "Editing or completing the task after a dispatch never rewrites what was already sent." | edge case, 007 FR-012 |
+| D-03-S27 Task succession | the agent answers a reply with a different task identifier inside the same conversation | One timeline row and nothing else: the projected state is not changed by the succession itself, both task identifiers are kept in the timeline, the run keeps its single correlation ID, and the reply is never refused because the identifier moved | "The agent continued this run in a new task" | FR-010, edge case |
 
 ### M-01 — Connected agents (iOS, 390×851)
 
@@ -186,7 +193,7 @@ Same semantics as D-01, state for state. Frames in `design/M-01-connected-agents
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| M-02-S01 default (guaranteed) | ready connection chosen | Scrolling sheet; Send and Cancel pinned at the bottom in thumb reach | as D-02-S01 | AC-007, FR-005, SC-005 |
+| M-02-S01 default (guaranteed) | ready connection chosen | Scrolling sheet; Send and Cancel pinned at the bottom in thumb reach; the manifest carries the same masked push callback address and its disclosure | as D-02-S01 | AC-007, FR-005, SC-005 |
 | M-02-S02 review (best-effort) | agent lacks the extension | Amber tier block plus the extension link; M-02-S12 – S14 are its three acknowledgement states | "**Best-effort single start.**" · "Read the single-start extension specification" | FR-003, FR-011 |
 | M-02-S03 empty (filtered to nothing) | connections exist, none eligible (stale, unsupported, disconnected or **Agent changed**) | Each ineligible connection with its reason | "None of your agents can take this hand-off" | AC-011, FR-002 |
 | M-02-S04 empty (first run) | no connection at all | Route to Connected agents | "No agents connected yet" | FR-001 |
@@ -209,14 +216,14 @@ Every D-03 run condition, label for label, from the same server projection.
 |---|---|---|---|---|
 | M-03-S01 default = empty (first run) | Task with no run | Only "Hand to agent"; no run section at all. As on D-03, the first-run empty state and the default state are the same state | "Hand to agent" | FR-005 |
 | M-03-S02 Not sent (rate limited) | agent rate-limits | Rose card, category, same-IDs retry note | as D-03-S03 | FR-006 |
-| M-03-S03 Sent | dispatch accepted | Sky pill, waiting explained | as D-03-S04 | AC-014, SC-006 |
-| M-03-S04 Delivery unconfirmed | ambiguous dispatch | Amber pill, lookup-before-resend | "**Delivery unconfirmed**" | FR-006 |
+| M-03-S03 Sent | dispatch accepted | Sky pill, waiting explained. **Queued variant**: while no connection slot is free the same state reads **Queued** on a neutral pill, because nothing has left BrainBuddy yet | as D-03-S04 · "Waiting for a free connection slot; nothing has been sent yet" | AC-014, SC-006 |
+| M-03-S04 Delivery unconfirmed | ambiguous dispatch | Amber pill, lookup-before-resend, and a 44pt **Check again** row that replays the same confirmation with the same correlation ID and the same message ID — lookup first, adopt if a task is there, resend the identical message only on an empty lookup. Never a new send | "**Delivery unconfirmed**" · "Check again runs the same check with the same correlation ID and the same message ID. It is never a new send." | FR-006 |
 | M-03-S05 Accepted | submitted observed | Sky pill | as D-03-S06 | FR-009 |
 | M-03-S06 Running | working observed | Sky pill plus attributed status text; 44pt cancel | as D-03-S07 | AC-013 |
 | M-03-S07 blocked with a question | input-required | Question, 56px answer field, 44pt Send answer | "Needs you" | FR-010 |
 | M-03-S08 reply unconfirmed | reply not acknowledged | Sent-not-acknowledged line | as D-03-S09 | AC-015 |
 | M-03-S09 blocked, needs authentication | auth-required | No reply box at all | "Agent needs additional authentication." | FR-009 |
-| M-03-S10 Agent reported complete | completed observed | Inert text, artifact placeholders naming the content type, safe HTTPS link, Task still open | "**Agent reported complete**" | AC-016, FR-014 |
+| M-03-S10 Agent reported complete | completed observed | Inert text, artifact placeholders naming the content type, Task still open. **Every reported address is inert text beside a 44pt Copy link control** — nothing is tappable, opened or fetched. **Too-large variant**: the observed state stands with a **Result too large to store** marker; never **Stopped reporting** | "**Agent reported complete**" · "Addresses the agent reports stay inert text. BrainBuddy does not make one tappable and never opens or fetches one — copy it if you want to go there yourself." · "**Result too large to store.**" | AC-016, FR-014 |
 | M-03-S11 Failed with reason | failed observed | Rose card, the agent's reason | as D-03-S12 | AC-017 |
 | M-03-S12 Failed — rejected | rejected observed | "**Rejected by agent.**" | as D-03-S13 | AC-017 |
 | M-03-S13 Cancellation requested | request accepted | "**Cancellation requested**" | as D-03-S14 | AC-018 |
@@ -232,6 +239,7 @@ Every D-03 run condition, label for label, from the same server projection.
 | M-03-S23 partial failure | refresh fails over cache | Cached-data banner with correlation ID | as D-03-S24 | 007 FR-018 |
 | M-03-S24 compact Task rows | task list rendering | State, guarantee tier in full, cancellation-unsupported, needs-you tint, Tag pill | "Running · Guaranteed single start" | SC-004, FR-013 |
 | M-03-S25 empty (filtered to nothing) | Tag view with no runs | No chips, no placeholder | — | FR-013 |
+| M-03-S26 Task succession | the agent answers a reply with a different task identifier inside the same conversation | One timeline row, as D-03-S27: the projected state is unchanged by the succession, both task identifiers are kept, the run keeps its single correlation ID, and the reply is never refused | "The agent continued this run in a new task" | FR-010, edge case |
 
 ## Affordance → requirement map
 
@@ -256,15 +264,23 @@ Every D-03 run condition, label for label, from the same server projection.
 | D-03 / M-03 | Send answer | One follow-up message in the same conversation and task with a stable command ID; shown unconfirmed until acknowledged | FR-010, AC-015 |
 | D-03 / M-03 | Request cancellation | One cancel request with a stable command ID; shows **Cancellation requested** until an observation says cancelled, or states the refusal | FR-010, AC-018 |
 | D-03 / M-03 | Try this hand-off again (on **Not sent**) | Reopens the review (never dispatches directly) so the same run ID and message ID can be retried after a rate limit | FR-005, FR-006, rate-limit edge case |
-| D-03 / M-03 | Result HTTPS link | Opens a safe HTTPS destination in a new tab, labelled as leaving BrainBuddy; an unsafe destination stays plain text | 007 FR-014 |
+| D-03 / M-03 | Check again (on **Delivery unconfirmed**) | Replays the same confirmation with the same correlation ID and the same message ID: look the run up at the agent, adopt an existing task, and send the identical message again only when the lookup comes back empty. It cannot become a second hand-off and cannot mint a new run | FR-006, ambiguous-dispatch edge case |
+| D-03 / M-03 | Copy link (on an agent-reported address) | Copies the address to the clipboard. The address itself is inert text — not an anchor, never opened, never fetched, whatever its scheme — so nothing leaves BrainBuddy on render | 007 FR-014, AC-016 |
 | D-03 / M-03 | Mark this task complete | Host-product Task command, drawn only to show that an agent report never completes the Task | AC-016, 007 FR-012 |
 
 ### Requirements with no affordance
 
-- **FR-006 (identifier reservation), FR-007 (background reply window), FR-008
-  (observation scheduling, version monotonicity, push verification), FR-015 (last-contact
-  definition)** — server contracts with no control of their own. Their effects are
-  visible as D-03-S03/S04/S05, D-03-S17 and D-03-S18; the user never invokes the rule.
+- **FR-007 (background reply window), FR-008 (observation scheduling, version
+  monotonicity, push verification), FR-015 (last-contact definition)** — server contracts
+  with no control of their own. Their effects are visible as D-03-S04 (including its
+  queued variant), D-03-S17 and D-03-S18; the user never invokes the rule. Push
+  acceleration adds no state of its own: it makes the ordinary observation row arrive
+  sooner.
+- **FR-006** — mostly a server contract (identifier reservation, lookup before resend),
+  and it *is* what D-03-S03/S04/S05 render. Since review campaign 1 it has one affordance:
+  **Check again** on D-03-S05 / M-03-S04 makes the lookup-before-resend path reachable from
+  the run view with the original identifiers, so the documented replay is something a user
+  can actually trigger instead of a mechanism only the client ever fired.
 - **FR-009** — a projection, not a control. Every label on D-03 and M-03 derives from it.
 - **FR-011** — the extension itself is a published specification, not a screen. It now
   has one affordance: the best-effort disclosure links to it (D-01-S11, M-01-S01,
@@ -273,6 +289,9 @@ Every D-03 run condition, label for label, from the same server projection.
 - **FR-014** — a copy rule, satisfied by the strings in every table above.
 - **FR-016** — rendering, retention, correlation IDs, logs, interruption and rollout-OFF
   are cross-cutting rules; they constrain the affordances above rather than adding any.
+- **FR-010's task-succession clause** — D-03-S27 / M-03-S26 are a timeline row, not a
+  control. Adoption of a successor task is automatic; the user neither approves nor
+  refuses it, and the reply control is not withdrawn because of it.
 - **FR-017** — conformance checks against the a2a-sdk sample agent and the Hermes A2A
   plugin run in CI, plus one approval-gated attended live run. No UI, by design.
 
@@ -304,16 +323,21 @@ matches `spec.md` line 19, which declares the same thing.
   yes. Long values that could force one — the agent address, the interface address, the
   Task and run IDs — wrap on word boundaries or break inside the token.
 - **Scrolling**: `M-01-S01`, `M-01-S10 – S16`, `M-02-S01/S02/S07/S10` and every `M-03`
-  run frame scroll vertically. In `M-02` the manifest scrolls inside the sheet while
-  **Send to agent** and **Cancel** stay pinned to the bottom, so the consent action is
-  never scrolled off.
+  run frame scroll vertically, including the new `M-03-S26` succession frame, whose
+  timeline is the longest on the screen. In `M-02` the manifest scrolls inside the sheet
+  while **Send to agent** and **Cancel** stay pinned to the bottom, so the consent action
+  is never scrolled off — the push callback address is one more line inside the scrolling
+  manifest and does not displace it.
 - **Tap targets**: 44pt minimum honored. Every action in a sheet is a 44pt-tall row;
   connection-card actions wrap two-up rather than shrinking; the answer field is 56px.
+  **Check again** on `M-03-S04` and **Copy link** on `M-03-S10` are both full 44pt rows.
   The one exception to review: the inline **Remove** control on a supporting item is a
   text button inside a list row — it meets 44pt only because its row is padded to 44pt.
 - **One-handed reach**: primary actions sit at the bottom of every sheet. Destructive
   **Disconnect** is placed below the safe "Keep it connected" option so the thumb rests
-  on the safe one.
+  on the safe one. `M-01-S21`'s mockup was reordered in the campaign-1 amendment to match
+  this sentence; the desktop dialog `D-01-S23` already reads safe-then-destructive
+  left-to-right, so both surfaces now put the safe choice first.
 - **Destructive actions**: the disconnect sheet says the stored credential is destroyed,
   observation and push registration stop, new hand-offs and replies are refused, active
   runs become **Connection disconnected**, and — explicitly — that work the agent already
@@ -329,10 +353,21 @@ matches `spec.md` line 19, which declares the same thing.
   disclosures, which precede Cancel and Send to agent.
 - **Focus on open**: the dialog or sheet heading, or the first required field.
   **Focus restored on close to**: the control that opened it (Hand to agent, Disconnect…,
-  Rotate credential).
-- **Escape**: closes a non-pending dialog without submitting and without minting a new
-  intent key. While a confirmation is in flight (`D-02-S12`, `M-02-S11`) the surface is
-  not dismissible, so an interrupted confirmation cannot silently become a second one.
+  Rotate credential) — on every close path, including Escape, the cancel action and a
+  completed submission.
+- **Focus containment**: every dialog and every sheet traps focus. Tab and Shift+Tab
+  cycle only among the controls inside the open surface and wrap at its boundary — the
+  page behind it is never reachable while it is open. The two controls that form the wrap
+  boundary are the first focusable control in the surface (the close control on `D-02`;
+  the sheet's own heading-adjacent close on `M-02`) and its last action (**Send to agent**
+  on `D-02`/`M-02`; **Disconnect** on the `D-01`/`M-01` disconnect confirmation; **Rotate
+  credential** on `D-01-S24`). Nothing outside the surface takes focus until it closes.
+- **Escape**: closes a non-destructive dialog or sheet without submitting and without
+  minting a new intent key, and focus returns to the control that invoked it. A
+  destructive confirmation (`D-01-S23`, `M-01-S21`) is dismissed by its own **Keep it
+  connected** action rather than by Escape alone, so a stray key cannot be read as a
+  decision. While a confirmation is in flight (`D-02-S12`, `M-02-S11`) the surface is not
+  dismissible at all, so an interrupted confirmation cannot silently become a second one.
 - **Accessible names**: each **Remove** control is named for its item
   (`Remove Staging rehearsal notes`); the close control is `Close the review`; the answer
   field is labelled `Your answer`. There are no icon-only controls without a text label.
@@ -359,13 +394,18 @@ matches `spec.md` line 19, which declares the same thing.
 - Self-contained check: **pass** — no `<script>`, no `@import`, no `<link>`, no CDN and
   no external font in any of the six files.
 - `python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py`: **pass**
-  (6 tests, OK). This design changes no skill artifact.
+  (6 tests, OK), re-run after the campaign-1 amendment. This design changes no skill
+  artifact. There is no `scripts/validate_brain_buddy_design_skill.py` in the repository —
+  the contract is asserted by the test module alone, which reads
+  `.claude/skills/brain-buddy-design/` and takes no feature directory, so the vocabulary
+  check over `design.md` and `design/` is the recorded grep above.
 
 ## Open decisions for the human
 
-All four resolved by Max on 2026-09-03 and encoded in `spec.md` (commit `9afdcaf`:
-FR-002, FR-003, FR-014, AC-026 and the Clarifications session). Kept here as the record
-of what was decided, not as open questions.
+The first four were resolved by Max on 2026-09-03 and encoded in `spec.md` (commit
+`9afdcaf`: FR-002, FR-003, FR-014, AC-026 and the Clarifications session); the fifth was
+decided on 2026-09-04. Kept here as the record of what was decided, not as open
+questions.
 
 1. **Best-effort admission loudness — decided: acknowledge, once.** A warning alone was
    not enough. The first hand-off on a best-effort connection now requires an explicit
@@ -386,3 +426,28 @@ of what was decided, not as open questions.
    FR-014 fixes its wording. A changed connection behaves as untested and cannot take a
    hand-off until a new successful test. D-01-S20 and M-01-S18 carry the updated refs,
    and the ineligible-connection lists (D-02-S05, M-02-S03) now include it.
+5. **Result links — decided 2026-09-04: inert.** An address the agent reports is never a
+   link. It is shown as inert text beside a **Copy link** control: no anchor, no new tab,
+   nothing opened and nothing fetched, and no "safe link" claim to be wrong about. This
+   settles what was the second pending product decision on D-03-S11 / M-03-S10; the
+   plan stage owns the matching change to AC-016 and to research Decision E's
+   `interactive_result_link`, which this design no longer relies on.
+
+### Amended after review campaign 1
+
+Decided by Max; re-acknowledged 2026-09-04. Nothing below renumbers an existing id.
+
+| change | ids | why |
+|---|---|---|
+| **Check again** on delivery-unconfirmed | D-03-S05, M-03-S04 | The documented lookup-before-resend replay had no control anywhere in the UI, so an undelivered hand-off had no route back. The action reuses the same correlation ID and message ID and can never become a second send. |
+| **Task succession** state added | D-03-S27, M-03-S26 | The timeline event was specified, schema'd and exercised end to end but had no design id for the acceptance auditor to cite. Appended at the end of each screen's sequence. |
+| **Disconnect sheet reordered** | M-01-S21 | The mockup contradicted this file's own thumb-safety sentence. The sentence won. |
+| **Focus containment stated** | Keyboard and focus | Dialogs and sheets trap focus, Tab wraps at the boundary, Escape closes non-destructive surfaces, focus returns to the invoking control. |
+| **Result addresses made inert** | D-03-S11, M-03-S10, affordance map | Product decision, 2026-09-04. |
+| **Result-too-large variant** | D-03-S11, M-03-S10 | An over-cap result must not be rendered as **Stopped reporting**. Row copy only; no new id. |
+| **Queued variant on Sent** | D-03-S04, M-03-S03 | A hand-off still waiting for a connection slot has not been sent, so it must not say **Sent**. Row copy and mockup only; no new id. |
+| **Push callback disclosed in the manifest** | D-02 and M-02 "what will be sent" | The per-run callback address is registered with the agent as part of the confirmed send, so the consent boundary has to name it. Text only; no new id. |
+
+**Still with the human.** Card metadata retention (spec FR-016 against data-model §8)
+remains an open product decision and is deliberately untouched here — it has no design
+surface in this file either way.
