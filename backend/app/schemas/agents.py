@@ -40,6 +40,9 @@ AgentReportedState = Literal[
 ]
 AgentCommandKind = Literal["start", "reply", "cancel"]
 AgentCommandDelivery = Literal["unconfirmed", "confirmed"]
+AgentExchangeState = Literal["none", "queued", "open", "closed", "interrupted"]
+AgentExchangeKind = Literal["start", "reply"]
+AgentPushRegistration = Literal["unregistered", "registered", "refused", "unsupported"]
 AgentAuthScheme = Literal["bearer", "api_key"]
 """The two credential schemes BrainBuddy can present to an agent (FR-001).
 
@@ -276,6 +279,8 @@ class AgentConnectionSigningSecretResponse(AgentConnectionSecretResponse):
 
 
 class AgentContextItemRequest(StrictBaseModel):
+    """One supporting item the owner chose to include (ADR-0006 vocabulary)."""
+
     label: str = Field(min_length=1, max_length=200)
     body: str = Field(min_length=1, max_length=4_000)
 
@@ -283,6 +288,20 @@ class AgentContextItemRequest(StrictBaseModel):
 class AgentContextItemResponse(StrictBaseModel):
     label: str
     body: str
+
+
+class AgentPushCallbackResponse(StrictBaseModel):
+    """The private per-run callback address, disclosed in the review (FR-005).
+
+    Shown with its token masked, and only when the agent's card says it can push
+    at all. An unregistered callback carries no address and no disclosure: a
+    masked address for something that does not exist would read as one that
+    does. The token itself appears in no response, ever (AC-007).
+    """
+
+    registered: bool = False
+    url_preview: str | None = None
+    disclosure: str | None = None
 
 
 class AgentReportingContractResponse(StrictBaseModel):
@@ -303,7 +322,7 @@ class AgentReportingContractResponse(StrictBaseModel):
 class AgentHandoffPreviewRequest(StrictBaseModel):
     connection_id: str = Field(min_length=1, max_length=200)
     include_details: bool = True
-    context_items: list[AgentContextItemRequest] = Field(default_factory=list)
+    supporting_items: list[AgentContextItemRequest] = Field(default_factory=list)
 
 
 class AgentHandoffConfirmRequest(AgentHandoffPreviewRequest):
@@ -311,10 +330,34 @@ class AgentHandoffConfirmRequest(AgentHandoffPreviewRequest):
 
     manifest_token: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     current_password: str | None = Field(default=None, max_length=512)
+    # Part of the canonical request identity, not a header: a retry that quietly
+    # dropped it would be a *different* request wearing the same
+    # Idempotency-Key, and the acknowledgement is the thing the user actually
+    # gave (AC-026). It defaults to false because an unstated acknowledgement is
+    # not an acknowledgement.
+    acknowledge_duplicate_risk: bool = False
+
+
+class AgentCheckDeliveryRequest(StrictBaseModel):
+    """**Check again**: re-run *this* run's own lookup-before-resend (AC-027).
+
+    Deliberately carries nothing but the password. Every identifier the check
+    needs is already on the run, and a body that could name a different run — or
+    carry new content — would make "check again" capable of being a second send.
+    """
+
+    current_password: str | None = Field(default=None, max_length=512)
 
 
 class AgentManifestResponse(StrictBaseModel):
-    """Exactly what will leave BrainBuddy, itemised for review (FR-005)."""
+    """Exactly what will leave BrainBuddy, itemised for review (FR-005).
+
+    This is the consent boundary, so it is itemised in full rather than
+    summarised: every field is something a user could object to before it
+    leaves. The bespoke reporting block is gone with the wire that needed it —
+    an A2A agent is told nothing about how to report back, because it reports by
+    answering.
+    """
 
     token: str
     run_id: str
@@ -323,14 +366,25 @@ class AgentManifestResponse(StrictBaseModel):
     agent_name: str
     title: str
     details: str | None = None
-    context_items: list[AgentContextItemResponse] = Field(default_factory=list)
-    reporting: AgentReportingContractResponse
-    reporting_instructions: str
-    instructions_version: str
+    supporting_items: list[AgentContextItemResponse] = Field(default_factory=list)
+    message_id: str
+    correlation_id: str
+    destination_interface: str
     protocol_version: str
-    destination_endpoint: str
+    guarantee_tier: AgentGuaranteeTier
+    tier_disclosure: str
+    tier_disclosure_url: str
+    # True only for a best-effort connection whose owner has not yet
+    # acknowledged the duplicate risk. Asked once per connection, and again
+    # whenever its verified scope resets (AC-026).
+    acknowledgement_required: bool = False
+    cancellation_disclosure: str
+    push_callback: AgentPushCallbackResponse | None = None
     external_copy_notice: str
     reauthentication_required: bool
+    # The exact text of each part that will be sent, in order. The review claims
+    # to show what leaves; this is that claim made checkable.
+    parts_preview: list[str] = Field(default_factory=list)
 
 
 class AgentReplyRequest(StrictBaseModel):
@@ -397,6 +451,22 @@ class AgentRunResponse(StrictBaseModel):
     # bespoke wire (api-deltas.md): A2A carries no progress percentage, and a
     # capability flag for something nothing can report is a promise, not a fact.
     capabilities: AgentControlsResponse
+
+    # --- the A2A exchange this run is waiting on (FR-006) ------------------
+    #
+    # `exchange_state` is the difference between **Queued** and **Sent**, and
+    # that is the one distinction this projection exists to keep: a queued
+    # exchange has provably not been sent, so collapsing it into `sent` would be
+    # precisely the lie the feature is built to avoid.
+    guarantee_tier: AgentGuaranteeTier | None = None
+    message_id: str | None = None
+    correlation_id: str | None = None
+    agent_task_id: str | None = None
+    exchange_open: bool = False
+    exchange_state: AgentExchangeState = "none"
+    exchange_kind: AgentExchangeKind | None = None
+    push_registration: AgentPushRegistration = "unregistered"
+
     manifest: AgentManifestResponse | None = None
     events: list[AgentRunEventResponse] = Field(default_factory=list)
     commands: list[AgentRunCommandResponse] = Field(default_factory=list)
@@ -423,6 +493,11 @@ class AgentEventIngestResponse(StrictBaseModel):
 
 __all__ = [
     "AgentAuthScheme",
+    "AgentCheckDeliveryRequest",
+    "AgentExchangeKind",
+    "AgentExchangeState",
+    "AgentPushCallbackResponse",
+    "AgentPushRegistration",
     "AgentAuthSchemeOfferResponse",
     "AgentCapabilitiesResponse",
     "AgentCardResponse",

@@ -47,8 +47,8 @@ from app.schemas.agents import (
     AgentHandoffConfirmRequest,
     AgentHandoffPreviewRequest,
     AgentManifestResponse,
+    AgentPushCallbackResponse,
     AgentReplyRequest,
-    AgentReportingContractResponse,
     AgentRunCommandResponse,
     AgentRunEventResponse,
     AgentRunResponse,
@@ -80,10 +80,10 @@ from .a2a.client import (
 )
 from .connector import ConnectorPort, ConnectorTarget
 from .domain import (
+    A2A_PROTOCOL_VERSION,
     AGENT_EVENT_ENVELOPE_ADAPTER,
     MAX_CONTEXT_ITEMS,
     PROTOCOL_VERSION,
-    REPORTING_INSTRUCTIONS_VERSION,
     TERMINAL_REPORTED_STATES,
     AgentAuditEntryDocument,
     AgentCapabilities,
@@ -92,12 +92,13 @@ from .domain import (
     AgentEventEnvelope,
     AgentIdempotencyRecord,
     AgentManifestContextItem,
-    AgentReportingContract,
+    AgentPushCallback,
     AgentRunCommandDocument,
     AgentRunDocument,
     AgentRunEventDocument,
     AgentRunManifest,
     bounded_test_error_detail,
+    inert_reporting_contract,
     project_run_for_access,
 )
 from .egress import (
@@ -153,6 +154,13 @@ BEST_EFFORT_TIER_DISCLOSURE = (
     "single-start extension. Before any retry BrainBuddy checks the agent for an "
     "existing task and adopts it instead of sending again. A duplicate remains "
     "possible if the agent forgets its tasks."
+)
+
+PUSH_CALLBACK_DISCLOSURE = (
+    "BrainBuddy also gives this agent a private callback address with a per-run "
+    "token so it can tell BrainBuddy when to check on the run. The agent keeps "
+    "that address until the run ends. It can only use it to ask BrainBuddy to "
+    "check on the run — no task content ever comes back through it."
 )
 
 CANCELLATION_DISCLOSURE = (
@@ -321,6 +329,10 @@ class AgentRelayService:
         secret_box: SecretBox,
         task_snapshot: TaskSnapshotPort,
         callback_url: str,
+        # The origin the per-run push callback lives under. Part of the manifest
+        # token, so a deployment that moved cannot let a stale confirmation hand
+        # the agent an address BrainBuddy no longer answers on.
+        push_base_url: str = "",
         # The A2A wire and its bounded exchange pool, injected here rather than
         # constructed inside the service. Both are optional for one transitional
         # reason: this build still speaks the bespoke 007 wire alongside them,
@@ -349,6 +361,7 @@ class AgentRelayService:
         self.secret_box = secret_box
         self.task_snapshot = task_snapshot
         self.callback_url = callback_url
+        self.push_base_url = push_base_url
         self.tier_disclosure_url = tier_disclosure_url
         self.stale_after = stale_after
         self.reporting_window = reporting_window
@@ -1708,6 +1721,64 @@ class AgentRelayService:
             return True
         return self._now() >= connection.scope_verified_at + SCOPE_REAUTH_WINDOW
 
+    def push_callback_url(self, run_id: str, token: str) -> str:
+        """The private per-run callback address given to the agent."""
+
+        return f"{self.push_base_url.rstrip('/')}/{run_id}/{token}"
+
+    @staticmethod
+    def _masked_push_url(url: str) -> str:
+        """The callback address as the *review* shows it: token elided.
+
+        The manifest is re-read on every run projection, so an unmasked address
+        here would put the token into every response, log line and audit row
+        that ever touches the run (AC-007, push-callback.md Redaction).
+        """
+
+        head, _, _token = url.rpartition("/")
+        return f"{head}/…"
+
+    def _push_callback_for(
+        self, connection: AgentConnectionDocument, *, run_id: str, token: str
+    ) -> AgentPushCallback:
+        if not (connection.card and connection.card.push_notifications):
+            # Nothing to disclose. A masked address for a callback the agent
+            # cannot use would read as one it can.
+            return AgentPushCallback(registered=False)
+        return AgentPushCallback(
+            registered=True,
+            url_preview=self._masked_push_url(self.push_callback_url(run_id, token)),
+            disclosure=PUSH_CALLBACK_DISCLOSURE,
+        )
+
+    def acknowledgement_required(self, connection: AgentConnectionDocument) -> bool:
+        """Whether this hand-off must carry the duplicate-risk acknowledgement.
+
+        Asked once per connection, and again whenever its verified scope resets
+        (AC-026). A guaranteed-tier agent is never asked: its card promises the
+        deduplication the acknowledgement exists to warn about.
+        """
+
+        return (
+            connection.guarantee_tier == "best_effort"
+            and connection.best_effort_acknowledged_at is None
+        )
+
+    @staticmethod
+    def _parts_preview(manifest: AgentRunManifest) -> list[str]:
+        """The exact text of each part that will be sent, in order.
+
+        The review claims to show what leaves. This is that claim made
+        checkable: it is built from the same manifest the wire message is built
+        from, so the two cannot drift.
+        """
+
+        parts = [manifest.title]
+        if manifest.details:
+            parts.append(manifest.details)
+        parts.extend(f"{item.label}\n{item.body}" for item in manifest.context_items)
+        return parts
+
     def _build_manifest(
         self,
         *,
@@ -1715,34 +1786,50 @@ class AgentRelayService:
         task: TaskSnapshot,
         connection: AgentConnectionDocument,
         payload: AgentHandoffPreviewRequest,
+        push_token: str | None = None,
     ) -> AgentRunManifest:
-        if len(payload.context_items) > MAX_CONTEXT_ITEMS:
+        if len(payload.supporting_items) > MAX_CONTEXT_ITEMS:
             raise ValidationFailure(
-                f"A hand-off may include at most {MAX_CONTEXT_ITEMS} context items.",
-                detail={"reason": "too_many_context_items"},
+                f"A hand-off may include at most {MAX_CONTEXT_ITEMS} supporting items.",
+                detail={"reason": "too_many_supporting_items"},
             )
         context_items = [
             AgentManifestContextItem(label=item.label, body=item.body)
-            for item in payload.context_items
+            for item in payload.supporting_items
         ]
         details = task.details if payload.include_details else None
-        reporting = AgentReportingContract(
-            callback_url=self.callback_url, connection_id=connection.id
+        tier = connection.guarantee_tier or "best_effort"
+        interface = (connection.card.interface_url if connection.card else None) or (
+            connection.endpoint_url
         )
-        instructions = _reporting_instructions(self.callback_url, connection.id)
+        push_callback = self._push_callback_for(
+            connection, run_id=run_id, token=push_token or ""
+        )
+        # Inert, and written only so a rolled-back 007 image can still parse the
+        # row (plan.md, Rollback boundary). Nothing in this build reads it.
+        reporting = inert_reporting_contract(connection.id)
         content = {
             "run_id": run_id,
             "task_id": task.id,
             "connection_id": connection.id,
-            "destination": connection.endpoint_url,
+            # The *interface*, not the address the owner typed: a card that
+            # moves changes where content would go, and the token has to
+            # invalidate when it does (AC-012).
+            "destination": interface,
             "agent_name": connection.name,
             "title": task.title,
             "details": details,
             "context_items": [item.model_dump() for item in context_items],
-            "reporting": reporting.model_dump(mode="json"),
-            "reporting_instructions": instructions,
-            "instructions_version": REPORTING_INSTRUCTIONS_VERSION,
-            "protocol_version": PROTOCOL_VERSION,
+            "message_id": f"{run_id}:start",
+            "correlation_id": run_id,
+            "guarantee_tier": tier,
+            "acknowledgement_required": self.acknowledgement_required(connection),
+            # The callback *origin* is part of the token: a deployment that
+            # moved would otherwise let a stale confirmation hand the agent an
+            # address BrainBuddy no longer answers on.
+            "push_callback_registered": push_callback.registered,
+            "push_callback_origin": self.push_base_url,
+            "protocol_version": A2A_PROTOCOL_VERSION,
         }
         token = hashlib.sha256(
             json.dumps(content, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1757,7 +1844,15 @@ class AgentRelayService:
             details=details,
             context_items=context_items,
             reporting=reporting,
-            reporting_instructions=instructions,
+            message_id=f"{run_id}:start",
+            correlation_id=run_id,
+            destination_interface=interface,
+            guarantee_tier=tier,
+            tier_disclosure=TIER_DISCLOSURES[tier],
+            tier_disclosure_url=self.tier_disclosure_url,
+            cancellation_disclosure=CANCELLATION_DISCLOSURE,
+            acknowledgement_required=self.acknowledgement_required(connection),
+            push_callback=push_callback,
         )
 
     def _manifest_response(
@@ -1771,19 +1866,27 @@ class AgentRelayService:
             agent_name=manifest.agent_name,
             title=manifest.title,
             details=manifest.details,
-            context_items=[
+            supporting_items=[
                 AgentContextItemResponse(label=item.label, body=item.body)
                 for item in manifest.context_items
             ],
-            reporting=AgentReportingContractResponse(**manifest.reporting.model_dump()),
-            reporting_instructions=manifest.reporting_instructions,
-            instructions_version=manifest.instructions_version,
+            message_id=manifest.message_id,
+            correlation_id=manifest.correlation_id,
+            destination_interface=manifest.destination_interface,
             protocol_version=manifest.protocol_version,
-            destination_endpoint=connection.endpoint_url,
+            guarantee_tier=manifest.guarantee_tier,
+            tier_disclosure=manifest.tier_disclosure,
+            tier_disclosure_url=manifest.tier_disclosure_url,
+            acknowledgement_required=manifest.acknowledgement_required,
+            cancellation_disclosure=manifest.cancellation_disclosure,
+            push_callback=AgentPushCallbackResponse(
+                **manifest.push_callback.model_dump()
+            ),
             external_copy_notice=EXTERNAL_COPY_NOTICE,
             reauthentication_required=self.requires_dispatch_reauthentication(
                 connection
             ),
+            parts_preview=self._parts_preview(manifest),
         )
 
     def preview_handoff(
@@ -2067,6 +2170,18 @@ class AgentRelayService:
             label = "Running"
         elif run.reported_state == "accepted":
             label = "Accepted"
+        elif run.exchange_state == "queued":
+            # Checked *before* the dispatch labels, and this ordering is the
+            # point: the durable `dispatch_state` is already
+            # `delivery_unconfirmed` at reservation, but nothing has left
+            # BrainBuddy while the exchange is queued. Rendering that as
+            # "Delivery unconfirmed" would claim a send that provably did not
+            # happen (FR-006, D-03-S04 queued variant).
+            label = "Queued"
+        elif run.exchange_state == "open" and run.dispatch_state != "not_sent":
+            # An exchange a worker is holding may already be at the agent, so
+            # **Sent** is the honest label until it closes without evidence.
+            label = "Sent"
         elif run.dispatch_state == "delivery_unconfirmed":
             label = "Delivery unconfirmed"
         elif run.dispatch_state == "sent":
