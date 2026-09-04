@@ -1889,6 +1889,56 @@ class AgentRelayService:
             parts_preview=self._parts_preview(manifest),
         )
 
+    def _refuse_a_destination_that_moved(
+        self, connection: AgentConnectionDocument, *, owner_id: str
+    ) -> None:
+        """Re-read the card at the review, and refuse a card that has moved.
+
+        The review is the last moment before content leaves, so the destination
+        it names is checked again here rather than trusted from the last test.
+        A drift found now marks the connection **Agent changed** — the same
+        transition a test would make — so every surface stops offering it, not
+        just this one review (AC-012, D-02-S09).
+
+        A refetch that *fails* is not evidence of drift and does not refuse: the
+        tested-and-not-stale rule already carries that risk, and turning every
+        transient card-fetch blip into a blocked hand-off would trade a real
+        safety property for an imagined one.
+        """
+
+        if connection.card_fingerprint is None:
+            return
+        now = self._now()
+        discovery = self._card_fetcher(
+            connection.endpoint_url, auth_scheme=connection.auth_scheme, now=now
+        )
+        if not discovery.ok or discovery.card_fingerprint == connection.card_fingerprint:
+            return
+        updates = self._drift_updates(connection, discovery)
+        with self.agent_repo.command_lock(owner_id):
+            current = self.agent_repo.get_connection(connection.id, owner_id=owner_id)
+            if updates is not None and current.revision == connection.revision:
+                self.agent_repo.save_connection(
+                    current.model_copy(
+                        update={
+                            **updates,
+                            "updated_at": now,
+                            "revision": current.revision + 1,
+                        }
+                    )
+                )
+                self._audit(
+                    owner_id=owner_id,
+                    action="card_drift_detected",
+                    outcome=AGENT_CARD_CHANGED,
+                    connection_id=connection.id,
+                )
+        raise ValidationFailure(
+            "This agent's card now advertises a different destination than the "
+            "one you tested. Test the connection again before handing work to it.",
+            detail={"reason": AGENT_CARD_CHANGED},
+        )
+
     def preview_handoff(
         self,
         task_id: str,
@@ -1901,6 +1951,7 @@ class AgentRelayService:
         connection = self._require_dispatchable(
             payload.connection_id, owner_id=owner_id
         )
+        self._refuse_a_destination_that_moved(connection, owner_id=owner_id)
         task = self.task_snapshot(task_id, owner_id=owner_id)
 
         now = self._now()
@@ -1987,6 +2038,23 @@ class AgentRelayService:
                             "Review it again before confirming.",
                             detail={"reason": "manifest_token_mismatch"},
                         )
+                    if self.acknowledgement_required(connection) and not (
+                        payload.acknowledge_duplicate_risk
+                    ):
+                        # Before the reservation is consumed and before any I/O:
+                        # the acknowledgement is the thing being consented to, so
+                        # a confirmation that lacks it is not a confirmation at
+                        # all (AC-026). It is checked after the token, because a
+                        # review that has gone stale is a different problem and
+                        # saying "acknowledge this" about content the user can no
+                        # longer see would be the wrong instruction.
+                        raise ValidationFailure(
+                            "Acknowledge that this agent may create a duplicate "
+                            "task before sending to it for the first time.",
+                            detail={
+                                "reason": "duplicate_risk_acknowledgement_required"
+                            },
+                        )
                     if self.requires_dispatch_reauthentication(connection) and not (
                         reauthenticated
                     ):
@@ -2053,6 +2121,23 @@ class AgentRelayService:
                             }
                         )
                         self.agent_repo.save_connection(connection)
+                    if payload.acknowledge_duplicate_risk:
+                        # Under the same lock as the reservation, and conditional
+                        # on the stamp still being absent, so the *first*
+                        # acknowledgement is the one recorded. Once it exists the
+                        # flag is inert: a client that stopped sending it must
+                        # not be able to withdraw a decision the owner made.
+                        #
+                        # It is a targeted row update rather than a field on the
+                        # document above, and it runs last, because the document
+                        # in hand was read before it and writing that stale copy
+                        # afterwards would erase the stamp it just made.
+                        self.agent_repo.acknowledge_duplicate_risk(
+                            connection.id, owner_id=owner_id, at=now
+                        )
+                        connection = self.agent_repo.get_connection(
+                            connection.id, owner_id=owner_id
+                        )
                 target = self._target(connection)
                 envelope = {
                     "type": "start",

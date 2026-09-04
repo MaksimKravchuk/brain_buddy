@@ -265,8 +265,20 @@ def create_task(client: TestClient, title: str = "Draft the migration plan") -> 
 
 
 def hand_off(
-    client: TestClient, connection_id: str, task_id: str, *, key: str = "k-dispatch"
+    client: TestClient,
+    connection_id: str,
+    task_id: str,
+    *,
+    key: str = "k-dispatch",
+    acknowledge: bool = True,
 ) -> dict[str, Any]:
+    """One review and the confirmation it authorises.
+
+    The default acknowledges the duplicate risk because every fixture connection
+    here is best-effort and a real client would have shown the box; the suites
+    that assert the *gate* pass `acknowledge=False` explicitly (AC-026).
+    """
+
     preview = client.post(
         f"/api/tasks/{task_id}/agent-runs/preview",
         json={"connection_id": connection_id},
@@ -278,6 +290,7 @@ def hand_off(
         json={
             "connection_id": connection_id,
             "manifest_token": preview.json()["token"],
+            "acknowledge_duplicate_risk": acknowledge,
         },
     )
     assert response.status_code == 201, response.text

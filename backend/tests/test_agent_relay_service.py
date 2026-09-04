@@ -366,8 +366,14 @@ def review(
     *,
     task_id: str = "task_1",
     context: list[AgentContextItemRequest] | None = None,
+    acknowledge: bool = True,
 ) -> AgentHandoffConfirmRequest:
-    """Run the review and return the exact confirmation it authorises."""
+    """Run the review and return the exact confirmation it authorises.
+
+    `acknowledge` defaults to true because the suite's connections are
+    best-effort and a real review would have shown the one-time duplicate-risk
+    box; the tests that assert the gate itself pass `acknowledge=False` (AC-026).
+    """
 
     preview = service.preview_handoff(
         task_id,
@@ -380,6 +386,7 @@ def review(
         connection_id=connection_id,
         supporting_items=context or [],
         manifest_token=preview.token,
+        acknowledge_duplicate_risk=acknowledge,
     )
 
 
@@ -1630,6 +1637,7 @@ class TestExternalIoLockScope:
         confirmation = AgentHandoffConfirmRequest(
             connection_id=created.id,
             manifest_token=preview.token,
+            acknowledge_duplicate_risk=True,
         )
         before_io = clock.now
 
@@ -2111,6 +2119,330 @@ class TestHandOffReview:
 
 
 # --- User Story 3: monitor and respond without false claims ------------------
+
+
+
+class TestHandOffManifestAndAcknowledgement:
+    """The consent boundary: what the manifest promises, and what it asks for."""
+
+    def _push_capable(
+        self, service: AgentRelayService, card_fetcher: FakeCardFetcher
+    ) -> str:
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(push_notifications=True)
+        )
+        connection_id = connect(service, key="idem-push")
+        make_ready(service, connection_id)
+        return connection_id
+
+    def test_014_FR_005_the_manifest_names_the_push_callback_with_its_token_masked(
+        self, service: AgentRelayService, card_fetcher: FakeCardFetcher
+    ) -> None:
+        """AC-007. The address is disclosed; the secret in it never is."""
+
+        connection_id = self._push_capable(service, card_fetcher)
+
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+
+        assert preview.push_callback.registered is True
+        assert preview.push_callback.url_preview is not None
+        assert preview.push_callback.url_preview.endswith("/…")
+        assert preview.push_callback.disclosure
+        # The whole projection, serialised: the token is not in it anywhere,
+        # because the token is not in the manifest the projection is built from.
+        assert "/…" in preview.model_dump_json()
+        assert preview.run_id in (preview.push_callback.url_preview or "")
+
+    def test_014_FR_005_a_card_without_push_discloses_no_callback_at_all(
+        self, service: AgentRelayService
+    ) -> None:
+        """A masked address for a callback the agent cannot use reads as one it can."""
+
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+
+        assert preview.push_callback.registered is False
+        assert preview.push_callback.url_preview is None
+        assert preview.push_callback.disclosure is None
+
+    def test_014_FR_005_the_manifest_names_the_interface_the_card_advertises(
+        self, service: AgentRelayService
+    ) -> None:
+        """AC-006. Where content would actually go, not the address typed in."""
+
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(
+                connection_id=connection_id,
+                supporting_items=[
+                    AgentContextItemRequest(label="Runbook", body="Cutover steps.")
+                ],
+            ),
+            owner_id=OWNER,
+        )
+
+        assert preview.destination_interface == "https://agent.example.com/a2a"
+        assert preview.message_id == f"{preview.run_id}:start"
+        assert preview.correlation_id == preview.run_id
+        assert preview.protocol_version == "1.0"
+        assert [item.label for item in preview.supporting_items] == ["Runbook"]
+        assert preview.parts_preview == [
+            "Draft the migration plan",
+            "Cover rollback and the data backfill.",
+            "Runbook\nCutover steps.",
+        ]
+
+    def test_014_FR_014_cancellation_disclosure_carries_the_exact_server_owned_copy(
+        self, service: AgentRelayService
+    ) -> None:
+        """FR-014's third literal, pinned beside the two tier sentences.
+
+        The clients render it verbatim, so drift here is drift in what
+        BrainBuddy promises about stopping work it has handed over.
+        """
+
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+
+        assert preview.cancellation_disclosure.startswith(
+            "Cancellation depends on the agent"
+        )
+        assert preview.tier_disclosure.startswith("Best-effort single start.")
+        assert preview.tier_disclosure_url
+
+    def test_014_FR_005_a_moved_callback_origin_invalidates_the_confirmation(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """The origin is part of the token, so a redeployment re-reviews.
+
+        A confirmation reviewed against one callback origin must not be able to
+        hand the agent an address BrainBuddy no longer answers on.
+        """
+
+        repo = AgentRepository(tmp_path)
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(push_notifications=True)
+        )
+        first = build_service(repo, connector, clock, card_fetcher=card_fetcher)
+        first.push_base_url = "https://one.example/api/a2a/push"
+        connection_id = connect(first)
+        make_ready(first, connection_id)
+        confirmation = review(first, connection_id)
+
+        moved = build_service(repo, connector, clock, card_fetcher=card_fetcher)
+        moved.push_base_url = "https://two.example/api/a2a/push"
+
+        with pytest.raises(ValidationFailure) as caught:
+            moved.dispatch_run(
+                "task_1",
+                confirmation,
+                owner_id=OWNER,
+                idempotency_key="idem-moved-origin",
+            )
+        assert caught.value.detail == {"reason": "manifest_token_mismatch"}
+
+    def test_014_FR_005_preview_refetches_the_card_and_refuses_drift(
+        self, service: AgentRelayService, card_fetcher: FakeCardFetcher
+    ) -> None:
+        """AC-012. The review is the last moment to notice the agent moved."""
+
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(interface_url="https://second.example.com/a2a")
+        )
+
+        with pytest.raises(ValidationFailure) as caught:
+            service.preview_handoff(
+                "task_1",
+                AgentHandoffPreviewRequest(connection_id=connection_id),
+                owner_id=OWNER,
+            )
+
+        assert caught.value.detail == {"reason": "agent_card_changed"}
+        # Refused before anything was reserved: a review that cannot be trusted
+        # leaves no run behind.
+        assert service.list_runs_for_task("task_1", owner_id=OWNER) == []
+
+    def test_014_FR_003_first_best_effort_confirm_without_acknowledgement_is_refused(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """AC-026, refused *before* any reservation and before any I/O."""
+
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        confirmation = review(service, connection_id, acknowledge=False)
+        assert confirmation.acknowledge_duplicate_risk is False
+
+        with pytest.raises(ValidationFailure) as caught:
+            service.dispatch_run(
+                "task_1",
+                confirmation,
+                owner_id=OWNER,
+                idempotency_key="idem-unacknowledged",
+            )
+
+        assert caught.value.detail == {
+            "reason": "duplicate_risk_acknowledgement_required"
+        }
+        assert a2a_client.calls_to("SendMessage") == []
+        # Refused before the reservation was spent: the reviewed run is still
+        # undispatched, so the same review can be confirmed once the box is
+        # ticked rather than having to be rebuilt.
+        reserved = service.agent_repo.find_run_by_manifest_token(
+            confirmation.manifest_token, owner_id=OWNER
+        )
+        assert reserved is not None
+        assert reserved.dispatched_at is None
+        assert reserved.exchange_state == "none"
+        assert service.list_runs_for_task("task_1", owner_id=OWNER) == []
+
+    def test_014_FR_003_the_guaranteed_tier_is_never_asked_to_acknowledge(
+        self, service: AgentRelayService, card_fetcher: FakeCardFetcher
+    ) -> None:
+        """The card promises the deduplication the acknowledgement warns about."""
+
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(extension_uris=[SINGLE_START_EXTENSION_URI])
+        )
+        connection_id = connect(service, key="idem-guaranteed")
+        make_ready(service, connection_id)
+
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+
+        assert preview.guarantee_tier == "guaranteed"
+        assert preview.acknowledgement_required is False
+        run = service.dispatch_run(
+            "task_1",
+            AgentHandoffConfirmRequest(
+                connection_id=connection_id, manifest_token=preview.token
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-guaranteed-dispatch",
+        )
+        assert run.id == preview.run_id
+
+    def test_014_FR_003_the_acknowledgement_is_persisted_and_then_never_asked_again(
+        self, service: AgentRelayService, clock: Clock
+    ) -> None:
+        """AC-026: once per connection. The second hand-off asks nothing."""
+
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        confirmation = review(service, connection_id)
+
+        service.dispatch_run(
+            "task_1",
+            confirmation,
+            owner_id=OWNER,
+            idempotency_key="idem-acknowledged",
+        )
+
+        stored = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert stored.best_effort_acknowledged_at == clock.now
+        second = service.preview_handoff(
+            "task_2",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+        assert second.acknowledgement_required is False
+
+    def test_014_FR_003_acknowledgement_flag_is_ignored_once_persisted(
+        self, service: AgentRelayService, clock: Clock
+    ) -> None:
+        """A later false does not un-acknowledge what the owner already agreed to.
+
+        The flag answers a question the review only asks once, so once the
+        answer is recorded the flag is inert — a client that stopped sending it
+        must not silently withdraw a decision the owner made.
+        """
+
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        service.dispatch_run(
+            "task_1",
+            review(service, connection_id),
+            owner_id=OWNER,
+            idempotency_key="idem-ack-1",
+        )
+        stamped = service.agent_repo.get_connection(
+            connection_id, owner_id=OWNER
+        ).best_effort_acknowledged_at
+
+        clock.advance(timedelta(minutes=5))
+        second = service.dispatch_run(
+            "task_2",
+            review(service, connection_id, task_id="task_2", acknowledge=False),
+            owner_id=OWNER,
+            idempotency_key="idem-ack-2",
+        )
+
+        assert second.task_id == "task_2"
+        after = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert after.best_effort_acknowledged_at == stamped
+
+    @pytest.mark.parametrize(
+        "condition", ["untested", "stale", "disconnected", "foreign"]
+    )
+    def test_014_SC_005_an_unusable_connection_is_refused_before_any_content(
+        self, service: AgentRelayService, clock: Clock, condition: str
+    ) -> None:
+        """FR-002 fails closed at the review, not after the content has left."""
+
+        connection_id = connect(service)
+        if condition != "untested":
+            make_ready(service, connection_id)
+        if condition == "stale":
+            clock.advance(timedelta(days=30))
+        if condition == "disconnected":
+            service.disconnect_connection(
+                connection_id,
+                AgentConnectionDisconnectRequest(
+                    current_password="password",
+                    expected_revision=service.get_connection(
+                        connection_id, owner_id=OWNER
+                    ).revision,
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-disconnect",
+                reauthenticated=True,
+            )
+
+        owner = OTHER_OWNER if condition == "foreign" else OWNER
+        with pytest.raises((ValidationFailure, NotFoundError)):
+            service.preview_handoff(
+                "task_1",
+                AgentHandoffPreviewRequest(connection_id=connection_id),
+                owner_id=owner,
+            )
+        assert service.list_runs_for_task("task_1", owner_id=OWNER) == []
 
 
 def sign(secret: str, timestamp: int, body: bytes) -> str:
@@ -5866,15 +6198,21 @@ class TestDispatchScopeReauthentication:
         )
         assert preview.reauthentication_required is True
 
-        with pytest.raises(ValidationFailure):
+        with pytest.raises(ValidationFailure) as refused:
             service.dispatch_run(
                 "task_1",
                 AgentHandoffConfirmRequest(
-                    connection_id=connection_id, manifest_token=preview.token
+                    connection_id=connection_id,
+                    manifest_token=preview.token,
+                    # Acknowledged, so the refusal below can only be about the
+                    # password: two consent gates that both refuse would
+                    # otherwise let this pass for the wrong reason.
+                    acknowledge_duplicate_risk=True,
                 ),
                 owner_id=OWNER,
                 idempotency_key="idem-dispatch",
             )
+        assert refused.value.detail == {"reason": "reauthentication_required"}
         assert connector.starts == []
 
     def test_once_content_has_been_sent_the_scope_no_longer_re_prompts(
