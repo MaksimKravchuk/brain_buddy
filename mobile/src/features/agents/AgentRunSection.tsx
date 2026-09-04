@@ -2,10 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { Linking, Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import { isDefinitiveMutationFailure } from "@/api/client";
-import { useCancelAgentRun, useReplyToAgentRun } from "@/api/hooks";
+import {
+  useCancelAgentRun,
+  useCheckAgentRunDelivery,
+  useReplyToAgentRun,
+} from "@/api/hooks";
 import type { AgentRunResponse } from "@/api/types";
 import {
   EXPIRED_CONTENT_NOTICE,
+  canCheckDelivery,
+  canRetryHandoff,
+  dispatchStateDetail,
   eventLabel,
   lastContactLabel,
   runsNewestFirst,
@@ -29,6 +36,8 @@ interface AgentRunSectionProps {
   online: boolean;
   /** Hand a run a command just returned straight back to the feed. */
   onRunUpdated: (run: AgentRunResponse) => void;
+  /** Reopen the review for a hand-off that never left, seeded from its manifest. */
+  onRetryHandoff?: (run: AgentRunResponse) => void;
   onRetry?: () => void;
 }
 
@@ -65,6 +74,7 @@ export function AgentRunSection({
   error,
   online,
   onRunUpdated,
+  onRetryHandoff,
   onRetry,
 }: AgentRunSectionProps) {
 
@@ -113,7 +123,13 @@ export function AgentRunSection({
         </BBText>
       ) : null}
       {runsNewestFirst(runs).map((run) => (
-        <RunCard key={run.id} run={run} online={online} onRunUpdated={onRunUpdated} />
+        <RunCard
+            key={run.id}
+            run={run}
+            online={online}
+            onRunUpdated={onRunUpdated}
+            onRetryHandoff={onRetryHandoff}
+          />
       ))}
     </View>
   );
@@ -123,19 +139,23 @@ function RunCard({
   run,
   online,
   onRunUpdated,
+  onRetryHandoff,
 }: {
   run: AgentRunResponse;
   online: boolean;
   onRunUpdated: (run: AgentRunResponse) => void;
+  onRetryHandoff?: (run: AgentRunResponse) => void;
 }) {
   const reply = useReplyToAgentRun();
   const cancel = useCancelAgentRun();
+  const checkDelivery = useCheckAgentRunDelivery();
 
   // One key per user intent, held across retries: a reply that never got an
   // answer may still have reached the server, and a fresh key would turn that
   // ambiguity into a second command.
   const replyKey = useIntentKey();
   const cancelKey = useIntentKey();
+  const checkKey = useIntentKey();
   const replyIntent = useRef<ReplyIntentSnapshot | null>(null);
   const [replyIntentConflict, setReplyIntentConflict] = useState(false);
 
@@ -171,6 +191,7 @@ function RunCard({
   const cancelGuard = canCancel(run, run.capabilities, { online });
   const linkGuard = run.result_link ? canOpenResultLink(run) : null;
   const events = sortedEvents(run);
+  const dispatchDetail = run.content_expired ? null : dispatchStateDetail(run);
 
   useEffect(() => {
     const held = replyIntent.current;
@@ -221,6 +242,29 @@ function RunCard({
           if (isDefinitiveMutationFailure(error)) {
             replyKey.settle();
             replyIntent.current = null;
+          }
+        },
+      },
+    );
+  };
+
+  const runCheckAgain = () => {
+    if (!online) {
+      return;
+    }
+    checkDelivery.mutate(
+      // No identifiers of its own: the correlation ID and the message ID are on
+      // the run, so this can only ever repeat the same check. The key is held
+      // across retries for the same reason a reply's is.
+      { runId: run.id, payload: { current_password: null }, idempotencyKey: checkKey.current() },
+      {
+        onSuccess: (updated) => {
+          checkKey.settle();
+          onRunUpdated(updated);
+        },
+        onError: (error) => {
+          if (isDefinitiveMutationFailure(error)) {
+            checkKey.settle();
           }
         },
       },
@@ -385,10 +429,42 @@ function RunCard({
           accepted.
         </BBText>
       ) : null}
-      {run.dispatch_state === "delivery_unconfirmed" ? (
+      {dispatchDetail ? (
         <BBText variant="micro" color={colors.fg5}>
-          Brain Buddy could not confirm the agent received this hand-off. It was not re-sent.
+          {dispatchDetail}
         </BBText>
+      ) : null}
+      {canCheckDelivery(run) ? (
+        <>
+          <BBText variant="micro" color={colors.fg5}>
+            Runs the same check again with the same correlation ID and the same message ID. It
+            is never a new send.
+          </BBText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Check again"
+            accessibilityState={{ disabled: !online }}
+            disabled={!online}
+            onPress={runCheckAgain}
+            style={styles.rowAction}
+          >
+            <BBText variant="caption" weight="medium" color={colors.infoFg}>
+              Check again
+            </BBText>
+          </Pressable>
+        </>
+      ) : null}
+      {canRetryHandoff(run) ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Try this hand-off again"
+          onPress={() => onRetryHandoff?.(run)}
+          style={styles.rowAction}
+        >
+          <BBText variant="caption" weight="medium" color={colors.infoFg}>
+            Try this hand-off again
+          </BBText>
+        </Pressable>
       ) : null}
 
       {events.length > 0 ? (
@@ -419,6 +495,11 @@ function RunCard({
 }
 
 const styles = StyleSheet.create({
+  // 44pt: a real decision, tappable like one.
+  rowAction: {
+    minHeight: 44,
+    justifyContent: "center",
+  },
   section: {
     gap: space.s2,
   },

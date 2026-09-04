@@ -32,13 +32,19 @@ from app.modules.agents.a2a.card import (
     MAX_CARD_DESCRIPTION_CHARS,
     CardDiscovery,
 )
+from app.modules.agents.a2a.types import Task
 from app.modules.agents.connector import (
     ConnectorCommandOutcome,
     ConnectorStartOutcome,
     ConnectorTarget,
     ConnectorTestOutcome,
 )
-from app.modules.agents.domain import PROTOCOL_VERSION, AgentCapabilities
+from app.modules.agents.domain import (
+    PROTOCOL_VERSION,
+    REPORTING_INSTRUCTIONS_VERSION,
+    AgentCapabilities,
+    inert_reporting_contract,
+)
 from app.repositories.feature_flag import FlagMode
 from app.schemas.auth import Invite, User
 from app.services.auth_service import AuthService
@@ -214,6 +220,13 @@ def connector(
     return relay_app[2]
 
 
+@pytest.fixture
+def container(
+    relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+) -> Container:
+    return relay_app[3]
+
+
 def register_connection(client: TestClient, *, key: str = "k-create") -> dict[str, Any]:
     """The registration response exactly as the route returns it (no secret)."""
 
@@ -265,8 +278,20 @@ def create_task(client: TestClient, title: str = "Draft the migration plan") -> 
 
 
 def hand_off(
-    client: TestClient, connection_id: str, task_id: str, *, key: str = "k-dispatch"
+    client: TestClient,
+    connection_id: str,
+    task_id: str,
+    *,
+    key: str = "k-dispatch",
+    acknowledge: bool = True,
 ) -> dict[str, Any]:
+    """One review and the confirmation it authorises.
+
+    The default acknowledges the duplicate risk because every fixture connection
+    here is best-effort and a real client would have shown the box; the suites
+    that assert the *gate* pass `acknowledge=False` explicitly (AC-026).
+    """
+
     preview = client.post(
         f"/api/tasks/{task_id}/agent-runs/preview",
         json={"connection_id": connection_id},
@@ -278,6 +303,7 @@ def hand_off(
         json={
             "connection_id": connection_id,
             "manifest_token": preview.json()["token"],
+            "acknowledge_duplicate_risk": acknowledge,
         },
     )
     assert response.status_code == 201, response.text
@@ -1158,10 +1184,11 @@ class TestSigningSecretRotationRoute:
 
 class TestHandOffRoutes:
     def test_a_reviewed_hand_off_dispatches_exactly_once(
-        self, client: TestClient, connector: FakeConnector
+        self, client: TestClient, container: Container
     ) -> None:
-        """AC-008 / AC-009 over HTTP."""
+        """AC-008 / AC-009 over HTTP: one confirmation, one A2A exchange."""
 
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
         created = create_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
@@ -1170,7 +1197,10 @@ class TestHandOffRoutes:
 
         assert run["dispatch_state"] == "sent"
         assert run["primary_state_label"] == "Sent"
-        assert len(connector.starts) == 1
+        assert run["exchange_state"] == "closed"
+        assert run["message_id"] == f"{run['id']}:start"
+        assert run["correlation_id"] == run["id"]
+        assert len(a2a.calls_to("SendMessage")) == 1
 
         listed = client.get(f"/api/tasks/{task_id}/agent-runs").json()
         assert len(listed) == 1
@@ -1416,7 +1446,10 @@ class TestEventIngestRoutes:
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
         run = hand_off(client, created["id"], task_id)
-        reporting = connector.starts[-1]["reporting"]
+        # Read off the run's own frozen manifest rather than off a connector
+        # envelope: 014 sends the start over A2A, and the bespoke block survives
+        # only as the inert rollback placeholder the run row still carries.
+        reporting = inert_reporting_contract(created["id"]).model_dump(mode="json")
         assert reporting["callback_url"] == "", "the manifest advertises nothing"
         assert reporting["signature_algorithm"] == "hmac-sha256"
         assert reporting["signing_bytes"] == "timestamp_bytes + b'.' + raw_body"
@@ -1501,8 +1534,11 @@ class TestEventIngestRoutes:
         run = hand_off(client, created["id"], task_id, key="golden-handoff")
         assert run["id"] == "agentrun_golden_vector"
 
-        reporting = connector.starts[-1]["reporting"]
-        assert reporting["instructions_version"] == "v2"
+        reporting = inert_reporting_contract(created["id"]).model_dump(mode="json")
+        # The instructions version belongs to the manifest, not to the signing
+        # contract: 014 tells an agent nothing about reporting, so only the
+        # signing rule below is still a live promise to a 007-era run.
+        assert REPORTING_INSTRUCTIONS_VERSION == "v2"
         assert reporting["body_envelope_version"] == "2026-08-09"
         assert reporting["signature_algorithm"] == "hmac-sha256"
         assert reporting["signing_bytes"] == "timestamp_bytes + b'.' + raw_body"
@@ -2410,3 +2446,306 @@ class TestPushCallbackInfrastructure:
 
         assert "push_callback" in config["filters"]
         assert "push_callback" in config["loggers"]["uvicorn.access"].get("filters", [])
+
+
+class TestCheckDeliveryRoute:
+    """**Check again** over HTTP: one lookup, then a resend the rules allow."""
+
+    def _unconfirmed(
+        self, client: TestClient, container: Container, *, key: str = "k-unconfirmed"
+    ) -> tuple[str, dict[str, Any]]:
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        created = register_connection(client, key=f"{key}-create")
+        client.post(f"/api/agent-connections/{created['id']}/test")
+        task_id = create_task(client, title=f"Task for {key}")
+        a2a.script(
+            "SendMessage",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+        run = hand_off(client, created["id"], task_id, key=f"{key}-handoff")
+        assert run["dispatch_state"] == "delivery_unconfirmed"
+        a2a.results.pop("SendMessage", None)
+        a2a.calls.clear()
+        return created["id"], run
+
+    def test_014_FR_006_a_check_adopts_a_found_task_without_sending_anything(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-027 over HTTP."""
+
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        _connection_id, run = self._unconfirmed(client, container)
+        a2a.script(
+            "ListTasks",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                tasks=(
+                    Task.model_validate(
+                        {
+                            "id": "t-found",
+                            "contextId": run["id"],
+                            "status": {"state": "TASK_STATE_WORKING"},
+                        }
+                    ),
+                ),
+            ),
+        )
+
+        response = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": "k-check"},
+            json={},
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["id"] == run["id"]
+        assert body["dispatch_state"] == "sent"
+        assert body["agent_task_id"] == "t-found"
+        assert a2a.calls_to("SendMessage") == []
+
+    def test_014_FR_016_a_check_without_an_idempotency_key_is_refused(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """The key is what makes a retried check the same check."""
+
+        _connection_id, run = self._unconfirmed(client, container, key="k-nokey")
+
+        response = client.post(f"/api/agent-runs/{run['id']}/check-delivery", json={})
+
+        assert response.status_code == 400, response.text
+        assert response.headers["X-Correlation-ID"]
+
+    @pytest.mark.parametrize(
+        "condition,reason",
+        [
+            ("terminal", "run_terminal"),
+            ("disconnected", "connection_disconnected"),
+            ("not_ready", "connection_not_ready"),
+        ],
+    )
+    def test_014_FR_006_each_refusal_names_its_own_reason_with_a_correlation_id(
+        self,
+        client: TestClient,
+        container: Container,
+        condition: str,
+        reason: str,
+    ) -> None:
+        """SC-009: an actionable category, never a generic failure."""
+
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        connection_id, run = self._unconfirmed(client, container, key=f"k-{condition}")
+        repo = container.agent_relay_service.agent_repo
+        owner = client.get("/api/auth/me").json()["id"]
+        stored_run = repo.get_run(run["id"], owner_id=owner)
+        if condition == "terminal":
+            repo.save_run(stored_run.model_copy(update={"reported_state": "completed"}))
+        elif condition == "disconnected":
+            connection = repo.get_connection(connection_id, owner_id=owner)
+            repo.save_connection(
+                connection.model_copy(update={"status": "disconnected"})
+            )
+        else:
+            connection = repo.get_connection(connection_id, owner_id=owner)
+            repo.save_connection(
+                connection.model_copy(update={"status": "unreachable"})
+            )
+            a2a.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        response = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": f"k-check-{condition}"},
+            json={},
+        )
+
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == {"reason": reason}
+        assert response.headers["X-Correlation-ID"]
+        assert a2a.calls_to("SendMessage") == []
+
+    def test_014_FR_006_rollout_off_looks_up_but_never_resends(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-036. The lookup runs and adopts; only the send is gated."""
+
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        _connection_id, run = self._unconfirmed(client, container, key="k-rollout")
+        set_relay_flag(client, FeatureFlagState.OFF)
+        a2a.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        response = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": "k-check-off"},
+            json={},
+        )
+
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == {"reason": "rollout_disabled"}
+        # The lookup ran before the refusal, so a task created meanwhile would
+        # still have been adopted.
+        assert a2a.calls_to("ListTasks")
+        assert a2a.calls_to("SendMessage") == []
+
+    def test_014_FR_006_a_run_that_is_already_sent_is_returned_unchanged(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """Nothing to check and nothing to send: the run simply reads back."""
+
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        created = register_connection(client, key="k-sent-create")
+        client.post(f"/api/agent-connections/{created['id']}/test")
+        task_id = create_task(client, title="Already sent")
+        run = hand_off(client, created["id"], task_id, key="k-sent-handoff")
+        assert run["dispatch_state"] == "sent"
+        a2a.calls.clear()
+        a2a.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        response = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": "k-check-sent"},
+            json={},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["dispatch_state"] == "sent"
+        assert a2a.calls_to("SendMessage") == []
+
+
+class TestHandOffContractOverHttp:
+    """The manifest, the acknowledgement gate and the two honest dispatch labels."""
+
+    def test_014_FR_005_the_manifest_carries_the_review_the_clients_render(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-007: every value that leaves, named in the response."""
+
+        container.agent_relay_service._card_fetcher = FakeCardFetcher()  # type: ignore[assignment]
+        container.agent_relay_service._card_fetcher.discovery = ready_discovery(  # type: ignore[attr-defined]
+            summary=card_summary(push_notifications=True)
+        )
+        created = register_connection(client, key="k-manifest")
+        client.post(f"/api/agent-connections/{created['id']}/test")
+        task_id = create_task(client, title="Manifest shape")
+
+        response = client.post(
+            f"/api/tasks/{task_id}/agent-runs/preview",
+            json={"connection_id": created["id"]},
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["acknowledgement_required"] is True
+        assert body["push_callback"]["registered"] is True
+        assert body["push_callback"]["url_preview"].endswith("/…")
+        assert body["push_callback"]["disclosure"]
+        assert body["parts_preview"][0] == "Manifest shape"
+        assert body["correlation_id"] == body["run_id"]
+        assert body["message_id"] == f"{body['run_id']}:start"
+        assert body["protocol_version"] == "1.0"
+        # The bespoke reporting block is gone from the contract entirely.
+        assert "reporting" not in body
+        assert "reporting_instructions" not in body
+
+    def test_014_FR_005_a_card_that_moved_refuses_the_preview_with_its_own_reason(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-012, D-02-S09 over HTTP."""
+
+        fetcher = FakeCardFetcher()
+        container.agent_relay_service._card_fetcher = fetcher  # type: ignore[assignment]
+        created = register_connection(client, key="k-drift")
+        client.post(f"/api/agent-connections/{created['id']}/test")
+        task_id = create_task(client, title="Drifted destination")
+        fetcher.discovery = ready_discovery(
+            summary=card_summary(interface_url="https://second.example.com/a2a")
+        )
+
+        response = client.post(
+            f"/api/tasks/{task_id}/agent-runs/preview",
+            json={"connection_id": created["id"]},
+        )
+
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == {"reason": "agent_card_changed"}
+        assert response.headers["X-Correlation-ID"]
+        listed = client.get("/api/agent-connections").json()
+        assert [
+            item["agent_changed"] for item in listed if item["id"] == created["id"]
+        ] == [True]
+
+    def test_014_SC_005_a_confirmation_without_the_acknowledgement_is_refused(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-026 over HTTP, before any reservation is spent."""
+
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        created = register_connection(client, key="k-ack")
+        client.post(f"/api/agent-connections/{created['id']}/test")
+        task_id = create_task(client, title="Needs the acknowledgement")
+        preview = client.post(
+            f"/api/tasks/{task_id}/agent-runs/preview",
+            json={"connection_id": created["id"]},
+        ).json()
+        assert preview["acknowledgement_required"] is True
+
+        refused = client.post(
+            f"/api/tasks/{task_id}/agent-runs",
+            headers={"Idempotency-Key": "k-ack-dispatch"},
+            json={
+                "connection_id": created["id"],
+                "manifest_token": preview["token"],
+                "acknowledge_duplicate_risk": False,
+            },
+        )
+
+        assert refused.status_code == 400, refused.text
+        assert refused.json()["detail"] == {
+            "reason": "duplicate_risk_acknowledgement_required"
+        }
+        assert refused.headers["X-Correlation-ID"]
+        assert a2a.calls_to("SendMessage") == []
+        assert client.get(f"/api/tasks/{task_id}/agent-runs").json() == []
+
+    def test_014_FR_006_a_queued_exchange_is_labelled_Queued_and_never_Sent(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """D-03-S04 queued variant over HTTP."""
+
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        # No pump and no executor, so the confirmed hand-off waits for a worker
+        # that is not there. That is exactly a saturated pool.
+        container.agent_relay_service.exchange_pump = None
+        container.agent_relay_service.exchange_executor = None
+        created = register_connection(client, key="k-queued")
+        client.post(f"/api/agent-connections/{created['id']}/test")
+        task_id = create_task(client, title="Waiting for a worker")
+
+        run = hand_off(client, created["id"], task_id, key="k-queued-dispatch")
+
+        assert run["primary_state_label"] == "Queued"
+        assert run["exchange_state"] == "queued"
+        assert run["exchange_open"] is True
+        assert run["dispatch_state"] == "delivery_unconfirmed"
+        assert a2a.calls_to("SendMessage") == []
+
+    def test_014_FR_006_a_restart_before_the_send_reads_as_Not_sent(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-032 over HTTP: nothing left BrainBuddy, and the label says so."""
+
+        container.agent_relay_service.exchange_pump = None
+        container.agent_relay_service.exchange_executor = None
+        created = register_connection(client, key="k-restart")
+        client.post(f"/api/agent-connections/{created['id']}/test")
+        task_id = create_task(client, title="Caught by a restart")
+        run = hand_off(client, created["id"], task_id, key="k-restart-dispatch")
+        assert run["primary_state_label"] == "Queued"
+
+        container.agent_observer.recover_interrupted_exchanges()
+
+        recovered = client.get(f"/api/agent-runs/{run['id']}").json()
+        assert recovered["dispatch_state"] == "not_sent"
+        assert recovered["dispatch_error_code"] == "restarted_before_send"
+        assert recovered["primary_state_label"] == "Not sent"
+        assert recovered["message_id"] == f"{run['id']}:start"

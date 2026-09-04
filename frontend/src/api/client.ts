@@ -53,6 +53,7 @@ import type {
   AgentConnectionRotateSigningSecretRequest,
   AgentConnectionSigningSecretResponse,
   AgentConnectionUpdateRequest,
+  AgentCheckDeliveryRequest,
   AgentHandoffConfirmRequest,
   AgentHandoffPreviewRequest,
   AgentManifestResponse,
@@ -582,6 +583,25 @@ export const apiClient = {
 
   replyToAgentRun(runId: string, payload: AgentReplyRequest, idempotencyKey: string) {
     return request<AgentRunResponse>(`/agent-runs/${runId}/reply`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  /**
+   * **Check again** on a `delivery_unconfirmed` run.
+   *
+   * It carries no identifiers of its own: the run already holds the correlation
+   * ID and the message ID the server looks the task up by, so this can only ever
+   * be the *same* check — never a second hand-off.
+   */
+  checkAgentRunDelivery(
+    runId: string,
+    payload: AgentCheckDeliveryRequest,
+    idempotencyKey: string
+  ) {
+    return request<AgentRunResponse>(`/agent-runs/${runId}/check-delivery`, {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: payload

@@ -592,3 +592,48 @@ describe("useAgentRunsFeed absorb polling", () => {
     await unmount();
   });
 });
+
+describe("TaskAgentSection retry of a hand-off that never left", () => {
+  it("014-SC-004 reopens the review seeded from the run's frozen manifest", async () => {
+    const frozen = makeManifest({
+      connection_id: "conn_1",
+      details: null,
+      supporting_items: [{ label: "Classification", body: "Project: Launch" }],
+    });
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        dispatch_state: "not_sent",
+        dispatch_error_code: "restarted_before_send",
+        reported_state: null,
+        primary_state_label: "Not sent",
+        manifest: frozen,
+      }),
+    ]);
+    mockPreview.mockResolvedValue(frozen);
+    mockListConnections.mockResolvedValue([makeConnection()]);
+
+    const { renderer, unmount } = await renderWithProviders(
+      <TaskAgentSection
+        task={makeTask()}
+        projectName="Launch"
+        tagNames={["Writing"]}
+        enabled
+      />,
+    );
+    await settle();
+    expect(visibleText(renderer)).toContain("Nothing left Brain Buddy");
+
+    await pressText(renderer, "Try this hand-off again");
+    await settle();
+
+    // Seeded, so the server rebuilds the identical manifest: the same
+    // connection, the same details decision, the same supporting items.
+    expect(mockPreview).toHaveBeenCalledWith("task_1", {
+      connection_id: "conn_1",
+      include_details: false,
+      supporting_items: [{ label: "Classification", body: "Project: Launch" }],
+    });
+
+    await unmount();
+  });
+});

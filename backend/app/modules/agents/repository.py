@@ -1055,6 +1055,7 @@ class AgentRepository(BaseRepository):
         expected_version: int,
         started_at: datetime,
         deadline_at: datetime,
+        from_states: tuple[str, ...] = ("queued",),
     ) -> AgentRunDocument | None:
         """Move one exchange `queued → open`, and spend the first-dispatch trigger.
 
@@ -1070,6 +1071,11 @@ class AgentRepository(BaseRepository):
         Compare-and-set on `run_version`, so a second worker, a replayed
         confirmation and the observer's recovery cannot each open the same
         exchange. Returns the started run, or `None` when someone else won.
+
+        ``from_states`` widens the same transition for **Check again**: a resend
+        opens an exchange that a restart interrupted, or one that closed without
+        evidence, and it has to win the same single-writer race a first send
+        does.
         """
 
         opened = run.model_copy(
@@ -1097,8 +1103,8 @@ class AgentRepository(BaseRepository):
                     payload = ?
                 WHERE owner_id = ? AND id = ?
                   AND json_extract(payload, '$.run_version') = ?
-                  AND exchange_state = 'queued'
-                """,
+                  AND exchange_state IN ({states})
+                """.format(states=",".join("?" * len(from_states))),
                 (
                     opened.dispatched_at.isoformat() if opened.dispatched_at else None,
                     opened.manifest.token if opened.manifest else None,
@@ -1109,6 +1115,7 @@ class AgentRepository(BaseRepository):
                     opened.owner_id,
                     opened.id,
                     expected_version,
+                    *from_states,
                 ),
             )
             if cursor.rowcount != 1:
@@ -1168,6 +1175,41 @@ class AgentRepository(BaseRepository):
                     connection_id,
                 ),
             )
+
+    def queued_exchanges(self) -> list[tuple[str, str, str]]:
+        """Every exchange still waiting for a worker: owner, run, connection.
+
+        Ordered oldest first so a drain is fair within an owner; fairness
+        *across* owners is the caller's business, because only it knows which
+        connections already hold workers.
+        """
+
+        with self._connection() as conn:
+            rows = conn.execute("""
+                SELECT owner_id, id, connection_id FROM agent_runs
+                WHERE exchange_state = 'queued'
+                ORDER BY created_at ASC, id ASC
+                """).fetchall()
+        return [
+            (str(row["owner_id"]), str(row["id"]), str(row["connection_id"]))
+            for row in rows
+        ]
+
+    def open_exchange_count(self, connection_id: str, *, owner_id: str) -> int:
+        """How many exchanges this connection is holding open right now.
+
+        The bound that stops one hostile or broken agent from consuming the
+        shared pool for every owner. Counted from the durable rows rather than
+        from an in-process tally, so a restart cannot lose track of it.
+        """
+
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS held FROM agent_runs "
+                "WHERE owner_id = ? AND connection_id = ? AND exchange_state = 'open'",
+                (owner_id, connection_id),
+            ).fetchone()
+        return int(row["held"]) if row is not None else 0
 
     def interrupted_exchanges(self) -> list[tuple[str, str, str]]:
         """Every exchange a restart left mid-flight: owner, run, state.

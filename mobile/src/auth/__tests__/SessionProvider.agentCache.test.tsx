@@ -252,7 +252,7 @@ function RelayMutationHarness() {
           previewHandoff.mutate({
             connection_id: "connection-1",
             include_details: false,
-            context_items: [],
+            supporting_items: [],
           })
         }
       />
@@ -263,7 +263,7 @@ function RelayMutationHarness() {
             payload: {
               connection_id: "connection-1",
               include_details: false,
-              context_items: [],
+              supporting_items: [],
               manifest_token: "a".repeat(64),
               current_password: "password",
             },

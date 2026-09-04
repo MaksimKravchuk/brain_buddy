@@ -27,6 +27,9 @@ import {
   MAX_POLL_DELAY_MS,
   nextPollDelay,
   projectRunAt,
+  canCheckDelivery,
+  canRetryHandoff,
+  dispatchStateDetail,
   rateLimitRetryCopy,
   runsNewestFirst,
   sortedEvents,
@@ -62,6 +65,14 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     last_contact_at: "2026-08-09T12:00:00Z",
     reporting_window_seconds: 900,
     capabilities: { ...CONTROLS },
+    guarantee_tier: "best_effort",
+    message_id: "run1:start",
+    correlation_id: "run1",
+    agent_task_id: null,
+    exchange_open: false,
+    exchange_state: "closed",
+    exchange_kind: "start",
+    push_registration: "unregistered",
     manifest: null,
     events: [],
     commands: [],
@@ -180,23 +191,18 @@ describe("applyRun / applyRuns", () => {
         agent_name: "Hermes",
         title: "Private task title",
         details: "Private task details",
-        context_items: [{ label: "Private context", body: "Private body" }],
-        reporting: {
-          callback_url: "https://brain.example.test/callback",
-          connection_id: "conn1",
-          connection_header: "X-BrainBuddy-Connection",
-          timestamp_header: "X-BrainBuddy-Timestamp",
-          signature_header: "X-BrainBuddy-Signature",
-          timestamp_format: "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero",
-          signature_algorithm: "hmac-sha256",
-          signing_bytes: "timestamp_bytes + b'.' + raw_body",
-          signature_format: "v1=<lowercase hex>",
-          body_envelope_version: "1",
-        },
-        reporting_instructions: "Private instructions",
-        instructions_version: "1",
-        protocol_version: "1",
-        destination_endpoint: "https://agent.example.test/relay",
+        supporting_items: [{ label: "Private context", body: "Private body" }],
+        message_id: "run1:start",
+        correlation_id: "run1",
+        destination_interface: "https://agent.example.test/a2a",
+        guarantee_tier: "best_effort",
+        tier_disclosure: "Best-effort single start.",
+        tier_disclosure_url: "https://example.invalid/single-start/v1.md",
+        acknowledgement_required: false,
+        cancellation_disclosure: "Cancellation depends on the agent.",
+        push_callback: null,
+        parts_preview: ["Private task title"],
+        protocol_version: "1.0",
         external_copy_notice: "Private notice",
         reauthentication_required: false,
       },
@@ -559,5 +565,117 @@ describe("buildContextCandidates", () => {
     });
     expect(item.body).toHaveLength(MAX_CONTEXT_BODY_CHARS);
     expect(item.body.endsWith("…")).toBe(true);
+  });
+});
+
+describe("dispatch state detail", () => {
+  it("014-FR-006 keeps Queued and Sent apart", () => {
+    // The whole point of the queued state: the identifiers are reserved, the
+    // content is frozen, and nothing has left. Saying "Sent" here would be the
+    // one claim this projection exists to avoid making.
+    expect(
+      dispatchStateDetail(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "queued",
+          exchange_open: true,
+          reported_state: null,
+        }),
+      ),
+    ).toBe("Waiting for a free connection slot; nothing has been sent yet");
+    expect(
+      dispatchStateDetail(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "open",
+          exchange_open: true,
+          reported_state: null,
+        }),
+      ),
+    ).toBe("Some agents answer only when the work is finished.");
+  });
+
+  it("014-FR-006 separates a restart that never sent from an ambiguous delivery", () => {
+    expect(
+      dispatchStateDetail(
+        makeRun({
+          dispatch_state: "not_sent",
+          dispatch_error_code: "restarted_before_send",
+          reported_state: null,
+        }),
+      ),
+    ).toBe("Brain Buddy restarted before this hand-off was sent. Nothing left Brain Buddy.");
+    expect(
+      dispatchStateDetail(
+        makeRun({
+          dispatch_state: "not_sent",
+          dispatch_error_code: "a2a_rate_limited",
+          reported_state: null,
+        }),
+      ),
+    ).toBe("The agent is rate limiting.");
+    expect(
+      dispatchStateDetail(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "closed",
+          reported_state: null,
+        }),
+      ),
+    ).toBe("Brain Buddy could not confirm the agent received this hand-off. It was not re-sent.");
+  });
+
+  it("014-FR-014 says nothing about dispatch once the agent has reported", () => {
+    expect(dispatchStateDetail(makeRun({ reported_state: "running" }))).toBeNull();
+    expect(
+      dispatchStateDetail(
+        makeRun({ dispatch_state: "not_sent", dispatch_error_code: null, reported_state: null }),
+      ),
+    ).toBeNull();
+  });
+
+  it("014-FR-006 offers Check again only where Brain Buddy genuinely does not know", () => {
+    expect(
+      canCheckDelivery(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "closed",
+          reported_state: null,
+        }),
+      ),
+    ).toBe(true);
+    // Queued has provably not been sent, so there is nothing at the agent.
+    expect(
+      canCheckDelivery(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "queued",
+          reported_state: null,
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      canCheckDelivery(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "closed",
+          reported_state: null,
+          connection_disconnected: true,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("014-FR-005 re-offers a hand-off only while its frozen review still exists", () => {
+    const frozen = makeRun({ dispatch_state: "not_sent", reported_state: null }).manifest;
+    expect(
+      canRetryHandoff({ dispatch_state: "not_sent", manifest: frozen, content_expired: false }),
+    ).toBe(frozen !== null);
+    expect(
+      canRetryHandoff({ dispatch_state: "not_sent", manifest: null, content_expired: false }),
+    ).toBe(false);
+    expect(
+      canRetryHandoff({ dispatch_state: "sent", manifest: frozen, content_expired: false }),
+    ).toBe(false);
   });
 });

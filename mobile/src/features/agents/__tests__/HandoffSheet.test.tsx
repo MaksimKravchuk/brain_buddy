@@ -12,6 +12,7 @@ import {
   visibleText,
 } from "@/test/render";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { Linking } from "react-native";
 import { act, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 
 const mockListConnections = jest.fn();
@@ -198,7 +199,7 @@ describe("HandoffSheet preview ordering", () => {
         makeManifest({
           token: "token-a",
           title: "Preview A",
-          context_items: [{ label: "Classification", body: "Project: Launch\nTags: Writing" }],
+          supporting_items: [{ label: "Classification", body: "Project: Launch\nTags: Writing" }],
         }),
       )
       .mockReturnValueOnce(replacement.promise);
@@ -414,6 +415,182 @@ describe("HandoffSheet preview ordering", () => {
     );
     expect(getByLabel(renderer, "Include task details")).toBeTruthy();
 
+    await unmount();
+  });
+});
+
+describe("HandoffSheet review contract", () => {
+  it("014-FR-005 lists every value the manifest names, and no reporting instructions", async () => {
+    mockPreview.mockResolvedValue(
+      makeManifest({
+        supporting_items: [{ label: "Classification", body: "Project: Launch" }],
+      }),
+    );
+    const { renderer, unmount } = await renderWithProviders(<HandoffSheet {...props()} />);
+    await settle();
+    await pressText(renderer, "My Claude Code box");
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Supporting items");
+    expect(text).toContain("Correlation ID");
+    expect(text).toContain("https://agent.example.test/a2a");
+    expect(text).toContain("Cancellation depends on the agent.");
+    expect(text).toContain("Best-effort single start.");
+    // The bespoke reporting block is gone with the wire that needed it: an A2A
+    // agent reports by answering, so it is told nothing about reporting.
+    expect(text).not.toContain("Reporting instructions");
+    expect(text).not.toContain("Instructions ");
+
+    await unmount();
+  });
+
+  it("014-FR-005 discloses the masked push callback only when one is registered", async () => {
+    mockPreview.mockResolvedValue(
+      makeManifest({
+        push_callback: {
+          registered: true,
+          url_preview: "https://brain.example.test/api/a2a/push/run_1/…",
+          disclosure: "Brain Buddy also gives this agent a private callback address …",
+        },
+      }),
+    );
+    const { renderer, unmount } = await renderWithProviders(<HandoffSheet {...props()} />);
+    await settle();
+    await pressText(renderer, "My Claude Code box");
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Push callback");
+    expect(text).toContain("https://brain.example.test/api/a2a/push/run_1/…");
+    expect(text).toContain("private callback address");
+    // The token itself appears in no response, so it can never be on screen.
+    expect(text).not.toMatch(/push\/run_1\/[A-Za-z0-9_-]{20,}/);
+
+    await unmount();
+  });
+
+  it("014-FR-005 offers no push callback row when the agent cannot push", async () => {
+    mockPreview.mockResolvedValue(makeManifest());
+    const { renderer, unmount } = await renderWithProviders(<HandoffSheet {...props()} />);
+    await settle();
+    await pressText(renderer, "My Claude Code box");
+    await settle();
+
+    expect(visibleText(renderer)).not.toContain("Push callback");
+
+    await unmount();
+  });
+
+  it("014-SC-005 gates Send on the one-time duplicate-risk acknowledgement", async () => {
+    mockPreview.mockResolvedValue(makeManifest({ acknowledgement_required: true }));
+    mockConfirm.mockResolvedValue({});
+    const { renderer, unmount } = await renderWithProviders(<HandoffSheet {...props()} />);
+    await settle();
+    await pressText(renderer, "My Claude Code box");
+    await settle();
+
+    expect(isDisabled(currentSendButton(renderer))).toBe(true);
+    const row = getByLabel(
+      renderer,
+      "I understand that a duplicate task is possible with this agent",
+    );
+    expect(row.props.accessibilityState?.checked).toBe(false);
+    // A real 44pt target, not a label with a tap handler bolted on.
+    expect(row.props.style).toEqual(expect.objectContaining({ minHeight: 44 }));
+
+    await pressLabel(
+      renderer,
+      "I understand that a duplicate task is possible with this agent",
+    );
+    await settle();
+
+    expect(isDisabled(currentSendButton(renderer))).toBe(false);
+    expect(visibleText(renderer)).toContain("Acknowledged. Brain Buddy will not ask again");
+
+    await pressText(renderer, "Send to My Claude Code box");
+    await settle();
+    expect(mockConfirm).toHaveBeenCalledWith(
+      "task_1",
+      expect.objectContaining({ acknowledge_duplicate_risk: true }),
+      expect.stringContaining("agent-handoff-"),
+    );
+
+    await unmount();
+  });
+
+  it("014-SC-005 asks nothing on a later hand-off to the same agent", async () => {
+    mockPreview.mockResolvedValue(makeManifest({ acknowledgement_required: false }));
+    mockConfirm.mockResolvedValue({});
+    const { renderer, unmount } = await renderWithProviders(<HandoffSheet {...props()} />);
+    await settle();
+    await pressText(renderer, "My Claude Code box");
+    await settle();
+
+    expect(
+      queryByText(
+        renderer,
+        "☐ I understand that a duplicate task is possible with this agent",
+      ),
+    ).toBeNull();
+    expect(visibleText(renderer)).toContain("so there is no acknowledgement step here");
+    expect(isDisabled(currentSendButton(renderer))).toBe(false);
+
+    await pressText(renderer, "Send to My Claude Code box");
+    await settle();
+    expect(mockConfirm).toHaveBeenCalledWith(
+      "task_1",
+      expect.objectContaining({ acknowledge_duplicate_risk: false }),
+      expect.stringContaining("agent-handoff-"),
+    );
+
+    await unmount();
+  });
+
+  it("014-FR-016 renders an adversarial agent name and destination as inert text", async () => {
+    mockPreview.mockResolvedValue(
+      makeManifest({
+        agent_name: "<script>alert(1)</script>Agent",
+        destination_interface: "javascript:alert(document.cookie)",
+      }),
+    );
+    const { renderer, unmount } = await renderWithProviders(<HandoffSheet {...props()} />);
+    await settle();
+    await pressText(renderer, "My Claude Code box");
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("javascript:alert(document.cookie)");
+    // AC-031: nothing card-sourced is a Linking target, whatever its scheme.
+    const links = renderer.root.findAll(
+      (node) => node.props.accessibilityRole === "link",
+      { deep: true },
+    );
+    for (const link of links) {
+      expect(link.props.accessibilityLabel).toBe(
+        "Read the single-start extension specification",
+      );
+    }
+
+    await unmount();
+  });
+
+  it("014-FR-003 opens the extension specification only on an explicit tap", async () => {
+    mockPreview.mockResolvedValue(makeManifest());
+    const openURL = jest
+      .spyOn(Linking, "openURL")
+      .mockResolvedValue(undefined as unknown as never);
+    const { renderer, unmount } = await renderWithProviders(<HandoffSheet {...props()} />);
+    await settle();
+    await pressText(renderer, "My Claude Code box");
+    await settle();
+
+    expect(openURL).not.toHaveBeenCalled();
+    await pressLabel(renderer, "Read the single-start extension specification");
+    await settle();
+    expect(openURL).toHaveBeenCalledWith("https://example.invalid/single-start/v1.md");
+
+    openURL.mockRestore();
     await unmount();
   });
 });

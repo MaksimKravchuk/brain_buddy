@@ -6,7 +6,7 @@
  */
 
 import { AgentRunSection } from "@/features/agents/AgentRunSection";
-import { makeRun } from "@/test/agentFixtures";
+import { makeManifest, makeRun } from "@/test/agentFixtures";
 import {
   getByLabel,
   pressText,
@@ -18,6 +18,7 @@ import {
 
 const mockReply = jest.fn();
 const mockCancel = jest.fn();
+const mockCheckDelivery = jest.fn();
 
 // jest-expo's expo-crypto stub returns no UUID, so pin one: every relay
 // command must still carry an `Idempotency-Key`.
@@ -27,6 +28,7 @@ jest.mock("@/auth/SessionProvider", () => {
   const api = {
     replyToAgentRun: (...args: unknown[]) => mockReply(...args),
     cancelAgentRun: (...args: unknown[]) => mockCancel(...args),
+    checkAgentRunDelivery: (...args: unknown[]) => mockCheckDelivery(...args),
   };
   return {
     useApi: () => api,
@@ -319,7 +321,9 @@ describe("AgentRunSection", () => {
     const text = visibleText(renderer);
     expect(text).toContain("No report since the last contact");
     expect(text).toContain("did not cancel any work");
-    expect(text).toContain("could not confirm");
+    // 014-FR-006: the agent reported, and that *is* the delivery evidence, so
+    // the ambiguous-delivery sentence is now known false and is withdrawn.
+    expect(text).not.toContain("could not confirm");
 
     await unmount();
   });
@@ -398,6 +402,147 @@ describe("AgentRunSection when a refresh fails", () => {
     expect(visibleText(renderer)).toContain("You are offline");
     expect(mockReply).not.toHaveBeenCalled();
     expect(mockCancel).not.toHaveBeenCalled();
+
+    await unmount();
+  });
+});
+
+describe("AgentRunSection dispatch states", () => {
+  it("014-SC-004 shows a queued exchange as Queued and never as Sent", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              dispatch_state: "delivery_unconfirmed",
+              exchange_state: "queued",
+              exchange_open: true,
+              reported_state: null,
+              primary_state_label: "Queued",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Queued");
+    expect(text).toContain("Waiting for a free connection slot; nothing has been sent yet");
+    expect(text).not.toContain("could not confirm the agent received");
+    // A queued hand-off has provably not been sent, so there is nothing at the
+    // agent to check on.
+    expect(queryByText(renderer, "Check again")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-FR-006 states a restart that never sent and re-offers the hand-off", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              dispatch_state: "not_sent",
+              dispatch_error_code: "restarted_before_send",
+              reported_state: null,
+              primary_state_label: "Not sent",
+              // The frozen review is what makes the retry a *retry*.
+              manifest: makeManifest(),
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(visibleText(renderer)).toContain(
+      "Brain Buddy restarted before this hand-off was sent. Nothing left Brain Buddy.",
+    );
+    expect(queryByText(renderer, "Try this hand-off again")).toBeTruthy();
+
+    await unmount();
+  });
+
+  it("014-FR-006 names the rate-limited category on a hand-off that was refused", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              dispatch_state: "not_sent",
+              dispatch_error_code: "a2a_rate_limited",
+              reported_state: null,
+              primary_state_label: "Not sent",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(visibleText(renderer)).toContain("The agent is rate limiting.");
+
+    await unmount();
+  });
+
+  it("014-FR-006 checks delivery with the run's own ids and never mints a new run", async () => {
+    mockCheckDelivery.mockResolvedValue(
+      makeRun({ dispatch_state: "sent", primary_state_label: "Sent" }),
+    );
+    const onRunUpdated = jest.fn();
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          onRunUpdated,
+          runs: [
+            makeRun({
+              dispatch_state: "delivery_unconfirmed",
+              exchange_state: "closed",
+              reported_state: null,
+              primary_state_label: "Delivery unconfirmed",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(visibleText(renderer)).toContain(
+      "Runs the same check again with the same correlation ID and the same message ID.",
+    );
+    const again = getByLabel(renderer, "Check again");
+    // 44pt, like every other real decision on this surface.
+    expect(again.props.style).toEqual(expect.objectContaining({ minHeight: 44 }));
+
+    await pressText(renderer, "Check again");
+
+    expect(mockCheckDelivery).toHaveBeenCalledWith(
+      "run_1",
+      { current_password: null },
+      "idem_key_test",
+    );
+
+    await unmount();
+  });
+
+  it("014-FR-006 disables Check again offline and queues nothing", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          online: false,
+          runs: [
+            makeRun({
+              dispatch_state: "delivery_unconfirmed",
+              exchange_state: "closed",
+              reported_state: null,
+              primary_state_label: "Delivery unconfirmed",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const again = getByLabel(renderer, "Check again");
+    expect(again.props.accessibilityState?.disabled).toBe(true);
+    await pressText(renderer, "Check again");
+    expect(mockCheckDelivery).not.toHaveBeenCalled();
 
     await unmount();
   });

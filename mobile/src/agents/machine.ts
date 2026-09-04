@@ -55,6 +55,68 @@ export function isRunPollable(run: PollableRun): boolean {
   return !run.connection_disconnected && run.dispatch_state !== "not_sent";
 }
 
+type DispatchShape = Pick<
+  AgentRunResponse,
+  "dispatch_state" | "dispatch_error_code" | "exchange_state" | "exchange_open" | "reported_state"
+>;
+
+/**
+ * What Brain Buddy knows about its *own* outbound request — and nothing else.
+ *
+ * The same four states the web surface keeps apart, kept apart here for the
+ * same reason: each licenses a different next step. **Queued** means the
+ * identifiers are reserved and nothing has left; **Sent** means the message
+ * went out; **Not sent** means it provably did not, so the identical hand-off
+ * can be offered again; **Delivery unconfirmed** means Brain Buddy does not
+ * know, and nothing is re-sent on its own.
+ *
+ * Once the agent itself has reported, its state is the authority and this says
+ * nothing rather than competing with it.
+ */
+export function dispatchStateDetail(run: DispatchShape): string | null {
+  if (run.reported_state !== null) {
+    return null;
+  }
+  if (run.exchange_state === "queued") {
+    return "Waiting for a free connection slot; nothing has been sent yet";
+  }
+  if (run.dispatch_state === "not_sent") {
+    if (run.dispatch_error_code === "restarted_before_send") {
+      return "Brain Buddy restarted before this hand-off was sent. Nothing left Brain Buddy.";
+    }
+    if (run.dispatch_error_code === "a2a_rate_limited") {
+      return "The agent is rate limiting.";
+    }
+    return null;
+  }
+  if (run.dispatch_state === "sent" || run.exchange_state === "open") {
+    return "Some agents answer only when the work is finished.";
+  }
+  return "Brain Buddy could not confirm the agent received this hand-off. It was not re-sent.";
+}
+
+/** **Check again** is offered only where Brain Buddy genuinely does not know. */
+export function canCheckDelivery(
+  run: DispatchShape & Pick<AgentRunResponse, "connection_disconnected">,
+): boolean {
+  return (
+    run.dispatch_state === "delivery_unconfirmed" &&
+    run.exchange_state !== "queued" &&
+    run.reported_state === null &&
+    !run.connection_disconnected
+  );
+}
+
+/**
+ * A hand-off that never left can be offered again exactly as it was reviewed —
+ * but only while Brain Buddy still holds what was reviewed.
+ */
+export function canRetryHandoff(
+  run: Pick<AgentRunResponse, "dispatch_state" | "manifest" | "content_expired">,
+): boolean {
+  return run.dispatch_state === "not_sent" && !run.content_expired && run.manifest !== null;
+}
+
 export const INITIAL_POLL_DELAY_MS = 1500;
 export const MAX_POLL_DELAY_MS = 8000;
 

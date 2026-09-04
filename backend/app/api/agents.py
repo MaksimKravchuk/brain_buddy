@@ -24,15 +24,18 @@ from fastapi import (
 
 from app.api.contracts import error_responses
 from app.api.dependencies import (
+    external_agent_relay_enabled,
     get_agent_relay_service,
     get_auth_service,
     get_current_user,
+    get_feature_flag_service,
     require_external_agent_relay_enabled,
 )
 from app.core.rate_limit import sensitive_action_rate_limiter
 from app.exceptions import ReauthFailedError, ValidationFailure
 from app.modules.agents.service import AgentRelayService, EventRejected
 from app.schemas.agents import (
+    AgentCheckDeliveryRequest,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
     AgentConnectionResponse,
@@ -49,7 +52,7 @@ from app.schemas.agents import (
     AgentRunSummaryResponse,
 )
 from app.schemas.auth import User
-from app.services import AuthService
+from app.services import AuthService, FeatureFlagService
 
 router = APIRouter(tags=["agents"])
 
@@ -432,6 +435,45 @@ def reply_to_agent_run(
         payload,
         owner_id=current_user.id,
         idempotency_key=_require_idempotency_key(idempotency_key),
+    )
+
+
+@router.post(
+    "/agent-runs/{run_id}/check-delivery",
+    response_model=AgentRunResponse,
+    responses=error_responses(400, 401, 404, 409, 422, 429),
+)
+def check_agent_run_delivery(
+    run_id: str,
+    payload: AgentCheckDeliveryRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
+    service: AgentRelayService = Depends(get_agent_relay_service),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> AgentRunResponse:
+    """Look this run up at the agent, and resend only what the rules allow.
+
+    Deliberately *not* gated on the rollout flag. The lookup carries no task
+    content and can only settle a run that already exists, so a rollback must
+    not strand an already-dispatched hand-off in **Delivery unconfirmed**
+    forever. The flag is passed down instead, and the service refuses the
+    *resend* branch with `rollout_disabled` after the lookup has run (AC-036).
+    """
+
+    key = _require_idempotency_key(idempotency_key)
+    reauthenticated = (
+        _verify_password(auth_service, current_user, payload.current_password)
+        if payload.current_password
+        else False
+    )
+    return service.check_delivery(
+        run_id,
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=key,
+        reauthenticated=reauthenticated,
+        resend_allowed=external_agent_relay_enabled(current_user, feature_flags),
     )
 
 

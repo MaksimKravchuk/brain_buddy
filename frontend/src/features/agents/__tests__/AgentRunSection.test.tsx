@@ -1,10 +1,10 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRunResponse } from "../../../api/agentTypes";
+import type { AgentManifestResponse, AgentRunResponse } from "../../../api/agentTypes";
 import { ApiError, apiClient } from "../../../api/client";
 import { AgentRunSection } from "../AgentRunSection";
 
@@ -35,6 +35,14 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     last_contact_at: "2026-08-09T12:00:00Z",
     reporting_window_seconds: 3600,
     capabilities: { reply: true, cancel: true },
+    guarantee_tier: null,
+    message_id: null,
+    correlation_id: null,
+    agent_task_id: null,
+    exchange_open: false,
+    exchange_state: "none",
+    exchange_kind: null,
+    push_registration: "unregistered",
     manifest: null,
     events: [],
     commands: [],
@@ -319,7 +327,10 @@ describe("AgentRunSection", () => {
     expect(screen.getByText(/answer was sent but the agent has not acknowledged/i)).toBeInTheDocument();
     expect(screen.getByText(/does not know whether the agent is still working/i)).toBeInTheDocument();
     expect(screen.getByText(/disconnecting did not cancel/i)).toBeInTheDocument();
-    expect(screen.getByText(/could not confirm the agent received/i)).toBeInTheDocument();
+    // 014-FR-006: the agent reported. That *is* the delivery evidence, so the
+    // ambiguous-delivery sentence is now known to be false and is withdrawn.
+    expect(screen.queryByText(/could not confirm the agent received/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
   });
 
   it("says nothing at all when the task has no runs", () => {
@@ -568,5 +579,250 @@ describe("AgentRunSection idempotency across retries", () => {
 
     expect(cancel).toHaveBeenCalledTimes(2);
     expect(cancel.mock.calls[1][1]).not.toBe(cancel.mock.calls[0][1]);
+  });
+});
+
+describe("AgentRunSection dispatch states", () => {
+  const frozenManifest: AgentManifestResponse = {
+    token: "f".repeat(64),
+    run_id: "agentrun_1",
+    task_id: "task_1",
+    connection_id: "agentconn_1",
+    agent_name: "Hermes",
+    title: "Write the migration runbook",
+    details: "Cover the cutover window.",
+    supporting_items: [{ label: "Runbook", body: "Deploy notes live in docs/." }],
+    message_id: "agentrun_1:start",
+    correlation_id: "agentrun_1",
+    destination_interface: "https://agent.example.com/a2a",
+    protocol_version: "1.0",
+    guarantee_tier: "guaranteed",
+    tier_disclosure: "Guaranteed single start.",
+    tier_disclosure_url: "https://example.invalid/single-start/v1.md",
+    acknowledgement_required: false,
+    cancellation_disclosure: "Cancellation depends on the agent.",
+    push_callback: null,
+    external_copy_notice: "Your agent keeps its own copy of everything sent here.",
+    reauthentication_required: false,
+    parts_preview: ["Write the migration runbook"]
+  };
+
+  const restartedRun = makeRun({
+    dispatch_state: "not_sent",
+    dispatch_error_code: "restarted_before_send",
+    primary_state_label: "Not sent",
+    message_id: "agentrun_1:start",
+    correlation_id: "agentrun_1",
+    exchange_state: "closed",
+    manifest: frozenManifest
+  });
+
+  async function reopenTheReview(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Try this hand-off again" }));
+    });
+    await screen.findByRole("heading", { name: "What will be sent" });
+  }
+
+  it("014-SC-004 shows a queued exchange as Queued and never as Sent", () => {
+    renderSection([
+      makeRun({
+        dispatch_state: "delivery_unconfirmed",
+        exchange_state: "queued",
+        exchange_open: true,
+        primary_state_label: "Queued"
+      })
+    ]);
+
+    expect(screen.getByText("Queued")).toBeInTheDocument();
+    expect(
+      screen.getByText("Waiting for a free connection slot; nothing has been sent yet")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Sent")).toBeNull();
+    // A queued hand-off has provably not been sent, so the ambiguous-delivery
+    // sentence and its Check again must not appear either.
+    expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
+  });
+
+  it("014-FR-006 states a restart that never sent and re-offers the hand-off", () => {
+    renderSection([restartedRun]);
+
+    expect(screen.getByText("Not sent")).toBeInTheDocument();
+    expect(
+      screen.getByText("BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try this hand-off again" })).toBeEnabled();
+  });
+
+  it("014-FR-006 names the rate-limited category on a hand-off that was refused", () => {
+    renderSection([
+      makeRun({
+        dispatch_state: "not_sent",
+        dispatch_error_code: "a2a_rate_limited",
+        primary_state_label: "Not sent",
+        manifest: frozenManifest
+      })
+    ]);
+
+    expect(screen.getByText("The agent is rate limiting.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try this hand-off again" })).toBeEnabled();
+  });
+
+  it("014-SC-004 retries an unchanged review under the same key, so the run and message ids are reused", async () => {
+    // Nothing left BrainBuddy, so the identifiers are still free to reuse — and
+    // reusing them is what stops a retry from becoming a second task.
+    vi.spyOn(apiClient, "listAgentConnections").mockResolvedValue([]);
+    vi.spyOn(apiClient, "previewAgentHandoff").mockResolvedValue(frozenManifest);
+    const confirm = vi.spyOn(apiClient, "confirmAgentHandoff").mockResolvedValue(
+      makeRun({
+        dispatch_state: "sent",
+        primary_state_label: "Sent",
+        message_id: "agentrun_1:start",
+        correlation_id: "agentrun_1"
+      })
+    );
+    const user = userEvent.setup();
+    renderSection([restartedRun]);
+    await reopenTheReview(user);
+
+    // Seeded from the frozen manifest, so the server rebuilds the identical
+    // review and hands back the identical token.
+    expect(apiClient.previewAgentHandoff).toHaveBeenCalledWith(
+      "task_1",
+      {
+        connection_id: "agentconn_1",
+        include_details: true,
+        supporting_items: [{ label: "Runbook", body: "Deploy notes live in docs/." }]
+      },
+      expect.anything()
+    );
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Send to agent" }));
+    });
+
+    await waitFor(() =>
+      expect(confirm).toHaveBeenCalledWith(
+        "task_1",
+        {
+          connection_id: "agentconn_1",
+          include_details: true,
+          supporting_items: [{ label: "Runbook", body: "Deploy notes live in docs/." }],
+          manifest_token: frozenManifest.token,
+          current_password: null,
+          acknowledge_duplicate_risk: false
+        },
+        `agent-handoff-${frozenManifest.token}`
+      )
+    );
+    await expect(confirm.mock.results[0].value).resolves.toMatchObject({
+      id: "agentrun_1",
+      message_id: "agentrun_1:start"
+    });
+  });
+
+  it("014-FR-006 previews anew and spends a different key once the review changes", async () => {
+    vi.spyOn(apiClient, "listAgentConnections").mockResolvedValue([]);
+    const rebuilt: AgentManifestResponse = {
+      ...frozenManifest,
+      token: "e".repeat(64),
+      run_id: "agentrun_2",
+      message_id: "agentrun_2:start",
+      details: null
+    };
+    vi.spyOn(apiClient, "previewAgentHandoff")
+      .mockResolvedValueOnce(frozenManifest)
+      .mockResolvedValue(rebuilt);
+    const confirm = vi.spyOn(apiClient, "confirmAgentHandoff").mockResolvedValue(
+      makeRun({ id: "agentrun_2", dispatch_state: "sent", primary_state_label: "Sent" })
+    );
+    const user = userEvent.setup();
+    renderSection([restartedRun]);
+    await reopenTheReview(user);
+
+    await act(async () => {
+      await user.click(screen.getByRole("checkbox", { name: "Include task details" }));
+    });
+    await waitFor(() => expect(apiClient.previewAgentHandoff).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Send to agent" }));
+    });
+
+    await waitFor(() =>
+      expect(confirm).toHaveBeenCalledWith(
+        "task_1",
+        expect.objectContaining({ manifest_token: rebuilt.token, include_details: false }),
+        `agent-handoff-${rebuilt.token}`
+      )
+    );
+    // The old run is untouched by the new one: it was never sent, and it still says so.
+    expect(
+      screen.getByText("BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.")
+    ).toBeInTheDocument();
+  });
+
+  it("014-FR-004 asks for the password again when the reopened review demands it", async () => {
+    vi.spyOn(apiClient, "listAgentConnections").mockResolvedValue([]);
+    vi.spyOn(apiClient, "previewAgentHandoff").mockResolvedValue({
+      ...frozenManifest,
+      reauthentication_required: true
+    });
+    const user = userEvent.setup();
+    renderSection([restartedRun]);
+    await reopenTheReview(user);
+
+    expect(screen.getByLabelText("Current password")).toBeInTheDocument();
+  });
+
+  it("014-FR-006 checks delivery with the run's own ids and never mints a second run", async () => {
+    const check = vi.spyOn(apiClient, "checkAgentRunDelivery").mockResolvedValue(
+      makeRun({ dispatch_state: "sent", primary_state_label: "Sent" })
+    );
+    const confirm = vi.spyOn(apiClient, "confirmAgentHandoff");
+    const user = userEvent.setup();
+    renderSection([
+      makeRun({
+        dispatch_state: "delivery_unconfirmed",
+        exchange_state: "closed",
+        primary_state_label: "Delivery unconfirmed",
+        message_id: "agentrun_1:start",
+        correlation_id: "agentrun_1"
+      })
+    ]);
+
+    expect(
+      screen.getByText(
+        "Runs the same check again with the same correlation ID and the same message ID. It is never a new send."
+      )
+    ).toBeInTheDocument();
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Check again" }));
+    });
+
+    await waitFor(() => expect(check).toHaveBeenCalledTimes(1));
+    expect(check.mock.calls[0][0]).toBe("agentrun_1");
+    expect(check.mock.calls[0][1]).toEqual({ current_password: null });
+    expect(check.mock.calls[0][2]).toMatch(/^agent-check-delivery-agentrun_1/);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("014-FR-006 never offers Check again while the browser is offline", async () => {
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
+    onlineManager.setOnline(false);
+    const check = vi.spyOn(apiClient, "checkAgentRunDelivery");
+    renderSection([
+      makeRun({
+        dispatch_state: "delivery_unconfirmed",
+        exchange_state: "closed",
+        primary_state_label: "Delivery unconfirmed"
+      })
+    ]);
+
+    const again = screen.getByRole("button", { name: "Check again" });
+    expect(again).toBeDisabled();
+    await userEvent.click(again);
+    expect(check).not.toHaveBeenCalled();
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, value: true });
+    onlineManager.setOnline(true);
   });
 });

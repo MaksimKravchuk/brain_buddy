@@ -27,6 +27,7 @@ import { useApi, useSession } from "@/auth/SessionProvider";
 import type {
   ProjectResponse,
   AgentConnectionCreateRequest,
+  AgentCheckDeliveryRequest,
   AgentConnectionDisconnectRequest,
   AgentConnectionResponse,
   AgentConnectionRotateRequest,
@@ -934,6 +935,25 @@ export function useReplyToAgentRun() {
         input.runId,
         input.payload,
         requireIdempotencyKey("useReplyToAgentRun", input.idempotencyKey),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useCheckAgentRunDelivery() {
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
+  return useRelayMutation({
+    mutationKey: agentKeys.mutation(owner, "check-delivery"),
+    mutationFn: (input: {
+      runId: string;
+      payload: AgentCheckDeliveryRequest;
+      idempotencyKey: string;
+    }) =>
+      api.checkAgentRunDelivery(
+        input.runId,
+        input.payload,
+        requireIdempotencyKey("useCheckAgentRunDelivery", input.idempotencyKey),
       ),
     onSuccess: invalidate,
   });

@@ -15,6 +15,7 @@
 import type {
   AgentConnectionCreateRequest,
   AgentConnectionDisconnectRequest,
+  AgentCheckDeliveryRequest,
   AgentConnectionResponse,
   AgentConnectionRotateRequest,
   AgentConnectionRotateSigningSecretRequest,
@@ -717,6 +718,26 @@ export function createApiClient(options: ApiClientOptions) {
       return relayMutation<AgentRunResponse>(
         "replyToAgentRun",
         `/agent-runs/${runId}/reply`,
+        payload,
+        idempotencyKey,
+      );
+    },
+
+    /**
+     * **Check again** on a `delivery_unconfirmed` run.
+     *
+     * It names no identifiers of its own: the correlation ID and the message ID
+     * are already on the run, so this can only ever repeat the same check —
+     * never become a second hand-off.
+     */
+    checkAgentRunDelivery(
+      runId: string,
+      payload: AgentCheckDeliveryRequest,
+      idempotencyKey: string,
+    ) {
+      return relayMutation<AgentRunResponse>(
+        "checkAgentRunDelivery",
+        `/agent-runs/${runId}/check-delivery`,
         payload,
         idempotencyKey,
       );
