@@ -1,7 +1,9 @@
 # Quickstart: validating feature 014 (A2A relay wire contract)
 
 Runnable validation scenarios for the delivered feature. Every scenario is free and
-deterministic except §7, which is approval-gated. Paths are repository-relative; commands
+deterministic except §8, which is approval-gated. Backend tests carry `014_FR_###` /
+`014_SC_###` in their names and the AC ids they prove in their docstrings, as the 007 tests
+do (`test_agent_relay_service.py` 303–306), because the coverage gate checks only FR/SC ids. Paths are repository-relative; commands
 assume the toolchain from `.claude/skills/self-verify/SKILL.md`.
 
 ## 0. Prerequisites
@@ -25,7 +27,7 @@ Rollout: `external_agent_relay` is SQLite-managed; turn it ON for your account t
 Admin Portal (`/admin` → Feature flags) or `PUT /api/admin/feature-flags/external_agent_relay`
 with an operator session (`docs/external-agent-relay-release.md`).
 
-## 1. The official a2a-sdk helloworld sample (SC-001, SC-002, AC-001, AC-009, AC-016)
+## 1. The official a2a-sdk helloworld sample (SC-001, SC-002, AC-001, AC-009, AC-016, AC-026)
 
 Terminal A — the unmodified sample, vendored at `backend/vendor/a2a_helloworld/`:
 
@@ -63,7 +65,13 @@ Terminal B — BrainBuddy (`make dev-backend`, `make dev-frontend`), then in the
 4. Request cancellation on the completed run: control is withdrawn (terminal).
 
 Automated equivalent: `cd backend && pytest tests/test_agent_a2a_reference_helloworld.py -v`
-(starts the sample as a subprocess on 9999; fails clearly if the port is taken).
+(a pre-bind availability check on `127.0.0.1:9999` fails — never skips — with a clear message
+naming the occupant when the port is taken; the sample is started as a subprocess with a
+bounded startup wait and guaranteed teardown through `request.addfinalizer`, kill + wait, even
+on assertion failure or timeout). The AC-026 acknowledgement gate is automated in
+`tests/test_agent_relay_service.py` (`test_first_best_effort_confirm_without_acknowledgement_is_refused`,
+`test_acknowledgement_flag_is_ignored_once_persisted`,
+`test_best_effort_acknowledged_at_is_persisted_and_reset_with_scope`).
 
 ## 2. The unmodified Hermes A2A plugin with a stub handler (SC-001, SC-006, AC-014, AC-015, AC-018, AC-021)
 
@@ -86,18 +94,27 @@ Terminal B — in BrainBuddy:
    Expected: *Tested ready*, **Best-effort single start**, push *yes*.
    Negative: rotate the credential to `wrong` → Test → *Invalid credentials* (D-01-S12) and
    the secret is never displayed.
-2. Hand off a Task. Expected: the confirmation returns within ~5 s showing **Sent** (the
-   inline probe found the WORKING task); with `STUB_REPLY_DELAY_SECONDS=90` the run shows
+2. Hand off a Task. Expected (AC-007): because this card declares push support, the review
+   lists the callback disclosure — BrainBuddy registers a private callback address with a
+   per-run token, held by the agent until the run ends — with the token masked in
+   `push_callback.url_preview`. Confirm. Expected: the confirmation returns within ~5 s
+   showing **Sent** (the inline probe found the WORKING task; a hand-off that has to wait for
+   a free exchange worker shows **Queued** — "Waiting for a free connection slot; nothing has
+   been sent yet" — until the exchange starts); with `STUB_REPLY_DELAY_SECONDS=90` the run shows
    *Running* with no fabricated failure; within one observation interval after the stub
    replies (≤ 60 s, ≤ 5 s with the demo interval) the run shows **Agent reported complete**
    — and immediately if the stub's push arrived (`push_registration: registered` in the run
    JSON, timeline row `trigger: push`).
 3. Hand off a Task whose title contains `ask me` (first hand-off on this best-effort
    connection: tick the one-time acknowledgement). Expected: *Needs you* with the stub's
-   question (D-03-S08); answer it. Expected: the answer is shown *sent but not acknowledged*
-   (D-03-S09) until the reply exchange returns; because Hermes creates a successor task for
-   the follow-up, the timeline shows **Agent continued the run in a new task** with both
-   task ids, the reply is never refused, and then the terminal report follows.
+   question (D-03-S08); answer it. Expected (AC-028, D-03-S27): the answer is shown *sent but
+   not acknowledged* (D-03-S09) until the reply exchange returns; because Hermes creates a
+   successor task for the follow-up, the timeline shows **The agent continued this run in a
+   new task** with both task ids, the run keeps its one correlation ID, the reply is never
+   refused, and then the terminal report follows. Answer only after Hermes' 300 s watchdog
+   has failed the waiting task and the timeline first shows *The previous task ended: failed*
+   — the run is **not** marked failed while your answer is pending — followed by the
+   succession row.
 4. Hand off, then Request cancellation while the stub is delaying. Expected:
    **Cancellation requested** then **Cancelled** (Hermes resolves the blocked exchange with
    `TASK_STATE_CANCELED`).
@@ -111,8 +128,10 @@ Terminal B — in BrainBuddy:
    the next hand-off.
 
 Automated equivalent: `cd backend && pytest tests/test_agent_a2a_reference_hermes.py -v`
-(starts `run_stub.py` on a free port; `tests/test_vendor_provenance.py` proves the vendored
-plugin files are byte-identical to the recorded upstream commit).
+(starts `run_stub.py` bound to port 0 and reads the bound port back, so it never collides;
+`tests/test_vendor_provenance.py` proves the vendored plugin files are byte-identical to the
+recorded upstream commit, and `tests/test_agent_a2a_extension_identifier.py` proves the
+FR-011 identifier path exists and is what the API serves as `tier_disclosure_url`).
 
 ## 3. Replay and the guaranteed tier (SC-002)
 
@@ -130,14 +149,20 @@ as **Guaranteed single start**). The card-level conformance steps are in
 
 ```bash
 cd backend && pytest tests/test_agent_relay_service.py tests/test_agent_relay_api.py \
-  tests/test_agent_a2a_client.py tests/test_agent_egress.py -k "014_SC_003 or 014_FR_004 or 014_FR_008" -v
+  tests/test_agent_a2a_client.py tests/test_agent_egress.py -k "014_SC_003 or 014_SC_009 or 014_FR_004 or 014_FR_008" -v
 ```
 
 Expected: every case asserts zero projection change and zero secret disclosure —
 unauthenticated (401 → invalid credentials), cross-owner (404), malformed and oversized card
 and task bodies, unknown run, private destination and DNS rebinding (`fake_resolver`),
 stale connection, forged / replayed / wrong-token / oversize / post-terminal push, card
-drift (`agent_card_changed`), superseded bespoke record (SC-010).
+drift (`agent_card_changed`), superseded bespoke record (SC-010, §9). The SC-009 log-scan
+case `test_push_token_never_appears_in_logs` captures application and `uvicorn.access`
+logging during a verified, a rejected and a failing (exception-path) push and asserts the
+issued token string appears in none of them; `test_unknown_run_flood_leaves_limiter_memory_bounded_and_no_rows`
+and `test_global_push_limiter_trips_before_the_run_lookup` prove the push route's limiter
+order; `test_agent_a2a_client.py` proves an oversized or adversarial inbound
+`X-Correlation-ID` never reaches an outbound request.
 
 ## 5. Barrier tests (SC-008) and observer determinism
 
@@ -147,10 +172,21 @@ cd backend && pytest tests/test_agent_observer.py -v
 ```
 
 Expected: concurrent duplicate start/reply/cancel converge on one durable winner and at most
-one agent-side action (`BlockingA2AAgent` port); observer tests run with the synchronous
-executor and the `Clock` fixture — no sleeps — covering schedule, coalescing, restart
-recovery (`interrupted` → adopt or `delivery_unconfirmed`), version compare-and-set,
-terminal locking and TaskNotFound.
+one agent-side action (`BlockingA2AAgent` port; the start barrier follows
+`test_concurrent_same_key_dispatches_contend_and_converge_only_with_lock`, the reply/cancel
+barrier `test_concurrent_same_key_commands_contend_and_converge_only_with_lock`); observer
+tests run with the synchronous exchange and observation executors and the `Clock` fixture —
+no sleeps — covering schedule, coalescing per run and per unreachable connection, backoff
+after the reporting window and its reset, restart recovery (`queued`/`open` → `interrupted`
+→ adopt or `delivery_unconfirmed`), version compare-and-set, terminal locking, TaskNotFound,
+the content-expiry rule (`test_observation_after_content_expiry_writes_no_agent_text`), the
+succession interleaving (`test_predecessor_failure_during_open_reply_exchange_does_not_lock_the_run`),
+purge during an observation (`test_purge_during_observation_writes_no_row`) and the two-owner
+starvation case (`test_one_owners_saturated_exchanges_never_delay_another_owners_observation`).
+`tests/test_agent_relay_service.py -k "014_FR_008 or 014_FR_010"` adds purge and disconnect
+during an open exchange (zero owner rows, no overwrite), the queued-exchange projection,
+`context_id_honoured=false` never auto-resending, and
+`test_cancel_transient_error_then_success_reuses_the_command_id`.
 
 ## 6. Retention and purge (SC-007)
 
@@ -158,9 +194,15 @@ terminal locking and TaskNotFound.
 cd backend && pytest tests/test_agent_relay_service.py tests/test_agent_repository.py -k "014_SC_007" -v
 ```
 
-Expected: content gone at 30 d, identifiers (`agent_task_id`, `correlation_id`,
-`message_id`, `push_token_fingerprint`) and event rows gone at 90 d, audit rows gone at
-90 d, `delete_all_for_owner` leaves no row for the owner and every row for another owner.
+Expected: content gone at 30 d — the six 007 fields plus `blocked_reason`,
+`artifacts_summary` and the status text, re-erased on the next pass if anything wrote them
+after expiry — and an observation accepted after content expiry leaves every content field
+null; identifiers (`agent_task_id`, `correlation_id`, `message_id`, `push_token_fingerprint`)
+and event rows gone at 90 d, audit rows gone at 90 d, `observation_accepted` audit rows
+bounded per run/state class/UTC day, `delete_all_for_owner` leaves no row for the owner and
+every row for another owner. The live connection's card summary and `card_fingerprint`
+survive every sweep while the connection is live and are erased by `disconnect_connection`
+together with the credential (product owner, 2026-09-04; FR-016, AC-024, SC-007).
 
 ## 7. Full gates and the product E2E
 
@@ -173,8 +215,9 @@ python3 scripts/check_requirement_coverage.py specs/014-a2a-relay-wire-contract
 `a2a-helloworld` in the backend's network namespace and `hermes-a2a`), enables the flag
 through the operator API, and runs `frontend/tests/e2e/agent-relay.compose.spec.ts`
 (stories: hand-off to helloworld, hand-off to the Hermes stub, replay creates one task,
-security rejections). Expected: Allure results under epic `External agent relay` alongside
-the unchanged native product matrix.
+security rejections). Expected: Allure results under epic `External agent relay`, recorded in
+the charter's new per-epic section **External agent relay product matrix**
+(`docs/e2e-acceptance-charter.md`) alongside the unchanged native product matrix table.
 
 ## 8. Attended live run against a real Hermes (release evidence, spends money)
 
@@ -184,3 +227,21 @@ public HTTPS, add it as a connection in a staging BrainBuddy, hand off one Task,
 question, cancel one run, and attach the correlation ids, run ids and redacted card summary
 to the release SHA as described in `docs/external-agent-relay-release.md` ("Hermes live
 evidence"). Expected: the same labels as §2, with real model output rendered inertly.
+
+## 9. SC-010 — bespoke wire removal and migration
+
+```bash
+cd backend && pytest tests/test_agent_repository_migration.py -v
+grep -rn "agent-events\|inbound_signing_secret\|AGENT_EVENT_ENVELOPE_ADAPTER\|modules.agents.connector" \
+  backend/app frontend/src mobile/src; test $? -eq 1
+```
+
+Expected: a seeded pre-014 bespoke connection row (no `wire` key) is rewritten by the
+ledgered migration `a2a_wire_contract_v1` to `status: "disconnected"`,
+`disconnect_reason: "superseded_wire_contract"`, `credential: null`; its runs keep their
+bounded history and are stamped `connection_disconnected_at`; a hand-off preview on it is
+refused with `superseded_wire_contract`; `POST /api/agent-events` and
+`POST /api/agent-connections/{id}/signing-secret` answer 404; importing
+`app.modules.agents.connector` raises `ModuleNotFoundError` (the import-absence assertion);
+the grep finds no bespoke symbol in product code. In the UI the record shows D-01-S21 /
+M-01-S19 (**Superseded wire contract**).

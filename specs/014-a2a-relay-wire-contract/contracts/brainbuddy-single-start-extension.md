@@ -45,7 +45,7 @@ for all requests.
 
 1. **Dedup key**: the pair `(Message.contextId, Message.messageId)` of a `SendMessage` (or
    `SendStreamingMessage`) request. When `contextId` is absent, the key is
-   `(<server-assigned contextId>, messageId)` and dedup applies only within that context.
+   `(<server-assigned contextId>, messageId)` and dedup applies only within that `contextId`.
 2. **First receipt**: processed normally.
 3. **Replay** — a later request whose dedup key equals one the agent has already accepted:
    the agent MUST NOT create a new task, MUST NOT deliver the message to the agent logic a
@@ -68,8 +68,16 @@ for all requests.
 BrainBuddy sets `contextId` to its own run id and `messageId` to `<run id>:start`, keeps the
 byte-identical message for the run's lifetime, and, before any resend, first calls
 `ListTasks(contextId)`; only when the agent reports no task does it resend. With a declaring
-agent the tier shown to the user is **Guaranteed single start**; without it,
-**Best-effort single start** with a duplicate-risk disclosure.
+agent BrainBuddy activates the extension — the `A2A-Extensions` header and
+`Message.extensions` — on the first `SendMessage`, on every replay of it and on every
+follow-up message, so the dedup key is recorded from first receipt. BrainBuddy adopts a task
+only when the task's `contextId` equals the run id it sent; when an agent's first answer
+shows that it assigned its own `contextId` instead, BrainBuddy records that on the connection,
+never resends automatically for it (an ambiguous send stays "Delivery unconfirmed" until the
+user checks again), and says so in the connection's duplicate-risk disclosure. A declaring
+agent SHOULD therefore accept the client-supplied `contextId` (A2A §3.4.1); the dedup key of
+§4 is scoped to it. With a declaring agent the tier shown to the user is **Guaranteed single
+start**; without it, **Best-effort single start** with a duplicate-risk disclosure.
 
 ## 6. Conformance test (normative for the "guaranteed" claim)
 
@@ -93,7 +101,7 @@ with `curl` (see `quickstart.md`).
 ## 7. Security considerations
 
 Dedup keys are client-chosen strings; an agent MUST scope them to the authenticated caller
-so one client cannot replay into another client's context (A2A §13.1). The extension never
+so one client cannot replay into another client's `contextId` (A2A §13.1). The extension never
 transports credentials or additional data.
 
 ## 8. Versioning and change control

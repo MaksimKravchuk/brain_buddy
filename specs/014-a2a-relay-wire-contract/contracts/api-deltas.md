@@ -47,7 +47,8 @@ Removed schemas: `AgentConnectionSecretResponse`, `AgentConnectionSigningSecretR
      "a2a_protocol_version_unsupported" | "a2a_no_supported_interface" |
      "a2a_auth_scheme_unsupported" | "a2a_credentials_rejected" | "a2a_rate_limited" |
      "agent_card_changed" | "destination_*",
-  "last_test_error_detail": null | { "found_version": "0.9.4" } | { "scheme": "oauth2" },
+  "last_test_error_detail": null | { "found_version": "0.9.4" } | { "scheme": "oauth2" } | { "retry_after_seconds": 30 },   // closed per-code shapes, data-model.md §1
+  "correlation_id_honoured": null | true | false,   // false: the agent's first answer did not keep the run's correlation ID; BrainBuddy never auto-resends on this connection (FR-006)
   "card": null | { "name": "…", "version": "…", "description": "…", "protocol_version": "1.0",
      "interface_url": "https://…", "streaming": true, "push_notifications": false,
      "skills": [ { "id": "…", "name": "…", "description": "…" } ],
@@ -85,8 +86,14 @@ Response `AgentManifestResponse`:
   "tier_disclosure_url": "https://github.com/…/single-start/v1.md",
   "acknowledgement_required": true,          // best-effort tier and best_effort_acknowledged_at is null (AC-026)
   "cancellation_disclosure": "…", "external_copy_notice": "…",
+  "push_callback": { "registered": true,     // false, with url_preview null and no disclosure, when the card lacks push support
+                     "url_preview": "https://…/api/a2a/push/agentrun_…/…",   // token masked; the callback origin is part of the manifest token
+                     "disclosure": "BrainBuddy also gives this agent a private callback address with a per-run token so it can tell BrainBuddy when to check on the run. The agent keeps that address until the run ends." },
   "reauthentication_required": false, "parts_preview": [ "<exact text of part 1>", "…" ] }
 ```
+
+`push_callback.disclosure` is a server-owned sentence rendered verbatim in the review's
+"what will be sent" list (FR-005, AC-007); the token itself never appears in any response.
 
 Preview refetches the card; drift ⇒ `400 {reason: "agent_card_changed"}` and the connection
 becomes **Agent changed** (D-02-S09, D-01-S20).
@@ -103,10 +110,27 @@ becomes **Agent changed** (D-02-S09, D-01-S20).
 connection is best-effort and `best_effort_acknowledged_at` is null, a confirm without
 `acknowledge_duplicate_risk: true` is refused with `400 {reason:
 "duplicate_risk_acknowledgement_required"}` before any reservation is consumed; the first
-accepted confirm stamps the timestamp under the owner lock (the flag is ignored otherwise).
-The call may take up to `dispatch_wait_seconds` and returns `AgentRunResponse`. Replay with
-the same key returns the same run without a second exchange; replay on a
-`delivery_unconfirmed` run performs the context lookup (adopt or resend) once.
+accepted confirm stamps the timestamp under the repository's process-wide command lock (the
+flag is ignored otherwise). The timestamp is cleared, and the acknowledgement asked again,
+whenever the connection's verified scope resets (address or auth-scheme change, credential
+rotation, card drift). The call may take up to `dispatch_wait_seconds` and returns
+`AgentRunResponse`; while the exchange is still `queued` (no free exchange worker yet) the
+response carries `primary_state_label: "Queued"` — rendered with the explanation "Waiting
+for a free connection slot; nothing has been sent yet" (the queued variant of D-03-S04 /
+M-03-S03) — and no lookup has run; the label becomes `Sent` only once the exchange starts.
+Replay with the same key
+returns the same run without a second exchange; replay on a `delivery_unconfirmed` run
+performs the correlation-ID lookup (adopt or resend) once.
+
+`POST /agent-runs/{id}/check-delivery` (Idempotency-Key; no reauthentication; the **Check
+again** control on D-03-S05 / M-03-S04) — empty body. Performs the same lookup-before-resend
+once with the run's own correlation ID and message ID: a found task is adopted and the run
+becomes `sent`; when the agent reports no task the identical start message is resent once with
+the same message ID — unless the connection has `correlation_id_honoured: false`, in which case
+nothing is resent; an ambiguous answer leaves the run `delivery_unconfirmed`. Returns
+`AgentRunResponse`; on a run that is already `sent` it returns the run unchanged. Refused with
+`400 {reason: "run_terminal"}`, `"agent_task_missing"` or `"connection_disconnected"`. It never
+mints a new run or message ID (AC-027).
 
 ## Runs
 
@@ -117,19 +141,26 @@ the same key returns the same run without a second exchange; replay on a
   "run_version": 4,                       // BrainBuddy observation version
   "guarantee_tier": "best_effort",
   "message_id": "…", "correlation_id": "…", "agent_task_id": null | "task-…",
-  "exchange_open": false,                 // a SendMessage exchange is still held
+  "exchange_open": false,                 // a SendMessage exchange is queued or still held
+  "exchange_state": "none|queued|open|closed|interrupted",
   "agent_task_missing": false,            // AC-020 condition
-  "cancel_outcome": "none|requested|accepted|unsupported|not_cancelable|task_missing",
+  "cancel_outcome": "none|requested|unconfirmed|accepted|unsupported|not_cancelable|task_missing",
   "push_registration": "unregistered|registered|refused|unsupported",
   "blocked_reason": null | "Agent needs additional authentication",
   "artifacts_summary": [ { "name": "report.pdf", "media_type": "application/pdf", "kind": "file" } ],
-  "last_observed_at": "…", "observation_interval_seconds": 60,
+  "result_link": null | "https://…",       // 007 field, unchanged: the agent-reported link, shown as inert text the user can copy
+  "result_link_interactive": false,       // 007 field, always false: egress.interactive_result_link is unchanged (documented click-time reason), so no client ever renders the link as clickable
+  "result_availability": null | "available" | "too_large",   // too_large: the task record exceeded the read cap; state observed through the task list
+  "last_observed_at": "…", "observation_interval_seconds": 60,   // the configured base interval; the server may observe less often after the reporting window (FR-008 backoff)
   "identifiers_expired": false,
   "events": [ { "id": "…", "type": "running", "run_version": 2, "received_at": "…",
                 "summary": "…", "trigger": "schedule", "kind": "observation",
                 "previous_agent_task_id": null, "new_agent_task_id": null },
-              { "id": "…", "type": "running", "run_version": 3, "received_at": "…",
-                "summary": "Agent continued the run in a new task", "trigger": "command",
+              { "id": "…", "type": "blocked", "run_version": 3, "received_at": "…",
+                "summary": "The previous task ended: failed", "trigger": "schedule", "kind": "observation",
+                "previous_agent_task_id": null, "new_agent_task_id": null },
+              { "id": "…", "type": "running", "run_version": 4, "received_at": "…",
+                "summary": "The agent continued this run in a new task", "trigger": "command",
                 "kind": "task_succession", "previous_agent_task_id": "task-a1",
                 "new_agent_task_id": "task-b2" } ],
   "commands": [ { "id": "agentcmd_…", "kind": "reply", "body": "…",
@@ -137,21 +168,36 @@ the same key returns the same run without a second exchange; replay on a
                   "created_at": "…", "confirmed_at": null } ] }
 ```
 
-`primary_state_label` vocabulary (rendered verbatim, `design.md` D-03): `Not sent`, `Sent`,
-`Delivery unconfirmed`, `Accepted`, `Running`, `Needs you`, `Cancellation requested`,
+`primary_state_label` vocabulary (rendered verbatim, `design.md` D-03): `Not sent`, `Queued`,
+`Sent`, `Delivery unconfirmed`, `Accepted`, `Running`, `Needs you`, `Cancellation requested`,
 `Agent reported complete`, `Failed`, `Cancelled`, `Stopped reporting`,
 `Agent no longer reports this run`, `Connection disconnected`,
-`Content expired under retention policy`. Secondary server sentences: `failure_reason`
-begins with `Rejected by agent` for rejected tasks; `cancel_outcome` ∈
-`{unsupported, not_cancelable}` renders "Cancellation not supported by this agent."
+`Content expired under retention policy`. A run whose exchange is still `queued` renders
+`Queued` (the queued variant of D-03-S04 / M-03-S03), for example
+`{ "dispatch_state": "delivery_unconfirmed", "exchange_state": "queued", "exchange_open": true,
+"reported_state": null, "primary_state_label": "Queued" }`, and the client shows the design
+copy "Waiting for a free connection slot; nothing has been sent yet" whenever
+`exchange_state == "queued"`; a run whose exchange is `open` with no definitive outcome renders
+`Sent` (the D-03-S04 pending projection); `Delivery unconfirmed` applies only once the exchange
+has closed or been interrupted without evidence. Secondary
+server sentences: `failure_reason` begins with `Rejected by agent` for rejected tasks;
+`cancel_outcome` ∈ `{unsupported, not_cancelable}` renders "Cancellation not supported by this
+agent."; `cancel_outcome == "unconfirmed"` renders "Cancellation request unconfirmed — you
+can try again." and keeps the cancel control; `result_availability == "too_large"` renders
+"Result unavailable (too large to store)." in place of the result text; a `kind:
+task_succession` row renders **The agent continued this run in a new task** (D-03-S27,
+M-03-S26).
 
 `AgentRunSummaryResponse` adds `guarantee_tier`, `cancel_outcome`, `agent_task_missing`.
 
 `POST /agent-runs/{id}/reply` and `POST /agent-runs/{id}/cancel`: unchanged requests;
 refused with `400 {reason: "agent_task_missing"}` when the agent no longer reports the
-run, and `400 {reason: "run_content_expired"}`/`"run_terminal"` as today. `cancel` on a run
-with `cancel_outcome ∈ {unsupported, not_cancelable}` replays the recorded outcome (no
-second CancelTask).
+run, and `400 {reason: "run_content_expired"}`/`"run_terminal"` as today. A reply the agent
+answers with a different task in the same conversation is never refused: the new task is
+adopted and the succession row appended (FR-010). `cancel` on a run with `cancel_outcome ∈
+{unsupported, not_cancelable}` replays the recorded outcome (no second CancelTask); on
+`unconfirmed` it sends `CancelTask` again with the **same** command id (AC-029). A `GET` of
+a run resets its observation backoff to the base interval.
 
 ## New inbound route
 
@@ -160,11 +206,33 @@ second CancelTask).
 ## Rollout OFF (007 FR-019, FR-016)
 
 Blocked: create/update/test/credential/preview/dispatch. Allowed: reads, disconnect,
-reply/cancel for existing non-terminal runs, the push route, the observer, retention, purge.
+reply/cancel and `check-delivery` for existing non-terminal runs (they complete or settle an
+already-confirmed hand-off and never create a run), the push route, the observer, retention,
+purge.
 
 ## Error reasons added to `ValidationFailure.detail.reason`
 
 `agent_card_changed`, `agent_task_missing`, `auth_scheme_unsupported`, `a2a_rate_limited`,
-`duplicate_risk_acknowledgement_required`, `connection_not_ready` (unchanged),
-`superseded_wire_contract` (mutations on a migrated record). Every error carries
-`X-Correlation-ID`.
+`duplicate_risk_acknowledgement_required`, `connection_disconnected`,
+`connection_not_ready` (unchanged), `superseded_wire_contract` (mutations on a migrated
+record). Every error carries `X-Correlation-ID`.
+
+## Compatibility (constitution Principle III, `docs/api-compatibility.md`)
+
+The deltas above are breaking for a strict client under the repository's own policy: two
+routes removed, `endpoint_url` renamed to `agent_address`, `context_items` renamed to
+`supporting_items`, `inbound_signing_secret` and `capabilities.progress` removed,
+`auth_header_name` no longer accepted on requests, `auth_scheme` newly required, the create
+response type changed, and new `last_test_error_code`, `cancel_outcome` and
+`primary_state_label` values. The compatibility strategy is recorded here rather than left
+implied: the web client ships lockstep with the backend behind the Fly frontend proxy; the
+iOS client is internal distribution (`mobile/eas.json` `development` and `preview` profiles
+declare `distribution: internal`, and `docs/api-compatibility.md` records that no separately
+versioned mobile client contract exists yet); and the whole relay surface is gated by
+`external_agent_relay`, which has been OFF since 007 ratification, so no deployed client
+depends on the removed or renamed shapes. Therefore no versioned OpenAPI snapshot and no
+migration window are published for this change; the minimum iOS build is refreshed together
+with the backend release (the pre-014 build cannot render an A2A connection and must not be
+kept in use once the flag turns on); and this document is the migration note Principle III
+requires. Backend schemas still change first (`backend/app/schemas/agents.py`), then
+`frontend/src/api/agentTypes.ts` and `mobile/src/api/types.ts`.

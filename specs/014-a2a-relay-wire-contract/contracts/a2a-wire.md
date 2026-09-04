@@ -3,7 +3,9 @@
 Binding: **JSON-RPC 2.0 over HTTP(S)** only (A2A v1.0 §9). BrainBuddy is a client, never a
 server. Every request below passes `validate_destination` and `pinned_request`
 (`backend/app/modules/agents/egress.py`): one pinned address, hostname TLS, no redirects,
-body ≤ `connector_max_response_bytes`, HTTPS unless the governed private class applies.
+body ≤ `connector_max_response_bytes` for card and short-call reads and
+≤ `a2a_task_max_response_bytes` (default 256 KB, hard maximum 1 MiB) for `GetTask`/`ListTasks`
+reads, HTTPS unless the governed private class applies.
 
 ## Discovery
 
@@ -30,39 +32,61 @@ protocol version present but outside 1.0.x → `a2a_protocol_version_unsupported
 ```
 POST {interface_url}
 Content-Type: application/json        Accept: application/json
-A2A-Version: 1.0                      X-Correlation-ID: <BrainBuddy correlation id>
+A2A-Version: 1.0                      X-Correlation-ID: <server-generated per call: uuid4 hex, or obs_<id> for a scheduled observation>
 Authorization: Bearer <cred>  |  <api key header name>: <cred>
-A2A-Extensions: <single-start URI>    (only for guaranteed-tier agents)
+A2A-Extensions: <single-start URI>    (guaranteed-tier agents only: on the first SendMessage, every replay of it and every reply, always paired with message.extensions)
 {"jsonrpc":"2.0","id":"<uuid4>","method":"<PascalCase>","params":{...camelCase, proto fields only...}}
 ```
 
+`X-Correlation-ID` is minted by BrainBuddy for each outbound call (`uuid4().hex`; `obs_<id>`
+for a scheduled observation) and logged under the same value on BrainBuddy's side; it is never
+the inbound `X-Correlation-ID`/`X-Request-ID` a client sent to the API forwarded verbatim
+(constitution Principle IV: accepted client-supplied ids are observability labels only). The
+`contextId` BrainBuddy sends is always the server-assigned run id and is never derived from
+any request header. Extension activation is fixed here, and this file is authoritative: a
+guaranteed-tier agent sees `A2A-Extensions` **and** `message.extensions` on the very first
+`SendMessage`, not only on replays, because §3–4 of the extension only oblige the agent to
+record the dedup key for a request that activated it.
+
 Only proto-defined fields are ever sent (the SDK server rejects unknown params). Responses
 must be a JSON object with `jsonrpc`, matching `id`, and exactly one of `result`/`error`;
-anything else is `a2a_response_invalid` (delivery unconfirmed for `SendMessage`).
+anything else is `a2a_response_invalid` (delivery unconfirmed for `SendMessage`). A response
+body over the applicable cap is `a2a_response_over_cap`: for `GetTask` it triggers the
+`ListTasks` fallback below instead of failing the observation.
 
 ## Operations
 
 | op | method | params | timeout | result handling |
 |---|---|---|---|---|
 | Connection test | `ListTasks` | `{pageSize:1}` (+`tenant`) | short | 2xx result ⇒ **ready**; `-32601` ⇒ retry with `GetTask {id:"brainbuddy-probe"}` expecting `-32001` ⇒ ready; HTTP 401/403 or `-32050/-32052` ⇒ `a2a_credentials_rejected`; 429/`-32051` ⇒ `a2a_rate_limited` (not ready) |
-| Start | `SendMessage` | `{message:{messageId:"<run>:start", contextId:"<run>", role:"ROLE_USER", parts:[{text:title},{text:details}?,{text:"<label>\n<body>"}…], metadata:{"brainbuddy.task_id":…, "brainbuddy.run_id":…}, extensions:[<uri>]?}, configuration:{taskPushNotificationConfig:{url,token}?, historyLength:0}}` | `reply_window + 15 s` (blocking, `returnImmediately` absent) | `result.task` ⇒ observation (Decision E), `agent_task_id`; `result.message` ⇒ completed with text; `-32602` ⇒ not sent; 429 ⇒ not sent `a2a_rate_limited`; 401/403 ⇒ not sent `a2a_credentials_rejected`; timeout/5xx/transport ⇒ delivery unconfirmed |
-| Probe / lookup | `ListTasks` | `{contextId:"<run>", pageSize:5, includeArtifacts:false}` | short | newest task by `status.timestamp` (Hermes: first item) adopted; empty ⇒ nothing |
-| Observe | `GetTask` | `{id:<agent_task_id>, historyLength:20}` | short | observation; `-32001` ⇒ agent no longer reports this run |
-| Reply | `SendMessage` | `{message:{messageId:<command_id>, contextId:"<run>", taskId:<agent_task_id>, role:"ROLE_USER", parts:[{text:answer}], referenceTaskIds:[<agent_task_id>], metadata:{…,"brainbuddy.command_id":…}}, configuration:{historyLength:20}}` | `reply_window + 15 s` | returned Task ⇒ command confirmed + observation; a **different** task id in the same `contextId` ⇒ task succession (below); `-32004` (terminal task) ⇒ command rejected, observation refreshed; `-32001` ⇒ agent no longer reports |
-| Cancel | `CancelTask` | `{id:<agent_task_id>, metadata:{"brainbuddy.command_id":…}}` | short | Task ⇒ confirmed + observation; `-32002` ⇒ `cancel_outcome=not_cancelable`; `-32004`/`-32603` ⇒ `unsupported`; `-32001` ⇒ `task_missing` |
+| Start | `SendMessage` | `{message:{messageId:"<run>:start", contextId:"<run>", role:"ROLE_USER", parts:[{text:title},{text:details}?,{text:"<label>\n<body>"}…], metadata:{"brainbuddy.task_id":…, "brainbuddy.run_id":…}, extensions:[<uri>] (guaranteed tier)}, configuration:{taskPushNotificationConfig:{url,token}?, historyLength:0}}` | `httpx.Timeout(connect=5 s, read=reply_window + 15 s)` (blocking, `returnImmediately` absent) | `result.task` ⇒ observation (Decision E), `agent_task_id` — adopted only if `task.contextId == "<run>"`, otherwise `a2a_response_invalid` and `context_id_honoured=false` on the connection; `result.message` ⇒ completed with text; `-32602` ⇒ not sent; 429 ⇒ not sent `a2a_rate_limited`; 401/403 ⇒ not sent `a2a_credentials_rejected`; timeout/5xx/transport ⇒ delivery unconfirmed |
+| Probe / lookup | `ListTasks` | `{contextId:"<run>", pageSize:5, includeArtifacts:false, historyLength:0}` | short | newest task by `status.timestamp` (Hermes: first item) adopted **only if its `contextId` equals the run id** (a foreign `contextId` is ignored); empty ⇒ nothing — and no resend at all when the connection has `context_id_honoured=false` |
+| Observe | `GetTask` | `{id:<agent_task_id>, historyLength:0}` routinely; `historyLength:20` only when the observed state needs text (input-required question, terminal summary) | short | observation; over `a2a_task_max_response_bytes` ⇒ fall back to `ListTasks {contextId:"<run>", includeArtifacts:false, historyLength:0}` so the state is still observed and the run marks `result_availability=too_large` ("unavailable — too large to store", never **Stopped reporting**); `-32001` ⇒ agent no longer reports this run |
+| Reply | `SendMessage` | `{message:{messageId:<command_id>, contextId:"<run>", taskId:<agent_task_id>, role:"ROLE_USER", parts:[{text:answer}], referenceTaskIds:[<agent_task_id>], extensions:[<uri>] (guaranteed tier), metadata:{…,"brainbuddy.command_id":…}}, configuration:{historyLength:20, taskPushNotificationConfig:{url,token}? (the same per-run config whenever the card supports push, so a successor task stays push-accelerated)}}` | `httpx.Timeout(connect=5 s, read=reply_window + 15 s)` | returned Task ⇒ command confirmed + observation; a **different** task id in the same `contextId` ⇒ task succession (below); `-32004` (terminal task, no successor) ⇒ command rejected, observation refreshed, the run shows the agent's own reason and the reply control is withdrawn; `-32001` ⇒ agent no longer reports |
+| Cancel | `CancelTask` | `{id:<agent_task_id>, metadata:{"brainbuddy.command_id":…}}` | short | Task ⇒ confirmed + observation; `-32002` ⇒ `cancel_outcome=not_cancelable`; `-32004`/`-32601` ⇒ `unsupported`; `-32001` ⇒ `task_missing`; `-32603`, HTTP 5xx, timeout or transport loss ⇒ `unconfirmed` — the cancel control stays available and a later attempt reuses the same command id (never a durable "not supported by this agent" claim) |
 | Register push (adopted task) | `CreateTaskPushNotificationConfig` | `{taskId, url, token}` | short | any error ⇒ `push_registration=refused`, silent |
 
 Parts are `text/plain`; `mediaType` omitted. The manifest lists each part verbatim; the
 agent's own joining of parts is agent-defined and not asserted.
 
-**Task succession** (product-owner decision 2026-09-03): Hermes mints a new task for every
-`SendMessage` and its watchdog fails an unanswered `INPUT_REQUIRED` task after 300 s, so a
-reply may come back as a Task whose `id` differs from the run's `agent_task_id`. When the
-returned Task's `contextId` equals the run's correlation id, BrainBuddy adopts it as the
-run's current agent task, appends the timeline event "Agent continued the run in a new
-task" carrying the previous and new task ids, confirms the reply command, and continues
-observing the new task. A reply is **never refused** because of succession; a returned
-Task with a foreign `contextId` is `a2a_response_invalid` (command unconfirmed).
+**Task succession** (product-owner decision 2026-09-03; spec FR-010, AC-028; design
+D-03-S27 / M-03-S26): Hermes mints a new task for every `SendMessage` and its watchdog fails
+any non-terminal task — `INPUT_REQUIRED` included — 300 s after creation, so a reply may come
+back as a Task whose `id` differs from the run's `agent_task_id`. When the returned Task's
+`contextId` equals the run's correlation id, BrainBuddy adopts it as the run's current agent
+task, appends the timeline event **The agent continued this run in a new task** carrying the
+previous and new task ids, keeps the run's single correlation id, confirms the reply command,
+and continues observing the new task. A reply is **never refused** because of succession; a
+returned Task with a foreign `contextId` is `a2a_response_invalid` (command unconfirmed).
+Precedence against the terminal lock, because the reply exchange itself may block for the
+same 300 s the watchdog counts: (a) while a reply command is unconfirmed or its exchange is
+open, scheduled observation of the predecessor task is suspended and a terminal observation
+of the predecessor does not lock the run — it is recorded as the timeline row "The previous
+task ended: <state>" and the run stays blocked/reply-pending; (b) when the reply exchange
+returns a successor task, the succession row supersedes the predecessor's terminal outcome;
+(c) when the reply itself meets a failed/terminal task with no successor (`-32004`, or a
+returned Task that is the same terminal predecessor), the run shows the agent's own reason
+honestly and the reply control is withdrawn.
 
 ## Error mapping (JSON-RPC `error.code`, A2A §5.4)
 
@@ -75,21 +99,27 @@ Task with a foreign `contextId` is `a2a_response_invalid` (command unconfirmed).
 | `-32005` | ContentTypeNotSupported | start ⇒ not sent `a2a_content_unsupported` |
 | `-32006`…`-32009` | InvalidAgentResponse, ExtendedCardNotConfigured, ExtensionSupportRequired, VersionNotSupported | start ⇒ not sent with the code; test ⇒ unsupported |
 | `-32600/-32602/-32700` | invalid request/params/parse | not sent `a2a_request_rejected` |
-| `-32601` | MethodNotFound | test fallback; elsewhere `a2a_unsupported_operation` |
-| `-32603` | Internal | ambiguous: start ⇒ delivery unconfirmed; cancel ⇒ `unsupported` |
+| `-32601` | MethodNotFound | test fallback; cancel ⇒ `cancel_outcome=unsupported`; elsewhere `a2a_unsupported_operation` |
+| `-32603` | Internal | ambiguous, never a capability claim: start ⇒ delivery unconfirmed; cancel ⇒ `cancel_outcome=unconfirmed` (control kept, same command id on retry); observe ⇒ contact not refreshed |
 | HTTP 401/403, `-32050`, `-32052` | auth | `a2a_credentials_rejected` (test: invalid credentials) |
-| HTTP 429, `-32051` | rate limit | `a2a_rate_limited`; start ⇒ **not sent** (retryable with the same ids) |
-| HTTP 5xx, timeout, transport | — | start ⇒ delivery unconfirmed; others ⇒ unreachable |
+| HTTP 429, `-32051` | rate limit | `a2a_rate_limited`; start ⇒ **not sent** (retryable with the same ids); test ⇒ `last_test_error_detail={retry_after_seconds}` |
+| HTTP 5xx, timeout, transport | — | start ⇒ delivery unconfirmed; cancel ⇒ `cancel_outcome=unconfirmed`; others ⇒ unreachable |
+| body over cap | `a2a_response_over_cap` | `GetTask` ⇒ `ListTasks` fallback + `result_availability=too_large`; card ⇒ `a2a_not_an_agent`; other calls ⇒ `a2a_response_invalid` |
 
-Codes are logged only from this allowlist; any other integer is logged as `other`.
+Codes are logged only from this allowlist; any other integer is logged as `other`. Only an
+explicit agent answer (`-32002`, `-32004`, `-32601`) may ever produce `cancel_outcome ∈
+{not_cancelable, unsupported}`.
 
 ## Observation projection summary (Decision E)
 
 `TASK_STATE_SUBMITTED→accepted`, `WORKING→running(+status text)`, `INPUT_REQUIRED→blocked(question)`,
 `AUTH_REQUIRED→blocked(fixed reason, no reply)`, `COMPLETED→completed(artifact texts + status text,
-first url part as inert link, other parts as placeholders)`, `FAILED→failed(status text)`,
+first url part as inert text the user can copy — never clickable, `result_link_interactive` stays false — other parts as placeholders)`, `FAILED→failed(status text)`,
 `REJECTED→failed("Rejected by agent")`, `CANCELED→cancelled`, `UNSPECIFIED→ignored (contact only)`;
-direct `Message` ⇒ `completed(text)`. Texts truncated at the 007 limits with a visible marker.
+direct `Message` ⇒ `completed(text)`. Texts truncated at the 007 limits with a visible marker;
+a task whose record exceeded the task read cap is observed through `ListTasks` and rendered
+with the "unavailable — too large to store" marker in place of the result. On a run whose
+content tier has expired the projection writes state, version and contact only, never text.
 
 ## Reference-runtime notes (verified from source)
 
