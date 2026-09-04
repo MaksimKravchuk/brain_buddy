@@ -51,7 +51,10 @@ regexes = ['''^\s*record = make_idempotency\(key="k1-raw-idempotency-key"\)\s*$'
 [[allowlists]]
 description = "Synthetic mobile integration password"
 regexTarget = "line"
-regexes = ['''^\s*const password = "correct-horse-battery-staple-1";\s*$''']
+# Both spellings the harness has used. The scan runs per commit over a PR's
+# whole range, so an earlier commit's `ACCOUNT_PASSWORD` still has to be
+# recognised after a later one renamed it — same synthetic value, same file.
+regexes = ['''^\s*const (password|ACCOUNT_PASSWORD) = "correct-horse-battery-staple-1";\s*$''']
 
 [[allowlists]]
 description = "Synthetic agent relay golden-vector signing secret (backend fixture)"
