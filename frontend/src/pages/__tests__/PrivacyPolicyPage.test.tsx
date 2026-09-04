@@ -77,9 +77,38 @@ describe("PrivacyPolicyPage", () => {
     );
   });
 
+  it("014-FR-016 / 014-SC-007: states the external-agent relay retention tiers honestly", () => {
+    renderPolicy();
+
+    // docs/data-retention.md names this page as the user-facing summary that
+    // must stay in sync with it. The relay rows there decide five facts, and
+    // each is pinned here in the words a user actually reads: the 30-day
+    // content tier, the 90-day identifier tier, the run id that is the run's
+    // correlation ID and is kept — not erased — until account deletion, the
+    // 90-day audit entries, the card summary that lives for the connection's
+    // lifetime and dies on disconnect, and the per-run callback address only
+    // the agent itself can delete.
+    const retention = screen.getByRole("heading", { name: /how long we keep it/i }).closest("section");
+
+    expect(retention).toHaveTextContent(/supporting items you kept/i);
+    expect(retention).toHaveTextContent(/deleted after 30 days/i);
+    expect(retention).toHaveTextContent(/agent's task and message identifiers/i);
+    expect(retention).toHaveTextContent(/for up to 90 days/i);
+
+    expect(retention).toHaveTextContent(/correlation ID/);
+    expect(retention).toHaveTextContent(/stays with the run record until you delete your account/i);
+    expect(retention).toHaveTextContent(/outcomes only, never your content.*kept for 90 days/i);
+
+    expect(retention).toHaveTextContent(
+      /kept for as long as the connection exists and is erased the moment you disconnect/i
+    );
+    expect(retention).toHaveTextContent(/callback address we registered with the agent/i);
+    expect(retention).toHaveTextContent(/only the agent can delete its copy/i);
+  });
+
   it("records the date the policy last changed", () => {
     renderPolicy();
-    expect(screen.getByText(/August 25, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/September 4, 2026/)).toBeInTheDocument();
   });
 
   it("links back to sign in", () => {
