@@ -6,21 +6,8 @@
  * intentionally unkeyed test and preview routes—rather than "it called something".
  */
 
-import type { AgentManifestResponse } from "../types";
 import { createApiClient } from "../client";
 
-const reportingContract = {
-  callback_url: "https://brain.example.test/api/agent-runs/run1/reports",
-  connection_id: "conn1",
-  connection_header: "X-BrainBuddy-Connection",
-  timestamp_header: "X-BrainBuddy-Timestamp",
-  signature_header: "X-BrainBuddy-Signature",
-  timestamp_format: "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero",
-  signature_algorithm: "hmac-sha256",
-  signing_bytes: "timestamp_bytes + b'.' + raw_body",
-  signature_format: "v1=<lowercase hex>",
-  body_envelope_version: "1",
-} satisfies AgentManifestResponse["reporting"];
 
 type FetchArgs = { url: string; init: RequestInit };
 
@@ -200,48 +187,52 @@ describe("agent hand-off", () => {
   // Confirmation requires the same manifest plus an idempotency key." The key
   // belongs to the confirm step; `preview_agent_handoff` declares no
   // `Idempotency-Key` header, so re-previewing is meant to mint a fresh token.
-  it("previews a hand-off without an Idempotency-Key (nothing is dispatched yet)", async () => {
+  it("014-FR-005 previews a hand-off without an Idempotency-Key (nothing is dispatched yet)", async () => {
     const { client, calls } = makeClient([
-      jsonResponse({ token: "a".repeat(64), reporting: reportingContract }),
+      jsonResponse({ token: "a".repeat(64), supporting_items: [] }),
     ]);
     const preview = await client.previewAgentHandoff("task1", {
       connection_id: "conn1",
       include_details: false,
-      context_items: [{ label: "Subtasks", body: "- book venue" }],
+      supporting_items: [{ label: "Subtasks", body: "- book venue" }],
     });
-    expect(preview.reporting).toEqual(reportingContract);
+    expect(preview.supporting_items).toEqual([]);
     expect(calls[0].url).toBe("https://example.test/api/tasks/task1/agent-runs/preview");
     expect(calls[0].init.method).toBe("POST");
     expect(headersOf(calls[0])["Idempotency-Key"]).toBeUndefined();
     expect(bodyOf(calls[0])).toEqual({
       connection_id: "conn1",
       include_details: false,
-      context_items: [{ label: "Subtasks", body: "- book venue" }],
+      supporting_items: [{ label: "Subtasks", body: "- book venue" }],
     });
   });
 
-  it("confirms a hand-off with the reviewed manifest token and an Idempotency-Key", async () => {
+  it("014-FR-005 confirms a hand-off with the reviewed manifest token and an Idempotency-Key", async () => {
     const { client, calls } = makeClient([jsonResponse({ id: "run1" }, 201)]);
     await client.confirmAgentHandoff(
       "task1",
       {
         connection_id: "conn1",
         include_details: true,
-        context_items: [],
+        supporting_items: [],
         manifest_token: "b".repeat(64),
         current_password: "correct-horse",
+        acknowledge_duplicate_risk: true,
       },
       "key-confirm",
     );
     expect(calls[0].url).toBe("https://example.test/api/tasks/task1/agent-runs");
     expect(calls[0].init.method).toBe("POST");
     expect(headersOf(calls[0])["Idempotency-Key"]).toBe("key-confirm");
+    // The acknowledgement travels in the body, so it is part of the canonical
+    // request the key is spent on (AC-026).
     expect(bodyOf(calls[0])).toEqual({
       connection_id: "conn1",
       include_details: true,
-      context_items: [],
+      supporting_items: [],
       manifest_token: "b".repeat(64),
       current_password: "correct-horse",
+      acknowledge_duplicate_risk: true,
     });
   });
 });
@@ -559,11 +550,30 @@ describe("relay mutation intent boundary", () => {
   );
 });
 
+describe("014-FR-006 check delivery", () => {
+  it("carries the run's own key and the optional password, and no ids of its own", async () => {
+    const { client, calls } = makeClient([jsonResponse({ id: "run1" })]);
+
+    await client.checkAgentRunDelivery(
+      "run1",
+      { current_password: "correct-horse" },
+      "key-check",
+    );
+
+    expect(calls[0].url).toBe("https://example.test/api/agent-runs/run1/check-delivery");
+    expect(calls[0].init.method).toBe("POST");
+    expect(headersOf(calls[0])["Idempotency-Key"]).toBe("key-check");
+    // Everything the check needs is on the run, so a body that could name a
+    // different one would make "check again" capable of being a second send.
+    expect(bodyOf(calls[0])).toEqual({ current_password: "correct-horse" });
+  });
+});
+
 describe("unkeyed relay POST contracts", () => {
   const previewPayload = {
     connection_id: "conn1",
     include_details: false,
-    context_items: [],
+    supporting_items: [],
   };
 
   // The standing at-most-once connector requirement (FR-006) covers start,
@@ -577,7 +587,7 @@ describe("unkeyed relay POST contracts", () => {
   it("never attaches an Idempotency-Key to a test or a preview", async () => {
     const { client, calls } = makeClient([
       jsonResponse({ id: "conn1", status: "ready" }),
-      jsonResponse({ token: "b".repeat(64), reporting: reportingContract }),
+      jsonResponse({ token: "b".repeat(64), supporting_items: [] }),
     ]);
 
     await client.testAgentConnection("conn1");
@@ -599,7 +609,7 @@ describe("unkeyed relay POST contracts", () => {
       jsonResponse({ message: "Ambiguous" }, 408),
       jsonResponse({ id: "conn2", status: "ready" }),
       jsonResponse({ message: "Ambiguous" }, 429),
-      jsonResponse({ token: "c".repeat(64), reporting: reportingContract }),
+      jsonResponse({ token: "c".repeat(64), supporting_items: [] }),
     ]);
 
     await expect(client.testAgentConnection("conn1")).rejects.toMatchObject({ status: 408 });
@@ -619,8 +629,8 @@ describe("unkeyed relay POST contracts", () => {
   // previews into one.
   it("sends every preview to the server rather than replaying a held one", async () => {
     const { client, calls } = makeClient([
-      jsonResponse({ token: "d".repeat(64), reporting: reportingContract }),
-      jsonResponse({ token: "e".repeat(64), reporting: reportingContract }),
+      jsonResponse({ token: "d".repeat(64), supporting_items: [] }),
+      jsonResponse({ token: "e".repeat(64), supporting_items: [] }),
     ]);
 
     const first = await client.previewAgentHandoff("task1", previewPayload);
