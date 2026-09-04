@@ -71,6 +71,15 @@ specification the best-effort disclosure links to (FR-003), opened only on expli
 action with external-destination disclosure. `capabilities.reply`/`.cancel` are always
 `true` for a tested A2A connection; the run projection withdraws controls per run.
 
+Every card-sourced string — `card.name`, `version`, `description`, `skills[].name`,
+`skills[].description`, `auth_schemes_offered[].name`, `interface_url` — and every
+`last_test_error_detail` value is untrusted agent text returned verbatim within the
+`data-model.md` §1 bounds; both clients render it as inert plain text — never an anchor or
+`Linking` target, never HTML/markdown-interpreted, never auto-linkified — exactly as
+`result_link` is treated (FR-016, AC-031). `last_test_error_code: "a2a_rate_limited"` comes
+with `status: "untested"` (never `ready`) until a later successful test; the client offers
+the retry after `last_test_error_detail.retry_after_seconds` (D-01-S25 / M-01-S22, AC-037).
+
 ## Hand-off review and dispatch
 
 `POST /tasks/{task_id}/agent-runs/preview` (gate) — request
@@ -120,17 +129,35 @@ for a free connection slot; nothing has been sent yet" (the queued variant of D-
 M-03-S03) — and no lookup has run; the label becomes `Sent` only once the exchange starts.
 Replay with the same key
 returns the same run without a second exchange; replay on a `delivery_unconfirmed` run
-performs the correlation-ID lookup (adopt or resend) once.
+performs the correlation-ID lookup once and resends only under the `check-delivery`
+preconditions below. A run that BrainBuddy restarted before its exchange ever started
+returns `dispatch_state: "not_sent"`, `dispatch_error_code: "restarted_before_send"` — nothing
+left BrainBuddy — and a later confirmation retries with the same run ID and message ID
+(AC-032).
 
-`POST /agent-runs/{id}/check-delivery` (Idempotency-Key; no reauthentication; the **Check
-again** control on D-03-S05 / M-03-S04) — empty body. Performs the same lookup-before-resend
-once with the run's own correlation ID and message ID: a found task is adopted and the run
-becomes `sent`; when the agent reports no task the identical start message is resent once with
-the same message ID — unless the connection has `correlation_id_honoured: false`, in which case
-nothing is resent; an ambiguous answer leaves the run `delivery_unconfirmed`. Returns
-`AgentRunResponse`; on a run that is already `sent` it returns the run unchanged. Refused with
-`400 {reason: "run_terminal"}`, `"agent_task_missing"` or `"connection_disconnected"`. It never
-mints a new run or message ID (AC-027).
+`POST /agent-runs/{id}/check-delivery` (Idempotency-Key; the **Check again** control on
+D-03-S05 / M-03-S04) — body `{ "current_password": null | "…" }`, needed only when the resend
+branch runs and the dispatch reauthentication rule (`requires_dispatch_reauthentication`,
+FR-004) applies to the connection; the lookup never needs it. Performs the same
+lookup-before-resend once with the run's own correlation ID and message ID: a found task is
+adopted and the run becomes `sent`; when the agent reports no task the identical start
+message is resent once with the same message ID to the interface recorded at dispatch —
+unless the connection has `correlation_id_honoured: false`, in which case nothing is resent;
+an ambiguous answer leaves the run `delivery_unconfirmed`. The resend branch — never the
+lookup — is refused, leaving the run `delivery_unconfirmed`, with `400 {reason:
+"connection_not_ready"}` when the connection is not `ready`, is stale, or its verified scope
+was reset since the run was dispatched (an agent-address, authentication-scheme, credential or
+card-drift reset), `"agent_card_changed"` when the connection is **Agent changed** or the
+run's pinned card fingerprint no longer matches, `"run_content_expired"` when the frozen
+manifest has been nulled by the content tier, `"reauthentication_required"` when the dispatch
+reauthentication rule applies and no valid `current_password` was sent, and while rollout is
+OFF (the lookup still runs and may adopt; §Rollout OFF, AC-036). Concurrent checks are
+serialised per run: the `interrupted|delivery_unconfirmed → open` transition is a
+compare-and-set on `run_version` under the process-wide command lock, so a second check, a
+replayed confirmation or the observer's restart-recovery lookup returns the winner without a
+second send (SC-008). Returns `AgentRunResponse`; on a run that is already `sent` it returns
+the run unchanged. Refused with `400 {reason: "run_terminal"}`, `"agent_task_missing"` or
+`"connection_disconnected"`. It never mints a new run or message ID (AC-027, AC-030).
 
 ## Runs
 
@@ -143,6 +170,8 @@ mints a new run or message ID (AC-027).
   "message_id": "…", "correlation_id": "…", "agent_task_id": null | "task-…",
   "exchange_open": false,                 // a SendMessage exchange is queued or still held
   "exchange_state": "none|queued|open|closed|interrupted",
+  "exchange_kind": null | "start" | "reply",   // which exchange exchange_state describes
+  "dispatch_error_code": null | "a2a_rate_limited" | "restarted_before_send" | "…",   // 007 field; restarted_before_send: the exchange never started before a restart — Not sent, nothing left BrainBuddy, hand-off re-offered with the same ids
   "agent_task_missing": false,            // AC-020 condition
   "cancel_outcome": "none|requested|unconfirmed|accepted|unsupported|not_cancelable|task_missing",
   "push_registration": "unregistered|registered|refused|unsupported",
@@ -179,7 +208,9 @@ mints a new run or message ID (AC-027).
 copy "Waiting for a free connection slot; nothing has been sent yet" whenever
 `exchange_state == "queued"`; a run whose exchange is `open` with no definitive outcome renders
 `Sent` (the D-03-S04 pending projection); `Delivery unconfirmed` applies only once the exchange
-has closed or been interrupted without evidence. Secondary
+has closed or been interrupted without evidence; `Not sent` with `dispatch_error_code ==
+"restarted_before_send"` renders the D-03-S03 / M-03-S02 variant "BrainBuddy restarted before
+this hand-off was sent. Nothing left BrainBuddy." beside the same-IDs retry. Secondary
 server sentences: `failure_reason` begins with `Rejected by agent` for rejected tasks;
 `cancel_outcome` ∈ `{unsupported, not_cancelable}` renders "Cancellation not supported by this
 agent."; `cancel_outcome == "unconfirmed"` renders "Cancellation request unconfirmed — you
@@ -196,7 +227,11 @@ run, and `400 {reason: "run_content_expired"}`/`"run_terminal"` as today. A repl
 answers with a different task in the same conversation is never refused: the new task is
 adopted and the succession row appended (FR-010). `cancel` on a run with `cancel_outcome ∈
 {unsupported, not_cancelable}` replays the recorded outcome (no second CancelTask); on
-`unconfirmed` it sends `CancelTask` again with the **same** command id (AC-029). A `GET` of
+`unconfirmed` it sends `CancelTask` again with the **same** command id (AC-029); `cancel` is
+served from the dedicated control pool and never waits behind hand-off exchanges (AC-035). A
+reply whose exchange ended ambiguously stays `delivery: "unconfirmed"` in `commands[]`;
+scheduled observation resumes at the exchange deadline and the reply control returns, for a
+new command id, only after a later observation shows the run blocked again (AC-033). A `GET` of
 a run resets its observation backoff to the base interval.
 
 ## New inbound route
@@ -205,17 +240,23 @@ a run resets its observation backoff to the base interval.
 
 ## Rollout OFF (007 FR-019, FR-016)
 
-Blocked: create/update/test/credential/preview/dispatch. Allowed: reads, disconnect,
-reply/cancel and `check-delivery` for existing non-terminal runs (they complete or settle an
-already-confirmed hand-off and never create a run), the push route, the observer, retention,
-purge.
+Blocked: create/update/test/credential/preview/dispatch, and the **resend branch** of
+`check-delivery` and of a replayed confirmation — the property the flag protects is "no task
+content leaves BrainBuddy", not "no run is created". Allowed: reads, disconnect, reply/cancel
+for existing non-terminal runs (they complete or settle an already-confirmed hand-off and
+never create a run), the **lookup** of `check-delivery` and of a replayed confirmation (an
+authenticated observation that adopts a found task; on an empty answer the run stays
+`delivery_unconfirmed` until rollout is ON — AC-036), the push route, the observer,
+retention, purge. Covered by the `test_agent_relay_api.py` rollout-OFF matrix.
 
 ## Error reasons added to `ValidationFailure.detail.reason`
 
 `agent_card_changed`, `agent_task_missing`, `auth_scheme_unsupported`, `a2a_rate_limited`,
 `duplicate_risk_acknowledgement_required`, `connection_disconnected`,
-`connection_not_ready` (unchanged), `superseded_wire_contract` (mutations on a migrated
-record). Every error carries `X-Correlation-ID`.
+`connection_not_ready` (unchanged; now also the resend refusal of `check-delivery`),
+`run_content_expired` and `reauthentication_required` (unchanged; now also on
+`check-delivery`), `superseded_wire_contract` (mutations on a migrated record). Every error
+carries `X-Correlation-ID`.
 
 ## Compatibility (constitution Principle III, `docs/api-compatibility.md`)
 

@@ -130,8 +130,8 @@ lookup only and confirmed by succession evidence — a task in the run's convers
 | `-32601` | MethodNotFound | test fallback; cancel ⇒ `cancel_outcome=unsupported`; elsewhere `a2a_unsupported_operation` |
 | `-32603` | Internal | ambiguous, never a capability claim: start ⇒ delivery unconfirmed; cancel ⇒ `cancel_outcome=unconfirmed` (control kept, same command id on retry); observe ⇒ contact not refreshed |
 | HTTP 401/403, `-32050`, `-32052` | auth | `a2a_credentials_rejected` (test: invalid credentials) |
-| HTTP 429, `-32051` | rate limit | `a2a_rate_limited`; start ⇒ **not sent** (retryable with the same ids); test ⇒ `last_test_error_detail={retry_after_seconds}` |
-| HTTP 5xx, timeout, transport | — | start ⇒ delivery unconfirmed; cancel ⇒ `cancel_outcome=unconfirmed`; others ⇒ unreachable |
+| HTTP 429, `-32051` | rate limit | `a2a_rate_limited`; start ⇒ **not sent** (retryable with the same ids); test ⇒ status stays untested, `last_test_error_detail={retry_after_seconds}`, retry after that (D-01-S25 / M-01-S22) |
+| HTTP 5xx, timeout, transport, deadline (`EgressDeadlineExceeded`) | — | start ⇒ delivery unconfirmed; reply ⇒ command unconfirmed (observation resumes at the deadline); cancel ⇒ `cancel_outcome=unconfirmed`; others ⇒ unreachable / contact not refreshed |
 | body over cap | `a2a_response_over_cap` | `GetTask` ⇒ `ListTasks` fallback + `result_availability=too_large`; card ⇒ `a2a_not_an_agent`; other calls ⇒ `a2a_response_invalid` |
 
 Codes are logged only from this allowlist; any other integer is logged as `other`. Only an
