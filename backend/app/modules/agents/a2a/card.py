@@ -36,7 +36,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
-from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from pydantic import Field, ValidationError
@@ -392,11 +391,14 @@ def _select_interface(
             continue
         return interface, None, version
 
-    if host_refused:
+    # A refused host outranks a version mismatch: "we will not talk to that
+    # address" is true whatever version it claimed, and reporting the version
+    # instead would send the owner off to upgrade an agent BrainBuddy was never
+    # going to reach. `found_version` is set by every non-refusing iteration, so
+    # the second condition is what an all-refused card leaves behind.
+    if host_refused or found_version is None:
         return None, A2A_NO_SUPPORTED_INTERFACE, None
-    if found_version is not None:
-        return None, A2A_PROTOCOL_VERSION_UNSUPPORTED, found_version
-    return None, A2A_NO_SUPPORTED_INTERFACE, None
+    return None, A2A_PROTOCOL_VERSION_UNSUPPORTED, found_version
 
 
 # --- fingerprint --------------------------------------------------------------
@@ -538,11 +540,6 @@ def interpret_card(
 # --- fetch --------------------------------------------------------------------
 
 
-def _origin_of(url: str) -> str:
-    parts = urlsplit(url)
-    return urlunsplit((parts.scheme, parts.netloc, "", "", ""))
-
-
 def fetch_card(
     address: str,
     *,
@@ -608,17 +605,15 @@ def fetch_card(
             resolver=resolver,
         )
 
-    result = interpret_card(
+    # No post-check on the result: `interpret_card` only ever produces a summary
+    # from a selected interface, and `CardInterface.url` is required, so an
+    # interface-less success is not a state this function can be handed.
+    return interpret_card(
         payload,
         auth_scheme=auth_scheme,
         validate_interface_host=_validate_interface_host,
         now=now,
     )
-    if result.summary is not None and result.summary.interface_url is None:
-        # Defensive: an interface-less success is not representable, but the
-        # origin is what a caller would fall back to and it must not be silent.
-        return _failure(A2A_NO_SUPPORTED_INTERFACE)
-    return result
 
 
 __all__ = [

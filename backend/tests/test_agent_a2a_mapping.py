@@ -442,3 +442,76 @@ class TestTerminalAndVersionInputs:
         assert observation.reported_state == "completed"
         assert observation.result_availability == "too_large"
         assert observation.result_text is None
+
+
+class TestProtocolValueEdges:
+    """The three places a value the protocol allows is not one we planned for.
+
+    Each is a decision about what BrainBuddy says when the wire hands it
+    something it does not recognise, and in all three the answer is the same:
+    say less, never guess.
+
+    014-FR-009, 014-FR-013.
+    """
+
+    def test_014_FR_009_an_unknown_task_state_degrades_instead_of_raising(
+        self,
+    ) -> None:
+        """A future A2A state must not be able to break an observation.
+
+        Raising here would abort the observation, leave the run at its previous
+        state, and the surfaces would then render it as the agent having gone
+        quiet — blaming the agent for a version skew. ``UNSPECIFIED`` refreshes
+        contact and claims nothing about progress.
+        """
+
+        assert TaskState("TASK_STATE_INVENTED_IN_2027") is TaskState.UNSPECIFIED
+
+        observation = project_observation(
+            _task(TaskState("TASK_STATE_INVENTED_IN_2027")), now=NOW, limits=LIMITS
+        )
+
+        assert observation.reported_state is None
+        assert observation.terminal is False
+        assert observation.observed_at == NOW
+
+    def test_014_FR_009_a_part_of_no_recognised_kind_produces_no_placeholder(
+        self,
+    ) -> None:
+        """A placeholder that cannot say what it stands for tells the user nothing.
+
+        A part carrying none of text, url, file or data is a shape the spec does
+        not name. Listing "something was here, kind unknown, name unknown" would
+        add a row to the result that no user can act on, so the projection keeps
+        the recognised parts and says nothing about this one.
+        """
+
+        recognised = Part(url="https://agent.example.com/report.pdf")
+        observation = project_observation(
+            _task(
+                TaskState.COMPLETED,
+                artifacts=[Artifact(name="mystery", parts=[Part(), recognised])],
+            ),
+            now=NOW,
+            limits=LIMITS,
+        )
+
+        assert Part().kind == "unknown"
+        assert [item.kind for item in observation.artifacts_summary] == ["link"]
+
+    def test_014_FR_009_a_parts_own_media_type_wins_over_the_file_descriptor(
+        self,
+    ) -> None:
+        """The part is the more specific statement, so it is the one believed.
+
+        A file descriptor's `mediaType` describes the stored blob; the part's
+        describes what the agent is handing over in this message. When they
+        disagree, the outer claim is the one the agent made deliberately.
+        """
+
+        part = Part(
+            mediaType="application/pdf",
+            file={"mediaType": "application/octet-stream"},
+        )
+
+        assert part.effective_media_type == "application/pdf"

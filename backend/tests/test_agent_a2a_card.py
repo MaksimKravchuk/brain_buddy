@@ -902,3 +902,181 @@ class TestFetchFailures:
         assert result.failure_code == A2A_PROTOCOL_VERSION_UNSUPPORTED
         assert result.failure_detail == {"found_version": "9.9"}
         assert json.dumps(result.failure_detail) == '{"found_version": "9.9"}'
+
+
+class TestDiscoveryResultEdges:
+    """Cards that are shaped like cards but do not carry what one carries.
+
+    Each case here is a way for discovery to end without a usable interface,
+    and the thing being tested is which of the closed failure codes the owner
+    is shown — because that code is the whole of the guidance they get.
+
+    014-FR-001, 014-FR-002.
+    """
+
+    def test_014_FR_001_a_card_omitting_optional_text_keeps_those_fields_empty(
+        self,
+    ) -> None:
+        """AC-001: absent is not the same as blank, and neither is a failure.
+
+        A card is allowed to carry no description and no version. Copying
+        `None` through rather than substituting a placeholder keeps the
+        connection inspector honest: it shows nothing because the agent said
+        nothing, not a string BrainBuddy made up.
+        """
+
+        payload = _card()
+        del payload["description"]
+        del payload["version"]
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.ok
+        assert result.summary is not None
+        assert result.summary.description is None
+        assert result.summary.version is None
+        assert result.summary.name == "Sample Agent"
+
+    def test_014_FR_002_ok_is_the_single_reading_of_a_discovery_result(self) -> None:
+        """One question, one answer, on every call site.
+
+        `summary is not None` and `failure_code is None` are the same question
+        asked two ways, and two ways is how a caller ends up treating a failure
+        as a partial success.
+        """
+
+        good = interpret_card(
+            _card(), auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+        bad = interpret_card(
+            {"not": "a card"},
+            auth_scheme="bearer",
+            validate_interface_host=_allow_any_host,
+        )
+
+        assert good.ok is True
+        assert bad.ok is False
+        assert bad.failure_code == A2A_NOT_AN_AGENT
+
+    def test_014_FR_002_a_payload_of_the_wrong_types_is_not_an_agent(self) -> None:
+        """A JSON object is not yet a card.
+
+        The address answered 200 with valid JSON, so it is not unreachable; what
+        it sent cannot be parsed as a card, so it is not an agent. Anything more
+        specific would be a guess about someone else's server.
+        """
+
+        result = interpret_card(
+            {"name": 12345, "supportedInterfaces": "not-a-list"},
+            auth_scheme="bearer",
+            validate_interface_host=_allow_any_host,
+        )
+
+        assert result.failure_code == A2A_NOT_AN_AGENT
+        assert result.failure_detail is None
+
+    def test_014_FR_002_the_first_unsupported_version_is_the_one_reported(
+        self,
+    ) -> None:
+        """AC-002: several wrong versions are still one message to the owner.
+
+        The report names the first version seen rather than a list, because the
+        owner's next action is the same either way — upgrade the agent — and a
+        list of every interface's version is detail they cannot use.
+        """
+
+        payload = _card(
+            supportedInterfaces=[
+                {
+                    "url": "https://agent.example.com/old",
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "0.9",
+                },
+                {
+                    "url": "https://agent.example.com/older",
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "0.8",
+                },
+            ]
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code == A2A_PROTOCOL_VERSION_UNSUPPORTED
+        assert result.failure_detail == {"found_version": "0.9"}
+
+    def test_014_FR_002_a_refused_host_outranks_an_unsupported_version(self) -> None:
+        """ "We will not talk to that address" is true whatever it claimed.
+
+        Reporting the version instead would send the owner off to upgrade an
+        agent BrainBuddy was never going to reach, and the upgrade would not
+        change the answer.
+        """
+
+        payload = _card(
+            supportedInterfaces=[
+                {
+                    "url": "https://agent.example.com/old",
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "0.9",
+                },
+                {
+                    "url": "https://internal.example.com/rpc",
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "1.0",
+                },
+            ]
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_refuse_host
+        )
+
+        assert result.failure_code == A2A_NO_SUPPORTED_INTERFACE
+        assert result.failure_detail is None
+
+    def test_014_FR_001_a_card_that_states_its_transport_only_at_the_top_level(
+        self,
+    ) -> None:
+        """AC-001: the pre-1.0 shape has no `supportedInterfaces` at all.
+
+        Older A2A cards name one URL at the top level and say the transport
+        beside it. Treating that as an interface here means selection has one
+        shape to reason about; refusing it would report a working agent as
+        having no supported interface, which is the least actionable message
+        discovery can produce.
+        """
+
+        payload = _card()
+        del payload["supportedInterfaces"]
+        payload["url"] = "https://agent.example.com/legacy-rpc"
+        payload["preferredTransport"] = "JSONRPC"
+        payload["protocolVersion"] = "1.0"
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.ok
+        assert result.interface_url == "https://agent.example.com/legacy-rpc"
+
+    def test_014_FR_002_a_card_naming_no_url_at_all_is_not_an_agent(self) -> None:
+        """Nothing to call is not a partial success.
+
+        Without `supportedInterfaces` and without a top-level `url` there is no
+        address, so there is no connection to make — and the owner's next move
+        is to check the address they typed, not the agent.
+        """
+
+        payload = _card()
+        del payload["supportedInterfaces"]
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code == A2A_NOT_AN_AGENT

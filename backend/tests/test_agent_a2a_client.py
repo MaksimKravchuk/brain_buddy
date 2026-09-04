@@ -945,3 +945,143 @@ class TestAgainstLoopbackAgents:
 
         assert result.ok is False
         assert result.error_code == A2A_TIMEOUT
+
+
+class TestAnswerEdges:
+    """Answers that are well-formed HTTP and still tell BrainBuddy nothing.
+
+    Each of these ends in the same place — the observation is not accepted —
+    and the value under test is which code says so, because that code is what
+    later decides whether a retry is safe.
+
+    014-FR-004, 014-FR-006, 014-FR-008.
+    """
+
+    def test_014_FR_006_an_over_cap_task_with_no_findable_task_stays_over_cap(
+        self,
+    ) -> None:
+        """The fallback either finds the task or changes nothing.
+
+        An empty `ListTasks` is not evidence that the task is gone — the read
+        was refused for size, not answered — so the original over-cap failure is
+        what the caller is told. Reporting "no such task" here would let a byte
+        cap look like the agent having dropped the run.
+        """
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            payload = json.loads(request.content)
+            if payload["method"] == "ListTasks":
+                return httpx.Response(
+                    200,
+                    json={"jsonrpc": "2.0", "id": payload["id"], "result": {}},
+                )
+            return httpx.Response(200, json={"result": "x" * 400_000})
+
+        client = _client(handler, task_max_response_bytes=1_024)
+
+        result = client.get_task(TARGET, task_id="task-1", context_id="run-1")
+
+        assert result.ok is False
+        assert result.error_code == A2A_RESPONSE_OVER_CAP
+        assert result.result_availability is None
+
+    def test_014_FR_006_listing_without_a_conversation_sends_no_context_id(
+        self,
+    ) -> None:
+        """The connection test lists tasks to prove the credential works.
+
+        It has no run to ask about, so it must not invent a `contextId`: sending
+        one would silently scope the probe to a conversation that does not
+        exist, and an empty answer would then be read as a working credential
+        when it proved nothing.
+        """
+
+        seen: list[httpx.Request] = []
+        client = _client(
+            lambda request: httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": json.loads(request.content)["id"],
+                    "result": {"tasks": []},
+                },
+            ),
+            seen=seen,
+        )
+
+        result = client.list_tasks(TARGET)
+
+        assert result.ok is True
+        assert "contextId" not in json.loads(seen[0].content)["params"]
+
+    def test_014_FR_004_an_api_key_target_without_a_header_name_sends_no_credential(
+        self,
+    ) -> None:
+        """A credential with nowhere to go is not put somewhere.
+
+        The header name comes from the agent's own card, so it is absent exactly
+        when discovery has not established one. Falling back to `Authorization`
+        would send the user's key to a scheme the agent never offered.
+        """
+
+        seen: list[httpx.Request] = []
+        client = _client(_task_body(), seen=seen)
+        target = A2ATarget(
+            interface_url="https://agent.example.com/rpc",
+            auth_scheme="api_key",
+            auth_header_name=None,
+            credential="super-secret-key",
+        )
+
+        client.get_task(target, task_id="task-1")
+
+        headers = seen[0].headers
+        assert "authorization" not in headers
+        assert "super-secret-key" not in json.dumps(dict(headers))
+
+    def test_014_FR_006_a_plain_4xx_is_a_rejected_request_not_a_lost_one(
+        self,
+    ) -> None:
+        """A 400 is definitive, and that is the whole point of separating it.
+
+        The agent parsed the request and refused it, so nothing is running and a
+        retry is free. Folding this into the server-error class would leave the
+        run **Delivery unconfirmed** and demand a lookup before every retry.
+        """
+
+        client = _client(_error_body(0, status=400))
+
+        result = client.get_task(TARGET, task_id="task-1")
+
+        assert result.ok is False
+        assert result.error_code == A2A_REQUEST_REJECTED
+        assert result.http_status == 400
+
+    def test_014_FR_006_a_result_whose_task_does_not_parse_is_response_invalid(
+        self,
+    ) -> None:
+        """A JSON-RPC success carrying a task BrainBuddy cannot read.
+
+        Accepting the envelope and dropping the task would advance the run's
+        version on an observation that established nothing, and the next real
+        answer would then be rejected as a straggler.
+        """
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            payload = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {"task": {"id": "task-1", "status": "not-an-object"}},
+                },
+            )
+
+        client = _client(handler)
+
+        result = client.get_task(TARGET, task_id="task-1")
+
+        assert result.ok is False
+        assert result.error_code == A2A_RESPONSE_INVALID
+        assert result.task is None
