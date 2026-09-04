@@ -195,7 +195,7 @@ describe("AgentRunSection", () => {
       needs_user: true,
       primary_state_label: "Needs you",
       question_text: "Which repository should I open?",
-      capabilities: { progress: true, reply: false, cancel: false },
+      capabilities: { reply: false, cancel: false },
     });
 
     const { renderer, unmount } = await renderWithProviders(
@@ -240,7 +240,7 @@ describe("AgentRunSection", () => {
     expect(onRunUpdated).toHaveBeenCalledWith(cancelled);
     await unmount();
 
-    const noCancel = makeRun({ capabilities: { progress: true, reply: true, cancel: false } });
+    const noCancel = makeRun({ capabilities: { reply: true, cancel: false } });
     const second = await renderWithProviders(
       <AgentRunSection {...props({ runs: [noCancel] })} />,
     );

@@ -39,19 +39,51 @@ export function makeTask(overrides: Partial<TaskResponse> = {}): TaskResponse {
   };
 }
 
+export function makeCard(
+  overrides: Partial<NonNullable<AgentConnectionResponse["card"]>> = {},
+): NonNullable<AgentConnectionResponse["card"]> {
+  return {
+    name: "My Claude Code box",
+    version: "1.2.3",
+    description: "A research agent.",
+    protocol_version: "1.0",
+    interface_url: "https://agent.example.test/a2a",
+    streaming: true,
+    push_notifications: false,
+    skills: [{ id: "research", name: "Research", description: "Digs." }],
+    auth_schemes_offered: [{ name: "bearer", kind: "bearer", header_name: null }],
+    extension_uris: [],
+    fetched_at: "2026-08-09T09:00:00Z",
+    ...overrides,
+  };
+}
+
 export function makeConnection(
   overrides: Partial<AgentConnectionResponse> = {},
 ): AgentConnectionResponse {
   return {
     id: "conn_1",
     name: "My Claude Code box",
-    endpoint_url: "https://agent.example.test/relay",
-    auth_header_name: "Authorization",
+    agent_address: "https://agent.example.test",
+    auth_scheme: "bearer",
+    auth_header_name: null,
     status: "ready",
     stale: false,
     ready_for_handoff: true,
-    capabilities: { progress: true, reply: true, cancel: true },
+    capabilities: { streaming: true, push_notifications: false },
+    controls_offered: { reply: true, cancel: true },
+    card: makeCard(),
+    guarantee_tier: "best_effort",
+    tier_disclosure:
+      "Best-effort single start. This agent's card does not declare Brain Buddy's single-start extension.",
+    tier_disclosure_url: "https://example.invalid/single-start/v1.md",
+    cancellation_disclosure: "Cancellation depends on the agent.",
+    agent_changed: false,
+    best_effort_acknowledged_at: null,
+    correlation_id_honoured: null,
+    disconnect_reason: null,
     last_test_error_code: null,
+    last_test_error_detail: null,
     last_contact_at: "2026-08-09T09:00:00Z",
     last_tested_at: "2026-08-09T09:00:00Z",
     stale_after_seconds: 3600,
@@ -122,7 +154,7 @@ export function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResp
     content_expires_at: "2026-09-01T09:00:00Z",
     last_contact_at: "2026-08-09T09:05:00Z",
     reporting_window_seconds: 900,
-    capabilities: { progress: true, reply: true, cancel: true },
+    capabilities: { reply: true, cancel: true },
     manifest: null,
     events: [],
     commands: [],

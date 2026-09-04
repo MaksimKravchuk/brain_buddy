@@ -289,9 +289,9 @@ describe("HandoffSheet preview ordering", () => {
 
   it.each([
     ["revision", makeConnection({ revision: 2 }), true],
-    ["capabilities", makeConnection({ capabilities: { progress: true, reply: false, cancel: true } }), true],
+    ["capabilities", makeConnection({ capabilities: { streaming: false, push_notifications: true } }), true],
     ["name", makeConnection({ name: "Renamed agent" }), true],
-    ["endpoint", makeConnection({ endpoint_url: "https://changed.example.test/relay" }), true],
+    ["endpoint", makeConnection({ agent_address: "https://changed.example.test/relay" }), true],
     [
       "dispatch status",
       makeConnection({ status: "unreachable", ready_for_handoff: false }),

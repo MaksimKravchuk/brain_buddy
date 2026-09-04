@@ -13,7 +13,6 @@
  */
 
 import type {
-  AgentConnectionCreatedResponse,
   AgentConnectionCreateRequest,
   AgentConnectionDisconnectRequest,
   AgentConnectionResponse,
@@ -585,11 +584,11 @@ export function createApiClient(options: ApiClientOptions) {
     },
 
     /**
-     * The 201 body is the only time the inbound signing secret is ever
-     * returned — show it once and never persist it.
+     * A plain connection: registration issues no secret under the A2A wire, so
+     * there is nothing here a caller has to handle exactly once (FR-012).
      */
     createAgentConnection(payload: AgentConnectionCreateRequest, idempotencyKey: string) {
-      return relayMutation<AgentConnectionCreatedResponse>(
+      return relayMutation<AgentConnectionResponse>(
         "createAgentConnection",
         "/agent-connections",
         payload,

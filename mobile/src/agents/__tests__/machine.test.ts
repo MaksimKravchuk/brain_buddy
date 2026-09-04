@@ -1,5 +1,6 @@
 import type {
   AgentCapabilities,
+  AgentControls,
   AgentConnectionResponse,
   AgentRunEvent,
   AgentRunResponse,
@@ -8,8 +9,10 @@ import { ApiError } from "../../api/client";
 import {
   applyRun,
   applyRuns,
+  authSchemeLabel,
   buildContextCandidates,
   capabilityDisclosure,
+  connectionStatusDetail,
   connectionStatusLabel,
   errorReasonCode,
   eventLabel,
@@ -24,11 +27,13 @@ import {
   MAX_POLL_DELAY_MS,
   nextPollDelay,
   projectRunAt,
+  rateLimitRetryCopy,
   runsNewestFirst,
   sortedEvents,
 } from "../machine";
 
-const CAPS: AgentCapabilities = { progress: true, reply: true, cancel: true };
+const CARD_CAPS: AgentCapabilities = { streaming: true, push_notifications: false };
+const CONTROLS: AgentControls = { reply: true, cancel: true };
 
 function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
   return {
@@ -56,7 +61,7 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     content_expires_at: "2026-09-08T00:00:00Z",
     last_contact_at: "2026-08-09T12:00:00Z",
     reporting_window_seconds: 900,
-    capabilities: { ...CAPS },
+    capabilities: { ...CONTROLS },
     manifest: null,
     events: [],
     commands: [],
@@ -72,13 +77,25 @@ function makeConnection(
   return {
     id: "conn1",
     name: "Hermes",
-    endpoint_url: "https://agent.example.test/hook",
-    auth_header_name: "Authorization",
+    agent_address: "https://agent.example.test",
+    auth_scheme: "bearer",
+    auth_header_name: null,
     status: "ready",
     stale: false,
     ready_for_handoff: true,
-    capabilities: { ...CAPS },
+    capabilities: { ...CARD_CAPS },
+    controls_offered: { ...CONTROLS },
+    card: null,
+    guarantee_tier: "best_effort",
+    tier_disclosure: "Best-effort single start.",
+    tier_disclosure_url: "https://example.invalid/single-start/v1.md",
+    cancellation_disclosure: "Cancellation depends on the agent.",
+    agent_changed: false,
+    best_effort_acknowledged_at: null,
+    correlation_id_honoured: null,
+    disconnect_reason: null,
     last_test_error_code: null,
+    last_test_error_detail: null,
     last_contact_at: "2026-08-09T12:00:00Z",
     last_tested_at: "2026-08-09T12:00:00Z",
     stale_after_seconds: 86_400,
@@ -298,9 +315,7 @@ describe("connection disclosure", () => {
       "Invalid credentials",
     );
     expect(connectionStatusLabel(makeConnection({ status: "unreachable" }))).toBe("Unreachable");
-    expect(connectionStatusLabel(makeConnection({ status: "unsupported" }))).toBe(
-      "Connector not supported",
-    );
+    expect(connectionStatusLabel(makeConnection({ status: "unsupported" }))).toBe("Unsupported");
     expect(connectionStatusLabel(makeConnection({ status: "disconnected" }))).toBe("Disconnected");
   });
 
@@ -314,19 +329,137 @@ describe("connection disclosure", () => {
     );
   });
 
-  it("names the unsupported capabilities explicitly", () => {
-    expect(capabilityDisclosure({ progress: true, reply: true, cancel: true })).toEqual({
-      supported: ["progress updates", "replies", "cancellation"],
+  it("014-FR-002 names only what the agent card declares, supported or not", () => {
+    // Replies and cancellation are absent by design: no A2A card advertises
+    // either, so listing them would render a Brain Buddy decision as an agent
+    // promise (FR-010).
+    expect(capabilityDisclosure({ streaming: true, push_notifications: true })).toEqual({
+      supported: ["streaming updates", "push notifications"],
       unsupported: [],
     });
-    expect(capabilityDisclosure({ progress: false, reply: false, cancel: false })).toEqual({
+    expect(capabilityDisclosure({ streaming: false, push_notifications: false })).toEqual({
       supported: [],
-      unsupported: ["progress updates", "replies", "cancellation"],
+      unsupported: ["streaming updates", "push notifications"],
     });
-    expect(capabilityDisclosure({ progress: true, reply: false, cancel: true })).toEqual({
-      supported: ["progress updates", "cancellation"],
-      unsupported: ["replies"],
+    expect(capabilityDisclosure({ streaming: true, push_notifications: false })).toEqual({
+      supported: ["streaming updates"],
+      unsupported: ["push notifications"],
     });
+  });
+
+  it("014-FR-002 lets a changed or rate-limited agent override the stored status", () => {
+    expect(
+      connectionStatusLabel(makeConnection({ status: "untested", agent_changed: true })),
+    ).toBe("Agent changed");
+    expect(
+      connectionStatusLabel(
+        makeConnection({ status: "untested", last_test_error_code: "a2a_rate_limited" }),
+      ),
+    ).toBe("Rate limited");
+    expect(
+      connectionStatusLabel(
+        makeConnection({ status: "disconnected", disconnect_reason: "superseded_wire_contract" }),
+      ),
+    ).toBe("Superseded wire contract");
+    expect(connectionStatusLabel(makeConnection({ status: "disconnected" }))).toBe("Disconnected");
+  });
+
+  it("014-FR-002 gives each unsupported category its own sentence", () => {
+    const unsupported = { status: "unsupported" as const, ready_for_handoff: false, card: null };
+    expect(
+      connectionStatusDetail(
+        makeConnection({ ...unsupported, last_test_error_code: "a2a_not_an_agent" }),
+      ),
+    ).toMatch(/well-known location/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({
+          ...unsupported,
+          last_test_error_code: "a2a_protocol_version_unsupported",
+          last_test_error_detail: { found_version: "0.9.4" },
+        }),
+      ),
+    ).toMatch(/declares A2A 0\.9\.4/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({
+          ...unsupported,
+          last_test_error_code: "a2a_protocol_version_unsupported",
+        }),
+      ),
+    ).toMatch(/outside 1\.0\.x/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({
+          ...unsupported,
+          last_test_error_code: "a2a_auth_scheme_unsupported",
+          last_test_error_detail: { scheme: "oauth2" },
+        }),
+      ),
+    ).toMatch(/requires oauth2/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({ ...unsupported, last_test_error_code: "a2a_auth_scheme_unsupported" }),
+      ),
+    ).toMatch(/does not support/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({ ...unsupported, last_test_error_code: "a2a_no_supported_interface" }),
+      ),
+    ).toMatch(/No JSON-RPC interface/i);
+    expect(connectionStatusDetail(makeConnection({ status: "untested" }))).toMatch(
+      /has not contacted this agent yet/i,
+    );
+    expect(connectionStatusDetail(makeConnection({ status: "invalid_credentials" }))).toMatch(
+      /rejected the credential/i,
+    );
+    expect(connectionStatusDetail(makeConnection({ status: "unreachable" }))).toMatch(
+      /Nothing was sent/i,
+    );
+    expect(connectionStatusDetail(makeConnection({ stale: true }))).toMatch(/staleness threshold/i);
+    expect(connectionStatusDetail(makeConnection())).toMatch(/it authenticated/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({ status: "disconnected", disconnect_reason: "superseded_wire_contract" }),
+      ),
+    ).toMatch(/previous agent wire/i);
+    expect(connectionStatusDetail(makeConnection({ status: "disconnected" }))).toMatch(
+      /were destroyed/i,
+    );
+    expect(connectionStatusDetail(makeConnection({ agent_changed: true }))).toMatch(
+      /destination you have not tested/i,
+    );
+    expect(
+      connectionStatusDetail(makeConnection({ last_test_error_code: "a2a_rate_limited" })),
+    ).toMatch(/answered the test by refusing it/i);
+  });
+
+  it("014-FR-002 never invents a retry countdown the agent did not give", () => {
+    expect(
+      rateLimitRetryCopy(makeConnection({ last_test_error_detail: { retry_after_seconds: 1 } })),
+    ).toBe("Test again in about 1 second.");
+    expect(
+      rateLimitRetryCopy(makeConnection({ last_test_error_detail: { retry_after_seconds: 30 } })),
+    ).toBe("Test again in about 30 seconds.");
+    expect(
+      rateLimitRetryCopy(makeConnection({ last_test_error_detail: { retry_after_seconds: null } })),
+    ).toBe("Test again shortly.");
+    expect(rateLimitRetryCopy(makeConnection({ last_test_error_detail: null }))).toBe(
+      "Test again shortly.",
+    );
+    expect(
+      rateLimitRetryCopy(makeConnection({ last_test_error_detail: { scheme: "oauth2" } })),
+    ).toBe("Test again shortly.");
+  });
+
+  it("014-FR-001 names the credential scheme without ever naming the credential", () => {
+    expect(authSchemeLabel(makeConnection())).toBe("Bearer token · stored sealed");
+    expect(
+      authSchemeLabel(makeConnection({ auth_scheme: "api_key", auth_header_name: "X-API-Key" })),
+    ).toBe("API key in X-API-Key · stored sealed");
+    expect(
+      authSchemeLabel(makeConnection({ auth_scheme: "api_key", auth_header_name: null })),
+    ).toBe("API key · stored sealed");
   });
 
   it("reports last contact without inventing one", () => {

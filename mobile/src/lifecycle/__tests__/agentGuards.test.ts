@@ -1,5 +1,6 @@
 import type {
   AgentCapabilities,
+  AgentControls,
   AgentConnectionResponse,
   AgentConnectionStatus,
   AgentRunResponse,
@@ -15,7 +16,8 @@ import {
   canTestConnection,
 } from "../agentGuards";
 
-const ALL_CAPS: AgentCapabilities = { progress: true, reply: true, cancel: true };
+const CARD_CAPS: AgentCapabilities = { streaming: true, push_notifications: false };
+const ALL_CONTROLS: AgentControls = { reply: true, cancel: true };
 
 function makeConnection(
   overrides: Partial<AgentConnectionResponse> = {},
@@ -23,13 +25,25 @@ function makeConnection(
   return {
     id: "conn1",
     name: "Hermes",
-    endpoint_url: "https://agent.example.test/hook",
-    auth_header_name: "Authorization",
+    agent_address: "https://agent.example.test",
+    auth_scheme: "bearer",
+    auth_header_name: null,
     status: "ready",
     stale: false,
     ready_for_handoff: true,
-    capabilities: { ...ALL_CAPS },
+    capabilities: { ...CARD_CAPS },
+    controls_offered: { ...ALL_CONTROLS },
+    card: null,
+    guarantee_tier: "best_effort",
+    tier_disclosure: "Best-effort single start.",
+    tier_disclosure_url: "https://example.invalid/single-start/v1.md",
+    cancellation_disclosure: "Cancellation depends on the agent.",
+    agent_changed: false,
+    best_effort_acknowledged_at: null,
+    correlation_id_honoured: null,
+    disconnect_reason: null,
     last_test_error_code: null,
+    last_test_error_detail: null,
     last_contact_at: "2026-08-09T12:00:00Z",
     last_tested_at: "2026-08-09T12:00:00Z",
     stale_after_seconds: 86_400,
@@ -65,7 +79,7 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     content_expires_at: "2026-09-08T00:00:00Z",
     last_contact_at: "2026-08-09T12:00:00Z",
     reporting_window_seconds: 900,
-    capabilities: { ...ALL_CAPS },
+    capabilities: { ...ALL_CONTROLS },
     manifest: null,
     events: [],
     commands: [],
@@ -139,28 +153,28 @@ describe("canHandOff", () => {
 
 describe("canReply", () => {
   it("allows a reply on a live run with a reply-capable connector", () => {
-    expect(canReply(makeRun(), ALL_CAPS)).toEqual({ ok: true });
+    expect(canReply(makeRun(), ALL_CONTROLS)).toEqual({ ok: true });
   });
 
   it("defaults to the run's own disclosed capabilities", () => {
     expect(canReply(makeRun())).toEqual({ ok: true });
     expect(
-      canReply(makeRun({ capabilities: { progress: true, reply: false, cancel: true } })).ok,
+      canReply(makeRun({ capabilities: { reply: false, cancel: true } })).ok,
     ).toBe(false);
   });
 
   it("refuses when the connector does not support replies", () => {
-    const guard = canReply(makeRun(), { progress: true, reply: false, cancel: true });
+    const guard = canReply(makeRun(), { reply: false, cancel: true });
     expectSentence(guard);
     expect(guard.ok === false && guard.reason).toBe("This agent does not support replies.");
   });
 
   it("refuses on a run that was never sent", () => {
-    expectSentence(canReply(makeRun({ dispatch_state: "not_sent" }), ALL_CAPS));
+    expectSentence(canReply(makeRun({ dispatch_state: "not_sent" }), ALL_CONTROLS));
   });
 
   it("refuses once the connection is disconnected", () => {
-    const guard = canReply(makeRun({ connection_disconnected: true }), ALL_CAPS);
+    const guard = canReply(makeRun({ connection_disconnected: true }), ALL_CONTROLS);
     expectSentence(guard);
     expect(guard.ok === false && guard.reason).toContain("disconnected");
   });
@@ -168,22 +182,22 @@ describe("canReply", () => {
   it.each(["completed", "failed", "cancelled"] as const)(
     "refuses on a %s run",
     (reported_state) => {
-      const guard = canReply(makeRun({ reported_state }), ALL_CAPS);
+      const guard = canReply(makeRun({ reported_state }), ALL_CONTROLS);
       expectSentence(guard);
       expect(guard.ok === false && guard.reason).toContain("already finished");
     },
   );
 
   it("still allows a reply while an earlier reply is unconfirmed", () => {
-    expect(canReply(makeRun({ reply_pending: true }), ALL_CAPS)).toEqual({ ok: true });
+    expect(canReply(makeRun({ reply_pending: true }), ALL_CONTROLS)).toEqual({ ok: true });
   });
 
   it("still allows a reply after the run stopped reporting", () => {
-    expect(canReply(makeRun({ stopped_reporting: true }), ALL_CAPS)).toEqual({ ok: true });
+    expect(canReply(makeRun({ stopped_reporting: true }), ALL_CONTROLS)).toEqual({ ok: true });
   });
 
   it("refuses while offline instead of queueing the reply", () => {
-    const guard = canReply(makeRun(), ALL_CAPS, { online: false });
+    const guard = canReply(makeRun(), ALL_CONTROLS, { online: false });
     expectSentence(guard);
     expect(guard.ok === false && guard.reason).toContain("offline");
   });
@@ -191,7 +205,7 @@ describe("canReply", () => {
   it("refuses once authoritative projection marks content expired", () => {
     const guard = canReply(
       makeRun({ content_expired: true, question_text: null }),
-      ALL_CAPS,
+      ALL_CONTROLS,
     );
     expectSentence(guard);
     expect(guard.ok === false && guard.reason).toContain("expired");
@@ -200,17 +214,17 @@ describe("canReply", () => {
 
 describe("canCancel", () => {
   it("allows cancellation on a live run with a cancel-capable connector", () => {
-    expect(canCancel(makeRun(), ALL_CAPS)).toEqual({ ok: true });
+    expect(canCancel(makeRun(), ALL_CONTROLS)).toEqual({ ok: true });
   });
 
   it("refuses when the connector does not support cancellation", () => {
-    const guard = canCancel(makeRun(), { progress: true, reply: true, cancel: false });
+    const guard = canCancel(makeRun(), { reply: true, cancel: false });
     expectSentence(guard);
     expect(guard.ok === false && guard.reason).toBe("This agent does not support cancellation.");
   });
 
   it("refuses a duplicate intent while cancellation is already requested", () => {
-    const guard = canCancel(makeRun({ cancel_requested: true }), ALL_CAPS);
+    const guard = canCancel(makeRun({ cancel_requested: true }), ALL_CONTROLS);
     expectSentence(guard);
     expect(guard.ok === false && guard.reason).toContain("already requested");
   });
@@ -218,22 +232,22 @@ describe("canCancel", () => {
   it.each(["completed", "failed", "cancelled"] as const)(
     "refuses on a %s run",
     (reported_state) => {
-      expectSentence(canCancel(makeRun({ reported_state }), ALL_CAPS));
+      expectSentence(canCancel(makeRun({ reported_state }), ALL_CONTROLS));
     },
   );
 
   it("refuses once the connection is disconnected", () => {
-    expectSentence(canCancel(makeRun({ connection_disconnected: true }), ALL_CAPS));
+    expectSentence(canCancel(makeRun({ connection_disconnected: true }), ALL_CONTROLS));
   });
 
   it("refuses while offline instead of queueing the request", () => {
-    expectSentence(canCancel(makeRun(), ALL_CAPS, { online: false }));
+    expectSentence(canCancel(makeRun(), ALL_CONTROLS, { online: false }));
   });
 
   it("still allows cancellation after content expiry on a nonterminal run", () => {
     const guard = canCancel(
       makeRun({ content_expired: true, question_text: null }),
-      ALL_CAPS,
+      ALL_CONTROLS,
     );
     expect(guard).toEqual({ ok: true });
   });

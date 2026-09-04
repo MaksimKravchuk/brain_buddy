@@ -19,7 +19,7 @@
  */
 
 import type {
-  AgentCapabilities,
+  AgentControls,
   AgentConnectionResponse,
   AgentRunResponse,
 } from "../api/types";
@@ -122,7 +122,7 @@ function commandableGuard(run: RunGuardInput): AgentGuard {
  */
 export function canReply(
   run: RunGuardInput,
-  capabilities: AgentCapabilities = run.capabilities,
+  capabilities: AgentControls = run.capabilities,
   options: AgentGuardOptions = {},
 ): AgentGuard {
   const offline = offlineGuard(options, "a reply");
@@ -145,7 +145,7 @@ export function canReply(
 /** A cancellation request is one user intent; while it is pending, do not create another. */
 export function canCancel(
   run: RunGuardInput,
-  capabilities: AgentCapabilities = run.capabilities,
+  capabilities: AgentControls = run.capabilities,
   options: AgentGuardOptions = {},
 ): AgentGuard {
   const offline = offlineGuard(options, "a cancellation request");

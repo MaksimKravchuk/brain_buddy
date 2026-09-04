@@ -83,7 +83,7 @@ describe("connected agents screen", () => {
     await renderScreen();
     expect(await screen.findByText("Release agent")).toBeOnTheScreen();
     expect(screen.getByText("Unreachable")).toBeOnTheScreen();
-    expect(screen.getByText("Supports progress updates, replies, cancellation.")).toBeOnTheScreen();
+    expect(screen.getByText("Supports streaming updates.")).toBeOnTheScreen();
 
     await fireEvent.press(screen.getByText("Test connection"));
 
@@ -97,11 +97,8 @@ describe("connected agents screen", () => {
     expect(screen.queryByText("Unreachable")).not.toBeOnTheScreen();
   });
 
-  it("creates an agent and keeps its returned signing secret visible only until acknowledgement", async () => {
-    const created = {
-      ...makeConnection({ name: "New relay" }),
-      inbound_signing_secret: "one-time-report-secret",
-    };
+  it("014-FR-001 creates an agent by address and scheme, and shows no secret", async () => {
+    const created = makeConnection({ name: "New relay" });
     const backend = serveConnected({ "POST /agent-connections": () => created });
 
     await renderScreen();
@@ -109,56 +106,28 @@ describe("connected agents screen", () => {
     await fireEvent.press(screen.getByText("Add an agent"));
     await fireEvent.changeText(screen.getByPlaceholderText("What you call this agent"), " New relay ");
     await fireEvent.changeText(
-      screen.getByPlaceholderText("https://your-agent.example.com/brain-buddy"),
-      " https://relay.example.test/task ",
+      screen.getByPlaceholderText("https://your-agent.example.com"),
+      " https://relay.example.test ",
     );
-    await fireEvent.changeText(screen.getByPlaceholderText("Sent as the auth header value"), "agent-key");
+    await fireEvent.changeText(screen.getByPlaceholderText("Sent as the credential"), "agent-key");
     await fireEvent.changeText(screen.getByPlaceholderText("Confirm it is you"), "account-password");
     await fireEvent.press(screen.getByText("Save agent"));
 
-    expect(await screen.findByText("one-time-report-secret")).toBeOnTheScreen();
+    await waitFor(() =>
+      expect(backend.callsTo("POST", "/agent-connections")).toHaveLength(1),
+    );
     const call = backend.callsTo("POST", "/agent-connections")[0];
     expect(call.body).toEqual({
       name: "New relay",
-      endpoint_url: "https://relay.example.test/task",
-      auth_header_name: "X-Agent-Key",
+      agent_address: "https://relay.example.test",
+      auth_scheme: "bearer",
       credential: "agent-key",
       current_password: "account-password",
     });
     expect(call.headers["Idempotency-Key"]).toMatch(/^00000000-0000-4000-8000-/);
-
-    await fireEvent.press(screen.getByText("I have copied it"));
-    await waitFor(() => expect(screen.queryByText("one-time-report-secret")).not.toBeOnTheScreen());
-  });
-
-  it("offers signing-secret recovery when creation returns a blank one-time secret", async () => {
-    const created = {
-      ...makeConnection({ name: "Blank-secret relay" }),
-      inbound_signing_secret: " ",
-    };
-    serveConnected({ "POST /agent-connections": () => created });
-
-    await renderScreen();
-    await screen.findByText("Release agent");
-    await fireEvent.press(screen.getByText("Add an agent"));
-    await fireEvent.changeText(
-      screen.getByPlaceholderText("What you call this agent"),
-      "Blank-secret relay",
-    );
-    await fireEvent.changeText(
-      screen.getByPlaceholderText("https://your-agent.example.com/brain-buddy"),
-      "https://relay.example.test/task",
-    );
-    await fireEvent.changeText(screen.getByPlaceholderText("Sent as the auth header value"), "key");
-    await fireEvent.changeText(screen.getByPlaceholderText("Confirm it is you"), "password");
-    await fireEvent.press(screen.getByText("Save agent"));
-
-    expect(await screen.findByText(/No signing secret was returned/)).toBeOnTheScreen();
-    const replaceButtons = screen.getAllByRole("button", { name: "Replace signing secret" });
-    await fireEvent.press(replaceButtons[replaceButtons.length - 1]);
-    expect(
-      await screen.findByText(/This replaces the secret your agent uses to sign reports/),
-    ).toBeOnTheScreen();
+    // There is nothing to copy: the A2A wire has no inbound secret an owner
+    // configures at their agent (014-FR-012).
+    expect(screen.queryByText("I have copied it")).not.toBeOnTheScreen();
   });
 
   it("preserves an ambiguous create key across dismissal for the exact same canonical input", async () => {
@@ -167,10 +136,7 @@ describe("connected agents screen", () => {
       "POST /agent-connections": () => {
         attempts += 1;
         if (attempts === 1) throw new TypeError("Response lost");
-        return {
-          ...makeConnection({ name: "Recovered relay" }),
-          inbound_signing_secret: "",
-        };
+        return makeConnection({ name: "Recovered relay" });
       },
     });
 
@@ -178,8 +144,8 @@ describe("connected agents screen", () => {
     await screen.findByText("Release agent");
     const enter = async () => {
       await fireEvent.changeText(screen.getByPlaceholderText("What you call this agent"), "Recovered relay");
-      await fireEvent.changeText(screen.getByPlaceholderText("https://your-agent.example.com/brain-buddy"), "https://relay.example.test/task");
-      await fireEvent.changeText(screen.getByPlaceholderText("Sent as the auth header value"), "same-key");
+      await fireEvent.changeText(screen.getByPlaceholderText("https://your-agent.example.com"), "https://relay.example.test/task");
+      await fireEvent.changeText(screen.getByPlaceholderText("Sent as the credential"), "same-key");
       await fireEvent.changeText(screen.getByPlaceholderText("Confirm it is you"), "same-password");
     };
     await fireEvent.press(screen.getByText("Add an agent"));
@@ -191,12 +157,16 @@ describe("connected agents screen", () => {
     await fireEvent.press(screen.getByLabelText("Close"));
     await fireEvent.press(screen.getByText("Add an agent"));
     expect(await screen.findByText(/outcome is unknown/i)).toBeOnTheScreen();
-    expect(screen.getByPlaceholderText("Sent as the auth header value").props.value).toBe("");
+    expect(screen.getByPlaceholderText("Sent as the credential").props.value).toBe("");
     expect(screen.getByPlaceholderText("Confirm it is you").props.value).toBe("");
     await enter();
     await fireEvent.press(screen.getByText("Save agent"));
 
-    expect(await screen.findByText(/No signing secret was returned/)).toBeOnTheScreen();
+    // The replay reaches the server under the *original* key, so it resolves the
+    // ambiguous first attempt rather than creating a second connection.
+    await waitFor(() =>
+      expect(backend.callsTo("POST", "/agent-connections")).toHaveLength(2),
+    );
     expect(backend.callsTo("POST", "/agent-connections")[1].headers["Idempotency-Key"]).toBe(firstKey);
   });
 
@@ -210,16 +180,16 @@ describe("connected agents screen", () => {
     await screen.findByText("Release agent");
     await fireEvent.press(screen.getByText("Add an agent"));
     await fireEvent.changeText(screen.getByPlaceholderText("What you call this agent"), "First intent");
-    await fireEvent.changeText(screen.getByPlaceholderText("https://your-agent.example.com/brain-buddy"), "https://relay.example.test/task");
-    await fireEvent.changeText(screen.getByPlaceholderText("Sent as the auth header value"), "key");
+    await fireEvent.changeText(screen.getByPlaceholderText("https://your-agent.example.com"), "https://relay.example.test/task");
+    await fireEvent.changeText(screen.getByPlaceholderText("Sent as the credential"), "key");
     await fireEvent.changeText(screen.getByPlaceholderText("Confirm it is you"), "password");
     await fireEvent.press(screen.getByText("Save agent"));
     await screen.findByText("Response lost");
     await fireEvent.press(screen.getByLabelText("Close"));
     await fireEvent.press(screen.getByText("Add an agent"));
     await fireEvent.changeText(screen.getByPlaceholderText("What you call this agent"), "Different intent");
-    await fireEvent.changeText(screen.getByPlaceholderText("https://your-agent.example.com/brain-buddy"), "https://relay.example.test/task");
-    await fireEvent.changeText(screen.getByPlaceholderText("Sent as the auth header value"), "key");
+    await fireEvent.changeText(screen.getByPlaceholderText("https://your-agent.example.com"), "https://relay.example.test/task");
+    await fireEvent.changeText(screen.getByPlaceholderText("Sent as the credential"), "key");
     await fireEvent.changeText(screen.getByPlaceholderText("Confirm it is you"), "password");
     await fireEvent.press(screen.getByText("Save agent"));
 
@@ -227,14 +197,9 @@ describe("connected agents screen", () => {
     expect(backend.callsTo("POST", "/agent-connections")).toHaveLength(1);
   });
 
-  it("rotates each credential independently and shows a replacement signing secret once", async () => {
-    const replacement = {
-      ...connection,
-      inbound_signing_secret: "replacement-report-secret",
-    };
+  it("rotates the credential and offers no signing-secret control at all", async () => {
     const backend = serveConnected({
       "POST /agent-connections/conn_1/credential": () => ({ ...connection, revision: 2 }),
-      "POST /agent-connections/conn_1/signing-secret": () => replacement,
     });
 
     await renderScreen();
@@ -256,19 +221,9 @@ describe("connected agents screen", () => {
     expect(credentialCall.headers["Idempotency-Key"]).toMatch(/^00000000-0000-4000-8000-/);
     await waitFor(() => expect(screen.queryByText("Rotate credential")).toBeOnTheScreen());
 
-    await fireEvent.press(screen.getByText("Replace signing secret"));
-    await fireEvent.changeText(screen.getByLabelText("Your Brain Buddy password"), "account-password");
-    const replaceButtons = screen.getAllByRole("button", { name: "Replace signing secret" });
-    await fireEvent.press(replaceButtons[replaceButtons.length - 1]);
-
-    expect(await screen.findByText("replacement-report-secret")).toBeOnTheScreen();
-    const signingCall = backend.callsTo("POST", "/agent-connections/conn_1/signing-secret")[0];
-    expect(signingCall.body).toEqual({ current_password: "account-password", expected_revision: 1 });
-    expect(signingCall.headers["Idempotency-Key"]).toMatch(/^00000000-0000-4000-8000-/);
-    await fireEvent.press(screen.getByText("I have copied it"));
-    await waitFor(() =>
-      expect(screen.queryByText("replacement-report-secret")).not.toBeOnTheScreen(),
-    );
+    // M-01 has no signing-secret state: there is no inbound secret to replace,
+    // and offering the control would advertise a step nobody has to take.
+    expect(screen.queryByText("Replace signing secret")).not.toBeOnTheScreen();
   });
 
   it("requires explicit confirmation and preserves the warning before disconnecting", async () => {
@@ -309,12 +264,7 @@ describe("connected agents screen", () => {
     await renderScreen();
     await screen.findByText("Release agent");
 
-    for (const action of [
-      "Add an agent",
-      "Rotate credential",
-      "Replace signing secret",
-      "Disconnect",
-    ]) {
+    for (const action of ["Add an agent", "Rotate credential", "Disconnect"]) {
       await fireEvent.press(screen.getByText(action));
       await fireEvent.press(screen.getByLabelText("Close"));
     }

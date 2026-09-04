@@ -78,8 +78,7 @@ describe("agent connections", () => {
     await client.createAgentConnection(
       {
         name: "Hermes",
-        endpoint_url: "https://agent.example.test/hook",
-        auth_header_name: "Authorization",
+        agent_address: "https://agent.example.test/hook",
         credential: "super-secret",
         current_password: "correct-horse",
       },
@@ -92,8 +91,7 @@ describe("agent connections", () => {
     expect(headersOf(calls[0])["Content-Type"]).toBe("application/json");
     expect(bodyOf(calls[0])).toEqual({
       name: "Hermes",
-      endpoint_url: "https://agent.example.test/hook",
-      auth_header_name: "Authorization",
+      agent_address: "https://agent.example.test/hook",
       credential: "super-secret",
       current_password: "correct-horse",
     });
@@ -113,7 +111,7 @@ describe("agent connections", () => {
       "conn1",
       {
         name: "Renamed agent",
-        endpoint_url: "https://next.example.test/hook",
+        agent_address: "https://next.example.test/hook",
         current_password: "correct-horse",
         expected_revision: 4,
       },
@@ -125,7 +123,7 @@ describe("agent connections", () => {
     expect(headersOf(calls[0])["Idempotency-Key"]).toBe("key-update");
     expect(bodyOf(calls[0])).toEqual({
       name: "Renamed agent",
-      endpoint_url: "https://next.example.test/hook",
+      agent_address: "https://next.example.test/hook",
       current_password: "correct-horse",
       expected_revision: 4,
     });
@@ -293,8 +291,7 @@ describe("agent runs", () => {
 describe("relay mutation intent boundary", () => {
   const createPayload = {
     name: "Hermes",
-    endpoint_url: "https://agent.example.test/hook",
-    auth_header_name: "X-Agent-Key",
+    agent_address: "https://agent.example.test/hook",
     credential: "secret",
     current_password: "password",
   };
@@ -470,7 +467,7 @@ describe("relay mutation intent boundary", () => {
     ]);
     await client.createAgentConnection(createPayload, "success-key");
     await client.createAgentConnection(
-      { ...createPayload, endpoint_url: "https://other.example.test/hook" },
+      { ...createPayload, agent_address: "https://other.example.test/hook" },
       "success-key",
     );
     expect(calls).toHaveLength(2);

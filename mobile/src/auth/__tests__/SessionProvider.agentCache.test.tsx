@@ -192,8 +192,8 @@ function SessionHarness() {
       <Text>{`${session.status}:${session.me?.id ?? "none"}`}</Text>
       <Text>
         {(connections.data ?? [])
-          .map((connection: { name: string; endpoint_url: string }) =>
-            `${connection.name}:${connection.endpoint_url}`,
+          .map((connection: { name: string; agent_address: string }) =>
+            `${connection.name}:${connection.agent_address}`,
           )
           .join("|") || "no private agents"}
       </Text>
@@ -224,8 +224,7 @@ function RelayMutationHarness() {
           createConnection.mutate({
             payload: {
               name: "Hermes",
-              endpoint_url: "https://agent.example.test/hook",
-              auth_header_name: "X-Agent-Key",
+              agent_address: "https://agent.example.test/hook",
               credential: "secret",
               current_password: "password",
             },
@@ -468,12 +467,12 @@ describe("SessionProvider private agent cleanup", () => {
         mutations: { retry: false, gcTime: 0 },
       },
     });
-    let resolveA!: (value: { name: string; endpoint_url: string }[]) => void;
-    let resolveB!: (value: { name: string; endpoint_url: string }[]) => void;
-    const pendingA = new Promise<{ name: string; endpoint_url: string }[]>((resolve) => {
+    let resolveA!: (value: { name: string; agent_address: string }[]) => void;
+    let resolveB!: (value: { name: string; agent_address: string }[]) => void;
+    const pendingA = new Promise<{ name: string; agent_address: string }[]>((resolve) => {
       resolveA = resolve;
     });
-    const pendingB = new Promise<{ name: string; endpoint_url: string }[]>((resolve) => {
+    const pendingB = new Promise<{ name: string; agent_address: string }[]>((resolve) => {
       resolveB = resolve;
     });
     mockApi.listAgentConnections.mockReturnValueOnce(pendingA).mockReturnValueOnce(pendingB);
@@ -502,7 +501,7 @@ describe("SessionProvider private agent cleanup", () => {
     expect(text(renderer)).not.toContain("a-agent.example.test");
 
     resolveA([
-      { name: "Account A agent", endpoint_url: "https://a-agent.example.test/relay" },
+      { name: "Account A agent", agent_address: "https://a-agent.example.test/relay" },
     ]);
     await act(async () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -511,7 +510,7 @@ describe("SessionProvider private agent cleanup", () => {
     expect(text(renderer)).not.toContain("a-agent.example.test");
 
     resolveB([
-      { name: "Account B agent", endpoint_url: "https://b-agent.example.test/relay" },
+      { name: "Account B agent", agent_address: "https://b-agent.example.test/relay" },
     ]);
     await waitFor(() => text(renderer).includes("Account B agent"));
     expect(text(renderer)).toContain("Account B agent:https://b-agent.example.test/relay");
