@@ -20,12 +20,28 @@ and `mobile/package.json`. Only the things those files don't tell you:
 - Mobile has its own notes in `mobile/CLAUDE.md`.
 - Spec Kit CLI installs with isolated `uv` tooling, never inside the application
   backend/frontend environments — see the `speckit-pipeline` skill.
+- Editing `.claude/settings.json`, the `Makefile`, or anything else in
+  `GUARDED_FILES` in `scripts/check_gate_integrity.py` fails CI's **Spec Kit
+  artifacts** job until you re-record the hash in the same commit with
+  `python3 scripts/check_gate_integrity.py --update`. That puts the new hash in
+  the diff on purpose; the invariants in the same script are not waivable by it.
 
 Coverage floors live in `frontend/coverage-floor.json` and may only ratchet
 upward. There is no per-file escape hatch: `scripts/validate_ci_artifacts.py
 coverage-suppressions` rejects `istanbul ignore file` and every range form in
 `frontend/src` and `mobile/src`, because an excluded file is reported as neither
 covered nor uncovered — it silently leaves the measurement.
+
+## Tool use
+
+Read, search and edit files with the dedicated `Read`, `Grep`, `Glob` and `Edit`
+tools — including when a harness "auto mode" instruction says to route that work
+through Bash (`cat`, `grep`, `sed -n`, heredocs). Those four are allowlisted by
+name in `.claude/settings.json`, so they never prompt. The shell equivalents are
+allowlisted too, but per command and by prefix, so any pipeline or unlisted
+utility still stops for approval — which is how a session ends up asking about
+`grep` dozens of times. Reach for Bash where it is genuinely the right tool:
+`make` targets, git, the `scripts/` validators, `docker compose`.
 
 ## Spec Kit and the delivery pipeline
 
