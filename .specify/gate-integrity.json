@@ -1,7 +1,7 @@
 {
   "comment": "Hashes of the files that define this repository's delivery gates. Regenerate deliberately with `python3 scripts/check_gate_integrity.py --update`, and expect a reviewer to ask what changed and why.",
   "files": {
-    ".claude/settings.json": "3bea393fe4d953e200fe1e79b33410e83c315719d24ac28aa52741312438ac8d",
+    ".claude/settings.json": "7403cc5fe4badc4a3be5550cbc8f6a345c02a2cc453996ba7db83a78be894015",
     ".specify/extensions.yml": "e66f8dc51ca47e9d40550ab3bd9dc53b6be411ee9a00dd4064a9879e7c898817",
     ".specify/templates/pre-freeze-receipt.schema.json": "44abf5960fd42e7130f889ecda463c186c46953b461e3abbeed043f78050ca8d",
     ".specify/workflows/speckit/handoff.schema.json": "089076b6df81ada79d7ba596b873c686a9d1748b8a921c592cce31f98dc82bf1",
@@ -15,7 +15,7 @@
     "scripts/check_speckit_manifests.py": "ebe37a8f292c657b89d6c1ada252d6453ca1561f8d5dce209a25ed65a3cdef7a",
     "scripts/classify_path_risk.py": "332fc4fd01c3d222ac800312fe33be7fe60032d543d549c909b89ce52acb291c",
     "scripts/mutation_gate.py": "4452787971ea6bcfa9bbf1c10df97bf1f3d172711098f69e1b2cf6e8f57ed96a",
-    "scripts/spec_kit_planning_review.py": "e3d5aa65c51f7ff5a690c1ee56249519d768d41a0c87f2bb341a7e92a083695b",
+    "scripts/spec_kit_planning_review.py": "9c66a92620296598fc6c6305e7e4a615a82de29a648b1e0e76de7af86eea94a6",
     "scripts/validate_pre_freeze_receipt.py": "4ef19b7f397f4b0a1b2964548e4de00d82b9c8b514466304764b81bbc6cf9e02"
   }
 }
