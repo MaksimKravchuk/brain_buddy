@@ -54,11 +54,6 @@ regexTarget = "line"
 regexes = ['''^\s*const password = "correct-horse-battery-staple-1";\s*$''']
 
 [[allowlists]]
-description = "Synthetic agent relay inbound signing secret (frontend fixture)"
-regexTarget = "line"
-regexes = ['''^\s*inbound_signing_secret: "sk-inbound-9f2c"\s*$''']
-
-[[allowlists]]
 description = "Synthetic agent relay golden-vector signing secret (backend fixture)"
 regexTarget = "line"
 regexes = ['''^\s*fixed_secret = "golden-vector-signing-secret-v2"\s*$''']
