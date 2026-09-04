@@ -44,6 +44,15 @@ function idempotencyKey(action: string): string {
   return `task-shell-${action}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function captureSignature(draft: SmartAddDraft, state: OpenTaskState | undefined, projectId: string | undefined, tagId: string | undefined, waitingFor: string): string {
+  return JSON.stringify({
+    title: draft.cleanTitle,
+    state: state ?? "inbox",
+    ...(state === "waiting" ? { waiting_for: waitingFor.trim() } : {}),
+    ...(draft.hasCompletedTokens ? { project: draft.project, tags: draft.tags } : { ...(projectId ? { project_id: projectId } : {}), ...(tagId ? { tag_ids: [tagId] } : {}) })
+  });
+}
+
 // Sidebar writes are modelled as commands rather than one loose bag of optional
 // fields, so "rename without a project" cannot be constructed at all instead of
 // being caught by a runtime guard no caller can reach.
@@ -77,6 +86,19 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const [canonicalResetKey, setCanonicalResetKey] = useState(0);
   const conflictControllerRef = useRef<ReturnType<typeof getTaskDetailAutosaveController> | null>(null);
   const discardFocusRef = useRef<HTMLElement | null>(null);
+  const newTitleRef = useRef(newTitle);
+  const newWaitingForRef = useRef(newWaitingFor);
+  newTitleRef.current = newTitle;
+  newWaitingForRef.current = newWaitingFor;
+  type CaptureRequest = {
+    payload: Parameters<typeof apiClient.createTask>[0] | Parameters<typeof apiClient.smartAddTask>[0];
+    key: string;
+    signature: string;
+    smart: boolean;
+    restoreFocus: () => void;
+  };
+  const captureAttemptRef = useRef<{ signature: string; key: string } | null>(null);
+  const [captureSettlementVersion, setCaptureSettlementVersion] = useState(0);
   const rowLinkRefs = useRef<Map<string, HTMLAnchorElement>>(new Map());
   const detailHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const listHeadingRef = useRef<HTMLHeadingElement | null>(null);
@@ -264,40 +286,27 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   });
 
   const createMutation = useMutation({
-    mutationFn: (draft: SmartAddDraft) => {
-      const payload = {
-        title: draft.cleanTitle,
-        state: state ?? "inbox",
-        ...(state === "waiting" ? { waiting_for: newWaitingFor.trim() } : {})
-      };
-      if (draft.hasCompletedTokens) {
-        return apiClient.smartAddTask(
-          {
-            ...payload,
-            project: draft.project,
-            tags: draft.tags
-          },
-          idempotencyKey("smart-add")
-        ).then((response) => response.task);
+    mutationFn: (request: CaptureRequest) => request.smart
+      ? apiClient.smartAddTask(request.payload as Parameters<typeof apiClient.smartAddTask>[0], request.key).then((response) => response.task)
+      : apiClient.createTask(request.payload as Parameters<typeof apiClient.createTask>[0], request.key),
+    onSuccess: (_task, request) => {
+      const currentDraft = parseSmartAdd(newTitleRef.current, { projects, tags, contextProjectId: projectId, contextTagId: tagId });
+      if (captureSignature(currentDraft, state, projectId, tagId, newWaitingForRef.current) === request.signature) {
+        setNewTitle("");
+        setNewWaitingFor("");
+        request.restoreFocus();
       }
-      return apiClient.createTask(
-        {
-          ...payload,
-          ...(projectId ? { project_id: projectId } : {}),
-          ...(tagId ? { tag_ids: [tagId] } : {})
-        },
-        idempotencyKey("create")
-      );
-    },
-    onSuccess: () => {
-      setNewTitle("");
-      setNewWaitingFor("");
+      captureAttemptRef.current = null;
+      setCaptureSettlementVersion((version) => version + 1);
       setMutationError(null);
       void invalidateTasks();
       void queryClient.invalidateQueries({ queryKey: ["tasks", "projects"] });
       void queryClient.invalidateQueries({ queryKey: ["tasks", "tags"] });
     },
-    onError: (caught: unknown) => setMutationError(getErrorMessage(caught))
+    onError: (caught: unknown) => {
+      setCaptureSettlementVersion((version) => version + 1);
+      setMutationError(getErrorMessage(caught));
+    }
   });
 
   const subtaskCreateMutation = useMutation({
@@ -617,7 +626,23 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             contextTagId={tagId}
             state={state}
             isCreating={createMutation.isPending}
-            onCreate={(draft) => createMutation.mutate(draft)}
+            captureSettlementVersion={captureSettlementVersion}
+            onCreate={(draft, restoreFocus) => {
+              const waitingFor = newWaitingForRef.current;
+              const payload = {
+                title: draft.cleanTitle,
+                state: state ?? "inbox",
+                ...(state === "waiting" ? { waiting_for: waitingFor.trim() } : {}),
+                ...(draft.hasCompletedTokens
+                  ? { project: draft.project, tags: draft.tags }
+                  : { ...(projectId ? { project_id: projectId } : {}), ...(tagId ? { tag_ids: [tagId] } : {}) })
+              };
+              const signature = captureSignature(draft, state, projectId, tagId, waitingFor);
+              const previous = captureAttemptRef.current;
+              const key = previous?.signature === signature ? previous.key : idempotencyKey(draft.hasCompletedTokens ? "smart-add" : "create");
+              captureAttemptRef.current = { signature, key };
+              createMutation.mutate({ payload, key, signature, smart: draft.hasCompletedTokens, restoreFocus });
+            }}
             onTitleChange={setNewTitle}
             onWaitingForChange={setNewWaitingFor}
           />
@@ -840,6 +865,7 @@ function TaskCreator({
   contextTagId,
   state,
   isCreating,
+  captureSettlementVersion,
   onCreate,
   onTitleChange,
   onWaitingForChange
@@ -852,12 +878,17 @@ function TaskCreator({
   contextTagId?: string;
   state?: OpenTaskState;
   isCreating: boolean;
-  onCreate: (draft: SmartAddDraft) => void;
+  captureSettlementVersion: number;
+  onCreate: (draft: SmartAddDraft, restoreFocus: () => void) => void;
   onTitleChange: (title: string) => void;
   onWaitingForChange: (value: string) => void;
 }): React.JSX.Element {
   const waitingForRequired = state === "waiting";
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const composerRef = useRef<HTMLFormElement | null>(null);
+  const submitLockedRef = useRef(false);
+  const previousSettlementVersionRef = useRef(captureSettlementVersion);
+  const [submitLocked, setSubmitLocked] = useState(false);
   const [caret, setCaret] = useState(0);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
   const [activeCompletionIndex, setActiveCompletionIndex] = useState(0);
@@ -891,11 +922,26 @@ function TaskCreator({
       : "Add a task";
 
   const submitDraft = () => {
-    if (draft.isValid && (!waitingForRequired || newWaitingFor.trim())) {
+    if (!submitLockedRef.current && draft.isValid && (!waitingForRequired || newWaitingFor.trim())) {
+      submitLockedRef.current = true;
+      setSubmitLocked(true);
       setSuggestionsOpen(false);
-      onCreate(draft);
+      const origin = document.activeElement;
+      onCreate(draft, () => {
+        if (!origin || !composerRef.current?.contains(origin)) return;
+        const active = document.activeElement;
+        if (active === document.body || composerRef.current.contains(active)) inputRef.current?.focus();
+      });
     }
   };
+
+  useEffect(() => {
+    if (captureSettlementVersion !== previousSettlementVersionRef.current) {
+      previousSettlementVersionRef.current = captureSettlementVersion;
+      submitLockedRef.current = false;
+      setSubmitLocked(false);
+    }
+  }, [captureSettlementVersion]);
 
   const updateCaretFromInput = () => {
     setCaret(inputRef.current?.selectionStart ?? newTitle.length);
@@ -930,6 +976,7 @@ function TaskCreator({
       {/* The prototype's dashed "add task" row; the smart-add form lives inside
           it so the affordance is directly typable rather than click-to-expand. */}
       <form
+        ref={composerRef}
         className="flex w-full flex-wrap items-center gap-3 rounded-[12px] border-[1.5px] border-dashed border-slate-300 bg-transparent px-4 py-3 transition-colors duration-200 ease-smooth focus-within:border-brand-primary hover:border-brand-primary"
         onSubmit={(event) => {
           event.preventDefault();
@@ -1029,10 +1076,10 @@ function TaskCreator({
           <Button
             type="submit"
             size="sm"
-            isLoading={isCreating}
-            disabled={!draft.isValid || (waitingForRequired && !newWaitingFor.trim())}
+            isLoading={isCreating || submitLocked}
+            disabled={submitLocked || !draft.isValid || (waitingForRequired && !newWaitingFor.trim())}
           >
-            Add task
+            {isCreating || submitLocked ? "Adding task…" : "Add task"}
           </Button>
         ) : null}
       </form>

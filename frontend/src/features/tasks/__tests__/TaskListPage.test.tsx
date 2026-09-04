@@ -627,6 +627,165 @@ describe("TaskListPage capture", () => {
     await waitFor(() => expect(field).toHaveValue(""));
   });
 
+  it("guards Enter twice with one synchronous capture attempt", async () => {
+    let release: (task: TaskResponse) => void = () => undefined;
+    mocked.createTask.mockImplementationOnce(() => new Promise<TaskResponse>((resolve) => { release = resolve; }));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Rapid Enter");
+    await user.keyboard("{Enter}{Enter}");
+    expect(mocked.createTask).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Adding task/ })).toBeDisabled();
+    expect(screen.getAllByText("Adding task…").length).toBeGreaterThan(0);
+    await act(async () => release(taskFixture({ id: "rapid-enter" })));
+  });
+
+  it("guards two same-tick form submissions before React commits pending state", async () => {
+    let release: (task: TaskResponse) => void = () => undefined;
+    mocked.createTask.mockImplementationOnce(() => new Promise<TaskResponse>((resolve) => { release = resolve; }));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Same tick");
+
+    const form = field.closest("form");
+    expect(form).not.toBeNull();
+    await act(async () => {
+      (form as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      (form as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    expect(mocked.createTask).toHaveBeenCalledTimes(1);
+    await act(async () => release(taskFixture({ id: "same-tick" })));
+  });
+
+  it("does not steal focus moved to another form while capture is pending", async () => {
+    let release: (task: TaskResponse) => void = () => undefined;
+    mocked.createTask.mockImplementationOnce(() => new Promise<TaskResponse>((resolve) => { release = resolve; }));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "External pending focus");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    const externalForm = document.createElement("form");
+    const externalInput = document.createElement("input");
+    externalInput.setAttribute("aria-label", "External form input");
+    externalForm.append(externalInput);
+    document.body.append(externalForm);
+    externalInput.focus();
+
+    await act(async () => release(taskFixture({ id: "external-focus" })));
+    expect(externalInput).toHaveFocus();
+    externalForm.remove();
+  });
+
+  it("preserves newer edits and focus when an older capture settles", async () => {
+    let release: (task: TaskResponse) => void = () => undefined;
+    mocked.createTask.mockImplementationOnce(() => new Promise<TaskResponse>((resolve) => { release = resolve; }));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Accepted first");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await user.type(field, " and newer");
+    const heading = screen.getByRole("heading", { level: 1, name: "Next actions" });
+    heading.focus();
+
+    await act(async () => release(taskFixture({ id: "accepted-first" })));
+    await waitFor(() => expect(field).toHaveValue("Accepted first and newer"));
+    expect(heading).toHaveFocus();
+  });
+
+  it("mints a fresh identity for a later intentional same-title capture", async () => {
+    const user = userEvent.setup();
+    renderPage("/tasks/next");
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Repeat intentionally");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(1));
+    const firstKey = mocked.createTask.mock.calls[0]?.[1];
+    await user.type(field, "Repeat intentionally");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(2));
+    expect(mocked.createTask.mock.calls[1]?.[1]).not.toBe(firstKey);
+  });
+
+  it("guards mixed Enter and click activation without deduplicating Smart Add titles", async () => {
+    let release: (response: { task: TaskResponse; project: null; tags: never[]; created: { project_id: null; tag_ids: never[] } }) => void = () => undefined;
+    mocked.smartAddTask.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Call bank #calls ");
+    await user.keyboard("{Enter}");
+    fireEvent.submit(field.closest("form") as HTMLFormElement);
+    expect(mocked.smartAddTask).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Adding task/ })).toBeDisabled();
+    await act(async () => release({ task: taskFixture({ id: "smart-rapid" }), project: null, tags: [], created: { project_id: null, tag_ids: [] } }));
+  });
+
+  it("reuses the body and key for an unchanged failed retry, then mints after editing", async () => {
+    mocked.createTask.mockRejectedValueOnce(new Error("Timed out."));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Retry title");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await screen.findByRole("alert");
+    mocked.createTask.mockResolvedValueOnce(taskFixture({ id: "retry-1" }));
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(2));
+    expect(mocked.createTask.mock.calls[1]).toEqual(mocked.createTask.mock.calls[0]);
+    await user.type(field, " again");
+    mocked.createTask.mockResolvedValueOnce(taskFixture({ id: "retry-2" }));
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(3));
+    expect(mocked.createTask.mock.calls[2][1]).not.toBe(mocked.createTask.mock.calls[1][1]);
+  });
+
+  it("clears after a retry whose whitespace-only edit preserves the normalized payload", async () => {
+    const user = userEvent.setup();
+    mocked.createTask.mockRejectedValueOnce(new Error("Timed out."));
+    renderPage("/tasks/next");
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "  Normalized retry  ");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await screen.findByRole("alert");
+    mocked.createTask.mockResolvedValueOnce(taskFixture({ id: "normalized-retry" }));
+    await user.clear(field);
+    await user.type(field, "Normalized retry");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(field).toHaveValue(""));
+    expect(mocked.createTask.mock.calls[1]?.[1]).toBe(mocked.createTask.mock.calls[0]?.[1]);
+  });
+
+  it("reuses a waiting capture key when only waiting-for whitespace changes after an ambiguous retry", async () => {
+    const user = userEvent.setup();
+    mocked.createTask.mockRejectedValueOnce(new Error("Request status is unknown."));
+    renderPage("/tasks/waiting");
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Chase the invoice");
+    const waiting = screen.getByRole("textbox", { name: "Waiting for" });
+    await user.type(waiting, "Finance");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await screen.findByRole("alert");
+
+    await user.clear(waiting);
+    await user.type(waiting, "  Finance  ");
+    mocked.createTask.mockResolvedValueOnce(taskFixture({ id: "waiting-retry" }));
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(2));
+
+    expect(mocked.createTask.mock.calls[1]?.[0]).toEqual({
+      title: "Chase the invoice",
+      state: "waiting",
+      waiting_for: "Finance"
+    });
+    expect(mocked.createTask.mock.calls[1]?.[1]).toBe(mocked.createTask.mock.calls[0]?.[1]);
+  });
+
   it("carries the project or tag context of the view into the created task", async () => {
     const user = userEvent.setup();
     const { unmount } = renderPage("/projects/project-launch");
