@@ -269,7 +269,7 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
 </section></div>
 <h2 class="sec">Shell states</h2>
 <div class="grid"><section class="panel ">
-  <header class="panel-h"><span class="sid">D-01-S02</span><span class="pname">loading — first server fetch</span><p class="pnote">Skeletons appear immediately; the settings frame never collapses. This is deliberately distinct from the first-run empty state, because “no agents connected” is a claim about the account.</p></header>
+  <header class="panel-h"><span class="sid">D-01-S02</span><span class="pname">loading — first server fetch</span><p class="pnote">Skeletons appear after about 250 ms, so a fast response never flickers one on and off; the settings frame never collapses. This is deliberately distinct from the first-run empty state, because “no agents connected” is a claim about the account. Nothing has failed, so there is no correlation ID here.</p></header>
   <div class="panel-b "><div class="stack g3">
   <p class="label">Your agents</p>
   <p class="caption">Loading connections…</p>
@@ -366,7 +366,7 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
 </section></div>
 <h2 class="sec">Connecting an agent</h2>
 <div class="grid"><section class="panel ">
-  <header class="panel-h"><span class="sid">D-01-S08</span><span class="pname">add an agent — bearer token scheme</span><p class="pnote">There is no signing-secret step and no inbound-secret sheet. Push notifications use a per-run token BrainBuddy registers with the agent automatically; you never see or configure it.</p></header>
+  <header class="panel-h"><span class="sid">D-01-S08</span><span class="pname">add an agent — bearer token scheme</span><p class="pnote">There is no signing-secret step and no inbound-secret sheet. Push notifications use a per-run token BrainBuddy registers with the agent automatically; you never see or configure it. Navigating away or closing this form discards it silently: nothing is stored, no credential is sent, and four short fields are cheap to re-enter, so no warning is shown.</p></header>
   <div class="panel-b "><div class="card stack g3">
   <div class="stack g1">
     <p class="subtitle">Add an agent</p>
@@ -754,6 +754,8 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <p class="body">BrainBuddy destroys the stored credential, stops observing this agent's runs, stops registering push
   notifications for them, and refuses new hand-offs and replies through it. Active runs become
   <strong>Connection disconnected</strong>. Disconnecting does not cancel work the agent already accepted.</p>
+  <p class="body">The agent-card summary BrainBuddy discovered — its name, version, description, skills and interface —
+  is erased with the credential, together with the card fingerprint. Connecting this agent again reads its card afresh.</p>
   <p class="body">Existing run history stays, redacted, until it expires.</p>
   <div class="field">
     <label class="label" for="d01-dc-pw">Current password</label>
@@ -778,6 +780,31 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   </div>
   <div class="row"><span class="btn primary sm">Save and test</span></div>
 </div></div>
+</section></div>
+
+<h2 class="sec">Rate-limited connection test</h2>
+<div class="grid"><section class="panel wide">
+  <header class="panel-h"><span class="sid">D-01-S25</span><span class="pname">test outcome: rate limited</span><p class="pnote">FR-002 / SC-009, following the D-03-S03 pattern. The agent answered the test by refusing it, so BrainBuddy learned nothing: the connection stays untested — never ready — until a later test succeeds, and it cannot take a hand-off in the meantime. Appended after review campaign 2; no existing id moved.</p></header>
+  <div class="panel-b ">
+    <article class="card stack g3">
+      <div class="row">
+        <div class="stack g1" style="min-width:0">
+          <p class="subtitle">Hermes planner</p>
+          <p class="micro mono" style="word-break:break-all">https://hermes.example.com</p>
+        </div>
+        <span class="spacer"></span><span class="pill bad">Rate limited</span>
+      </div>
+      <p class="body" style="font-size:13px">The agent is rate limiting. It refused the test rather than answering it, so BrainBuddy could not read its card or check the credential. Nothing was sent and nothing about this connection changed.</p>
+      <p class="caption">The agent asked to be left alone for 60 seconds. Test again after that.</p>
+      <p class="micro mono">Correlation ID 8e41-b30c-77a2</p><p class="caption" style="color:var(--warn-fg)">Still untested — cannot receive a hand-off yet.</p>
+      <div class="row" style="gap:8px">
+        <span class="btn sm">Test connection</span>
+        <span class="btn sm">Edit connection</span>
+        <span class="btn sm">Rotate credential</span>
+        <span class="btn sm danger">Disconnect…</span>
+      </div>
+      <p class="micro">Testing again re-uses the credential already stored, sealed. Nothing secret is shown here and nothing has to be typed again. When the agent gives no retry-after, the line above is dropped and the retry is offered immediately.</p>
+    </article></div>
 </section></div>
 
 </div>

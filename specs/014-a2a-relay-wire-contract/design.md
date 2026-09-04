@@ -3,11 +3,14 @@
 **Feature**: `specs/014-a2a-relay-wire-contract/`
 **Spec**: `spec.md` (Clarifications settled: 2026-09-03, session 2026-09-03, zero open markers)
 **Screens**: `design/*.html` — six self-contained static files, no script, no external font, no CDN
-**States**: **127 total** — D-01 24, D-02 15, D-03 27, M-01 21, M-02 14, M-03 26
+**States**: **129 total** — D-01 25, D-02 15, D-03 27, M-01 22, M-02 14, M-03 26
 **Human sign-off**: Max, 2026-09-03 (decisions recorded in spec.md Clarifications).
 Amended after review campaign 1 (2026-09-03): D-03-S27, M-03-S26 added; Check again
 affordance on D-03-S05/M-03-S04; M-01 sheet order; focus rules; result links inert
 (D-03-S11/M-03-S10). Re-acknowledged by Max, 2026-09-04.
+Amended after review campaign 2 (2026-09-04): D-01-S25, M-01-S22 added; restart variant
+of Not sent; disconnect copy names the card erasure; loading citations; aria-disabled
+parity. Re-acknowledgement pending.
 
 <!--
   Produced by /speckit-design via the design-architect subagent, after
@@ -15,9 +18,12 @@ affordance on D-03-S05/M-03-S04; M-01 sheet order; focus rules; result links ine
   stable forever: the acceptance traceability matrix keys off them.
 
   ADR-0006: the term is Tag. The retired taxonomy noun it replaced, and that noun's
-  at-prefixed form, are forbidden strings; the design CI validator hard-fails on them,
-  case-insensitively. See "Vocabulary" below for how this feature's wire-level nouns
-  are rendered in the UI.
+  at-prefixed form, are forbidden strings anywhere in this file or design/. The sweep
+  that proves it is a recorded, case-insensitive manual grep (see "Design authority"),
+  run alongside the unit-tested design-skill contract
+  (scripts/test_validate_brain_buddy_design_skill.py). No CI job scans this feature
+  directory for the retired noun, so the grep is the evidence, not a green build.
+  See "Vocabulary" below for how this feature's wire-level nouns are rendered in the UI.
 -->
 
 ## Applicability
@@ -55,8 +61,11 @@ apply to every surface and every string in `design/`. **Both were accepted at th
 
 The two A2A wire field names these map onto — the per-message identifier and the
 conversation identifier, named verbatim in spec.md Assumptions — appear only in technical
-artifacts and are never returned in a client-facing response. The design CI validator
-enforces that, case-insensitively, over this file and `design/`.
+artifacts and are never returned in a client-facing response. What enforces the ADR-0006
+substitution over this file and `design/` is the recorded case-insensitive grep in
+**Design authority** below, plus `scripts/test_validate_brain_buddy_design_skill.py`
+for the design-skill contract itself — not a CI validator, because no CI job reads this
+feature directory.
 
 ## Screen inventory
 
@@ -80,18 +89,24 @@ Files:
 
 ## State inventory
 
+**Shared loading treatment.** Every loading row below (`D-01-S02`, `D-02-S03`, `D-03-S02`,
+`M-01-S02`, `M-02-S05`, `M-03-S20`) shows its skeleton only after about 250 ms, so a fast
+response never flickers a skeleton on and off; until then the surface holds the frame it
+already has. The skeleton never stands in for the empty state, and it carries no
+correlation ID, because nothing has failed.
+
 ### D-01 — Connected agents (desktop)
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
 | D-01-S01 default | one or more saved connections | Name, address, status pill, tier disclosure (best-effort rows carry the extension link), credential scheme, last contact, last tested, stale threshold, four actions | "The last test reached this agent and it authenticated." | FR-001, FR-002, FR-003, FR-011 |
-| D-01-S02 loading | first server fetch | Settings frame intact, skeleton rows, "Loading connections…"; never the empty state | "Loading connections…" | 007 FR-017 |
+| D-01-S02 loading | first server fetch | Settings frame intact, skeleton rows after ~250 ms, "Loading connections…"; never the empty state | "Loading connections…" | 007 FR-018 |
 | D-01-S03 empty (first run) | no connection has ever been saved | Display heading, one-line hint, single primary action | "Connect an agent you operate" | FR-001 |
 | D-01-S04 empty (filtered to nothing) | — | Deliberately absent: the list has no filter, search or sort. The real case lives on D-02-S05 | "No filter, no search, no sort on this list" | scope boundary, FR-001 |
 | D-01-S05 error | list fetch fails | Category, correlation ID, retry; no partial rows invented | "We couldn't load your connections" | SC-009, 007 FR-017 |
 | D-01-S06 partial failure | cached list exists, refresh fails | Cached rows stay, each stamped with the time it was read, all labelled potentially stale | "Showing potentially stale saved data." | 007 FR-018 |
 | D-01-S07 offline / interrupted | browser reports offline | Saved status visible and stamped; every secret-bearing action disabled; nothing queued | "Offline — reconnect to manage agents." | 007 FR-018 |
-| D-01-S08 add agent (bearer) | user opens the add form | Agent name, agent address, scheme radio, credential, password; egress rule stated on the address field | "BrainBuddy fetches the agent card from this address's standard well-known location…" | FR-001, FR-004 |
+| D-01-S08 add agent (bearer) | user opens the add form | Agent name, agent address, scheme radio, credential, password; egress rule stated on the address field. Navigating away or closing the form discards it silently: nothing was stored, no credential was sent, and the four fields are cheap to re-enter, so no warning is shown | "BrainBuddy fetches the agent card from this address's standard well-known location…" | FR-001, FR-004 |
 | D-01-S09 add agent (API key) | user picks the API-key scheme | Read-only header name sourced from the card; before discovery it reads "Read from the agent card when you test" | "Read from the agent card after discovery. You do not type it." | FR-001 |
 | D-01-S10 test: ready, guaranteed | test succeeds, card declares the extension | Agent name, version, description, skills, streaming, push, protocol version, interface, then the tier | "**Guaranteed single start.** …a retry cannot start a second run." | AC-001, FR-002, FR-003, FR-011 |
 | D-01-S11 test: ready, best-effort | test succeeds, card does not declare it | Same discovery result, best-effort tier, the link to the published extension specification, plus the push-not-supported note | "**Best-effort single start.** …A duplicate remains possible if the agent forgets its tasks." · "Read the single-start extension specification" | AC-005, FR-003, FR-011 |
@@ -106,8 +121,9 @@ Files:
 | D-01-S20 **Agent changed** | card fingerprint drift on interface address or authentication | Tested interface and current card interface shown side by side; the connection behaves as untested until a new successful test; reauthentication demanded | "**Agent changed**" · "BrainBuddy will not send task content to a destination you have not tested." | FR-002, FR-014, AC-012, FR-004 |
 | D-01-S21 disconnected: superseded wire | a pre-existing bespoke connection record | Neutral disconnected pill with the reason; no path to reuse it | "Superseded wire contract." | FR-012, SC-010 |
 | D-01-S22 rollout OFF | deployment flag off | Add, edit, test and rotate unavailable; disconnect still available; runs keep reporting | "The external-agent relay rollout is off." | FR-016, 007 FR-019 |
-| D-01-S23 disconnect confirmation | user chooses Disconnect | Names what is destroyed, what stops, and what is *not* cancelled; password required | "Disconnecting does not cancel work the agent already accepted." | AC-022, FR-016 |
+| D-01-S23 disconnect confirmation | user chooses Disconnect | Names what is destroyed — the credential **and the discovered agent-card summary with its fingerprint** — what stops, and what is *not* cancelled; password required | "The stored credential and the agent-card summary BrainBuddy discovered — its name, version, description, skills and interface — are erased together, along with the card fingerprint." · "Disconnecting does not cancel work the agent already accepted." | AC-022, FR-016 |
 | D-01-S24 rotate credential | user chooses Rotate credential | No current value shown; new credential plus password | "BrainBuddy cannot show you the current one." | FR-001, AC-023 |
+| D-01-S25 rate limited | the connection test is answered by the agent's own rate limit (`last_test_error_code = a2a_rate_limited`) | Rose category pill, the retry-after hint when the agent gave one, correlation ID. The connection stays **untested** — never ready — so it still cannot take a hand-off; **Test connection** stays available and re-uses the sealed credential, echoing nothing secret and asking for nothing to be retyped | "**Rate limited**" · "The agent is rate limiting. It answered the test by refusing it, so BrainBuddy learned nothing about the connection and nothing was sent." · "Test again in about 60 seconds." | FR-002, SC-009 |
 
 ### D-02 — Hand-off review (desktop)
 
@@ -134,8 +150,8 @@ Files:
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
 | D-03-S01 default = empty (first run) | Task has never been handed over | Only "Hand to agent". No run section, no empty run heading — for this screen the first-run empty state *is* the default state, because an empty "Agent runs" heading would imply the feature had been used | "Hand to agent" | FR-005 |
-| D-03-S02 loading | runs being fetched | Heading plus skeleton run card | "Loading runs…" | 007 FR-017 |
-| D-03-S03 Not sent (rate limited) | agent rate-limits before creating a task | Rose card, actionable category, retry that reuses the same run and message IDs | "The agent is rate limiting." | FR-006, edge case |
+| D-03-S02 loading | runs being fetched | Heading plus a skeleton run card after ~250 ms | "Loading runs…" | 007 FR-018 |
+| D-03-S03 Not sent (rate limited) | agent rate-limits before creating a task | Rose card, actionable category, retry that reuses the same run and message IDs. **Restart variant**: a hand-off still queued when BrainBuddy restarted was provably never sent, so it is settled as **Not sent** with its own sentence and the same retry — never as **Delivery unconfirmed** | "The agent is rate limiting." · "BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy." · "Try this hand-off again" | FR-006, edge case |
 | D-03-S04 Sent | dispatch accepted, no agent state yet | Sky pill, waiting explained, no fabricated progress. **Queued variant**: while no connection slot is free the same state reads **Queued** on a neutral pill, because nothing has left BrainBuddy yet; the identifiers are already reserved and it becomes **Sent** only once the message actually goes out | "Some agents answer only when the work is finished." · "Waiting for a free connection slot; nothing has been sent yet" | AC-014, FR-006, FR-007, SC-006 |
 | D-03-S05 Delivery unconfirmed | ambiguous or timed-out dispatch | Amber pill, nothing re-sent on its own, lookup-before-resend explained, and a **Check again** action. Check again replays the *same* confirmation — same correlation ID, same message ID — so it looks the run up at the agent first and adopts an existing task; only an empty lookup sends the identical message again. It is never a new send and never mints a second run | "**Delivery unconfirmed** … It was not re-sent." · "Runs the same check again with the same correlation ID and the same message ID. It is never a new send." | FR-006, edge case |
 | D-03-S06 Accepted | submitted observed | Sky pill, timeline entry | "Accepted" | FR-009 |
@@ -168,13 +184,13 @@ Same semantics as D-01, state for state. Frames in `design/M-01-connected-agents
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
 | M-01-S01 default | saved connections exist | Cards at 14px radius; tier under the status line, best-effort carrying the extension link; actions wrap two-up at 44pt | as D-01-S01 | FR-001 – FR-003, FR-011 |
-| M-01-S02 loading | first fetch | Skeleton cards | "Loading connections…" | 007 FR-017 |
+| M-01-S02 loading | first fetch | Skeleton cards after ~250 ms | "Loading connections…" | 007 FR-018 |
 | M-01-S03 empty (first run) | none saved | 24px display heading, hint, one primary action | "Connect an agent you operate" | FR-001 |
 | M-01-S04 empty (filtered to nothing) | — | Deliberately absent, points at M-02-S03 | "No filter, no search, no sort" | scope boundary |
 | M-01-S05 error | fetch fails | Category, correlation ID, 44pt retry | "We couldn't load your connections" | SC-009 |
 | M-01-S06 partial failure | refresh fails over cache | "As of 21:58" stamp on every row | "Showing potentially stale saved data." | 007 FR-018 |
 | M-01-S07 offline / interrupted | device offline, app resumed | Stamped cache, disabled actions, nothing queued; resume loads the server projection | "Reopening the app loads the server projection…" | 007 FR-018 |
-| M-01-S08 add agent sheet | user taps Add an agent | Sheet with address, scheme radios, credential, password; egress rule inline | as D-01-S08 | FR-001, FR-004 |
+| M-01-S08 add agent sheet | user taps Add an agent | Sheet with address, scheme radios, credential, password; egress rule inline. Swiping the sheet away or leaving the screen discards it silently, as on D-01-S08 — nothing stored, nothing sent, fields cheap to re-enter, so no warning | as D-01-S08 | FR-001, FR-004 |
 | M-01-S09 discovery result | test succeeds | Card metadata as a two-column list plus skill pills plus tier | as D-01-S10 | AC-001, FR-003 |
 | M-01-S10 invalid credentials | credential rejected | One sentence, correlation ID stub | as D-01-S12 | AC-003 |
 | M-01-S11 unreachable | transport failure or timeout | One sentence, correlation ID stub | as D-01-S13 | AC-002 |
@@ -187,7 +203,8 @@ Same semantics as D-01, state for state. Frames in `design/M-01-connected-agents
 | M-01-S18 **Agent changed** | card drift | Behaves as untested; new test plus password demanded | as D-01-S20 | FR-002, FR-014, AC-012, FR-004 |
 | M-01-S19 superseded wire contract | pre-existing bespoke record | Neutral disconnected pill with the reason | as D-01-S21 | FR-012, SC-010 |
 | M-01-S20 rollout OFF | flag off | Amber notice; disconnect still available | as D-01-S22 | FR-016 |
-| M-01-S21 disconnect sheet | user taps Disconnect | Destructive sheet, password, destructive action *below* the safe one | as D-01-S23 | AC-022 |
+| M-01-S21 disconnect sheet | user taps Disconnect | Destructive sheet, password, destructive action *below* the safe one; the same erasure sentence as D-01-S23 — credential, discovered card summary and card fingerprint go together | as D-01-S23 | AC-022 |
+| M-01-S22 rate limited | connection test answered by the agent's rate limit (`last_test_error_code = a2a_rate_limited`) | Rose category pill in the outcomes list, the retry-after hint when the agent gave one; connection stays untested, 44pt **Test connection** still offered and re-uses the sealed credential | as D-01-S25 | FR-002, SC-009 |
 
 ### M-02 — Hand to agent review sheet (iOS, 390×851)
 
@@ -215,7 +232,7 @@ Every D-03 run condition, label for label, from the same server projection.
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
 | M-03-S01 default = empty (first run) | Task with no run | Only "Hand to agent"; no run section at all. As on D-03, the first-run empty state and the default state are the same state | "Hand to agent" | FR-005 |
-| M-03-S02 Not sent (rate limited) | agent rate-limits | Rose card, category, same-IDs retry note | as D-03-S03 | FR-006 |
+| M-03-S02 Not sent (rate limited) | agent rate-limits | Rose card, category, same-IDs retry note, 44pt **Try this hand-off again**. **Restart variant**: a queued hand-off interrupted by a restart is settled as **Not sent** with its own sentence and the same retry, never as **Delivery unconfirmed**; drawn in the variants frame | as D-03-S03 · "BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy." | FR-006 |
 | M-03-S03 Sent | dispatch accepted | Sky pill, waiting explained. **Queued variant**: while no connection slot is free the same state reads **Queued** on a neutral pill, because nothing has left BrainBuddy yet | as D-03-S04 · "Waiting for a free connection slot; nothing has been sent yet" | AC-014, SC-006 |
 | M-03-S04 Delivery unconfirmed | ambiguous dispatch | Amber pill, lookup-before-resend, and a 44pt **Check again** row that replays the same confirmation with the same correlation ID and the same message ID — lookup first, adopt if a task is there, resend the identical message only on an empty lookup. Never a new send | "**Delivery unconfirmed**" · "Check again runs the same check with the same correlation ID and the same message ID. It is never a new send." | FR-006 |
 | M-03-S05 Accepted | submitted observed | Sky pill | as D-03-S06 | FR-009 |
@@ -233,7 +250,7 @@ Every D-03 run condition, label for label, from the same server projection.
 | M-03-S17 Agent no longer reports this run | task does not exist at the agent | Timeline kept, commands withdrawn | "**Agent no longer reports this run**" | AC-020, FR-013 |
 | M-03-S18 content expired | 30-day retention | Marker replaces relayed content | "**Content expired under retention policy**" | SC-007 |
 | M-03-S19 Connection disconnected | connection disconnected | Frozen last state, commands withdrawn | "**Connection disconnected**" | AC-022, FR-016 |
-| M-03-S20 loading | runs being fetched | Skeleton card | "Loading runs…" | 007 FR-017 |
+| M-03-S20 loading | runs being fetched | Skeleton card after ~250 ms | "Loading runs…" | 007 FR-018 |
 | M-03-S21 error | run fetch fails | Category, correlation ID, 44pt retry | "We couldn't load the runs for this task." | SC-009 |
 | M-03-S22 offline / interrupted | offline, or app resumed | Cached state stamped "as of", reply and cancel disabled, nothing queued | "Reopening online loads the server projection first." | 007 FR-018 |
 | M-03-S23 partial failure | refresh fails over cache | Cached-data banner with correlation ID | as D-03-S24 | 007 FR-018 |
@@ -247,10 +264,10 @@ Every D-03 run condition, label for label, from the same server projection.
 |---|---|---|---|
 | D-01 / M-01 | Add agent | Creates one owner-scoped connection from an agent address plus one credential, after server-verified reauthentication | FR-001, FR-004 |
 | D-01 / M-01 | Credential scheme radio (bearer token / API key) | Selects one of exactly two supported schemes; the API-key header name is read from the card, never typed | FR-001 |
-| D-01 / M-01 | Test connection | Authenticated call to the agent's task interface; produces ready, invalid credentials, unreachable or one of four unsupported categories, and refreshes the discovery result and the tier | FR-001, FR-002, FR-003 |
+| D-01 / M-01 | Test connection | Authenticated call to the agent's task interface; produces ready, invalid credentials, unreachable, rate limited (D-01-S25 / M-01-S22, leaving the connection untested) or one of four unsupported categories, and refreshes the discovery result and the tier | FR-001, FR-002, FR-003 |
 | D-01 / M-01 | Edit connection | Renames, or changes the agent address; an address change demands a new successful test and reauthentication before the next content-bearing dispatch | FR-001, FR-004 |
 | D-01 / M-01 | Rotate credential | Replaces the sealed credential after reauthentication; the stored value is never displayed | FR-001, AC-023 |
-| D-01 / M-01 | Disconnect | Destroys the credential, stops observation and push registration for that connection's runs, blocks new hand-offs and replies, preserves bounded redacted history | FR-016, AC-022 |
+| D-01 / M-01 | Disconnect | Destroys the credential **and, with it, the discovered agent-card summary and its card fingerprint** — the confirmation says so before it happens; stops observation and push registration for that connection's runs, blocks new hand-offs and replies, preserves bounded redacted history | FR-016, AC-022 |
 | D-01 / D-02 / D-03 (and M-) | Retry | Re-issues the failed read; every failure carries a category and a correlation ID | SC-009, 007 FR-017 |
 | D-02 / M-02 / D-03 / M-03 | Hand to agent | Opens the immutable, versioned review | FR-005 |
 | D-02 / M-02 | Agent chooser | Selects one eligible destination; ineligible connections are shown with their reason and cannot be chosen | FR-002, AC-011 |
@@ -263,7 +280,7 @@ Every D-03 run condition, label for label, from the same server projection.
 | D-02 / M-02 | Send to agent | Confirms the manifest by token; reserves run ID, message ID and correlation ID before anything is sent; a replay returns the same run. Disabled on a best-effort connection until the one-time acknowledgement is recorded | FR-005, FR-006, AC-026 |
 | D-03 / M-03 | Send answer | One follow-up message in the same conversation and task with a stable command ID; shown unconfirmed until acknowledged | FR-010, AC-015 |
 | D-03 / M-03 | Request cancellation | One cancel request with a stable command ID; shows **Cancellation requested** until an observation says cancelled, or states the refusal | FR-010, AC-018 |
-| D-03 / M-03 | Try this hand-off again (on **Not sent**) | Reopens the review (never dispatches directly) so the same run ID and message ID can be retried after a rate limit | FR-005, FR-006, rate-limit edge case |
+| D-03 / M-03 | Try this hand-off again (on **Not sent**, both variants) | Reopens the review (never dispatches directly) so the same run ID and message ID can be retried after a rate limit, or after a restart settled a still-queued hand-off as not sent | FR-005, FR-006, rate-limit and restart edge cases |
 | D-03 / M-03 | Check again (on **Delivery unconfirmed**) | Replays the same confirmation with the same correlation ID and the same message ID: look the run up at the agent, adopt an existing task, and send the identical message again only when the lookup comes back empty. It cannot become a second hand-off and cannot mint a new run | FR-006, ambiguous-dispatch edge case |
 | D-03 / M-03 | Copy link (on an agent-reported address) | Copies the address to the clipboard. The address itself is inert text — not an anchor, never opened, never fetched, whatever its scheme — so nothing leaves BrainBuddy on render | 007 FR-014, AC-016 |
 | D-03 / M-03 | Mark this task complete | Host-product Task command, drawn only to show that an agent report never completes the Task | AC-016, 007 FR-012 |
@@ -322,9 +339,10 @@ matches `spec.md` line 19, which declares the same thing.
 - **Viewport**: verified at 390×851 across `M-01`, `M-02`, `M-03`. No horizontal scroll:
   yes. Long values that could force one — the agent address, the interface address, the
   Task and run IDs — wrap on word boundaries or break inside the token.
-- **Scrolling**: `M-01-S01`, `M-01-S10 – S16`, `M-02-S01/S02/S07/S10` and every `M-03`
-  run frame scroll vertically, including the new `M-03-S26` succession frame, whose
-  timeline is the longest on the screen. In `M-02` the sheet is bounded by the frame: the
+- **Scrolling**: `M-01-S01`, `M-01-S10 – S16`, `M-01-S22`, `M-02-S01/S02/S07/S10` and
+  every `M-03` run frame scroll vertically, including the new `M-03-S26` succession frame,
+  whose timeline is the longest on the screen. `M-01-S22` is one more card in the same
+  outcomes list and displaces nothing. In `M-02` the sheet is bounded by the frame: the
   manifest and the disclosures scroll in a body between a fixed header and a pinned
   actions footer, so **Send to agent** and **Cancel** are on screen at every scroll
   position and the consent action can never be scrolled off. The push callback address is
@@ -344,10 +362,11 @@ matches `spec.md` line 19, which declares the same thing.
   on the safe one. `M-01-S21`'s mockup was reordered in the campaign-1 amendment to match
   this sentence; the desktop dialog `D-01-S23` already reads safe-then-destructive
   left-to-right, so both surfaces now put the safe choice first.
-- **Destructive actions**: the disconnect sheet says the stored credential is destroyed,
-  observation and push registration stop, new hand-offs and replies are refused, active
-  runs become **Connection disconnected**, and — explicitly — that work the agent already
-  accepted is *not* cancelled. Redacted history survives until it expires.
+- **Destructive actions**: the disconnect sheet says the stored credential is destroyed
+  together with the discovered agent-card summary and its fingerprint, observation and
+  push registration stop, new hand-offs and replies are refused, active runs become
+  **Connection disconnected**, and — explicitly — that work the agent already accepted is
+  *not* cancelled. Redacted history survives until it expires.
 - **Interruption**: `M-02-S10` and `M-03-S22` state the ADR-0002-style rule this feature
   inherits from 007 FR-018 — reopening loads the server projection, offline clients label
   cached state as potentially stale and disable reply and cancel rather than queue them.
@@ -381,6 +400,15 @@ matches `spec.md` line 19, which declares the same thing.
   `Tested ready`, `Stale`, `Needs you`, `Stopped reporting`, `Agent no longer reports
   this run`, `Best-effort single start`. The amber row tint on a needs-you Task row
   duplicates a chip that already says "Needs you".
+- **Disabled controls**: never dimming alone, and never dimming alone on one platform
+  only. Every disabled control in the mockups carries `aria-disabled="true"`, which is
+  what drives the 45% opacity; the dimming is the consequence, not the signal. Web ships
+  it as a real disabled `<button>`, iOS as a `Pressable` carrying the equivalent disabled
+  accessibility state. The controls this covers are the offline actions on `D-01-S07` /
+  `M-01-S07`, rollout-OFF on `D-01-S22`, the acknowledgement gate on `D-02-S13` /
+  `M-02-S12`, the in-flight confirmation on `D-02-S12` / `M-02-S11`, the offline send on
+  `D-02-S10` / `M-02-S10`, and offline reply and cancel on `D-03-S25` / `M-03-S22`.
+  `M-01-S20` states the rollout-OFF restriction in copy and draws no control to disable.
 
 ## Design authority
 
@@ -396,22 +424,26 @@ matches `spec.md` line 19, which declares the same thing.
   retired prefixes.
 - Vocabulary check (ADR-0006, `Tag`): **pass** — a case-insensitive grep for the
   retired taxonomy noun and its at-prefixed form over `design.md` and `design/`
-  returns nothing.
+  returns nothing. This grep is a **recorded manual check, not a CI gate**: no job in
+  `.github/workflows` and no script in `scripts/` reads this feature directory, so the
+  guarantee is only as fresh as the last time someone ran it. Re-run after the
+  campaign-2 amendment: still nothing.
 - Self-contained check: **pass** — no `<script>`, no `@import`, no `<link>`, no CDN and
   no external font in any of the six files.
 - `python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py`: **pass**
-  (6 tests, OK), re-run after the campaign-1 amendment. This design changes no skill
-  artifact. There is no `scripts/validate_brain_buddy_design_skill.py` in the repository —
-  the contract is asserted by the test module alone, which reads
-  `.claude/skills/brain-buddy-design/` and takes no feature directory, so the vocabulary
-  check over `design.md` and `design/` is the recorded grep above.
+  (6 tests, OK), re-run after the campaign-2 amendment. This design changes no skill
+  artifact. That module is the only mechanical check in play, and it asserts the
+  **design-skill contract** — it reads `.claude/skills/brain-buddy-design/` and takes no
+  feature directory. There is no `scripts/validate_brain_buddy_design_skill.py` in the
+  repository. So: unit-tested skill contract, plus the recorded grep above for this
+  feature's own vocabulary. Nothing here hard-fails a build.
 
 ## Open decisions for the human
 
 The first four were resolved by Max on 2026-09-03 and encoded in `spec.md` (commit
-`9afdcaf`: FR-002, FR-003, FR-014, AC-026 and the Clarifications session); the fifth was
-decided on 2026-09-04. Kept here as the record of what was decided, not as open
-questions.
+`9afdcaf`: FR-002, FR-003, FR-014, AC-026 and the Clarifications session); the fifth and
+sixth were decided on 2026-09-04. Kept here as the record of what was decided, not as
+open questions. **Nothing in this design is waiting on a product decision.**
 
 1. **Best-effort admission loudness — decided: acknowledge, once.** A warning alone was
    not enough. The first hand-off on a best-effort connection now requires an explicit
@@ -438,6 +470,16 @@ questions.
    settles what was the second pending product decision on D-03-S11 / M-03-S10; the
    plan stage owns the matching change to AC-016 and to research Decision E's
    `interactive_result_link`, which this design no longer relies on.
+6. **Card-metadata retention — decided 2026-09-04: the connection's lifetime.** The
+   product owner settled it: a live connection's discovered card summary and its
+   `card_fingerprint` are **connection configuration**, retained for as long as the
+   connection exists and erased on disconnect together with the credential — never swept
+   on a clock. Only audit rows that name the card follow the 90-day identifier bound.
+   Design consequence, and the reason this is recorded here rather than left implicit:
+   the disconnect confirmation (`D-01-S23`, `M-01-S21`) must *say* the card summary and
+   fingerprint go with the credential, which it now does, and the affordance map's
+   **Disconnect** row says the same. This was the last thing this file marked as still
+   with the human; it is closed.
 
 ### Amended after review campaign 1
 
@@ -454,6 +496,20 @@ Decided by Max; re-acknowledged 2026-09-04. Nothing below renumbers an existing 
 | **Queued variant on Sent** | D-03-S04, M-03-S03 | A hand-off still waiting for a connection slot has not been sent, so it must not say **Sent**. Row copy and mockup only; no new id. |
 | **Push callback disclosed in the manifest** | D-02 and M-02 "what will be sent" | The per-run callback address is registered with the agent as part of the confirmed send, so the consent boundary has to name it. Text only; no new id. |
 
-**Still with the human.** Card metadata retention (spec FR-016 against data-model §8)
-remains an open product decision and is deliberately untouched here — it has no design
-surface in this file either way.
+### Amended after review campaign 2
+
+Applied 2026-09-04 from the campaign-2 findings. **Re-acknowledgement by Max pending.**
+Nothing below renumbers an existing id; the two new ids are appended at the end of their
+screens' sequences, exactly as `D-03-S27` / `M-03-S26` were in campaign 1.
+
+| change | ids | why |
+|---|---|---|
+| **Rate-limited connection test added** | D-01-S25, M-01-S22 | SC-009 and the wire contract both name a rate-limited test outcome (`last_test_error_code = a2a_rate_limited`), and FR-002 now does too, but D-01/M-01 enumerated every other test failure and not this one. Follows the D-03-S03 pattern: actionable category, retry-after hint, connection stays untested, **Test connection** still offered. |
+| **Restart variant of Not sent** | D-03-S03, M-03-S02 | A hand-off still queued when BrainBuddy restarted provably never left, so it is settled as **Not sent** — "BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy." — with the same **Try this hand-off again**, and never labelled **Delivery unconfirmed**. Row copy and mockup only; no new id. |
+| **Disconnect names the card erasure** | D-01-S23, M-01-S21, affordance map | The dialog claimed to say "exactly what is destroyed" while omitting the discovered card summary and its fingerprint, which the 2026-09-04 retention decision erases with the credential. Copy only. |
+| **Card-retention decision recorded** | Open decisions 6 | This file still called a settled decision open. Replaced with the outcome. |
+| **Vocabulary sweep described honestly** | Vocabulary, Design authority | It was written as a CI validator that hard-fails. It is a recorded manual grep plus the unit-tested design-skill contract; no CI job reads this feature directory. |
+| **Loading citations corrected** | D-01-S02, M-01-S02, D-03-S02, M-03-S20 | A skeleton shows no correlation ID, so 007 FR-017 was the wrong trace. They cite 007 FR-018 (the client loads the server projection) instead. |
+| **Skeleton delay stated once** | State inventory preamble | ~250 ms before a skeleton appears, so a fast response does not flicker. Shared, not repeated per row. |
+| **Add-agent navigation stated** | D-01-S08, M-01-S08 | Leaving the form discards it silently: nothing stored, nothing sent, four cheap fields, so no warning. Closes the Principle V draft-loss question rather than leaving it unanswered. |
+| **`aria-disabled` parity on iOS** | M-01-S07, M-02-S10, M-02-S11, M-02-S12, M-03-S22 | Disabled controls carried inline opacity alone on mobile while desktop carried the attribute, so the disabled state was invisible to assistive technology on one platform. |

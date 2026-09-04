@@ -209,7 +209,7 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
     <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
   </div>
   <p class="phonecap"><span class="sid">M-01-S02</span>loading</p>
-  
+  <p class="phonecap">Skeletons appear after about 250 ms, so a fast response does not flicker one on and off. Nothing has failed, so no correlation ID is shown.</p>
 </div><div class="phonewrap">
   <div class="phone">
     <div class="status"><span>9:41</span><span>390 × 851</span></div>
@@ -292,8 +292,8 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   
 </article>
   <div class="row" style="gap:8px">
-    <span class="btn sm tap44" style="flex:1 1 46%;padding:12px;opacity:.45">Test connection</span>
-    <span class="btn sm tap44" style="flex:1 1 46%;padding:12px;opacity:.45">Rotate credential</span>
+    <span class="btn sm tap44" aria-disabled="true" style="flex:1 1 46%;padding:12px">Test connection</span>
+    <span class="btn sm tap44" aria-disabled="true" style="flex:1 1 46%;padding:12px">Rotate credential</span>
   </div></div>
     <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
   </div>
@@ -324,6 +324,7 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   </div>
   <p class="phonecap"><span class="sid">M-01-S08</span>add an agent — sheet</p>
   <p class="phonecap">There is no signing-secret step and no secret to copy. Push notifications use a per-run token BrainBuddy registers with the agent automatically.</p>
+  <p class="phonecap">Swiping the sheet away or leaving the screen discards this form silently — nothing is stored and nothing is sent, and the fields are cheap to re-enter, so no warning is shown.</p>
 </div><div class="phonewrap">
   <div class="phone">
     <div class="status"><span>9:41</span><span>390 × 851</span></div>
@@ -399,6 +400,8 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
     <p class="body">BrainBuddy destroys the stored credential, stops observing this agent's runs, stops registering
     push notifications for them, and refuses new hand-offs and replies. Active runs become
     <strong>Connection disconnected</strong>. Disconnecting does not cancel work the agent already accepted.</p>
+    <p class="body">The discovered agent-card summary — name, version, description, skills and interface — is erased
+    with the credential, along with the card fingerprint.</p>
     <p class="body">Existing run history stays, redacted, until it expires.</p>
     <div class="field"><p class="label">Your Brain Buddy password</p><div class="input ph">Confirm it is you</div></div>
     <span class="btn tap44" style="padding:12px">Keep it connected</span>
@@ -409,7 +412,34 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <p class="phonecap"><span class="sid">M-01-S21</span>disconnect — destructive sheet</p>
   <p class="phonecap">The safe option sits above the destructive one, so the thumb rests on <strong>Keep it
   connected</strong> and <strong>Disconnect</strong> has to be reached for.</p>
-  
+
+</div></div>
+
+<h2 class="sec">Rate-limited connection test</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><article class="card stack g2" style="border-radius:14px">
+  <div class="row"><span class="subtitle" style="min-width:0">Hermes planner</span><span class="spacer"></span><span class="pill bad">Rate limited</span></div>
+  <p class="micro mono" style="word-break:break-all">https://hermes.example.com</p>
+  <p class="caption" style="color:var(--fg3)">The agent is rate limiting. It refused the test rather than answering it,
+  so BrainBuddy could not read its card or check the credential. Nothing was sent.</p>
+  <p class="caption" style="color:var(--fg3)">The agent asked to be left alone for 60 seconds. Test again after that.</p>
+  <p class="micro mono">Correlation ID 8e41-b30c-77a2</p>
+  <p class="caption" style="color:var(--warn-fg)">Still untested — cannot receive a hand-off yet.</p>
+  <div class="row" style="gap:8px"><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Test connection</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Rotate credential</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px;border-color:var(--bad-bd);color:var(--bad-fg)">Disconnect…</span></div>
+</article>
+  <p class="micro">Testing again re-uses the credential already stored, sealed. Nothing secret is shown and nothing has
+  to be typed again. When the agent gives no retry-after, the waiting line is dropped and the retry is offered at
+  once.</p></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S22</span>rate limited — the agent refused the connection test</p>
+  <p class="phonecap">FR-002 / SC-009, the same outcome as D-01-S25 and the same shape as the dispatch-side D-03-S03.
+  The category is its own sentence, the connection stays <strong>untested</strong> rather than sliding to ready or to
+  unreachable, and <strong>Test connection</strong> stays a 44pt target. Appended after review campaign 2; no existing
+  id moved.</p>
 </div></div>
 
 </div>
