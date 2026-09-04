@@ -19,15 +19,26 @@ import type {
  * which is not a claim that it is reachable now.
  */
 export function connectionStatusLabel(connection: AgentConnectionResponse): string {
+  // Checked before `status`, because a changed agent's stored status is
+  // `untested` and "Not tested" would hide the thing the user has to look at
+  // (FR-002, D-01-S20).
+  if (connection.agent_changed) {
+    return "Agent changed";
+  }
+  if (connection.last_test_error_code === "a2a_rate_limited") {
+    return "Rate limited";
+  }
   switch (connection.status) {
     case "disconnected":
-      return "Disconnected";
+      return connection.disconnect_reason === "superseded_wire_contract"
+        ? "Superseded wire contract"
+        : "Disconnected";
     case "invalid_credentials":
       return "Invalid credentials";
     case "unreachable":
       return "Unreachable";
     case "unsupported":
-      return "Unsupported connector";
+      return "Unsupported";
     case "untested":
       return "Not tested";
     default:
@@ -35,16 +46,65 @@ export function connectionStatusLabel(connection: AgentConnectionResponse): stri
   }
 }
 
+/**
+ * The four `unsupported` categories are four different sentences.
+ *
+ * Collapsing them into one would leave the owner with the least actionable
+ * message the product has: "no card at the well-known location" and "this card
+ * requires OAuth2" call for entirely different next steps (D-01-S14..S17).
+ */
+function unsupportedDetail(connection: AgentConnectionResponse): string {
+  const detail = connection.last_test_error_detail;
+  switch (connection.last_test_error_code) {
+    case "a2a_not_an_agent":
+      return "There is no agent card at its well-known location. Check the address you entered, then test again.";
+    case "a2a_protocol_version_unsupported": {
+      const found = detail && "found_version" in detail ? detail.found_version : null;
+      return found
+        ? `The card declares A2A ${found}. BrainBuddy speaks protocol version 1.0.x only.`
+        : "The card declares a protocol version outside 1.0.x. BrainBuddy speaks protocol version 1.0.x only.";
+    }
+    case "a2a_auth_scheme_unsupported": {
+      const scheme = detail && "scheme" in detail ? detail.scheme : null;
+      return scheme
+        ? `This card requires ${scheme}. BrainBuddy supports a bearer token or an API key named by the card, and nothing else.`
+        : "This card requires an authentication scheme BrainBuddy does not support. BrainBuddy supports a bearer token or an API key named by the card.";
+    }
+    default:
+      return "No JSON-RPC interface BrainBuddy can use over HTTPS.";
+  }
+}
+
+/** "Test again in about N seconds." — the agent's own number, or nothing. */
+export function rateLimitRetryCopy(connection: AgentConnectionResponse): string {
+  const detail = connection.last_test_error_detail;
+  const seconds =
+    detail && "retry_after_seconds" in detail ? detail.retry_after_seconds : null;
+  // CHK051: an agent that gave no hint gets no invented countdown. A fabricated
+  // number would send the user back at exactly the wrong moment.
+  return seconds === null || seconds === undefined
+    ? "Test again shortly."
+    : `Test again in about ${seconds} ${seconds === 1 ? "second" : "seconds"}.`;
+}
+
 export function connectionStatusDetail(connection: AgentConnectionResponse): string {
+  if (connection.agent_changed) {
+    return "This agent's card now advertises a different interface address or different authentication requirements than the one you tested. BrainBuddy will not send task content to a destination you have not tested. Test the connection again — you will be asked for your password, because a new destination is a new content-bearing send.";
+  }
+  if (connection.last_test_error_code === "a2a_rate_limited") {
+    return "The agent is rate limiting. It answered the test by refusing it, so BrainBuddy learned nothing about the connection and nothing was sent.";
+  }
   switch (connection.status) {
     case "disconnected":
-      return "The stored credential was destroyed. New hand-offs and replies through this agent are blocked.";
+      return connection.disconnect_reason === "superseded_wire_contract"
+        ? "Superseded wire contract. This connection was made under BrainBuddy's previous agent wire, which no longer exists. Add the agent again by its address to use it."
+        : "The stored credential and the agent-card summary BrainBuddy discovered were destroyed. New hand-offs and replies through this agent are blocked.";
     case "invalid_credentials":
-      return "The agent rejected the credential. Replace it below, then test again.";
+      return "The agent answered and rejected the credential. Rotate it below, then test again.";
     case "unreachable":
-      return "BrainBuddy could not reach this endpoint. Nothing was sent. Check the address and test again.";
+      return "BrainBuddy could not reach this address before the test timeout. Nothing was sent.";
     case "unsupported":
-      return "The agent answered but does not speak a protocol version BrainBuddy supports.";
+      return unsupportedDetail(connection);
     case "untested":
       return "BrainBuddy has not contacted this agent yet. Test it before handing over a task.";
     default:
@@ -52,6 +112,13 @@ export function connectionStatusDetail(connection: AgentConnectionResponse): str
         ? `The last contact is older than the ${formatDuration(connection.stale_after_seconds)} staleness threshold. Test it again before a hand-off.`
         : "The last test reached this agent and it authenticated.";
   }
+}
+
+/** The label beside the credential scheme. Never the credential itself. */
+export function authSchemeLabel(connection: AgentConnectionResponse): string {
+  return connection.auth_scheme === "bearer"
+    ? "Bearer token · stored sealed"
+    : `API key${connection.auth_header_name ? ` in ${connection.auth_header_name}` : ""} · stored sealed`;
 }
 
 type RunGuardInput = Pick<
@@ -101,14 +168,20 @@ export function canCancelRun(run: RunGuardInput): boolean {
   return isCommandable(run) && !run.cancel_requested && run.capabilities.cancel;
 }
 
-/** Fixed order so a missing capability is a visible "not supported", never a gap. */
+/**
+ * What the *card* declared, in a fixed order.
+ *
+ * Only the two booleans an A2A card actually carries. Reply and cancellation are
+ * deliberately absent: no card advertises either, so listing them here would
+ * turn a BrainBuddy product decision into something that reads as an agent
+ * promise (FR-002, FR-010).
+ */
 export function capabilityDisclosure(
   capabilities: AgentCapabilities
 ): Array<{ label: string; supported: boolean }> {
   return [
-    { label: "Progress updates", supported: capabilities.progress },
-    { label: "Replies to questions", supported: capabilities.reply },
-    { label: "Cancellation", supported: capabilities.cancel }
+    { label: "Streaming updates", supported: capabilities.streaming },
+    { label: "Push notifications", supported: capabilities.push_notifications }
   ];
 }
 

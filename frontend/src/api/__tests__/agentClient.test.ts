@@ -52,14 +52,14 @@ describe("apiClient external agent relay contract", () => {
     expect(new Headers(init.headers).get("Idempotency-Key")).toBeNull();
   });
 
-  it("creates a connection with the caller's idempotency key and the re-authentication password", async () => {
-    fetchMock.mockResolvedValue(response({ id: "conn-1", inbound_signing_secret: "secret" }, 201));
+  it("014-FR-001 creates a connection by address and scheme, never a header name", async () => {
+    fetchMock.mockResolvedValue(response({ id: "conn-1" }, 201));
 
     await apiClient.createAgentConnection(
       {
         name: "Hermes",
-        endpoint_url: "https://agent.example.com/hooks",
-        auth_header_name: "Authorization",
+        agent_address: "https://agent.example.com",
+        auth_scheme: "api_key",
         credential: "token-abc",
         current_password: "hunter2hunter2"
       },
@@ -70,21 +70,27 @@ describe("apiClient external agent relay contract", () => {
     expect(url).toBe(`${API_BASE_URL}/agent-connections`);
     expect(init.method).toBe("POST");
     expect(new Headers(init.headers).get("Idempotency-Key")).toBe("create-connection-key");
-    expect(JSON.parse(String(init.body))).toEqual({
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body).toEqual({
       name: "Hermes",
-      endpoint_url: "https://agent.example.com/hooks",
-      auth_header_name: "Authorization",
+      agent_address: "https://agent.example.com",
+      auth_scheme: "api_key",
       credential: "token-abc",
       current_password: "hunter2hunter2"
     });
+    // The header the credential travels in comes from the agent's card, so the
+    // client has nothing to send and no field to send it in.
+    expect(body).not.toHaveProperty("auth_header_name");
+    expect(body).not.toHaveProperty("endpoint_url");
   });
 
-  it("updates a connection with the backend PUT contract and caller idempotency key", async () => {
+  it("014-FR-001 updates a connection by address and scheme with the caller's key", async () => {
     fetchMock.mockResolvedValue(response({ id: "conn-1", name: "Hermes prod", revision: 3 }));
 
     const payload = {
       name: "Hermes prod",
-      endpoint_url: "https://agent.example.com/v2/hooks",
+      agent_address: "https://second.example.com",
+      auth_scheme: "bearer" as const,
       expected_revision: 2,
       current_password: "hunter2hunter2"
     };

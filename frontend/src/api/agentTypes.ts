@@ -2,10 +2,11 @@
  * Wire contracts for the external-agent relay (`backend/app/schemas/agents.py`).
  *
  * Two properties of that contract shape everything here. No response type can
- * carry a saved credential — the only secret the server ever returns is the
- * one-time `inbound_signing_secret` on create. And a run keeps connector-reported
- * facts, BrainBuddy-derived conditions, and pending user commands in separate
- * fields, so the client never has to blend them into an invented status.
+ * carry a saved credential, and registration returns no secret of any kind — the
+ * A2A wire has no inbound secret for an owner to configure. And a run keeps
+ * agent-reported facts, BrainBuddy-derived conditions, and pending user commands
+ * in separate fields, so the client never has to blend them into an invented
+ * status.
  */
 
 /**
@@ -176,7 +177,12 @@ export interface AgentConnectionRotateSigningSecretRequest {
   expected_revision: number;
 }
 
-/** The replacement, returned by rotation and by nothing else. */
+/**
+ * The replacement, returned by rotation and by nothing else.
+ *
+ * The last shape in this file that can carry a secret. It survives only until
+ * the bespoke inbound wire is removed with the route that issues it.
+ */
 export interface AgentConnectionSigningSecretResponse extends AgentConnectionResponse {
   inbound_signing_secret: string;
 }
@@ -283,7 +289,8 @@ export interface AgentRunResponse {
   content_expires_at: string;
   last_contact_at: string | null;
   reporting_window_seconds: number;
-  capabilities: AgentCapabilities;
+  /** The controls still offered on *this* run. Never a card declaration. */
+  capabilities: AgentControls;
   manifest: AgentManifestResponse | null;
   events: AgentRunEvent[];
   commands: AgentRunCommand[];

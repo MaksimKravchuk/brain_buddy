@@ -13,12 +13,15 @@ import { Overlay, OverlayHeader } from "../../components/ui/Overlay";
 import { Feedback, Field, SectionCard } from "../../components/ui/SettingsSection";
 import { getErrorMessage } from "../../utils/error";
 import { definitivelyRejected, useIntentKey, type IntentKey } from "../../utils/idempotency";
+import type { AgentAuthScheme } from "../../api/agentTypes";
 import {
+  authSchemeLabel,
   capabilityDisclosure,
   connectionStatusDetail,
   connectionStatusLabel,
   formatDuration,
-  formatTimestamp
+  formatTimestamp,
+  rateLimitRetryCopy
 } from "./agentCopy";
 
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
@@ -59,13 +62,14 @@ export function AgentSettingsPage({ rolloutEnabled }: { rolloutEnabled: boolean 
         {!rolloutEnabled ? (
           <section className="rounded-xl border border-needs-you-border bg-needs-you-bg p-4 text-sm text-needs-you-fg">
             The external-agent relay rollout is off. Existing connections remain visible and may be
-            safely disconnected, but adding, editing, testing, or replacing credentials is unavailable.
+            safely disconnected, and runs already handed over keep reporting, but adding, editing,
+            testing, or replacing credentials is unavailable.
           </section>
         ) : null}
         {rolloutEnabled ? <AddConnectionSection /> : null}
         <SectionCard
           title="Your agents"
-          description="Status and capabilities come from the last connection test, not from BrainBuddy."
+          description="Everything below is read from the agent's own published card by the last connection test. BrainBuddy states only what it observed."
         >
           {connectionsQuery.isError ? (
             <Feedback error={getErrorMessage(connectionsQuery.error)} success={null} />
@@ -98,15 +102,12 @@ function AddConnectionSection(): React.JSX.Element {
   const keys = useAgentKeys();
   const online = useRelayOnline();
   const [name, setName] = useState("");
-  const [endpointUrl, setEndpointUrl] = useState("");
-  const [authHeaderName, setAuthHeaderName] = useState("X-Agent-Key");
+  const [agentAddress, setAgentAddress] = useState("");
+  const [authScheme, setAuthScheme] = useState<AgentAuthScheme>("bearer");
   const [credential, setCredential] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  // Held in component state on purpose: navigating away unmounts this and the
-  // secret is gone for good, because the server will never return it again.
-  const [signingSecret, setSigningSecret] = useState<string | null>(null);
-  const [createdWithoutSecret, setCreatedWithoutSecret] = useState<string | null>(null);
+  const [added, setAdded] = useState<string | null>(null);
   const createKey = useIntentKey("agent-connection-create");
 
   const mutation = useRelayMutation({
@@ -115,23 +116,23 @@ function AddConnectionSection(): React.JSX.Element {
       return apiClient.createAgentConnection(
         {
           name,
-          endpoint_url: endpointUrl,
-          auth_header_name: authHeaderName,
+          agent_address: agentAddress,
+          auth_scheme: authScheme,
           credential,
           current_password: currentPassword
         },
-        createKey.current(JSON.stringify([name, endpointUrl, authHeaderName, credential, currentPassword]))
+        createKey.current(
+          JSON.stringify([name, agentAddress, authScheme, credential, currentPassword])
+        )
       );
     },
     onSuccess: (created) => {
       createKey.settle();
       setError(null);
-      const returnedSecret = created.inbound_signing_secret.trim();
-      setSigningSecret(returnedSecret || null);
-      setCreatedWithoutSecret(returnedSecret ? null : created.name);
+      setAdded(created.name);
       setName("");
-      setEndpointUrl("");
-      setAuthHeaderName("X-Agent-Key");
+      setAgentAddress("");
+      setAuthScheme("bearer");
       setCredential("");
       setCurrentPassword("");
       void queryClient.invalidateQueries({ queryKey: keys.connections() });
@@ -140,7 +141,7 @@ function AddConnectionSection(): React.JSX.Element {
       if (definitivelyRejected(caught)) {
         createKey.settle();
       }
-      setSigningSecret(null);
+      setAdded(null);
       setError(getErrorMessage(caught));
     }
   });
@@ -158,22 +159,15 @@ function AddConnectionSection(): React.JSX.Element {
       <form aria-label="Add an agent" className="flex flex-col gap-3" onSubmit={handleSubmit}>
         <Field label="Agent name" name="agent_name" type="text" value={name} onChange={setName} />
         <Field
-          label="Endpoint URL"
-          name="endpoint_url"
+          label="Agent address"
+          name="agent_address"
           type="url"
-          value={endpointUrl}
-          onChange={setEndpointUrl}
-          placeholder="https://agent.example.com/brain-buddy"
-          hint="The deployment decides which destinations are allowed. Loopback, link-local, metadata and private-network addresses are refused unless your deployment enables them."
+          value={agentAddress}
+          onChange={setAgentAddress}
+          placeholder="https://agent.example.com"
+          hint="BrainBuddy fetches the agent card from this address's standard well-known location. The deployment decides which destinations are allowed. Loopback, link-local, metadata and private-network addresses are refused unless your deployment enables them."
         />
-        <Field
-          label="Auth header name"
-          name="auth_header_name"
-          type="text"
-          value={authHeaderName}
-          onChange={setAuthHeaderName}
-          hint="The header BrainBuddy puts the credential in when it calls your agent."
-        />
+        <AuthSchemeChoice value={authScheme} onChange={setAuthScheme} />
         <Field
           label="Credential"
           name="agent_credential"
@@ -198,53 +192,78 @@ function AddConnectionSection(): React.JSX.Element {
           </Button>
         </div>
       </form>
-      {createdWithoutSecret ? (
-        <p role="status" className="mt-3 text-sm text-needs-you-fg">
-          {createdWithoutSecret} was added, but its one-time signing secret is no longer
-          available. In Your agents below, choose Replace signing secret to issue a new one.
+      {added ? (
+        <p role="status" className="mt-3 text-sm text-slate-600">
+          {added} was added. Test it below — BrainBuddy reads its card and checks the
+          credential before it will take a hand-off.
         </p>
-      ) : null}
-      {signingSecret ? (
-        <SigningSecretPanel secret={signingSecret} onDismiss={() => setSigningSecret(null)} />
       ) : null}
     </SectionCard>
   );
 }
 
-/** The one and only render of the inbound signing secret. */
-function SigningSecretPanel({
-  secret,
-  onDismiss,
-  title = "Inbound signing secret",
-  lead
+/**
+ * The two credential schemes, and the header name the card decides (D-01-S08/S09).
+ *
+ * The header field is read-only on purpose. It is discovery output, not user
+ * input: a typed value could point the credential at a header the agent never
+ * asked for, and the owner has no way to know which one it wants until the card
+ * has been read.
+ */
+function AuthSchemeChoice({
+  value,
+  onChange,
+  headerName = null
 }: {
-  secret: string;
-  onDismiss: () => void;
-  title?: string;
-  lead?: string;
+  value: AgentAuthScheme;
+  onChange: (scheme: AgentAuthScheme) => void;
+  headerName?: string | null;
 }): React.JSX.Element {
-  const titleId = useId();
+  const groupId = useId();
   return (
-    <section
-      aria-labelledby={titleId}
-      className="mt-4 flex flex-col gap-2 rounded-xl border border-needs-you-border bg-needs-you-bg p-4"
-    >
-      <h3 id={titleId} className="text-sm font-semibold text-needs-you-fg">
-        {title}
-      </h3>
-      <p className="text-sm text-needs-you-fg">
-        {lead ??
-          "Copy this now — BrainBuddy will never show it again. Configure your agent to sign every report it sends back with this secret, or BrainBuddy will reject its events."}
-      </p>
-      <code className="break-all rounded-md border border-needs-you-border bg-white px-3 py-2 font-mono text-sm text-slate-900">
-        {secret}
-      </code>
-      <div>
-        <Button type="button" variant="secondary" size="sm" onClick={onDismiss}>
-          I&apos;ve saved it
-        </Button>
+    <fieldset className="flex flex-col gap-2" aria-describedby={`${groupId}-hint`}>
+      <legend className="text-xs font-medium text-slate-700">Credential scheme</legend>
+      <div className="flex flex-wrap gap-4">
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="radio"
+            name={`${groupId}-scheme`}
+            value="bearer"
+            checked={value === "bearer"}
+            onChange={() => onChange("bearer")}
+          />
+          Bearer token
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="radio"
+            name={`${groupId}-scheme`}
+            value="api_key"
+            checked={value === "api_key"}
+            onChange={() => onChange("api_key")}
+          />
+          API key
+        </label>
       </div>
-    </section>
+      {value === "api_key" ? (
+        <label className="flex flex-col gap-1 text-xs text-slate-700">
+          Header name
+          <input
+            type="text"
+            readOnly
+            aria-readonly="true"
+            value={headerName ?? "Read from the agent card when you test"}
+            className="rounded-md border border-slate-200 bg-surface-sunken px-3 py-2 text-sm text-slate-600"
+          />
+          <span className="text-slate-500">
+            Read from the agent card after discovery. You do not type it.
+          </span>
+        </label>
+      ) : null}
+      <p id={`${groupId}-hint`} className="text-xs text-slate-500">
+        BrainBuddy supports a bearer token or an API key the card names, and nothing else.
+      </p>
+    </fieldset>
   );
 }
 
@@ -263,15 +282,7 @@ function ConnectionCard({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
-  const [signingSecretOpen, setSigningSecretOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  // Component state only, exactly like the create response: it is never written
-  // to the query cache or storage, and unmounting this card loses it for good.
-  const [replacementSecret, setReplacementSecret] = useState<string | null>(null);
-  // Held on the card, not in the dialog: closing and reopening after a failure
-  // the user cannot interpret is still the *same* attempt, so it must not mint
-  // a second key and rotate twice.
-  const signingSecretKey = useIntentKey("agent-signing-secret");
   const disconnectKey = useIntentKey(`agent-disconnect-${connection.id}`);
 
   const refresh = (message: string) => {
@@ -304,7 +315,7 @@ function ConnectionCard({
           <h3 id={titleId} className="text-sm font-semibold text-slate-900">
             {connection.name}
           </h3>
-          <p className="mt-0.5 break-all text-xs text-slate-500">{connection.endpoint_url}</p>
+          <p className="mt-0.5 break-all text-xs text-slate-500">{connection.agent_address}</p>
         </div>
         <StatusBadge connection={connection} />
       </div>
@@ -315,20 +326,22 @@ function ConnectionCard({
           ? "Ready to receive a hand-off."
           : "Cannot receive a hand-off yet."}
       </p>
-      {connection.last_test_error_code ===
-      "legacy_invalid_auth_header_requires_reconfiguration" ? (
+      {connection.last_test_error_code === "a2a_rate_limited" ? (
+        <p className="text-xs text-needs-you-fg">{rateLimitRetryCopy(connection)}</p>
+      ) : connection.last_test_error_code ===
+        "legacy_invalid_auth_header_requires_reconfiguration" ? (
         <p className="text-xs text-needs-you-fg">
-          Enter a replacement credential for {connection.auth_header_name}, then test the connection.
-        </p>
-      ) : connection.last_test_error_code ? (
-        <p className="text-xs text-slate-500">
-          The last connection test failed. Test again after correcting the connection settings.
+          Enter a replacement credential, then test the connection.
         </p>
       ) : null}
 
+      {connection.agent_changed ? <AgentChangedComparison connection={connection} /> : null}
+      {connection.card ? <DiscoveryResult connection={connection} /> : null}
+      {connection.tier_disclosure ? <TierDisclosure connection={connection} /> : null}
+
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-500">
-        <dt className="sr-only">Credential header</dt>
-        <dd className="col-span-2">Credential header: {connection.auth_header_name}</dd>
+        <dt className="sr-only">Credential</dt>
+        <dd className="col-span-2">Credential: {authSchemeLabel(connection)}</dd>
         <dt className="sr-only">Last contact</dt>
         <dd className="col-span-2">Last contact: {formatTimestamp(connection.last_contact_at)}</dd>
         <dt className="sr-only">Last tested</dt>
@@ -353,9 +366,9 @@ function ConnectionCard({
             </li>
           ))}
         </ul>
-        {connection.status === "untested" ? (
+        {connection.card === null ? (
           <p className="text-xs text-slate-500">
-            Capabilities are only known after a successful test.
+            The agent&apos;s card is only read on a successful test.
           </p>
         ) : null}
       </div>
@@ -384,15 +397,6 @@ function ConnectionCard({
         >
           Test connection
         </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={isDisconnected || !online}
-          onClick={() => setSigningSecretOpen(true)}
-        >
-          Replace signing secret…
-        </Button>
           </>
         ) : null}
         <Button
@@ -417,31 +421,9 @@ function ConnectionCard({
         />
       ) : null}
 
-      {replacementSecret ? (
-        <SigningSecretPanel
-          secret={replacementSecret}
-          title="Replacement signing secret"
-          lead="Copy this now — BrainBuddy will never show it again. The previous signing secret has already stopped verifying reports, so configure your agent with this one before it reports again."
-          onDismiss={() => setReplacementSecret(null)}
-        />
-      ) : null}
-
       {!mutationsEnabled || isDisconnected ? null : (
         <RotateCredentialForm connection={connection} online={online} onDone={refresh} onFailed={setError} />
       )}
-
-      {mutationsEnabled && signingSecretOpen && online ? (
-        <ReplaceSigningSecretDialog
-          connection={connection}
-          intentKey={signingSecretKey}
-          onClose={() => setSigningSecretOpen(false)}
-          onReplaced={(secret) => {
-            setSigningSecretOpen(false);
-            setReplacementSecret(secret);
-            refresh("Signing secret replaced. The previous one no longer verifies reports.");
-          }}
-        />
-      ) : null}
 
       {disconnectOpen ? (
         <DisconnectDialog
@@ -456,6 +438,123 @@ function ConnectionCard({
         />
       ) : null}
     </article>
+  );
+}
+
+/**
+ * The tested destination beside the one the card now advertises (D-01-S20).
+ *
+ * Both are card text, so both render as plain text: making either navigable is
+ * exactly the mistake the warning exists to prevent (AC-031).
+ */
+function AgentChangedComparison({
+  connection
+}: {
+  connection: AgentConnectionResponse;
+}): React.JSX.Element {
+  const detail = connection.last_test_error_detail;
+  const current = detail && "interface_url" in detail ? detail.interface_url : null;
+  return (
+    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg border border-needs-you-border bg-needs-you-bg p-3 text-xs text-needs-you-fg">
+      <dt>Tested interface</dt>
+      <dd className="break-all font-mono">{connection.card?.interface_url ?? "Unknown"}</dd>
+      <dt>Card now says</dt>
+      <dd className="break-all font-mono">{current ?? "Unknown"}</dd>
+    </dl>
+  );
+}
+
+/**
+ * What the agent's published card says about itself (D-01-S10/S11).
+ *
+ * Every value here is untrusted agent text and is rendered as plain text: no
+ * anchor, no markup interpretation, no auto-linking, whatever scheme the agent
+ * chose for its interface (FR-016, AC-031). `interface_url` in particular is
+ * shown so the owner can see where their content would go — which is the reason
+ * it must never become something a stray click can follow.
+ */
+function DiscoveryResult({
+  connection
+}: {
+  connection: AgentConnectionResponse;
+}): React.JSX.Element {
+  const card = connection.card;
+  return (
+    <section aria-label="Discovery result" className="flex flex-col gap-1.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+        Read from the agent card
+      </p>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-600">
+        <dt>Name</dt>
+        <dd className="break-words">{card?.name ?? "Not stated"}</dd>
+        <dt>Version</dt>
+        <dd className="break-words">{card?.version ?? "Not stated"}</dd>
+        <dt>Description</dt>
+        <dd className="break-words">{card?.description ?? "Not stated"}</dd>
+        <dt>Protocol version</dt>
+        <dd className="break-words">{card?.protocol_version ?? "Not stated"}</dd>
+        <dt>Interface</dt>
+        <dd className="break-all font-mono">{card?.interface_url ?? "Not stated"}</dd>
+      </dl>
+      {card && card.skills.length > 0 ? (
+        <ul aria-label="Skills" className="flex flex-wrap gap-1.5">
+          {card.skills.map((skill, index) => (
+            <li
+              key={`${skill.id ?? "skill"}-${index}`}
+              className="rounded-full border border-slate-200 px-2 py-[2px] text-[11px] text-slate-600"
+            >
+              {skill.name ?? skill.id ?? "Unnamed skill"}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * The server-owned tier sentence, rendered verbatim (FR-014).
+ *
+ * The link to the published extension specification is the only navigable thing
+ * on the row, and it is BrainBuddy's own address: it opens on an explicit click,
+ * in a new context, and says so.
+ */
+function TierDisclosure({
+  connection
+}: {
+  connection: AgentConnectionResponse;
+}): React.JSX.Element {
+  const guaranteed = connection.guarantee_tier === "guaranteed";
+  return (
+    <section
+      aria-label="Guarantee"
+      className={`flex flex-col gap-1 rounded-lg border p-3 text-xs ${
+        guaranteed
+          ? "border-ai-border bg-ai-bg text-ai-fg"
+          : "border-needs-you-border bg-needs-you-bg text-needs-you-fg"
+      }`}
+    >
+      <p>{connection.tier_disclosure}</p>
+      {!guaranteed && connection.tier_disclosure_url ? (
+        <p>
+          <a
+            className="underline"
+            href={connection.tier_disclosure_url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Read the single-start extension specification
+          </a>{" "}
+          <span className="text-slate-500">
+            Opens the published specification outside BrainBuddy, so you can ask your
+            agent&apos;s operator to declare it.
+          </span>
+        </p>
+      ) : null}
+      {connection.cancellation_disclosure ? (
+        <p>{connection.cancellation_disclosure}</p>
+      ) : null}
+    </section>
   );
 }
 
@@ -488,17 +587,27 @@ function UpdateConnectionForm({
   onDone: (message: string) => void;
 }): React.JSX.Element {
   const [name, setName] = useState(connection.name);
-  const [endpointUrl, setEndpointUrl] = useState(connection.endpoint_url);
+  const [agentAddress, setAgentAddress] = useState(connection.agent_address);
+  const [authScheme, setAuthScheme] = useState<AgentAuthScheme>(connection.auth_scheme);
   const [currentPassword, setCurrentPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ambiguous, setAmbiguous] = useState(false);
   const keys = useAgentKeys();
   const intentKey = useIntentKey(`agent-connection-update-${connection.id}`);
   const frozen = useRef<{
-    body: { name?: string; endpoint_url?: string; expected_revision: number; current_password?: string };
+    body: {
+      name?: string;
+      agent_address?: string;
+      auth_scheme?: AgentAuthScheme;
+      expected_revision: number;
+      current_password?: string;
+    };
     idempotencyKey: string;
   } | null>(null);
-  const endpointChanged = endpointUrl.trim() !== connection.endpoint_url;
+  // A scheme change is a scope change exactly as an address change is: the same
+  // secret presented differently may reach a different agent (FR-004).
+  const scopeChanged =
+    agentAddress.trim() !== connection.agent_address || authScheme !== connection.auth_scheme;
 
   const mutation = useRelayMutation({
     mutationKey: keys.mutation("connection-update", connection.id),
@@ -508,9 +617,11 @@ function UpdateConnectionForm({
       intentKey.settle();
       frozen.current = null;
       setAmbiguous(false);
-      onDone(input.body.endpoint_url
-        ? "Connection updated. Test it again before handing off new work."
-        : "Connection name updated.");
+      onDone(
+        input.body.agent_address || input.body.auth_scheme
+          ? "Connection updated. Test it again before handing off new work."
+          : "Connection name updated."
+      );
     },
     onError: (caught: unknown) => {
       const definitive = definitivelyRejected(caught);
@@ -539,7 +650,15 @@ function UpdateConnectionForm({
         event.preventDefault();
         const body = {
           ...(name.trim() !== connection.name ? { name: name.trim() } : {}),
-          ...(endpointChanged ? { endpoint_url: endpointUrl.trim(), current_password: currentPassword } : {}),
+          ...(scopeChanged
+            ? {
+                ...(agentAddress.trim() !== connection.agent_address
+                  ? { agent_address: agentAddress.trim() }
+                  : {}),
+                ...(authScheme !== connection.auth_scheme ? { auth_scheme: authScheme } : {}),
+                current_password: currentPassword
+              }
+            : {}),
           expected_revision: connection.revision
         };
         const snapshot = {
@@ -553,16 +672,21 @@ function UpdateConnectionForm({
       <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Edit connection</p>
       <Field label="Agent name" name={`update_name_${connection.id}`} type="text" value={name} onChange={setName} />
       <Field
-        label="Endpoint URL"
-        name={`update_endpoint_${connection.id}`}
+        label="Agent address"
+        name={`update_address_${connection.id}`}
         type="url"
-        value={endpointUrl}
-        onChange={setEndpointUrl}
+        value={agentAddress}
+        onChange={setAgentAddress}
       />
-      {endpointChanged ? (
+      <AuthSchemeChoice
+        value={authScheme}
+        onChange={setAuthScheme}
+        headerName={connection.auth_header_name}
+      />
+      {scopeChanged ? (
         <>
           <p className="text-xs text-needs-you-fg">
-            An endpoint change resets readiness. Reauthenticate now, then test the new destination before another hand-off.
+            Changing the address or the credential scheme resets readiness. Reauthenticate now, then test the new destination before another hand-off.
           </p>
           <Field
             label="Current password"
@@ -677,106 +801,6 @@ function RotateCredentialForm({
   );
 }
 
-/**
- * The only way back from a lost signing secret.
- *
- * Guarded like registration because it is the same act — issuing credential
- * material — and phrased so the user cannot mistake it for the outbound
- * credential: this replaces what their agent signs *reports* with, and the old
- * one dies immediately rather than at some later cutover.
- */
-function ReplaceSigningSecretDialog({
-  connection,
-  intentKey,
-  onClose,
-  onReplaced
-}: {
-  connection: AgentConnectionResponse;
-  intentKey: IntentKey;
-  onClose: () => void;
-  onReplaced: (secret: string) => void;
-}): React.JSX.Element {
-  const titleId = useId();
-  const keys = useAgentKeys();
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const mutation = useRelayMutation({
-    mutationKey: keys.mutation("signing-secret-rotate", connection.id),
-    mutationFn: () => {
-      return apiClient.rotateAgentSigningSecret(
-        connection.id,
-        { current_password: currentPassword, expected_revision: connection.revision },
-        // The in-memory intent includes every material request value, including
-        // the password, so only an exact ambiguous replay can reuse the key.
-        // Closing the dialog clears the UI value but not this card-owned intent;
-        // retyping the exact payload safely resumes it, while any change mints.
-        intentKey.current(JSON.stringify([connection.id, connection.revision, currentPassword]))
-      );
-    },
-    onSuccess: (replaced) => {
-      intentKey.settle();
-      setCurrentPassword("");
-      onReplaced(replaced.inbound_signing_secret);
-    },
-    onError: (caught: unknown) => {
-      if (definitivelyRejected(caught)) {
-        intentKey.settle();
-      }
-      setError(getErrorMessage(caught));
-    }
-  });
-
-  return (
-    <Overlay labelledBy={titleId} onClose={onClose} size="narrow">
-      <OverlayHeader
-        titleId={titleId}
-        eyebrow="Signing secret"
-        title={`Replace ${connection.name}'s signing secret?`}
-        onClose={onClose}
-      />
-      <form
-        className="flex flex-col gap-4 px-5 py-5 sm:px-6"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setError(null);
-          mutation.mutate();
-        }}
-      >
-        <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600">
-          <li>
-            This is the secret your agent signs its reports with — not the credential BrainBuddy
-            sends to your agent. Replacing one does not change the other.
-          </li>
-          <li>
-            The current signing secret stops verifying reports the moment the replacement is
-            issued, so a running agent&apos;s events will be rejected until you configure the new
-            one.
-          </li>
-          <li>The replacement is shown once, here, and BrainBuddy cannot show it again.</li>
-        </ul>
-        <Field
-          label="Confirm with your password"
-          name={`signing_secret_password_${connection.id}`}
-          type="password"
-          value={currentPassword}
-          onChange={setCurrentPassword}
-          autoComplete="current-password"
-        />
-        <Feedback error={error} success={null} />
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" size="md" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" size="md" isLoading={mutation.isPending}>
-            Replace signing secret
-          </Button>
-        </div>
-      </form>
-    </Overlay>
-  );
-}
-
 function DisconnectDialog({
   connection,
   intentKey,
@@ -840,8 +864,9 @@ function DisconnectDialog({
             stopped, request cancellation first and wait for the agent to confirm it.
           </li>
           <li>
-            The stored credential is destroyed. New hand-offs and replies through this agent are
-            blocked, and later reports signed with it are rejected.
+            The stored credential and the agent-card summary BrainBuddy discovered — its name,
+            version, description, skills and interface — are erased together, along with the card
+            fingerprint. New hand-offs and replies through this agent are blocked.
           </li>
           <li>
             Runs already attached to your tasks stay visible until they expire under the retention
