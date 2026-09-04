@@ -34,7 +34,6 @@ from app.exceptions import (
 from app.schemas.agents import (
     AgentCapabilitiesResponse,
     AgentCardResponse,
-    AgentConnectionCreatedResponse,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
     AgentConnectionResponse,
@@ -167,6 +166,13 @@ TIER_DISCLOSURES: dict[str, str] = {
     "best_effort": BEST_EFFORT_TIER_DISCLOSURE,
 }
 
+#: Fallback discovery policy, used only when no `card_fetcher` is injected. The
+#: container always injects one built from `AgentRelaySettings`; these exist so a
+#: service constructed in a test still has a working, bounded default rather than
+#: an unbounded fetch or none at all.
+DEFAULT_CARD_TIMEOUT_SECONDS = 10.0
+DEFAULT_CARD_MAX_RESPONSE_BYTES = 64_000
+
 #: The sentinel task id of the ``GetTask`` fallback probe. Deliberately a name
 #: no agent would mint: a ``-32001`` answer to it proves the credential was
 #: accepted *before* the lookup failed, which is exactly what the test needs to
@@ -176,6 +182,14 @@ PROBE_TASK_ID = "brainbuddy-probe"
 #: Client failure codes that mean "the credential was refused", whatever the
 #: transport said.
 _CREDENTIALS_REJECTED = frozenset({A2A_CREDENTIALS_REJECTED})
+
+#: Connection failures a hand-off refusal names verbatim instead of collapsing
+#: into "not ready". Each one has a different corrective action, and a user who
+#: is told only "not ready" about a rate limit will retest immediately and be
+#: rate limited again (contracts/api-deltas.md, error reasons).
+_DISPATCH_REFUSAL_REASONS = frozenset(
+    {A2A_AUTH_SCHEME_UNSUPPORTED, A2A_RATE_LIMITED, AGENT_CARD_CHANGED}
+)
 
 #: Discovery failures that are the agent's *shape*, not its reachability. Each
 #: one is its own sentence on D-01-S14..S17.
@@ -321,8 +335,6 @@ class AgentRelayService:
         # the same settings, so there is never a service that cannot discover.
         card_fetcher: CardFetcherPort | None = None,
         tier_disclosure_url: str = SINGLE_START_EXTENSION_URI,
-        connector_timeout_seconds: float = 10.0,
-        connector_max_response_bytes: int = 64_000,
         stale_after: timedelta = DEFAULT_STALE_AFTER,
         reporting_window: timedelta = DEFAULT_REPORTING_WINDOW,
         content_retention: timedelta = DEFAULT_CONTENT_RETENTION,
@@ -346,8 +358,8 @@ class AgentRelayService:
         self._now = now
         self._card_fetcher: CardFetcherPort = card_fetcher or partial(
             fetch_card,
-            timeout_seconds=connector_timeout_seconds,
-            max_response_bytes=connector_max_response_bytes,
+            timeout_seconds=DEFAULT_CARD_TIMEOUT_SECONDS,
+            max_response_bytes=DEFAULT_CARD_MAX_RESPONSE_BYTES,
             allow_private_destinations=allow_private_destinations,
             resolver=resolver,
         )
@@ -1029,9 +1041,7 @@ class AgentRelayService:
 
     # --- discovery and the authenticated probe (FR-002) ---------------------
 
-    def _discovery_failure_updates(
-        self, discovery: CardDiscovery
-    ) -> dict[str, Any]:
+    def _discovery_failure_updates(self, discovery: CardDiscovery) -> dict[str, Any]:
         """What a card that could not be used records, and nothing more.
 
         Each failure code is its own sentence to the owner (D-01-S14..S17), so
@@ -1041,7 +1051,9 @@ class AgentRelayService:
         """
 
         code = discovery.failure_code or A2A_UNREACHABLE
-        status = "unsupported" if code in _UNSUPPORTED_DISCOVERY_CODES else "unreachable"
+        status = (
+            "unsupported" if code in _UNSUPPORTED_DISCOVERY_CODES else "unreachable"
+        )
         return {
             "status": status,
             "last_test_error_code": code,
@@ -1590,7 +1602,21 @@ class AgentRelayService:
                     "inbound_secret": None,
                     "status": "disconnected",
                     "capabilities": AgentCapabilities(),
+                    # The discovered card goes with the credential: it is
+                    # connection configuration, and a disconnected connection
+                    # that still described where it pointed would outlive the
+                    # decision to stop pointing there (FR-016, AC-024).
+                    "card": None,
+                    "card_fingerprint": None,
+                    "card_drift_at": None,
+                    "guarantee_tier": None,
+                    "auth_header_name": None,
+                    "best_effort_acknowledged_at": None,
                     "disconnected_at": now,
+                    # Deliberate, and distinguishable from the wire migration's
+                    # `superseded_wire_contract`: the two read very differently
+                    # to whoever finds a dead connection (D-01-S21).
+                    "disconnect_reason": "owner",
                     "updated_at": now,
                     "revision": connection.revision + 1,
                 }
@@ -1638,10 +1664,25 @@ class AgentRelayService:
                 "work to it.",
                 detail={"reason": "connection_disconnected"},
             )
+        if connection.agent_changed:
+            # Its own reason, not a generic "not ready": the corrective action
+            # differs — this one asks the owner to look at *where* their content
+            # would now go before agreeing to send it again (D-01-S20, AC-012).
+            raise ValidationFailure(
+                "This agent's card now advertises a different destination than "
+                "the one you tested. Test the connection again before handing "
+                "work to it.",
+                detail={"reason": AGENT_CARD_CHANGED},
+            )
         if connection.status != "ready":
+            reason = (
+                connection.last_test_error_code
+                if connection.last_test_error_code in _DISPATCH_REFUSAL_REASONS
+                else "connection_not_ready"
+            )
             raise ValidationFailure(
                 "Test this connection successfully before handing work to it.",
-                detail={"reason": "connection_not_ready", "status": connection.status},
+                detail={"reason": reason, "status": connection.status},
             )
         if self._is_stale(connection):
             raise ValidationFailure(

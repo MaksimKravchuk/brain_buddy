@@ -187,7 +187,11 @@ class AgentConnectionUpdateRequest(StrictBaseModel):
 
     @model_validator(mode="after")
     def _requires_an_update(self) -> AgentConnectionUpdateRequest:
-        if self.name is None and self.agent_address is None and self.auth_scheme is None:
+        if (
+            self.name is None
+            and self.agent_address is None
+            and self.auth_scheme is None
+        ):
             raise ValueError("name, agent_address or auth_scheme is required")
         return self
 

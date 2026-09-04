@@ -25,22 +25,19 @@ from pydantic import AfterValidator, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
+from app.modules.agents.a2a.card import (
+    SINGLE_START_EXTENSION_URI,
+    AgentAuthSchemeOffer,
+    CardDiscovery,
+    fetch_card,
+)
+from app.modules.agents.a2a.client import A2AResult
 from app.modules.agents.connector import (
     ConnectorCommandOutcome,
     ConnectorStartOutcome,
     ConnectorTarget,
     ConnectorTestOutcome,
 )
-from app.modules.agents.a2a.card import (
-    SINGLE_START_EXTENSION_URI,
-    AgentAuthSchemeOffer,
-    AgentCardSummary,
-    AgentSkillSummary,
-    CardDiscovery,
-    card_fingerprint,
-    fetch_card,
-)
-from app.modules.agents.a2a.client import A2AResult, A2ATarget
 from app.modules.agents.domain import (
     PROTOCOL_VERSION,
     REPORTING_INSTRUCTIONS_VERSION,
@@ -75,6 +72,13 @@ from app.schemas.agents import (
     AgentReplyRequest,
 )
 from app.schemas.common import StorageBaseModel
+
+from .a2a_fakes import (
+    FakeA2AClient,
+    FakeCardFetcher,
+    card_summary,
+    ready_discovery,
+)
 
 OWNER = "user_a"
 OTHER_OWNER = "user_b"
@@ -111,50 +115,6 @@ class FakeConnector:
         return self.command_outcome
 
 
-class FakeCardFetcher:
-    """Discovery as one scriptable call (spec 014, FR-002).
-
-    The service reaches the agent card through a single injected port, so a test
-    can hand it a `CardDiscovery` directly instead of standing up a socket. The
-    two cases that genuinely need HTTP — a malformed body and an over-cap one —
-    drive the *real* `fetch_card` through `httpx.MockTransport` instead.
-    """
-
-    def __init__(self) -> None:
-        self.discovery = ready_discovery()
-        self.calls: list[tuple[str, str]] = []
-
-    def __call__(
-        self,
-        address: str,
-        *,
-        auth_scheme: str,
-        now: datetime | None = None,
-    ) -> CardDiscovery:
-        self.calls.append((address, auth_scheme))
-        return self.discovery
-
-
-def card_summary(**overrides: Any) -> AgentCardSummary:
-    payload: dict[str, Any] = {
-        "name": "Hermes",
-        "version": "1.2.3",
-        "description": "A research agent.",
-        "protocol_version": "1.0",
-        "interface_url": "https://agent.example.com/a2a",
-        "streaming": True,
-        "push_notifications": False,
-        "skills": [AgentSkillSummary(id="research", name="Research")],
-        "auth_schemes_offered": [AgentAuthSchemeOffer(name="bearer", kind="bearer")],
-        "security_required": True,
-        "extension_uris": [],
-        "security_requirements": [["bearer"]],
-        "fetched_at": datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
-    }
-    payload.update(overrides)
-    return AgentCardSummary(**payload)
-
-
 def mock_transport_card_fetcher(
     handler: Callable[[httpx.Request], httpx.Response],
 ) -> Callable[..., CardDiscovery]:
@@ -183,61 +143,6 @@ def mock_transport_card_fetcher(
         )
 
     return fetch
-
-
-def ready_discovery(**overrides: Any) -> CardDiscovery:
-    """A discovery result a bearer connection can be tested against."""
-
-    summary = overrides.pop("summary", None) or card_summary()
-    payload: dict[str, Any] = {
-        "summary": summary,
-        "interface_url": summary.interface_url,
-        "auth_header_name": None,
-        "guarantee_tier": (
-            "guaranteed"
-            if SINGLE_START_EXTENSION_URI in summary.extension_uris
-            else "best_effort"
-        ),
-        "card_fingerprint": card_fingerprint(summary),
-    }
-    payload.update(overrides)
-    return CardDiscovery(**payload)
-
-
-class FakeA2AClient:
-    """A scriptable `A2AClientPort` that never opens a socket."""
-
-    def __init__(self) -> None:
-        self.results: dict[str, list[A2AResult]] = {}
-        self.calls: list[tuple[str, A2ATarget, dict[str, Any]]] = []
-
-    def script(self, method: str, *results: A2AResult) -> None:
-        self.results[method] = list(results)
-
-    def _answer(self, method: str, target: A2ATarget, **kwargs: Any) -> A2AResult:
-        self.calls.append((method, target, kwargs))
-        queued = self.results.get(method)
-        if not queued:
-            return A2AResult(ok=True, correlation_id="corr")
-        return queued.pop(0) if len(queued) > 1 else queued[0]
-
-    def send_message(self, target: A2ATarget, **kwargs: Any) -> A2AResult:
-        return self._answer("SendMessage", target, **kwargs)
-
-    def get_task(self, target: A2ATarget, **kwargs: Any) -> A2AResult:
-        return self._answer("GetTask", target, **kwargs)
-
-    def list_tasks(self, target: A2ATarget, **kwargs: Any) -> A2AResult:
-        return self._answer("ListTasks", target, **kwargs)
-
-    def cancel_task(self, target: A2ATarget, **kwargs: Any) -> A2AResult:
-        return self._answer("CancelTask", target, **kwargs)
-
-    def create_push_config(self, target: A2ATarget, **kwargs: Any) -> A2AResult:
-        return self._answer("CreateTaskPushNotificationConfig", target, **kwargs)
-
-    def calls_to(self, method: str) -> list[tuple[str, A2ATarget, dict[str, Any]]]:
-        return [call for call in self.calls if call[0] == method]
 
 
 class BlockingCardFetcher(FakeCardFetcher):
@@ -1202,9 +1107,7 @@ class TestConnectByAgentCard:
         service.test_connection(connection_id, owner_id=OWNER)
         acknowledged = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
         service.agent_repo.save_connection(
-            acknowledged.model_copy(
-                update={"best_effort_acknowledged_at": clock.now}
-            )
+            acknowledged.model_copy(update={"best_effort_acknowledged_at": clock.now})
         )
 
         card_fetcher.discovery = ready_discovery(
@@ -1312,12 +1215,9 @@ class TestConnectByAgentCard:
         bearer_id = connect(service)
         bearer = service.test_connection(bearer_id, owner_id=OWNER)
         assert bearer.auth_header_name is None
-        assert (
-            "auth_header_name"
-            not in service.agent_repo.get_connection(
-                bearer_id, owner_id=OWNER
-            ).model_dump(exclude_none=True)
-        )
+        assert "auth_header_name" not in service.agent_repo.get_connection(
+            bearer_id, owner_id=OWNER
+        ).model_dump(exclude_none=True)
         assert a2a_client.calls_to("ListTasks")[0][1].auth_scheme == "bearer"
 
         card_fetcher.discovery = ready_discovery(
@@ -2228,7 +2128,9 @@ class Relay:
             reauthenticated=True,
         )
         self.connection_id = created.id
-        self.secret = issue_signing_secret(service, created.id, key="idem-relay-signing")
+        self.secret = issue_signing_secret(
+            service, created.id, key="idem-relay-signing"
+        )
         service.test_connection(self.connection_id, owner_id=OWNER)
         self.run = dispatch(service, self.connection_id)
         self.service = service

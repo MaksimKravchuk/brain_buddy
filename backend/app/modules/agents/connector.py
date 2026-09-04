@@ -199,19 +199,13 @@ class GenericHttpConnector:
                 error_code="connector_response_invalid",
             )
 
-        raw_capabilities = parsed.get("capabilities")
-        declared = raw_capabilities if isinstance(raw_capabilities, dict) else {}
-        capabilities = AgentCapabilities(
-            progress=declared.get("progress") is True,
-            # A control BrainBuddy may have to retry is only usable if the
-            # connector promises to deduplicate it. An advertised capability
-            # without its guarantee is suppressed rather than exposed, so the
-            # user is offered nothing BrainBuddy cannot deliver safely (FR-007).
-            reply=declared.get("reply") is True
-            and parsed.get("idempotent_reply") is True,
-            cancel=declared.get("cancel") is True
-            and parsed.get("idempotent_cancel") is True,
-        )
+        # 014: `AgentCapabilities` now carries only the two booleans an agent
+        # *card* declares. The bespoke probe's `progress`/`reply`/`cancel` flags
+        # have no field to land in any more, and nothing reads this outcome's
+        # capabilities: the connection test goes through the A2A wire. The probe
+        # itself stays until T110-T115 delete this module whole, so the outcome
+        # is built empty rather than made up.
+        capabilities = AgentCapabilities()
         if parsed.get("idempotent_start") is not True:
             # Without connector-side dedup a replayed dispatch could start the
             # same work twice, so the connection is honestly not usable (FR-006).

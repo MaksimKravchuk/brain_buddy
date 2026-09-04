@@ -29,7 +29,11 @@ from pydantic import (
 from app.modules.agents.a2a.card import (
     AGENT_CARD_CHANGED,
     AgentCardSummary,
+)
+from app.modules.agents.a2a.card import (
     AuthScheme as AgentAuthScheme,
+)
+from app.modules.agents.a2a.card import (
     GuaranteeTier as AgentGuaranteeTier,
 )
 from app.modules.agents.authority import validate_endpoint_authority
@@ -363,7 +367,7 @@ class AgentConnectionDocument(StorageBaseModel):
         not discover (plan.md; data-model.md §1).
         """
 
-        payload = handler(self)
+        payload: dict[str, Any] = handler(self)
         if payload.get("auth_header_name") is None:
             payload.pop("auth_header_name", None)
         return payload

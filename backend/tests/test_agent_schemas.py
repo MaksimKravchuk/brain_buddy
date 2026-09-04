@@ -21,7 +21,6 @@ from app.modules.agents.domain import (
 )
 from app.modules.agents.egress import _is_governed_private, _is_publicly_routable
 from app.schemas.agents import (
-    AgentCapabilitiesResponse,
     AgentConnectionCreatedResponse,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
