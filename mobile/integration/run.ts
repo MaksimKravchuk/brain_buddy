@@ -34,9 +34,6 @@ import { makeWav } from "./wav";
 
 const key = () => randomUUID();
 
-/** One account password for the whole run; the relay re-checks it per action. */
-const ACCOUNT_PASSWORD = "correct-horse-battery-staple-1";
-
 let passed = 0;
 function ok(label: string) {
   passed += 1;
@@ -96,7 +93,7 @@ async function main() {
     // --- Auth ---
     console.log("auth");
     const email = `mobile-it-${Date.now()}@example.com`;
-    const password = ACCOUNT_PASSWORD;
+    const password = "correct-horse-battery-staple-1";
     const invite = backend.invite();
     const me = await client.signup({ email, password, invite_code: invite });
     assert.equal(me.email, email);
@@ -539,7 +536,7 @@ async function main() {
     // backend and a real agent socket. The categories are the ones a user acts
     // on differently, so proving the *client* surfaces each distinctly is what
     // makes the connection screen trustworthy (014-FR-002).
-    await runAgentConnectionChecks(client);
+    await runAgentConnectionChecks(client, password);
 
     // --- Logout closes the session ---
     await client.logout();
@@ -564,6 +561,7 @@ async function main() {
  */
 async function runAgentConnectionChecks(
   client: ReturnType<typeof createApiClient>,
+  password: string,
 ): Promise<void> {
   const agent = await startFakeAgent({ bearerToken: "integration-agent-token" });
   const noCard = await startFakeAgent({ servesCard: false });
@@ -575,7 +573,7 @@ async function runAgentConnectionChecks(
           agent_address: address,
           auth_scheme: "bearer",
           credential,
-          current_password: ACCOUNT_PASSWORD,
+          current_password: password,
         },
         key(),
       );
