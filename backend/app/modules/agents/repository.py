@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -28,8 +28,11 @@ from app.exceptions import (
     StorageUnavailableError,
 )
 from app.repositories.base import BaseRepository
+from app.utils.time import utcnow
 
 from .domain import (
+    A2A_SCHEMA_VERSION,
+    TERMINAL_REPORTED_STATES,
     AgentAuditEntryDocument,
     AgentConnectionDocument,
     AgentIdempotencyRecord,
@@ -60,6 +63,58 @@ AUDIT_RETENTION = timedelta(days=90)
 
 EVENT_ID_RETENTION = timedelta(days=30)
 """How long a consumed event ID blocks a replay; matches content retention."""
+
+A2A_WIRE_MIGRATION = "a2a_wire_contract_v1"
+"""Ledger name of the one-way migration off the bespoke relay wire (SC-010)."""
+
+DUE_OBSERVATION_BATCH = 200
+"""Upper bound on the runs one scheduler pass may claim.
+
+A backlog — an outage, a restart, a clock jump — must not turn into one
+unbounded query and one unbounded storm of submits. The pass takes what its
+bounded pools can actually work on and leaves the rest for the next tick, which
+is a delay rather than an incident.
+"""
+
+_TERMINAL_STATES: tuple[str, ...] = tuple(sorted(TERMINAL_REPORTED_STATES))
+_TERMINAL_PLACEHOLDERS = ", ".join("?" for _ in _TERMINAL_STATES)
+
+
+def _decoded_payload(raw: str) -> dict[str, Any] | None:
+    """One stored payload as a mapping, or ``None`` when it is not one.
+
+    Three startup migrations walk raw rows, and each has to survive a payload
+    that is not JSON or not an object — a row a different image, or a partial
+    write, left behind. Deciding that once means a corrupt row is skipped the
+    same way everywhere, instead of aborting whichever pass happens to reach it
+    first and taking every healthy row's migration down with it.
+
+    The annotation says what the column is declared to hold; ``TypeError`` is
+    caught because SQLite's typing is a suggestion, not a guarantee.
+    """
+
+    try:
+        payload = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _bumped_revision(payload: Mapping[str, Any]) -> int:
+    """The next revision for a row a migration rewrites.
+
+    A migration changes a record behind the owner's back, so the revision has
+    to move: a client still holding the old one must not be able to apply an
+    update against a row that changed underneath it. The coercion is for a
+    corrupt value — these rows are being rewritten precisely because they may
+    be — and 1 is the floor the document model itself enforces.
+    """
+
+    try:
+        current = int(payload.get("revision", 1))
+    except (TypeError, ValueError, OverflowError):
+        current = 1
+    return min(max(current, 1), 2_147_483_646) + 1
 
 
 @contextmanager
@@ -328,7 +383,269 @@ class AgentRepository(BaseRepository):
                 except BaseException:
                     conn.rollback()
                     raise
+            self._migrate_a2a_wire_contract(conn)
             self._migrate_legacy_invalid_connections(conn)
+            # Deliberately outside the ledger and run on *every* startup: a
+            # wire-less row can be created during a 007-image interlude between
+            # two 014 boots, and it would otherwise sit unreadable until someone
+            # noticed. Idempotent, exactly like
+            # `_migrate_legacy_invalid_connections` above.
+            self._supersede_bespoke_connections(conn)
+
+    # --- the A2A wire migration (spec 014, FR-012, SC-010) -----------------
+
+    _A2A_MIGRATION = A2A_WIRE_MIGRATION
+
+    #: Columns the observer's scheduler and restart recovery read. They are real
+    #: columns rather than JSON lookups because the due-work query runs across
+    #: every owner on a schedule: scanning JSON would make the observer's cost
+    #: grow with total history instead of with work actually due.
+    _A2A_RUN_COLUMNS: ClassVar[dict[str, str]] = {
+        "agent_task_id": "TEXT",
+        "context_id": "TEXT",
+        "next_observation_at": "TEXT",
+        "exchange_state": "TEXT",
+        "identifiers_expire_at": "TEXT",
+    }
+
+    def _migrate_a2a_wire_contract(self, conn: sqlite3.Connection) -> None:
+        """Add the A2A run columns, once, under a durable ledger row.
+
+        The ledger also records how many bespoke connections the *first* pass
+        superseded. `docs/external-agent-relay-release.md` asks for that count
+        before deploy so the "no production records" assumption is evidence
+        rather than trust, and a number nobody wrote down is not evidence.
+        """
+
+        existing = conn.execute(
+            "SELECT 1 FROM agent_schema_migrations WHERE name = ?",
+            (self._A2A_MIGRATION,),
+        ).fetchone()
+        if existing is not None:
+            return
+
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            self._ensure_migration_ledger_columns(conn)
+            columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(agent_runs)")
+            }
+            for name, sql_type in self._A2A_RUN_COLUMNS.items():
+                if name not in columns:
+                    conn.execute(
+                        f"ALTER TABLE agent_runs ADD COLUMN {name} {sql_type}"  # noqa: S608 - names are module constants
+                    )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent_runs_observation "
+                "ON agent_runs(next_observation_at)"
+            )
+            superseded = self._rewrite_bespoke_connections(conn)
+            conn.execute(
+                "INSERT INTO agent_schema_migrations(name, rewritten_rows, applied_at) "
+                "VALUES (?, ?, ?)",
+                (self._A2A_MIGRATION, superseded, utcnow().isoformat()),
+            )
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+
+    @staticmethod
+    def _ensure_migration_ledger_columns(conn: sqlite3.Connection) -> None:
+        """Widen the ledger so a migration can record what it actually did."""
+
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(agent_schema_migrations)")
+        }
+        if "rewritten_rows" not in columns:
+            conn.execute(
+                "ALTER TABLE agent_schema_migrations ADD COLUMN rewritten_rows INTEGER"
+            )
+        if "applied_at" not in columns:
+            conn.execute(
+                "ALTER TABLE agent_schema_migrations ADD COLUMN applied_at TEXT"
+            )
+
+    def _supersede_bespoke_connections(self, conn: sqlite3.Connection) -> int:
+        """Run the rewrite below in a transaction of its own.
+
+        The ledgered migration calls the inner pass directly, inside its own
+        ``BEGIN IMMEDIATE``, because the ALTER, the rewrite and the ledger row
+        have to land or roll back together. Every later startup calls this
+        wrapper instead. Splitting the two makes "who owns the transaction" a
+        fact about the call site rather than a flag the body has to keep
+        re-deciding.
+        """
+
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            rewritten = self._rewrite_bespoke_connections(conn)
+            conn.commit()
+            return rewritten
+        except BaseException:
+            conn.rollback()
+            raise
+
+    def _rewrite_bespoke_connections(self, conn: sqlite3.Connection) -> int:
+        """Disconnect every connection that predates the A2A wire contract.
+
+        A pre-014 record was configured against a wire this build no longer
+        speaks: its credential is scoped to an endpoint BrainBuddy will never
+        call again, and its inbound signing secret authorises a route that no
+        longer exists. Leaving it "ready" would offer the owner a hand-off that
+        cannot work; silently deleting it would erase a connection they
+        configured. So it becomes **disconnected** with a reason that says why
+        (D-01-S21), its credential and inbound secret are destroyed, and its
+        in-flight runs are stamped so they stop pretending to be live.
+
+        Idempotent by construction — it selects on the absence of
+        ``wire == "a2a"`` and writes that key — so a second startup rewrites
+        nothing and the count it returns is zero. The caller owns the
+        transaction; nothing here is durable until that caller commits.
+        """
+
+        rows = conn.execute(
+            "SELECT owner_id, id, payload FROM agent_connections"
+        ).fetchall()
+        now = utcnow()
+        rewritten = 0
+        for row in rows:
+            payload = _decoded_payload(row["payload"])
+            # An unreadable row is the quarantine migration's job. Taking it
+            # here would supersede and quarantine the same row on one startup
+            # and lose which of the two actually happened to it.
+            if payload is None or payload.get("wire") == "a2a":
+                continue
+            self._write_superseded_connection(conn, row, payload, now=now)
+            rewritten += 1
+            self._migration_boundary("wire_superseded")
+        return rewritten
+
+    def _write_superseded_connection(
+        self,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row,
+        payload: dict[str, Any],
+        *,
+        now: datetime,
+    ) -> None:
+        owner_id = str(row["owner_id"])
+        connection_id = str(row["id"])
+        payload.update(
+            wire="a2a",
+            status="disconnected",
+            disconnect_reason="superseded_wire_contract",
+            disconnected_at=now.isoformat(),
+            credential=None,
+            last_contact_at=None,
+            scope_verified_at=None,
+            first_dispatch_at=None,
+            schema_version=A2A_SCHEMA_VERSION,
+            revision=_bumped_revision(payload),
+            updated_at=now.isoformat(),
+        )
+        # Dropped rather than nulled: the key itself is 007's, and the field no
+        # longer exists on the 014 model.
+        payload.pop("inbound_secret", None)
+
+        conn.execute(
+            "UPDATE agent_connections SET status = ?, payload = ? "
+            "WHERE owner_id = ? AND id = ?",
+            (
+                "disconnected",
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                owner_id,
+                connection_id,
+            ),
+        )
+        self._stamp_runs_of_superseded_connection(
+            conn, owner_id=owner_id, connection_id=connection_id, now=now
+        )
+        self._append_audit_row(
+            conn,
+            AgentAuditEntryDocument(
+                id=f"a2a-supersede-{connection_id}",
+                owner_id=owner_id,
+                action="wire_superseded",
+                outcome="disconnected",
+                connection_id=connection_id,
+                created_at=now,
+            ),
+        )
+
+    def _stamp_runs_of_superseded_connection(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        owner_id: str,
+        connection_id: str,
+        now: datetime,
+    ) -> None:
+        """Stop a superseded connection's live runs from claiming to be live.
+
+        A dispatched, non-terminal run on a connection BrainBuddy can no longer
+        reach will never receive another observation. Left alone it would sit at
+        "running" forever, which is the exact false claim the honesty rules
+        exist to prevent. Stamping it lets the surfaces say the connection was
+        disconnected while keeping the bounded history the user already has.
+        """
+
+        rows = conn.execute(
+            "SELECT id, payload FROM agent_runs "
+            "WHERE owner_id = ? AND connection_id = ? AND dispatched_at IS NOT NULL",
+            (owner_id, connection_id),
+        ).fetchall()
+        for row in rows:
+            payload = _decoded_payload(row["payload"])
+            if payload is None:
+                continue
+            if payload.get("reported_state") in TERMINAL_REPORTED_STATES:
+                continue
+            if payload.get("connection_disconnected_at"):
+                continue
+            payload["connection_disconnected_at"] = now.isoformat()
+            payload["next_observation_at"] = None
+            payload["updated_at"] = now.isoformat()
+            conn.execute(
+                "UPDATE agent_runs SET payload = ?, next_observation_at = NULL "
+                "WHERE owner_id = ? AND id = ?",
+                (
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                    owner_id,
+                    str(row["id"]),
+                ),
+            )
+
+    def _append_audit_row(
+        self, conn: sqlite3.Connection, entry: AgentAuditEntryDocument
+    ) -> None:
+        """Write one audit row on a caller-owned connection.
+
+        ``INSERT OR REPLACE`` with a deterministic id keeps the rewrite
+        idempotent: a re-run writes the same row rather than a second one.
+        """
+
+        conn.execute(
+            "INSERT OR REPLACE INTO agent_audit (owner_id, id, created_at, payload) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                entry.owner_id,
+                entry.id,
+                entry.created_at.isoformat(),
+                self._payload(entry),
+            ),
+        )
+
+    def migration_rewrite_count(self, name: str) -> int | None:
+        """How many rows a ledgered migration rewrote, or ``None`` if unrun."""
+
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT rewritten_rows FROM agent_schema_migrations WHERE name = ?",
+                (name,),
+            ).fetchone()
+        return None if row is None else row["rewritten_rows"]
 
     def _migration_boundary(self, stage: str) -> None:
         """Deterministic interleaving/failure-injection seam for atomicity tests."""
@@ -366,11 +683,8 @@ class AgentRepository(BaseRepository):
             "SELECT owner_id, id, payload FROM agent_connections"
         ).fetchall()
         for row in rows:
-            try:
-                payload = json.loads(row["payload"])
-            except (TypeError, json.JSONDecodeError):
-                continue
-            if not isinstance(payload, dict):
+            payload = _decoded_payload(row["payload"])
+            if payload is None:
                 continue
             raw_header = payload.get("auth_header_name")
             if isinstance(raw_header, str):
@@ -380,12 +694,7 @@ class AgentRepository(BaseRepository):
                     pass
                 else:
                     continue
-            raw_revision = payload.get("revision", 1)
-            try:
-                legacy_revision = int(raw_revision)
-            except (TypeError, ValueError, OverflowError):
-                legacy_revision = 1
-            legacy_revision = min(max(legacy_revision, 1), 2_147_483_646)
+            legacy_revision = _bumped_revision(payload)
             payload.update(
                 auth_header_name="X-Agent-Key",
                 credential=None,
@@ -398,7 +707,7 @@ class AgentRepository(BaseRepository):
                 last_tested_at=None,
                 scope_verified_at=None,
                 first_dispatch_at=None,
-                revision=legacy_revision + 1,
+                revision=legacy_revision,
                 updated_at=datetime.now(UTC).isoformat(),
             )
             conn.execute(
@@ -589,13 +898,20 @@ class AgentRepository(BaseRepository):
             """
             INSERT INTO agent_runs
                 (owner_id, id, connection_id, task_id, created_at, dispatched_at,
-                 manifest_token, content_expires_at, content_expired, payload)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 manifest_token, content_expires_at, content_expired,
+                 agent_task_id, context_id, next_observation_at, exchange_state,
+                 identifiers_expire_at, payload)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(owner_id, id) DO UPDATE SET
                 dispatched_at = excluded.dispatched_at,
                 manifest_token = excluded.manifest_token,
                 content_expires_at = excluded.content_expires_at,
                 content_expired = excluded.content_expired,
+                agent_task_id = excluded.agent_task_id,
+                context_id = excluded.context_id,
+                next_observation_at = excluded.next_observation_at,
+                exchange_state = excluded.exchange_state,
+                identifiers_expire_at = excluded.identifiers_expire_at,
                 payload = excluded.payload
             """,
             (
@@ -608,9 +924,123 @@ class AgentRepository(BaseRepository):
                 run.manifest.token if run.manifest else None,
                 run.content_expires_at.isoformat(),
                 int(run.content_expired),
+                *self._a2a_run_columns(run),
                 self._payload(run),
             ),
         )
+
+    @staticmethod
+    def _a2a_run_columns(run: AgentRunDocument) -> tuple[str | None, ...]:
+        """The five payload values the scheduler must read without parsing JSON.
+
+        Mirrored out of the payload rather than owned by the columns: the
+        document stays the single source of truth, and a column is only ever a
+        projection of it, so a row can never disagree with itself about what the
+        run is.
+        """
+
+        return (
+            run.agent_task_id,
+            run.context_id,
+            run.next_observation_at.isoformat() if run.next_observation_at else None,
+            run.exchange_state,
+            (
+                run.identifiers_expire_at.isoformat()
+                if run.identifiers_expire_at
+                else None
+            ),
+        )
+
+    def update_run_if_version(
+        self, run: AgentRunDocument, *, expected_version: int
+    ) -> bool:
+        """Write a run only if nothing moved under the worker that read it.
+
+        Two properties, both of which a plain ``save_run`` would lose.
+
+        **Compare-and-set.** An observer worker reads the run, spends seconds or
+        minutes on a network call, and applies the answer afterwards. Without
+        ``run_version`` in the ``WHERE`` clause a slow observation returning
+        after a fast one would overwrite newer truth with older — the run would
+        appear to move backwards, which reads to the user as the agent having
+        un-completed their work.
+
+        **No resurrection.** This is an ``UPDATE``, never an upsert, so it can
+        only change a row that is still there. A worker that started before an
+        account purge finishes after it and writes nothing, rather than
+        re-creating a row the user asked to be erased (FR-016).
+
+        Returns whether the write applied.
+        """
+
+        with self._connection() as conn, _sqlite_guard("Agent run", run.id):
+            cursor = conn.execute(
+                """
+                UPDATE agent_runs SET
+                    dispatched_at = ?,
+                    manifest_token = ?,
+                    content_expires_at = ?,
+                    content_expired = ?,
+                    agent_task_id = ?,
+                    context_id = ?,
+                    next_observation_at = ?,
+                    exchange_state = ?,
+                    identifiers_expire_at = ?,
+                    payload = ?
+                WHERE owner_id = ? AND id = ?
+                  AND json_extract(payload, '$.run_version') = ?
+                """,
+                (
+                    run.dispatched_at.isoformat() if run.dispatched_at else None,
+                    run.manifest.token if run.manifest else None,
+                    run.content_expires_at.isoformat(),
+                    int(run.content_expired),
+                    *self._a2a_run_columns(run),
+                    self._payload(run),
+                    run.owner_id,
+                    run.id,
+                    expected_version,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def due_observations(
+        self, *, now: datetime, limit: int = DUE_OBSERVATION_BATCH
+    ) -> list[tuple[str, str]]:
+        """Owner/run pairs whose next scheduled observation has come due.
+
+        One pass, every owner: the observer is a process-wide scheduler, not a
+        per-request path, so filtering by owner here would mean one query per
+        owner and a queue whose head could starve the tail.
+
+        The three exclusions are the honesty rules in SQL. A terminal run has
+        nothing left to observe; a disconnected one has no credential to ask
+        with; an undispatched one was never handed over. Each of them is
+        *supposed* to carry ``next_observation_at = NULL`` already, so these
+        conditions are the second lock: a row that missed the invariant costs a
+        skipped candidate here instead of an endless poll against an agent that
+        has nothing to say.
+        """
+
+        with self._connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT owner_id, id FROM agent_runs
+                WHERE next_observation_at IS NOT NULL
+                  AND next_observation_at <= ?
+                  AND dispatched_at IS NOT NULL
+                  AND json_extract(payload, '$.connection_disconnected_at') IS NULL
+                  AND (
+                      json_extract(payload, '$.reported_state') IS NULL
+                      OR json_extract(payload, '$.reported_state')
+                         NOT IN ({_TERMINAL_PLACEHOLDERS})
+                  )
+                ORDER BY next_observation_at ASC, id ASC
+                LIMIT ?
+                """,  # noqa: S608 - placeholders only, from a module constant
+                (now.isoformat(), *_TERMINAL_STATES, limit),
+            ).fetchall()
+        return [(str(row["owner_id"]), str(row["id"])) for row in rows]
 
     def find_run_by_manifest_token(
         self, token: str, *, owner_id: str
@@ -911,7 +1341,12 @@ class AgentRepository(BaseRepository):
     ) -> dict[str, list[dict[str, Any]]]:
         """Return portable owner content without relay secrets or replay receipts."""
 
-        connection_excludes = {"credential", "inbound_secret"}
+        # A sealed credential is useless without the key ring, but a
+        # *fingerprint* is a verifier: anyone holding the export and a candidate
+        # token could confirm a match. None of them is content the user asked
+        # for, so none of them travels (data-model §8, SC-007).
+        connection_excludes = {"credential", "inbound_secret", "card_fingerprint"}
+        run_excludes = {"push_token_fingerprint", "card_fingerprint"}
         with self._connection() as conn:
             connection_rows = conn.execute(
                 "SELECT payload FROM agent_connections WHERE owner_id = ? "
@@ -957,7 +1392,10 @@ class AgentRepository(BaseRepository):
                 )
                 for row in connection_rows
             ],
-            "runs": [run.model_dump(mode="json") for run in projected_runs],
+            "runs": [
+                run.model_dump(mode="json", exclude=run_excludes)
+                for run in projected_runs
+            ],
             "events": [
                 (
                     event.model_copy(update={"summary": None})
@@ -1336,7 +1774,9 @@ class AgentRepository(BaseRepository):
 
 
 __all__ = [
+    "A2A_WIRE_MIGRATION",
     "AUDIT_RETENTION",
+    "DUE_OBSERVATION_BATCH",
     "EVENT_ID_RETENTION",
     "IDEMPOTENCY_RETENTION",
     "AgentRepository",

@@ -2410,3 +2410,260 @@ class TestCommandCheckpoint:
         with repo.command_lock("user_a"):
             repo.create_connection(make_connection())
         assert repo.get_connection("agentconn_1", owner_id="user_a").name == "Hermes"
+
+
+class TestA2AWireStorage:
+    """The columns and queries the A2A observer runs on.
+
+    An observation arrives on a background worker, minutes or hours after the
+    hand-off, on a row the owner may meanwhile have disconnected, purged or
+    watched go terminal. So the storage contract is narrower than "write the
+    row": a worker may only ever *update* a run it re-read, at the version it
+    re-read, and it may never bring one back.
+
+    014-FR-008, 014-FR-016, 014-SC-007.
+    """
+
+    def test_014_FR_008_the_wire_migration_adds_its_run_columns_and_indices(
+        self, repo: AgentRepository, tmp_path: Path
+    ) -> None:
+        """The five values the scheduler and recovery read.
+
+        They are real columns rather than JSON lookups because the due-work
+        query runs across every owner on a schedule: a JSON scan of every run
+        row would make the observer's cost grow with total history rather than
+        with work actually due.
+        """
+
+        with closing(sqlite3.connect(tmp_path / "agents.sqlite3")) as database:
+            columns = {
+                row[1] for row in database.execute("PRAGMA table_info(agent_runs)")
+            }
+            indices = {
+                row[1] for row in database.execute("PRAGMA index_list(agent_runs)")
+            }
+            migrations = {
+                row[0]
+                for row in database.execute("SELECT name FROM agent_schema_migrations")
+            }
+
+        assert {
+            "agent_task_id",
+            "context_id",
+            "next_observation_at",
+            "exchange_state",
+            "identifiers_expire_at",
+        } <= columns
+        assert "idx_agent_runs_observation" in indices
+        assert "a2a_wire_contract_v1" in migrations
+
+    def test_014_FR_008_a_conditional_update_is_a_no_op_on_a_stale_version(
+        self, repo: AgentRepository
+    ) -> None:
+        """Compare-and-set, because two observations can be in flight at once.
+
+        A worker reads a run's version *before* its network call and applies the
+        result after. Without the version in the WHERE clause, a slow
+        observation returning after a fast one would overwrite the newer state
+        with older truth — the run would appear to move backwards, which reads
+        to a user as the agent having un-completed their work.
+        """
+
+        run = make_run(run_version=4)
+        repo.create_run(run)
+
+        stale = run.model_copy(update={"run_version": 5, "reported_state": "completed"})
+        assert repo.update_run_if_version(stale, expected_version=3) is False
+        assert repo.get_run(run.id, owner_id=run.owner_id).reported_state is None
+
+        fresh = run.model_copy(update={"run_version": 5, "reported_state": "completed"})
+        assert repo.update_run_if_version(fresh, expected_version=4) is True
+        assert repo.get_run(run.id, owner_id=run.owner_id).reported_state == "completed"
+
+    def test_014_FR_008_a_conditional_update_never_resurrects_a_purged_run(
+        self, repo: AgentRepository
+    ) -> None:
+        """The property that makes the observer safe against account purge.
+
+        An UPSERT here would re-create a row the user asked to be erased,
+        minutes after the erasure, from a worker that started before it. The
+        update is therefore an UPDATE — it can only ever change a row that is
+        still there.
+        """
+
+        run = make_run(run_version=1)
+        repo.create_run(run)
+        repo.delete_all_for_owner(owner_id=run.owner_id)
+
+        applied = repo.update_run_if_version(
+            run.model_copy(update={"run_version": 2}), expected_version=1
+        )
+
+        assert applied is False
+        with pytest.raises(NotFoundError):
+            repo.get_run(run.id, owner_id=run.owner_id)
+        assert repo.list_runs_for_owner(owner_id=run.owner_id) == []
+
+    def test_014_FR_008_the_conditional_update_is_owner_scoped(
+        self, repo: AgentRepository
+    ) -> None:
+        """A run id alone must never address another owner's row."""
+
+        run = make_run(owner_id="user_a", run_id="shared-id", run_version=1)
+        repo.create_run(run)
+
+        applied = repo.update_run_if_version(
+            run.model_copy(update={"owner_id": "user_b", "run_version": 2}),
+            expected_version=1,
+        )
+
+        assert applied is False
+        assert repo.get_run("shared-id", owner_id="user_a").run_version == 1
+
+    def test_014_FR_008_due_observations_span_owners_and_respect_the_clock(
+        self, repo: AgentRepository
+    ) -> None:
+        """One scheduler pass, every owner. The filters are the honesty rules.
+
+        A terminal, disconnected or undispatched run has nothing left to
+        observe; polling it would spend a bounded worker on a question already
+        answered, and on a disconnected connection there is no credential to
+        ask with.
+        """
+
+        due = NOW - timedelta(seconds=1)
+        later = NOW + timedelta(minutes=5)
+
+        repo.create_run(
+            make_run(owner_id="user_a", run_id="due-a", next_observation_at=due)
+        )
+        repo.create_run(
+            make_run(owner_id="user_b", run_id="due-b", next_observation_at=due)
+        )
+        repo.create_run(
+            make_run(owner_id="user_a", run_id="not-yet", next_observation_at=later)
+        )
+        repo.create_run(
+            make_run(owner_id="user_a", run_id="unscheduled", next_observation_at=None)
+        )
+        repo.create_run(
+            make_run(
+                owner_id="user_a",
+                run_id="terminal",
+                next_observation_at=due,
+                reported_state="completed",
+            )
+        )
+        repo.create_run(
+            make_run(
+                owner_id="user_a",
+                run_id="disconnected",
+                next_observation_at=due,
+                connection_disconnected_at=NOW,
+            )
+        )
+        repo.create_run(
+            make_run(
+                owner_id="user_a",
+                run_id="never-dispatched",
+                next_observation_at=due,
+                dispatched_at=None,
+            )
+        )
+
+        found = {run_id for _owner, run_id in repo.due_observations(now=NOW)}
+
+        assert found == {"due-a", "due-b"}
+
+    def test_014_FR_008_due_observations_are_bounded_per_pass(
+        self, repo: AgentRepository
+    ) -> None:
+        """A backlog must not become one unbounded query and one unbounded
+        submit storm; the scheduler takes what it can work on."""
+
+        due = NOW - timedelta(seconds=1)
+        for index in range(10):
+            repo.create_run(make_run(run_id=f"run-{index}", next_observation_at=due))
+
+        assert len(repo.due_observations(now=NOW, limit=4)) == 4
+
+    def test_014_SC_007_the_export_excludes_every_relay_secret_and_fingerprint(
+        self, repo: AgentRepository
+    ) -> None:
+        """AC-024: an export is a file a user may email to themselves.
+
+        A sealed credential is useless without the key ring, but a *fingerprint*
+        is a verifier: anyone holding the export and a candidate push token
+        could confirm a match. None of the three is content the user asked for,
+        so none of them travels.
+
+        ``card_fingerprint`` is named on the connection too. The connection does
+        not carry one yet — it arrives with card discovery — and naming it in
+        the exclusion set now is deliberate: the exclusion is a property of the
+        export, and the field must never be able to appear in one.
+        """
+
+        repo.save_connection(
+            make_connection(credential=SealedSecret(key_id="v1", ciphertext="sealed"))
+        )
+        repo.create_run(
+            make_run(
+                push_token_fingerprint="p" * 64,
+                card_fingerprint="c" * 64,
+                agent_task_id="task-at-agent",
+            )
+        )
+
+        export = repo.export_owner_data(owner_id="user_a", now=NOW)
+
+        rendered = json.dumps(export)
+        assert "credential" not in export["connections"][0]
+        assert "inbound_secret" not in export["connections"][0]
+        assert "push_token_fingerprint" not in export["runs"][0]
+        assert "card_fingerprint" not in export["runs"][0]
+        assert "card_fingerprint" not in export["connections"][0]
+        assert "sealed" not in rendered
+        assert "p" * 64 not in rendered
+        assert "c" * 64 not in rendered
+        # The agent's own task id is coarse metadata the user is entitled to:
+        # it is what lets them ask the agent's operator about their own run.
+        assert export["runs"][0]["agent_task_id"] == "task-at-agent"
+
+    def test_014_FR_016_delete_all_for_owner_still_covers_every_table(
+        self, repo: AgentRepository, tmp_path: Path
+    ) -> None:
+        """Purge is the promise with no second chance.
+
+        Asserted by enumerating the tables that exist rather than by listing
+        them here, so a table added later fails this test instead of quietly
+        surviving an erasure.
+        """
+
+        repo.save_connection(make_connection())
+        repo.create_run(make_run())
+        repo.save_connection(make_connection(owner_id="user_b", connection_id="other"))
+        repo.create_run(make_run(owner_id="user_b", run_id="other-run"))
+
+        repo.delete_all_for_owner(owner_id="user_a")
+
+        with closing(sqlite3.connect(tmp_path / "agents.sqlite3")) as database:
+            tables = [
+                row[0]
+                for row in database.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' "
+                    "AND name LIKE 'agent_%'"
+                )
+                if row[0] != "agent_schema_migrations"
+            ]
+            for table in tables:
+                columns = {
+                    row[1] for row in database.execute(f"PRAGMA table_info({table})")
+                }
+                if "owner_id" not in columns:
+                    continue
+                remaining = database.execute(
+                    f"SELECT owner_id FROM {table}"  # noqa: S608 - name from sqlite_master
+                ).fetchall()
+                assert all(row[0] == "user_b" for row in remaining), table
+
+        assert repo.list_runs_for_owner(owner_id="user_b")
