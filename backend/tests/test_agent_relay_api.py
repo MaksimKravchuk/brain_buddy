@@ -1791,3 +1791,329 @@ class TestOpenApiContract:
         connection_schema = schema["components"]["schemas"]["AgentConnectionResponse"]
         assert "credential" not in connection_schema["properties"]
         assert "inbound_secret" not in connection_schema["properties"]
+
+
+class TestPushCallbackInfrastructure:
+    """The two things that must exist before the push route can be safe.
+
+    The A2A push token travels in the URL path — not because that is pleasant,
+    but because Hermes stores only the URL of a push config and signs with a
+    secret BrainBuddy cannot know, so a header-only token would leave its
+    pushes unverifiable (research.md Decision D). That choice is only
+    acceptable with two properties actually in place:
+
+    1. **The token never reaches BrainBuddy's own logs.** An agent's logs are
+       outside our control and the token's power is bounded by design — it can
+       trigger one authenticated observation BrainBuddy would perform anyway —
+       but repeating it in our own logs would be a disclosure we chose.
+    2. **Limiter memory is bounded.** The route is reachable by anyone who
+       guesses a URL shape, so a per-run limiter that never evicts is a remote
+       memory-growth primitive.
+
+    014-FR-008, 014-FR-016, 014-SC-009.
+    """
+
+    # --- the bounded limiter ------------------------------------------------
+
+    def test_014_FR_008_the_bounded_limiter_never_grows_past_its_key_cap(self) -> None:
+        """AC-035: unknown ids must not be able to mint keys without bound.
+
+        `InMemoryRateLimiter` is a `defaultdict` whose `_prune` only trims
+        timestamps *inside* a key, so it never forgets a key at all. On a login
+        route keyed by source IP that is a considered trade; on a route keyed by
+        a caller-supplied run id it is unbounded growth driven by a stranger.
+        """
+
+        from app.core.rate_limit import BoundedKeyRateLimiter
+
+        limiter = BoundedKeyRateLimiter(
+            max_attempts=30, window_seconds=60.0, max_keys=8
+        )
+
+        for index in range(500):
+            limiter.check(f"run-{index}")
+
+        assert limiter.key_count <= 8
+
+    def test_014_FR_008_a_runs_bucket_is_evicted_when_the_run_closes(self) -> None:
+        """A terminal or disconnected run can never be pushed for again, so
+        keeping its bucket is pure retention of something with no use."""
+
+        from app.core.rate_limit import BoundedKeyRateLimiter
+
+        limiter = BoundedKeyRateLimiter(
+            max_attempts=2, window_seconds=60.0, max_keys=64
+        )
+
+        assert limiter.check("run-a") is True
+        assert limiter.check("run-a") is True
+        assert limiter.check("run-a") is False, "the window is exhausted"
+
+        assert limiter.evict("run-a") is True
+        assert limiter.key_count == 0
+        # Eviction is not a bypass: a fresh key starts a fresh window, and the
+        # route only evicts when the run can no longer be pushed for at all.
+        assert limiter.check("run-a") is True
+        assert limiter.evict("never-seen") is False
+
+    def test_014_FR_008_eviction_under_pressure_drops_the_oldest_key(self) -> None:
+        """When the cap is reached the limiter must still admit new runs.
+
+        Refusing every new key at the cap would let one flood of stale ids
+        deny push acceleration to every legitimate run — the limiter would
+        become the outage it exists to prevent.
+        """
+
+        from app.core.rate_limit import BoundedKeyRateLimiter
+
+        limiter = BoundedKeyRateLimiter(max_attempts=1, window_seconds=60.0, max_keys=2)
+
+        limiter.check("first")
+        limiter.check("second")
+        limiter.check("third")
+
+        assert limiter.key_count == 2
+        # "first" was displaced, so it is admitted again as a new key rather
+        # than silently refused forever.
+        assert limiter.check("first") is True
+
+    def test_014_FR_008_the_shared_login_limiter_is_left_alone(self) -> None:
+        """The bounded variant is additive. `InMemoryRateLimiter` guards login
+        and the sensitive account actions, and changing its eviction semantics
+        under them would be a security change made by accident."""
+
+        from app.core.rate_limit import InMemoryRateLimiter
+
+        assert not hasattr(InMemoryRateLimiter, "evict")
+        assert not hasattr(InMemoryRateLimiter, "key_count")
+
+    def test_014_FR_008_a_fixed_size_counter_bounds_the_route_before_any_read(
+        self,
+    ) -> None:
+        """Step 2 of the check order: a process-wide counter with no per-key
+        state at all, consulted before the database is touched. Rejections of
+        unknown ids are counted only here — never per unknown id, which would
+        reintroduce the growth the cap above removes."""
+
+        from app.core.rate_limit import FixedWindowCounter
+
+        counter = FixedWindowCounter(max_events=3, window_seconds=60.0)
+
+        assert [counter.check() for _ in range(4)] == [True, True, True, False]
+        assert counter.rejected == 1
+
+    # --- path redaction -----------------------------------------------------
+
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            (
+                "/api/a2a/push/run-123/tok-abcdef",
+                "/api/a2a/push/run-123/[redacted]",
+            ),
+            (
+                "/api/a2a/push/run-123/tok-abcdef/extra",
+                "/api/a2a/push/run-123/[redacted]",
+            ),
+            # No token segment yet: nothing to hide, and inventing one would
+            # make a 404 look like a redacted hit.
+            ("/api/a2a/push/run-123", "/api/a2a/push/run-123"),
+            ("/api/a2a/push/", "/api/a2a/push/"),
+            ("/api/a2a/push", "/api/a2a/push"),
+            # Unrelated paths are untouched: over-redaction destroys the
+            # operational value of the log without adding safety.
+            ("/api/agent-runs/run-1", "/api/agent-runs/run-1"),
+            ("/api/tasks", "/api/tasks"),
+            ("/", "/"),
+        ],
+    )
+    def test_014_SC_009_the_path_sanitiser_hides_the_token_and_nothing_else(
+        self, path: str, expected: str
+    ) -> None:
+        """AC-035: the run id stays visible because it is what makes a log line
+        useful for support; the token is the only secret in the path."""
+
+        from app.api.middleware import sanitize_log_path
+
+        assert sanitize_log_path(path, api_prefix="/api") == expected
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "",
+            "not-a-path",
+            "//////",
+            "/api/a2a/push//",
+            "/api/a2a/push/%00/%00",
+            "?" * 50,
+        ],
+    )
+    def test_014_SC_009_the_path_sanitiser_never_raises(self, path: str) -> None:
+        """It runs inside a logging call on the request's exception path. A
+        sanitiser that could raise would turn a redaction into a 500 — and
+        would do it exactly when something has already gone wrong."""
+
+        from app.api.middleware import sanitize_log_path
+
+        assert isinstance(sanitize_log_path(path, api_prefix="/api"), str)
+
+    def test_014_SC_009_a_custom_api_prefix_is_still_redacted(self) -> None:
+        """The prefix is configurable, and a redaction keyed to a hard-coded
+        `/api` would silently stop working on a deployment that changed it."""
+
+        from app.api.middleware import sanitize_log_path
+
+        assert (
+            sanitize_log_path("/custom/a2a/push/run-1/tok", api_prefix="/custom")
+            == "/custom/a2a/push/run-1/[redacted]"
+        )
+
+    def test_014_SC_009_both_middleware_log_lines_go_through_the_sanitiser(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """`api_request` *and* `api_request_failed`.
+
+        Driven through the real middleware rather than asserted against its
+        source, so the property proved is what actually reaches a log handler.
+        The exception line is the one most likely to be forgotten and the one
+        most likely to be read, because it fires when a push went wrong —
+        exactly when someone pastes the line into a ticket.
+        """
+
+        import logging
+
+        from fastapi import FastAPI
+
+        from app.api.middleware import CorrelationIdMiddleware
+
+        app = FastAPI()
+        app.add_middleware(CorrelationIdMiddleware, api_prefix="/api")
+
+        @app.post("/api/a2a/push/{run_id}/{token}")
+        async def _ok(run_id: str, token: str) -> dict[str, str]:
+            return {"run_id": run_id}
+
+        @app.post("/api/a2a/push/boom/{token}/fail")
+        async def _boom(token: str) -> dict[str, str]:
+            raise RuntimeError("the push handler exploded")
+
+        secret = "tok-never-log-this"
+        with caplog.at_level(logging.INFO, logger="app.api.middleware"):
+            client = TestClient(app, raise_server_exceptions=False)
+            client.post(f"/api/a2a/push/run-1/{secret}")
+            client.post(f"/api/a2a/push/boom/{secret}/fail")
+
+        # Scoped to BrainBuddy's own loggers, which is exactly what SC-009
+        # claims: the two in-process edges. `TestClient` drives httpx, whose
+        # client-side logger prints the URL it is calling — a property of the
+        # test harness standing in for the network, not of anything the server
+        # writes. Asserting over it would be asserting about the test.
+        messages = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name.startswith("app.")
+        ]
+        assert any("api_request " in message for message in messages)
+        assert any("api_request_failed" in message for message in messages)
+        assert not any(
+            secret in message for message in messages
+        ), "one unsanitised log call is a full disclosure of the push token"
+        assert any("/api/a2a/push/run-1/[redacted]" in message for message in messages)
+        # The run id survives: it is what makes the line useful, and it is not
+        # the secret.
+        assert any("/api/a2a/push/boom/[redacted]" in message for message in messages)
+
+    def test_014_SC_009_the_uvicorn_access_filter_redacts_the_push_path(self) -> None:
+        """uvicorn writes its own access line, below the middleware.
+
+        BrainBuddy's log configuration routes `uvicorn.access` to the same
+        console handler, so a token redacted by the middleware would still be
+        printed verbatim one line later without this filter.
+        """
+
+        import logging
+
+        from app.core.logging import PushCallbackAccessFilter
+
+        log_filter = PushCallbackAccessFilter(api_prefix="/api")
+
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='%s - "%s %s HTTP/%s" %d',
+            args=("127.0.0.1:1", "POST", "/api/a2a/push/run-1/tok-secret", "1.1", 204),
+            exc_info=None,
+        )
+
+        assert log_filter.filter(record) is True
+        assert "tok-secret" not in record.getMessage()
+        assert "/api/a2a/push/run-1/[redacted]" in record.getMessage()
+
+    def test_014_SC_009_the_access_filter_leaves_other_paths_alone(self) -> None:
+        import logging
+
+        from app.core.logging import PushCallbackAccessFilter
+
+        log_filter = PushCallbackAccessFilter(api_prefix="/api")
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='%s - "%s %s HTTP/%s" %d',
+            args=("127.0.0.1:1", "GET", "/api/tasks", "1.1", 200),
+            exc_info=None,
+        )
+
+        assert log_filter.filter(record) is True
+        assert "/api/tasks" in record.getMessage()
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            None,
+            (),
+            ("only-one",),
+            ("a", "b", 12345, "d", 200),
+            "a bare string",
+        ],
+    )
+    def test_014_SC_009_the_access_filter_never_raises_on_an_odd_record(
+        self, args: Any
+    ) -> None:
+        """A logging filter that raises takes down the log, and uvicorn's record
+        shape is not something BrainBuddy controls across versions."""
+
+        import logging
+
+        from app.core.logging import PushCallbackAccessFilter
+
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="%s",
+            args=args,
+            exc_info=None,
+        )
+
+        assert PushCallbackAccessFilter(api_prefix="/api").filter(record) is True
+
+    def test_014_SC_009_the_access_filter_is_installed_on_the_uvicorn_logger(
+        self,
+    ) -> None:
+        """A filter nobody attaches redacts nothing.
+
+        The logging dict is where `uvicorn.access` is wired to the console
+        handler, so it is also where the filter has to appear.
+        """
+
+        from app.core.logging import build_logging_dict
+
+        config = build_logging_dict("INFO")
+
+        assert "push_callback" in config["filters"]
+        assert "push_callback" in config["loggers"]["uvicorn.access"].get("filters", [])
