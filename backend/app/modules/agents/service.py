@@ -35,6 +35,7 @@ from app.exceptions import (
 from app.schemas.agents import (
     AgentCapabilitiesResponse,
     AgentCardResponse,
+    AgentCheckDeliveryRequest,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
     AgentConnectionResponse,
@@ -2828,6 +2829,198 @@ class AgentRelayService:
         if not candidates:
             return None
         return max(candidates, key=lambda task: task.status.timestamp or "")
+
+    # --- check delivery -----------------------------------------------------
+
+    def _refuse_before_the_lookup(
+        self, run: AgentRunDocument, connection: AgentConnectionDocument
+    ) -> None:
+        """The three conditions that make looking pointless rather than unsafe.
+
+        Each one means there is nothing at the agent this run could still be
+        waiting on, so BrainBuddy does not spend a request discovering that.
+        """
+
+        if connection.status == "disconnected":
+            raise ValidationFailure(
+                "This agent is disconnected, so BrainBuddy can no longer reach "
+                "this run.",
+                detail={"reason": "connection_disconnected"},
+            )
+        if run.reported_state in TERMINAL_REPORTED_STATES:
+            raise ValidationFailure(
+                "This run has already finished.",
+                detail={"reason": "run_terminal"},
+            )
+        if run.agent_task_missing_at is not None:
+            raise ValidationFailure(
+                "This agent no longer reports this run.",
+                detail={"reason": "agent_task_missing"},
+            )
+
+    def _refuse_the_resend(
+        self,
+        run: AgentRunDocument,
+        connection: AgentConnectionDocument,
+        *,
+        resend_allowed: bool,
+        reauthenticated: bool,
+    ) -> None:
+        """The preconditions a *send* has that a lookup does not (FR-006).
+
+        Every one of them is about the destination or the content being other
+        than what the owner reviewed, or about the owner's consent having gone
+        stale. A lookup risks none of that, which is why it has already run by
+        the time any of these refuse.
+        """
+
+        if not resend_allowed:
+            raise ValidationFailure(
+                "External agent relay is not available, so nothing was re-sent.",
+                detail={"reason": "rollout_disabled"},
+            )
+        if connection.agent_changed or connection.card_fingerprint != (
+            run.card_fingerprint
+        ):
+            raise ValidationFailure(
+                "This agent's card now advertises a different destination than "
+                "the one this run was sent to. Test the connection again.",
+                detail={"reason": AGENT_CARD_CHANGED},
+            )
+        if connection.status != "ready" or self._is_stale(connection):
+            raise ValidationFailure(
+                "Test this connection successfully before sending to it again.",
+                detail={"reason": "connection_not_ready"},
+            )
+        if run.manifest is None:
+            raise ValidationFailure(
+                "This hand-off's retained content has expired, so there is "
+                "nothing left to send again.",
+                detail={"reason": "run_content_expired"},
+            )
+        if self.requires_dispatch_reauthentication(connection) and not reauthenticated:
+            raise ValidationFailure(
+                "Confirm your password before sending task content to this "
+                "agent again.",
+                detail={"reason": "reauthentication_required"},
+            )
+
+    def check_delivery(
+        self,
+        run_id: str,
+        payload: AgentCheckDeliveryRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        reauthenticated: bool = False,
+        resend_allowed: bool = True,
+    ) -> AgentRunResponse:
+        """**Check again**: look the run up, and resend only the same message.
+
+        Ordered deliberately. The lookup is safe — it reads, it carries no task
+        content, and a task it finds settles the run without any send at all —
+        so it runs first and runs even while rollout is OFF. Only after it comes
+        back empty do the *send* preconditions apply, and each of those refuses
+        with its own reason rather than a generic failure, because each one asks
+        the owner for a different next step.
+
+        It can never mint a second run: every identifier it uses is already on
+        the run, and the resend wins the same single-writer transition a first
+        send does, so concurrent checks converge on one message.
+        """
+
+        run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+        if run.dispatched_at is None:
+            raise NotFoundError("Agent run", run_id)
+        if run.dispatch_state != "delivery_unconfirmed":
+            # There is no ambiguity to resolve. A `sent` run's delivery is
+            # already established and a `not_sent` one provably never left, so
+            # the honest answer to "check again" is the run as it stands —
+            # neither a lookup nor a send would tell anyone anything new.
+            return self._run_response(run)
+        connection = self.agent_repo.get_connection(
+            run.connection_id, owner_id=owner_id
+        )
+        self._refuse_before_the_lookup(run, connection)
+
+        adopted = self._lookup_task(run, connection)
+        if adopted is not None:
+            run = self.apply_observation(
+                run.id,
+                owner_id=owner_id,
+                observation=project_observation(
+                    adopted, now=self._now(), limits=self.observation_limits
+                ),
+                based_on=run.run_version,
+                extra={
+                    "dispatch_state": "sent",
+                    "dispatch_error_code": None,
+                    "exchange_state": "closed",
+                },
+            )
+            self._audit(
+                owner_id=owner_id,
+                action="task_adopted",
+                outcome=adopted.id,
+                connection_id=connection.id,
+                run_id=run.id,
+            )
+            return self._run_response(run)
+
+        if connection.context_id_honoured is False:
+            # This agent dropped BrainBuddy's correlation ID once already, so an
+            # empty lookup here is not evidence that nothing exists — it is only
+            # evidence that BrainBuddy cannot tell. Sending again on that basis
+            # is exactly how a duplicate task gets made.
+            return self._run_response(run)
+
+        self._refuse_the_resend(
+            run,
+            connection,
+            resend_allowed=resend_allowed,
+            reauthenticated=reauthenticated,
+        )
+        return self._run_response(self._resend(run, connection, owner_id=owner_id))
+
+    def _resend(
+        self,
+        run: AgentRunDocument,
+        connection: AgentConnectionDocument,
+        *,
+        owner_id: str,
+    ) -> AgentRunDocument:
+        """Put the identical message on the wire once more, or lose and stop."""
+
+        wire = self.a2a_client
+        if wire is None:  # pragma: no cover - a deployment with no wire cannot send
+            return run
+        now = self._now()
+        with self.agent_repo.command_lock(owner_id):
+            opened = self.agent_repo.start_exchange(
+                run,
+                expected_version=run.run_version,
+                started_at=now,
+                deadline_at=now + self.reply_window,
+                # The states a check may reopen from: a restart-interrupted
+                # exchange, and one that closed without evidence.
+                from_states=("interrupted", "closed"),
+            )
+        if opened is None:
+            # Another check won. It is sending the same message, so this one has
+            # nothing to add and nothing to send.
+            return self.agent_repo.get_run(run.id, owner_id=owner_id)
+
+        result = wire.send_message(
+            self._a2a_target(
+                connection,
+                interface_url=opened.interface_url or connection.endpoint_url,
+                guarantee_tier=opened.guarantee_tier,
+            ),
+            message=self._start_message(opened),
+            run_id=opened.id,
+        )
+        self._close_exchange(opened, connection, result)
+        return self.agent_repo.get_run(run.id, owner_id=owner_id)
 
     # --- run projection -----------------------------------------------------
 

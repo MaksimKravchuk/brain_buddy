@@ -155,6 +155,17 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
             "409",
             "422",
         },
+        # Ungated on the rollout flag on purpose (014 AC-036): the lookup must
+        # still run for an already-dispatched hand-off, and 429 is the
+        # re-authentication rate limit the resend branch may consume.
+        ("/api/agent-runs/{run_id}/check-delivery", "post"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+            "429",
+        },
         ("/api/agent-events", "post"): {"400", "403", "413", "422"},
         ("/api/brain-dump-operations", "post"): {"400", "401", "409", "422"},
         ("/api/brain-dump-providers", "get"): {"401"},

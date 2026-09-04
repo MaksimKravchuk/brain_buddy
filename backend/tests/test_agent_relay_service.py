@@ -56,6 +56,7 @@ from app.modules.agents.headers import (
 from app.modules.agents.repository import IDEMPOTENCY_RETENTION, AgentRepository
 from app.modules.agents.secrets import SealedSecret, SecretBox
 from app.modules.agents.service import (
+    SCOPE_REAUTH_WINDOW,
     AgentRelayService,
     EventRejected,
     ExchangePolicy,
@@ -64,6 +65,7 @@ from app.modules.agents.service import (
     TaskSnapshot,
 )
 from app.schemas.agents import (
+    AgentCheckDeliveryRequest,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
     AgentConnectionResponse,
@@ -3453,6 +3455,400 @@ class TestExchangeEdges:
             service._newest_adoptable(run, A2AResult(ok=False, correlation_id="c"))
             is None
         )
+
+
+class TestCheckDelivery:
+    """**Check again**: look first, resend only what the rules still allow."""
+
+    def _unconfirmed(
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
+        *,
+        key: str = "idem-unconfirmed",
+    ) -> tuple[str, str]:
+        """One dispatched run left **Delivery unconfirmed** by a timeout."""
+
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+        run = dispatch(service, connection_id, key=key)
+        assert run.dispatch_state == "delivery_unconfirmed"
+        a2a_client.results.pop("SendMessage", None)
+        a2a_client.calls.clear()
+        return connection_id, run.id
+
+    def test_014_FR_006_a_found_task_is_adopted_and_nothing_is_resent(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """AC-027. The lookup answered, so there is nothing to send again."""
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                tasks=(a2a_task("t-found", context_id=run_id),),
+            ),
+        )
+
+        checked = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check",
+        )
+
+        assert checked.id == run_id
+        assert checked.dispatch_state == "sent"
+        assert checked.agent_task_id == "t-found"
+        assert sends(a2a_client) == []
+
+    def test_014_FR_006_an_empty_lookup_resends_the_identical_message_once(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """AC-027. Same run, same message ID — never a second hand-off."""
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=a2a_task("t-resent", context_id=run_id),
+            ),
+        )
+
+        checked = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check",
+        )
+
+        assert checked.id == run_id
+        assert checked.message_id == f"{run_id}:start"
+        assert checked.dispatch_state == "sent"
+        assert [message["messageId"] for message in sends(a2a_client)] == [
+            f"{run_id}:start"
+        ]
+        assert len(service.list_runs_for_task("task_1", owner_id=OWNER)) == 1
+
+    def test_014_FR_006_the_resend_goes_to_the_interface_pinned_at_dispatch(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """A card that moved cannot redirect a live run's traffic."""
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check",
+        )
+
+        _method, target, _kwargs = a2a_client.calls_to("SendMessage")[0]
+        assert target.interface_url == "https://agent.example.com/a2a"
+
+    def test_014_FR_006_a_connection_that_dropped_the_correlation_id_never_resends(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """An empty lookup there proves nothing, so it licenses nothing."""
+
+        connection_id, run_id = self._unconfirmed(service, a2a_client)
+        stored = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        service.agent_repo.save_connection(
+            stored.model_copy(update={"context_id_honoured": False})
+        )
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        checked = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check",
+        )
+
+        assert checked.dispatch_state == "delivery_unconfirmed"
+        assert sends(a2a_client) == []
+
+    def test_014_FR_006_a_lookup_runs_while_rollout_is_off_and_the_resend_does_not(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """AC-036. The lookup is safe; only the send is gated."""
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                tasks=(a2a_task("t-found", context_id=run_id),),
+            ),
+        )
+
+        adopted = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-off-1",
+            resend_allowed=False,
+        )
+        assert adopted.dispatch_state == "sent"
+
+        _connection_id_2, second_run = self._unconfirmed(
+            service, a2a_client, key="idem-unconfirmed-2"
+        )
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+        with pytest.raises(ValidationFailure) as refused:
+            service.check_delivery(
+                second_run,
+                AgentCheckDeliveryRequest(),
+                owner_id=OWNER,
+                idempotency_key="idem-check-off-2",
+                resend_allowed=False,
+            )
+
+        assert refused.value.detail == {"reason": "rollout_disabled"}
+        # Refused *after* the lookup ran, so a task created meanwhile is still
+        # adopted rather than lost behind a flag.
+        assert a2a_client.calls_to("ListTasks")
+        assert sends(a2a_client) == []
+        assert (
+            service.get_run(second_run, owner_id=OWNER).dispatch_state
+            == "delivery_unconfirmed"
+        )
+
+    @pytest.mark.parametrize(
+        "condition,reason",
+        [
+            ("not_ready", "connection_not_ready"),
+            ("agent_changed", "agent_card_changed"),
+            ("scope_reset", "connection_not_ready"),
+            ("content_expired", "run_content_expired"),
+        ],
+    )
+    def test_014_FR_006_the_resend_preconditions_refuse_after_the_lookup(
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
+        clock: Clock,
+        condition: str,
+        reason: str,
+    ) -> None:
+        """Each refusal leaves the run untouched and sends nothing."""
+
+        connection_id, run_id = self._unconfirmed(service, a2a_client)
+        stored = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        if condition == "not_ready":
+            service.agent_repo.save_connection(
+                stored.model_copy(update={"status": "unreachable"})
+            )
+        elif condition == "agent_changed":
+            service.agent_repo.save_connection(
+                stored.model_copy(
+                    update={
+                        "status": "untested",
+                        "card_drift_at": clock.now,
+                        "last_test_error_code": "agent_card_changed",
+                    }
+                )
+            )
+        elif condition == "scope_reset":
+            service.agent_repo.save_connection(
+                stored.model_copy(
+                    update={"status": "untested", "scope_verified_at": clock.now}
+                )
+            )
+        else:
+            run = service.agent_repo.get_run(run_id, owner_id=OWNER)
+            service.agent_repo.expire_due_content(now=run.content_expires_at)
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        with pytest.raises(ValidationFailure) as refused:
+            service.check_delivery(
+                run_id,
+                AgentCheckDeliveryRequest(),
+                owner_id=OWNER,
+                idempotency_key="idem-check",
+            )
+
+        assert refused.value.detail == {"reason": reason}
+        assert sends(a2a_client) == []
+        assert (
+            service.agent_repo.get_run(run_id, owner_id=OWNER).dispatch_state
+            == "delivery_unconfirmed"
+        )
+
+    @pytest.mark.parametrize(
+        "condition,reason",
+        [
+            ("terminal", "run_terminal"),
+            ("task_missing", "agent_task_missing"),
+            ("disconnected", "connection_disconnected"),
+        ],
+    )
+    def test_014_FR_006_three_conditions_refuse_the_whole_check_before_any_lookup(
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
+        clock: Clock,
+        condition: str,
+        reason: str,
+    ) -> None:
+        """There is nothing to look for, so BrainBuddy does not go looking."""
+
+        connection_id, run_id = self._unconfirmed(service, a2a_client)
+        run = service.agent_repo.get_run(run_id, owner_id=OWNER)
+        if condition == "terminal":
+            service.agent_repo.save_run(
+                run.model_copy(update={"reported_state": "completed"})
+            )
+        elif condition == "task_missing":
+            service.agent_repo.save_run(
+                run.model_copy(update={"agent_task_missing_at": clock.now})
+            )
+        else:
+            stored = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+            service.agent_repo.save_connection(
+                stored.model_copy(update={"status": "disconnected"})
+            )
+
+        with pytest.raises(ValidationFailure) as refused:
+            service.check_delivery(
+                run_id,
+                AgentCheckDeliveryRequest(),
+                owner_id=OWNER,
+                idempotency_key="idem-check",
+            )
+
+        assert refused.value.detail == {"reason": reason}
+        assert a2a_client.calls_to("ListTasks") == []
+        assert sends(a2a_client) == []
+
+    def test_014_FR_004_a_retry_of_a_hand_off_that_never_left_needs_the_password_again(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient, clock: Clock
+    ) -> None:
+        """FR-004's `first_dispatch_at` rule, stated end to end.
+
+        Nothing left BrainBuddy, so the connection's first-content trigger is
+        still unspent. Once the 15-minute window has passed the resend is
+        refused until the password is given — and only then does the exchange
+        start and the trigger get spent.
+        """
+
+        connection_id, run_id = self._unconfirmed(service, a2a_client)
+        connection = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        # The exchange never started, so the stamp was never made.
+        service.agent_repo.save_connection(
+            connection.model_copy(update={"first_dispatch_at": None})
+        )
+        clock.advance(SCOPE_REAUTH_WINDOW + timedelta(minutes=1))
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        with pytest.raises(ValidationFailure) as refused:
+            service.check_delivery(
+                run_id,
+                AgentCheckDeliveryRequest(),
+                owner_id=OWNER,
+                idempotency_key="idem-check-reauth",
+            )
+        assert refused.value.detail == {"reason": "reauthentication_required"}
+        assert sends(a2a_client) == []
+
+        service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(current_password="correct-horse-battery-staple"),
+            owner_id=OWNER,
+            idempotency_key="idem-check-reauth-2",
+            reauthenticated=True,
+        )
+
+        assert len(sends(a2a_client)) == 1
+        assert (
+            service.agent_repo.get_connection(
+                connection_id, owner_id=OWNER
+            ).first_dispatch_at
+            == clock.now
+        )
+
+    def test_014_SC_008_an_exchange_that_started_has_already_spent_the_trigger(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient, clock: Clock
+    ) -> None:
+        """**Check again** on a started exchange asks for no password."""
+
+        connection_id, run_id = self._unconfirmed(service, a2a_client)
+        stamped = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert stamped.first_dispatch_at is not None
+        clock.advance(SCOPE_REAUTH_WINDOW + timedelta(minutes=1))
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-spent",
+        )
+
+        assert len(sends(a2a_client)) == 1
+
+    def test_014_SC_008_concurrent_checks_converge_on_one_resend(
+        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+    ) -> None:
+        """One durable winner; the loser returns without touching the network."""
+
+        a2a_client = BlockingA2AClient()
+        repo = AgentRepository(tmp_path)
+        service = build_service(
+            repo,
+            connector,
+            clock,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+        run_id = dispatch(service, connection_id).id
+        a2a_client.results.pop("SendMessage", None)
+        a2a_client.calls.clear()
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+        a2a_client.block_kind = "start"
+
+        errors: list[BaseException] = []
+
+        def check(key: str) -> None:
+            try:
+                service.check_delivery(
+                    run_id,
+                    AgentCheckDeliveryRequest(),
+                    owner_id=OWNER,
+                    idempotency_key=key,
+                )
+            except BaseException as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+
+        first = Thread(target=check, args=("idem-check-a",))
+        first.start()
+        assert a2a_client.entered.wait(timeout=5)
+        second = Thread(target=check, args=("idem-check-b",))
+        second.start()
+        second.join(timeout=5)
+        a2a_client.release.set()
+        first.join(timeout=5)
+
+        assert errors == []
+        assert len(sends(a2a_client)) == 1
 
 
 def sign(secret: str, timestamp: int, body: bytes) -> str:

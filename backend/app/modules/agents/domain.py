@@ -608,6 +608,10 @@ class AgentRunDocument(StorageBaseModel):
     push_registration: AgentPushRegistration = "unregistered"
     last_observed_at: datetime | None = None
     next_observation_at: datetime | None = None
+    #: Set once an agent answered that this task does not exist. Durable, and
+    #: checked before any lookup: there is nothing left to look for, so looking
+    #: again would only be a request made to produce the same answer.
+    agent_task_missing_at: datetime | None = None
     identifiers_expire_at: datetime | None = None
     identifiers_expired: bool = False
     content_expires_at: datetime
