@@ -207,15 +207,15 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
 </section></div>
 <h2 class="sec">Dispatch states BrainBuddy owns</h2>
 <div class="grid"><section class="panel ">
-  <header class="panel-h"><span class="sid">D-03-S02</span><span class="pname">loading — runs are being fetched</span></header>
+  <header class="panel-h"><span class="sid">D-03-S02</span><span class="pname">loading — runs are being fetched</span><p class="pnote">The skeleton appears after about 250 ms, so a fast response never flickers one on and off. Nothing has failed, so there is no correlation ID here.</p></header>
   <div class="panel-b "><div class="stack g2">
   <p class="label">Agent run</p>
   <p class="caption">Loading runs…</p>
   <div class="card stack g2"><div class="skel w40"></div><div class="skel w80"></div><div class="skel w30"></div></div>
 </div></div>
 </section><section class="panel ">
-  <header class="panel-h"><span class="sid">D-03-S03</span><span class="pname">Not sent — the agent is rate limiting</span><p class="pnote">FR-006 and the rate-limit edge case. “Not sent” is a BrainBuddy fact, not an agent report.</p></header>
-  <div class="panel-b "><article class="runcard bad">
+  <header class="panel-h"><span class="sid">D-03-S03</span><span class="pname">Not sent — the agent is rate limiting, and its restart variant</span><p class="pnote">FR-006, the rate-limit edge case and the restart-recovery rule. “Not sent” is a BrainBuddy fact, not an agent report. <strong>Restart variant</strong>: a hand-off still queued when BrainBuddy restarted had not begun its exchange, so it provably never left — it is settled as <strong>Not sent</strong> with its own sentence and the same retry, and is never labelled <strong>Delivery unconfirmed</strong>, which is reserved for a send whose outcome is genuinely unknown.</p></header>
+  <div class="panel-b "><div class="stack g2"><article class="runcard bad">
   <div class="head">
     <span class="avatar">H</span>
     <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span>
@@ -227,7 +227,19 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <p class="note">Confirming again reuses the same run ID and the same message ID, so a successful retry still produces exactly one task.</p><p class="note">Correlation ID run_5b7e19d3</p>
   <ol class="timeline"><li><span class="what">Not sent</span><span class="when">22:01</span><span class="sum">Agent is rate limiting.</span></li></ol>
   <div class="row" style="margin-top:10px"><span class="btn sm">Try this hand-off again</span></div>
-</article></div>
+</article><article class="runcard bad">
+  <div class="head">
+    <span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span>
+    <span class="pill bad">Not sent</span>
+    <span class="pill mute">Guaranteed single start</span>
+    <span class="spacer"></span><span class="micro">Last contact Never</span>
+  </div>
+  <p class="body" style="font-size:12.5px;margin-top:8px">BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.</p>
+  <p class="note">The run was still queued for a connection slot, so no message had been handed to the agent and no task exists there. Confirming again reuses the same run ID and the same message ID.</p><p class="note">Correlation ID run_9c3f42a7</p>
+  <ol class="timeline"><li><span class="what">Queued</span><span class="when">22:01</span><span class="sum">Reserved one run; no connection slot free yet.</span></li><li><span class="what">Not sent</span><span class="when">22:06</span><span class="sum">BrainBuddy restarted while it was still queued.</span></li></ol>
+  <div class="row" style="margin-top:10px"><span class="btn sm">Try this hand-off again</span></div>
+</article></div></div>
 </section><section class="panel ">
   <header class="panel-h"><span class="sid">D-03-S04</span><span class="pname">Sent — dispatch accepted, the agent has not reported yet (and its queued variant)</span><p class="pnote">AC-014 / SC-006. Up to the deployment's reply window (at least 300 seconds) this is the honest state — no percentage, no stage, no ETA. When no connection slot is free yet the same state reads <strong>Queued</strong> instead, because nothing has left BrainBuddy and “Sent” would be a false claim.</p></header>
   <div class="panel-b "><div class="stack g2"><article class="runcard ">

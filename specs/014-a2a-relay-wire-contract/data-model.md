@@ -29,7 +29,7 @@ Content limits are unchanged: `MAX_PROGRESS_CHARS=2000`, `MAX_QUESTION_CHARS=400
 | `best_effort_acknowledged_at` | datetime \| None | FR-003/AC-026: stamped by the first confirmed hand-off on this connection whose request carries `acknowledge_duplicate_risk: true` (under the repository's process-wide command lock); while `None` and the tier is `best_effort`, a confirm without the flag is refused (`duplicate_risk_acknowledgement_required`); **cleared whenever `scope_verified_at` is cleared** — agent address change, auth-scheme change, credential rotation, card drift detected — so the first hand-off after a destination change asks again; also cleared when the tier becomes `guaranteed` after a re-test (irrelevant then); never on rename |
 | `context_id_honoured` | bool \| None | `None` until the first `SendMessage` answer on this connection; `False` when the task the agent returned does not carry the run id as its conversation identifier. While `False`, BrainBuddy never resends automatically on this connection (an empty lookup keeps **Delivery unconfirmed**) and the best-effort disclosure says so (FR-006); exposed as `correlation_id_honoured` |
 | `agent_changed` (derived) | bool | `last_test_error_code == "agent_card_changed"` — the fifth connection condition **Agent changed** (FR-002, D-01-S20 / M-01-S18) |
-| `status` | `untested\|ready\|invalid_credentials\|unreachable\|unsupported\|disconnected` | unchanged vocabulary; drift → `untested` |
+| `status` | `untested\|ready\|invalid_credentials\|unreachable\|unsupported\|disconnected` | unchanged vocabulary; drift → `untested`; a rate-limited test (`last_test_error_code=a2a_rate_limited`) leaves `untested` — never `ready` — until a later successful test, and the retry is offered after `last_test_error_detail.retry_after_seconds` (FR-002, AC-037; D-01-S25 / M-01-S22) |
 | `last_test_error_code` | str \| None | `a2a_unreachable`, `a2a_not_an_agent`, `a2a_protocol_version_unsupported`, `a2a_no_supported_interface`, `a2a_auth_scheme_unsupported`, `a2a_credentials_rejected`, `a2a_rate_limited`, `agent_card_changed`, plus every `destination_*` code from `egress.py` |
 | `last_test_error_detail` | JSON object \| None, ≤ 512 bytes | closed per-code shapes, refreshed by every test: `a2a_protocol_version_unsupported` → `{"found_version": str}`; `a2a_auth_scheme_unsupported` → `{"scheme": str}`; `a2a_rate_limited` → `{"retry_after_seconds": int \| null}`; every other code → `null`. Coarse metadata; never card text beyond those values |
 | `last_contact_at`, `last_tested_at`, `scope_verified_at`, `first_dispatch_at`, `disconnected_at` | unchanged | reauth scope resets on address change, auth-scheme change, credential rotation **and card drift** |
@@ -42,6 +42,10 @@ Content limits are unchanged: `MAX_PROGRESS_CHARS=2000`, `MAX_QUESTION_CHARS=400
 `streaming: bool`, `push_notifications: bool`, `skills[]` (≤50 × `{id ≤128, name ≤200,
 description ≤500}`), `auth_schemes_offered[]` (`{name, kind: bearer|api_key|oauth2|oidc|mtls|other, header_name?}` — the same name in `contracts/api-deltas.md`),
 `security_required: bool`, `extension_uris[]` (≤20 × ≤512 chars), `fetched_at`.
+Every one of these strings — and every `last_test_error_detail` value — is untrusted agent text:
+both clients render it as inert plain text, never an anchor or `Linking` target, never
+HTML/markdown-interpreted, never auto-linkified, exactly as `result_link` is treated (FR-016,
+AC-031); the bounds above are the only processing it receives.
 
 **State transitions** (connection): `untested → (test) ready | invalid_credentials |
 unreachable | unsupported`; `ready → stale` is derived (`now >= last_contact_at + stale_after`);
@@ -60,38 +64,67 @@ below mirror the protocol and never leave `backend/app` (see `contracts/api-delt
 | field | type | rule |
 |---|---|---|
 | `id`, `owner_id`, `connection_id`, `task_id`, `agent_name`, `manifest`, `dispatched_at`, `dispatch_state`, `dispatch_error_code`, `reported_state`, `progress_text`, `question_text`, `result_text`, `result_link`, `failure_reason`, `last_contact_at`, `cancel_requested_at`, `reply_pending_command_id`, `connection_disconnected_at`, `content_expires_at`, `content_expired`, `created_at`, `updated_at`, `revision` | unchanged | 007 |
-| `context_id` | str | `= id` (FR-006); identifier tier (90 d) |
-| `message_id` | str | `= f"{id}:start"`; identifier tier |
+| `context_id` | str | `= id` (FR-006): the wire conversation identifier *is* the run id, which is also part of the push callback path. It is 007 coarse metadata retained with the run row until account purge — no sweep deletes a dispatched run row — and is therefore **not** identifier tier: nulling it at 90 d would erase nothing the agent or BrainBuddy holds, so SC-007 asserts the honest statement instead (research H) |
+| `message_id` | str | `= f"{id}:start"`; identifier tier (90 d) |
 | `agent_task_id` | str \| None | first known from the SendMessage response or the ListTasks probe; every adopted task must carry the run id as its conversation identifier (FR-006); **task succession** (Resolved 6, FR-010, AC-028): a reply exchange that returns a Task with a different id under the same correlation ID replaces it, the previous id is kept in the succession timeline row, and the reply is never refused; identifier tier |
 | `interface_url` | str \| None | copied from the connection at dispatch; observation of this run always uses it (edge case "card changes while a run is active"); identifier tier |
 | `card_fingerprint` | str \| None | at dispatch; identifier tier |
 | `guarantee_tier` | `guaranteed\|best_effort` | copied at dispatch; shown on every surface (FR-013) |
 | `run_version` | int ≥ 0 | **BrainBuddy-assigned observation version**; +1 per accepted observation under compare-and-set (FR-008) |
-| `exchange_state` | `none\|queued\|open\|closed\|interrupted` | `queued` from the durable reservation until a worker of the exchange pool starts the exchange; `open` while a SendMessage exchange is held by a worker; `interrupted` after restart recovery (both `queued` and `open` are recovered). While `queued` nothing has gone out: `dispatch_run` skips the inline lookup and returns the **Queued** projection (`primary_state_label: "Queued"`, explained as "Waiting for a free connection slot; nothing has been sent yet" — the queued variant of D-03-S04 / M-03-S03); the label becomes **Sent** only once the worker starts the exchange |
-| `exchange_started_at`, `exchange_deadline_at` | datetime \| None | stamped when the worker **starts** the exchange, not at submit; deadline = start + reply_window + 15 s |
-| `last_observed_at`, `next_observation_at` | datetime \| None | schedule; `None` once terminal, missing, or disconnected. After `last_contact_at + reporting_window` the interval backs off (×2 per missed interval, capped at 10 × `observation_interval_seconds`, derived from `last_contact_at` and `now` — no extra column) until `identifiers_expire_at`; a verified push, a reply/cancel acknowledgement or a user read of the run resets it to the base interval (FR-008). Scheduled observation of the predecessor task is suspended while a reply command is unconfirmed or its exchange is open (succession precedence below) |
+| `exchange_state` | `none\|queued\|open\|closed\|interrupted` | `queued` from the durable reservation until a worker of the exchange pool starts the exchange (at most `max_exchanges_per_connection` workers per connection, §9); `open` while a SendMessage exchange is held by a worker; `interrupted` after restart recovery of an `open` exchange only — a `queued` exchange (`exchange_started_at is None`) has provably not been sent and is settled instead as `dispatch_state=not_sent`, `dispatch_error_code=restarted_before_send`, `exchange_state=none`, with the hand-off re-offered under the same run and message ids (D-03-S03 / M-03-S02 variant text; AC-032). While `queued` nothing has gone out: `dispatch_run` skips the inline lookup and returns the **Queued** projection (`primary_state_label: "Queued"`, explained as "Waiting for a free connection slot; nothing has been sent yet" — the queued variant of D-03-S04 / M-03-S03); the label becomes **Sent** only once the worker starts the exchange |
+| `exchange_kind` | `start\|reply\|None` | which exchange `exchange_state` describes. Restart recovery of a `reply` exchange is lookup-only and confirms the command by succession evidence (§4), never by resending it (AC-033) |
+| `exchange_started_at`, `exchange_deadline_at` | datetime \| None | stamped when the worker **starts** the exchange, not at submit; deadline = start + reply_window + 15 s, and it is enforced on the open socket by `egress.pinned_request` (`EgressDeadlineExceeded`, §9), not only recorded |
+| `last_observed_at`, `next_observation_at` | datetime \| None | schedule; `None` once terminal, missing, or disconnected. After `last_contact_at + reporting_window` the interval backs off (×2 per missed interval, capped at 10 × `observation_interval_seconds`, derived from `last_contact_at` and `now` — no extra column) until `identifiers_expire_at`; a verified push, a reply/cancel acknowledgement or a user read of the run resets it to the base interval (FR-008). Scheduled observation of the predecessor task is suspended while the reply exchange is open and resumes when the exchange is `closed` or `interrupted` or at `exchange_deadline_at`, whichever comes first (succession precedence below) |
 | `observation_trigger_pending` | `schedule\|push\|command\|None` | set by verified push / command ack so the next pass runs immediately |
 | `agent_task_missing_at` | datetime \| None | TaskNotFound observed (AC-020); stops observation and commands, preserves last contact |
 | `push_registration` | `unregistered\|registered\|refused\|unsupported` | `unsupported` when the card lacks push; `refused` on `-32003`/error (silent to the user) |
-| `push_token_fingerprint` | str \| None | `SecretBox.fingerprint(token)`; identifier tier; cleared on terminal |
+| `push_token_fingerprint` | str \| None | `SecretBox.fingerprint(token)`; identifier tier — kept until identifier expiry, **not** cleared on terminal, so a valid push arriving after the run closed still passes the fingerprint comparison and is classified `push_after_close`, never `push_token_rejected` (§7, SC-003) |
 | `cancel_outcome` | `none\|requested\|unconfirmed\|accepted\|unsupported\|not_cancelable\|task_missing` | AC-018/AC-029; `unsupported` only from `-32004`/`-32601`, `not_cancelable` only from `-32002` — both keep the last observed state and withdraw the control; `unconfirmed` from `-32603`, HTTP 5xx, timeout or transport loss — keeps the last observed state **and** the cancel control, and a later attempt reuses the same command id |
 | `blocked_reason` | str \| None | fixed text for `AUTH_REQUIRED` ("Agent needs additional authentication"); content tier |
 | `artifacts_summary` | list[`{name ≤200, media_type ≤128, kind: text\|file\|data\|link}`] ≤20 | placeholders for non-text artifacts; content tier |
 | `result_availability` | `available\|too_large\|None` | `None` until a terminal observation; `too_large` when the task record exceeded `a2a_task_max_response_bytes` and the state was observed through the `ListTasks` fallback — the surfaces show "unavailable (too large to store)" with a visible marker instead of drifting into **Stopped reporting**; coarse marker, nulled with the content tier |
 | `identifiers_expire_at`, `identifiers_expired` | datetime, bool | `dispatched_at + 90 d`; sweep nulls every identifier-tier field |
 
+**Manifest shape** (rollback boundary): the 014 manifest keeps the 007 keys `token`,
+`run_id`, `task_id`, `connection_id`, `agent_name`, `title`, `details`, `context_items`
+(storage name; the API says `supporting_items`) and `protocol_version` (`"1.0"`), adds
+`message_id`, `correlation_id`, the tier and cancellation disclosures,
+`acknowledgement_required` and `push_callback`, and **also writes the 007-required
+`reporting` and `reporting_instructions` keys with inert placeholder values**
+(`reporting = {callback_url: "", connection_id: <connection id>}` plus the 007 defaults;
+`reporting_instructions = ""`) that 014 never reads and the API never exposes, so a frozen 007
+`AgentRunManifest` validates every 014 run row and the 007 image's sweep, export and reads
+keep working after a rollback (`plan.md`, Rollback boundary; research F).
+
 **Dispatch state machine** (FR-006): `not_sent → delivery_unconfirmed` (reservation +
 exchange `queued`, before I/O, as today) → `sent` (any of: SendMessage answered with a Task or
 Message; ListTasks probe found the task; a later observation found it) or `not_sent`
 (definitive: `ConnectError`, destination rejected before send, HTTP 4xx before task creation,
-`-32602` invalid params, 429 → `dispatch_error_code=a2a_rate_limited`) or stays
-`delivery_unconfirmed` (timeout/5xx/transport loss/`interrupted` with an empty correlation-ID
-lookup). A replayed confirmation or the user's **Check again**
-(`POST /agent-runs/{id}/check-delivery`, D-03-S05 / M-03-S04) on `delivery_unconfirmed`
-performs the correlation-ID lookup once; found → adopt → `sent`; empty → resend the identical
-message once with the same message id — except on a connection with
-`context_id_honoured=false`, where nothing is resent and the run stays `delivery_unconfirmed`.
-Neither path ever mints a new run or message id.
+`-32602` invalid params, 429 → `dispatch_error_code=a2a_rate_limited`; or a restart while the
+exchange was still `queued` → `dispatch_error_code=restarted_before_send`, hand-off re-offered
+with the same ids) or stays `delivery_unconfirmed` (timeout/5xx/transport
+loss/`EgressDeadlineExceeded`/`interrupted` with an empty correlation-ID lookup). A replayed
+confirmation or the user's **Check again** (`POST /agent-runs/{id}/check-delivery`, D-03-S05 /
+M-03-S04) on `delivery_unconfirmed` performs the correlation-ID lookup once; found → adopt →
+`sent`; empty → resend the identical message once with the same message id — except on a
+connection with `context_id_honoured=false`, where nothing is resent (not by any thread and
+not on **Check again**, because an empty lookup there proves nothing) and the run stays
+`delivery_unconfirmed`. **Resend preconditions** (AC-030): the lookup is always allowed, also
+while rollout is OFF; the resend branch is refused and the run left `delivery_unconfirmed` —
+`connection_not_ready` when the connection is not `ready`, is stale, or its `scope_verified_at`
+is `None` or younger than the run's `dispatched_at` (address, auth-scheme, credential or
+card-drift reset since dispatch); `agent_card_changed` when the connection is **Agent
+changed** or the run's pinned `card_fingerprint` differs from the connection's;
+`run_content_expired` when `manifest` is null; and while rollout is OFF (AC-036). When it
+runs it passes `requires_dispatch_reauthentication` exactly like a dispatch (the request
+carries `current_password` for that case), goes to the run's pinned `interface_url`, and is
+serialised: the `interrupted|delivery_unconfirmed → open` transition is a compare-and-set on
+`run_version` under the process-wide command lock before any I/O, so a concurrent check, a
+replayed confirmation or the observer's restart-recovery lookup re-reads, sees `open` and
+returns the winner without network I/O (SC-008). No background thread — observer scheduler,
+observation pool, exchange pool, control pool, restart recovery or retention sweep — ever
+emits a content-bearing `SendMessage`; the only sends are a confirmed hand-off, its
+user-triggered replay and a user reply. Neither path ever mints a new run or message id.
 
 **Observation state machine** (FR-009): `reported_state ∈ {accepted, running, blocked,
 completed, failed, cancelled}`; terminal = `{completed, failed, cancelled}`; a differing
@@ -114,9 +147,10 @@ only once the exchange has closed or been interrupted without evidence. `cancel_
 **Write rule for background threads** (FR-008, purge safety): every write from an observer or
 exchange worker is a conditional `UPDATE … WHERE owner_id = ? AND id = ? AND run_version = ?`
 issued by `AgentRelayService.apply_observation` after re-reading the run under the
-repository's process-wide `command_lock`; there is no insert path from background threads,
-the worker aborts when the run is missing, disconnected, terminal or identifiers-expired, and
-no event, command or audit row is written for a missing run. Network I/O never happens inside
+repository's process-wide `command_lock`; there is no *run* insert path from background
+threads — event, succession and audit rows are appended only for a run that still exists and
+is not purged — the worker aborts when the run is missing, disconnected, terminal or
+identifiers-expired, and no event, command or audit row is written for a missing run. Network I/O never happens inside
 that lock (the 007 dispatch path in `service.py` is the pattern). A purged run therefore cannot
 be resurrected and a disconnected or terminal run cannot be overwritten by a late result.
 
@@ -125,17 +159,25 @@ a run whose content tier has expired (`content_expired` or `now >= content_expir
 advances only `reported_state`, `run_version`, `last_contact_at`/`last_observed_at`, the raw
 `agent_state` on the event row, timeline markers (`summary = None`) and terminal locking; it
 MUST NOT write `blocked_reason`, `artifacts_summary`, `progress_text`, `question_text`,
-`result_text`, `result_link`, `failure_reason` or any other agent text back into the row.
+`result_text`, `result_link`, `failure_reason` or any other agent text back into the row. The
+same fields are nulled at read time by `domain.project_run_for_access` (§8), so a run whose
+content is due but not yet swept never returns agent text either.
 
-**Succession precedence** (FR-010, AC-028): while a reply command is unconfirmed or its
-exchange is open, scheduled observation of the predecessor task is suspended and a terminal
-observation of the predecessor does **not** lock the run — it is recorded as a `kind:
-observation` timeline row whose summary reads "The previous task ended: <state>" and whose
-`type` is the run's unchanged projected state, and the run stays blocked/reply-pending; when
-the reply exchange returns a successor task the `task_succession` row supersedes the
-predecessor's terminal outcome; when the reply itself meets a failed/terminal task with no
-successor, the observation is applied honestly (the agent's own reason) and the reply control
-is withdrawn.
+**Succession precedence** (FR-010, AC-028, AC-033): while the reply exchange is open,
+scheduled observation of the predecessor task is suspended — bounded: it resumes once the
+exchange is `closed` or `interrupted` or at `exchange_deadline_at`, whichever comes first — and
+a terminal observation of the predecessor that arrives while the reply is unconfirmed or its
+exchange is open does **not** lock the run — it is recorded as a `kind: observation` timeline
+row whose summary reads "The previous task ended: <state>" and whose `type` is the run's
+unchanged projected state, and the run stays blocked/reply-pending; when the reply exchange
+returns a successor task the `task_succession` row supersedes the predecessor's terminal
+outcome; when the reply itself meets a failed/terminal task with no successor, the observation
+is applied honestly (the agent's own reason) and the reply control is withdrawn. A reply that
+is never acknowledged stays in the timeline with `delivery: unconfirmed`;
+`reply_pending_command_id` is kept until the first observation applied after the suspension
+ends, which settles the command as unconfirmed, and the reply control then derives from that
+observation's state — blocked ⇒ offered again for a new command id — so the run is never left
+unobserved until identifier expiry.
 
 **Last contact** (FR-015): max of accepted dispatch (`sent`), successful observation (including
 unchanged), acknowledged reply/cancel. **Stopped reporting**: non-terminal, not disconnected,
@@ -172,7 +214,12 @@ run's identifier expiry at 90 d.
 
 Confirmation rules: start → confirmed by `sent`; reply → confirmed only when a Task whose
 `history[]` contains our `messageId` is observed **or** the reply exchange itself returns a
-Task/Message (explicit correlation); cancel → confirmed when `CancelTask` returns a Task,
+Task/Message (explicit correlation) **or**, after a restart interrupted the reply exchange
+(`exchange_kind=reply`), by succession evidence — a task in the run's conversation created
+after the command's `created_at`, found by the recovery lookup — because Hermes serves no
+history; a reply exchange is never resent. A reply whose exchange ended ambiguously and is
+never acknowledged stays `unconfirmed` and is settled in the timeline when the observation
+suspension ends (§2); a later reply gets a new command id; cancel → confirmed when `CancelTask` returns a Task,
 `rejected` only on an explicit `-32002`/`-32004`/`-32601`/`-32001` answer, and left
 `unconfirmed` (with `outcome_code=a2a_internal_error` for `-32603`, otherwise `None`) on
 `-32603`, HTTP 5xx, timeout or transport loss — the run's `cancel_outcome` becomes
@@ -193,8 +240,10 @@ when the observation changed the state, bounded per run/state class/UTC day — 
 per 60-second poll), `observation_rejected` (bounded per owner/connection/class/day),
 `push_registered`, `push_refused`, `push_verified`, `push_token_rejected` (one bounded row
 per owner/connection/UTC day; the same name in `contracts/push-callback.md`),
-`push_after_close` (bounded, same rule), `run_replied`, `run_cancel_requested`,
-`identifiers_expired`, `wire_superseded`. Outcomes are coarse codes; never text, never tokens
+`push_after_close` (bounded, same rule; also the classification of a valid push arriving after
+the run closed, since the fingerprint is kept until identifier expiry), `run_replied`,
+`run_cancel_requested`, `identifiers_expired`, `wire_superseded` (one row per connection the
+ledgered migration rewrites; the ledger row records the count). Outcomes are coarse codes; never text, never tokens
 (the push token appears in no audit row — the run keeps only `push_token_fingerprint`,
 the keyed `SecretBox.fingerprint`). 90-day purge unchanged (`AUDIT_RETENTION`).
 
@@ -207,7 +256,13 @@ schedule stays the fallback), stored only as `push_token_fingerprint`. Verificat
 order fixed by `contracts/push-callback.md`: body cap → process-wide limiter → run lookup
 (unknown → `403`, no row, no limiter key) → constant-time fingerprint comparison → run
 dispatched + not terminal + not disconnected + connection exists → bounded per-run limiter.
-Invalidated when the run becomes terminal, missing or disconnected, and on identifier expiry.
+It stops verifying when the run becomes terminal, missing or disconnected — that step refuses
+with the `push_after_close` class — while the fingerprint itself is kept until identifier
+expiry, so the comparison step still recognises a late valid push (the agent's terminal push
+racing BrainBuddy's own terminal observation) and never misclassifies it as
+`push_token_rejected`. `CreateTaskPushNotificationConfig` for an adopted task runs on the
+control pool (§9). The verified push wakes the observer through the narrow wake port that
+`api/dependencies.py` exposes to the route.
 The token never appears in a response, error envelope, audit row, timeline event or log line
 (`contracts/push-callback.md`, Redaction).
 
@@ -215,8 +270,8 @@ The token never appears in a response, error envelope, audit row, timeline event
 
 | tier | fields | bound | sweep step |
 |---|---|---|---|
-| content | manifest, progress/question/result/failure texts, `result_link`, `blocked_reason`, `artifacts_summary`, the agent status text, `result_availability`, command bodies, event summaries | 30 d from dispatch | `expire_due_content` (**extended**: today it nulls six 007 fields once and re-detects only event summaries and command bodies — `repository.py` 998–1042; it now also nulls `blocked_reason`, `artifacts_summary` and the status text, and its selection predicate re-detects a non-null value in any content column, so a value written after expiry is re-erased on the next pass and nothing survives a partial expiry; the observation path itself never writes agent text into an expired run, §2) |
-| identifiers | `context_id`, `message_id`, `agent_task_id`, `interface_url`, `card_fingerprint`, `push_token_fingerprint`, event rows, `agent_task_id_after` | 90 d from dispatch | new `expire_due_identifiers` |
+| content | manifest, progress/question/result/failure texts, `result_link`, `blocked_reason`, `artifacts_summary`, the agent status text, `result_availability`, command bodies, event summaries | 30 d from dispatch | `expire_due_content` (**extended**: today it nulls six 007 fields once and re-detects only event summaries and command bodies — `repository.py` 998–1042; it now also nulls `blocked_reason`, `artifacts_summary` and the status text, and its selection predicate re-detects a non-null value in any content column, so a value written after expiry is re-erased on the next pass and nothing survives a partial expiry; the observation path itself never writes agent text into an expired run, §2. The read-time projection `domain.project_run_for_access` — today nulling manifest, the four texts, `result_link`, `failure_reason` and `reply_pending_command_id` on every read path, `domain.py` 362–378 — is extended to null `blocked_reason`, `artifacts_summary`, `result_availability` and the agent status text as well, so due content is inaccessible before the sweep runs. The sweep skips and logs — correlation id, no content — a row it cannot parse instead of aborting the transaction for every owner) |
+| identifiers | `message_id`, `agent_task_id`, `interface_url`, `card_fingerprint`, `push_token_fingerprint`, event rows, `agent_task_id_after` — **not** the run id: `context_id = id` is retained with the run row as 007 coarse metadata until account purge (no sweep deletes a dispatched run row) and `docs/data-retention.md` says so | 90 d from dispatch | new `expire_due_identifiers` |
 | audit | all audit rows | 90 d | `purge_expired_audit` (unchanged) |
 | idempotency | records | 24 h | unchanged |
 | connection card metadata | `card`, `card_fingerprint` | connection lifetime; erased on disconnect together with the credential — never swept; only audit rows that name the card follow the 90-day bound (product owner, 2026-09-04; FR-016, AC-024, SC-007) | `disconnect_connection` |
@@ -239,9 +294,12 @@ documented for users in `docs/data-retention.md` (retention-schedule rows and th
 | `observation_interval_seconds` | `BRAIN_BUDDY_AGENT_OBSERVATION_INTERVAL_SECONDS` | 60, 5–3600 |
 | `reply_window_seconds` | `BRAIN_BUDDY_AGENT_REPLY_WINDOW_SECONDS` | 300, 30–3600 |
 | `dispatch_wait_seconds` | `BRAIN_BUDDY_AGENT_DISPATCH_WAIT_SECONDS` | 5, 0–30 |
-| `exchange_workers` (exchange pool: SendMessage start/reply, CancelTask, push config) | `BRAIN_BUDDY_AGENT_EXCHANGE_WORKERS` | 8, 1–64 |
+| `exchange_workers` (exchange pool: SendMessage start/reply only) | `BRAIN_BUDDY_AGENT_EXCHANGE_WORKERS` | 8, 1–64 |
+| `max_exchanges_per_connection` (exchange workers one connection may hold at once; excess exchanges stay `queued`, so one hostile or broken agent cannot exhaust the pool for every owner) | `BRAIN_BUDDY_AGENT_MAX_EXCHANGES_PER_CONNECTION` | 2, 1–`exchange_workers` |
 | `observer_workers` (observation pool: GetTask/ListTasks; separate from the exchange pool) | `BRAIN_BUDDY_AGENT_OBSERVER_WORKERS` | 4, 1–64 |
+| `control_workers` (control pool: CancelTask and CreateTaskPushNotificationConfig, short timeout; never shared with start/reply exchanges, so a cancel never waits behind the exchanges it ends) | `BRAIN_BUDDY_AGENT_CONTROL_WORKERS` | 2, 1–16 |
 | `connector_timeout_seconds` (test/short-call timeout; also the exchange connect timeout) | unchanged name | 10, ≤120 (exchanges use `httpx.Timeout(connect=5, read=reply_window + 15)`) |
+| absolute request deadline | derived: `egress.pinned_request(deadline_seconds=…)` | exchange: `reply_window_seconds + 15`; observation, control and test calls: `connector_timeout_seconds + 5`. Enforced by `pinned_request` itself while waiting for headers and inside the `iter_raw` loop (an httpx read timeout is per chunk, so a drip-feeding agent never trips it); breach closes the stream and raises `EgressDeadlineExceeded` — exchange ⇒ `delivery_unconfirmed` (lookup before any resend), observation ⇒ failed contact, cancel ⇒ `cancel_outcome=unconfirmed`, test ⇒ `a2a_unreachable` |
 | `connector_max_response_bytes` (card and short-call reads) | unchanged | 64000 |
 | `a2a_task_max_response_bytes` (GetTask/ListTasks reads; over-cap GetTask falls back to ListTasks without artifacts) | `BRAIN_BUDDY_AGENT_A2A_TASK_MAX_RESPONSE_BYTES` | 262144 (256 KB), 1024–1048576 (1 MiB hard max) |
 | push limiter bounds | constants beside the route (`PUSH_GLOBAL_MAX_PER_MINUTE`, `PUSH_RUN_MAX_PER_MINUTE`, `PUSH_LIMITER_MAX_KEYS`) | 600/min process-wide before any database read; 30/min per known run; at most 1024 per-run keys, evicted on terminal/disconnect |

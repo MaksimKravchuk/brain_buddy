@@ -194,18 +194,19 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <div class="row" style="margin-top:6px"><span class="pill mute">Best-effort single start</span><span class="spacer"></span>
     <span class="micro">Last contact Never</span></div>
   <p class="body" style="font-size:12.5px;margin-top:8px">The agent is rate limiting. It refused the hand-off before creating a task, so nothing is running.</p><p class="note">Trying again reuses the same run ID and message ID.</p>
+  <div class="row" style="margin-top:8px"><span class="btn sm tap44" style="padding:12px">Try this hand-off again</span></div>
 </article><article class="runcard " style="border-radius:14px">
   <div class="head"><span class="avatar">H</span>
     <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill info">Sent</span></div>
   <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
     <span class="micro">Last contact Sep 3, 22:01</span></div>
-  <p class="body" style="font-size:12.5px;margin-top:8px">Waiting for the agent. Some agents answer only when the work is finished; BrainBuddy waits without inventing a failure.</p><ol class="timeline"><li><span class="what">Sent</span><span class="when">22:01</span></li></ol>
+  <p class="body" style="font-size:12.5px;margin-top:8px">Waiting for the agent. Some agents answer only when the work is finished.</p><ol class="timeline"><li><span class="what">Sent</span><span class="when">22:01</span></li></ol>
 </article><article class="runcard needs" style="border-radius:14px">
   <div class="head"><span class="avatar">H</span>
     <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill warn">Delivery unconfirmed</span></div>
   <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
     <span class="micro">Last contact Sep 3, 22:01</span></div>
-  <p class="note">BrainBuddy could not confirm the agent received this hand-off. It was not re-sent. Before anything is sent again BrainBuddy looks this run up at the agent by its correlation ID.</p>
+  <p class="note">BrainBuddy could not confirm the agent received this hand-off. It was not re-sent. Before anything is sent again, BrainBuddy looks this run up at the agent.</p>
   <div class="row" style="margin-top:10px;gap:8px"><span class="btn sm tap44" style="padding:12px">Check again</span></div>
   <p class="note">Check again runs the same check with the same correlation ID and the same message ID. It is never a new send.</p>
 </article><article class="runcard " style="border-radius:14px">
@@ -213,7 +214,7 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
     <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill info">Accepted</span></div>
   <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
     <span class="micro">Last contact Sep 3, 22:02</span></div>
-  <ol class="timeline"><li><span class="what">Sent</span><span class="when">22:01</span></li><li><span class="what">Accepted</span><span class="when">22:02</span></li></ol>
+  <ol class="timeline"><li><span class="what">Accepted</span><span class="when">22:02</span></li></ol>
 </article></div>
     
   </div>
@@ -302,8 +303,17 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
     <span class="micro">Last contact Never</span></div>
   <p class="body" style="font-size:12.5px;margin-top:8px">Waiting for a free connection slot; nothing has been sent yet.</p>
-  <p class="note">The identifiers are reserved, but no message has left BrainBuddy. The card reads <strong>Sent</strong>
-  only once the exchange actually starts.</p>
+  <p class="note">The identifiers are reserved, but no message has left BrainBuddy.</p>
+</article><article class="runcard bad" style="border-radius:14px">
+  <div class="head"><span class="avatar">H</span>
+    <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill bad">Not sent</span></div>
+  <div class="row" style="margin-top:6px"><span class="pill mute">Guaranteed single start</span><span class="spacer"></span>
+    <span class="micro">Last contact Never</span></div>
+  <p class="body" style="font-size:12.5px;margin-top:8px">BrainBuddy restarted before this hand-off was sent. Nothing
+  left BrainBuddy.</p>
+  <p class="note">It was still queued for a connection slot, so no task exists at the agent. Trying again reuses the
+  same run ID and message ID.</p>
+  <div class="row" style="margin-top:8px"><span class="btn sm tap44" style="padding:12px">Try this hand-off again</span></div>
 </article><article class="runcard " style="border-radius:14px">
   <div class="head"><span class="avatar">H</span>
     <span style="font-size:12.5px;font-weight:500;color:var(--ai-fg)">Hermes planner</span><span class="pill ok">Agent reported complete</span></div>
@@ -312,8 +322,7 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <p class="body" style="font-size:12.5px;margin-top:8px"><strong>Result too large to store.</strong> The result was
   larger than BrainBuddy keeps, so its text and attachment list were not stored.</p>
   <p class="note">The state is the agent's own and is shown as observed. Only the content is missing, and BrainBuddy's
-  size limit is why — this is not a failure and it is not <strong>Stopped reporting</strong>. Read the result wherever
-  you operate the agent.</p>
+  size limit is why — this is not a failure and it is not <strong>Stopped reporting</strong>.</p>
   <div class="card tint-sunk" style="margin-top:10px;border-radius:12px">
     <p class="caption">The task is still open — completing it is your call.</p>
     <div class="row tap44" style="margin-top:6px"><span class="check"></span>
@@ -321,11 +330,14 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
 </article></div>
     
   </div>
-  <p class="phonecap"><span class="sid">M-03-S03 variant · M-03-S10 variant</span>Queued, and a result too large to store</p>
-  <p class="phonecap">Neither is a new state. <strong>Queued</strong> is M-03-S03 before a connection slot frees, so
-  “Sent” would be a false claim. <strong>Result too large to store</strong> is M-03-S10 when the agent's result exceeded
-  the size BrainBuddy keeps: the observed state stands, only the content is missing, and it is never rendered as
-  <strong>Stopped reporting</strong>.</p>
+  <p class="phonecap"><span class="sid">M-03-S03 variant · M-03-S02 variant · M-03-S10 variant</span>Queued, not sent
+  after a restart, and a result too large to store</p>
+  <p class="phonecap">None is a new state. <strong>Queued</strong> is M-03-S03 before a connection slot frees, so
+  “Sent” would be a false claim. The middle card is M-03-S02 after a restart: a hand-off still queued when BrainBuddy
+  restarted had not begun its exchange, so it is settled as <strong>Not sent</strong> and offered again — never as
+  <strong>Delivery unconfirmed</strong>. <strong>Result too large to store</strong> is M-03-S10 when the agent's result
+  exceeded the size BrainBuddy keeps: the observed state stands, only the content is missing, and it is never rendered
+  as <strong>Stopped reporting</strong>.</p>
   
 </div><div class="phonewrap">
   <div class="phone">
@@ -414,7 +426,7 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
     
   </div>
   <p class="phonecap"><span class="sid">M-03-S19 – S21</span>Connection disconnected, loading, error</p>
-  
+  <p class="phonecap">M-03-S20's skeleton appears after about 250 ms, so a fast response does not flicker one on and off; it carries no correlation ID, because nothing has failed. M-03-S21 does carry one.</p>
 </div><div class="phonewrap">
   <div class="phone">
     <div class="status"><span>9:41</span><span>390 × 851</span></div>
@@ -428,8 +440,8 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
     <span class="micro">Last contact Sep 3, 22:07</span></div>
   <div class="card" style="margin-top:8px;background:#fff;border-radius:12px">
     <p class="body" style="font-size:12.5px">Should the runbook assume the DNS change is done by the platform team?</p>
-    <div class="row" style="margin-top:8px;gap:8px"><span class="btn sm tap44" style="padding:12px;opacity:.45">Send
-    answer</span><span class="btn ghost sm tap44" style="padding:12px;opacity:.45">Request cancellation</span></div>
+    <div class="row" style="margin-top:8px;gap:8px"><span class="btn sm tap44" aria-disabled="true" style="padding:12px">Send
+    answer</span><span class="btn ghost sm tap44" aria-disabled="true" style="padding:12px">Request cancellation</span></div>
   </div>
 </article><div class="card tint-warn stack g1" style="border-radius:14px;margin-top:12px">
     <p class="caption" style="color:var(--warn-fg)">Showing cached agent data because the refresh failed.</p>

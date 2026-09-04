@@ -48,6 +48,17 @@ guaranteed-tier agent sees `A2A-Extensions` **and** `message.extensions` on the 
 `SendMessage`, not only on replays, because §3–4 of the extension only oblige the agent to
 record the dedup key for a request that activated it.
 
+Every request also carries an **absolute wall-clock deadline** that `pinned_request` enforces
+itself, while waiting for headers and inside its body loop (an httpx read timeout is per
+chunk, so a drip-feeding agent never trips it): reply window + 15 s for a start or reply
+exchange, the short-call timeout plus a margin for every other call. A breach closes the
+stream and raises `EgressDeadlineExceeded` — start ⇒ delivery unconfirmed (lookup before any
+resend), reply ⇒ command unconfirmed, observe ⇒ contact not refreshed, cancel ⇒
+`cancel_outcome=unconfirmed`, test ⇒ `a2a_unreachable`. Start and reply exchanges run on the
+exchange pool (at most `max_exchanges_per_connection` per connection); `CancelTask` and
+`CreateTaskPushNotificationConfig` run on a dedicated control pool and never wait behind
+exchanges; observations run on the observation pool.
+
 Only proto-defined fields are ever sent (the SDK server rejects unknown params). Responses
 must be a JSON object with `jsonrpc`, matching `id`, and exactly one of `result`/`error`;
 anything else is `a2a_response_invalid` (delivery unconfirmed for `SendMessage`). A response
@@ -58,13 +69,13 @@ body over the applicable cap is `a2a_response_over_cap`: for `GetTask` it trigge
 
 | op | method | params | timeout | result handling |
 |---|---|---|---|---|
-| Connection test | `ListTasks` | `{pageSize:1}` (+`tenant`) | short | 2xx result ⇒ **ready**; `-32601` ⇒ retry with `GetTask {id:"brainbuddy-probe"}` expecting `-32001` ⇒ ready; HTTP 401/403 or `-32050/-32052` ⇒ `a2a_credentials_rejected`; 429/`-32051` ⇒ `a2a_rate_limited` (not ready) |
+| Connection test | `ListTasks` | `{pageSize:1}` (+`tenant`) | short | 2xx result ⇒ **ready**; `-32601` ⇒ retry with `GetTask {id:"brainbuddy-probe"}` expecting `-32001` ⇒ ready; HTTP 401/403 or `-32050/-32052` ⇒ `a2a_credentials_rejected`; 429/`-32051` ⇒ `a2a_rate_limited` — `status` stays `untested` (never ready) until a later successful test, `last_test_error_detail={retry_after_seconds}`, retry offered after that (FR-002, AC-037; D-01-S25 / M-01-S22) |
 | Start | `SendMessage` | `{message:{messageId:"<run>:start", contextId:"<run>", role:"ROLE_USER", parts:[{text:title},{text:details}?,{text:"<label>\n<body>"}…], metadata:{"brainbuddy.task_id":…, "brainbuddy.run_id":…}, extensions:[<uri>] (guaranteed tier)}, configuration:{taskPushNotificationConfig:{url,token}?, historyLength:0}}` | `httpx.Timeout(connect=5 s, read=reply_window + 15 s)` (blocking, `returnImmediately` absent) | `result.task` ⇒ observation (Decision E), `agent_task_id` — adopted only if `task.contextId == "<run>"`, otherwise `a2a_response_invalid` and `context_id_honoured=false` on the connection; `result.message` ⇒ completed with text; `-32602` ⇒ not sent; 429 ⇒ not sent `a2a_rate_limited`; 401/403 ⇒ not sent `a2a_credentials_rejected`; timeout/5xx/transport ⇒ delivery unconfirmed |
-| Probe / lookup | `ListTasks` | `{contextId:"<run>", pageSize:5, includeArtifacts:false, historyLength:0}` | short | newest task by `status.timestamp` (Hermes: first item) adopted **only if its `contextId` equals the run id** (a foreign `contextId` is ignored); empty ⇒ nothing — and no resend at all when the connection has `context_id_honoured=false` |
+| Probe / lookup | `ListTasks` | `{contextId:"<run>", pageSize:5, includeArtifacts:false, historyLength:0}` | short | newest task by `status.timestamp` (Hermes: first item) adopted **only if its `contextId` equals the run id** (a foreign `contextId` is ignored); empty ⇒ nothing by itself — the resend that may follow an empty lookup is a user-triggered dispatch with preconditions (`api-deltas.md`, `check-delivery`): refused unless the connection is ready, unchanged and in the verified scope of the dispatch, the manifest still present, rollout ON and the dispatch reauthentication rule satisfied; serialised per run; never from a background thread; and no resend at all when the connection has `context_id_honoured=false` |
 | Observe | `GetTask` | `{id:<agent_task_id>, historyLength:0}` routinely; `historyLength:20` only when the observed state needs text (input-required question, terminal summary) | short | observation; over `a2a_task_max_response_bytes` ⇒ fall back to `ListTasks {contextId:"<run>", includeArtifacts:false, historyLength:0}` so the state is still observed and the run marks `result_availability=too_large` ("unavailable — too large to store", never **Stopped reporting**); `-32001` ⇒ agent no longer reports this run |
-| Reply | `SendMessage` | `{message:{messageId:<command_id>, contextId:"<run>", taskId:<agent_task_id>, role:"ROLE_USER", parts:[{text:answer}], referenceTaskIds:[<agent_task_id>], extensions:[<uri>] (guaranteed tier), metadata:{…,"brainbuddy.command_id":…}}, configuration:{historyLength:20, taskPushNotificationConfig:{url,token}? (the same per-run config whenever the card supports push, so a successor task stays push-accelerated)}}` | `httpx.Timeout(connect=5 s, read=reply_window + 15 s)` | returned Task ⇒ command confirmed + observation; a **different** task id in the same `contextId` ⇒ task succession (below); `-32004` (terminal task, no successor) ⇒ command rejected, observation refreshed, the run shows the agent's own reason and the reply control is withdrawn; `-32001` ⇒ agent no longer reports |
-| Cancel | `CancelTask` | `{id:<agent_task_id>, metadata:{"brainbuddy.command_id":…}}` | short | Task ⇒ confirmed + observation; `-32002` ⇒ `cancel_outcome=not_cancelable`; `-32004`/`-32601` ⇒ `unsupported`; `-32001` ⇒ `task_missing`; `-32603`, HTTP 5xx, timeout or transport loss ⇒ `unconfirmed` — the cancel control stays available and a later attempt reuses the same command id (never a durable "not supported by this agent" claim) |
-| Register push (adopted task) | `CreateTaskPushNotificationConfig` | `{taskId, url, token}` | short | any error ⇒ `push_registration=refused`, silent |
+| Reply | `SendMessage` | `{message:{messageId:<command_id>, contextId:"<run>", taskId:<agent_task_id>, role:"ROLE_USER", parts:[{text:answer}], referenceTaskIds:[<agent_task_id>], extensions:[<uri>] (guaranteed tier), metadata:{…,"brainbuddy.command_id":…}}, configuration:{historyLength:20, taskPushNotificationConfig:{url,token}? (the same per-run config whenever the card supports push, so a successor task stays push-accelerated)}}` | `httpx.Timeout(connect=5 s, read=reply_window + 15 s)` | returned Task ⇒ command confirmed + observation; a **different** task id in the same `contextId` ⇒ task succession (below); `-32004` (terminal task, no successor) ⇒ command rejected, observation refreshed, the run shows the agent's own reason and the reply control is withdrawn; `-32001` ⇒ agent no longer reports; timeout/5xx/transport/deadline ⇒ command unconfirmed, scheduled observation resumes at the exchange deadline (Task succession, below) |
+| Cancel | `CancelTask` | `{id:<agent_task_id>, metadata:{"brainbuddy.command_id":…}}` | short; control pool, never behind exchanges | Task ⇒ confirmed + observation; `-32002` ⇒ `cancel_outcome=not_cancelable`; `-32004`/`-32601` ⇒ `unsupported`; `-32001` ⇒ `task_missing`; `-32603`, HTTP 5xx, timeout or transport loss ⇒ `unconfirmed` — the cancel control stays available and a later attempt reuses the same command id (never a durable "not supported by this agent" claim) |
+| Register push (adopted task) | `CreateTaskPushNotificationConfig` | `{taskId, url, token}` | short; control pool | any error ⇒ `push_registration=refused`, silent |
 
 Parts are `text/plain`; `mediaType` omitted. The manifest lists each part verbatim; the
 agent's own joining of parts is agent-defined and not asserted.
@@ -79,14 +90,31 @@ previous and new task ids, keeps the run's single correlation id, confirms the r
 and continues observing the new task. A reply is **never refused** because of succession; a
 returned Task with a foreign `contextId` is `a2a_response_invalid` (command unconfirmed).
 Precedence against the terminal lock, because the reply exchange itself may block for the
-same 300 s the watchdog counts: (a) while a reply command is unconfirmed or its exchange is
-open, scheduled observation of the predecessor task is suspended and a terminal observation
-of the predecessor does not lock the run — it is recorded as the timeline row "The previous
-task ended: <state>" and the run stays blocked/reply-pending; (b) when the reply exchange
-returns a successor task, the succession row supersedes the predecessor's terminal outcome;
-(c) when the reply itself meets a failed/terminal task with no successor (`-32004`, or a
-returned Task that is the same terminal predecessor), the run shows the agent's own reason
-honestly and the reply control is withdrawn.
+same 300 s the watchdog counts: (a) while the reply exchange is open, scheduled observation
+of the predecessor task is suspended, and a terminal observation of the predecessor that
+arrives while the reply is unconfirmed or its exchange is open does not lock the run — it is
+recorded as the timeline row "The previous task ended: <state>" and the run stays
+blocked/reply-pending; (b) when the reply exchange returns a successor task, the succession
+row supersedes the predecessor's terminal outcome; (c) when the reply itself meets a
+failed/terminal task with no successor (`-32004`, or a returned Task that is the same terminal
+predecessor), the run shows the agent's own reason honestly and the reply control is
+withdrawn; (d) the suspension has an exit: scheduled observation resumes once the reply
+exchange is `closed` or `interrupted`, or at the exchange deadline, whichever comes first —
+a reply exchange that ends ambiguously (timeout, 5xx, transport loss, deadline) therefore
+never leaves the run unobserved; the reply stays in the timeline as unconfirmed and the reply
+control returns, for a new command id, only after a later observation shows the run blocked
+again (AC-033).
+
+**Restart recovery** (no thread survives a restart; spec FR-006, FR-010, AC-032, AC-033): a
+start exchange that was still queued — never started — settles as **Not sent**
+(`restarted_before_send`) and the hand-off is re-offered with the same ids; nothing is
+resent. A start exchange that had started is marked interrupted and resolved by the
+Probe / lookup above: adopt the task if found, else the run stays **Delivery unconfirmed**
+for the user's **Check again**. A reply exchange that had started is likewise resolved by
+lookup only and confirmed by succession evidence — a task in the run's conversation
+(`contextId` = run id) created after the reply command — because Hermes serves no history
+(F5); otherwise the reply stays unconfirmed. No BrainBuddy background thread ever emits
+`SendMessage`.
 
 ## Error mapping (JSON-RPC `error.code`, A2A §5.4)
 

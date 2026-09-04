@@ -339,10 +339,11 @@ matches `spec.md` line 19, which declares the same thing.
 - **Viewport**: verified at 390×851 across `M-01`, `M-02`, `M-03`. No horizontal scroll:
   yes. Long values that could force one — the agent address, the interface address, the
   Task and run IDs — wrap on word boundaries or break inside the token.
-- **Scrolling**: `M-01-S01`, `M-01-S10 – S16`, `M-01-S22`, `M-02-S01/S02/S07/S10` and
-  every `M-03` run frame scroll vertically, including the new `M-03-S26` succession frame,
-  whose timeline is the longest on the screen. `M-01-S22` is one more card in the same
-  outcomes list and displaces nothing. In `M-02` the sheet is bounded by the frame: the
+- **Scrolling**: `M-01-S01`, `M-01-S10 – S16`, `M-02-S01/S02/S07/S10` and every `M-03`
+  run frame scroll vertically, including the new `M-03-S26` succession frame, whose
+  timeline is the longest on the screen. `M-01-S22` needs no scroll: one card, its
+  retry-after line and the three 44pt actions fit the 390×851 frame with room left,
+  verified by rendering. In `M-02` the sheet is bounded by the frame: the
   manifest and the disclosures scroll in a body between a fixed header and a pinned
   actions footer, so **Send to agent** and **Cancel** are on screen at every scroll
   position and the consent action can never be scrolled off. The push callback address is
@@ -443,7 +444,9 @@ matches `spec.md` line 19, which declares the same thing.
 The first four were resolved by Max on 2026-09-03 and encoded in `spec.md` (commit
 `9afdcaf`: FR-002, FR-003, FR-014, AC-026 and the Clarifications session); the fifth and
 sixth were decided on 2026-09-04. Kept here as the record of what was decided, not as
-open questions. **Nothing in this design is waiting on a product decision.**
+open questions. **No product decision is outstanding.** The one thing still owed to a
+person is inside item 3 and is not a product question: the extension specification's real
+published location, which the plan stage must bind before rollout.
 
 1. **Best-effort admission loudness — decided: acknowledge, once.** A warning alone was
    not enough. The first hand-off on a best-effort connection now requires an explicit
