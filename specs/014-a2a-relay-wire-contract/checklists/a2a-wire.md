@@ -14,7 +14,7 @@ Focus: (1) wire contract, identifiers and observation honesty; (2) privacy, secu
 ## Requirement Completeness
 
 - [x] CHK001 Are the outcomes of a connection test enumerated exhaustively (ready, invalid credentials, unreachable, not an A2A agent, unsupported protocol version, no supported interface, unsupported authentication scheme, private destination, rate limited), each with the error code it sets and the status the connection keeps? [Completeness, Spec §FR-002, §SC-009]
-- [x] CHK002 Are the identifiers reserved before dispatch (run ID, message ID derived from the idempotency key, correlation ID used as the protocol conversation identifier) all named with their derivation and lifetime? [Completeness, Spec §FR-006, data-model §2]
+- [x] CHK002 Are the identifiers reserved before dispatch (run ID, message ID derived from the reserved run ID that the idempotency key pins, correlation ID used as the protocol conversation identifier) all named with their derivation and lifetime? [Completeness, Spec §FR-006, data-model §2]
 - [x] CHK003 Is every state the agent can report mapped to exactly one BrainBuddy projection, including the states that have no natural counterpart (rejected, auth-required, unknown)? [Completeness, Spec §FR-009]
 - [x] CHK004 Are the preconditions for every content-bearing send (confirmed hand-off, replayed confirmation, Check again, reply) written as an explicit list, and is the rule that no background thread may send content stated as a MUST? [Completeness, Spec §FR-006, §FR-010]
 - [x] CHK005 Are requirements defined for the hand-off manifest to disclose the push-notification callback registration when the agent supports push? [Completeness, Spec §FR-005, AC-007]
@@ -87,7 +87,7 @@ Focus: (1) wire contract, identifiers and observation honesty; (2) privacy, secu
 
 - [x] CHK049 Does any artifact still describe the callback as passing through the frontend proxy, or the vocabulary sweep as a CI validator, or restart recovery as able to resend? [Conflict, plan.md, design.md, research.md Decision B]
 - [x] CHK050 Does any artifact still call card-metadata retention or clickable result links an open product decision after the 2026-09-04 answers? [Conflict, design.md, research.md §Resolved]
-- [ ] CHK051 Is the presentation of `retry_after_seconds` in the rate-limited connection-test copy ("Test again in about N seconds") specified for the case where the agent gives no retry-after value? [Ambiguity, design.md D-01-S25, Spec §FR-002]
+- [x] CHK051 Is the presentation of `retry_after_seconds` in the rate-limited connection-test copy ("Test again in about N seconds") specified for the case where the agent gives no retry-after value? [Ambiguity, design.md D-01-S25, Spec §FR-002]
 
 ## Pre-freeze evidence
 
@@ -100,5 +100,5 @@ Focus: (1) wire contract, identifiers and observation honesty; (2) privacy, secu
 
 - Check items off as completed: `[x]`
 - Add comments or findings inline
-- CHK051: design.md D-01-S25 shows the hint only "when the agent gave one"; the spec names `retry_after_seconds` as optional. The implementer renders the generic sentence ("Test again shortly.") when the value is absent — record the chosen copy in the implementation and tick this item.
+- CHK051: decided and ticked at the `/speckit-analyze` stage (2026-09-04). The chosen copy when the agent gives no retry-after is "Test again shortly.", with **Test connection** offered at once; FR-002, AC-037, design.md D-01-S25 / M-01-S22 and tasks T048 / T050 all carry it. T130 confirms the implementation renders exactly that string.
 - CHK052 is completed by the feature-implementer before the pre-freeze receipt.

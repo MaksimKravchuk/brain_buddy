@@ -67,8 +67,9 @@ Terminal B — BrainBuddy (`make dev-backend`, `make dev-frontend`), then in the
 Automated equivalent: `cd backend && pytest tests/test_agent_a2a_reference_helloworld.py -v`
 (a pre-bind availability check on `127.0.0.1:9999` fails — never skips — with a clear message
 naming the occupant when the port is taken; the sample is started as a subprocess with a
-bounded startup wait and guaranteed teardown through `request.addfinalizer`, kill + wait, even
-on assertion failure or timeout). The AC-026 acknowledgement gate is automated in
+30 s startup wait on the card URL and guaranteed teardown through `request.addfinalizer`, kill
++ wait, even on assertion failure or timeout; the sample's cancel answer is asserted as
+`-32004`, with the fallback documented in `contracts/a2a-wire.md`). The AC-026 acknowledgement gate is automated in
 `tests/test_agent_relay_service.py` (`test_first_best_effort_confirm_without_acknowledgement_is_refused`,
 `test_acknowledgement_flag_is_ignored_once_persisted`,
 `test_best_effort_acknowledged_at_is_persisted_and_reset_with_scope`).

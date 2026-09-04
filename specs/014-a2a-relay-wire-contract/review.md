@@ -84,3 +84,55 @@ on 2026-09-04 in answer to an explicit question that named the cap, the
 counts, the fixes and the compensating measures; it was not asserted by an
 agent. It expires on 2026-12-31: after that date it no longer closes the
 review and a fresh decision is required.
+
+## Post-acceptance amendments (analyze stage, 2026-09-04)
+
+`/speckit-analyze` ran on the accepted artifacts after `tasks.md` was written
+(0 CRITICAL, 2 HIGH, 17 MEDIUM, 15 LOW) and its remediations were applied on
+2026-09-04. They are consistency fixes — the spec's MUST and AC text was
+brought into line with what the contracts, data model, design and tasks
+already said, or given the one value those artifacts had left open — and no
+requirement, success criterion, acceptance scenario, state or task changed
+its number or meaning. The founder acceptance above stands unchanged. Every
+change to spec MUST/AC text, by finding id:
+
+- **I1 + U2** — FR-006, AC-030 and AC-036 now carry the contract's complete
+  resend-refusal reason list with one reason per condition
+  (`connection_not_ready`, `agent_card_changed`, `run_content_expired`,
+  `reauthentication_required`, `connection_disconnected`, `run_terminal`,
+  `agent_task_missing`) plus the new `rollout_disabled`, returned after the
+  lookup ran; `contracts/api-deltas.md`, `data-model.md` §2 and tasks
+  T055/T068 carry the same eight.
+- **U1** — FR-004 and FR-006 (with AC-030, AC-032) fix when
+  `first_dispatch_at` is stamped: at exchange start, never at reservation, so
+  a queued hand-off that never left keeps the reauthentication trigger
+  unspent; `data-model.md` §1/§2 and tasks T053/T054/T065/T066/T067 say the
+  same.
+- **I4** — FR-008 and SC-003 ratify the push route's per-run 429 for known,
+  dispatched, non-terminal runs as the one deliberate existence signal and
+  keep every rejection class byte-identical, as `contracts/push-callback.md`
+  and the plan already stated.
+- **I7** — FR-002 lists "private destination" (007 FR-004) as the sixth
+  connection-test outcome, matching the plan, SC-009 and T034.
+- **D4** — FR-016 places the run's observation event rows in the 90-day tier
+  and reply drafts in the 30-day content tier, so SC-007 tests an FR clause.
+- **A1** — FR-002 and AC-037 name the rate-limit trigger as HTTP 429 or an
+  agent-specific code from the allowlist (Hermes `-32051`), no longer "the
+  protocol's rate-limit error", which A2A 1.0 does not define.
+- **A3** — FR-007 separates the default (300 s) from the floor (MUST NOT be
+  configured below 300 s); `data-model.md` §9 bounds `reply_window_seconds`
+  accordingly.
+- **I6** — FR-006 derives the message ID from the reserved run ID, which the
+  idempotency key pins (`{run_id}:start`), as the contracts already did.
+- **I8** — the header reads `Status: Accepted (founder-accepted 2026-09-04)`.
+- **U4** — FR-005 (with AC-032 and the rate-limit edge case) states when
+  **Try this hand-off again** reuses the reserved run, message ID and
+  idempotency key (only while the rebuilt manifest token equals the frozen
+  one) and that otherwise a new run is reserved and the old one stays
+  **Not sent**.
+- **U6** — FR-002 and AC-037 carry the null-retry-after copy ("Test again
+  shortly."), closing CHK051 in `checklists/a2a-wire.md`.
+
+The remaining findings (A2, A4, U3, U5, C1, C2, G1–G5, I2, I3, I5, I9–I13)
+touched only the plan, design, data model, contracts, checklist and tasks.
+D1–D3 (duplication) were left as they are: the restated text is consistent.

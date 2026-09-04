@@ -32,8 +32,9 @@ Content limits are unchanged: `MAX_PROGRESS_CHARS=2000`, `MAX_QUESTION_CHARS=400
 | `status` | `untested\|ready\|invalid_credentials\|unreachable\|unsupported\|disconnected` | unchanged vocabulary; drift → `untested`; a rate-limited test (`last_test_error_code=a2a_rate_limited`) leaves `untested` — never `ready` — until a later successful test, and the retry is offered after `last_test_error_detail.retry_after_seconds` (FR-002, AC-037; D-01-S25 / M-01-S22) |
 | `last_test_error_code` | str \| None | `a2a_unreachable`, `a2a_not_an_agent`, `a2a_protocol_version_unsupported`, `a2a_no_supported_interface`, `a2a_auth_scheme_unsupported`, `a2a_credentials_rejected`, `a2a_rate_limited`, `agent_card_changed`, plus every `destination_*` code from `egress.py` |
 | `last_test_error_detail` | JSON object \| None, ≤ 512 bytes | closed per-code shapes, refreshed by every test: `a2a_protocol_version_unsupported` → `{"found_version": str}`; `a2a_auth_scheme_unsupported` → `{"scheme": str}`; `a2a_rate_limited` → `{"retry_after_seconds": int \| null}`; every other code → `null`. Coarse metadata; never card text beyond those values |
-| `last_contact_at`, `last_tested_at`, `scope_verified_at`, `first_dispatch_at`, `disconnected_at` | unchanged | reauth scope resets on address change, auth-scheme change, credential rotation **and card drift** |
+| `last_contact_at`, `last_tested_at`, `scope_verified_at`, `first_dispatch_at`, `disconnected_at` | unchanged | reauth scope resets on address change, auth-scheme change, credential rotation **and card drift**. `first_dispatch_at` (the spent first-content trigger read by `requires_dispatch_reauthentication`) is stamped by the exchange **start** — the `queued → open` transition of §2, when the message actually leaves BrainBuddy — never at reservation as 007 does today (`service.py` `dispatch_run` stamps it before any I/O): a `queued` hand-off that never started leaves it unset, so the retry of a hand-off a restart settled as **Not sent** is a first dispatch again and needs recent reauthentication (FR-004) |
 | `disconnect_reason` | `Literal["owner","superseded_wire_contract"] \| None` | migration writes `superseded_wire_contract` (SC-010) |
+| `controls_offered` (derived) | `{reply: bool, cancel: bool}` | BrainBuddy-side: the controls the product offers on this connection's runs — always `true` for a tested A2A connection, never an agent claim (cards do not advertise cancellation, FR-010); `capabilities` carries only the card's `streaming` and `push_notifications`; the run projection withdraws controls per run. The same name in `contracts/api-deltas.md` |
 | removed | `inbound_secret`, `capabilities.progress`, `auth_header_name` as user input | FR-012 |
 
 **AgentCardSummary** (embedded, coarse metadata): `name` (≤200), `version` (≤64), `description`
@@ -73,7 +74,7 @@ below mirror the protocol and never leave `backend/app` (see `contracts/api-delt
 | `run_version` | int ≥ 0 | **BrainBuddy-assigned observation version**; +1 per accepted observation under compare-and-set (FR-008) |
 | `exchange_state` | `none\|queued\|open\|closed\|interrupted` | `queued` from the durable reservation until a worker of the exchange pool starts the exchange (at most `max_exchanges_per_connection` workers per connection, §9); `open` while a SendMessage exchange is held by a worker; `interrupted` after restart recovery of an `open` exchange only — a `queued` exchange (`exchange_started_at is None`) has provably not been sent and is settled instead as `dispatch_state=not_sent`, `dispatch_error_code=restarted_before_send`, `exchange_state=none`, with the hand-off re-offered under the same run and message ids (D-03-S03 / M-03-S02 variant text; AC-032). While `queued` nothing has gone out: `dispatch_run` skips the inline lookup and returns the **Queued** projection (`primary_state_label: "Queued"`, explained as "Waiting for a free connection slot; nothing has been sent yet" — the queued variant of D-03-S04 / M-03-S03); the label becomes **Sent** only once the worker starts the exchange |
 | `exchange_kind` | `start\|reply\|None` | which exchange `exchange_state` describes. Restart recovery of a `reply` exchange is lookup-only and confirms the command by succession evidence (§4), never by resending it (AC-033) |
-| `exchange_started_at`, `exchange_deadline_at` | datetime \| None | stamped when the worker **starts** the exchange, not at submit; deadline = start + reply_window + 15 s, and it is enforced on the open socket by `egress.pinned_request` (`EgressDeadlineExceeded`, §9), not only recorded |
+| `exchange_started_at`, `exchange_deadline_at` | datetime \| None | stamped when the worker **starts** the exchange, not at submit — in the same write as the connection's `first_dispatch_at` when that is still unset (§1); deadline = start + reply_window + 15 s, and it is enforced on the open socket by `egress.pinned_request` (`EgressDeadlineExceeded`, §9), not only recorded |
 | `last_observed_at`, `next_observation_at` | datetime \| None | schedule; `None` once terminal, missing, or disconnected. After `last_contact_at + reporting_window` the interval backs off (×2 per missed interval, capped at 10 × `observation_interval_seconds`, derived from `last_contact_at` and `now` — no extra column) until `identifiers_expire_at`; a verified push, a reply/cancel acknowledgement or a user read of the run resets it to the base interval (FR-008). Scheduled observation of the predecessor task is suspended while the reply exchange is open and resumes when the exchange is `closed` or `interrupted` or at `exchange_deadline_at`, whichever comes first (succession precedence below) |
 | `observation_trigger_pending` | `schedule\|push\|command\|None` | set by verified push / command ack so the next pass runs immediately |
 | `agent_task_missing_at` | datetime \| None | TaskNotFound observed (AC-020); stops observation and commands, preserves last contact |
@@ -109,16 +110,25 @@ M-03-S04) on `delivery_unconfirmed` performs the correlation-ID lookup once; fou
 `sent`; empty → resend the identical message once with the same message id — except on a
 connection with `context_id_honoured=false`, where nothing is resent (not by any thread and
 not on **Check again**, because an empty lookup there proves nothing) and the run stays
-`delivery_unconfirmed`. **Resend preconditions** (AC-030): the lookup is always allowed, also
-while rollout is OFF; the resend branch is refused and the run left `delivery_unconfirmed` —
-`connection_not_ready` when the connection is not `ready`, is stale, or its `scope_verified_at`
-is `None` or younger than the run's `dispatched_at` (address, auth-scheme, credential or
-card-drift reset since dispatch); `agent_card_changed` when the connection is **Agent
-changed** or the run's pinned `card_fingerprint` differs from the connection's;
-`run_content_expired` when `manifest` is null; and while rollout is OFF (AC-036). When it
+`delivery_unconfirmed`. **Resend preconditions** (AC-030, FR-006 — one reason per condition,
+the same list as `contracts/api-deltas.md` `check-delivery`): the lookup is always allowed,
+also while rollout is OFF, except on a disconnected connection; the resend branch is refused
+and the run left `delivery_unconfirmed` — `connection_not_ready` when the connection is not
+`ready`, is stale, or its `scope_verified_at` is `None` or younger than the run's
+`dispatched_at` (address, auth-scheme, credential or card-drift reset since dispatch);
+`agent_card_changed` when the connection is **Agent changed** or the run's pinned
+`card_fingerprint` differs from the connection's; `run_content_expired` when `manifest` is
+null; `reauthentication_required` when `requires_dispatch_reauthentication` applies and no
+valid `current_password` was sent; `rollout_disabled` while rollout is OFF (AC-036) — returned
+after the lookup ran, with the lookup's outcome (an adopted task, refreshed contact, the audit
+row) already applied. `connection_disconnected` (no credential exists any more),
+`run_terminal` and `agent_task_missing` refuse the whole check before any lookup. When it
 runs it passes `requires_dispatch_reauthentication` exactly like a dispatch (the request
-carries `current_password` for that case), goes to the run's pinned `interface_url`, and is
-serialised: the `interrupted|delivery_unconfirmed → open` transition is a compare-and-set on
+carries `current_password` for that case) — because `first_dispatch_at` is stamped by the
+`queued → open` transition (§1), a resend of an exchange that had started lies inside the
+spent trigger, and the reachable case of the rule is the retry of a hand-off that never left
+(`queued` at restart → `not_sent`), which is a dispatch — goes to the run's pinned
+`interface_url`, and is serialised: the `interrupted|delivery_unconfirmed → open` transition is a compare-and-set on
 `run_version` under the process-wide command lock before any I/O, so a concurrent check, a
 replayed confirmation or the observer's restart-recovery lookup re-reads, sees `open` and
 returns the winner without network I/O (SC-008). No background thread — observer scheduler,
@@ -235,7 +245,8 @@ exchange is still open returns the live projection without a second exchange.
 ## 6. Audit entry (`AgentAuditEntryDocument`) — unchanged shape, new actions
 
 Actions: `card_fetched`, `connection_tested`, `card_drift_detected`, `run_dispatched`,
-`exchange_closed`, `task_adopted`, `task_succeeded`, `observation_accepted` (written only
+`exchange_closed`, `task_adopted`, `task_succession_recorded` (one row per `task_succession`
+timeline row, §3), `observation_accepted` (written only
 when the observation changed the state, bounded per run/state class/UTC day — never one row
 per 60-second poll), `observation_rejected` (bounded per owner/connection/class/day),
 `push_registered`, `push_refused`, `push_verified`, `push_token_rejected` (one bounded row
@@ -292,14 +303,14 @@ documented for users in `docs/data-retention.md` (retention-schedule rows and th
 | setting | env | default / bounds |
 |---|---|---|
 | `observation_interval_seconds` | `BRAIN_BUDDY_AGENT_OBSERVATION_INTERVAL_SECONDS` | 60, 5–3600 |
-| `reply_window_seconds` | `BRAIN_BUDDY_AGENT_REPLY_WINDOW_SECONDS` | 300, 30–3600 |
+| `reply_window_seconds` | `BRAIN_BUDDY_AGENT_REPLY_WINDOW_SECONDS` | 300, 300–3600 (never below 300 s, FR-007) |
 | `dispatch_wait_seconds` | `BRAIN_BUDDY_AGENT_DISPATCH_WAIT_SECONDS` | 5, 0–30 |
 | `exchange_workers` (exchange pool: SendMessage start/reply only) | `BRAIN_BUDDY_AGENT_EXCHANGE_WORKERS` | 8, 1–64 |
 | `max_exchanges_per_connection` (exchange workers one connection may hold at once; excess exchanges stay `queued`, so one hostile or broken agent cannot exhaust the pool for every owner) | `BRAIN_BUDDY_AGENT_MAX_EXCHANGES_PER_CONNECTION` | 2, 1–`exchange_workers` |
 | `observer_workers` (observation pool: GetTask/ListTasks; separate from the exchange pool) | `BRAIN_BUDDY_AGENT_OBSERVER_WORKERS` | 4, 1–64 |
 | `control_workers` (control pool: CancelTask and CreateTaskPushNotificationConfig, short timeout; never shared with start/reply exchanges, so a cancel never waits behind the exchanges it ends) | `BRAIN_BUDDY_AGENT_CONTROL_WORKERS` | 2, 1–16 |
 | `connector_timeout_seconds` (test/short-call timeout; also the exchange connect timeout) | unchanged name | 10, ≤120 (exchanges use `httpx.Timeout(connect=5, read=reply_window + 15)`) |
-| absolute request deadline | derived: `egress.pinned_request(deadline_seconds=…)` | exchange: `reply_window_seconds + 15`; observation, control and test calls: `connector_timeout_seconds + 5`. Enforced by `pinned_request` itself while waiting for headers and inside the `iter_raw` loop (an httpx read timeout is per chunk, so a drip-feeding agent never trips it); breach closes the stream and raises `EgressDeadlineExceeded` — exchange ⇒ `delivery_unconfirmed` (lookup before any resend), observation ⇒ failed contact, cancel ⇒ `cancel_outcome=unconfirmed`, test ⇒ `a2a_unreachable` |
+| absolute request deadline | derived: `egress.pinned_request(deadline_seconds=…)` | exchange: `reply_window_seconds + 15` (315 s at the defaults); observation, control and test calls: `connector_timeout_seconds` (10 s) + 5 s = 15 s at the defaults. Enforced by `pinned_request` itself while waiting for headers and inside the `iter_raw` loop (an httpx read timeout is per chunk, so a drip-feeding agent never trips it); breach closes the stream and raises `EgressDeadlineExceeded` — exchange ⇒ `delivery_unconfirmed` (lookup before any resend), observation ⇒ failed contact, cancel ⇒ `cancel_outcome=unconfirmed`, test ⇒ `a2a_unreachable` |
 | `connector_max_response_bytes` (card and short-call reads) | unchanged | 64000 |
 | `a2a_task_max_response_bytes` (GetTask/ListTasks reads; over-cap GetTask falls back to ListTasks without artifacts) | `BRAIN_BUDDY_AGENT_A2A_TASK_MAX_RESPONSE_BYTES` | 262144 (256 KB), 1024–1048576 (1 MiB hard max) |
 | push limiter bounds | constants beside the route (`PUSH_GLOBAL_MAX_PER_MINUTE`, `PUSH_RUN_MAX_PER_MINUTE`, `PUSH_LIMITER_MAX_KEYS`) | 600/min process-wide before any database read; 30/min per known run; at most 1024 per-run keys, evicted on terminal/disconnect |

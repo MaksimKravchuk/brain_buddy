@@ -57,7 +57,8 @@ Removed schemas: `AgentConnectionSecretResponse`, `AgentConnectionSigningSecretR
   "guarantee_tier": null | "guaranteed" | "best_effort",
   "tier_disclosure": null | "Guaranteed single start. …" | "Best-effort single start. …",
   "tier_disclosure_url": "https://github.com/…/single-start/v1.md",
-  "capabilities": { "streaming": true, "push_notifications": false, "reply": true, "cancel": true },
+  "capabilities": { "streaming": true, "push_notifications": false },   // the card's own declarations only
+  "controls_offered": { "reply": true, "cancel": true },                // BrainBuddy-side: the controls the product offers on this connection's runs, never an agent claim
   "cancellation_disclosure": "Cancellation depends on the agent …",
   "agent_changed": false,                      // FR-002 fifth condition; true iff last_test_error_code == "agent_card_changed"
   "best_effort_acknowledged_at": null | "…",  // FR-003 one-time acknowledgement (null until the first confirmed best-effort hand-off)
@@ -68,8 +69,11 @@ Removed schemas: `AgentConnectionSecretResponse`, `AgentConnectionSigningSecretR
 `tier_disclosure` and `cancellation_disclosure` are server-owned sentences rendered
 verbatim (FR-003, FR-010, FR-014); `tier_disclosure_url` is the published extension
 specification the best-effort disclosure links to (FR-003), opened only on explicit user
-action with external-destination disclosure. `capabilities.reply`/`.cancel` are always
-`true` for a tested A2A connection; the run projection withdraws controls per run.
+action with external-destination disclosure. `capabilities` carries only what the card
+declares (`streaming`, `push_notifications`); `controls_offered.reply`/`.cancel` are
+BrainBuddy-side statements of the controls the product offers on this connection's runs —
+always `true` for a tested A2A connection, because agent cards do not advertise cancellation
+(FR-010) — never an agent claim; the run projection withdraws controls per run.
 
 Every card-sourced string — `card.name`, `version`, `description`, `skills[].name`,
 `skills[].description`, `auth_schemes_offered[].name`, `interface_url` — and every
@@ -133,7 +137,16 @@ performs the correlation-ID lookup once and resends only under the `check-delive
 preconditions below. A run that BrainBuddy restarted before its exchange ever started
 returns `dispatch_state: "not_sent"`, `dispatch_error_code: "restarted_before_send"` — nothing
 left BrainBuddy — and a later confirmation retries with the same run ID and message ID
-(AC-032).
+(AC-032). That retry is the same request identity as the original confirmation —
+`connection_id`, `include_details`, `supporting_items`, `manifest_token` and
+`acknowledge_duplicate_risk` unchanged, under the `Idempotency-Key` both clients derive from
+the manifest token (`agent-handoff-<token>`, as they do today) — so it replays through the
+reserved run; the review reopened by **Try this hand-off again** is seeded from the run's
+frozen manifest, and a rebuilt manifest whose token differs is a new preview that reserves a
+new run while the earlier one stays `not_sent` (FR-005). Because `first_dispatch_at` is
+stamped only when an exchange starts, such a retry is a first dispatch under
+`requires_dispatch_reauthentication` and needs `current_password` once the 15-minute window
+has passed (FR-004).
 
 `POST /agent-runs/{id}/check-delivery` (Idempotency-Key; the **Check again** control on
 D-03-S05 / M-03-S04) — body `{ "current_password": null | "…" }`, needed only when the resend
@@ -150,14 +163,23 @@ was reset since the run was dispatched (an agent-address, authentication-scheme,
 card-drift reset), `"agent_card_changed"` when the connection is **Agent changed** or the
 run's pinned card fingerprint no longer matches, `"run_content_expired"` when the frozen
 manifest has been nulled by the content tier, `"reauthentication_required"` when the dispatch
-reauthentication rule applies and no valid `current_password` was sent, and while rollout is
-OFF (the lookup still runs and may adopt; §Rollout OFF, AC-036). Concurrent checks are
+reauthentication rule applies and no valid `current_password` was sent (with
+`first_dispatch_at` stamped at exchange start, a resend of an exchange that had started lies
+inside the spent trigger — the rule is applied all the same), and `"rollout_disabled"` while
+rollout is OFF — returned after the lookup ran, with the lookup's outcome already applied: a
+found task is adopted and the response is then the `sent` run, not a refusal (§Rollout OFF,
+AC-036). Concurrent checks are
 serialised per run: the `interrupted|delivery_unconfirmed → open` transition is a
 compare-and-set on `run_version` under the process-wide command lock, so a second check, a
 replayed confirmation or the observer's restart-recovery lookup returns the winner without a
 second send (SC-008). Returns `AgentRunResponse`; on a run that is already `sent` it returns
-the run unchanged. Refused with `400 {reason: "run_terminal"}`, `"agent_task_missing"` or
-`"connection_disconnected"`. It never mints a new run or message ID (AC-027, AC-030).
+the run unchanged. Refused outright — before any lookup — with `400 {reason: "run_terminal"}`,
+`"agent_task_missing"` or `"connection_disconnected"` (a disconnected connection has no
+credential left to look up with). That is the complete list, one reason per condition —
+`connection_not_ready`, `agent_card_changed`, `run_content_expired`, `reauthentication_required`,
+`rollout_disabled`, `run_terminal`, `agent_task_missing`, `connection_disconnected` — and
+spec FR-006, `data-model.md` §2 and tasks T055/T068 carry the same eight. It never mints a
+new run or message ID (AC-027, AC-030).
 
 ## Runs
 
@@ -245,16 +267,19 @@ Blocked: create/update/test/credential/preview/dispatch, and the **resend branch
 content leaves BrainBuddy", not "no run is created". Allowed: reads, disconnect, reply/cancel
 for existing non-terminal runs (they complete or settle an already-confirmed hand-off and
 never create a run), the **lookup** of `check-delivery` and of a replayed confirmation (an
-authenticated observation that adopts a found task; on an empty answer the run stays
-`delivery_unconfirmed` until rollout is ON — AC-036), the push route, the observer,
-retention, purge. Covered by the `test_agent_relay_api.py` rollout-OFF matrix.
+authenticated observation that adopts a found task; on an empty answer the resend is refused
+with `400 {reason: "rollout_disabled"}` — after the lookup ran, its outcome applied — and
+the run stays `delivery_unconfirmed` until rollout is ON — AC-036), the push route, the
+observer, retention, purge. Covered by the `test_agent_relay_api.py` rollout-OFF matrix.
 
 ## Error reasons added to `ValidationFailure.detail.reason`
 
-`agent_card_changed`, `agent_task_missing`, `auth_scheme_unsupported`, `a2a_rate_limited`,
-`duplicate_risk_acknowledgement_required`, `connection_disconnected`,
+`agent_card_changed`, `agent_task_missing`, `a2a_auth_scheme_unsupported` (the same code as
+`last_test_error_code`), `a2a_rate_limited`, `duplicate_risk_acknowledgement_required`,
+`connection_disconnected`, `rollout_disabled` (the resend refusal of `check-delivery` and of
+a replayed confirmation while rollout is OFF, returned after the lookup ran),
 `connection_not_ready` (unchanged; now also the resend refusal of `check-delivery`),
-`run_content_expired` and `reauthentication_required` (unchanged; now also on
+`run_content_expired`, `run_terminal` and `reauthentication_required` (unchanged; now also on
 `check-delivery`), `superseded_wire_contract` (mutations on a migrated record). Every error
 carries `X-Correlation-ID`.
 

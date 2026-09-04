@@ -51,7 +51,7 @@ record the dedup key for a request that activated it.
 Every request also carries an **absolute wall-clock deadline** that `pinned_request` enforces
 itself, while waiting for headers and inside its body loop (an httpx read timeout is per
 chunk, so a drip-feeding agent never trips it): reply window + 15 s for a start or reply
-exchange, the short-call timeout plus a margin for every other call. A breach closes the
+exchange, `connector_timeout_seconds` (10 s) + 5 s for every other call (`data-model.md` §9). A breach closes the
 stream and raises `EgressDeadlineExceeded` — start ⇒ delivery unconfirmed (lookup before any
 resend), reply ⇒ command unconfirmed, observe ⇒ contact not refreshed, cancel ⇒
 `cancel_outcome=unconfirmed`, test ⇒ `a2a_unreachable`. Start and reply exchanges run on the
@@ -130,7 +130,7 @@ lookup only and confirmed by succession evidence — a task in the run's convers
 | `-32601` | MethodNotFound | test fallback; cancel ⇒ `cancel_outcome=unsupported`; elsewhere `a2a_unsupported_operation` |
 | `-32603` | Internal | ambiguous, never a capability claim: start ⇒ delivery unconfirmed; cancel ⇒ `cancel_outcome=unconfirmed` (control kept, same command id on retry); observe ⇒ contact not refreshed |
 | HTTP 401/403, `-32050`, `-32052` | auth | `a2a_credentials_rejected` (test: invalid credentials) |
-| HTTP 429, `-32051` | rate limit | `a2a_rate_limited`; start ⇒ **not sent** (retryable with the same ids); test ⇒ status stays untested, `last_test_error_detail={retry_after_seconds}`, retry after that (D-01-S25 / M-01-S22) |
+| HTTP 429, `-32051` | rate limit — HTTP 429, or an agent-specific code admitted through this allowlist (`-32051` is Hermes' code; A2A 1.0 defines no rate-limit error) | `a2a_rate_limited`; start ⇒ **not sent** (retryable with the same ids); test ⇒ status stays untested, `last_test_error_detail={retry_after_seconds}`, retry after that (D-01-S25 / M-01-S22) |
 | HTTP 5xx, timeout, transport, deadline (`EgressDeadlineExceeded`) | — | start ⇒ delivery unconfirmed; reply ⇒ command unconfirmed (observation resumes at the deadline); cancel ⇒ `cancel_outcome=unconfirmed`; others ⇒ unreachable / contact not refreshed |
 | body over cap | `a2a_response_over_cap` | `GetTask` ⇒ `ListTasks` fallback + `result_availability=too_large`; card ⇒ `a2a_not_an_agent`; other calls ⇒ `a2a_response_invalid` |
 
@@ -158,4 +158,8 @@ content tier has expired the projection writes state, version and contact only, 
   completed; legacy card security shape; `A2A-Version` `1.0`/`1.0.0`/absent.
 - a2a-sdk 1.1.2 server (helloworld): strict params, no `messageId` dedup, `ListTasks` with
   `contextId`, `SendMessage` returns the completed task within the request, cancel raises
-  ⇒ `-32603`/`-32004` (assert in test), no push capability.
+  ⇒ `-32004` UnsupportedOperation, asserted by `test_agent_a2a_reference_helloworld.py`
+  (T118) after a 30 s startup wait; documented fallback should the pinned sample answer
+  `-32603` instead: BrainBuddy shows `cancel_outcome=unconfirmed` with the control kept
+  (never a capability claim), and the assertion is corrected to the observed code with this
+  note amended — never widened to accept both; no push capability.
