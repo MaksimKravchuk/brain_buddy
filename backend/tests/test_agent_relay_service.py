@@ -16,9 +16,10 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import pytest
+from pydantic import AfterValidator, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
@@ -30,12 +31,18 @@ from app.modules.agents.connector import (
 )
 from app.modules.agents.domain import (
     PROTOCOL_VERSION,
+    REPORTING_INSTRUCTIONS_VERSION,
     AgentCapabilities,
     AgentConnectionDocument,
+    AgentRunManifest,
+    inert_reporting_contract,
 )
-from app.modules.agents.headers import RESERVED_AUTH_HEADER_NAMES
+from app.modules.agents.headers import (
+    RESERVED_AUTH_HEADER_NAMES,
+    validate_auth_header_name,
+)
 from app.modules.agents.repository import IDEMPOTENCY_RETENTION, AgentRepository
-from app.modules.agents.secrets import SecretBox
+from app.modules.agents.secrets import SealedSecret, SecretBox
 from app.modules.agents.service import (
     AgentRelayService,
     EventRejected,
@@ -54,6 +61,7 @@ from app.schemas.agents import (
     AgentHandoffPreviewRequest,
     AgentReplyRequest,
 )
+from app.schemas.common import StorageBaseModel
 
 OWNER = "user_a"
 OTHER_OWNER = "user_b"
@@ -5642,3 +5650,217 @@ class TestMalformedStoredFingerprintsFailClosed:
         scenario.invoke_fresh(scenario.instance(rotated_ring()), key="idem-after")
 
         assert len(scenario.deliveries) == 2
+
+
+class TestRollbackBoundary:
+    """A 014 row has to stay readable by the 007 image.
+
+    ADR-0008 landing keeps rollback as a real operational option, and a rollback
+    that finds the relay's rows unparseable is far worse than one that finds the
+    feature idle: the 007 image's retention sweep, data export and read paths all
+    go through these models, so an unreadable row would break GDPR export and
+    stop content expiring on schedule — for connections and runs the user may
+    never touch again.
+
+    So the frozen 007 shapes are declared *here*, in the test, rather than
+    imported. Importing the live models would prove only that 014 agrees with
+    itself. These copies are pinned to what the 007 image actually shipped, and
+    they are what a 014 payload is validated against.
+
+    014-FR-012, 014-SC-010.
+    """
+
+    class Frozen007ReportingContract(StorageBaseModel):
+        """The 007 shape: `callback_url` and `connection_id` both required."""
+
+        callback_url: str
+        connection_id: str
+        connection_header: Literal["X-BrainBuddy-Connection"] = (
+            "X-BrainBuddy-Connection"
+        )
+        timestamp_header: Literal["X-BrainBuddy-Timestamp"] = "X-BrainBuddy-Timestamp"
+        signature_header: Literal["X-BrainBuddy-Signature"] = "X-BrainBuddy-Signature"
+        timestamp_format: Literal[
+            "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero"
+        ] = "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero"
+        signature_algorithm: Literal["hmac-sha256"] = "hmac-sha256"
+        signing_bytes: Literal["timestamp_bytes + b'.' + raw_body"] = (
+            "timestamp_bytes + b'.' + raw_body"
+        )
+        signature_format: Literal["v1=<lowercase hex>"] = "v1=<lowercase hex>"
+        body_envelope_version: str = "2026-08-09"
+
+    class Frozen007ConnectionDocument(StorageBaseModel):
+        """The 007 connection shape.
+
+        Note `endpoint_url` and the `auth_header_name` validator: 014 keeps the
+        storage key and never stores "Authorization" there precisely because
+        this model would reject it.
+        """
+
+        id: str
+        owner_id: str
+        name: str
+        endpoint_url: str
+        auth_header_name: Annotated[
+            str, AfterValidator(validate_auth_header_name), Field(max_length=128)
+        ] = "X-Agent-Key"
+        credential: SealedSecret | None = None
+        inbound_secret: SealedSecret | None = None
+        status: str = "untested"
+        created_at: datetime
+        updated_at: datetime
+        schema_version: int = Field(default=1, ge=1)
+        revision: int = Field(default=1, ge=1)
+
+    class Frozen007RunManifest(StorageBaseModel):
+        """The 007 manifest, whose `reporting` block was mandatory."""
+
+        token: str = Field(min_length=64, max_length=64)
+        run_id: str
+        task_id: str
+        connection_id: str
+        agent_name: str
+        title: str
+        details: str | None = None
+        context_items: list[dict[str, Any]] = Field(default_factory=list)
+        reporting: TestRollbackBoundary.Frozen007ReportingContract
+        reporting_instructions: str
+        instructions_version: str = "v2"
+        protocol_version: str = "2026-08-09"
+
+    def test_014_FR_012_frozen_007_connection_document_validates_a_014_payload(
+        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+    ) -> None:
+        """AC-023: a rolled-back image can still read a connection 014 wrote.
+
+        Three properties carry this, and each is a thing 014 could plausibly
+        have done differently:
+
+        * the storage key stays `endpoint_url` even though the API now says
+          `agent_address` — renaming it would have been tidier and unreadable;
+        * a bearer connection stores **no** `auth_header_name` key, so the 007
+          default applies. Storing "Authorization" would be rejected outright by
+          007's own validator, turning every bearer connection into a parse
+          failure on rollback;
+        * `StorageBaseModel` ignores unknown fields, which is what lets 014 add
+          `wire` and `disconnect_reason` without 007 choking on them.
+        """
+
+        service = build_service(AgentRepository(tmp_path), connector, clock)
+        connection_id = connect(service)
+
+        # Read the row as it sits on disk. Going through the live model would
+        # prove only that 014 agrees with itself; the rollback question is what
+        # a *different* image finds in the file.
+        with sqlite3.connect(tmp_path / "agents.sqlite3") as database:
+            row = database.execute(
+                "SELECT payload FROM agent_connections WHERE id = ?", (connection_id,)
+            ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+
+        assert payload["endpoint_url"], "007 reads the connection by this key"
+        assert payload.get("wire") == "a2a", "014 records its own wire contract"
+
+        # A bearer connection must not persist a header name the 007 validator
+        # refuses. The 014 model's own default is the 007 default, so what
+        # matters is that nothing ever writes "Authorization" here.
+        assert payload.get("auth_header_name") != "Authorization"
+
+        restored = self.Frozen007ConnectionDocument.model_validate(payload)
+        assert restored.id == connection_id
+        assert restored.endpoint_url == payload["endpoint_url"]
+
+    def test_014_FR_012_a_bearer_shaped_payload_without_a_header_name_still_loads(
+        self,
+    ) -> None:
+        """The exact rollback case: the key is absent, not empty.
+
+        An empty string would fail 007's field-name token validator, and `None`
+        would fail its type. Absent is the only shape that survives, so it is
+        the one asserted.
+        """
+
+        payload = {
+            "id": "conn-1",
+            "owner_id": "owner-1",
+            "name": "Agent",
+            "endpoint_url": "https://agent.example.com/",
+            "wire": "a2a",
+            "auth_scheme": "bearer",
+            "disconnect_reason": None,
+            "status": "ready",
+            "created_at": "2026-09-04T12:00:00Z",
+            "updated_at": "2026-09-04T12:00:00Z",
+            "schema_version": 2,
+            "revision": 3,
+        }
+
+        restored = self.Frozen007ConnectionDocument.model_validate(payload)
+
+        assert restored.auth_header_name == "X-Agent-Key", "the 007 default applies"
+        assert restored.schema_version == 2
+
+    def test_014_FR_012_frozen_007_run_event_and_command_documents_validate_014_payloads(
+        self,
+    ) -> None:
+        """AC-023: the manifest keeps its 007 keys, with inert values.
+
+        014 has no callback URL to put there — the bespoke inbound wire is
+        gone — but omitting the block entirely would make every 014 run row
+        unparseable to the 007 image. An empty `callback_url` is deliberately
+        not an address: a rolled-back image reading it finds nowhere to send
+        anything, rather than an endpoint 014 has stopped serving.
+        """
+
+        manifest = AgentRunManifest(
+            token="a" * 64,
+            run_id="run-1",
+            task_id="task-1",
+            connection_id="conn-1",
+            agent_name="Agent",
+            title="Do the thing",
+            details=None,
+            context_items=[],
+            reporting=inert_reporting_contract("conn-1"),
+            reporting_instructions="",
+        )
+
+        payload = manifest.model_dump(mode="json")
+
+        assert payload["reporting"]["callback_url"] == ""
+        assert payload["reporting"]["connection_id"] == "conn-1"
+        assert payload["reporting_instructions"] == ""
+        assert payload["instructions_version"] == REPORTING_INSTRUCTIONS_VERSION
+        # The 007 defaults are present, not merely defaulted at read time: a
+        # rolled-back image validating this row must not depend on its own
+        # defaults matching ours.
+        assert payload["reporting"]["signature_algorithm"] == "hmac-sha256"
+        assert payload["reporting"]["body_envelope_version"] == PROTOCOL_VERSION
+
+        restored = self.Frozen007RunManifest.model_validate(payload)
+        assert restored.reporting.callback_url == ""
+        assert restored.run_id == "run-1"
+
+    def test_014_FR_012_a_manifest_missing_its_reporting_block_would_break_rollback(
+        self,
+    ) -> None:
+        """The negative case, so the guard above cannot be vacuous.
+
+        If this ever stops raising, the 007 model has been relaxed and the
+        rollback boundary is no longer being tested by the test above.
+        """
+
+        payload = {
+            "token": "a" * 64,
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "connection_id": "conn-1",
+            "agent_name": "Agent",
+            "title": "Do the thing",
+            "reporting_instructions": "",
+        }
+
+        with pytest.raises(PydanticValidationError):
+            self.Frozen007RunManifest.model_validate(payload)
