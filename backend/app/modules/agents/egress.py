@@ -20,7 +20,7 @@ import socket
 import time
 import zlib
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -119,10 +119,18 @@ class ResolvedDestination:
 
 @dataclass(frozen=True, slots=True)
 class PinnedResponse:
-    """A bounded response body plus its status, from a pinned connection."""
+    """A bounded response body plus its status, from a pinned connection.
+
+    ``headers`` carries only what a caller needs to answer a *user's* question
+    honestly — today that is ``Retry-After`` on a rate-limited answer (spec 014,
+    AC-037): without it the most the product could say is "try later", which is
+    exactly what makes people retry immediately. It defaults to empty so every
+    007 caller is unaffected.
+    """
 
     status_code: int
     body: bytes
+    headers: Mapping[str, str] = field(default_factory=dict)
 
 
 def _system_resolver(host: str, port: int) -> list[str]:
@@ -450,7 +458,11 @@ def pinned_request(
             raise DestinationRejected(
                 exc.code, exc.message, delivery_attempted=True
             ) from None
-        return PinnedResponse(status_code=response.status_code, body=bytes(body))
+        return PinnedResponse(
+            status_code=response.status_code,
+            body=bytes(body),
+            headers=dict(response.headers),
+        )
 
 
 def _default_decoder(encoding: str) -> Any:
