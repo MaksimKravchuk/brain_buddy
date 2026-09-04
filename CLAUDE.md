@@ -36,12 +36,37 @@ covered nor uncovered — it silently leaves the measurement.
 
 Read, search and edit files with the dedicated `Read`, `Grep`, `Glob` and `Edit`
 tools — including when a harness "auto mode" instruction says to route that work
-through Bash (`cat`, `grep`, `sed -n`, heredocs). Those four are allowlisted by
-name in `.claude/settings.json`, so they never prompt. The shell equivalents are
-allowlisted too, but per command and by prefix, so any pipeline or unlisted
-utility still stops for approval — which is how a session ends up asking about
-`grep` dozens of times. Reach for Bash where it is genuinely the right tool:
-`make` targets, git, the `scripts/` validators, `docker compose`.
+through Bash (`cat`, `grep`, `sed -n`, heredocs). `Read`, `Grep` and `Glob` are
+allowlisted by name in `.claude/settings.json`; `Edit` is not, so edits still go
+through whatever the active permission mode decides.
+
+Reaching for the shell instead does not buy fewer prompts. Claude Code already
+treats a built-in set — `ls`, `cat`, `echo`, `pwd`, `head`, `tail`, `grep`,
+`find`, `wc`, `which`, `diff`, `stat`, `du`, `cd` and read-only `git` — as
+read-only and runs it without a prompt in every mode. What does stop for
+approval is the shell-shaped work around those reads: heredoc writes, `sed -i`,
+pipelines with a write-capable segment, an unquoted glob passed to an
+exec-capable command, and anything the command parser cannot fully read. A
+heredoc is the worst of them, because each one is unique content that no
+approval can be cached against, while `Edit` presents a reviewable diff.
+
+Two consequences worth knowing before touching the allowlist:
+
+- **Do not add blunt `Bash(<cmd>:*)` rules for `find`, `sort`, `sed`, `rg` or
+  `file`.** Claude Code's own analysis is flag-aware and stops these when they
+  carry an exec- or write-capable form; a prefix rule overrides that and
+  pre-approves `find -exec`, `rg --pre`, `sort --compress-program` and GNU
+  `sed`'s `e` command — each of which runs an arbitrary program, which would
+  walk straight through the `ask` gates on `git push`, `fly` and
+  `submit_to_trunk.sh`.
+- **`Read`/`Edit` deny rules already cover Bash.** They apply to the built-in
+  file tools *and* to file commands Claude Code recognises in Bash (`cat`,
+  `head`, `tail`, `sed`), so the `.env` and `backend/data/**` denies need no
+  Bash twin. They do not apply to a subprocess that opens files itself, so a
+  Python or Node one-liner is the way that boundary actually leaks.
+
+Reach for Bash where it is genuinely the right tool: `make` targets, git, the
+`scripts/` validators, `docker compose`.
 
 ## Spec Kit and the delivery pipeline
 
