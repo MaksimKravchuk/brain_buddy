@@ -561,7 +561,11 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
         env=env,
         text=True,
         capture_output=True,
-        timeout=900,
+        # A maximum-effort lens over a feature with a dozen artifacts and a
+        # 125-state design took 10-15 minutes on the two runs that finished
+        # and timed out twice at 900 s; the cap bounds a hung runtime, not a
+        # slow honest review.
+        timeout=1800,
     )
     if result.returncode != 0:
         # Deliberately not routed to the fallback. A reviewer that ran and
