@@ -16,6 +16,7 @@ import hmac
 import json
 import secrets
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import Future
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -54,6 +55,7 @@ from app.schemas.agents import (
 from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
 
+from .a2a.client import A2AClientPort
 from .connector import ConnectorPort, ConnectorTarget
 from .domain import (
     AGENT_EVENT_ENVELOPE_ADAPTER,
@@ -161,6 +163,24 @@ class TaskSnapshotPort(Protocol):
     def __call__(self, task_id: str, *, owner_id: str) -> TaskSnapshot: ...
 
 
+class ExchangeExecutorPort(Protocol):
+    """The one method the exchange pool needs from an executor.
+
+    A protocol rather than `concurrent.futures.Executor` for the usual reason,
+    and for a sharper one. The usual: a test can pass a synchronous double and
+    drive a state machine without threads or sleeps. The sharper: the pool this
+    describes is deliberately *bounded* (`exchange_workers`, data-model §9)
+    because a held `SendMessage` occupies a worker for up to the reply window,
+    and an unbounded one would let a single slow agent consume the process. The
+    narrow port keeps that bound a property of what is injected here rather than
+    something the service could quietly opt out of.
+    """
+
+    def submit(
+        self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any
+    ) -> Future[Any]: ...
+
+
 def _reporting_instructions(callback_url: str, connection_id: str) -> str:
     """The versioned template shown verbatim in the hand-off review."""
 
@@ -190,6 +210,15 @@ class AgentRelayService:
         secret_box: SecretBox,
         task_snapshot: TaskSnapshotPort,
         callback_url: str,
+        # The A2A wire and its bounded exchange pool, injected here rather than
+        # constructed inside the service. Both are optional for one transitional
+        # reason: this build still speaks the bespoke 007 wire alongside them,
+        # and the observer that drives them arrives later. Taking them in the
+        # constructor now is what keeps the wiring acyclic — the container owns
+        # every collaborator, so the client never needs a service and the
+        # service never needs a container (plan.md, "Delivery boundary").
+        a2a_client: A2AClientPort | None = None,
+        exchange_executor: ExchangeExecutorPort | None = None,
         stale_after: timedelta = DEFAULT_STALE_AFTER,
         reporting_window: timedelta = DEFAULT_REPORTING_WINDOW,
         content_retention: timedelta = DEFAULT_CONTENT_RETENTION,
@@ -199,6 +228,8 @@ class AgentRelayService:
     ) -> None:
         self.agent_repo = agent_repo
         self.connector = connector
+        self.a2a_client = a2a_client
+        self.exchange_executor = exchange_executor
         self.secret_box = secret_box
         self.task_snapshot = task_snapshot
         self.callback_url = callback_url
