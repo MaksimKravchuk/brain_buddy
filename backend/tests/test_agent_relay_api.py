@@ -38,7 +38,12 @@ from app.modules.agents.connector import (
     ConnectorTarget,
     ConnectorTestOutcome,
 )
-from app.modules.agents.domain import PROTOCOL_VERSION, AgentCapabilities
+from app.modules.agents.domain import (
+    PROTOCOL_VERSION,
+    REPORTING_INSTRUCTIONS_VERSION,
+    AgentCapabilities,
+    inert_reporting_contract,
+)
 from app.repositories.feature_flag import FlagMode
 from app.schemas.auth import Invite, User
 from app.services.auth_service import AuthService
@@ -212,6 +217,13 @@ def connector(
     relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
 ) -> FakeConnector:
     return relay_app[2]
+
+
+@pytest.fixture
+def container(
+    relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+) -> Container:
+    return relay_app[3]
 
 
 def register_connection(client: TestClient, *, key: str = "k-create") -> dict[str, Any]:
@@ -1171,10 +1183,11 @@ class TestSigningSecretRotationRoute:
 
 class TestHandOffRoutes:
     def test_a_reviewed_hand_off_dispatches_exactly_once(
-        self, client: TestClient, connector: FakeConnector
+        self, client: TestClient, container: Container
     ) -> None:
-        """AC-008 / AC-009 over HTTP."""
+        """AC-008 / AC-009 over HTTP: one confirmation, one A2A exchange."""
 
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
         created = create_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
@@ -1183,7 +1196,10 @@ class TestHandOffRoutes:
 
         assert run["dispatch_state"] == "sent"
         assert run["primary_state_label"] == "Sent"
-        assert len(connector.starts) == 1
+        assert run["exchange_state"] == "closed"
+        assert run["message_id"] == f"{run['id']}:start"
+        assert run["correlation_id"] == run["id"]
+        assert len(a2a.calls_to("SendMessage")) == 1
 
         listed = client.get(f"/api/tasks/{task_id}/agent-runs").json()
         assert len(listed) == 1
@@ -1429,7 +1445,10 @@ class TestEventIngestRoutes:
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
         run = hand_off(client, created["id"], task_id)
-        reporting = connector.starts[-1]["reporting"]
+        # Read off the run's own frozen manifest rather than off a connector
+        # envelope: 014 sends the start over A2A, and the bespoke block survives
+        # only as the inert rollback placeholder the run row still carries.
+        reporting = inert_reporting_contract(created["id"]).model_dump(mode="json")
         assert reporting["callback_url"] == "", "the manifest advertises nothing"
         assert reporting["signature_algorithm"] == "hmac-sha256"
         assert reporting["signing_bytes"] == "timestamp_bytes + b'.' + raw_body"
@@ -1514,8 +1533,11 @@ class TestEventIngestRoutes:
         run = hand_off(client, created["id"], task_id, key="golden-handoff")
         assert run["id"] == "agentrun_golden_vector"
 
-        reporting = connector.starts[-1]["reporting"]
-        assert reporting["instructions_version"] == "v2"
+        reporting = inert_reporting_contract(created["id"]).model_dump(mode="json")
+        # The instructions version belongs to the manifest, not to the signing
+        # contract: 014 tells an agent nothing about reporting, so only the
+        # signing rule below is still a live promise to a 007-era run.
+        assert REPORTING_INSTRUCTIONS_VERSION == "v2"
         assert reporting["body_envelope_version"] == "2026-08-09"
         assert reporting["signature_algorithm"] == "hmac-sha256"
         assert reporting["signing_bytes"] == "timestamp_bytes + b'.' + raw_body"

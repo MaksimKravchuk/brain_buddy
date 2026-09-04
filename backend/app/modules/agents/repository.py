@@ -1169,6 +1169,41 @@ class AgentRepository(BaseRepository):
                 ),
             )
 
+    def queued_exchanges(self) -> list[tuple[str, str, str]]:
+        """Every exchange still waiting for a worker: owner, run, connection.
+
+        Ordered oldest first so a drain is fair within an owner; fairness
+        *across* owners is the caller's business, because only it knows which
+        connections already hold workers.
+        """
+
+        with self._connection() as conn:
+            rows = conn.execute("""
+                SELECT owner_id, id, connection_id FROM agent_runs
+                WHERE exchange_state = 'queued'
+                ORDER BY created_at ASC, id ASC
+                """).fetchall()
+        return [
+            (str(row["owner_id"]), str(row["id"]), str(row["connection_id"]))
+            for row in rows
+        ]
+
+    def open_exchange_count(self, connection_id: str, *, owner_id: str) -> int:
+        """How many exchanges this connection is holding open right now.
+
+        The bound that stops one hostile or broken agent from consuming the
+        shared pool for every owner. Counted from the durable rows rather than
+        from an in-process tally, so a restart cannot lose track of it.
+        """
+
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS held FROM agent_runs "
+                "WHERE owner_id = ? AND connection_id = ? AND exchange_state = 'open'",
+                (owner_id, connection_id),
+            ).fetchone()
+        return int(row["held"]) if row is not None else 0
+
     def interrupted_exchanges(self) -> list[tuple[str, str, str]]:
         """Every exchange a restart left mid-flight: owner, run, state.
 

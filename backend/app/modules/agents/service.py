@@ -17,7 +17,8 @@ import json
 import secrets
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
-from dataclasses import dataclass
+from concurrent.futures import TimeoutError as FuturesTimeoutError
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any, Protocol
@@ -70,14 +71,22 @@ from .a2a.card import (
     fetch_card,
 )
 from .a2a.client import (
+    A2A_CONTENT_UNSUPPORTED,
     A2A_CREDENTIALS_REJECTED,
+    A2A_EXTENSION_SUPPORT_REQUIRED,
     A2A_METHOD_NOT_FOUND,
     A2A_RATE_LIMITED,
+    A2A_REQUEST_REJECTED,
+    A2A_RESPONSE_INVALID,
     A2A_TASK_NOT_FOUND,
+    A2A_UNSUPPORTED_OPERATION,
+    A2A_VERSION_NOT_SUPPORTED,
     A2AClientPort,
     A2AResult,
     A2ATarget,
 )
+from .a2a.mapping import Observation, ObservationLimits, project_observation
+from .a2a.types import Task
 from .connector import ConnectorPort, ConnectorTarget
 from .domain import (
     A2A_PROTOCOL_VERSION,
@@ -116,6 +125,8 @@ from .secrets import (
     SealedSecret,
     SecretBox,
     SecretDecryptionFailed,
+    generate_push_token,
+    push_token_fingerprint,
     secret_aad,
 )
 
@@ -125,6 +136,27 @@ DEFAULT_CONTENT_RETENTION = timedelta(days=30)
 EVENT_FRESHNESS_WINDOW = timedelta(minutes=5)
 SCOPE_REAUTH_WINDOW = timedelta(minutes=15)
 RESERVATION_TTL = timedelta(hours=1)
+DEFAULT_REPLY_WINDOW = timedelta(minutes=5)
+
+#: Failures that prove the message was refused before the agent could act on it.
+#:
+#: Everything *not* here is ambiguous by construction and becomes **Delivery
+#: unconfirmed** — a timeout, a 5xx or a breached deadline all mean the request
+#: may already be at the agent, and demoting one of those to "not sent" is the
+#: single claim that turns an honest unknown into a lie the user acts on.
+NOT_SENT_ERROR_CODES = frozenset(
+    {
+        A2A_UNREACHABLE,
+        A2A_CREDENTIALS_REJECTED,
+        A2A_RATE_LIMITED,
+        A2A_REQUEST_REJECTED,
+        A2A_METHOD_NOT_FOUND,
+        A2A_UNSUPPORTED_OPERATION,
+        A2A_CONTENT_UNSUPPORTED,
+        A2A_EXTENSION_SUPPORT_REQUIRED,
+        A2A_VERSION_NOT_SUPPORTED,
+    }
+)
 MAX_EVENT_BYTES = 64_000
 INBOUND_SECRET_BYTES = 32
 
@@ -282,6 +314,34 @@ class ExchangeExecutorPort(Protocol):
     ) -> Future[Any]: ...
 
 
+@dataclass(frozen=True)
+class ExchangePolicy:
+    """Everything the exchange lane needs from deployment, in one object.
+
+    Grouped rather than passed as four more constructor arguments because they
+    are one decision, not four: who runs an exchange, how long the request
+    thread waits on it, how long the agent gets, and how much of the agent's
+    text an observation may keep. A deployment that changes one of these almost
+    always means to change its neighbours.
+    """
+
+    #: The bounded pool exchanges run on. ``None`` means nothing runs them here,
+    #: which leaves confirmed hand-offs **Queued** — a true statement about
+    #: them, and never mistaken for sent.
+    executor: ExchangeExecutorPort | None = None
+    #: How long the request thread waits on a submitted exchange before it
+    #: answers with what is honestly known. Zero means "never block the
+    #: request"; it never means "assume it was sent".
+    dispatch_wait_seconds: float = 0.0
+    #: FR-007's promise to the agent, and the bound on one exchange.
+    reply_window: timedelta = DEFAULT_REPLY_WINDOW
+    observation_limits: ObservationLimits = field(default_factory=ObservationLimits)
+
+
+#: Shared because it is frozen: no caller can mutate another's policy.
+DEFAULT_EXCHANGE_POLICY = ExchangePolicy()
+
+
 class CardFetcherPort(Protocol):
     """Discovery, as the one call the service depends on.
 
@@ -333,7 +393,7 @@ class AgentRelayService:
         # token, so a deployment that moved cannot let a stale confirmation hand
         # the agent an address BrainBuddy no longer answers on.
         push_base_url: str = "",
-        # The A2A wire and its bounded exchange pool, injected here rather than
+        # The A2A wire and its bounded exchange lane, injected here rather than
         # constructed inside the service. Both are optional for one transitional
         # reason: this build still speaks the bespoke 007 wire alongside them,
         # and the observer that drives them arrives later. Taking them in the
@@ -341,7 +401,7 @@ class AgentRelayService:
         # every collaborator, so the client never needs a service and the
         # service never needs a container (plan.md, "Delivery boundary").
         a2a_client: A2AClientPort | None = None,
-        exchange_executor: ExchangeExecutorPort | None = None,
+        exchange: ExchangePolicy = DEFAULT_EXCHANGE_POLICY,
         # Discovery. Optional so the container can bind deployment policy into
         # it once; when it is absent the service builds the default below from
         # the same settings, so there is never a service that cannot discover.
@@ -357,7 +417,13 @@ class AgentRelayService:
         self.agent_repo = agent_repo
         self.connector = connector
         self.a2a_client = a2a_client
-        self.exchange_executor = exchange_executor
+        self.exchange_executor = exchange.executor
+        self.dispatch_wait_seconds = exchange.dispatch_wait_seconds
+        self.reply_window = exchange.reply_window
+        self.observation_limits = exchange.observation_limits
+        # Set by the container once the observer exists, so the service never
+        # needs to know how exchanges are scheduled — only that they are.
+        self.exchange_pump: Callable[[str, str], Future[Any] | None] | None = None
         self.secret_box = secret_box
         self.task_snapshot = task_snapshot
         self.callback_url = callback_url
@@ -1912,7 +1978,10 @@ class AgentRelayService:
         discovery = self._card_fetcher(
             connection.endpoint_url, auth_scheme=connection.auth_scheme, now=now
         )
-        if not discovery.ok or discovery.card_fingerprint == connection.card_fingerprint:
+        if (
+            not discovery.ok
+            or discovery.card_fingerprint == connection.card_fingerprint
+        ):
             return
         updates = self._drift_updates(connection, discovery)
         with self.agent_repo.command_lock(owner_id):
@@ -2095,9 +2164,27 @@ class AgentRelayService:
                         update={
                             "manifest": manifest,
                             "dispatched_at": now,
+                            # Durable before any I/O and honestly ambiguous from
+                            # this moment on. What keeps it from *reading* as an
+                            # ambiguous delivery is `exchange_state`: while the
+                            # exchange is queued the run projects as **Queued**,
+                            # because nothing has left BrainBuddy yet (FR-006).
                             "dispatch_state": "delivery_unconfirmed",
                             "dispatch_error_code": None,
                             "content_expires_at": now + self.content_retention,
+                            # The conversation *is* the run, so the correlation
+                            # ID needs no second identifier to go wrong.
+                            "context_id": reserved.id,
+                            "message_id": f"{reserved.id}:start",
+                            # Pinned: a card that moves mid-run must not be able
+                            # to redirect this run's traffic, and the resend
+                            # rules compare against what was pinned here.
+                            "interface_url": manifest.destination_interface,
+                            "card_fingerprint": connection.card_fingerprint,
+                            "guarantee_tier": connection.guarantee_tier
+                            or "best_effort",
+                            "exchange_state": "queued",
+                            "exchange_kind": "start",
                             "updated_at": now,
                             "revision": reserved.revision + 1,
                         }
@@ -2112,15 +2199,13 @@ class AgentRelayService:
                             created_at=reserved_at,
                         )
                     )
-                    if connection.first_dispatch_at is None:
-                        connection = connection.model_copy(
-                            update={
-                                "first_dispatch_at": now,
-                                "updated_at": now,
-                                "revision": connection.revision + 1,
-                            }
-                        )
-                        self.agent_repo.save_connection(connection)
+                    self._audit(
+                        owner_id=owner_id,
+                        action="run_dispatched",
+                        outcome="queued",
+                        connection_id=connection.id,
+                        run_id=reserved.id,
+                    )
                     if payload.acknowledge_duplicate_risk:
                         # Under the same lock as the reservation, and conditional
                         # on the stamp still being absent, so the *first*
@@ -2138,22 +2223,6 @@ class AgentRelayService:
                         connection = self.agent_repo.get_connection(
                             connection.id, owner_id=owner_id
                         )
-                target = self._target(connection)
-                envelope = {
-                    "type": "start",
-                    "protocol_version": PROTOCOL_VERSION,
-                    "run_id": reserved.id,
-                    "task_id": manifest.task_id,
-                    "idempotency_key": reserved.id,
-                    "title": manifest.title,
-                    "details": manifest.details,
-                    "context": [item.model_dump() for item in manifest.context_items],
-                    "reporting": {
-                        **manifest.reporting.model_dump(mode="json"),
-                        "instructions": manifest.reporting_instructions,
-                        "instructions_version": manifest.instructions_version,
-                    },
-                }
                 self._begin_delivery_attempt(
                     owner_id=owner_id,
                     key_hash=key_hash,
@@ -2165,60 +2234,600 @@ class AgentRelayService:
                     request_hash=record.request_hash if record is not None else None,
                 )
 
-            outcome = self.connector.start(target, envelope=envelope)
-
-            with self.agent_repo.command_lock(owner_id):
-                current = self.agent_repo.get_run(reserved.id, owner_id=owner_id)
-                post_io_now = self._now()
-                callback_arrived_during_io = current.run_version > reserved.run_version
-                effective_status = (
-                    "sent" if callback_arrived_during_io else outcome.status
-                )
-                updates: dict[str, Any] = {
-                    "dispatch_state": effective_status,
-                    "dispatch_error_code": (
-                        None if callback_arrived_during_io else outcome.error_code
-                    ),
-                    "updated_at": max(current.updated_at, post_io_now),
-                    "revision": current.revision + 1,
-                }
-                if effective_status == "sent" and current.last_contact_at is None:
-                    updates["last_contact_at"] = post_io_now
-                current = current.model_copy(update=updates)
-                self.agent_repo.save_run(current)
-                self.agent_repo.save_command(
-                    AgentRunCommandDocument(
-                        id=command_id,
+            # Outside the command lock: the exchange takes it for its own writes,
+            # and a send that an agent may hold open for the whole reply window
+            # must never be holding a process-wide lock while it does.
+            future = self._submit_exchange(owner_id=owner_id, run_id=reserved.id)
+            self._await_exchange(future)
+            current = self.agent_repo.get_run(reserved.id, owner_id=owner_id)
+            if current.exchange_state == "open":
+                # A worker still holds the send. Ask the agent once whether the
+                # task already exists, so the answer can be **Sent** rather than
+                # an honest but useless silence. Never while queued: nothing has
+                # left, so there is nothing to find.
+                current = self._probe_open_exchange(current, connection)
+            if current.exchange_state != "open":
+                with self.agent_repo.command_lock(owner_id):
+                    self.agent_repo.save_command(
+                        AgentRunCommandDocument(
+                            id=command_id,
+                            owner_id=owner_id,
+                            run_id=current.id,
+                            kind="start",
+                            delivery=(
+                                "confirmed"
+                                if current.dispatch_state == "sent"
+                                else "unconfirmed"
+                            ),
+                            created_at=reserved_at,
+                            confirmed_at=(
+                                current.last_contact_at
+                                if current.dispatch_state == "sent"
+                                else None
+                            ),
+                        )
+                    )
+                    self._remember(
                         owner_id=owner_id,
-                        run_id=current.id,
-                        kind="start",
-                        delivery=(
-                            "confirmed" if effective_status == "sent" else "unconfirmed"
-                        ),
+                        key_hash=key_hash,
+                        command=command,
+                        canonical=canonical,
+                        resource_id=current.id,
+                        command_id=command_id,
+                        delivery_attempted=True,
                         created_at=reserved_at,
-                        confirmed_at=(
-                            post_io_now if effective_status == "sent" else None
+                    )
+            return self._run_response(current)
+
+    def _await_exchange(self, future: Future[Any] | None) -> None:
+        """Give the exchange `dispatch_wait_seconds` to finish, then answer.
+
+        The wait is a courtesy, not a contract: whatever it does or does not
+        settle, the response afterwards describes only what actually happened.
+        """
+
+        if future is None or self.dispatch_wait_seconds <= 0:
+            return
+        try:
+            future.result(timeout=self.dispatch_wait_seconds)
+        except FuturesTimeoutError:
+            return
+        except Exception:  # pragma: no cover - the worker records its own failure
+            return
+
+    # --- the A2A exchange ---------------------------------------------------
+
+    def _push_capable(self, connection: AgentConnectionDocument) -> bool:
+        return bool(connection.card and connection.card.push_notifications)
+
+    def _start_message(self, run: AgentRunDocument) -> dict[str, Any]:
+        """The one content-bearing message, exactly as the review showed it.
+
+        Built from the run's *frozen* manifest rather than from the Task, so
+        editing or completing the Task after a dispatch can never rewrite what
+        was already sent (007 FR-012).
+        """
+
+        manifest = run.manifest
+        assert manifest is not None  # guarded by the caller
+        return {
+            "messageId": run.message_id,
+            "contextId": run.context_id,
+            "role": "ROLE_USER",
+            "parts": [{"text": part} for part in self._parts_preview(manifest)],
+            "metadata": {
+                "brainbuddy.task_id": run.task_id,
+                "brainbuddy.run_id": run.id,
+            },
+        }
+
+    def _submit_exchange(self, *, owner_id: str, run_id: str) -> Future[Any] | None:
+        """Hand one queued exchange to whoever runs exchanges here.
+
+        The pump is the observer, which owns the per-connection bound; without
+        one the service falls back to its own executor, and with neither the
+        exchange simply stays **Queued** — which is a true statement about it,
+        so there is nothing to invent.
+        """
+
+        if self.exchange_pump is not None:
+            return self.exchange_pump(owner_id, run_id)
+        if self.exchange_executor is None:
+            return None
+        return self.exchange_executor.submit(
+            self.perform_exchange, run_id, owner_id=owner_id
+        )
+
+    def perform_exchange(self, run_id: str, *, owner_id: str) -> None:
+        """Start one queued exchange, send its message, and settle it.
+
+        The send is held open by the agent for up to the reply window, so it
+        happens on an exchange worker and outside every lock: holding the
+        process-wide command lock across it would stop every other owner's
+        commands for as long as one agent felt like thinking.
+        """
+
+        run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+        if run.exchange_state != "queued" or run.manifest is None:
+            return
+        wire = self.a2a_client
+        if wire is None:
+            # No wire configured here, so nothing can leave. The exchange stays
+            # **Queued**, which is exactly what has happened to it: leaving it
+            # open, or closing it as unconfirmed, would both claim a send.
+            return
+        connection = self.agent_repo.get_connection(
+            run.connection_id, owner_id=owner_id
+        )
+        now = self._now()
+        # Minted here rather than at reservation: a queued exchange holds no
+        # plaintext secret, and the manifest token commits only to the callback
+        # *origin*, so the token itself is free to be created at the moment it
+        # is about to leave.
+        push_token = generate_push_token() if self._push_capable(connection) else None
+        prepared = run.model_copy(
+            update={
+                "push_token_fingerprint": (
+                    push_token_fingerprint(self.secret_box, push_token)
+                    if push_token is not None
+                    else None
+                )
+            }
+        )
+        with self.agent_repo.command_lock(owner_id):
+            opened = self.agent_repo.start_exchange(
+                prepared,
+                expected_version=run.run_version,
+                started_at=now,
+                deadline_at=now + self.reply_window,
+            )
+        if opened is None:
+            # A replayed confirmation, a second worker or restart recovery won
+            # the start. Exactly one of us may send.
+            return
+
+        result = wire.send_message(
+            self._a2a_target(
+                connection,
+                interface_url=opened.interface_url or connection.endpoint_url,
+                guarantee_tier=opened.guarantee_tier,
+            ),
+            message=self._start_message(opened),
+            push_config=(
+                {
+                    "url": self.push_callback_url(opened.id, push_token),
+                    "token": push_token,
+                }
+                if push_token is not None
+                else None
+            ),
+            run_id=opened.id,
+        )
+        self._close_exchange(
+            opened, connection, result, sent_push=push_token is not None
+        )
+
+    def _observation_updates(self, observation: Observation) -> dict[str, Any]:
+        """One projected answer, as the run fields it may write."""
+
+        updates: dict[str, Any] = {
+            "reported_state": observation.reported_state,
+            "last_contact_at": observation.observed_at,
+        }
+        if observation.agent_task_id is not None:
+            updates["agent_task_id"] = observation.agent_task_id
+        if observation.reported_state is None:
+            return updates
+        updates["progress_text"] = observation.progress_text
+        updates["question_text"] = observation.question_text
+        updates["result_text"] = observation.result_text
+        updates["result_link"] = observation.result_link
+        updates["failure_reason"] = observation.failure_reason
+        if observation.terminal:
+            updates["cancel_requested_at"] = None
+        return updates
+
+    def apply_observation(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        observation: Observation | None,
+        based_on: int,
+        extra: dict[str, Any] | None = None,
+        superseded: dict[str, Any] | None = None,
+    ) -> AgentRunDocument:
+        """Write one observation, or lose the race and change nothing.
+
+        The compare-and-set on `run_version` is what keeps two answers about the
+        same run from interleaving into a state neither of them saw. A terminal
+        reported state is never overwritten: an agent that says "completed" and
+        then goes quiet has not un-completed anything.
+
+        `superseded` is the narrow exception: the fields still worth writing
+        when a *newer* report has already landed. A dispatch uses it to record
+        `sent`, because a report arriving during the exchange is itself proof
+        the message got there — whatever the transport went on to say about
+        itself. Nothing about the agent's state is written on that path; that
+        belongs to the report that won.
+
+        No I/O happens inside the lock — the observation is already projected by
+        the time it arrives here.
+        """
+
+        with self.agent_repo.command_lock(owner_id):
+            current = self.agent_repo.get_run(run_id, owner_id=owner_id)
+            if current.run_version != based_on:
+                if not superseded:
+                    return current
+                now = self._now()
+                overtaken = current.model_copy(
+                    update={
+                        **superseded,
+                        "updated_at": max(current.updated_at, now),
+                        "revision": current.revision + 1,
+                    }
+                )
+                self.agent_repo.save_run(overtaken)
+                return overtaken
+            now = self._now()
+            updates: dict[str, Any] = dict(extra or {})
+            if observation is not None and (
+                current.reported_state not in TERMINAL_REPORTED_STATES
+            ):
+                updates = {**self._observation_updates(observation), **updates}
+                if current.content_expired:
+                    # Retention is irreversible: state and contact still move,
+                    # but a late answer can never recreate expired content.
+                    updates.update(
+                        progress_text=None,
+                        question_text=None,
+                        result_text=None,
+                        result_link=None,
+                        failure_reason=None,
+                    )
+            reported = updates.get("reported_state")
+            # `run_version` is the *agent-reported* version, so only something
+            # the agent actually said advances it. BrainBuddy's own bookkeeping
+            # — which dispatch state an exchange closed in, whether a worker is
+            # holding it — is a fact about BrainBuddy's request, and letting it
+            # burn versions would make a later genuine report look like a
+            # straggler and be dropped.
+            if reported is not None:
+                updates["run_version"] = current.run_version + 1
+            updates.update(
+                updated_at=max(current.updated_at, now),
+                revision=current.revision + 1,
+            )
+            updated = current.model_copy(update=updates)
+            self.agent_repo.save_run(updated)
+            if observation is not None and reported is not None:
+                self.agent_repo.append_event(
+                    AgentRunEventDocument(
+                        id=generate_id("agentevt"),
+                        owner_id=owner_id,
+                        run_id=updated.id,
+                        connection_id=updated.connection_id,
+                        type=reported,
+                        run_version=updated.run_version,
+                        received_at=observation.observed_at,
+                        summary=(
+                            None
+                            if updated.content_expired
+                            else (
+                                observation.progress_text
+                                or observation.question_text
+                                or observation.result_text
+                                or observation.failure_reason
+                            )
                         ),
                     )
                 )
-                self._remember(
-                    owner_id=owner_id,
-                    key_hash=key_hash,
-                    command=command,
-                    canonical=canonical,
-                    resource_id=current.id,
-                    command_id=command_id,
-                    delivery_attempted=True,
-                    created_at=reserved_at,
+        return updated
+
+    def _adoptable(self, run: AgentRunDocument, task: Task) -> bool:
+        """Whether a returned task belongs to *this* run's conversation.
+
+        The only evidence that an agent kept BrainBuddy's correlation ID.
+        Adopting a task from another conversation would attach this run to work
+        BrainBuddy never asked for, and would make every later lookup lie.
+        """
+
+        return task.context_id == run.context_id
+
+    def _exchange_outcome(
+        self,
+        run: AgentRunDocument,
+        result: A2AResult,
+        *,
+        now: datetime,
+    ) -> tuple[dict[str, Any], Observation | None, bool]:
+        """One A2A answer, as (run updates, observation, correlation honoured).
+
+        The three groups are kept apart deliberately: what BrainBuddy knows
+        about *its own request* (the dispatch state), what the *agent* said (the
+        observation), and what the answer proved about the connection.
+        """
+
+        if not result.ok:
+            code = result.error_code
+            return (
+                {
+                    "dispatch_state": (
+                        "not_sent"
+                        if code in NOT_SENT_ERROR_CODES
+                        else "delivery_unconfirmed"
+                    ),
+                    "dispatch_error_code": code,
+                },
+                None,
+                True,
+            )
+        if result.task is not None:
+            if not self._adoptable(run, result.task):
+                # The message plainly arrived — something answered it — but the
+                # task it names is not this conversation, so nothing about the
+                # agent's work may be adopted from it.
+                return (
+                    {
+                        "dispatch_state": "sent",
+                        "dispatch_error_code": A2A_RESPONSE_INVALID,
+                        "last_contact_at": now,
+                    },
+                    None,
+                    False,
                 )
+            observation = project_observation(
+                result.task,
+                now=now,
+                limits=self.observation_limits,
+                result_availability=result.result_availability,
+            )
+            return (
+                {"dispatch_state": "sent", "dispatch_error_code": None},
+                observation,
+                True,
+            )
+        if result.message is not None:
+            # Some agents never create a task: the answer *is* the result.
+            observation = project_observation(
+                result.message, now=now, limits=self.observation_limits
+            )
+            return (
+                {"dispatch_state": "sent", "dispatch_error_code": None},
+                observation,
+                True,
+            )
+        return (
+            {
+                "dispatch_state": "sent",
+                "dispatch_error_code": A2A_RESPONSE_INVALID,
+                "last_contact_at": now,
+            },
+            None,
+            True,
+        )
+
+    def _close_exchange(
+        self,
+        run: AgentRunDocument,
+        connection: AgentConnectionDocument,
+        result: A2AResult,
+        *,
+        sent_push: bool = False,
+    ) -> None:
+        """Settle one finished exchange, honestly."""
+
+        now = self._now()
+        updates, observation, honoured = self._exchange_outcome(run, result, now=now)
+        updates["exchange_state"] = "closed"
+        if sent_push and result.ok:
+            # BrainBuddy asked inline and the send succeeded. It is not a claim
+            # that the agent will actually push — a push only ever accelerates
+            # an observation the schedule performs anyway.
+            updates["push_registration"] = "registered"
+        updated = self.apply_observation(
+            run.id,
+            owner_id=run.owner_id,
+            observation=observation,
+            based_on=run.run_version,
+            extra=updates,
+            # A report that landed while the exchange was open proves the
+            # message arrived, so delivery is `sent` even if the transport then
+            # failed on the way back. The agent's own state is left to the
+            # report that won the race.
+            superseded={
+                "dispatch_state": "sent",
+                "dispatch_error_code": None,
+                "exchange_state": "closed",
+            },
+        )
+        if not honoured and connection.context_id_honoured is not False:
+            self._record_correlation_not_honoured(connection)
+        with self.agent_repo.command_lock(run.owner_id):
+            self._audit(
+                owner_id=run.owner_id,
+                action="exchange_closed",
+                outcome=str(updates.get("dispatch_state", updated.dispatch_state)),
+                connection_id=run.connection_id,
+                run_id=run.id,
+            )
+            if observation is not None and observation.agent_task_id is not None:
                 self._audit(
-                    owner_id=owner_id,
-                    action="run_dispatched",
-                    outcome=effective_status,
-                    connection_id=connection.id,
-                    run_id=current.id,
+                    owner_id=run.owner_id,
+                    action="task_adopted",
+                    outcome=observation.agent_task_id,
+                    connection_id=run.connection_id,
+                    run_id=run.id,
                 )
-            return self._run_response(current)
+
+    def _record_correlation_not_honoured(
+        self, connection: AgentConnectionDocument
+    ) -> None:
+        """Remember that this agent dropped BrainBuddy's correlation ID.
+
+        Durable on the connection rather than on the run, because it decides
+        something about *every* future run there: an empty lookup on such an
+        agent proves nothing, so BrainBuddy never resends for it at all.
+        """
+
+        now = self._now()
+        with self.agent_repo.command_lock(connection.owner_id):
+            current = self.agent_repo.get_connection(
+                connection.id, owner_id=connection.owner_id
+            )
+            if current.context_id_honoured is False:
+                return
+            self.agent_repo.save_connection(
+                current.model_copy(
+                    update={
+                        "context_id_honoured": False,
+                        "updated_at": now,
+                        "revision": current.revision + 1,
+                    }
+                )
+            )
+
+    def _probe_open_exchange(
+        self, run: AgentRunDocument, connection: AgentConnectionDocument
+    ) -> AgentRunDocument:
+        """Look once, while a worker still holds the send, for the task it made.
+
+        Only ever run against an *open* exchange: a queued one has provably not
+        left, so there is nothing at the agent to find and the probe would be a
+        request made to answer a question nobody asked.
+        """
+
+        adopted = self._lookup_task(run, connection)
+        if adopted is None:
+            return run
+        now = self._now()
+        return self.apply_observation(
+            run.id,
+            owner_id=run.owner_id,
+            observation=project_observation(
+                adopted, now=now, limits=self.observation_limits
+            ),
+            based_on=run.run_version,
+            extra={"dispatch_state": "sent", "dispatch_error_code": None},
+        )
+
+    def settle_restarted_before_send(self, run_id: str, *, owner_id: str) -> None:
+        """A hand-off a restart caught before its exchange started.
+
+        **Not sent**, never **Delivery unconfirmed**: the worker never ran, so
+        no byte left BrainBuddy and there is nothing at the agent to be unsure
+        about. The identifiers stay exactly as they were, which is what lets the
+        same hand-off be offered again rather than replaced by a second one
+        (AC-032).
+        """
+
+        with self.agent_repo.command_lock(owner_id):
+            run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+            if run.exchange_state != "queued":
+                return
+            now = self._now()
+            self.agent_repo.save_run(
+                run.model_copy(
+                    update={
+                        "dispatch_state": "not_sent",
+                        "dispatch_error_code": "restarted_before_send",
+                        "exchange_state": "closed",
+                        "updated_at": max(run.updated_at, now),
+                        "revision": run.revision + 1,
+                    }
+                )
+            )
+            self._audit(
+                owner_id=owner_id,
+                action="exchange_closed",
+                outcome="restarted_before_send",
+                connection_id=run.connection_id,
+                run_id=run.id,
+            )
+
+    def recover_open_exchange(self, run_id: str, *, owner_id: str) -> None:
+        """An exchange a restart interrupted after it had started.
+
+        Resolved by lookup alone. The message may already be at the agent, so
+        the only safe question is "is there a task in this conversation?" — and
+        the only safe answer to "no" is to leave the run **Delivery unconfirmed**
+        for the user's own **Check again**. No background thread ever resends.
+        """
+
+        with self.agent_repo.command_lock(owner_id):
+            run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+            if run.exchange_state != "open":
+                return
+            now = self._now()
+            run = run.model_copy(
+                update={
+                    "exchange_state": "interrupted",
+                    "dispatch_state": "delivery_unconfirmed",
+                    "updated_at": max(run.updated_at, now),
+                    "revision": run.revision + 1,
+                }
+            )
+            self.agent_repo.save_run(run)
+        connection = self.agent_repo.get_connection(
+            run.connection_id, owner_id=owner_id
+        )
+        adopted = self._lookup_task(run, connection)
+        if adopted is None:
+            return
+        self.apply_observation(
+            run.id,
+            owner_id=owner_id,
+            observation=project_observation(
+                adopted, now=self._now(), limits=self.observation_limits
+            ),
+            based_on=run.run_version,
+            extra={
+                "dispatch_state": "sent",
+                "dispatch_error_code": None,
+                "exchange_state": "closed",
+            },
+        )
+
+    def _lookup_task(
+        self, run: AgentRunDocument, connection: AgentConnectionDocument
+    ) -> Task | None:
+        """The correlation-ID lookup: one `ListTasks`, never a send."""
+
+        if self.a2a_client is None:
+            # Nothing to look with. An absent answer is not an empty one, so
+            # the caller is told nothing rather than "no task exists".
+            return None
+        result = self.a2a_client.list_tasks(
+            self._a2a_target(
+                connection,
+                interface_url=run.interface_url or connection.endpoint_url,
+                guarantee_tier=run.guarantee_tier,
+            ),
+            context_id=run.context_id,
+            page_size=5,
+            run_id=run.id,
+        )
+        return self._newest_adoptable(run, result)
+
+    def _newest_adoptable(
+        self, run: AgentRunDocument, result: A2AResult
+    ) -> Task | None:
+        """The newest task in the run's own conversation, or nothing.
+
+        A foreign `contextId` is ignored rather than adopted: a lookup that
+        matched on anything looser would let one agent's unrelated work settle
+        another run.
+        """
+
+        if not result.ok:
+            return None
+        candidates = [task for task in result.tasks if self._adoptable(run, task)]
+        if result.task is not None and self._adoptable(run, result.task):
+            candidates.append(result.task)
+        if not candidates:
+            return None
+        return max(candidates, key=lambda task: task.status.timestamp or "")
 
     # --- run projection -----------------------------------------------------
 
@@ -2326,6 +2935,19 @@ class AgentRelayService:
             last_contact_at=run.last_contact_at,
             reporting_window_seconds=int(self.reporting_window.total_seconds()),
             capabilities=controls,
+            guarantee_tier=run.guarantee_tier,
+            message_id=run.message_id,
+            # The conversation identifier *is* the run's own id: one identifier,
+            # so there is nothing for the two to disagree about (FR-006).
+            correlation_id=run.context_id,
+            agent_task_id=run.agent_task_id,
+            # True for a queued exchange as well as an open one: both are
+            # unfinished business the clients keep polling, and only
+            # `exchange_state` says which of the two it is.
+            exchange_open=run.exchange_state in ("queued", "open"),
+            exchange_state=run.exchange_state,
+            exchange_kind=run.exchange_kind,
+            push_registration=run.push_registration,
             manifest=(
                 self._manifest_response(run.manifest, connection)
                 if run.manifest is not None and connection is not None

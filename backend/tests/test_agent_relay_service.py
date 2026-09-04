@@ -13,6 +13,7 @@ import json
 import sqlite3
 from collections import OrderedDict
 from collections.abc import Callable
+from concurrent.futures import Future
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,6 +33,8 @@ from app.modules.agents.a2a.card import (
     fetch_card,
 )
 from app.modules.agents.a2a.client import A2AResult
+from app.modules.agents.a2a.mapping import ObservationLimits, project_observation
+from app.modules.agents.a2a.types import Message, Task
 from app.modules.agents.connector import (
     ConnectorCommandOutcome,
     ConnectorStartOutcome,
@@ -55,6 +58,7 @@ from app.modules.agents.secrets import SealedSecret, SecretBox
 from app.modules.agents.service import (
     AgentRelayService,
     EventRejected,
+    ExchangePolicy,
     RelayFingerprintUnreadable,
     RelayKeyRotationUnsafe,
     TaskSnapshot,
@@ -83,6 +87,7 @@ from .a2a_fakes import (
 OWNER = "user_a"
 OTHER_OWNER = "user_b"
 CALLBACK = "https://brainbuddy.example/api/agent-events"
+PUSH_BASE = "https://brainbuddy.example/api/a2a/push"
 
 
 class FakeConnector:
@@ -184,6 +189,28 @@ class BlockingTestConnector(FakeConnector):
         return self.test_outcome
 
 
+class BlockingA2AClient(FakeA2AClient):
+    """A scripted A2A client whose send waits for the test to release it.
+
+    The 014 counterpart of `BlockingIoConnector`: the content-bearing call is
+    now `SendMessage`, so that is where a slow agent has to be simulated for
+    the lock-scope and contention assertions to mean anything.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.block_kind: str | None = None
+        self.entered = Event()
+        self.release = Event()
+
+    def send_message(self, target: Any, **kwargs: Any) -> A2AResult:
+        result = super().send_message(target, **kwargs)
+        if self.block_kind == "start":
+            self.entered.set()
+            assert self.release.wait(timeout=5)
+        return result
+
+
 class BlockingIoConnector(FakeConnector):
     def __init__(self) -> None:
         super().__init__()
@@ -222,6 +249,43 @@ class Clock:
 
     def advance(self, delta: timedelta) -> None:
         self.now += delta
+
+
+class SynchronousExecutor:
+    """An exchange pool with no threads: `submit` runs the work inline.
+
+    The exchange state machine is what these tests are about, so it is driven
+    directly rather than raced against a real pool — a sleep would only make the
+    same assertions slower and flakier.
+    """
+
+    def __init__(self) -> None:
+        self.submitted: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+
+    def submit(self, fn: Any, /, *args: Any, **kwargs: Any) -> Future[Any]:
+        self.submitted.append((fn, args, kwargs))
+        future: Future[Any] = Future()
+        try:
+            future.set_result(fn(*args, **kwargs))
+        except BaseException as exc:  # pragma: no cover - surfaced by the test
+            future.set_exception(exc)
+        return future
+
+
+class SaturatedExecutor:
+    """A pool with no free worker: everything submitted stays queued."""
+
+    def __init__(self) -> None:
+        self.submitted: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+
+    def submit(self, fn: Any, /, *args: Any, **kwargs: Any) -> Future[Any]:
+        self.submitted.append((fn, args, kwargs))
+        return Future()
+
+    def run_pending(self) -> None:
+        pending, self.submitted = self.submitted, []
+        for fn, args, kwargs in pending:
+            fn(*args, **kwargs)
 
 
 TASKS = {
@@ -278,6 +342,7 @@ def build_service(
     keys: OrderedDict[str, bytes] | None = None,
     card_fetcher: Any | None = None,
     a2a_client: Any | None = None,
+    exchange_executor: Any | None = None,
 ) -> AgentRelayService:
     return AgentRelayService(
         repo,
@@ -285,8 +350,10 @@ def build_service(
         secret_box=SecretBox(keys if keys is not None else OrderedDict({"v1": key})),
         task_snapshot=task_snapshot,
         callback_url=CALLBACK,
+        push_base_url=PUSH_BASE,
         card_fetcher=card_fetcher if card_fetcher is not None else FakeCardFetcher(),
         a2a_client=a2a_client if a2a_client is not None else FakeA2AClient(),
+        exchange=ExchangePolicy(executor=exchange_executor),
         resolver=fake_resolver,
         now=clock,
     )
@@ -306,6 +373,11 @@ def service(
         clock,
         card_fetcher=card_fetcher,
         a2a_client=a2a_client,
+        # Inline by default: almost every test here is about what one dispatch
+        # *decides*, not about how long it waits for a worker, and a pool that
+        # answered later would only make those assertions race. The tests that
+        # are about queueing supply their own executor.
+        exchange_executor=SynchronousExecutor(),
     )
 
 
@@ -358,6 +430,19 @@ def issue_signing_secret(
         reauthenticated=True,
     )
     return rotated.inbound_signing_secret
+
+
+def sends(a2a_client: FakeA2AClient) -> list[dict[str, Any]]:
+    """Every content-bearing message this dispatch put on the wire.
+
+    The 014 replacement for the bespoke connector's `starts`: the A2A
+    `SendMessage` is the only call that carries task content.
+    """
+
+    return [
+        kwargs["message"]
+        for _method, _target, kwargs in a2a_client.calls_to("SendMessage")
+    ]
 
 
 def review(
@@ -1519,8 +1604,15 @@ class TestExternalIoLockScope:
         self, tmp_path: Path, clock: Clock, operation: str
     ) -> None:
         connector = BlockingIoConnector()
+        a2a_client = BlockingA2AClient()
         repo = AgentRepository(tmp_path)
-        service = build_service(repo, connector, clock)
+        service = build_service(
+            repo,
+            connector,
+            clock,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
         connection_id = connect(service)
         make_ready(service, connection_id)
 
@@ -1560,7 +1652,10 @@ class TestExternalIoLockScope:
                         idempotency_key="idem-slow-cancel",
                     )
 
-        connector.block_kind = operation
+        # The start's content-bearing call is the A2A send; reply and cancel
+        # still travel the bespoke wire until T110-T114 retire it.
+        blocker: Any = a2a_client if operation == "start" else connector
+        blocker.block_kind = operation
         worker_errors: list[BaseException] = []
 
         def run_worker() -> None:
@@ -1571,7 +1666,7 @@ class TestExternalIoLockScope:
 
         worker = Thread(target=run_worker)
         worker.start()
-        assert connector.entered.wait(timeout=5)
+        assert blocker.entered.wait(timeout=5)
 
         unrelated_finished = Event()
         maintenance_finished = Event()
@@ -1590,7 +1685,7 @@ class TestExternalIoLockScope:
         maintenance.start()
         unrelated_during_io = unrelated_finished.wait(timeout=0.5)
         maintenance_during_io = maintenance_finished.wait(timeout=0.5)
-        connector.release.set()
+        blocker.release.set()
         worker.join(timeout=5)
         unrelated.join(timeout=5)
         maintenance.join(timeout=5)
@@ -1620,7 +1715,14 @@ class TestExternalIoLockScope:
         expire_content: bool,
     ) -> None:
         connector = FakeConnector()
-        service = build_service(AgentRepository(tmp_path), connector, clock)
+        a2a_client = FakeA2AClient()
+        service = build_service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
         created = service.create_connection(
             create_request(),
             owner_id=OWNER,
@@ -1641,10 +1743,10 @@ class TestExternalIoLockScope:
         )
         before_io = clock.now
 
-        def start_with_callback(
-            target: ConnectorTarget, *, envelope: dict[str, Any]
-        ) -> ConnectorStartOutcome:
-            connector.starts.append(envelope)
+        def send_with_callback(target: Any, **kwargs: Any) -> A2AResult:
+            """An authenticated report that lands while the send is in flight."""
+
+            a2a_client.calls.append(("SendMessage", target, kwargs))
             clock.advance(timedelta(minutes=2))
             event = {
                 "protocol_version": PROTOCOL_VERSION,
@@ -1669,9 +1771,19 @@ class TestExternalIoLockScope:
                 clock.now = persisted.content_expires_at
                 service.agent_repo.expire_due_content(now=clock.now)
             clock.advance(timedelta(seconds=1))
-            return ConnectorStartOutcome(transport_status, "stale_transport_error")
+            if transport_status == "sent":
+                return A2AResult(ok=True, correlation_id="c")
+            return A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code=(
+                    "a2a_request_rejected"
+                    if transport_status == "not_sent"
+                    else "a2a_timeout"
+                ),
+            )
 
-        monkeypatch.setattr(connector, "start", start_with_callback)
+        monkeypatch.setattr(a2a_client, "send_message", send_with_callback)
 
         run = service.dispatch_run(
             "task_1",
@@ -1689,7 +1801,7 @@ class TestExternalIoLockScope:
         persisted = service.agent_repo.get_run(run.id, owner_id=OWNER)
         assert persisted.updated_at == clock.now
         assert persisted.updated_at > before_io
-        assert len(connector.starts) == 1
+        assert len(a2a_client.calls_to("SendMessage")) == 1
 
     @pytest.mark.parametrize("bypass_operation_lock", [False, True])
     def test_concurrent_same_key_dispatches_contend_and_converge_only_with_lock(
@@ -1700,12 +1812,19 @@ class TestExternalIoLockScope:
         bypass_operation_lock: bool,
     ) -> None:
         connector = BlockingIoConnector()
+        a2a_client = BlockingA2AClient()
         repo = AgentRepository(tmp_path)
-        service = build_service(repo, connector, clock)
+        service = build_service(
+            repo,
+            connector,
+            clock,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
         connection_id = connect(service)
         make_ready(service, connection_id)
         confirmation = review(service, connection_id)
-        connector.block_kind = "start"
+        a2a_client.block_kind = "start"
         results: list[Any] = []
         errors: list[BaseException] = []
         attempts: list[tuple[str, str]] = []
@@ -1752,7 +1871,7 @@ class TestExternalIoLockScope:
         first = Thread(target=invoke)
         second = Thread(target=lambda: invoke(second=True))
         first.start()
-        assert connector.entered.wait(timeout=5)
+        assert a2a_client.entered.wait(timeout=5)
         second.start()
         assert second_attempted.wait(timeout=5)
         assert attempts == [
@@ -1765,12 +1884,15 @@ class TestExternalIoLockScope:
         else:
             assert second_acquired.is_set() is False
             assert second_finished.is_set() is False
-        connector.release.set()
+        a2a_client.release.set()
         first.join(timeout=5)
         second.join(timeout=5)
 
         assert errors == []
-        assert len(connector.starts) == 1
+        # The durable `queued -> open` compare-and-set is the barrier: whichever
+        # thread loses it does no network I/O at all, so one confirmation is one
+        # message however many times it is replayed concurrently.
+        assert len(sends(a2a_client)) == 1
         assert len(results) == 2
         assert results[0].id == results[1].id
         if bypass_operation_lock:
@@ -1892,7 +2014,7 @@ class TestHandOffReview:
         assert connector.starts == []
 
     def test_one_confirmation_produces_exactly_one_run_and_one_start(
-        self, service: AgentRelayService, connector: FakeConnector
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
     ) -> None:
         """AC-008: dispatch is Sent, linked to the Task, and singular."""
 
@@ -1905,45 +2027,39 @@ class TestHandOffReview:
         assert run.task_id == "task_1"
         assert run.reported_state is None
         assert run.primary_state_label == "Sent"
-        assert len(connector.starts) == 1
+        assert len(sends(a2a_client)) == 1
         assert len(service.list_runs_for_task("task_1", owner_id=OWNER)) == 1
 
     def test_the_start_envelope_carries_the_correlated_identifiers(
-        self, service: AgentRelayService, connector: FakeConnector
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
     ) -> None:
-        """FR-006: start(prompt, task_id, run_id, idempotency_key)."""
+        """FR-006: the wire message names the run, its message and its Task.
+
+        The bespoke `reporting` block is gone from the wire with the wire that
+        needed it: an A2A agent is told nothing about how to report back,
+        because it reports by answering. The inert copy survives only inside the
+        stored manifest, for a rolled-back image to parse.
+        """
 
         connection_id = connect(service)
         make_ready(service, connection_id)
         run = dispatch(service, connection_id)
 
-        envelope = connector.starts[0]
-        assert envelope["run_id"] == run.id
-        assert envelope["task_id"] == "task_1"
-        assert envelope["idempotency_key"]
-        assert envelope["title"] == "Draft the migration plan"
-        reporting = envelope["reporting"]
-        assert reporting == {
-            # Inert: 014 writes the 007 shape with an empty callback so a
-            # rolled-back image still parses the row, and never a live address.
-            "callback_url": "",
-            "connection_id": connection_id,
-            "connection_header": "X-BrainBuddy-Connection",
-            "timestamp_header": "X-BrainBuddy-Timestamp",
-            "signature_header": "X-BrainBuddy-Signature",
-            "timestamp_format": "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero",
-            "signature_algorithm": "hmac-sha256",
-            "signing_bytes": "timestamp_bytes + b'.' + raw_body",
-            "signature_format": "v1=<lowercase hex>",
-            "body_envelope_version": PROTOCOL_VERSION,
-            "instructions": reporting["instructions"],
-            "instructions_version": "v2",
-        }
-        assert "super-secret-token" not in json.dumps(reporting)
+        message = sends(a2a_client)[0]
+        assert message["contextId"] == run.id
+        assert message["messageId"] == f"{run.id}:start"
+        assert message["metadata"]["brainbuddy.task_id"] == "task_1"
+        assert message["metadata"]["brainbuddy.run_id"] == run.id
+        assert message["parts"][0]["text"] == "Draft the migration plan"
+        assert "reporting" not in message
+        assert "super-secret-token" not in json.dumps(message)
+        stored = service.agent_repo.get_run(run.id, owner_id=OWNER)
+        assert stored.manifest is not None
+        assert stored.manifest.reporting.callback_url == ""
 
     @pytest.mark.parametrize("replays", [1, 2, 3])
     def test_replaying_the_dispatch_returns_the_same_run_without_restarting(
-        self, service: AgentRelayService, connector: FakeConnector, replays: int
+        self, service: AgentRelayService, a2a_client: FakeA2AClient, replays: int
     ) -> None:
         """AC-009 / SC-001: identical replays never start a second external run."""
 
@@ -1961,11 +2077,11 @@ class TestHandOffReview:
             assert repeat.id == first.id
             assert repeat.dispatch_state == first.dispatch_state
 
-        assert len(connector.starts) == 1
+        assert len(sends(a2a_client)) == 1
         assert len(service.list_runs_for_task("task_1", owner_id=OWNER)) == 1
 
     def test_reusing_a_key_for_a_different_confirmation_is_a_conflict(
-        self, service: AgentRelayService, connector: FakeConnector
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
     ) -> None:
         """A key is bound to one request; reuse for another is refused."""
 
@@ -1986,41 +2102,48 @@ class TestHandOffReview:
                 idempotency_key="idem-dispatch",
             )
 
-        assert len(connector.starts) == 1
+        assert len(sends(a2a_client)) == 1
 
     @pytest.mark.parametrize(
-        "outcome,expected",
+        "error_code,expected",
         [
-            (ConnectorStartOutcome("delivery_unconfirmed"), "delivery_unconfirmed"),
-            (ConnectorStartOutcome("not_sent", "connector_http_400"), "not_sent"),
+            ("a2a_timeout", "delivery_unconfirmed"),
+            ("a2a_request_rejected", "not_sent"),
         ],
     )
     def test_dispatch_reports_its_own_delivery_honestly(
         self,
         service: AgentRelayService,
-        connector: FakeConnector,
-        outcome: ConnectorStartOutcome,
+        a2a_client: FakeA2AClient,
+        error_code: str,
         expected: str,
     ) -> None:
         """FR-006: ambiguous loss is never called failure, and vice versa."""
 
         connection_id = connect(service)
         make_ready(service, connection_id)
-        connector.start_outcome = outcome
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(ok=False, correlation_id="c", error_code=error_code),
+        )
 
         run = dispatch(service, connection_id)
 
         assert run.dispatch_state == expected
+        assert run.dispatch_error_code == error_code
         assert run.reported_state is None
 
     def test_an_unconfirmed_delivery_keeps_its_run_and_is_never_auto_retried(
-        self, service: AgentRelayService, connector: FakeConnector
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
     ) -> None:
         """FR-006: a retry reuses the original run and key, never a new one."""
 
         connection_id = connect(service)
         make_ready(service, connection_id)
-        connector.start_outcome = ConnectorStartOutcome("delivery_unconfirmed")
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
         confirmation = review(service, connection_id)
         first = service.dispatch_run(
             "task_1", confirmation, owner_id=OWNER, idempotency_key="idem-dispatch"
@@ -2032,7 +2155,7 @@ class TestHandOffReview:
 
         assert repeat.id == first.id
         assert repeat.dispatch_state == "delivery_unconfirmed"
-        assert len(connector.starts) == 1
+        assert len(sends(a2a_client)) == 1
 
     @pytest.mark.parametrize(
         "probe_error",
@@ -2119,7 +2242,6 @@ class TestHandOffReview:
 
 
 # --- User Story 3: monitor and respond without false claims ------------------
-
 
 
 class TestHandOffManifestAndAcknowledgement:
@@ -2443,6 +2565,894 @@ class TestHandOffManifestAndAcknowledgement:
                 owner_id=owner,
             )
         assert service.list_runs_for_task("task_1", owner_id=OWNER) == []
+
+
+def a2a_task(
+    task_id: str, *, context_id: str | None, state: str = "TASK_STATE_SUBMITTED"
+) -> Task:
+    return Task.model_validate(
+        {"id": task_id, "contextId": context_id, "status": {"state": state}}
+    )
+
+
+class TestHandOffExchange:
+    """One dispatch, one exchange, and never a claim the wire did not support."""
+
+    def _service(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+        executor: Any,
+    ) -> AgentRelayService:
+        return build_service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            card_fetcher=card_fetcher,
+            a2a_client=a2a_client,
+            exchange_executor=executor,
+        )
+
+    def test_014_FR_006_the_reservation_pins_every_identifier_before_any_io(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """AC-009. The ids exist durably before the first byte leaves."""
+
+        executor = SaturatedExecutor()
+        service = self._service(
+            tmp_path, connector, clock, a2a_client, card_fetcher, executor
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+
+        run = dispatch(service, connection_id)
+
+        stored = service.agent_repo.get_run(run.id, owner_id=OWNER)
+        assert stored.context_id == run.id
+        assert stored.message_id == f"{run.id}:start"
+        assert stored.interface_url == "https://agent.example.com/a2a"
+        assert stored.card_fingerprint is not None
+        assert stored.guarantee_tier == "best_effort"
+        assert stored.exchange_kind == "start"
+        assert stored.exchange_state == "queued"
+        # Nothing has left, so neither stamp exists yet.
+        assert stored.exchange_started_at is None
+        assert stored.exchange_deadline_at is None
+        connection = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert connection.first_dispatch_at is None
+        assert a2a_client.calls_to("SendMessage") == []
+
+    def test_014_FR_006_a_queued_exchange_reads_as_queued_and_runs_no_probe(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """AC-034, D-03-S04 queued variant. Queued is not Sent."""
+
+        executor = SaturatedExecutor()
+        service = self._service(
+            tmp_path, connector, clock, a2a_client, card_fetcher, executor
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+
+        run = dispatch(service, connection_id)
+
+        assert run.primary_state_label == "Queued"
+        assert run.exchange_state == "queued"
+        assert run.exchange_open is True
+        # No probe while it is queued: there is nothing at the agent to find.
+        # (The connection test's own `ListTasks` sentinel carries no contextId,
+        # so it is not a lookup for this run.)
+        assert [
+            kwargs
+            for _method, _target, kwargs in a2a_client.calls_to("ListTasks")
+            if kwargs.get("context_id") is not None
+        ] == []
+        assert a2a_client.calls_to("SendMessage") == []
+
+    def test_014_FR_006_starting_the_exchange_stamps_both_sides_at_once(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """The one write that says content has left for this destination."""
+
+        executor = SaturatedExecutor()
+        service = self._service(
+            tmp_path, connector, clock, a2a_client, card_fetcher, executor
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        run = dispatch(service, connection_id)
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="corr",
+                task=a2a_task("agent-task-1", context_id=run.id),
+            ),
+        )
+
+        clock.advance(timedelta(seconds=30))
+        executor.run_pending()
+
+        stored = service.agent_repo.get_run(run.id, owner_id=OWNER)
+        assert stored.exchange_started_at == clock.now
+        assert stored.exchange_deadline_at is not None
+        assert stored.exchange_deadline_at > clock.now
+        connection = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert connection.first_dispatch_at == clock.now
+
+    def test_014_FR_006_the_start_message_carries_the_wire_shape_the_contract_names(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """contracts/a2a-wire.md, the Start row. Ids, parts and metadata."""
+
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(push_notifications=True)
+        )
+        service = self._service(
+            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        run = dispatch(
+            service,
+            connection_id,
+            context=[AgentContextItemRequest(label="Runbook", body="Cutover steps.")],
+        )
+
+        sends = a2a_client.calls_to("SendMessage")
+        assert len(sends) == 1
+        _method, target, kwargs = sends[0]
+        message = kwargs["message"]
+        assert message["messageId"] == f"{run.id}:start"
+        assert message["contextId"] == run.id
+        assert message["role"] == "ROLE_USER"
+        assert [part["text"] for part in message["parts"]] == [
+            "Draft the migration plan",
+            "Cover rollback and the data backfill.",
+            "Runbook\nCutover steps.",
+        ]
+        assert message["metadata"] == {
+            "brainbuddy.task_id": "task_1",
+            "brainbuddy.run_id": run.id,
+        }
+        assert target.interface_url == "https://agent.example.com/a2a"
+        # The card advertises push, so the config travels inline with the very
+        # first send rather than as a second round trip.
+        assert kwargs["push_config"]["url"].endswith(
+            run.id + "/" + kwargs["push_config"]["token"]
+        )
+
+    def test_014_FR_006_a_guaranteed_tier_send_activates_the_extension(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """The extension is what the guarantee *is*, so it is on every send."""
+
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(extension_uris=[SINGLE_START_EXTENSION_URI])
+        )
+        service = self._service(
+            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        dispatch(service, connection_id)
+
+        _method, target, _kwargs = a2a_client.calls_to("SendMessage")[0]
+        assert target.guarantee_tier == "guaranteed"
+
+    @pytest.mark.parametrize(
+        ("result", "dispatch_state", "error_code"),
+        [
+            (
+                A2AResult(ok=False, correlation_id="c", error_code="a2a_unreachable"),
+                "not_sent",
+                "a2a_unreachable",
+            ),
+            (
+                A2AResult(
+                    ok=False,
+                    correlation_id="c",
+                    error_code="a2a_credentials_rejected",
+                    http_status=401,
+                ),
+                "not_sent",
+                "a2a_credentials_rejected",
+            ),
+            (
+                A2AResult(
+                    ok=False,
+                    correlation_id="c",
+                    error_code="a2a_request_rejected",
+                    a2a_error_code=-32602,
+                ),
+                "not_sent",
+                "a2a_request_rejected",
+            ),
+            (
+                A2AResult(
+                    ok=False,
+                    correlation_id="c",
+                    error_code="a2a_rate_limited",
+                    http_status=429,
+                ),
+                "not_sent",
+                "a2a_rate_limited",
+            ),
+            (
+                A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+                "delivery_unconfirmed",
+                "a2a_timeout",
+            ),
+            (
+                A2AResult(
+                    ok=False,
+                    correlation_id="c",
+                    error_code="a2a_server_error",
+                    http_status=503,
+                ),
+                "delivery_unconfirmed",
+                "a2a_server_error",
+            ),
+        ],
+    )
+    def test_014_FR_006_every_failed_exchange_lands_in_the_state_it_can_prove(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+        result: A2AResult,
+        dispatch_state: str,
+        error_code: str,
+    ) -> None:
+        """A refusal is **Not sent**; an ambiguity is never demoted to one."""
+
+        service = self._service(
+            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        a2a_client.script("SendMessage", result)
+
+        run = dispatch(service, connection_id)
+
+        assert run.dispatch_state == dispatch_state
+        assert run.dispatch_error_code == error_code
+        assert run.exchange_state == "closed"
+        assert run.exchange_open is False
+
+    def test_014_FR_006_an_answered_exchange_adopts_the_task_it_names(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """AC-009. The agent answered, so the run is **Sent** and adopted."""
+
+        service = self._service(
+            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="corr",
+                task=a2a_task(
+                    "agent-task-1",
+                    context_id=preview.run_id,
+                    state="TASK_STATE_WORKING",
+                ),
+            ),
+        )
+
+        run = service.dispatch_run(
+            "task_1",
+            AgentHandoffConfirmRequest(
+                connection_id=connection_id,
+                manifest_token=preview.token,
+                acknowledge_duplicate_risk=True,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-adopt",
+        )
+
+        assert run.dispatch_state == "sent"
+        assert run.agent_task_id == "agent-task-1"
+        assert run.reported_state == "running"
+        assert run.primary_state_label == "Running"
+
+    def test_014_FR_007_a_task_in_a_foreign_conversation_is_never_adopted(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """An agent that dropped the correlation ID proves nothing by a lookup.
+
+        The answer arrived, so the message was **Sent** — but the task it names
+        belongs to some other conversation, so adopting it would attach this run
+        to work BrainBuddy never asked for.
+        """
+
+        service = self._service(
+            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="corr",
+                task=a2a_task("agent-task-9", context_id="someone-elses-conversation"),
+            ),
+        )
+
+        run = dispatch(service, connection_id)
+
+        assert run.dispatch_state == "sent"
+        assert run.dispatch_error_code == "a2a_response_invalid"
+        assert run.agent_task_id is None
+        assert run.reported_state is None
+        connection = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert connection.context_id_honoured is False
+
+    def test_014_FR_006_a_direct_message_answer_completes_the_run(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """Some agents answer with a message and never create a task at all."""
+
+        service = self._service(
+            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="corr",
+                message=Message.model_validate(
+                    {
+                        "messageId": "m1",
+                        "role": "ROLE_AGENT",
+                        "parts": [{"text": "Done."}],
+                    }
+                ),
+            ),
+        )
+
+        run = dispatch(service, connection_id)
+
+        assert run.dispatch_state == "sent"
+        assert run.reported_state == "completed"
+        assert run.result_text == "Done."
+        assert run.primary_state_label == "Agent reported complete"
+
+    def test_014_SC_002_three_replays_create_one_task_and_one_exchange(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """SC-002. The key is spent once; the wire is touched once."""
+
+        service = self._service(
+            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="corr",
+                task=a2a_task("agent-task-1", context_id=preview.run_id),
+            ),
+        )
+        confirmation = AgentHandoffConfirmRequest(
+            connection_id=connection_id,
+            manifest_token=preview.token,
+            acknowledge_duplicate_risk=True,
+        )
+
+        runs = [
+            service.dispatch_run(
+                "task_1",
+                confirmation,
+                owner_id=OWNER,
+                idempotency_key=f"agent-handoff-{preview.token}",
+            )
+            for _ in range(3)
+        ]
+
+        assert {run.id for run in runs} == {preview.run_id}
+        assert {run.message_id for run in runs} == {f"{preview.run_id}:start"}
+        assert len(a2a_client.calls_to("SendMessage")) == 1
+
+
+class OpeningExecutor:
+    """A pool whose worker opens the exchange and then stalls inside the send.
+
+    The one shape the request thread's inline probe exists for: the message has
+    left, a worker is still holding the answer, and the user is waiting.
+    """
+
+    def __init__(self, repo: AgentRepository, clock: Clock) -> None:
+        self.repo = repo
+        self.clock = clock
+
+    def submit(self, fn: Any, /, *args: Any, **kwargs: Any) -> Future[Any]:
+        run_id = args[0] if args else kwargs["run_id"]
+        owner_id = kwargs.get("owner_id", OWNER)
+        run = self.repo.get_run(run_id, owner_id=owner_id)
+        self.repo.start_exchange(
+            run,
+            expected_version=run.run_version,
+            started_at=self.clock.now,
+            deadline_at=self.clock.now + timedelta(minutes=5),
+        )
+        future: Future[Any] = Future()
+        future.set_result(None)
+        return future
+
+
+class StallingExecutor:
+    """A pool that accepts the work and never finishes it."""
+
+    def submit(self, fn: Any, /, *args: Any, **kwargs: Any) -> Future[Any]:
+        return Future()
+
+
+class TestExchangeEdges:
+    """The paths a hand-off takes when something else got there first."""
+
+    def _service(
+        self,
+        repo: AgentRepository,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+        executor: Any,
+        wait: float = 0.0,
+    ) -> AgentRelayService:
+        return AgentRelayService(
+            repo,
+            connector=connector,
+            secret_box=SecretBox(OrderedDict({"v1": b"\x07" * 32})),
+            task_snapshot=task_snapshot,
+            callback_url=CALLBACK,
+            push_base_url=PUSH_BASE,
+            card_fetcher=card_fetcher,
+            a2a_client=a2a_client,
+            exchange=ExchangePolicy(executor=executor, dispatch_wait_seconds=wait),
+            resolver=fake_resolver,
+            now=clock,
+        )
+
+    def test_014_FR_006_an_open_exchange_is_probed_once_before_the_request_answers(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """The message has left; asking once is better than an honest silence."""
+
+        repo = AgentRepository(tmp_path)
+        service = self._service(
+            repo,
+            connector,
+            clock,
+            a2a_client,
+            card_fetcher,
+            OpeningExecutor(repo, clock),
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                tasks=(a2a_task("t-probed", context_id=preview.run_id),),
+            ),
+        )
+
+        run = service.dispatch_run(
+            "task_1",
+            AgentHandoffConfirmRequest(
+                connection_id=connection_id,
+                manifest_token=preview.token,
+                acknowledge_duplicate_risk=True,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-probe",
+        )
+
+        assert run.dispatch_state == "sent"
+        assert run.agent_task_id == "t-probed"
+        assert run.exchange_state == "open"
+        assert run.primary_state_label == "Accepted"
+
+    def test_014_FR_006_a_probe_that_finds_nothing_leaves_the_exchange_alone(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """An empty lookup is not evidence, so nothing is written from it."""
+
+        repo = AgentRepository(tmp_path)
+        service = self._service(
+            repo,
+            connector,
+            clock,
+            a2a_client,
+            card_fetcher,
+            OpeningExecutor(repo, clock),
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        a2a_client.script("ListTasks", A2AResult(ok=False, correlation_id="c"))
+
+        run = dispatch(service, connection_id)
+
+        assert run.agent_task_id is None
+        assert run.exchange_state == "open"
+        assert run.primary_state_label == "Sent"
+
+    def test_014_FR_006_the_request_stops_waiting_and_still_answers_honestly(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """The wait is a courtesy, not a contract (D-03-S04 queued variant)."""
+
+        service = self._service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            a2a_client,
+            card_fetcher,
+            StallingExecutor(),
+            wait=0.05,
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+
+        run = dispatch(service, connection_id)
+
+        assert run.primary_state_label == "Queued"
+        assert run.exchange_state == "queued"
+
+    def test_014_FR_006_a_deployment_with_no_wire_leaves_the_hand_off_queued(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """Nothing can leave, so nothing is claimed to have."""
+
+        service = self._service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            FakeA2AClient(),
+            card_fetcher,
+            SynchronousExecutor(),
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        run_id = dispatch(service, connection_id).id
+        service.a2a_client = None
+
+        service.perform_exchange(run_id, owner_id=OWNER)
+
+        assert (
+            service.agent_repo.get_run(run_id, owner_id=OWNER).exchange_state
+            == "closed"
+        )
+        # And a lookup with no wire reports nothing rather than "nothing found".
+        run = service.agent_repo.get_run(run_id, owner_id=OWNER)
+        connection = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
+        assert service._lookup_task(run, connection) is None
+
+    def test_014_FR_006_a_second_worker_on_one_exchange_sends_nothing(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """Exactly one of us may send; the loser does no I/O at all."""
+
+        service = self._service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            a2a_client,
+            card_fetcher,
+            SynchronousExecutor(),
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        run_id = dispatch(service, connection_id).id
+        before = len(sends(a2a_client))
+
+        # The exchange is closed, so a straggling worker finds nothing to start.
+        service.perform_exchange(run_id, owner_id=OWNER)
+
+        assert len(sends(a2a_client)) == before
+
+    def test_014_FR_006_an_unspecified_task_state_refreshes_contact_and_claims_nothing(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """The agent said it is alive and nothing more; that is all we record."""
+
+        service = self._service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            a2a_client,
+            card_fetcher,
+            SynchronousExecutor(),
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=a2a_task(
+                    "t-alive",
+                    context_id=preview.run_id,
+                    state="TASK_STATE_UNSPECIFIED",
+                ),
+            ),
+        )
+
+        run = service.dispatch_run(
+            "task_1",
+            AgentHandoffConfirmRequest(
+                connection_id=connection_id,
+                manifest_token=preview.token,
+                acknowledge_duplicate_risk=True,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-unspecified",
+        )
+
+        assert run.dispatch_state == "sent"
+        assert run.reported_state is None
+        assert run.agent_task_id == "t-alive"
+        assert run.last_contact_at == clock.now
+        assert run.events == []
+
+    def test_014_FR_006_a_late_answer_never_recreates_expired_content(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """Retention is irreversible: state moves, the words do not come back."""
+
+        service = self._service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            a2a_client,
+            card_fetcher,
+            SynchronousExecutor(),
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        run_id = dispatch(service, connection_id).id
+        expired = service.agent_repo.get_run(run_id, owner_id=OWNER)
+        service.agent_repo.expire_due_content(now=expired.content_expires_at)
+
+        service.apply_observation(
+            run_id,
+            owner_id=OWNER,
+            observation=project_observation(
+                a2a_task("t1", context_id=run_id, state="TASK_STATE_COMPLETED"),
+                now=clock.now,
+                limits=ObservationLimits(),
+            ),
+            based_on=service.agent_repo.get_run(run_id, owner_id=OWNER).run_version,
+        )
+
+        stored = service.agent_repo.get_run(run_id, owner_id=OWNER)
+        assert stored.reported_state == "completed"
+        assert stored.result_text is None
+        assert stored.content_expired is True
+
+    def test_014_FR_006_an_observation_that_lost_the_race_changes_nothing(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """Two answers about one run never interleave into a third state."""
+
+        service = self._service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            a2a_client,
+            card_fetcher,
+            SynchronousExecutor(),
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        run_id = dispatch(service, connection_id).id
+        before = service.agent_repo.get_run(run_id, owner_id=OWNER)
+
+        unchanged = service.apply_observation(
+            run_id,
+            owner_id=OWNER,
+            observation=project_observation(
+                a2a_task("t1", context_id=run_id, state="TASK_STATE_WORKING"),
+                now=clock.now,
+                limits=ObservationLimits(),
+            ),
+            based_on=before.run_version + 7,
+        )
+
+        assert unchanged.revision == before.revision
+        assert unchanged.reported_state == before.reported_state
+
+    def test_014_FR_006_a_lookup_prefers_the_newest_task_in_this_conversation(
+        self,
+        tmp_path: Path,
+        connector: FakeConnector,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """Newest by the agent's own timestamp; foreign conversations ignored."""
+
+        service = self._service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            a2a_client,
+            card_fetcher,
+            SynchronousExecutor(),
+        )
+        connection_id = connect(service)
+        make_ready(service, connection_id)
+        run_id = dispatch(service, connection_id).id
+        run = service.agent_repo.get_run(run_id, owner_id=OWNER)
+
+        older = Task.model_validate(
+            {
+                "id": "t-old",
+                "contextId": run_id,
+                "status": {
+                    "state": "TASK_STATE_WORKING",
+                    "timestamp": "2026-08-09T11:00:00Z",
+                },
+            }
+        )
+        newer = Task.model_validate(
+            {
+                "id": "t-new",
+                "contextId": run_id,
+                "status": {
+                    "state": "TASK_STATE_WORKING",
+                    "timestamp": "2026-08-09T12:00:00Z",
+                },
+            }
+        )
+        foreign = a2a_task("t-foreign", context_id="another-conversation")
+
+        assert (
+            service._newest_adoptable(
+                run,
+                A2AResult(ok=True, correlation_id="c", tasks=(older, newer, foreign)),
+            )
+            is newer
+        )
+        # A single `task` answer is a candidate too — some agents answer a
+        # lookup with one task rather than a list.
+        assert (
+            service._newest_adoptable(
+                run, A2AResult(ok=True, correlation_id="c", task=newer)
+            )
+            is newer
+        )
+        assert (
+            service._newest_adoptable(
+                run, A2AResult(ok=True, correlation_id="c", tasks=(foreign,))
+            )
+            is None
+        )
+        assert (
+            service._newest_adoptable(run, A2AResult(ok=False, correlation_id="c"))
+            is None
+        )
 
 
 def sign(secret: str, timestamp: int, body: bytes) -> str:
@@ -3595,13 +4605,19 @@ class TestExternalIoMergeRaces:
     def test_start_retention_race_is_a_write_barrier_not_content_revival(
         self, tmp_path: Path, clock: Clock
     ) -> None:
-        connector = BlockingIoConnector()
-        service = build_service(AgentRepository(tmp_path), connector, clock)
+        a2a_client = BlockingA2AClient()
+        service = build_service(
+            AgentRepository(tmp_path),
+            FakeConnector(),
+            clock,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
         connection_id = connect(service)
         make_ready(service, connection_id)
         confirmation = review(service, connection_id)
         reserved = service.agent_repo.list_runs_for_task("task_1", owner_id=OWNER)[0]
-        connector.block_kind = "start"
+        a2a_client.block_kind = "start"
         errors: list[BaseException] = []
 
         def invoke() -> None:
@@ -3617,23 +4633,29 @@ class TestExternalIoMergeRaces:
 
         worker = Thread(target=invoke)
         worker.start()
-        assert connector.entered.wait(timeout=5)
+        assert a2a_client.entered.wait(timeout=5)
         service.agent_repo.expire_due_content(now=clock.now + service.content_retention)
-        connector.release.set()
+        a2a_client.release.set()
         worker.join(timeout=5)
 
         assert errors == []
         current = service.agent_repo.get_run(reserved.id, owner_id=OWNER)
         assert current.content_expired is True
         assert current.manifest is None
-        assert len(connector.starts) == 1
+        assert len(sends(a2a_client)) == 1
 
     @pytest.mark.parametrize("race", ["terminal", "rotation", "disconnect"])
     def test_start_transport_merge_preserves_newer_terminal_or_connection_state(
         self, tmp_path: Path, clock: Clock, race: str
     ) -> None:
-        connector = BlockingIoConnector()
-        service = build_service(AgentRepository(tmp_path), connector, clock)
+        a2a_client = BlockingA2AClient()
+        service = build_service(
+            AgentRepository(tmp_path),
+            FakeConnector(),
+            clock,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
         created = service.create_connection(
             create_request(),
             owner_id=OWNER,
@@ -3644,7 +4666,7 @@ class TestExternalIoMergeRaces:
         make_ready(service, created.id)
         confirmation = review(service, created.id)
         reserved = service.agent_repo.list_runs_for_task("task_1", owner_id=OWNER)[0]
-        connector.block_kind = "start"
+        a2a_client.block_kind = "start"
         errors: list[BaseException] = []
 
         def invoke() -> None:
@@ -3660,7 +4682,7 @@ class TestExternalIoMergeRaces:
 
         worker = Thread(target=invoke)
         worker.start()
-        assert connector.entered.wait(timeout=5)
+        assert a2a_client.entered.wait(timeout=5)
         if race == "terminal":
             event = {
                 "protocol_version": PROTOCOL_VERSION,
@@ -3704,12 +4726,12 @@ class TestExternalIoMergeRaces:
                 idempotency_key="idem-start-race-disconnect-connection",
                 reauthenticated=True,
             )
-        connector.release.set()
+        a2a_client.release.set()
         worker.join(timeout=5)
 
         assert errors == []
         current_run = service.agent_repo.get_run(reserved.id, owner_id=OWNER)
-        assert len(connector.starts) == 1
+        assert len(sends(a2a_client)) == 1
         if race == "terminal":
             assert current_run.reported_state == "completed"
             assert current_run.result_text == "Already done"
@@ -5190,7 +6212,14 @@ class TestRelayFailureRecoveryEdges:
         window: str,
     ) -> None:
         connector = FakeConnector()
-        service = build_service(AgentRepository(tmp_path), connector, clock)
+        a2a_client = FakeA2AClient()
+        service = build_service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
         key = f"idem-window-{operation}-{window}"
         if operation == "start":
             connection_id = connect(service)
@@ -5204,6 +6233,9 @@ class TestRelayFailureRecoveryEdges:
 
         else:
             relay = Relay(service, clock)
+            # The relay fixture dispatched a run to have something to command.
+            # That start is setup, not the call under test.
+            a2a_client.calls.clear()
             connector.starts.clear()
             connector.commands.clear()
             if operation == "reply":
@@ -5259,7 +6291,7 @@ class TestRelayFailureRecoveryEdges:
 
         with pytest.raises(RuntimeError, match=expected):
             invoke()
-        assert connector.starts == []
+        assert sends(a2a_client) == []
         assert connector.commands == []
 
         key_hash = service._key_fingerprint(OWNER, key)
@@ -5280,11 +6312,17 @@ class TestRelayFailureRecoveryEdges:
             assert durable_row[0] is not None
             assert durable_row[1:] == (0, 1)
 
-        service = build_service(AgentRepository(tmp_path), connector, clock)
+        service = build_service(
+            AgentRepository(tmp_path),
+            connector,
+            clock,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
         recovered = invoke()
 
-        external_calls = (
-            connector.starts if operation == "start" else connector.commands
+        external_calls: list[dict[str, Any]] = (
+            sends(a2a_client) if operation == "start" else connector.commands
         )
         if window == "marker_before_connector":
             assert external_calls == []
@@ -5295,7 +6333,9 @@ class TestRelayFailureRecoveryEdges:
         else:
             assert len(external_calls) == 1
             wire_id = (
-                external_calls[0]["run_id"]
+                # The A2A conversation identifier *is* the run id, so the wire
+                # and the projection cannot name two different things.
+                external_calls[0]["contextId"]
                 if operation == "start"
                 else external_calls[0]["command_id"]
             )
@@ -5766,7 +6806,7 @@ class TestRelayFailureRecoveryEdges:
     def test_start_retry_after_ambiguous_storage_failure_reuses_wire_identifiers(
         self,
         service: AgentRelayService,
-        connector: FakeConnector,
+        a2a_client: FakeA2AClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         connection_id = connect(service)
@@ -5811,9 +6851,12 @@ class TestRelayFailureRecoveryEdges:
             idempotency_key="idem-crash-start",
         )
 
-        assert len(connector.starts) == 1
-        assert connector.starts[0]["run_id"] == recovered.id
-        assert connector.starts[0]["idempotency_key"] == recovered.id
+        # One message, and its identifiers are the run's own: a retry after an
+        # ambiguous storage outage must reach the agent as the *same* request,
+        # not as a second one wearing a new name.
+        assert len(sends(a2a_client)) == 1
+        assert sends(a2a_client)[0]["contextId"] == recovered.id
+        assert sends(a2a_client)[0]["messageId"] == f"{recovered.id}:start"
         assert (
             len([command for command in recovered.commands if command.kind == "start"])
             == 1
@@ -6297,6 +7340,10 @@ class RotationScenario:
         self._tmp_path = tmp_path
         self._connector = connector
         self._clock = clock
+        # Shared across every generation, like the database and the connector:
+        # a rolling deploy is many processes over one set of records and one
+        # agent, and a per-instance client would hide a second delivery.
+        self._a2a = FakeA2AClient()
         self.operation = operation
         self.command = COMMAND_NAMES[operation]
         # The connection is created once, so its credential is sealed under the
@@ -6315,7 +7362,12 @@ class RotationScenario:
 
     def instance(self, ring: OrderedDict[str, bytes]) -> AgentRelayService:
         return build_service(
-            AgentRepository(self._tmp_path), self._connector, self._clock, keys=ring
+            AgentRepository(self._tmp_path),
+            self._connector,
+            self._clock,
+            keys=ring,
+            a2a_client=self._a2a,
+            exchange_executor=SynchronousExecutor(),
         )
 
     def invoke(self, service: AgentRelayService, *, key: str) -> Any:
@@ -6364,7 +7416,7 @@ class RotationScenario:
         """Everything this operation has actually put on the wire."""
 
         if self.operation == "start":
-            return self._connector.starts
+            return sends(self._a2a)
         return self._connector.commands
 
 
