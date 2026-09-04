@@ -21,6 +21,7 @@ from app.modules.agents.domain import (
 )
 from app.modules.agents.egress import _is_governed_private, _is_publicly_routable
 from app.schemas.agents import (
+    AgentCheckDeliveryRequest,
     AgentConnectionCreatedResponse,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
@@ -36,7 +37,6 @@ from app.schemas.agents import (
     AgentHandoffPreviewRequest,
     AgentManifestResponse,
     AgentReplyRequest,
-    AgentReportingContractResponse,
     AgentRunCommandResponse,
     AgentRunEventResponse,
     AgentRunResponse,
@@ -117,14 +117,24 @@ def _manifest_payload() -> dict[str, object]:
         "agent_name": "Hermes",
         "title": "Research relay security",
         "details": "Review the signed callback contract.",
-        "context_items": [{"label": "Definition of done", "body": "Cite evidence."}],
-        "reporting": _reporting_payload(),
-        "reporting_instructions": "Sign the exact raw event body.",
-        "instructions_version": "v2",
-        "protocol_version": "2026-08-09",
-        "destination_endpoint": "https://agent.example.com/hooks",
+        "supporting_items": [{"label": "Definition of done", "body": "Cite evidence."}],
+        "message_id": "agentrun_1:start",
+        "correlation_id": "agentrun_1",
+        "destination_interface": "https://agent.example.com/a2a",
+        "protocol_version": "1.0",
+        "guarantee_tier": "best_effort",
+        "tier_disclosure": "Best-effort single start. …",
+        "tier_disclosure_url": "https://example.invalid/single-start/v1.md",
+        "acknowledgement_required": True,
+        "cancellation_disclosure": "Cancellation depends on the agent …",
+        "push_callback": {
+            "registered": True,
+            "url_preview": "https://brainbuddy.example/api/a2a/push/agentrun_1/…",
+            "disclosure": "BrainBuddy also gives this agent a private callback address …",
+        },
         "external_copy_notice": "This content leaves BrainBuddy.",
         "reauthentication_required": False,
+        "parts_preview": ["Research relay security"],
     }
 
 
@@ -610,7 +620,9 @@ def test_handoff_schemas_bind_confirmation_to_an_exact_manifest() -> None:
 
     preview = AgentHandoffPreviewRequest(
         connection_id="agentconn_1",
-        context_items=[AgentContextItemRequest(label="Goal", body="Produce evidence")],
+        supporting_items=[
+            AgentContextItemRequest(label="Goal", body="Produce evidence")
+        ],
     )
     confirmation = AgentHandoffConfirmRequest(
         **preview.model_dump(), manifest_token="a" * 64, current_password=None
@@ -619,19 +631,202 @@ def test_handoff_schemas_bind_confirmation_to_an_exact_manifest() -> None:
 
     assert preview.include_details is True
     assert confirmation.manifest_token == manifest.token
-    assert manifest.context_items[0].model_dump() == {
+    assert manifest.supporting_items[0].model_dump() == {
         "label": "Definition of done",
         "body": "Cite evidence.",
     }
-    assert manifest.reporting == AgentReportingContractResponse.model_validate(
-        _reporting_payload()
-    )
 
     for token in ("a" * 63, "A" * 64, "g" * 64):
         with pytest.raises(ValidationError):
             AgentHandoffConfirmRequest(
                 **preview.model_dump(), manifest_token=token, current_password=None
             )
+
+
+def _run_payload() -> dict[str, object]:
+    return {
+        "id": "agentrun_1",
+        "task_id": "task_1",
+        "connection_id": "agentconn_1",
+        "agent_name": "Hermes",
+        "dispatch_state": "delivery_unconfirmed",
+        "dispatch_error_code": None,
+        "reported_state": None,
+        "run_version": 0,
+        "stopped_reporting": False,
+        "connection_disconnected": False,
+        "reply_pending": False,
+        "cancel_requested": False,
+        "needs_user": False,
+        "primary_state_label": "Queued",
+        "content_expired": False,
+        "content_expires_at": NOW + timedelta(days=30),
+        "reporting_window_seconds": 3600,
+        "capabilities": {"reply": True, "cancel": True},
+        "guarantee_tier": "best_effort",
+        "message_id": "agentrun_1:start",
+        "correlation_id": "agentrun_1",
+        "agent_task_id": None,
+        "exchange_open": True,
+        "exchange_state": "queued",
+        "exchange_kind": "start",
+        "push_registration": "registered",
+        "created_at": NOW,
+        "revision": 1,
+    }
+
+
+def test_014_FR_005_the_manifest_lists_every_value_that_will_leave() -> None:
+    """AC-007. The review is the consent boundary, so it is itemised in full.
+
+    Every field here is something a user could object to before it leaves. The
+    protocol's own field names are absent on purpose (ADR-0006): the product
+    says supporting items and correlation ID.
+    """
+
+    manifest = AgentManifestResponse.model_validate(_manifest_payload())
+
+    assert manifest.supporting_items[0].model_dump() == {
+        "label": "Definition of done",
+        "body": "Cite evidence.",
+    }
+    assert manifest.message_id == "agentrun_1:start"
+    assert manifest.correlation_id == "agentrun_1"
+    assert manifest.destination_interface == "https://agent.example.com/a2a"
+    assert manifest.protocol_version == "1.0"
+    assert manifest.guarantee_tier == "best_effort"
+    assert manifest.tier_disclosure_url
+    assert manifest.acknowledgement_required is True
+    assert manifest.cancellation_disclosure
+    assert manifest.push_callback is not None
+    assert manifest.push_callback.registered is True
+    assert manifest.push_callback.disclosure
+    assert manifest.parts_preview == ["Research relay security"]
+
+    # The bespoke reporting block is gone with the wire that needed it. Checked
+    # against the property names rather than the rendered schema, so a prose
+    # description mentioning "report" cannot fail it and a real field cannot
+    # hide behind one.
+    properties = set(AgentManifestResponse.model_json_schema()["properties"])
+    for name in (
+        "reporting",
+        "reporting_instructions",
+        "instructions_version",
+        "context_items",
+        "destination_endpoint",
+    ):
+        assert name not in properties, f"AgentManifestResponse still has {name!r}"
+
+    # An unregistered callback carries no address and no disclosure: there is
+    # nothing to disclose, and a masked address for a callback that does not
+    # exist would read as one that does.
+    unregistered = AgentManifestResponse.model_validate(
+        {
+            **_manifest_payload(),
+            "push_callback": {
+                "registered": False,
+                "url_preview": None,
+                "disclosure": None,
+            },
+        }
+    )
+    assert unregistered.push_callback is not None
+    assert unregistered.push_callback.url_preview is None
+
+
+def test_014_FR_005_the_acknowledgement_is_part_of_the_request_identity() -> None:
+    """AC-026. A replay must not be able to drop the acknowledgement.
+
+    It is a field of the confirmation, not a header or a separate call, so the
+    canonical request the Idempotency-Key is spent on includes it: a retry that
+    quietly omitted it would be a *different* request wearing the same key.
+    """
+
+    preview = AgentHandoffPreviewRequest(
+        connection_id="agentconn_1",
+        supporting_items=[
+            AgentContextItemRequest(label="Goal", body="Produce evidence")
+        ],
+    )
+    confirmation = AgentHandoffConfirmRequest(
+        **preview.model_dump(),
+        manifest_token="a" * 64,
+        current_password=None,
+        acknowledge_duplicate_risk=True,
+    )
+
+    assert confirmation.acknowledge_duplicate_risk is True
+    assert "acknowledge_duplicate_risk" in confirmation.model_dump()
+    # Defaults to false: an unstated acknowledgement is not an acknowledgement.
+    assert (
+        AgentHandoffConfirmRequest(
+            **preview.model_dump(), manifest_token="a" * 64
+        ).acknowledge_duplicate_risk
+        is False
+    )
+
+
+def test_014_FR_006_check_delivery_asks_for_nothing_but_the_password() -> None:
+    """AC-027, AC-030. Check again re-runs *this* run's own check.
+
+    The request carries no ids and no content: everything it needs is already on
+    the run. A body that could name a different run, or carry new content, would
+    make "check again" capable of being a second send.
+    """
+
+    assert AgentCheckDeliveryRequest().current_password is None
+    assert (
+        AgentCheckDeliveryRequest(current_password="hunter2").current_password
+        == "hunter2"
+    )
+
+    assert set(AgentCheckDeliveryRequest.model_json_schema()["properties"]) == {
+        "current_password"
+    }
+
+    with pytest.raises(ValidationError):
+        AgentCheckDeliveryRequest.model_validate({"run_id": "agentrun_2"})
+
+
+def test_014_FR_006_the_run_projection_states_the_exchange_it_is_waiting_on() -> None:
+    """AC-032, AC-034. Queued and Sent are different claims, and stay so.
+
+    A queued exchange has provably not been sent. Collapsing it into `sent`
+    would be the one lie this projection exists to prevent.
+    """
+
+    run = AgentRunResponse.model_validate(_run_payload())
+
+    assert run.exchange_state == "queued"
+    assert run.exchange_open is True
+    assert run.exchange_kind == "start"
+    assert run.primary_state_label == "Queued"
+    assert run.message_id == "agentrun_1:start"
+    assert run.correlation_id == "agentrun_1"
+    assert run.guarantee_tier == "best_effort"
+    assert run.push_registration == "registered"
+
+    restarted = AgentRunResponse.model_validate(
+        {
+            **_run_payload(),
+            "dispatch_state": "not_sent",
+            "dispatch_error_code": "restarted_before_send",
+            "exchange_state": "none",
+            "exchange_open": False,
+            "exchange_kind": None,
+            "primary_state_label": "Not sent",
+        }
+    )
+    assert restarted.dispatch_error_code == "restarted_before_send"
+    assert restarted.exchange_state == "none"
+
+    for invalid in ({"exchange_state": "sending"}, {"push_registration": "maybe"}):
+        with pytest.raises(ValidationError):
+            AgentRunResponse.model_validate({**_run_payload(), **invalid})
+
+    properties = set(AgentRunResponse.model_json_schema()["properties"])
+    for name in ("contextId", "messageId", "taskId", "context_items"):
+        assert name not in properties, f"AgentRunResponse leaks {name!r}"
 
 
 def test_run_projection_keeps_reported_derived_and_requested_state_separate() -> None:

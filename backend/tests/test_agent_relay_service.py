@@ -372,13 +372,13 @@ def review(
     preview = service.preview_handoff(
         task_id,
         AgentHandoffPreviewRequest(
-            connection_id=connection_id, context_items=context or []
+            connection_id=connection_id, supporting_items=context or []
         ),
         owner_id=OWNER,
     )
     return AgentHandoffConfirmRequest(
         connection_id=connection_id,
-        context_items=context or [],
+        supporting_items=context or [],
         manifest_token=preview.token,
     )
 
@@ -1788,7 +1788,7 @@ class TestHandOffReview:
             "task_1",
             AgentHandoffPreviewRequest(
                 connection_id=connection_id,
-                context_items=[
+                supporting_items=[
                     AgentContextItemRequest(label="Runbook", body="Step one...")
                 ],
             ),
@@ -1797,12 +1797,21 @@ class TestHandOffReview:
 
         assert preview.title == "Draft the migration plan"
         assert preview.details == "Cover rollback and the data backfill."
-        assert [item.label for item in preview.context_items] == ["Runbook"]
+        assert [item.label for item in preview.supporting_items] == ["Runbook"]
         assert preview.task_id == "task_1"
         assert preview.run_id
         assert preview.agent_name == "Hermes"
-        assert preview.reporting_instructions
-        assert preview.destination_endpoint == "https://agent.example.com"
+        # The *interface* the card named, not the address the owner typed: that
+        # is where content would actually go (AC-007).
+        assert preview.destination_interface == "https://agent.example.com/a2a"
+        assert preview.message_id == f"{preview.run_id}:start"
+        assert preview.correlation_id == preview.run_id
+        assert preview.protocol_version == "1.0"
+        assert preview.parts_preview == [
+            "Draft the migration plan",
+            "Cover rollback and the data backfill.",
+            "Runbook\nStep one...",
+        ]
         assert "cannot guarantee" in preview.external_copy_notice
 
     def test_excluding_details_removes_them_from_the_manifest_and_the_token(
@@ -1847,7 +1856,7 @@ class TestHandOffReview:
                 "task_1",
                 AgentHandoffConfirmRequest(
                     connection_id=connection_id,
-                    context_items=[
+                    supporting_items=[
                         AgentContextItemRequest(label="Sneaky", body="added later")
                     ],
                     manifest_token=preview.token,
@@ -1907,7 +1916,9 @@ class TestHandOffReview:
         assert envelope["title"] == "Draft the migration plan"
         reporting = envelope["reporting"]
         assert reporting == {
-            "callback_url": CALLBACK,
+            # Inert: 014 writes the 007 shape with an empty callback so a
+            # rolled-back image still parses the row, and never a live address.
+            "callback_url": "",
             "connection_id": connection_id,
             "connection_header": "X-BrainBuddy-Connection",
             "timestamp_header": "X-BrainBuddy-Timestamp",
@@ -5671,12 +5682,12 @@ class TestRelayFailureRecoveryEdges:
             service.preview_handoff(
                 "task_1",
                 AgentHandoffPreviewRequest(
-                    connection_id=connection_id, context_items=context
+                    connection_id=connection_id, supporting_items=context
                 ),
                 owner_id=OWNER,
             )
 
-        assert refused.value.detail == {"reason": "too_many_context_items"}
+        assert refused.value.detail == {"reason": "too_many_supporting_items"}
         assert service.list_runs_for_task("task_1", owner_id=OWNER) == []
 
     def test_unreserved_manifest_and_preview_run_are_not_actionable(
@@ -6490,7 +6501,7 @@ class TestRollbackBoundary:
             agent_name="Agent",
             title="Do the thing",
             details=None,
-            context_items=[],
+            supporting_items=[],
             reporting=inert_reporting_contract("conn-1"),
             reporting_instructions="",
         )

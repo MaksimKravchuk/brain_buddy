@@ -1188,14 +1188,14 @@ class TestHandOffRoutes:
             f"/api/tasks/{task_id}/agent-runs/preview",
             json={
                 "connection_id": created["id"],
-                "context_items": [{"label": "Runbook", "body": "Step one"}],
+                "supporting_items": [{"label": "Runbook", "body": "Step one"}],
             },
         ).json()
 
         assert preview["title"] == "Draft the migration plan"
         assert preview["details"] == "Cover rollback."
-        assert preview["context_items"] == [{"label": "Runbook", "body": "Step one"}]
-        assert preview["destination_endpoint"] == ENDPOINT
+        assert preview["supporting_items"] == [{"label": "Runbook", "body": "Step one"}]
+        assert preview["destination_interface"] == "https://agent.example.com/a2a"
         assert preview["external_copy_notice"]
 
     def test_handing_off_another_owners_task_is_refused(
@@ -1399,14 +1399,25 @@ class TestEventIngestRoutes:
         )
         assert unchanged == expired
 
-    def test_emitted_reporting_contract_produces_an_accepted_callback(
+    def test_the_bespoke_ingest_route_still_accepts_a_correctly_signed_event(
         self, client: TestClient, connector: FakeConnector
     ) -> None:
+        """The 007 route works; 014 simply stopped advertising it.
+
+        The manifest's `reporting` block is now an inert rollback placeholder
+        with an empty callback URL — no agent is told about this route any more,
+        because an A2A agent reports by answering. The route itself lives until
+        T110-T114 remove it with the rest of the bespoke wire, and a run
+        dispatched before that must still be able to report, so its signing
+        contract is exercised here against the route directly.
+        """
+
         created = create_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
         run = hand_off(client, created["id"], task_id)
         reporting = connector.starts[-1]["reporting"]
+        assert reporting["callback_url"] == "", "the manifest advertises nothing"
         assert reporting["signature_algorithm"] == "hmac-sha256"
         assert reporting["signing_bytes"] == "timestamp_bytes + b'.' + raw_body"
         assert reporting["signature_format"] == "v1=<lowercase hex>"
@@ -1431,7 +1442,7 @@ class TestEventIngestRoutes:
         ).hexdigest()
 
         response = client.post(
-            reporting["callback_url"],
+            "/api/agent-events",
             content=body,
             headers={
                 "Content-Type": "application/json",
@@ -1497,9 +1508,12 @@ class TestEventIngestRoutes:
         assert reporting["signing_bytes"] == "timestamp_bytes + b'.' + raw_body"
         assert reporting["signature_format"] == "v1=<lowercase hex>"
         assert reporting["connection_id"] == "agentconn_golden_vector"
+        # The manifest advertises no address any more (014 FR-012); the route
+        # stays until T110-T114, and this vector still pins its signing rule.
+        assert reporting["callback_url"] == ""
 
         response = client.post(
-            reporting["callback_url"],
+            "/api/agent-events",
             content=fixed_body,
             headers={
                 "Content-Type": "application/json",

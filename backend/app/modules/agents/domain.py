@@ -67,6 +67,19 @@ AgentDisconnectReason = Literal["owner", "superseded_wire_contract"]
 """Why a connection is disconnected (spec 014, FR-012, SC-010)."""
 
 AgentExchangeState = Literal["none", "queued", "open", "closed", "interrupted"]
+AgentExchangeKind = Literal["start", "reply"]
+"""Which kind of held exchange a run's `exchange_state` describes."""
+
+AgentPushRegistration = Literal["unregistered", "registered", "refused", "unsupported"]
+"""Whether the agent accepted the per-run push callback. Silent to the user: a
+push only accelerates an observation the schedule performs anyway, so a refusal
+is not something the owner can or should act on."""
+
+A2A_PROTOCOL_VERSION = "1.0"
+"""The protocol version a 014 manifest states, and the only one this build
+speaks. Distinct from `PROTOCOL_VERSION`, which named the retired bespoke wire
+and survives only in the inert rollback placeholder."""
+
 """What BrainBuddy knows about a held SendMessage exchange (spec 014, FR-006).
 
 The distinction that matters is ``queued`` vs ``open``: a queued exchange has
@@ -457,6 +470,21 @@ class AgentReportingContract(StorageBaseModel):
     body_envelope_version: str = PROTOCOL_VERSION
 
 
+class AgentPushCallback(StorageBaseModel):
+    """What the review says about the per-run push callback (FR-005, AC-007).
+
+    The address is stored with its token already masked, because the manifest is
+    read back on every run projection and the token must appear in no response,
+    log line or audit row. `registered: False` carries neither an address nor a
+    disclosure: there is nothing to disclose, and a masked address for a
+    callback that does not exist would read as one that does.
+    """
+
+    registered: bool = False
+    url_preview: str | None = None
+    disclosure: str | None = None
+
+
 class AgentRunManifest(StorageBaseModel):
     """The exact, frozen set of content-bearing values a hand-off sends.
 
@@ -482,7 +510,25 @@ class AgentRunManifest(StorageBaseModel):
     )
     reporting_instructions: str = ""
     instructions_version: str = REPORTING_INSTRUCTIONS_VERSION
-    protocol_version: str = PROTOCOL_VERSION
+    # The A2A protocol version, not the retired bespoke wire version. Defaulted
+    # so a frozen 007 row still parses, but every 014 manifest states "1.0".
+    protocol_version: str = A2A_PROTOCOL_VERSION
+    # --- 014 additions -----------------------------------------------------
+    #
+    # All defaulted, because a 007 row read after a rollforward has none of
+    # them and must still parse; a 014 row always sets them.
+    message_id: str = ""
+    correlation_id: str = ""
+    destination_interface: str = ""
+    guarantee_tier: AgentGuaranteeTier = "best_effort"
+    tier_disclosure: str = ""
+    tier_disclosure_url: str = ""
+    cancellation_disclosure: str = ""
+    # True only while this connection is best-effort and the owner has not yet
+    # acknowledged the duplicate risk. Frozen into the manifest so a retry of a
+    # settled hand-off asks exactly what the original review asked (AC-026).
+    acknowledgement_required: bool = False
+    push_callback: AgentPushCallback = Field(default_factory=AgentPushCallback)
 
 
 def inert_reporting_contract(connection_id: str) -> AgentReportingContract:
@@ -547,6 +593,19 @@ class AgentRunDocument(StorageBaseModel):
     # being reported as a forged token (SC-003).
     push_token_fingerprint: str | None = Field(default=None, max_length=128)
     exchange_state: AgentExchangeState = "none"
+    #: Which exchange `exchange_state` describes. Restart recovery treats a
+    #: `reply` exchange differently from a `start` one: a reply is never resent,
+    #: only confirmed by succession evidence (AC-033).
+    exchange_kind: AgentExchangeKind | None = None
+    #: Stamped when a worker *starts* the exchange, never when it is submitted.
+    #: The gap between the two is exactly the window in which nothing has left
+    #: BrainBuddy, and the whole **Queued** state depends on keeping it visible.
+    exchange_started_at: datetime | None = None
+    exchange_deadline_at: datetime | None = None
+    interface_url: str | None = Field(default=None, max_length=2_000)
+    guarantee_tier: AgentGuaranteeTier | None = None
+    message_id: str | None = Field(default=None, max_length=256)
+    push_registration: AgentPushRegistration = "unregistered"
     last_observed_at: datetime | None = None
     next_observation_at: datetime | None = None
     identifiers_expire_at: datetime | None = None
@@ -649,7 +708,11 @@ class AgentIdempotencyRecord(StorageBaseModel):
 
 
 __all__ = [
+    "A2A_PROTOCOL_VERSION",
     "AGENT_EVENT_ENVELOPE_ADAPTER",
+    "AgentExchangeKind",
+    "AgentPushCallback",
+    "AgentPushRegistration",
     "MAX_CONTEXT_ITEMS",
     "MAX_TEST_ERROR_DETAIL_BYTES",
     "AgentAuthScheme",

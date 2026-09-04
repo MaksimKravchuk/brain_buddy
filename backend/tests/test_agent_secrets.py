@@ -23,7 +23,10 @@ from app.modules.agents.secrets import (
     SecretsUnavailable,
     build_secret_box,
     fingerprint_key_id,
+    generate_push_token,
     parse_secret_keys,
+    push_token_fingerprint,
+    push_token_matches,
     secret_aad,
 )
 
@@ -499,3 +502,53 @@ def test_two_ephemeral_development_boxes_do_not_share_a_key() -> None:
 
     with pytest.raises(SecretDecryptionFailed):
         second.open(sealed, aad="conn_1")
+
+
+# --- 014 FR-008: the per-run push callback token --------------------------
+
+
+def test_014_FR_008_a_push_token_is_random_urlsafe_and_never_repeats(
+    box: SecretBox,
+) -> None:
+    """The token is the whole authentication of an unauthenticated route.
+
+    32 bytes of `secrets.token_urlsafe` because it travels in a *path segment*:
+    a shorter token would be guessable at the route's limiter budget, and a
+    non-urlsafe one would have to be escaped, which is one more place for the
+    two sides to disagree about what was signed.
+    """
+
+    tokens = {generate_push_token() for _ in range(64)}
+
+    assert len(tokens) == 64
+    for token in tokens:
+        assert len(token) >= 43, "32 random bytes, urlsafe-encoded"
+        assert set(token) <= set(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        )
+
+
+def test_014_FR_008_only_a_keyed_fingerprint_of_the_push_token_is_storable(
+    box: SecretBox,
+) -> None:
+    """A run keeps a fingerprint, never the token, and compares in constant time.
+
+    The agent holds the token for the life of the run, so the row that verifies
+    it is the one an attacker with the database would go for. A keyed
+    fingerprint makes that row prove nothing: the key never lives in the data
+    directory, and the token is high-entropy enough that even a plain digest
+    would not be guessable — the keying is what stops the *fingerprint itself*
+    being replayed as a comparison oracle across deployments.
+    """
+
+    token = generate_push_token()
+    stored = push_token_fingerprint(box, token)
+
+    assert token not in stored
+    assert stored.startswith("v1:")
+    assert push_token_matches(box, stored, token) is True
+    assert push_token_matches(box, stored, generate_push_token()) is False
+    # A truncated or malformed stored value is a refusal, never an exception:
+    # the push route answers one opaque 403 for every failure mode.
+    assert push_token_matches(box, "", token) is False
+    assert push_token_matches(box, "v9:deadbeef", token) is False

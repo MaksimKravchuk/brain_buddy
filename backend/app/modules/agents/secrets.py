@@ -33,6 +33,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 from collections import OrderedDict
 
 from cryptography.exceptions import InvalidTag
@@ -313,6 +314,46 @@ class SecretBox:
         return plaintext.decode("utf-8")
 
 
+#: Bytes of randomness in a per-run push callback token (data-model.md §7).
+#: It travels in a path segment on an unauthenticated route, so it is the whole
+#: authentication of that route and is sized accordingly.
+PUSH_TOKEN_BYTES = 32
+
+
+def generate_push_token() -> str:
+    """A fresh per-run push callback token.
+
+    ``token_urlsafe`` rather than hex because the value is a *path segment*: an
+    encoding that needed escaping would give the two sides one more thing to
+    disagree about, and a disagreement here reads as a forged token.
+    """
+
+    return secrets.token_urlsafe(PUSH_TOKEN_BYTES)
+
+
+def push_token_fingerprint(box: SecretBox, token: str) -> str:
+    """What a run may store about its push token: a keyed fingerprint, no more.
+
+    Kept until identifier expiry rather than cleared when the run ends, so a
+    valid push racing BrainBuddy's own terminal observation still *recognises*
+    itself and is classified `push_after_close` instead of being reported as a
+    forged token (data-model.md §7, SC-003).
+    """
+
+    return box.fingerprint(token)
+
+
+def push_token_matches(box: SecretBox, stored: str, token: str) -> bool:
+    """Constant-time comparison, and a refusal for anything unreadable.
+
+    A malformed stored value is `False`, never an exception: the push route
+    answers one opaque `403` for every failure mode, and a raised error there
+    would be a timing and log-shape difference a prober could measure.
+    """
+
+    return box.fingerprint_matches(stored, token)
+
+
 def build_secret_box(raw_keys: str | None, *, environment: AppEnvironment) -> SecretBox:
     """Build the process's secret box, failing closed in production.
 
@@ -333,12 +374,16 @@ def build_secret_box(raw_keys: str | None, *, environment: AppEnvironment) -> Se
 
 
 __all__ = [
+    "PUSH_TOKEN_BYTES",
     "AAD_PURPOSE_INBOUND_SIGNING",
     "AAD_PURPOSE_OUTBOUND_CREDENTIAL",
     "AAD_PURPOSE_SIGNING_RECEIPT",
     "SealedSecret",
     "SecretBox",
     "SecretDecryptionFailed",
+    "generate_push_token",
+    "push_token_fingerprint",
+    "push_token_matches",
     "SecretsUnavailable",
     "build_secret_box",
     "fingerprint_key_id",

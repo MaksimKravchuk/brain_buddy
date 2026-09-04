@@ -2667,3 +2667,183 @@ class TestA2AWireStorage:
                 assert all(row[0] == "user_b" for row in remaining), table
 
         assert repo.list_runs_for_owner(owner_id="user_b")
+
+
+# --- 014 FR-006: the exchange the run is waiting on -------------------------
+
+
+class TestExchangePersistence:
+    """The `queued → open` write, and what it must never come apart from."""
+
+    def _queued(self, repo: AgentRepository) -> AgentRunDocument:
+        repo.create_connection(make_connection())
+        run = make_run(exchange_state="queued", exchange_kind="start")
+        repo.create_run(run)
+        return run
+
+    def test_014_FR_006_starting_an_exchange_stamps_the_run_and_spends_the_trigger(
+        self, repo: AgentRepository
+    ) -> None:
+        """AC-032, AC-034. Both stamps mean the same fact, so both happen or neither.
+
+        `exchange_started_at` is what makes **Queued** and **Sent** different
+        claims; `first_dispatch_at` is the spent marker of the re-authentication
+        trigger. Both say "content has now left BrainBuddy for this
+        destination", so one without the other would either render an unsent
+        hand-off as sent or skip the password on its retry.
+        """
+
+        run = self._queued(repo)
+        started = NOW + timedelta(seconds=5)
+        deadline = started + timedelta(seconds=315)
+
+        opened = repo.start_exchange(
+            run, expected_version=0, started_at=started, deadline_at=deadline
+        )
+
+        assert opened is not None
+        assert opened.exchange_state == "open"
+        assert opened.exchange_started_at == started
+        assert opened.exchange_deadline_at == deadline
+        stored = repo.get_run("agentrun_1", owner_id="user_a")
+        assert stored.exchange_state == "open"
+        assert stored.exchange_started_at == started
+        connection = repo.get_connection("agentconn_1", owner_id="user_a")
+        assert connection.first_dispatch_at == started
+        assert connection.revision == 2
+
+    def test_014_FR_004_a_spent_first_dispatch_marker_is_never_moved_forward(
+        self, repo: AgentRepository
+    ) -> None:
+        """The trigger is spent once. A later exchange must not re-date it.
+
+        Re-dating would slide the 15-minute re-authentication window forward on
+        every send, which is the opposite of what a *first*-content trigger is
+        for.
+        """
+
+        repo.create_connection(make_connection(first_dispatch_at=NOW))
+        run = make_run(exchange_state="queued", exchange_kind="start")
+        repo.create_run(run)
+        later = NOW + timedelta(hours=2)
+
+        repo.start_exchange(
+            run,
+            expected_version=0,
+            started_at=later,
+            deadline_at=later + timedelta(seconds=315),
+        )
+
+        assert (
+            repo.get_connection("agentconn_1", owner_id="user_a").first_dispatch_at
+            == NOW
+        )
+
+    def test_014_SC_008_only_one_caller_can_open_a_queued_exchange(
+        self, repo: AgentRepository
+    ) -> None:
+        """A second worker, a replay and restart recovery converge on one send.
+
+        The compare-and-set is on `run_version` *and* on the exchange still
+        being queued, so a loser gets `None` and does no network I/O rather than
+        opening a second exchange for the same run.
+        """
+
+        run = self._queued(repo)
+        started = NOW + timedelta(seconds=5)
+        deadline = started + timedelta(seconds=315)
+
+        first = repo.start_exchange(
+            run, expected_version=0, started_at=started, deadline_at=deadline
+        )
+        second = repo.start_exchange(
+            run, expected_version=0, started_at=started, deadline_at=deadline
+        )
+        stale = repo.start_exchange(
+            run, expected_version=7, started_at=started, deadline_at=deadline
+        )
+
+        assert first is not None
+        assert second is None, "the exchange is no longer queued"
+        assert stale is None, "a stale run_version never wins"
+        assert repo.get_connection("agentconn_1", owner_id="user_a").revision == 2
+
+    def test_014_FR_006_a_missing_run_cannot_be_opened_back_into_existence(
+        self, repo: AgentRepository
+    ) -> None:
+        """Purge safety: this is an UPDATE, so it can only change a live row."""
+
+        repo.create_connection(make_connection())
+        run = make_run(exchange_state="queued")
+
+        opened = repo.start_exchange(
+            run,
+            expected_version=0,
+            started_at=NOW,
+            deadline_at=NOW + timedelta(seconds=315),
+        )
+
+        assert opened is None
+        assert repo.list_runs_for_owner(owner_id="user_a") == []
+
+    def test_014_FR_003_the_duplicate_risk_acknowledgement_is_stamped_once(
+        self, repo: AgentRepository
+    ) -> None:
+        """AC-026. Two racing confirmations record the first, not the later one."""
+
+        repo.create_connection(make_connection())
+        first_at = NOW + timedelta(seconds=1)
+
+        repo.acknowledge_duplicate_risk("agentconn_1", owner_id="user_a", at=first_at)
+        repo.acknowledge_duplicate_risk(
+            "agentconn_1", owner_id="user_a", at=NOW + timedelta(hours=1)
+        )
+
+        connection = repo.get_connection("agentconn_1", owner_id="user_a")
+        assert connection.best_effort_acknowledged_at == first_at
+        assert connection.revision == 2
+
+        # A connection that is not there is not an error: the caller holds the
+        # command lock, and a purge that landed inside it must not raise past
+        # the acknowledgement into the dispatch it belongs to.
+        repo.acknowledge_duplicate_risk("agentconn_missing", owner_id="user_a", at=NOW)
+
+    def test_014_FR_006_restart_recovery_sees_queued_and_open_exchanges_apart(
+        self, repo: AgentRepository
+    ) -> None:
+        """AC-032. The two need opposite treatment, so the state comes back too.
+
+        A queued exchange provably never left and is settled as **Not sent**; an
+        open one may already be at the agent and is resolved by lookup only.
+        Guessing which is which from anything else would risk resending work the
+        agent already has.
+        """
+
+        repo.create_connection(make_connection())
+        repo.create_run(make_run(run_id="agentrun_queued", exchange_state="queued"))
+        repo.create_run(
+            make_run(
+                run_id="agentrun_open",
+                exchange_state="open",
+                exchange_started_at=NOW,
+                created_at=NOW + timedelta(seconds=1),
+            )
+        )
+        repo.create_run(
+            make_run(
+                run_id="agentrun_closed",
+                exchange_state="closed",
+                created_at=NOW + timedelta(seconds=2),
+            )
+        )
+        repo.create_run(
+            make_run(
+                run_id="agentrun_idle",
+                created_at=NOW + timedelta(seconds=3),
+            )
+        )
+
+        assert repo.interrupted_exchanges() == [
+            ("user_a", "agentrun_queued", "queued"),
+            ("user_a", "agentrun_open", "open"),
+        ]

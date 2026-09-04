@@ -39,9 +39,13 @@ export async function startBackend(port: number): Promise<BackendHandle> {
     ...process.env,
     BRAIN_BUDDY_ENV: "test",
     BRAIN_BUDDY_DATA_DIR: dataDir,
-    BRAIN_BUDDY_FEATURE_FLAGS: "voice_brain_dump=on",
+    BRAIN_BUDDY_FEATURE_FLAGS: "voice_brain_dump=on,external_agent_relay=on",
     BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST: "1",
     BRAIN_BUDDY_VOICE_SWEEP_INTERVAL_SECONDS: "1",
+    // The suite's agent is a loopback socket, which is exactly the network
+    // class the relay refuses by default. This is the single governed opt-in
+    // (FR-004), and it stays confined to this disposable backend.
+    BRAIN_BUDDY_AGENT_ALLOW_PRIVATE_DESTINATIONS: "1",
   };
 
   const child: ChildProcess = spawn(
