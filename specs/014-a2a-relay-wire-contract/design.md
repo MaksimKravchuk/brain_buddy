@@ -10,7 +10,7 @@ affordance on D-03-S05/M-03-S04; M-01 sheet order; focus rules; result links ine
 (D-03-S11/M-03-S10). Re-acknowledged by Max, 2026-09-04.
 Amended after review campaign 2 (2026-09-04): D-01-S25, M-01-S22 added; restart variant
 of Not sent; disconnect copy names the card erasure; loading citations; aria-disabled
-parity. Re-acknowledgement pending.
+parity. Re-acknowledged by Max, 2026-09-04.
 
 <!--
   Produced by /speckit-design via the design-architect subagent, after
