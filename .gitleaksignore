@@ -1,0 +1,17 @@
+# Fingerprints of individual Gitleaks findings that are not credentials.
+#
+# A fingerprint is commit:path:rule:line, so an entry exempts exactly one
+# reported line in exactly one historical commit and nothing else: the same
+# text in any later commit has a different fingerprint and is scanned again.
+# That makes this file narrower than a `.gitleaks.toml` allowlist, which is
+# why it is the right place for a false positive that has no synthetic value
+# to pin (the guardrail in scripts/test_secret_scan_guardrails.py requires
+# every allowlist line to carry a quoted literal it can rotate).
+#
+# The two entries below are the `generic-api-key` rule reading the keyword
+# argument `owner_id=OWNER` on the line after `confirmation.manifest_token,`
+# as a token value. The line is a repository lookup in a test; nothing on it
+# is a secret. The commits are on the feature-014 branch already merged into
+# PR #192 and cannot be rewritten.
+2ec1d87f45a029072fa31dff47a31602ea110483:backend/tests/test_agent_relay_service.py:generic-api-key:2316
+84d512bb858222bd683eab46996b09f9fb34cee6:backend/tests/test_agent_relay_service.py:generic-api-key:2438
