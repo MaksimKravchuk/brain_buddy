@@ -19,6 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any, Protocol
 
 from pydantic import BaseModel
@@ -32,6 +33,7 @@ from app.exceptions import (
 )
 from app.schemas.agents import (
     AgentCapabilitiesResponse,
+    AgentCardResponse,
     AgentConnectionCreatedResponse,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
@@ -41,6 +43,7 @@ from app.schemas.agents import (
     AgentConnectionSigningSecretResponse,
     AgentConnectionUpdateRequest,
     AgentContextItemResponse,
+    AgentControlsResponse,
     AgentEventIngestResponse,
     AgentHandoffConfirmRequest,
     AgentHandoffPreviewRequest,
@@ -55,7 +58,27 @@ from app.schemas.agents import (
 from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
 
-from .a2a.client import A2AClientPort
+from .a2a.card import (
+    A2A_AUTH_SCHEME_UNSUPPORTED,
+    A2A_NO_SUPPORTED_INTERFACE,
+    A2A_NOT_AN_AGENT,
+    A2A_PROTOCOL_VERSION_UNSUPPORTED,
+    A2A_UNREACHABLE,
+    AGENT_CARD_CHANGED,
+    SINGLE_START_EXTENSION_URI,
+    AuthScheme,
+    CardDiscovery,
+    fetch_card,
+)
+from .a2a.client import (
+    A2A_CREDENTIALS_REJECTED,
+    A2A_METHOD_NOT_FOUND,
+    A2A_RATE_LIMITED,
+    A2A_TASK_NOT_FOUND,
+    A2AClientPort,
+    A2AResult,
+    A2ATarget,
+)
 from .connector import ConnectorPort, ConnectorTarget
 from .domain import (
     AGENT_EVENT_ENVELOPE_ADAPTER,
@@ -75,6 +98,7 @@ from .domain import (
     AgentRunDocument,
     AgentRunEventDocument,
     AgentRunManifest,
+    bounded_test_error_detail,
     project_run_for_access,
 )
 from .egress import (
@@ -83,6 +107,7 @@ from .egress import (
     interactive_result_link,
     validate_destination,
 )
+from .headers import usable_auth_header_name
 from .repository import AgentRepository
 from .secrets import (
     AAD_PURPOSE_INBOUND_SIGNING,
@@ -107,6 +132,60 @@ EXTERNAL_COPY_NOTICE = (
     "Your agent receives its own copy of everything listed here. BrainBuddy "
     "cannot guarantee that its retention cleanup, disconnect, or account "
     "deletion erases that copy."
+)
+
+# --- server-owned disclosures (FR-003, FR-011, FR-014) -----------------------
+#
+# These three sentences are the product's promise about what a hand-off to this
+# agent can and cannot guarantee, so they are minted here and rendered verbatim
+# by both clients. Assembling them client-side would let web and iOS drift into
+# two different promises about the same agent, and the drift would show up as a
+# duplicate task rather than as a typo.
+
+GUARANTEED_TIER_DISCLOSURE = (
+    "Guaranteed single start. This agent's card declares BrainBuddy's "
+    "single-start extension: it deduplicates by message ID inside one "
+    "conversation and returns the original task on a replay, so a retry cannot "
+    "start a second run."
+)
+
+BEST_EFFORT_TIER_DISCLOSURE = (
+    "Best-effort single start. This agent's card does not declare BrainBuddy's "
+    "single-start extension. Before any retry BrainBuddy checks the agent for an "
+    "existing task and adopts it instead of sending again. A duplicate remains "
+    "possible if the agent forgets its tasks."
+)
+
+CANCELLATION_DISCLOSURE = (
+    "Cancellation depends on the agent. Agent cards do not advertise whether "
+    "cancellation works, so BrainBuddy can only find out once you request it. If "
+    "the agent refuses, BrainBuddy says so and keeps the last state it observed."
+)
+
+TIER_DISCLOSURES: dict[str, str] = {
+    "guaranteed": GUARANTEED_TIER_DISCLOSURE,
+    "best_effort": BEST_EFFORT_TIER_DISCLOSURE,
+}
+
+#: The sentinel task id of the ``GetTask`` fallback probe. Deliberately a name
+#: no agent would mint: a ``-32001`` answer to it proves the credential was
+#: accepted *before* the lookup failed, which is exactly what the test needs to
+#: learn from an agent that does not implement ``ListTasks``.
+PROBE_TASK_ID = "brainbuddy-probe"
+
+#: Client failure codes that mean "the credential was refused", whatever the
+#: transport said.
+_CREDENTIALS_REJECTED = frozenset({A2A_CREDENTIALS_REJECTED})
+
+#: Discovery failures that are the agent's *shape*, not its reachability. Each
+#: one is its own sentence on D-01-S14..S17.
+_UNSUPPORTED_DISCOVERY_CODES = frozenset(
+    {
+        A2A_NOT_AN_AGENT,
+        A2A_NO_SUPPORTED_INTERFACE,
+        A2A_PROTOCOL_VERSION_UNSUPPORTED,
+        A2A_AUTH_SCHEME_UNSUPPORTED,
+    }
 )
 
 
@@ -181,6 +260,24 @@ class ExchangeExecutorPort(Protocol):
     ) -> Future[Any]: ...
 
 
+class CardFetcherPort(Protocol):
+    """Discovery, as the one call the service depends on.
+
+    Narrow on purpose. Everything the real fetch needs from deployment — the
+    timeout, the response cap, the private-destination opt-in, the resolver — is
+    bound once by whoever constructs it, so the service never has to hold that
+    policy and a test can hand it a scripted result without a socket.
+    """
+
+    def __call__(
+        self,
+        address: str,
+        *,
+        auth_scheme: AuthScheme,
+        now: datetime | None = ...,
+    ) -> CardDiscovery: ...
+
+
 def _reporting_instructions(callback_url: str, connection_id: str) -> str:
     """The versioned template shown verbatim in the hand-off review."""
 
@@ -219,6 +316,13 @@ class AgentRelayService:
         # service never needs a container (plan.md, "Delivery boundary").
         a2a_client: A2AClientPort | None = None,
         exchange_executor: ExchangeExecutorPort | None = None,
+        # Discovery. Optional so the container can bind deployment policy into
+        # it once; when it is absent the service builds the default below from
+        # the same settings, so there is never a service that cannot discover.
+        card_fetcher: CardFetcherPort | None = None,
+        tier_disclosure_url: str = SINGLE_START_EXTENSION_URI,
+        connector_timeout_seconds: float = 10.0,
+        connector_max_response_bytes: int = 64_000,
         stale_after: timedelta = DEFAULT_STALE_AFTER,
         reporting_window: timedelta = DEFAULT_REPORTING_WINDOW,
         content_retention: timedelta = DEFAULT_CONTENT_RETENTION,
@@ -233,12 +337,20 @@ class AgentRelayService:
         self.secret_box = secret_box
         self.task_snapshot = task_snapshot
         self.callback_url = callback_url
+        self.tier_disclosure_url = tier_disclosure_url
         self.stale_after = stale_after
         self.reporting_window = reporting_window
         self.content_retention = content_retention
         self.allow_private_destinations = allow_private_destinations
         self._resolver = resolver
         self._now = now
+        self._card_fetcher: CardFetcherPort = card_fetcher or partial(
+            fetch_card,
+            timeout_seconds=connector_timeout_seconds,
+            max_response_bytes=connector_max_response_bytes,
+            allow_private_destinations=allow_private_destinations,
+            resolver=resolver,
+        )
 
     # --- shared helpers -----------------------------------------------------
 
@@ -500,7 +612,6 @@ class AgentRelayService:
             if (
                 current.reported_state not in TERMINAL_REPORTED_STATES
                 and connection.status != "disconnected"
-                and connection.capabilities.cancel
                 and connection.revision
                 == record.response_body.get("connection_revision")
             ):
@@ -595,13 +706,48 @@ class AgentRelayService:
             raise ValidationFailure(exc.message, detail={"reason": exc.code}) from exc
 
     def _target(self, connection: AgentConnectionDocument) -> ConnectorTarget:
+        return ConnectorTarget(
+            endpoint_url=connection.endpoint_url,
+            auth_header_name=connection.auth_header_name or "X-Agent-Key",
+            credential=self._open_credential(connection),
+        )
+
+    def _a2a_target(
+        self,
+        connection: AgentConnectionDocument,
+        *,
+        interface_url: str,
+        auth_header_name: str | None = None,
+        guarantee_tier: str | None = None,
+    ) -> A2ATarget:
+        """Where one A2A call goes, and the credential it may carry.
+
+        The interface is passed in rather than read off the connection because
+        a *test* uses the interface the card just named while an *observation*
+        must use the one pinned at dispatch: a card that moves mid-run must not
+        be able to redirect a live run's traffic.
+        """
+
+        return A2ATarget(
+            interface_url=interface_url,
+            auth_scheme=connection.auth_scheme,
+            auth_header_name=auth_header_name or connection.auth_header_name,
+            credential=self._open_credential(connection),
+            guarantee_tier=(
+                "guaranteed"
+                if (guarantee_tier or connection.guarantee_tier) == "guaranteed"
+                else "best_effort"
+            ),
+        )
+
+    def _open_credential(self, connection: AgentConnectionDocument) -> str:
         if connection.credential is None:
             raise ValidationFailure(
                 "This connection has no stored credential. Reconnect the agent.",
                 detail={"reason": "credential_missing"},
             )
         try:
-            credential = self.secret_box.open(
+            return self.secret_box.open(
                 connection.credential,
                 aad=secret_aad(
                     AAD_PURPOSE_OUTBOUND_CREDENTIAL,
@@ -616,11 +762,6 @@ class AgentRelayService:
                 "Rotate the credential to continue.",
                 detail={"reason": "credential_unreadable"},
             ) from exc
-        return ConnectorTarget(
-            endpoint_url=connection.endpoint_url,
-            auth_header_name=connection.auth_header_name,
-            credential=credential,
-        )
 
     # --- connection projection ---------------------------------------------
 
@@ -638,7 +779,8 @@ class AgentRelayService:
         return AgentConnectionResponse(
             id=connection.id,
             name=connection.name,
-            endpoint_url=connection.endpoint_url,
+            agent_address=connection.endpoint_url,
+            auth_scheme=connection.auth_scheme,
             auth_header_name=connection.auth_header_name,
             status=connection.status,
             stale=self._is_stale(connection),
@@ -646,7 +788,36 @@ class AgentRelayService:
             capabilities=AgentCapabilitiesResponse(
                 **connection.capabilities.model_dump()
             ),
+            # BrainBuddy's own statement, never an agent claim: a tested A2A
+            # connection is one BrainBuddy will offer both controls on, and the
+            # run projection is what withdraws them once an agent has refused.
+            controls_offered=AgentControlsResponse(
+                reply=connection.status == "ready",
+                cancel=connection.status == "ready",
+            ),
+            card=(
+                AgentCardResponse.model_validate(
+                    connection.card.model_dump(
+                        exclude={"security_required", "security_requirements"}
+                    )
+                )
+                if connection.card is not None
+                else None
+            ),
+            guarantee_tier=connection.guarantee_tier,
+            tier_disclosure=(
+                TIER_DISCLOSURES[connection.guarantee_tier]
+                if connection.guarantee_tier is not None
+                else None
+            ),
+            tier_disclosure_url=self.tier_disclosure_url,
+            cancellation_disclosure=CANCELLATION_DISCLOSURE,
+            agent_changed=connection.agent_changed,
+            best_effort_acknowledged_at=connection.best_effort_acknowledged_at,
+            correlation_id_honoured=connection.context_id_honoured,
+            disconnect_reason=connection.disconnect_reason,
             last_test_error_code=connection.last_test_error_code,
+            last_test_error_detail=connection.last_test_error_detail,
             last_contact_at=connection.last_contact_at,
             last_tested_at=connection.last_tested_at,
             stale_after_seconds=int(self.stale_after.total_seconds()),
@@ -663,7 +834,7 @@ class AgentRelayService:
         owner_id: str,
         idempotency_key: str,
         reauthenticated: bool,
-    ) -> AgentConnectionCreatedResponse:
+    ) -> AgentConnectionResponse:
         command = "create_connection"
         # No target: this call is what brings the connection into existence.
         canonical = self._canonical_request(command, payload, target=None)
@@ -675,14 +846,10 @@ class AgentRelayService:
                 canonical=canonical,
             )
             if record is not None:
-                existing = self.agent_repo.get_connection(
-                    record.resource_id, owner_id=owner_id
-                )
-                # The one-time secret is genuinely gone; a replay cannot resurrect
-                # it, and saying so beats returning a plausible-looking blank.
-                return AgentConnectionCreatedResponse(
-                    **self._connection_response(existing).model_dump(),
-                    inbound_signing_secret="",
+                return self._connection_response(
+                    self.agent_repo.get_connection(
+                        record.resource_id, owner_id=owner_id
+                    )
                 )
 
             if not reauthenticated:
@@ -690,7 +857,7 @@ class AgentRelayService:
                     "Confirm your password to connect an agent.",
                     detail={"reason": "reauthentication_required"},
                 )
-            self._validate_endpoint(payload.endpoint_url)
+            self._validate_endpoint(payload.agent_address)
 
             now = self._now()
             connection_id = generate_id("agentconn")
@@ -699,8 +866,9 @@ class AgentRelayService:
                 id=connection_id,
                 owner_id=owner_id,
                 name=payload.name.strip(),
-                endpoint_url=payload.endpoint_url,
-                auth_header_name=payload.auth_header_name,
+                # Storage key unchanged from 007 on purpose (data-model.md §1).
+                endpoint_url=payload.agent_address,
+                auth_scheme=payload.auth_scheme,
                 credential=self.secret_box.seal(
                     payload.credential,
                     aad=secret_aad(
@@ -736,10 +904,10 @@ class AgentRelayService:
                 connection_id=connection_id,
             )
 
-        return AgentConnectionCreatedResponse(
-            **self._connection_response(connection).model_dump(),
-            inbound_signing_secret=inbound_secret,
-        )
+        # No secret in the 201. Under the A2A wire there is no inbound secret an
+        # owner has to configure at their agent, so registration has nothing to
+        # show once and everything to lose by showing it (FR-012).
+        return self._connection_response(connection)
 
     def list_connections(self, *, owner_id: str) -> list[AgentConnectionResponse]:
         return [
@@ -791,10 +959,18 @@ class AgentRelayService:
                     "This agent changed elsewhere; reload and try again.",
                 )
 
-            destination_changed = (
-                payload.endpoint_url is not None
-                and payload.endpoint_url != connection.endpoint_url
+            address_changed = (
+                payload.agent_address is not None
+                and payload.agent_address != connection.endpoint_url
             )
+            scheme_changed = (
+                payload.auth_scheme is not None
+                and payload.auth_scheme != connection.auth_scheme
+            )
+            # A scheme change is a scope change exactly as an address change is:
+            # the same secret is presented differently, so the agent that
+            # receives it may not be the one that received it before.
+            destination_changed = address_changed or scheme_changed
             name_changed = payload.name is not None and payload.name != connection.name
             if destination_changed:
                 if not reauthenticated:
@@ -802,8 +978,9 @@ class AgentRelayService:
                         "Confirm your password to change this agent's destination.",
                         detail={"reason": "reauthentication_required"},
                     )
-                assert payload.endpoint_url is not None
-                self._validate_endpoint(payload.endpoint_url)
+                if address_changed:
+                    assert payload.agent_address is not None
+                    self._validate_endpoint(payload.agent_address)
 
             if not name_changed and not destination_changed:
                 response = self._connection_response(connection)
@@ -825,18 +1002,11 @@ class AgentRelayService:
             if name_changed:
                 updates["name"] = payload.name
             if destination_changed:
-                updates.update(
-                    {
-                        "endpoint_url": payload.endpoint_url,
-                        "status": "untested",
-                        "capabilities": AgentCapabilities(),
-                        "last_test_error_code": None,
-                        "last_contact_at": None,
-                        "last_tested_at": None,
-                        "scope_verified_at": now,
-                        "first_dispatch_at": None,
-                    }
-                )
+                updates.update(self._scope_reset_updates(now=now))
+                if address_changed:
+                    updates["endpoint_url"] = payload.agent_address
+                if scheme_changed:
+                    updates["auth_scheme"] = payload.auth_scheme
             updated = connection.model_copy(update=updates)
             self.agent_repo.save_connection(updated)
             self._remember(
@@ -857,10 +1027,212 @@ class AgentRelayService:
             )
         return self._connection_response(updated)
 
+    # --- discovery and the authenticated probe (FR-002) ---------------------
+
+    def _discovery_failure_updates(
+        self, discovery: CardDiscovery
+    ) -> dict[str, Any]:
+        """What a card that could not be used records, and nothing more.
+
+        Each failure code is its own sentence to the owner (D-01-S14..S17), so
+        the code is stored rather than collapsed into a single "unsupported":
+        "there is no card at the well-known location" and "this card requires
+        OAuth2" call for entirely different corrective actions.
+        """
+
+        code = discovery.failure_code or A2A_UNREACHABLE
+        status = "unsupported" if code in _UNSUPPORTED_DISCOVERY_CODES else "unreachable"
+        return {
+            "status": status,
+            "last_test_error_code": code,
+            "last_test_error_detail": bounded_test_error_detail(
+                discovery.failure_detail
+            ),
+        }
+
+    def _probe_updates(
+        self, connection: AgentConnectionDocument, discovery: CardDiscovery
+    ) -> dict[str, Any]:
+        """Authenticate against the interface the card just named.
+
+        A card read proves an agent exists; it does not prove BrainBuddy may
+        talk to it. ``ListTasks`` is the cheapest authenticated call that carries
+        no content, and the ``GetTask`` sentinel behind it exists because an
+        agent may legitimately not implement listing at all.
+        """
+
+        assert discovery.summary is not None
+        assert discovery.interface_url is not None
+        client = self.a2a_client
+        if client is None:  # pragma: no cover - the container always wires one
+            raise ValidationFailure(
+                "BrainBuddy cannot test connections right now. Try again shortly.",
+                detail={"reason": "a2a_unreachable"},
+            )
+        target = self._a2a_target(
+            connection,
+            interface_url=discovery.interface_url,
+            auth_header_name=discovery.auth_header_name,
+            guarantee_tier=discovery.guarantee_tier,
+        )
+        result = client.list_tasks(target, page_size=1)
+        if result.error_code == A2A_METHOD_NOT_FOUND:
+            result = client.get_task(target, task_id=PROBE_TASK_ID)
+            if result.error_code == A2A_TASK_NOT_FOUND:
+                # The credential was accepted; only the sentinel is missing,
+                # which is the answer that proves the agent is reachable and
+                # authenticated without it having to own a real task.
+                result = A2AResult(ok=True, correlation_id=result.correlation_id)
+        return self._probe_outcome_updates(result)
+
+    @staticmethod
+    def _probe_outcome_updates(result: A2AResult) -> dict[str, Any]:
+        if result.ok:
+            return {"status": "ready"}
+        if result.error_code in _CREDENTIALS_REJECTED:
+            return {
+                "status": "invalid_credentials",
+                "last_test_error_code": A2A_CREDENTIALS_REJECTED,
+            }
+        if result.error_code == A2A_RATE_LIMITED:
+            # A refusal to answer is not a verdict on the connection: the probe
+            # learned nothing, so the connection stays *untested* rather than
+            # inheriting a failure it did not earn (AC-037, D-01-S25).
+            return {
+                "status": "untested",
+                "last_test_error_code": A2A_RATE_LIMITED,
+                "last_test_error_detail": {
+                    "retry_after_seconds": result.retry_after_seconds
+                },
+            }
+        return {"status": "unreachable", "last_test_error_code": A2A_UNREACHABLE}
+
+    def _drift_updates(
+        self, connection: AgentConnectionDocument, discovery: CardDiscovery
+    ) -> dict[str, Any] | None:
+        """The **Agent changed** transition, or nothing (AC-012, D-01-S20).
+
+        The stored card is deliberately *not* replaced here: it describes the
+        destination the owner actually tested, and the surface shows it beside
+        the one the card now advertises. Overwriting it would erase the very
+        comparison that makes the warning actionable.
+        """
+
+        if connection.card_fingerprint is None:
+            return None
+        if discovery.card_fingerprint == connection.card_fingerprint:
+            return None
+        if connection.card_drift_at is not None:
+            # Announced once. The owner has seen **Agent changed** and has come
+            # back to test again, which is exactly the deliberate act the
+            # warning asks for — repeating the refusal would leave no way out of
+            # it short of deleting the connection.
+            return None
+        return {
+            "status": "untested",
+            "last_test_error_code": AGENT_CARD_CHANGED,
+            "last_test_error_detail": bounded_test_error_detail(
+                {"interface_url": discovery.interface_url}
+            ),
+            "card_drift_at": self._now(),
+            # Not an owner action, so there is no fresh proof of possession to
+            # keep: the next content-bearing send has to ask for the password
+            # again, and the duplicate-risk acknowledgement is asked again too.
+            "scope_verified_at": None,
+            "best_effort_acknowledged_at": None,
+        }
+
+    def _successful_test_updates(
+        self, discovery: CardDiscovery, *, now: datetime
+    ) -> dict[str, Any]:
+        summary = discovery.summary
+        assert summary is not None
+        return {
+            "status": "ready",
+            "card": summary,
+            "card_fingerprint": discovery.card_fingerprint,
+            "card_drift_at": None,
+            "guarantee_tier": discovery.guarantee_tier,
+            "auth_header_name": discovery.auth_header_name,
+            "capabilities": AgentCapabilities(
+                streaming=summary.streaming,
+                push_notifications=summary.push_notifications,
+            ),
+            "last_test_error_code": None,
+            "last_test_error_detail": None,
+            # Only an authenticated success is contact; a rejection is not.
+            "last_contact_at": now,
+        }
+
+    def _test_outcome_updates(
+        self, connection: AgentConnectionDocument, *, now: datetime
+    ) -> dict[str, Any]:
+        """One test, as the fields it changes. No I/O happens under a lock."""
+
+        discovery = self._card_fetcher(
+            connection.endpoint_url, auth_scheme=connection.auth_scheme, now=now
+        )
+        if not discovery.ok:
+            return self._discovery_failure_updates(discovery)
+
+        if connection.auth_scheme == "api_key" and (
+            usable_auth_header_name(discovery.auth_header_name) is None
+        ):
+            # Discovery normally refuses this itself; repeating the check here
+            # means a card can never reach the request builder with a header
+            # name the transport owns, whatever path produced the discovery.
+            return {
+                "status": "unsupported",
+                "last_test_error_code": A2A_AUTH_SCHEME_UNSUPPORTED,
+                "last_test_error_detail": bounded_test_error_detail(
+                    {"scheme": discovery.auth_header_name or connection.auth_scheme}
+                ),
+            }
+
+        drifted = self._drift_updates(connection, discovery)
+        if drifted is not None:
+            return drifted
+
+        probe = self._probe_updates(connection, discovery)
+        if probe["status"] != "ready":
+            return probe
+        return self._successful_test_updates(discovery, now=now)
+
+    @staticmethod
+    def _scope_reset_updates(*, now: datetime) -> dict[str, Any]:
+        """Everything a new destination, scheme or credential invalidates.
+
+        Stated once because the three call sites must reset the *same* set: an
+        address change that forgot to clear the card fingerprint would leave a
+        connection claiming it had tested a destination it never saw. The
+        duplicate-risk acknowledgement goes with them (AC-026) — it was given
+        about a specific agent, and this is no longer certainly that agent.
+        """
+
+        return {
+            "status": "untested",
+            "capabilities": AgentCapabilities(),
+            "card": None,
+            "card_fingerprint": None,
+            "card_drift_at": None,
+            "guarantee_tier": None,
+            "auth_header_name": None,
+            "best_effort_acknowledged_at": None,
+            "context_id_honoured": None,
+            "last_test_error_code": None,
+            "last_test_error_detail": None,
+            "last_contact_at": None,
+            "last_tested_at": None,
+            # The owner just proved possession for *this* scope, and no content
+            # has moved under it yet, so the first-dispatch trigger re-arms.
+            "scope_verified_at": now,
+            "first_dispatch_at": None,
+        }
+
     def test_connection(
         self, connection_id: str, *, owner_id: str
     ) -> AgentConnectionResponse:
-        """Ask the connector what it is, and record only what it answered."""
+        """Discover the agent from its card, then prove we may talk to it."""
 
         connection = self.agent_repo.get_connection(connection_id, owner_id=owner_id)
         if connection.status == "disconnected":
@@ -868,36 +1240,51 @@ class AgentRelayService:
                 "This agent is disconnected. Connect it again to test it.",
                 detail={"reason": "connection_disconnected"},
             )
+        # Before any request leaves: a refused network class must not be able to
+        # collect even the credential-free card fetch.
         self._validate_endpoint(connection.endpoint_url)
-        outcome = self.connector.test(self._target(connection))
 
         now = self._now()
+        updates = self._test_outcome_updates(connection, now=now)
+
         with self.agent_repo.command_lock(owner_id):
             current = self.agent_repo.get_connection(connection_id, owner_id=owner_id)
-            # Connector I/O intentionally happens without the owner lock. Merge
-            # the test-only fields only if the exact destination/credential
-            # snapshot tested is still current; any intervening command wins.
+            # Discovery and the probe intentionally happen without the owner
+            # lock. Merge the test-only fields only if the exact
+            # destination/credential snapshot tested is still current; any
+            # intervening command wins.
             if current.revision != connection.revision:
                 return self._connection_response(current)
             if current.status == "disconnected":
                 return self._connection_response(current)
-            updates: dict[str, Any] = {
-                "status": outcome.status,
-                "capabilities": outcome.capabilities,
-                "last_test_error_code": outcome.error_code,
-                "last_tested_at": now,
-                "updated_at": now,
-                "revision": current.revision + 1,
-            }
-            if outcome.status == "ready":
-                # Only an authenticated success is contact; a rejection is not.
-                updates["last_contact_at"] = now
-            updated = current.model_copy(update=updates)
+            updated = current.model_copy(
+                update={
+                    "last_test_error_code": None,
+                    "last_test_error_detail": None,
+                    **updates,
+                    "last_tested_at": now,
+                    "updated_at": now,
+                    "revision": current.revision + 1,
+                }
+            )
             self.agent_repo.save_connection(updated)
             self._audit(
                 owner_id=owner_id,
+                action="card_fetched",
+                outcome=updated.last_test_error_code or "ok",
+                connection_id=connection_id,
+            )
+            if updated.agent_changed:
+                self._audit(
+                    owner_id=owner_id,
+                    action="card_drift_detected",
+                    outcome="agent_card_changed",
+                    connection_id=connection_id,
+                )
+            self._audit(
+                owner_id=owner_id,
                 action="connection_tested",
-                outcome=outcome.status,
+                outcome=updated.status,
                 connection_id=connection_id,
             )
         return self._connection_response(updated)
@@ -953,15 +1340,9 @@ class AgentRelayService:
                             connection_id=connection_id,
                         ),
                     ),
-                    # A new credential is a new scope: readiness and the
-                    # first-dispatch re-auth trigger both reset.
-                    "status": "untested",
-                    "capabilities": AgentCapabilities(),
-                    "last_test_error_code": None,
-                    "last_contact_at": None,
-                    "last_tested_at": None,
-                    "scope_verified_at": now,
-                    "first_dispatch_at": None,
+                    # A new credential is a new scope: readiness, the discovery
+                    # result and the first-dispatch re-auth trigger all reset.
+                    **self._scope_reset_updates(now=now),
                     "updated_at": now,
                     "revision": connection.revision + 1,
                 }
@@ -1663,8 +2044,13 @@ class AgentRelayService:
             )
         except NotFoundError:  # pragma: no cover - connection rows outlive runs
             connection = None
-        capabilities = (
-            connection.capabilities if connection is not None else AgentCapabilities()
+        # BrainBuddy-side, never an agent claim: cards do not advertise reply or
+        # cancellation (FR-010), so both controls are offered on a live run and
+        # withdrawn only once something has actually made them impossible — a
+        # disconnected connection, or an agent that refused.
+        controls = AgentControlsResponse(
+            reply=connection is not None and run.connection_disconnected_at is None,
+            cancel=connection is not None and run.connection_disconnected_at is None,
         )
         commands = self.agent_repo.list_commands(run.id, owner_id=run.owner_id)
         reply_pending = any(
@@ -1698,7 +2084,7 @@ class AgentRelayService:
             content_expires_at=run.content_expires_at,
             last_contact_at=run.last_contact_at,
             reporting_window_seconds=int(self.reporting_window.total_seconds()),
-            capabilities=AgentCapabilitiesResponse(**capabilities.model_dump()),
+            capabilities=controls,
             manifest=(
                 self._manifest_response(run.manifest, connection)
                 if run.manifest is not None and connection is not None
@@ -1854,14 +2240,6 @@ class AgentRelayService:
                         run_id,
                         "This run changed elsewhere; reload and try again.",
                     )
-                if not connection.capabilities.reply:
-                    raise ValidationFailure(
-                        "This agent does not support replies.",
-                        detail={
-                            "reason": "capability_unsupported",
-                            "capability": "reply",
-                        },
-                    )
                 now = self._now()
                 command_id, reserved_at = self._reserve_command(
                     owner_id=owner_id,
@@ -1922,7 +2300,6 @@ class AgentRelayService:
                     and current_connection.status != "disconnected"
                     and current.reported_state not in TERMINAL_REPORTED_STATES
                     and not current.content_expired
-                    and current_connection.capabilities.reply
                 )
                 if unchanged_scope:
                     current = current.model_copy(
@@ -1978,14 +2355,6 @@ class AgentRelayService:
                 if reconciled is not None:
                     return reconciled
                 run, connection = self._require_commandable(run_id, owner_id=owner_id)
-                if not connection.capabilities.cancel:
-                    raise ValidationFailure(
-                        "This agent does not support cancellation.",
-                        detail={
-                            "reason": "capability_unsupported",
-                            "capability": "cancel",
-                        },
-                    )
                 now = self._now()
                 attempt_receipt: dict[str, object] = {
                     "id": run.id,
@@ -2051,7 +2420,6 @@ class AgentRelayService:
                     current_connection.revision == connection.revision
                     and current_connection.status != "disconnected"
                     and current.reported_state not in TERMINAL_REPORTED_STATES
-                    and current_connection.capabilities.cancel
                 )
                 if unchanged_scope:
                     current = current.model_copy(

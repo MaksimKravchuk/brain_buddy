@@ -48,10 +48,7 @@ from app.modules.agents.egress import (
     pinned_request,
     validate_destination,
 )
-from app.modules.agents.headers import (
-    RESERVED_AUTH_HEADER_NAMES,
-    validate_auth_header_name,
-)
+from app.modules.agents.headers import usable_auth_header_name
 from app.schemas.common import StrictBaseModel
 from app.utils.time import utcnow
 
@@ -299,28 +296,15 @@ def _requirement_names(card: AgentCard) -> list[list[str]]:
 #: protocol's framing, not the relay's generic transport reservations, and a
 #: card that named one would be asking BrainBuddy to let the agent choose its
 #: own protocol version or activate its own extensions.
-_A2A_PROTOCOL_HEADERS: frozenset[str] = frozenset(
-    {"a2a-version", "a2a-extensions", "x-correlation-id"}
-)
-
-
 def _usable_header_name(raw: str | None) -> str | None:
     """An API-key header name, or ``None`` when it may not be sent.
 
-    Refuses a reserved transport-structural name in any casing and anything
-    that is not an RFC 9110 token — the second check is header injection
-    protection, not tidiness.
+    Delegated to ``headers`` so the reserved set is stated once: this module and
+    the service both have to refuse the same names, and two copies of that list
+    would eventually disagree about which header a card may capture.
     """
 
-    if not raw:
-        return None
-    folded = raw.casefold()
-    if folded in RESERVED_AUTH_HEADER_NAMES or folded in _A2A_PROTOCOL_HEADERS:
-        return None
-    try:
-        return validate_auth_header_name(raw)
-    except ValueError:
-        return None
+    return usable_auth_header_name(raw)
 
 
 def _select_scheme(

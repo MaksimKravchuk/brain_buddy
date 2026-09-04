@@ -10,19 +10,28 @@ authenticated as (``reported_state``), what BrainBuddy derived from the clock
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
     AfterValidator,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     TypeAdapter,
+    model_serializer,
     model_validator,
 )
 
+from app.modules.agents.a2a.card import (
+    AGENT_CARD_CHANGED,
+    AgentCardSummary,
+    AuthScheme as AgentAuthScheme,
+    GuaranteeTier as AgentGuaranteeTier,
+)
 from app.modules.agents.authority import validate_endpoint_authority
 from app.modules.agents.validation import sanitize_endpoint_input
 from app.schemas.common import StorageBaseModel, StrictBaseModel
@@ -238,11 +247,20 @@ AGENT_EVENT_ENVELOPE_ADAPTER: TypeAdapter[AgentEventEnvelope] = TypeAdapter(
 
 
 class AgentCapabilities(StorageBaseModel):
-    """What a connector said it can do. Absent capability means no control."""
+    """What the agent's own card declared it can do.
 
-    progress: bool = False
-    reply: bool = False
-    cancel: bool = False
+    Only the card's two booleans (spec 014, FR-002). ``reply``/``cancel`` are not
+    here on purpose: A2A cards do not advertise either, so BrainBuddy offers both
+    controls on every tested connection and the run projection withdraws them
+    once an agent has actually refused. Keeping a *product* decision out of a
+    model named "capabilities" is what stops it being read as an agent claim.
+
+    ``progress`` is gone with the bespoke wire: A2A carries no progress figure,
+    and a flag for something nothing can report is a promise, not a fact.
+    """
+
+    streaming: bool = False
+    push_notifications: bool = False
 
 
 class AgentConnectionDocument(StorageBaseModel):
@@ -278,12 +296,41 @@ class AgentConnectionDocument(StorageBaseModel):
     # keeps the hundreds of in-code constructions from having to restate the one
     # value this build can produce.
     wire: Literal["a2a"] = "a2a"
-    auth_header_name: Annotated[AuthHeaderName, Field(max_length=128)] = "X-Agent-Key"
+    # Which of the two credential schemes the owner chose (FR-001). The header
+    # the credential travels in follows from this plus the card, never from
+    # anything typed.
+    auth_scheme: AgentAuthScheme = "bearer"
+    # Present *only* for an api_key connection, and only once discovery read it
+    # off the card. A bearer connection stores no key at all — deliberately not
+    # the string "Authorization", which this very validator rejects, and which a
+    # rolled-back 007 image would refuse to parse (plan.md, Rollback boundary).
+    auth_header_name: Annotated[AuthHeaderName, Field(max_length=128)] | None = None
     credential: SealedSecret | None = None
     inbound_secret: SealedSecret | None = None
     capabilities: AgentCapabilities = Field(default_factory=AgentCapabilities)
+    # The bounded copy of the card the last *successful test* read. Kept for the
+    # connection's lifetime and erased on disconnect with the credential — never
+    # swept at 90 days, because a connection that cannot say where it points is
+    # not a connection anyone can reason about (FR-016, AC-024).
+    card: AgentCardSummary | None = None
+    card_fingerprint: str | None = Field(default=None, max_length=64)
+    # Set when a test, preview or dispatch finds the card has moved under the
+    # connection; cleared by the next successful test.
+    card_drift_at: datetime | None = None
+    guarantee_tier: AgentGuaranteeTier | None = None
+    # FR-003/AC-026: stamped by the first confirmed best-effort hand-off that
+    # carried the acknowledgement, and cleared whenever the verified scope is,
+    # so a destination change asks again.
+    best_effort_acknowledged_at: datetime | None = None
+    # None until the first SendMessage answer on this connection. False means
+    # the agent did not keep the run's correlation ID, so an empty lookup there
+    # proves nothing and BrainBuddy never auto-resends (FR-006).
+    context_id_honoured: bool | None = None
     status: AgentConnectionStatus = "untested"
     last_test_error_code: str | None = Field(default=None, max_length=128)
+    # Closed per-code shapes (data-model.md §1), bounded on write by the service.
+    # Coarse metadata only — never card prose.
+    last_test_error_detail: dict[str, Any] | None = None
     last_contact_at: datetime | None = None
     last_tested_at: datetime | None = None
     # When the owner last proved possession of their password for *this*
@@ -301,6 +348,68 @@ class AgentConnectionDocument(StorageBaseModel):
     updated_at: datetime
     schema_version: int = Field(default=1, ge=1)
     revision: int = Field(default=1, ge=1)
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_header_name(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        """Write no ``auth_header_name`` key at all when there is none.
+
+        Not cosmetic, and not the same as writing ``null``. A bearer connection
+        has no header name, and the 007 model this row must still validate
+        against after a rollback declares the field a non-optional string with a
+        default — so a stored ``null`` would make every 014 row unparseable to
+        the previous image, which is the one thing the rollback boundary must
+        not discover (plan.md; data-model.md §1).
+        """
+
+        payload = handler(self)
+        if payload.get("auth_header_name") is None:
+            payload.pop("auth_header_name", None)
+        return payload
+
+    @property
+    def agent_changed(self) -> bool:
+        """The fifth connection condition (FR-002, D-01-S20).
+
+        Derived rather than stored: a second boolean beside
+        ``last_test_error_code`` could disagree with it, and the surfaces would
+        then have two answers to "did this agent move?".
+        """
+
+        return self.last_test_error_code == AGENT_CARD_CHANGED
+
+    @property
+    def content_bearing_scope_is_verified(self) -> bool:
+        """Whether the destination and credential were proved by a test."""
+
+        return self.status == "ready" and self.card_fingerprint is not None
+
+
+MAX_TEST_ERROR_DETAIL_BYTES = 512
+"""Hard bound on the coarse detail a failed test may record (data-model §1)."""
+
+
+def bounded_test_error_detail(
+    detail: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """The detail as it may be stored, or nothing.
+
+    A card chooses the values inside `found_version`, `scheme` and the drifted
+    interface, so the bound is enforced here rather than trusted from discovery:
+    an agent must not be able to grow a connection row by returning a very long
+    version string.
+    """
+
+    if not detail:
+        return None
+    encoded = json.dumps(detail, separators=(",", ":"), ensure_ascii=False)
+    if len(encoded.encode("utf-8")) <= MAX_TEST_ERROR_DETAIL_BYTES:
+        return detail
+    return {
+        key: (value[:64] if isinstance(value, str) else value)
+        for key, value in detail.items()
+    }
 
 
 class AgentManifestContextItem(StorageBaseModel):
@@ -538,6 +647,10 @@ class AgentIdempotencyRecord(StorageBaseModel):
 __all__ = [
     "AGENT_EVENT_ENVELOPE_ADAPTER",
     "MAX_CONTEXT_ITEMS",
+    "MAX_TEST_ERROR_DETAIL_BYTES",
+    "AgentAuthScheme",
+    "AgentGuaranteeTier",
+    "bounded_test_error_detail",
     "MAX_CONTEXT_ITEM_CHARS",
     "MAX_PROGRESS_CHARS",
     "MAX_QUESTION_CHARS",
