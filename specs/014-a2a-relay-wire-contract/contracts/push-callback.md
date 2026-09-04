@@ -34,9 +34,15 @@ The hand-off review discloses this registration before confirmation (FR-005, AC-
 the server-owned disclosure sentence (`api-deltas.md`).
 
 `token`: 32 random bytes, urlsafe base64, unique per run, generated at dispatch, stored only
-as `SecretBox.fingerprint(token)`. `url` is built from `agent_relay_push_base_url`
-(`BRAIN_BUDDY_PUBLIC_BASE_URL` + api prefix + `/a2a/push`), which production validates as a
-canonical public HTTPS origin (`backend/app/core/config.py` `_canonical_public_base_url`).
+as `SecretBox.fingerprint(token)` — kept until identifier expiry (90 d), not cleared at
+terminal, so a late valid push is still recognised as such (below). `url` is built from
+`agent_relay_push_base_url` (`BRAIN_BUDDY_PUBLIC_BASE_URL` + api prefix + `/a2a/push`), which
+production validates as a canonical public HTTPS origin (`backend/app/core/config.py`
+`_canonical_public_base_url`). That origin is the **backend Fly app's own**
+(`fly.backend.toml` sets `BRAIN_BUDDY_PUBLIC_BASE_URL = 'https://brain-buddy-backend.fly.dev'`),
+so the agent calls the backend app directly; the frontend image's nginx proxy
+(`deploy/nginx/default.conf`, which proxies *outward* to that backend) is not on the path.
+The registration call for an adopted task runs on the control pool, never behind exchanges.
 `authentication` is omitted (neither reference runtime honours it; the SDK sends the token as
 `X-A2A-Notification-Token`, Hermes sends nothing but `X-A2A-Signature`).
 
@@ -57,22 +63,23 @@ BrainBuddy's own logs are a different matter and are handled below.
 - `backend/app/core/logging.py` routes `uvicorn.access` to the console handler; it gains a
   logging filter that rewrites or drops access lines whose request path starts with
   `{api_prefix}/a2a/push/`, so the server's own access log cannot repeat the token either.
-- `deploy/nginx/default.conf` (the Fly frontend proxy image copies it to
-  `/etc/nginx/templates/default.conf.template`) gains a `location /api/a2a/push/` block that
-  proxies exactly like `location /api/` but with `access_log off;`. The file has no
-  `access_log` directive today, so without the block nginx's default combined format would
-  write the full request line, token included.
+- Those two are the only layers, and the only ones on the token's path: the callback URL is
+  built from the backend app's own origin (above), so agents call the backend Fly app
+  directly, the frontend image's `deploy/nginx/default.conf` never sees the request and needs
+  no `location /api/a2a/push/` block, and `backend/Dockerfile` runs uvicorn with no reverse
+  proxy of its own.
 - The token never appears in responses, error envelopes, audit rows (they carry ids and
   coarse outcome codes only; the run keeps just `push_token_fingerprint`, the keyed
   `SecretBox.fingerprint`, never a plain digest) or timeline events.
-- Residual: the platform edge (the Fly proxy) may log request paths outside BrainBuddy's
-  control. Mitigation: the token is wake-up-only (a verified push only schedules an immediate
-  observation; all state comes from `GetTask`), is unique per run, and stops being honoured
-  once the run is terminal or the connection is disconnected.
+- Residual: the real production edge is the Fly proxy in front of the backend app, which may
+  log request paths outside BrainBuddy's control; that is disclosed, not argued away. It is
+  bounded by the token's nature: wake-up-only (a verified push only schedules an immediate
+  observation BrainBuddy would perform anyway; all state comes from `GetTask`), unique per
+  run, and not honoured once the run is terminal or the connection is disconnected.
 - SC-009 evidence: `test_push_token_never_appears_in_logs` (`test_agent_relay_api.py`)
-  captures application logging **and** `uvicorn.access` during a verified push, a rejected
-  push and a failing push (the exception path) and asserts the issued token string appears in
-  none of the captured lines.
+  captures application logging **and** `uvicorn.access` — exactly the two in-process edges
+  above — during a verified push, a rejected push and a failing push (the exception path) and
+  asserts the issued token string appears in none of the captured lines.
 
 ## What BrainBuddy accepts
 
@@ -83,8 +90,8 @@ BrainBuddy's own logs are a different matter and are handled below.
 | 1 | declared `Content-Length` > 64 000, or streamed body > 64 000 bytes | `413`, no row (before reading / while reading) |
 | 2 | process-wide fixed-size limiter for the whole route, consulted **before any database read** | `429`, no row |
 | 3 | resolve `run_id`: unknown, not dispatched, or identifiers expired | `403 {"detail":"Notification rejected."}`, **no durable row, no limiter key**; counted only in a process-wide fixed-size rejection counter (for alerting), never per unknown id |
-| 4 | token fingerprint mismatch for a known run (constant-time comparison) | `403`, one bounded audit row per (owner, connection, `push_token_rejected`, UTC day) |
-| 5 | run terminal, `agent_task_missing`, or connection disconnected/missing | `403`, bounded row class `push_after_close`, no observation |
+| 4 | token fingerprint mismatch for a known run (constant-time comparison; the fingerprint is kept until identifier expiry, so a late *valid* push passes here) | `403`, one bounded audit row per (owner, connection, `push_token_rejected`, UTC day) |
+| 5 | run terminal, `agent_task_missing`, or connection disconnected/missing — including a valid push that arrives after BrainBuddy's own terminal observation, the common Hermes race | `403`, bounded row class `push_after_close`, no observation |
 | 6 | per-run limiter exceeded (30/min) — keys exist only for known, dispatched, non-terminal runs, the limiter has a maximum key count, and a run's bucket is evicted when the run goes terminal or is disconnected | `429`, no row |
 | 7 | verified | `204`, `observation_trigger_pending="push"`, observer wake, audit `push_verified` |
 
@@ -94,8 +101,16 @@ variant (a `max_keys` extension of it) rather than the class as-is; step 2 is a 
 fixed-size counter with no per-key state. Because unknown ids never create a key, limiter
 memory is bounded by real dispatched runs (`test_unknown_run_flood_leaves_limiter_memory_bounded_and_no_rows`),
 and the global limiter trips before the run lookup (`test_global_push_limiter_trips_before_the_run_lookup`).
-The `429` of step 6 is reachable only for known runs; that bounded run-existence oracle is
-intentional and protected by unguessable run ids.
+Steps 3, 4 and 5 are byte-identical to the caller — the same status, the same body, no
+distinguishing header and no `Retry-After` — so they differ only in the durable audit row
+BrainBuddy writes (`test_push_rejections_are_indistinguishable_to_the_caller`). The `429` of
+step 6 is reachable only for known runs; that bounded run-existence oracle is intentional and
+protected by unguessable run ids, and because it is the one deviation from the repository's
+404-for-wrong-owner convention it is recorded in `docs/auth.md` in one line: the A2A push
+callback answers 403 rather than 404, and its per-run 429 is a deliberate, run-id-gated
+existence signal accepted because run ids are unguessable and the token authorises only an
+observation BrainBuddy would perform anyway. A verified push wakes the observer through the
+narrow wake port `api/dependencies.py` exposes to the route.
 
 The body is **never parsed** for state. It may optionally be inspected for a JSON object
 carrying `statusUpdate.taskId` / `task.id` to log a coarse `task_id_matches` boolean; a
@@ -113,7 +128,7 @@ the rate limit bound the cost; it changes nothing by itself (SC-003 "replayed pu
 ## Observation triggered by push
 
 The observer performs `GetTask {id: agent_task_id, historyLength: 0}` (or the `ListTasks`
-lookup if the task id is still unknown because the start exchange is queued or open) under
+lookup if the task id is still unknown because the start exchange is still open) under
 the connection's recorded `interface_url` and credential, hands the result to
 `AgentRelayService.apply_observation`, which re-reads the run under the repository's
 process-wide command lock and applies the projection with the compare-and-set version rule
@@ -134,7 +149,9 @@ push also resets the run's observation backoff to the base interval (FR-008).
 ## Deregistration
 
 Nothing is deleted at the agent: the token stops verifying when the run becomes terminal,
-missing or disconnected, and the fingerprint is nulled at identifier expiry (90 d).
+missing or disconnected (step 5), while the fingerprint is deliberately kept — not cleared at
+terminal — and nulled only at identifier expiry (90 d), so a late valid push is classified
+`push_after_close` rather than `push_token_rejected`.
 `DeleteTaskPushNotificationConfig` is not used (Hermes drops its single config after the
 first push; the SDK config store is the agent's concern).
 
@@ -152,6 +169,10 @@ forged token · replayed valid push · wrong-run token · unknown run · oversiz
 oversize streamed · malformed body · push after terminal · push after disconnect · push for
 another owner's run id · flood (rate limit) — each asserts zero projection change, zero
 secret disclosure, and the bounded-cardinality audit rule. Plus:
+`test_valid_push_after_terminal_is_classified_push_after_close` (a valid token arriving after
+the observer's terminal observation is recorded as `push_after_close`, never
+`push_token_rejected`), `test_push_rejections_are_indistinguishable_to_the_caller` (steps 3,
+4 and 5: same status, same body, no distinguishing header or `Retry-After`),
 `test_push_token_never_appears_in_logs` (SC-009 log scan over application and
 `uvicorn.access` logging for a verified, a rejected and a failing push),
 `test_unknown_run_flood_leaves_limiter_memory_bounded_and_no_rows` (N posts with random run

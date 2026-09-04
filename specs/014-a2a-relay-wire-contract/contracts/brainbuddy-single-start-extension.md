@@ -73,8 +73,12 @@ agent BrainBuddy activates the extension — the `A2A-Extensions` header and
 follow-up message, so the dedup key is recorded from first receipt. BrainBuddy adopts a task
 only when the task's `contextId` equals the run id it sent; when an agent's first answer
 shows that it assigned its own `contextId` instead, BrainBuddy records that on the connection,
-never resends automatically for it (an ambiguous send stays "Delivery unconfirmed" until the
-user checks again), and says so in the connection's duplicate-risk disclosure. A declaring
+never resends for it at all — not on its own and not on the user's **Check again**, because an
+empty lookup on such a connection proves nothing (an ambiguous send stays "Delivery
+unconfirmed") — and says so in the connection's duplicate-risk disclosure. No BrainBuddy
+background thread ever resends a message; a resend happens only on a user-triggered check,
+after the lookup, while the connection is still ready, unchanged and in the same verified
+scope as the original dispatch. A declaring
 agent SHOULD therefore accept the client-supplied `contextId` (A2A §3.4.1); the dedup key of
 §4 is scoped to it. With a declaring agent the tier shown to the user is **Guaranteed single
 start**; without it, **Best-effort single start** with a duplicate-risk disclosure.

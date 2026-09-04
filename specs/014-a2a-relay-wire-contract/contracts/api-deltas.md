@@ -264,16 +264,33 @@ The deltas above are breaking for a strict client under the repository's own pol
 routes removed, `endpoint_url` renamed to `agent_address`, `context_items` renamed to
 `supporting_items`, `inbound_signing_secret` and `capabilities.progress` removed,
 `auth_header_name` no longer accepted on requests, `auth_scheme` newly required, the create
-response type changed, and new `last_test_error_code`, `cancel_outcome` and
-`primary_state_label` values. The compatibility strategy is recorded here rather than left
-implied: the web client ships lockstep with the backend behind the Fly frontend proxy; the
-iOS client is internal distribution (`mobile/eas.json` `development` and `preview` profiles
-declare `distribution: internal`, and `docs/api-compatibility.md` records that no separately
-versioned mobile client contract exists yet); and the whole relay surface is gated by
-`external_agent_relay`, which has been OFF since 007 ratification, so no deployed client
-depends on the removed or renamed shapes. Therefore no versioned OpenAPI snapshot and no
-migration window are published for this change; the minimum iOS build is refreshed together
-with the backend release (the pre-014 build cannot render an A2A connection and must not be
-kept in use once the flag turns on); and this document is the migration note Principle III
-requires. Backend schemas still change first (`backend/app/schemas/agents.py`), then
+response type changed, new `last_test_error_code`, `cancel_outcome`, `dispatch_error_code`
+and `primary_state_label` values, and — on `AgentManifestResponse` —
+`destination_endpoint` renamed to `destination_interface`, `reporting_instructions` and
+`instructions_version` removed (both clients render them today:
+`frontend/src/features/agents/AgentHandoffOverlay.tsx`,
+`mobile/src/features/agents/HandoffSheet.tsx`), and `protocol_version` re-defined from the
+bespoke wire version `"2026-08-09"` (`domain.PROTOCOL_VERSION`) to the A2A protocol version
+`"1.0"`.
+
+The compatibility strategy — the migration note Principle III requires — is recorded here
+rather than left implied. The web client ships lockstep with the backend behind the Fly
+frontend proxy. The iOS client is **store-distributed**: `mobile/eas.json` has a `production`
+profile (store distribution by default — only `development` and `preview` declare
+`distribution: internal`), `docs/external-agent-relay-release.md` carries the TestFlight and
+App Store path that builds and submits it, installed App Store binaries cannot be rolled back
+remotely, and `docs/api-compatibility.md` records that no separately versioned mobile client
+contract exists yet. The whole relay surface is gated by `external_agent_relay`, OFF since
+007 ratification and rolled out per user, so no deployed client depends on the removed or
+renamed shapes today; the enforceable mechanism that keeps it that way is a
+**release-runbook gate**: `external_agent_relay` MUST NOT be turned ON for any user until the
+refreshed iOS build is the only distributed build (TestFlight and App Store phased release
+complete). While the flag is OFF a pre-014 build that meets the new API sees exactly the OFF
+surface it sees today — the gated routes answer the same fail-closed 404 and the ungated
+reads return empty collections, because no relay record exists for any user (spec
+Assumptions). The mobile client sends no client-build header today
+(`mobile/src/api/client.ts` sets only `Content-Type`, `Idempotency-Key` and
+`X-Content-SHA256`), so no minimum-build check is introduced: the gate is the mechanism, and
+no versioned OpenAPI snapshot or migration window is published for this change. Backend
+schemas still change first (`backend/app/schemas/agents.py`), then
 `frontend/src/api/agentTypes.ts` and `mobile/src/api/types.ts`.
