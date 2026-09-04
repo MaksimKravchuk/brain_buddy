@@ -254,3 +254,191 @@ change.
 **Checkpoint**: All four user stories are independently functional; the removal of the bespoke wire, the reference-runtime conformance, the product E2E stories, the documentation and the writer gates remain.
 
 ---
+
+## Phase 7: Polish & Cross-Cutting Concerns
+
+**Purpose**: Remove the bespoke wire (research.md Decision F, one ordered pass per shared file, after every a2a/observer task on that file), prove conformance against the two unmodified reference runtimes, ship the product E2E stories and fixtures, update the documentation, and pass the writer gates. The attended Hermes live run is a human release step recorded in `docs/external-agent-relay-release.md`, never a task here.
+
+### Removal of the bespoke wire (sequenced after T044/T067/T088/T106 on the same files; never `[P]` against them)
+
+- [ ] T109 Remove the bespoke-wire tests first so every later deletion is observed by a green suite: delete `backend/tests/test_agent_connector.py` (its egress-bound cases moved in T016); strip from `backend/tests/test_agent_relay_service.py` the signing-secret rotation classes (pre-014 lines 3907–4075), the inbound-event classes (1632–1988, 3264–3457, 3845, 5097–5133) and every `inbound_signing_secret` assertion; from `backend/tests/test_agent_relay_api.py` the event-route and body-cap cases (1123–1330, 1418–1650) that T079's push-route cases superseded; from `backend/tests/test_agent_schemas.py` the reporting-contract cases; from `backend/tests/test_agent_repository.py` the event-id cases; from `backend/tests/test_agent_secrets.py` the inbound-signing and signing-receipt purpose cases; from `backend/tests/test_api_contract.py` the removed routes (95–158, 232–247); from `backend/tests/test_config.py` the callback-URL cases (87–115) — leaving T020's route-404 and import-absence cases as the only assertions about the bespoke wire (014-FR-012, 014-SC-010)
+- [ ] T110 Remove the bespoke ingest path from `backend/app/modules/agents/service.py` in its last ordered pass: `rotate_signing_secret`, `_signing_secret_response`, `_replayed_signing_secret`, `_open_receipt`, `_authenticate_event_request`, `_validate_authenticated_event`, `_event_run`, `_event_updates`, `_event_summary`, `_apply_authenticated_event`, `ingest_event`, `_reporting_instructions`, `EVENT_FRESHNESS_WINDOW`, `MAX_EVENT_BYTES`, `INBOUND_SECRET_BYTES`, `EventRejected`, the `ConnectorPort` constructor port and every import of `connector` (014-FR-012, 014-SC-010)
+- [ ] T111 Remove the envelope from `backend/app/modules/agents/domain.py` in its last ordered pass: the event envelope models, `AGENT_EVENT_ENVELOPE_ADAPTER`, `REPORTING_INSTRUCTIONS_VERSION`, `PROTOCOL_VERSION = "2026-08-09"` (the manifest's `protocol_version` has been `"1.0"` since T064), `AgentConnectionDocument.inbound_secret` and `AgentCapabilities.progress`; `AgentReportingContract` stays as the frozen placeholder of T031 (014-FR-012, 014-SC-010)
+- [ ] T112 Remove the event-id store from `backend/app/modules/agents/repository.py` in its last ordered pass: the `agent_event_ids` table, `consume_event_id`, `purge_expired_event_ids` and the inbound-signing branches of `live_sealed_key_ids` (pre-014 lines 1185–1263); the ledger, the migration and `delete_all_for_owner` are unaffected (014-FR-012, 014-SC-010)
+- [ ] T113 Remove `AAD_PURPOSE_INBOUND_SIGNING` and `AAD_PURPOSE_SIGNING_RECEIPT` and their callers from `backend/app/modules/agents/secrets.py` in its last ordered pass; the outbound-credential purpose and the push-token helper of T063 stay (014-FR-012, 014-SC-010)
+- [ ] T114 Remove the routes `POST /agent-connections/{id}/signing-secret` and `POST /agent-events` from `backend/app/api/agents.py` and the schemas `AgentConnectionSecretResponse`, `AgentConnectionCreatedResponse` (superseded by the plain response of T045), `AgentConnectionSigningSecretResponse`, `AgentConnectionRotateSigningSecretRequest`, `AgentReportingContractResponse` and `AgentEventIngestResponse` from `backend/app/schemas/agents.py`, so the removed routes answer 404 as T020 asserts (014-FR-012, 014-SC-010)
+- [ ] T115 Delete `backend/app/modules/agents/connector.py`, remove `AGENT_EVENTS_PATH` and `agent_relay_callback_url` from `backend/app/core/config.py` (T012 added their replacements), and drop the synthetic signing-secret allowlist entries (lines 57–64) from `.gitleaks.toml`; T020's import-absence case turns green here (014-FR-012, 014-SC-010)
+- [ ] T116 [P] Remove the bespoke surfaces from both clients: delete `mobile/src/features/agents/SigningSecretSheet.tsx`, `mobile/src/features/agents/ReplaceSigningSecretSheet.tsx`, `mobile/src/api/__tests__/agentSecretSettlement.test.tsx` and `mobile/src/features/agents/__tests__/signingSecretRecovery.test.tsx`; strip the signing-secret and reporting types from `frontend/src/api/agentTypes.ts`, `rotateAgentSigningSecret` from `frontend/src/api/client.ts` and its cases from `frontend/src/api/__tests__/agentClient.test.ts`; strip the signing-secret types, calls and hooks from `mobile/src/api/types.ts`, `mobile/src/api/client.ts` and `mobile/src/api/hooks.ts`, the `inbound_signing_secret` fixtures from `mobile/src/test/agentFixtures.ts` and `mobile/src/test/fakeBackend.ts`, and any remaining sheet import from `mobile/src/app/agents/index.tsx` (014-FR-012, 014-SC-010)
+- [ ] T117 Prove SC-010 end to end: `cd backend && pytest tests/test_agent_repository_migration.py -v` is fully green (migration, audit and count, idempotent startup, route 404s, preview refusal, import absence), the quickstart.md §9 grep `grep -rn "agent-events\|inbound_signing_secret\|AGENT_EVENT_ENVELOPE_ADAPTER\|modules.agents.connector" backend/app frontend/src mobile/src; test $? -eq 1` finds nothing in product code, and a seeded bespoke row renders as D-01-S21 / M-01-S19 **Superseded wire contract** (014-FR-012, 014-SC-010)
+
+### Reference runtimes and product E2E (gated on T023–T098)
+
+- [ ] T118 [P] Write and pass `backend/tests/test_agent_a2a_reference_helloworld.py` (`014_FR_017`, `014_SC_001`, `014_SC_002`; AC-001, AC-009, AC-016, AC-026 in docstrings): a pre-bind availability check on `127.0.0.1:9999` that fails — never skips — with a message naming the occupant; `python __main__.py` started as a subprocess (cwd `backend/vendor/a2a_helloworld/`, `HOME` a temp dir) with a bounded startup wait on the card URL and guaranteed teardown through `request.addfinalizer` (kill + wait, also on assertion failure or timeout); the container built with `BRAIN_BUDDY_AGENT_ALLOW_PRIVATE_DESTINATIONS=1`; connect → test (best-effort, no push) → preview with the one-time acknowledgement → dispatch ×3 → **Sent** then **Agent reported complete** inside the exchange with the sample's result text → exactly one task through `ListTasks(contextId)`; cancel on the completed run withdrawn and the sample's cancel `NotImplementedError` surfacing as `-32603`/`-32004` (014-FR-017, 014-SC-001, 014-SC-002)
+- [ ] T119 [P] Write and pass `backend/tests/test_agent_a2a_reference_hermes.py` (`014_FR_017`, `014_SC_001`, `014_SC_006`; AC-014, AC-015, AC-018, AC-020, AC-021, AC-028 in docstrings): `backend/vendor/hermes_a2a/run_stub.py` bound to port 0 with the bound port read back; the legacy card shape parsed (bearer, push, streaming); a wrong bearer → invalid credentials with nothing echoed; a delayed dispatch → **Sent**/**Running** without a fabricated failure, then **Agent reported complete** within one observation interval and at once on the stub's push (`trigger: push`); `ask me` → **Needs you** → reply → the succession row with both task ids and the run's single correlation ID; cancel while delaying → **Cancellation requested** → **Cancelled**; a stub restart → **Agent no longer reports this run** with last contact kept; a stub without `A2A_BEARER_TOKEN` → `agent_card_changed` on preview (014-FR-017, 014-SC-001, 014-SC-006)
+- [ ] T120 [P] Add the compose fixture images and stack: `scripts/fixtures/a2a-helloworld/Dockerfile` (`python:3.11-slim`, `pip install a2a-sdk[http-server]==1.1.2 uvicorn`, the vendored sample) and `scripts/fixtures/hermes-a2a/Dockerfile` (the vendored plugin, the stub gateway and `run_stub.py` with `A2A_HOST=0.0.0.0`, `A2A_PORT=9900`, `A2A_BEARER_TOKEN`, `A2A_PUBLIC_URL`); services `a2a-helloworld` (`network_mode: "service:backend"`, because the sample binds `127.0.0.1:9999`) and `hermes-a2a` (reachable as `http://hermes-a2a:9900`) under profile `agents` in `compose.yaml`, with `BRAIN_BUDDY_AGENT_ALLOW_PRIVATE_DESTINATIONS=1` and `BRAIN_BUDDY_PUBLIC_BASE_URL` on the backend service; `scripts/run_playwright_e2e.sh` enables the profile and toggles `external_agent_relay` ON through the operator API (014-FR-017, 014-SC-001)
+- [ ] T121 [P] Extend the `e2e` job in `.github/workflows/ci.yml` to build the two fixture images through the same buildx cache helper as the app images before `make test-e2e`, and confirm `python3 scripts/validate_ci_artifacts.py workflow` accepts the new build steps (ASK-class path under the `deploy-and-ci` rules) (014-FR-017, 014-SC-001)
+- [ ] T122 Write and pass the Playwright stories in `frontend/tests/e2e/agent-relay.compose.spec.ts` under the `External agent relay` epic (the T009 rule): `A2A hand-off to the helloworld sample` (`014-SC-005`, `014-SC-001` — the desktop-width review D-02-S01/S02/S13/S14 end to end to **Agent reported complete** D-03-S11), `A2A hand-off to the Hermes stub` (`014-SC-004`, `014-SC-006` — working, input-required, completed, failed and canceled through D-03-S07/S08/S09/S11/S12/S14/S15 and the succession row S27 on the product surfaces), `A2A replay creates one task` (`014-SC-002` — three confirmations, one task at the agent) and `A2A security rejections` (`014-SC-003` — invalid credentials D-01-S12, private destination D-01-S18, a forged push, **Agent changed** D-01-S20, each with zero state change) via `data-testid` selectors against the compose stack of T120 (014-SC-001, 014-SC-002, 014-SC-003, 014-SC-004, 014-SC-005)
+- [ ] T123 [P] Add the per-epic section **External agent relay product matrix** to `docs/e2e-acceptance-charter.md` under "Browser E2E acceptance scenarios", beside the unchanged native table, listing the four stories with their success criteria and fixture services; the native-story validator is unchanged (014-SC-001, 014-SC-004)
+
+### Documentation
+
+- [ ] T124 [P] Add the relay rows to `docs/data-retention.md`: the 30-day content tier (`expire_due_content`), the 90-day identifiers tier (`expire_due_identifiers`: agent task ids, message ids, push token fingerprint) with the sentence that the run id — the correlation ID — stays with the run row as coarse metadata until account purge, the 90-day audit rows (`purge_expired_audit`), the live connection's card summary and fingerprint retained for the connection's lifetime and erased by `disconnect_connection` together with the credential, the `relay/relay.json` export member with its exclusions, and the disclosed agent-side copy of the callback URL (014-FR-016, 014-SC-007)
+- [ ] T125 [P] Add the matching user-facing paragraph to `frontend/src/pages/PrivacyPolicyPage.tsx` (30-day content, 90-day identifiers with the honest run-id sentence, 90-day audit, the card summary kept for the connection's lifetime and erased on disconnect, the per-run callback address the agent keeps) with `LAST_UPDATED` bumped, and extend `frontend/src/pages/__tests__/PrivacyPolicyPage.test.tsx` to assert the new text and date (014-FR-016, 014-SC-007)
+- [ ] T126 [P] Add one line to `docs/auth.md` after the 404-for-wrong-owner rule: the A2A push callback is the one route that answers 403 rather than 404, and its per-run 429 is a deliberate, run-id-gated existence signal accepted because run ids are unguessable and the token authorises only an observation BrainBuddy would perform anyway (014-FR-008, 014-SC-003)
+- [ ] T127 [P] Update `docs/external-agent-relay-release.md`: rewrite step 5 for the A2A smoke; add the rollout gate — `external_agent_relay` MUST NOT be turned ON for any user until the refreshed iOS build is the only distributed build (TestFlight and App Store phased release complete), the Principle III migration note of `contracts/api-deltas.md` §Compatibility; the pre-deploy step counting bespoke connection rows in production (payloads without a `wire` key) before the 014 image starts; the true rollback consequences and their verified mitigation from plan.md "Risks and rollback"; and the "Hermes live evidence" section — approval-gated like `verify-live`, never CI, never a subagent — whose evidence is the closed field list (agent name, version, protocol version, declared capabilities, guarantee tier, correlation ids, run id, the resulting `primary_state_label` sequence) and never the agent address or `interface_url`, the credential, the push token or its fingerprint, the card description or skill text, the Task title, details or supporting items, artifacts or model output (014-FR-017, 014-FR-016, 014-FR-012)
+
+### Writer gates
+
+- [ ] T128 Run `python3 scripts/check_requirement_coverage.py specs/014-a2a-relay-wire-contract` and make it trace every requirement — 014-FR-001 through 014-FR-017 and 014-SC-001 through 014-SC-010 — to a named test, adding the missing feature-qualified marker to the covering test rather than a vacuous new one (014-FR-001, 014-FR-017, 014-SC-001, 014-SC-010)
+- [ ] T129 Run `make verify-all` (check-specs, validate-ci, backend with its coverage floor and the Allure taxonomy validator, frontend, mobile, e2e) green in the worktree with the isolation values of T001; keep `backend/coverage-floor.json`, `frontend/coverage-floor.json` and `mobile/coverage-floor.json` ratcheting upward only with no coverage suppression; walk the quickstart.md §1–§7 and §9 scenarios once against the vendored runtimes; confirm the ASK landing class with `python3 scripts/classify_path_risk.py` (014-SC-001, 014-SC-003, 014-SC-004, 014-SC-005, 014-SC-007, 014-SC-008, 014-SC-009, 014-SC-010)
+- [ ] T130 Record the CHK051 copy decision in `specs/014-a2a-relay-wire-contract/checklists/a2a-wire.md` — "Test again shortly." is rendered when `retry_after_seconds` is null, as realised by T048 (web) and T050 (iOS) — and tick CHK051 (014-FR-002)
+- [ ] T131 Freeze the candidate and write the local, uncommitted writer receipt conforming to `.specify/templates/pre-freeze-receipt.schema.json` — contract `brainbuddy.pre-freeze-writer-receipt/v1`, the full lowercase implementation SHA, the changed-path inventory, and the gates `writer.tests`, `writer.verify_all`, `writer.path_classification` and `writer.diff_review` each `PASS` with the exact command, observation and evidence — run `python3 scripts/validate_pre_freeze_receipt.py <receipt> --sha <full-lowercase-sha>`, and tick CHK052 in `specs/014-a2a-relay-wire-contract/checklists/a2a-wire.md`; independent review, QA, exact-SHA CI, landing, deploy, the attended Hermes run and rollout remain post-freeze human obligations under ADR-0008 (014-FR-017, 014-SC-010)
+
+---
+
+## Dependencies & Execution Order
+
+### Phase Dependencies
+
+- **Setup (Phase 1)**: No dependencies — T001 first, then T002–T010; T004–T010 run in parallel with each other once T002/T003 have landed the `backend/pyproject.toml` edits
+- **Foundational (Phase 2)**: Depends on Setup — BLOCKS all user stories. T011–T022 (failing tests, `[P]`) precede T023–T033; within the implementation half the order is types → card → egress deadline → client → mapping → limiter → redaction → repository → domain → ports → extension doc
+- **User Stories (Phases 3–6)**: All depend on Foundational. They ship in priority order; the backend lane is sequential per file, while the frontend and mobile lanes of a story start as soon as that story's schema task (T045, T068, T089) has landed
+- **Polish (Phase 7)**: The removal lane (T109–T117) depends on every a2a/observer pass on the same files (T044, T067, T088, T106 and their domain/repository siblings) — it is the last ordered pass per file; the reference-runtime tests (T118, T119) and the Playwright stories (T122) are gated on the complete §1–§4 pipeline (T023–T098); the docs (T123–T127) may start any time after their facts are implemented; the writer gates (T128–T131) are last
+
+### User Story Dependencies
+
+- **User Story 1 (P1, MVP)**: Starts after Foundational — no dependency on any other story. Independently testable with the two vendored runtimes and no dispatch
+- **User Story 2 (P1)**: Starts after US1's connection contract (T042–T047, T049): a tested, non-stale connection is the precondition of every hand-off. Its backend tests seed a ready connection through the service, so it is independently testable once US1's backend has landed
+- **User Story 3 (P1)**: Starts after US2's dispatch path (T064–T070): an observation needs a dispatched run. Its tests seed dispatched runs, so it is independently testable once US2's backend has landed
+- **User Story 4 (P2)**: Depends only on US1 (a connection to disconnect) and Foundational (the columns and sweeps); its tests seed runs directly. It may be built in parallel with US2/US3 by a second developer, subject to the shared-file rule below
+- **Independent stories**: US1 stands alone; US4 is independent of US2 and US3; US2 → US3 is the only hard chain
+
+### Within Each User Story
+
+- Tests MUST be written and observed failing before implementation (the `feature-implementer` rule: an import error is not a meaningful failure)
+- Backend schemas change before any client depends on the new shape (constitution Principle III): T045 → T047/T049, T068 → T071/T074, T089 → T093/T096
+- Models before services, services before routes, routes before clients, story complete before the next priority
+
+### Per-file ordering (the plan's lane rule)
+
+- `backend/app/modules/agents/service.py`: T032 → T044 → T067 → T088 → T106 → T110 (removal last)
+- `backend/app/modules/agents/domain.py`: T031 → T042 → T064 → T085 → T104 → T111 (removal last)
+- `backend/app/modules/agents/repository.py`: T030 → T065 → T086 → T105 → T112 (removal last)
+- `backend/app/modules/agents/headers.py`: T043 only (additions and removals in one pass)
+- `backend/app/modules/agents/secrets.py`: T063 → T113 (removal last)
+- `backend/app/modules/agents/observer.py`: T066 → T087
+- `backend/app/schemas/agents.py` and `backend/app/api/agents.py`: T045/T046 → T068/T069 → T089/T091 → T114 (removal last)
+- `backend/app/container.py` and `backend/app/main.py`: T032 → T070 → T092
+- `backend/tests/test_agent_relay_service.py`: T022 → T034 → T051 → T052 → T053 → T078 → T099 → T109; `backend/tests/test_agent_relay_api.py`: T019 → T035 → T055 → T079 → T109
+
+### Parallel Opportunities
+
+- Setup: T004–T010 together after T003
+- Foundational: T011, T013–T022 together; T033 beside the implementation half
+- Every story: the frontend lane and the mobile lane run beside the backend lane once the story's schema task has landed; inside a lane, story-specific component tasks (`[P]`) run beside the shared-module tasks
+- Polish: T116 beside T110–T115; T118–T121 and T123–T127 together once T098 has landed; T122 after T120/T121
+
+---
+
+## Parallel Example: User Story 1
+
+```bash
+# After T033 (Foundational complete), launch the failing tests that touch disjoint files:
+Task: "T039 mobile AddConnectionSheet.test.tsx and ConnectionCard.test.tsx"
+Task: "T041 mobile/integration/run.ts connection-test contract"
+# ...while T034–T038 (shared backend and web suites) proceed in the backend/web lane.
+
+# After T045 (connection schema) has landed, the two client lanes run beside the backend routes:
+Task: "T047 → T048 frontend connection types, client, hooks and AgentSettingsPage (D-01)"
+Task: "T049 → T050 mobile connection types, client, hooks, AddConnectionSheet and ConnectionCard (M-01)"
+```
+
+## Parallel Example: User Story 2
+
+```bash
+# Failing tests on story-specific files, beside the shared-suite tasks T051–T057:
+Task: "T058 frontend AgentHandoffOverlay.test.tsx (D-02, 014-SC-005)"
+Task: "T061 mobile HandoffSheet suites (M-02, 014-SC-005)"
+
+# After T068 (manifest and dispatch schema):
+Task: "T072 frontend AgentHandoffOverlay.tsx"
+Task: "T075 mobile HandoffSheet.tsx"
+# ...while T069/T070 (routes, container, main) land in the backend lane.
+```
+
+## Parallel Example: User Story 3
+
+```bash
+# Failing tests on story-specific files, beside T077–T081, T083, T084:
+Task: "T082 frontend TaskDetailPanel.test.tsx and TaskListPage.test.tsx (D-03-S21/S22)"
+
+# After T089 (run schema):
+Task: "T090 api/dependencies.py wake port"
+Task: "T095 frontend TaskDetailPanel.tsx and TaskListPage.tsx"
+# ...while T091/T092 (push route, observer lifecycle) land in the backend lane and
+# T093/T094 (web) and T096–T098 (iOS) proceed in their lanes.
+```
+
+## Parallel Example: User Story 4
+
+```bash
+# Failing tests on story-specific files, beside T099, T100 and T102:
+Task: "T101 backend/tests/test_account_export.py relay/relay.json member"
+Task: "T103 mobile DisconnectSheet.test.tsx (M-01-S21)"
+
+# Implementation:
+Task: "T108 mobile DisconnectSheet.tsx"
+# ...while T104–T106 (domain, repository, service retention passes) and T107 (web D-01-S23) proceed.
+```
+
+---
+
+## Implementation Strategy
+
+### MVP First (User Story 1, then User Story 2)
+
+1. Complete Phase 1: Setup (worktree, dependencies, vendored runtimes, hygiene, taxonomy, `.env.example`)
+2. Complete Phase 2: Foundational (protocol surface, deadline, limiter, redaction, columns, migration, ports, extension doc) — CRITICAL, blocks all stories
+3. Complete Phase 3: User Story 1 — connect and test both vendored runtimes
+4. **STOP and VALIDATE**: quickstart.md §1 step 1 and §2 step 1 on web and iOS
+5. Complete Phase 4: User Story 2 — the consent boundary and one honest dispatch with lookup-before-resend
+6. **STOP and VALIDATE**: quickstart.md §1 steps 2–3 and §3 (three replays, one task); the MVP is a Task handed off once to a real A2A agent
+
+### Incremental Delivery
+
+1. Setup + Foundational → foundation ready
+2. Add User Story 1 → test independently → demo connections (MVP part 1)
+3. Add User Story 2 → test independently → demo one hand-off with one task at the agent (MVP complete)
+4. Add User Story 3 → test independently → demo monitoring, reply with succession, cancel, push acceleration
+5. Add User Story 4 → test independently → demo disconnect, retention clocks and purge
+6. Polish: remove the bespoke wire, prove conformance against both unmodified runtimes, ship the Playwright stories, docs, and the writer gates
+7. Each story adds value without breaking the previous ones; rollout stays OFF throughout
+
+### Parallel Team Strategy
+
+With multiple developers, after Setup + Foundational:
+
+- Developer A: the backend lane in story order (US1 → US2 → US3 → US4 → removal)
+- Developer B: the web lane, one story behind the backend schema task of that story
+- Developer C: the iOS lane, one story behind the backend schema task of that story
+- Any developer: vendoring and provenance (T004–T007) at any time; the reference-runtime tests and the Playwright stories only after T098
+
+### What is never a task here
+
+- The attended Hermes live run (`quickstart.md` §8; `docs/external-agent-relay-release.md` "Hermes live evidence") spends provider money and requires explicit human approval like `verify-live`; it is a human release step, never run by the implementer, a subagent or a schedule
+- Turning `external_agent_relay` ON — gated on the recorded live evidence and on the refreshed iOS build being the only distributed build
+- Landing (`scripts/submit_to_trunk.sh`, `git push`), the ASK review on the exact SHA, deploy and the TestFlight/App Store path — post-freeze obligations under ADR-0008
+
+---
+
+## Notes
+
+- `[P]` tasks = different files, no dependencies; granted conservatively (see Path Conventions) so that two lanes never edit one file at once
+- `[Story]` label maps a task to its user story for traceability; Setup, Foundational and Polish carry none
+- Each user story is independently completable and testable with seeded rows; only US2 → US3 is a hard chain
+- Verify tests fail before implementing; commit after each task or logical group; stop at any checkpoint to validate the story
+- Line numbers quoted for removals are pre-014 positions from `research.md` Decision F; re-locate them by symbol, not by number, once earlier passes have shifted the file
+- Existing files the plan's tree omits but which the work necessarily touches, named here rather than hidden: `mobile/src/app/agents/index.tsx` (mounts the deleted secret sheets), `mobile/src/features/agents/AgentRunSection.tsx` (renders the run card `TaskAgentSection` composes), `backend/tests/test_agent_secrets.py` (owns the inbound-signing purpose cases), the frontend `TaskDetailPanel`/`TaskListPage` suites and the mobile hook suites listed in T084
+- Avoid: vague tasks, same-file conflicts, cross-story dependencies that break independence, and any resend from a background thread
+- Generated tasks.md is portable planning input only. Do not use it to bypass
+  isolated worktrees, TDD, independent review, CI, landing, or release gates.
