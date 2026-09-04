@@ -1,5 +1,5 @@
-import { Bot, Check, ChevronRight, Inbox, MoreHorizontal, Network, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Bot, Check, ChevronRight, CircleAlert, Inbox, LoaderCircle, MoreHorizontal, Network, X } from "lucide-react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
 
 import { useAgentRuns } from "../../api/agentHooks";
@@ -19,6 +19,7 @@ import type {
 import { Button } from "../../components/ui/Button";
 import { useShellToast } from "../../components/shell/shellToast";
 import { getErrorMessage } from "../../utils/error";
+import type { AutosaveSnapshot, EditableField, TaskDetailAutosaveController } from "./taskDetailAutosave";
 
 type TaskDetailSavePayload = Parameters<typeof apiClient.updateTask>[1];
 
@@ -34,7 +35,7 @@ const openStateOptions: OpenTaskState[] = ["inbox", "next", "waiting", "someday"
 // The panel is a docked 320px column from 1100px up (prototype `.bbs-detail`)
 // and a fixed right slide-over below that breakpoint.
 const activePanelClass =
-  "fixed bottom-0 right-0 top-14 z-40 flex w-[360px] max-w-[90vw] flex-col overflow-y-auto border-l border-slate-200 bg-white shadow-floating motion-safe:animate-slide-in-right min-[1100px]:static min-[1100px]:z-auto min-[1100px]:w-[320px] min-[1100px]:max-w-none min-[1100px]:shrink-0 min-[1100px]:animate-none min-[1100px]:shadow-none";
+  "fixed bottom-0 right-0 top-14 z-40 flex w-full max-w-none flex-col overflow-x-hidden overflow-y-auto border-l border-slate-200 bg-white shadow-floating motion-safe:animate-slide-in-right min-[1100px]:static min-[1100px]:z-auto min-[1100px]:w-[320px] min-[1100px]:max-w-none min-[1100px]:shrink-0 min-[1100px]:animate-none min-[1100px]:shadow-none";
 
 const iconButtonClass =
   "inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-soft transition-colors duration-200 ease-smooth hover:border-slate-300 hover:text-slate-800";
@@ -64,6 +65,8 @@ export function TaskDetailEmptyPanel(): React.JSX.Element {
 
 export function TaskDetailPanel({
   task,
+  autosave,
+  resetKey,
   projects,
   tags,
   isLoading,
@@ -77,6 +80,8 @@ export function TaskDetailPanel({
   onCreateComment
 }: {
   task?: TaskResponse;
+  autosave?: TaskDetailAutosaveController;
+  resetKey?: number;
   projects: ProjectResponse[];
   tags: TagResponse[];
   isLoading: boolean;
@@ -92,6 +97,11 @@ export function TaskDetailPanel({
   const notify = useShellToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const isTerminal = Boolean(task && (task.state === "completed" || task.state === "cancelled"));
+  const autosaveSnapshot = useSyncExternalStore(
+    autosave?.subscribe ?? (() => () => undefined),
+    autosave?.getSnapshot ?? (() => undefined),
+    autosave?.getSnapshot ?? (() => undefined)
+  );
 
   useEffect(() => {
     setMenuOpen(false);
@@ -106,7 +116,8 @@ export function TaskDetailPanel({
         <button type="button" aria-label="Close" className={iconButtonClass} onClick={onClose}>
           <ChevronRight className="h-[15px] w-[15px]" aria-hidden />
         </button>
-        <span className="relative ml-auto flex items-center gap-1">
+        <span className="relative ml-auto flex min-w-0 items-center gap-1">
+          <AutosaveStatus snapshot={autosaveSnapshot} />
           <button
             type="button"
             aria-label="Thinking canvas"
@@ -133,7 +144,8 @@ export function TaskDetailPanel({
                     className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-rose-600 transition-colors duration-200 ease-smooth hover:bg-rose-50"
                     onClick={() => {
                       setMenuOpen(false);
-                      onTransition(task, "cancel");
+                      if (autosave) autosave.barrier("cancel");
+                      else onTransition(task, "cancel");
                     }}
                   >
                     Cancel task
@@ -153,8 +165,10 @@ export function TaskDetailPanel({
       ) : null}
       {task ? (
         <TaskDetailBody
-          key={`${task.id}-${task.revision}`}
           task={task}
+          autosave={autosave}
+          autosaveSnapshot={autosaveSnapshot}
+          resetKey={resetKey}
           projects={projects}
           tags={tags}
           isTerminal={isTerminal}
@@ -170,8 +184,81 @@ export function TaskDetailPanel({
   );
 }
 
+function AutosaveStatus({ snapshot }: { snapshot?: AutosaveSnapshot }): React.JSX.Element | null {
+  if (!snapshot || snapshot.status === "clean") return null;
+  const labels: Partial<Record<AutosaveSnapshot["status"], string>> = {
+    saving: "Saving…",
+    queued: snapshot.queuedCount === 1 ? "1 change queued" : `${snapshot.queuedCount} changes queued`,
+    retrying: "Retrying…",
+    saved: "Saved",
+    conflicted: "Not saved",
+    failed: "Not saved"
+  };
+  const announcements: Partial<Record<AutosaveSnapshot["status"], string>> = {
+    saving: "Saving changes",
+    queued: "Changes queued",
+    retrying: "Retrying your edits",
+    saved: "All changes saved",
+    conflicted: "Task changed elsewhere",
+    failed: "Changes not saved"
+  };
+  const Icon = snapshot.status === "saving" || snapshot.status === "retrying"
+    ? LoaderCircle
+    : snapshot.status === "saved" ? Check : CircleAlert;
+  return (
+    <>
+      <span className={`flex min-w-0 items-center gap-1 whitespace-nowrap text-xs ${snapshot.status === "saved" ? "text-[#065f46]" : "text-[#92400e]"}`}>
+        <Icon className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin motion-reduce:animate-none" aria-hidden />
+        <span>{labels[snapshot.status]}</span>
+      </span>
+      <span data-testid="autosave-announcement" className="sr-only" aria-live="polite" aria-atomic="true">{announcements[snapshot.status]}</span>
+    </>
+  );
+}
+
+function AutosaveRecovery({ snapshot, controller }: { snapshot?: AutosaveSnapshot; controller?: TaskDetailAutosaveController }): React.JSX.Element | null {
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  if (!snapshot || !controller || (snapshot.status !== "conflicted" && snapshot.status !== "failed" && snapshot.status !== "retrying")) return null;
+  const conflict = snapshot.status === "conflicted";
+  const offline = snapshot.error?.offline;
+  const heading = conflict ? "Task changed elsewhere" : offline ? "You’re offline" : "Couldn’t save changes";
+  const body = conflict
+    ? snapshot.conflict?.refetchFailed ? "Your edits are safe here. Check your connection and try again." : "Your edits are safe here. Retry to apply them to the latest task."
+    : offline ? "Your edits are kept on this device. Retry when you’re back online." : "Your edits are safe here. Check your connection and try again.";
+  const errorDetail = !conflict && snapshot.error?.message && snapshot.error.message !== "Couldn’t save changes"
+    ? snapshot.error.message
+    : null;
+  const retryDisabled = snapshot.status === "retrying"
+    || Boolean(conflict && !snapshot.conflict?.latestServerTask && !snapshot.conflict?.refetchFailed);
+  return (
+    <section role="alert" className="mx-4 mb-3 rounded-xl border border-[#fde68a] bg-[#fffbeb] p-3 text-[#92400e]">
+      <h3 ref={headingRef} tabIndex={-1} className="m-0 text-sm font-semibold">{heading}</h3>
+      {errorDetail ? <p className="mb-0 mt-1 text-xs leading-relaxed">{errorDetail}</p> : null}
+      <p className="mb-3 mt-1 text-xs leading-relaxed">{snapshot.status === "retrying" ? "Applying your edits to the latest task…" : body}</p>
+      {confirmDiscard ? (
+        <div>
+          <p className="mb-2 text-sm font-semibold">Discard unsaved edits?</p>
+          <div className="flex gap-2 max-[339px]:flex-col">
+            <button type="button" className="min-h-11 flex-1 rounded-lg border border-[#fde68a] px-3 text-sm font-medium focus-visible:shadow-ring-focus" onClick={() => setConfirmDiscard(false)}>Keep editing</button>
+            <button type="button" className="min-h-11 flex-1 rounded-lg bg-rose-700 px-3 text-sm font-semibold text-white focus-visible:shadow-ring-focus" onMouseDown={(event) => event.preventDefault()} onClick={() => { controller.discard(); setConfirmDiscard(false); queueMicrotask(() => headingRef.current?.focus()); }}>Discard</button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-2 max-[339px]:flex-col">
+          <button type="button" disabled={retryDisabled} aria-disabled={retryDisabled} className="min-h-11 flex-1 rounded-lg bg-[#92400e] px-3 text-sm font-semibold text-white focus-visible:shadow-ring-focus disabled:opacity-60" onClick={() => snapshot.conflict?.refetchFailed ? void controller.retryRefetch() : controller.retry()}>{conflict ? "Retry my edits" : "Retry"}</button>
+          {conflict ? <button type="button" className="min-h-11 flex-1 rounded-lg border border-[#fde68a] px-3 text-sm font-medium focus-visible:shadow-ring-focus" onMouseDown={(event) => event.preventDefault()} onClick={() => setConfirmDiscard(true)}>Discard my edits</button> : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TaskDetailBody({
   task,
+  autosave,
+  autosaveSnapshot,
+  resetKey,
   projects,
   tags,
   isTerminal,
@@ -183,6 +270,9 @@ function TaskDetailBody({
   onCreateComment
 }: {
   task: TaskResponse;
+  autosave?: TaskDetailAutosaveController;
+  autosaveSnapshot?: AutosaveSnapshot;
+  resetKey?: number;
   projects: ProjectResponse[];
   tags: TagResponse[];
   isTerminal: boolean;
@@ -196,11 +286,41 @@ function TaskDetailBody({
   // Live value shared between the "waiting" prop row and list moves into
   // Waiting for, which require a non-empty waiting_for on the transition.
   const [waitingFor, setWaitingFor] = useState(task.waiting_for ?? "");
+  const [title, setTitle] = useState(task.title);
+  const [details, setDetails] = useState(task.details ?? "");
+  const [dueDate, setDueDate] = useState(task.due_date ?? "");
+  const [draftState, setDraftState] = useState(task.state);
+  const [projectId, setProjectId] = useState(task.project_id ?? "");
+  const [priority, setPriority] = useState(task.priority);
+  const [tagIds, setTagIds] = useState(task.tag_ids);
+  const [waitingRequired, setWaitingRequired] = useState(false);
+  const waitingRef = useRef<HTMLInputElement>(null);
+
+  // Acknowledged revisions must not overwrite an active draft. Identity
+  // changes and explicit conflict Discard are the only canonical resets.
+  /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(() => {
+    setWaitingFor(task.waiting_for ?? "");
+    setTitle(task.title);
+    setDetails(task.details ?? "");
+    setDueDate(task.due_date ?? "");
+    setDraftState(task.state);
+    setProjectId(task.project_id ?? "");
+    setPriority(task.priority);
+    setTagIds(task.tag_ids);
+  }, [task.id, resetKey]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const save = (payload: Omit<TaskDetailSavePayload, "expected_revision">) =>
     onSave(task, { ...payload, expected_revision: task.revision });
+  const draft = autosaveSnapshot?.draft;
+  const fieldLabel = (label: string, field: EditableField) => {
+    void field;
+    return label;
+  };
+  const change = (field: EditableField, value: never, delay: number) => autosave?.change(field, value, delay);
 
-  const project = task.project_id ? projects.find((item) => item.id === task.project_id) : undefined;
+  const project = projectId ? projects.find((item) => item.id === projectId) : undefined;
   const subtasks = task.subtasks ?? [];
   const doneSubtasks = subtasks.filter((subtask) => subtask.state !== "open").length;
   const comments = task.comments ?? [];
@@ -218,25 +338,27 @@ function TaskDetailBody({
                 ? "border-slate-300 bg-slate-200 text-slate-500"
                 : "border-slate-300 bg-white text-transparent hover:border-brand-primary"
           }`}
-          onClick={() => onTransition(task, isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined)}
+          onClick={() => autosave ? autosave.barrier(isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined) : onTransition(task, isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined)}
         >
           {task.state === "cancelled" ? <X className="h-2.5 w-2.5" aria-hidden /> : <Check className="h-[11px] w-[11px]" aria-hidden />}
         </button>
         {/* A textarea so long titles wrap like the prototype's static title;
             Enter commits instead of inserting a newline. */}
         <textarea
-          aria-label="Title"
-          defaultValue={task.title}
+          aria-label={fieldLabel("Title", "title")}
+          value={draft?.title ?? title}
           rows={1}
           ref={autosizeTitle}
           className={`w-full min-w-0 resize-none overflow-hidden rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold leading-[1.35] outline-none transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary ${
             isTerminal ? "text-slate-500 line-through" : "text-slate-900"
           }`}
+          onChange={(event) => { setTitle(event.currentTarget.value); change("title", event.currentTarget.value as never, 500); }}
           onInput={(event) => autosizeTitle(event.currentTarget)}
           onBlur={(event) => {
-            const title = event.currentTarget.value.trim();
-            if (title && title !== task.title) {
-              save({ title });
+            const nextTitle = event.currentTarget.value.trim();
+            if (autosave) autosave.flush("title");
+            else if (nextTitle && nextTitle !== task.title) {
+              save({ title: nextTitle });
             }
           }}
           onKeyDown={(event) => {
@@ -248,27 +370,45 @@ function TaskDetailBody({
         />
       </div>
 
+      <AutosaveRecovery snapshot={autosaveSnapshot} controller={autosave} />
+      <span className="pointer-events-none absolute">
+        {autosaveSnapshot?.dirtyFields.map((field) => (
+          <i key={field} aria-label={`${field === "project_id" ? "Project" : field === "tag_ids" ? "Tags" : field === "due_date" ? "Due date" : field === "waiting_for" ? "Waiting for" : field[0]?.toUpperCase() + field.slice(1)}, unsaved`} className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+        ))}
+      </span>
+
       <div className="grid grid-cols-[64px_1fr] items-center gap-x-2.5 gap-y-2 px-4 pb-3.5 text-[12.5px]">
         <span className={propLabelClass}>date</span>
         <input
-          aria-label="Due date"
+          aria-label={fieldLabel("Due date", "due_date")}
           type="date"
-          defaultValue={task.due_date ?? ""}
-          className={propFieldClass}
-          onChange={(event) => save({ due_date: event.currentTarget.value || null })}
+          value={draft?.due_date ?? dueDate}
+          className={`${propFieldClass} scroll-mb-[88px]`}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            setDueDate(value);
+            if (autosave) change("due_date", (value || null) as never, 0); else save({ due_date: value || null });
+          }}
         />
 
         <span className={propLabelClass}>list</span>
         <select
-          aria-label="List"
-          value={isTerminal ? "" : task.state}
+          aria-label={fieldLabel("List", "state")}
+          value={isTerminal && !draft ? "" : draft?.state ?? draftState}
           className={propFieldClass}
           onChange={(event) => {
             const target = event.currentTarget.value as OpenTaskState | "";
             if (!target) {
               return;
             }
-            onTransition(task, isTerminal ? "reopen" : "move", target, target === "waiting" ? waitingFor : undefined);
+            setDraftState(target);
+            if (autosave) {
+              const result = autosave.transition(target);
+              if (!result.accepted) {
+                setWaitingRequired(true);
+                queueMicrotask(() => waitingRef.current?.focus());
+              } else setWaitingRequired(false);
+            } else onTransition(task, isTerminal ? "reopen" : "move", target, target === "waiting" ? waitingFor : undefined);
           }}
         >
           {isTerminal ? <option value="">{task.state === "completed" ? "Completed" : "Cancelled"}</option> : null}
@@ -287,10 +427,14 @@ function TaskDetailBody({
             aria-hidden
           />
           <select
-            aria-label="Project"
-            value={task.project_id ?? ""}
+            aria-label={fieldLabel("Project", "project_id")}
+            value={draft?.project_id ?? projectId}
             className={propFieldClass}
-            onChange={(event) => save({ project_id: event.currentTarget.value || null })}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setProjectId(value);
+              if (autosave) change("project_id", (value || null) as never, 0); else save({ project_id: value || null });
+            }}
           >
             <option value="">none</option>
             {projects.map((item) => (
@@ -303,10 +447,14 @@ function TaskDetailBody({
 
         <span className={propLabelClass}>priority</span>
         <select
-          aria-label="Priority"
-          value={task.priority}
+          aria-label={fieldLabel("Priority", "priority")}
+          value={draft?.priority ?? priority}
           className={propFieldClass}
-          onChange={(event) => save({ priority: event.currentTarget.value as TaskPriority })}
+          onChange={(event) => {
+            const value = event.currentTarget.value as TaskPriority;
+            setPriority(value);
+            if (autosave) change("priority", value as never, 0); else save({ priority: value });
+          }}
         >
           <option value="none">none</option>
           <option value="low">Low</option>
@@ -317,18 +465,19 @@ function TaskDetailBody({
         <span className={`${propLabelClass} self-start pt-1`}>tags</span>
         <span className="flex min-w-0 flex-wrap gap-1.5">
           {tags.map((tag) => {
-            const checked = task.tag_ids.includes(tag.id);
+            const currentTagIds = draft?.tag_ids ?? tagIds;
+            const checked = currentTagIds.includes(tag.id);
             return (
               <label key={tag.id} className="inline-flex cursor-pointer items-center">
                 <input
                   type="checkbox"
                   className="peer sr-only"
                   checked={checked}
-                  onChange={() =>
-                    save({
-                      tag_ids: checked ? task.tag_ids.filter((id) => id !== tag.id) : [...task.tag_ids, tag.id]
-                    })
-                  }
+                  onChange={() => {
+                    const nextTagIds = checked ? currentTagIds.filter((id) => id !== tag.id) : [...currentTagIds, tag.id];
+                    setTagIds(nextTagIds);
+                    if (autosave) change("tag_ids", nextTagIds as never, 0); else save({ tag_ids: nextTagIds });
+                  }}
                 />
                 <span className="rounded-full border border-slate-200 bg-white px-2 py-[2px] text-[11px] font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:border-slate-300 peer-checked:border-brand-primary peer-checked:bg-info-bg peer-checked:text-info-fg peer-focus-visible:shadow-ring-focus">
                   #{tag.name.replace(/^[#@]/, "")}
@@ -340,32 +489,37 @@ function TaskDetailBody({
 
         <span className={propLabelClass}>waiting</span>
         <input
-          aria-label="Waiting for"
-          value={waitingFor}
+          ref={waitingRef}
+          aria-label={fieldLabel("Waiting for", "waiting_for")}
+          value={draft?.waiting_for ?? waitingFor}
           placeholder="never"
-          className={propFieldClass}
-          onChange={(event) => setWaitingFor(event.currentTarget.value)}
+          className={`${propFieldClass} scroll-mb-[88px]`}
+          onChange={(event) => { setWaitingFor(event.currentTarget.value); setWaitingRequired(false); change("waiting_for", event.currentTarget.value as never, task.state === "waiting" ? 500 : 60_000); }}
           onBlur={() => {
-            if (task.state === "waiting" && waitingFor.trim() !== (task.waiting_for ?? "")) {
+            if (autosave) autosave.flush("waiting_for");
+            else if (task.state === "waiting" && waitingFor.trim() !== (task.waiting_for ?? "")) {
               save({ waiting_for: waitingFor.trim() });
             }
           }}
         />
+        {waitingRequired ? <span className="col-start-2 text-xs text-[#92400e]">Add who or what you’re waiting for</span> : null}
       </div>
 
       <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
         <div className="flex flex-col gap-1.5">
           <h3 className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Details</h3>
           <textarea
-            aria-label="Details"
-            defaultValue={task.details ?? ""}
+            aria-label={fieldLabel("Details", "details")}
+            value={draft?.details ?? details}
             rows={2}
             placeholder="Notes, links, whatever helps you pick this up again"
             className={`${dashedInputClass} resize-none`}
-            onBlur={(event) => {
-              const details = event.currentTarget.value.trim();
-              if (details !== (task.details ?? "")) {
-                save({ details: details || null });
+            onChange={(event) => { setDetails(event.currentTarget.value); change("details", event.currentTarget.value as never, 750); }}
+            onBlur={() => {
+              const nextDetails = details.trim();
+              if (autosave) autosave.flush("details");
+              else if (nextDetails !== (task.details ?? "")) {
+                save({ details: nextDetails || null });
               }
             }}
           />

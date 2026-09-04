@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiClient } from "../../../api/client";
+import { ApiError, apiClient } from "../../../api/client";
 import type {
   ProjectResponse,
   TagResponse,
@@ -15,6 +15,7 @@ import type {
 } from "../../../api/taskTypes";
 import { useAuthStore } from "../../../stores/authStore";
 import { TaskListPage } from "../TaskListPage";
+import { resetTaskDetailAutosaveControllersForTests, taskAutosaveStorageKey } from "../taskDetailAutosave";
 
 vi.mock("../../../api/client", async () => {
   const actual = await vi.importActual<typeof import("../../../api/client")>("../../../api/client");
@@ -127,9 +128,12 @@ function renderPage(initialEntry = "/tasks/next") {
 }
 
 beforeEach(() => {
+  resetTaskDetailAutosaveControllersForTests();
+  sessionStorage.clear();
   act(() => {
     useAuthStore.setState({ user: { id: "user-1", email: "max@example.test" }, status: "authed" });
   });
+  vi.spyOn(window, "confirm").mockReturnValue(true);
   mocked.listTasks.mockImplementation(async () => listResponse([taskFixture()]));
   mocked.getTask.mockImplementation(async () => taskFixture());
   mocked.listProjects.mockResolvedValue(projects);
@@ -147,8 +151,18 @@ beforeEach(() => {
     candidates: ["Prepare launch notes today", "Prepare launch notes this week", "Prepare launch notes tomorrow"]
   });
   mocked.recordTitleCompletionAccepted.mockResolvedValue(undefined);
-  mocked.updateTask.mockImplementation(async () => taskFixture({ revision: 5 }));
-  mocked.transitionTask.mockImplementation(async () => taskFixture({ state: "completed", revision: 5 }));
+  mocked.updateTask.mockImplementation(async (_id, payload) => taskFixture({ ...payload, revision: payload.expected_revision + 1 }));
+  mocked.transitionTask.mockImplementation(async (_id, payload) => {
+    const state = payload.action === "complete" ? "completed" : payload.action === "cancel" ? "cancelled" : payload.to_state ?? "next";
+    return taskFixture({
+      state,
+      revision: payload.expected_revision + 1,
+      waiting_for: state === "waiting" ? payload.waiting_for ?? "Waiting" : null,
+      waiting_since: state === "waiting" ? "2026-07-15T11:00:00Z" : null,
+      completed_at: state === "completed" ? "2026-07-15T11:00:00Z" : null,
+      cancelled_at: state === "cancelled" ? "2026-07-15T11:00:00Z" : null
+    });
+  });
   mocked.createSubtask.mockResolvedValue({ id: "subtask-1", title: "Draft", state: "open", order_key: 1, revision: 1 });
   mocked.transitionSubtask.mockResolvedValue({
     id: "subtask-1",
@@ -176,6 +190,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetTaskDetailAutosaveControllersForTests();
+  sessionStorage.clear();
   vi.clearAllMocks();
   act(() => {
     useAuthStore.setState({ user: null, status: "loading" });
@@ -267,6 +283,12 @@ describe("TaskListPage projections", () => {
 
     renderPage("/tags/tag-missing");
     expect(await screen.findByRole("heading", { level: 1, name: "#tag" })).toBeInTheDocument();
+  });
+
+  it("falls back to Next actions for an unknown state route", async () => {
+    renderPage("/tasks/not-a-state");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Next actions" })).toBeInTheDocument();
   });
 
   it("turns each date view into the matching due-date filter and swaps capture for a hint", async () => {
@@ -574,6 +596,10 @@ describe("TaskListPage capture", () => {
     const listbox = await screen.findByRole("listbox", { name: "Task title suggestions" });
 
     await user.click(field);
+    await user.keyboard("{ArrowDown}");
+    expect(within(listbox).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{ArrowUp}");
+    expect(within(listbox).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{ArrowUp}");
     expect(within(listbox).getAllByRole("option")[2]).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Escape}");
@@ -599,6 +625,165 @@ describe("TaskListPage capture", () => {
       )
     );
     await waitFor(() => expect(field).toHaveValue(""));
+  });
+
+  it("guards Enter twice with one synchronous capture attempt", async () => {
+    let release: (task: TaskResponse) => void = () => undefined;
+    mocked.createTask.mockImplementationOnce(() => new Promise<TaskResponse>((resolve) => { release = resolve; }));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Rapid Enter");
+    await user.keyboard("{Enter}{Enter}");
+    expect(mocked.createTask).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Adding task/ })).toBeDisabled();
+    expect(screen.getAllByText("Adding task…").length).toBeGreaterThan(0);
+    await act(async () => release(taskFixture({ id: "rapid-enter" })));
+  });
+
+  it("guards two same-tick form submissions before React commits pending state", async () => {
+    let release: (task: TaskResponse) => void = () => undefined;
+    mocked.createTask.mockImplementationOnce(() => new Promise<TaskResponse>((resolve) => { release = resolve; }));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Same tick");
+
+    const form = field.closest("form");
+    expect(form).not.toBeNull();
+    await act(async () => {
+      (form as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      (form as HTMLFormElement).dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    expect(mocked.createTask).toHaveBeenCalledTimes(1);
+    await act(async () => release(taskFixture({ id: "same-tick" })));
+  });
+
+  it("does not steal focus moved to another form while capture is pending", async () => {
+    let release: (task: TaskResponse) => void = () => undefined;
+    mocked.createTask.mockImplementationOnce(() => new Promise<TaskResponse>((resolve) => { release = resolve; }));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "External pending focus");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    const externalForm = document.createElement("form");
+    const externalInput = document.createElement("input");
+    externalInput.setAttribute("aria-label", "External form input");
+    externalForm.append(externalInput);
+    document.body.append(externalForm);
+    externalInput.focus();
+
+    await act(async () => release(taskFixture({ id: "external-focus" })));
+    expect(externalInput).toHaveFocus();
+    externalForm.remove();
+  });
+
+  it("preserves newer edits and focus when an older capture settles", async () => {
+    let release: (task: TaskResponse) => void = () => undefined;
+    mocked.createTask.mockImplementationOnce(() => new Promise<TaskResponse>((resolve) => { release = resolve; }));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Accepted first");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await user.type(field, " and newer");
+    const heading = screen.getByRole("heading", { level: 1, name: "Next actions" });
+    heading.focus();
+
+    await act(async () => release(taskFixture({ id: "accepted-first" })));
+    await waitFor(() => expect(field).toHaveValue("Accepted first and newer"));
+    expect(heading).toHaveFocus();
+  });
+
+  it("mints a fresh identity for a later intentional same-title capture", async () => {
+    const user = userEvent.setup();
+    renderPage("/tasks/next");
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Repeat intentionally");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(1));
+    const firstKey = mocked.createTask.mock.calls[0]?.[1];
+    await user.type(field, "Repeat intentionally");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(2));
+    expect(mocked.createTask.mock.calls[1]?.[1]).not.toBe(firstKey);
+  });
+
+  it("guards mixed Enter and click activation without deduplicating Smart Add titles", async () => {
+    let release: (response: { task: TaskResponse; project: null; tags: never[]; created: { project_id: null; tag_ids: never[] } }) => void = () => undefined;
+    mocked.smartAddTask.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Call bank #calls ");
+    await user.keyboard("{Enter}");
+    fireEvent.submit(field.closest("form") as HTMLFormElement);
+    expect(mocked.smartAddTask).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Adding task/ })).toBeDisabled();
+    await act(async () => release({ task: taskFixture({ id: "smart-rapid" }), project: null, tags: [], created: { project_id: null, tag_ids: [] } }));
+  });
+
+  it("reuses the body and key for an unchanged failed retry, then mints after editing", async () => {
+    mocked.createTask.mockRejectedValueOnce(new Error("Timed out."));
+    renderPage("/tasks/next");
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Retry title");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await screen.findByRole("alert");
+    mocked.createTask.mockResolvedValueOnce(taskFixture({ id: "retry-1" }));
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(2));
+    expect(mocked.createTask.mock.calls[1]).toEqual(mocked.createTask.mock.calls[0]);
+    await user.type(field, " again");
+    mocked.createTask.mockResolvedValueOnce(taskFixture({ id: "retry-2" }));
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(3));
+    expect(mocked.createTask.mock.calls[2][1]).not.toBe(mocked.createTask.mock.calls[1][1]);
+  });
+
+  it("clears after a retry whose whitespace-only edit preserves the normalized payload", async () => {
+    const user = userEvent.setup();
+    mocked.createTask.mockRejectedValueOnce(new Error("Timed out."));
+    renderPage("/tasks/next");
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "  Normalized retry  ");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await screen.findByRole("alert");
+    mocked.createTask.mockResolvedValueOnce(taskFixture({ id: "normalized-retry" }));
+    await user.clear(field);
+    await user.type(field, "Normalized retry");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(field).toHaveValue(""));
+    expect(mocked.createTask.mock.calls[1]?.[1]).toBe(mocked.createTask.mock.calls[0]?.[1]);
+  });
+
+  it("reuses a waiting capture key when only waiting-for whitespace changes after an ambiguous retry", async () => {
+    const user = userEvent.setup();
+    mocked.createTask.mockRejectedValueOnce(new Error("Request status is unknown."));
+    renderPage("/tasks/waiting");
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Chase the invoice");
+    const waiting = screen.getByRole("textbox", { name: "Waiting for" });
+    await user.type(waiting, "Finance");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await screen.findByRole("alert");
+
+    await user.clear(waiting);
+    await user.type(waiting, "  Finance  ");
+    mocked.createTask.mockResolvedValueOnce(taskFixture({ id: "waiting-retry" }));
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(2));
+
+    expect(mocked.createTask.mock.calls[1]?.[0]).toEqual({
+      title: "Chase the invoice",
+      state: "waiting",
+      waiting_for: "Finance"
+    });
+    expect(mocked.createTask.mock.calls[1]?.[1]).toBe(mocked.createTask.mock.calls[0]?.[1]);
   });
 
   it("carries the project or tag context of the view into the created task", async () => {
@@ -805,9 +990,41 @@ describe("TaskListPage detail wiring", () => {
       expect(mocked.updateTask).toHaveBeenCalledWith(
         "task-1",
         { title: "Renamed task", expected_revision: 4 },
-        expect.stringContaining("task-shell-detail-edit")
+        expect.any(String)
       )
     );
+  });
+
+  it("serializes selected-row Complete behind the detail PATCH on the shared controller", async () => {
+    const user = userEvent.setup();
+    let resolvePatch: ((task: TaskResponse) => void) | undefined;
+    const patch = new Promise<TaskResponse>((resolve) => { resolvePatch = resolve; });
+    mocked.updateTask.mockReturnValueOnce(patch);
+    mocked.transitionTask.mockImplementationOnce(async (_id, payload) => taskFixture({
+      state: "completed",
+      completed_at: "2026-07-15T11:00:00Z",
+      revision: payload.expected_revision + 1
+    }));
+
+    renderPage("/tasks/next/task-1");
+    const title = await screen.findByLabelText("Title");
+    await user.clear(title);
+    await user.type(title, "Renamed task{Enter}");
+    await waitFor(() => expect(mocked.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      { title: "Renamed task", expected_revision: 4 },
+      expect.any(String)
+    ));
+
+    await user.click(await screen.findByRole("button", { name: "Complete Fix onboarding drop-off" }));
+    expect(mocked.transitionTask).not.toHaveBeenCalled();
+
+    resolvePatch?.(taskFixture({ title: "Renamed task", revision: 5 }));
+    await waitFor(() => expect(mocked.transitionTask).toHaveBeenCalledWith(
+      "task-1",
+      { action: "complete", to_state: undefined, expected_revision: 5 },
+      expect.any(String)
+    ));
   });
 
   it("drives every detail action against the API", async () => {
@@ -821,8 +1038,8 @@ describe("TaskListPage detail wiring", () => {
     await waitFor(() =>
       expect(mocked.transitionTask).toHaveBeenCalledWith(
         "task-1",
-        { action: "move", to_state: "someday", waiting_for: undefined, expected_revision: 4 },
-        expect.stringContaining("task-shell-detail-move")
+        { action: "move", to_state: "someday", expected_revision: 4 },
+        expect.any(String)
       )
     );
 
@@ -877,16 +1094,16 @@ describe("TaskListPage detail wiring", () => {
     renderPage("/tasks/next/task-1");
 
     await user.selectOptions(await screen.findByLabelText("List"), "someday");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Transition rejected.");
+    expect(await screen.findByText(/Transition rejected\./)).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("New subtask title"), "Second step{Enter}");
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Subtask rejected."));
+    await waitFor(() => expect(screen.getByText("Subtask rejected.")).toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: "Complete Draft" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Subtask transition rejected."));
+    await waitFor(() => expect(screen.getByText("Subtask transition rejected.")).toBeInTheDocument());
 
     await user.type(screen.getByLabelText("New comment"), "Blocked{Enter}");
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Comment rejected."));
+    await waitFor(() => expect(screen.getByText("Comment rejected.")).toBeInTheDocument());
   });
 
   it("shows the empty panel with no task selected and closes the open one back to the list", async () => {
@@ -1059,5 +1276,227 @@ describe("TaskListPage sidebar mutations", () => {
     await user.click(screen.getByRole("button", { name: "New tag" }));
     await user.type(screen.getByLabelText("New tag name"), "calls{Enter}");
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Tag name is taken."));
+  });
+});
+
+describe("TaskListPage canonical Discard paths", () => {
+  it("retries an unselected row-completion conflict from the list alert", async () => {
+    const user = userEvent.setup();
+    const stale = taskFixture({ title: "Retry row", state: "next", revision: 4 });
+    const canonical = taskFixture({ title: "Retry row", state: "next", revision: 5 });
+    mocked.listTasks.mockImplementation(async () => listResponse([stale]));
+    mocked.transitionTask
+      .mockRejectedValueOnce(new ApiError("stale", 409, {}))
+      .mockResolvedValueOnce(taskFixture({
+        title: "Retry row",
+        state: "completed",
+        completed_at: "2026-07-15T11:00:00Z",
+        revision: 6
+      }));
+    mocked.getTask.mockResolvedValueOnce(canonical);
+
+    renderPage("/tasks/next");
+    await user.click((await screen.findAllByRole("button", { name: /^Complete / }))[0]);
+    const warning = await screen.findByRole("alert");
+    await user.click(within(warning).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(mocked.transitionTask).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Saved", {}, { timeout: 3000 })).toBeInTheDocument();
+  });
+
+  it("discards an unselected row-completion conflict and converges canonical list state", async () => {
+    const user = userEvent.setup();
+    const stale = taskFixture({ title: "Stale row", state: "next", revision: 4 });
+    const canonical = taskFixture({ title: "Canonical row", state: "next", revision: 5 });
+    mocked.transitionTask.mockRejectedValueOnce(new ApiError("stale", 409, {}));
+    mocked.getTask.mockResolvedValueOnce(canonical);
+    let nextListCalls = 0;
+    let resolveCanonicalList: ((response: TaskListResponse) => void) | undefined;
+    const canonicalList = new Promise<TaskListResponse>((resolve) => { resolveCanonicalList = resolve; });
+    mocked.listTasks.mockImplementation(async (filters) => {
+      if (filters?.limit) return listResponse([stale]);
+      nextListCalls += 1;
+      return nextListCalls === 1 ? listResponse([stale], {
+        counts_by_state: { inbox: 17, next: 1, waiting: 3, someday: 0 }
+      }) : canonicalList;
+    });
+
+    renderPage("/tasks/next");
+    await user.click((await screen.findAllByRole("button", { name: /^Complete / }))[0]);
+    const warning = await screen.findByRole("alert");
+    expect(warning).toHaveTextContent("Task changed elsewhere");
+    fireEvent.click(within(warning).getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.getByRole("link", { name: "Canonical row" })).toBeInTheDocument());
+    resolveCanonicalList?.(listResponse([canonical], {
+      counts_by_state: { inbox: 17, next: 2, waiting: 3, someday: 0 }
+    }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Canonical row" })).toBeInTheDocument();
+      expect(screen.getByText("2 tasks")).toBeInTheDocument();
+    });
+    expect(mocked.getTask).toHaveBeenCalledWith("task-1");
+  });
+
+  it("conflict Discard restores canonical fields without remount or focus regression", async () => {
+    const user = userEvent.setup();
+    mocked.updateTask.mockRejectedValue(new ApiError("stale", 409, {}));
+    mocked.getTask.mockResolvedValue(taskFixture({
+      state: "waiting", waiting_for: "Canonical owner", waiting_since: "2026-01-01T00:00:00Z",
+      details: "Canonical details", revision: 5
+    }));
+    let waitingListCalls = 0;
+    let resolveCanonicalList: ((response: TaskListResponse) => void) | undefined;
+    const canonicalList = new Promise<TaskListResponse>((resolve) => { resolveCanonicalList = resolve; });
+    mocked.listTasks.mockImplementation(async (filters) => filters?.state === "waiting"
+      ? (++waitingListCalls === 1
+        ? listResponse([taskFixture({ title: "Pre-discard waiting row", state: "waiting", waiting_for: "Old owner" })], { counts_by_state: { inbox: 1, next: 1, waiting: 2, someday: 1 } })
+        : canonicalList)
+      : listResponse([taskFixture()]));
+    renderPage("/tasks/waiting/task-1");
+    const title = await screen.findByLabelText("Title");
+    await user.clear(title); await user.type(title, "Dirty title");
+    await user.clear(screen.getByLabelText("Details")); await user.type(screen.getByLabelText("Details"), "Dirty details");
+    const panel = screen.getByRole("complementary", { name: "Task detail" });
+    const waitingFor = within(panel).getByLabelText("Waiting for");
+    await user.clear(waitingFor); await user.type(waitingFor, "Dirty owner"); await user.tab();
+    title.focus();
+    const titleNode = title;
+    fireEvent.click(await screen.findByRole("button", { name: "Discard my edits" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toBeInTheDocument());
+    resolveCanonicalList?.(listResponse([taskFixture({ title: "Fix onboarding drop-off", state: "waiting", waiting_for: "Canonical owner" })], { counts_by_state: { inbox: 1, next: 1, waiting: 4, someday: 1 } }));
+    const conflictPanel = await screen.findByRole("complementary", { name: "Task detail" });
+    await waitFor(() => {
+      expect(within(conflictPanel).getByLabelText("Title")).toHaveValue("Fix onboarding drop-off");
+      expect(within(conflictPanel).getByLabelText("Details")).toHaveValue("Canonical details");
+      expect(within(conflictPanel).getByLabelText("Waiting for")).toHaveValue("Canonical owner");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("4 tasks")).toBeInTheDocument();
+    expect(screen.getByLabelText("Title")).toBe(titleNode);
+    expect(document.activeElement).toBe(titleNode);
+  });
+
+  it("recovery-only Discard restores canonical fields without remount or focus regression", async () => {
+    const user = userEvent.setup();
+    mocked.getTask.mockResolvedValue(taskFixture({
+      title: "Canonical recovery title", details: "Canonical recovery details", state: "waiting",
+      waiting_for: "Canonical recovery owner", waiting_since: "2026-01-01T00:00:00Z", revision: 5
+    }));
+    let waitingListCalls = 0;
+    mocked.listTasks.mockImplementation(async (filters) => filters?.state === "waiting"
+      ? (++waitingListCalls === 1
+        ? listResponse([taskFixture({ title: "Pre-discard recovery row", state: "waiting", waiting_for: "Old recovery owner" })], { counts_by_state: { inbox: 17, next: 3, waiting: 2, someday: 0 } })
+        : listResponse([taskFixture({ title: "Canonical recovery title", state: "waiting", waiting_for: "Canonical recovery owner" })], { counts_by_state: { inbox: 17, next: 3, waiting: 5, someday: 0 } }))
+      : listResponse([taskFixture()]));
+    const apiOrigin = new URL("/api", window.location.origin).href.replace(/\/$/, "");
+    const recoveryKey = taskAutosaveStorageKey("user-1", apiOrigin, "task-1");
+    const baseline = taskFixture({ state: "waiting", waiting_for: "Old recovery owner", waiting_since: "2026-01-01T00:00:00Z" });
+    sessionStorage.setItem(recoveryKey, JSON.stringify({
+      version: 1,
+      identity: { accountId: "user-1", apiOrigin, taskId: "task-1" },
+      baseline,
+      draft: { title: "Recovered title", details: "Recovered details", state: "waiting", project_id: baseline.project_id, priority: baseline.priority, tag_ids: baseline.tag_ids, waiting_for: "Recovered owner", due_date: baseline.due_date },
+      dirty: {
+        title: { baseValue: baseline.title, generation: 1, value: "Recovered title" },
+        details: { baseValue: baseline.details, generation: 1, value: "Recovered details" },
+        waiting_for: { baseValue: baseline.waiting_for, generation: 1, value: "Recovered owner" }
+      },
+      inFlight: { kind: "patch", body: { title: "Recovered title", details: "Recovered details", waiting_for: "Recovered owner", expected_revision: 4 }, generations: { title: 1, details: 1, waiting_for: 1 }, idempotencyKey: "autosave-recovery-test", attempt: 1 },
+      barriers: [], status: "failed", conflict: null,
+      error: { kind: "network", message: "offline", retryAllowed: true, offline: true }, retrying: false
+    }));
+    renderPage("/tasks/waiting/task-1");
+    const title = await screen.findByLabelText("Title");
+    fireEvent.change(title, { target: { value: "Dirty title" } });
+    fireEvent.change(screen.getByLabelText("Details"), { target: { value: "Dirty details" } });
+    const panel = screen.getByRole("complementary", { name: "Task detail" });
+    fireEvent.change(within(panel).getByLabelText("Waiting for"), { target: { value: "Dirty owner" } });
+    const titleNode = title;
+    const discard = await screen.findByRole("button", { name: "Discard" });
+    fireEvent.mouseDown(discard);
+    discard.focus();
+    await user.keyboard("{Enter}");
+    const recoveryPanel = await screen.findByRole("complementary", { name: "Task detail" });
+    await waitFor(() => {
+      expect(within(recoveryPanel).getByLabelText("Title")).toHaveValue("Canonical recovery title");
+      expect(within(recoveryPanel).getByLabelText("Details")).toHaveValue("Canonical recovery details");
+      expect(within(recoveryPanel).getByLabelText("Waiting for")).toHaveValue("Canonical recovery owner");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("link", { name: "Canonical recovery title" })).toBeInTheDocument();
+    expect(screen.getByText("5 tasks")).toBeInTheDocument();
+    expect(sessionStorage.getItem(recoveryKey)).toBeNull();
+    expect(screen.getByLabelText("Title")).toBe(titleNode);
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Task detail" }));
+  });
+
+  it("retries a persisted failed edit from the list alert", async () => {
+    const user = userEvent.setup();
+    const apiOrigin = new URL("/api", window.location.origin).href.replace(/\/$/, "");
+    const recoveryKey = taskAutosaveStorageKey("user-1", apiOrigin, "task-1");
+    const baseline = taskFixture();
+    sessionStorage.setItem(recoveryKey, JSON.stringify({
+      version: 1,
+      identity: { accountId: "user-1", apiOrigin, taskId: "task-1" },
+      baseline,
+      draft: {
+        title: "Recovered title",
+        details: baseline.details,
+        state: baseline.state,
+        project_id: baseline.project_id,
+        priority: baseline.priority,
+        tag_ids: baseline.tag_ids,
+        waiting_for: baseline.waiting_for,
+        due_date: baseline.due_date
+      },
+      dirty: {
+        title: { baseValue: baseline.title, generation: 1, value: "Recovered title" }
+      },
+      inFlight: {
+        kind: "patch",
+        body: { title: "Recovered title", expected_revision: baseline.revision },
+        generations: { title: 1 },
+        idempotencyKey: "autosave-recovery-retry-test",
+        attempt: 1
+      },
+      barriers: [],
+      status: "failed",
+      conflict: null,
+      error: { kind: "network", message: "offline", retryAllowed: true, offline: true },
+      retrying: false
+    }));
+    mocked.updateTask
+      .mockRejectedValueOnce(new TypeError("offline"))
+      .mockResolvedValueOnce(taskFixture({ title: "Recovered title", revision: 5 }));
+
+    renderPage("/tasks/next/task-1");
+    const recoveredMessage = await screen.findByText("Unsaved task change recovered. Retry or Discard.");
+    const warning = recoveredMessage.closest('[role="alert"]');
+    if (!(warning instanceof HTMLElement)) throw new Error("Recovery alert was not rendered");
+    await user.click(within(warning).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(mocked.updateTask).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Saved", {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.getByLabelText("Title")).toHaveValue("Recovered title");
+    await waitFor(() => expect(sessionStorage.getItem(recoveryKey)).toBeNull());
+  });
+
+  it("keeps detail fallback controls inert when the account controller disappears", async () => {
+    renderPage("/tasks/next/task-1");
+    const title = await screen.findByLabelText("Title");
+    act(() => {
+      useAuthStore.setState({ user: null, status: "authed" });
+    });
+
+    fireEvent.change(title, { target: { value: "Local only" } });
+    fireEvent.blur(title);
+    fireEvent.click(screen.getByRole("button", { name: "Complete task" }));
+    fireEvent.click(screen.getByRole("button", { name: "Complete Fix onboarding drop-off" }));
+
+    expect(mocked.updateTask).not.toHaveBeenCalled();
+    expect(mocked.transitionTask).not.toHaveBeenCalled();
   });
 });

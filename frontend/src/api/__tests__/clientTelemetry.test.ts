@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiClient } from "../client";
+import { ApiError, apiClient, getApiBaseUrl } from "../client";
 import { nowMs, recordTelemetry } from "../../utils/telemetry";
 
 // Every request records one telemetry event. It is the only trace a support
@@ -56,6 +56,12 @@ describe("apiClient telemetry", () => {
     expect(record.mock.calls[0][1]).toBeUndefined();
   });
 
+  it("returns the configured API base when no browser window exists", () => {
+    vi.stubGlobal("window", undefined);
+
+    expect(getApiBaseUrl()).toBe("/api");
+  });
+
   it("records an empty 204 response as a successful request in its own right", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
 
@@ -83,6 +89,28 @@ describe("apiClient telemetry", () => {
       },
       "warn"
     );
+  });
+
+  it("parses retry timing from seconds, HTTP dates, or a missing header", async () => {
+    const future = new Date(Date.now() + 10_000).toUTCString();
+    for (const [retryAfter, expected] of [
+      ["2", 2000],
+      [future, "date"],
+      ["not-a-retry-date", undefined],
+      [undefined, undefined]
+    ] as const) {
+      fetchMock.mockResolvedValueOnce(response(
+        { detail: "wait" },
+        429,
+        retryAfter === undefined ? {} : { "Retry-After": retryAfter }
+      ));
+
+      const caught = await apiClient.listTags().catch((error: unknown) => error);
+      expect(caught).toBeInstanceOf(ApiError);
+      const retryAfterMs = (caught as ApiError).retryAfterMs;
+      if (expected === "date") expect(retryAfterMs).toBeGreaterThan(0);
+      else expect(retryAfterMs).toBe(expected);
+    }
   });
 
   it("warns with the failure text when the request never reached the server", async () => {
