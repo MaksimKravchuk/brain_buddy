@@ -86,6 +86,14 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     last_contact_at: null,
     reporting_window_seconds: 3600,
     capabilities: { reply: true, cancel: true },
+    guarantee_tier: null,
+    message_id: null,
+    correlation_id: null,
+    agent_task_id: null,
+    exchange_open: false,
+    exchange_state: "none",
+    exchange_kind: null,
+    push_registration: "unregistered",
     manifest: null,
     events: [],
     commands: [],
@@ -413,6 +421,32 @@ describe("run polling", () => {
     expect(isRunPollable(makeRun({ connection_disconnected: true }))).toBe(false);
     expect(isRunPollable(makeRun({ content_expired: true }))).toBe(true);
     expect(isRunPollable(makeRun({ dispatch_state: "not_sent" }))).toBe(false);
+  });
+
+  it("014-FR-006 keeps polling a queued exchange and stops on one that never left", () => {
+    // A queued exchange is the one state whose label is guaranteed to change
+    // without the user doing anything, so it is exactly the state polling
+    // exists for. A run settled as restarted-before-send is the opposite: it
+    // will never move again on its own.
+    expect(
+      isRunPollable(
+        makeRun({ dispatch_state: "delivery_unconfirmed", exchange_state: "queued", exchange_open: true })
+      )
+    ).toBe(true);
+    expect(
+      isRunPollable(
+        makeRun({ dispatch_state: "delivery_unconfirmed", exchange_state: "open", exchange_open: true })
+      )
+    ).toBe(true);
+    expect(
+      isRunPollable(
+        makeRun({
+          dispatch_state: "not_sent",
+          dispatch_error_code: "restarted_before_send",
+          exchange_state: "closed"
+        })
+      )
+    ).toBe(false);
   });
 
   it("backs off from 1.5s and never past the 8s cap", () => {

@@ -112,10 +112,12 @@ describe("relay mutation lifecycle", () => {
   it("routes every real relay mutation call site through the guarded hook", () => {
     const relaySurfaces = [handoffSource, runSectionSource, settingsSource].join("\n");
 
-    // Eight since 014 removed the signing-secret replacement: the A2A wire has
-    // no inbound secret, so the mutation that replaced one has no call site.
+    // Eight since 014 removed the signing-secret replacement (the A2A wire has
+    // no inbound secret, so the mutation that replaced one has no call site),
+    // plus check-delivery: **Check again** is a relay mutation like any other
+    // and must not be the one call site that escapes the session guard.
     expect(relaySurfaces).not.toMatch(/\buseMutation\s*\(/);
-    expect(relaySurfaces.match(/\buseRelayMutation\s*\(\{/g)).toHaveLength(8);
+    expect(relaySurfaces.match(/\buseRelayMutation\s*\(\{/g)).toHaveLength(9);
   });
 
   it.each(SCOPE_TRANSITIONS)("suppresses delayed success settlement after %s", async (_transition, leaveScope) => {

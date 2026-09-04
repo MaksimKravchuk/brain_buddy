@@ -373,6 +373,13 @@ export interface AgentControls {
 export type AgentAuthScheme = "bearer" | "api_key";
 export type AgentGuaranteeTier = "guaranteed" | "best_effort";
 export type AgentDisconnectReason = "owner" | "superseded_wire_contract";
+export type AgentExchangeState = "none" | "queued" | "open" | "closed" | "interrupted";
+export type AgentExchangeKind = "start" | "reply";
+export type AgentPushRegistration =
+  | "unregistered"
+  | "registered"
+  | "refused"
+  | "unsupported";
 export type AgentSchemeKind =
   | "bearer"
   | "api_key"
@@ -519,15 +526,27 @@ export interface AgentContextItem {
   body: string;
 }
 
+export interface AgentPushCallback {
+  registered: boolean;
+  url_preview: string | null;
+  disclosure: string | null;
+}
+
+export interface AgentCheckDeliveryRequest {
+  current_password?: string | null;
+}
+
 export interface AgentHandoffPreviewRequest {
   connection_id: string;
   include_details?: boolean;
-  context_items?: AgentContextItem[];
+  supporting_items?: AgentContextItem[];
 }
 
 export interface AgentHandoffConfirmRequest extends AgentHandoffPreviewRequest {
   manifest_token: string;
   current_password?: string | null;
+  /** Part of the canonical request identity, so a replay carries it (AC-026). */
+  acknowledge_duplicate_risk?: boolean;
 }
 
 export interface AgentReportingContract {
@@ -552,14 +571,22 @@ export interface AgentManifestResponse {
   agent_name: string;
   title: string;
   details: string | null;
-  context_items: AgentContextItem[];
-  reporting: AgentReportingContract;
-  reporting_instructions: string;
-  instructions_version: string;
+  supporting_items: AgentContextItem[];
+  message_id: string;
+  correlation_id: string;
+  /** Where content would actually go: the interface the card named. */
+  destination_interface: string;
   protocol_version: string;
-  destination_endpoint: string;
+  guarantee_tier: AgentGuaranteeTier;
+  /** Server-owned sentences, rendered verbatim. Never re-worded client-side. */
+  tier_disclosure: string;
+  tier_disclosure_url: string;
+  acknowledgement_required: boolean;
+  cancellation_disclosure: string;
+  push_callback: AgentPushCallback | null;
   external_copy_notice: string;
   reauthentication_required: boolean;
+  parts_preview: string[];
 }
 
 export interface AgentReplyRequest {
@@ -622,6 +649,16 @@ export interface AgentRunResponse {
   reporting_window_seconds: number;
   /** The controls still offered on *this* run. Never a card declaration. */
   capabilities: AgentControls;
+  /** The A2A exchange this run is waiting on: Queued and Sent stay apart. */
+  guarantee_tier: AgentGuaranteeTier | null;
+  message_id: string | null;
+  correlation_id: string | null;
+  agent_task_id: string | null;
+  exchange_open: boolean;
+  exchange_state: AgentExchangeState;
+  exchange_kind: AgentExchangeKind | null;
+  push_registration: AgentPushRegistration;
+
   manifest: AgentManifestResponse | null;
   events: AgentRunEvent[];
   commands: AgentRunCommand[];

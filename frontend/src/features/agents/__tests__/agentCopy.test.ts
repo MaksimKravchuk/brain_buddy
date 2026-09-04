@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentConnectionResponse } from "../../../api/agentTypes";
+import type { AgentRunResponse } from "../../../api/agentTypes";
 import {
   authSchemeLabel,
+  dispatchStateDetail,
   rateLimitRetryCopy,
   awaitsAnswer,
   capabilityDisclosure,
@@ -40,6 +42,20 @@ const base: AgentConnectionResponse = {
   created_at: "2026-08-09T09:00:00Z",
   revision: 1
 };
+
+/** The dispatch-side slice of a run, which is all `dispatchStateDetail` reads. */
+function runShape(
+  overrides: Partial<AgentRunResponse>
+): Parameters<typeof dispatchStateDetail>[0] {
+  return {
+    dispatch_state: "sent",
+    dispatch_error_code: null,
+    exchange_state: "none",
+    exchange_open: false,
+    reported_state: null,
+    ...overrides
+  };
+}
 
 describe("agentCopy", () => {
   it("keeps a disclosed blocked question answerable even before needs_user is projected", () => {
@@ -192,5 +208,60 @@ describe("agentCopy", () => {
     expect(formatDuration(900)).toBe("15 minutes");
     expect(formatDuration(3600)).toBe("1 hour");
     expect(formatDuration(7200)).toBe("2 hours");
+  });
+
+  it("014-FR-006 keeps Queued and Sent apart in the dispatch sentence", () => {
+    // The whole point of the queued state: the identifiers are reserved, the
+    // content is frozen, and nothing has left. Saying "Sent" here would be the
+    // one claim this projection exists to avoid making.
+    expect(
+      dispatchStateDetail(
+        runShape({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "queued",
+          exchange_open: true
+        })
+      )
+    ).toBe("Waiting for a free connection slot; nothing has been sent yet");
+    expect(
+      dispatchStateDetail(
+        runShape({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "open",
+          exchange_open: true
+        })
+      )
+    ).toBe("Some agents answer only when the work is finished.");
+    expect(dispatchStateDetail(runShape({ dispatch_state: "sent" }))).toBe(
+      "Some agents answer only when the work is finished."
+    );
+  });
+
+  it("014-FR-006 separates a restart that never sent from an ambiguous delivery", () => {
+    expect(
+      dispatchStateDetail(
+        runShape({ dispatch_state: "not_sent", dispatch_error_code: "restarted_before_send" })
+      )
+    ).toBe("BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.");
+    expect(
+      dispatchStateDetail(
+        runShape({ dispatch_state: "not_sent", dispatch_error_code: "a2a_rate_limited" })
+      )
+    ).toBe("The agent is rate limiting.");
+    expect(
+      dispatchStateDetail(runShape({ dispatch_state: "delivery_unconfirmed", exchange_state: "closed" }))
+    ).toBe("BrainBuddy could not confirm the agent received this hand-off. It was not re-sent.");
+  });
+
+  it("014-FR-014 says nothing about dispatch once the agent has reported", () => {
+    // Dispatch is BrainBuddy's own claim about its outbound request. Once the
+    // agent has spoken, its state is the authority and a stale dispatch line
+    // would compete with it.
+    expect(
+      dispatchStateDetail(runShape({ dispatch_state: "sent", reported_state: "running" }))
+    ).toBeNull();
+    expect(
+      dispatchStateDetail(runShape({ dispatch_state: "not_sent", dispatch_error_code: null }))
+    ).toBeNull();
   });
 });

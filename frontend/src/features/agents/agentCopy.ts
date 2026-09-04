@@ -168,6 +168,51 @@ export function canCancelRun(run: RunGuardInput): boolean {
   return isCommandable(run) && !run.cancel_requested && run.capabilities.cancel;
 }
 
+type DispatchShape = Pick<
+  AgentRunResponse,
+  "dispatch_state" | "dispatch_error_code" | "exchange_state" | "exchange_open" | "reported_state"
+>;
+
+/**
+ * What BrainBuddy knows about its *own* outbound request — and nothing else.
+ *
+ * Four states that are routinely collapsed into one are kept apart here, because
+ * each one licenses a different next step:
+ *
+ * - **Queued**: the run's identifiers are reserved and its content frozen, but
+ *   no byte has left. Calling this "Sent" is the single dishonest claim this
+ *   whole projection exists to prevent.
+ * - **Sent**: the message went out, or is going out inside an open exchange.
+ * - **Not sent**: it provably did not go out, so the same hand-off — the same
+ *   run ID, the same message ID — can simply be offered again.
+ * - **Delivery unconfirmed**: BrainBuddy does not know. Nothing is re-sent on
+ *   its own; the user asks for a lookup.
+ *
+ * Once the agent itself has reported, its state is the authority and this says
+ * nothing at all rather than competing with it.
+ */
+export function dispatchStateDetail(run: DispatchShape): string | null {
+  if (run.reported_state !== null) {
+    return null;
+  }
+  if (run.exchange_state === "queued") {
+    return "Waiting for a free connection slot; nothing has been sent yet";
+  }
+  if (run.dispatch_state === "not_sent") {
+    if (run.dispatch_error_code === "restarted_before_send") {
+      return "BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.";
+    }
+    if (run.dispatch_error_code === "a2a_rate_limited") {
+      return "The agent is rate limiting.";
+    }
+    return null;
+  }
+  if (run.dispatch_state === "sent" || run.exchange_state === "open") {
+    return "Some agents answer only when the work is finished.";
+  }
+  return "BrainBuddy could not confirm the agent received this hand-off. It was not re-sent.";
+}
+
 /**
  * What the *card* declared, in a fixed order.
  *

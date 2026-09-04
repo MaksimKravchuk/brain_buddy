@@ -9,7 +9,14 @@ import { apiClient } from "../../api/client";
 import { Button } from "../../components/ui/Button";
 import { getErrorMessage } from "../../utils/error";
 import { definitivelyRejected, useIntentKey } from "../../utils/idempotency";
-import { awaitsAnswer, canCancelRun, canReplyToRun, formatTimestamp } from "./agentCopy";
+import { AgentHandoffOverlay } from "./AgentHandoffOverlay";
+import {
+  awaitsAnswer,
+  canCancelRun,
+  canReplyToRun,
+  dispatchStateDetail,
+  formatTimestamp
+} from "./agentCopy";
 
 const EXPIRED_NOTICE = "Content expired under retention policy";
 
@@ -105,6 +112,9 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
   const contentExpired = useAgentRunContentExpired(run);
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Re-review of a hand-off that never left. It is the same review, reopened —
+  // not a new one — so it is seeded from the run's own frozen manifest.
+  const [retrying, setRetrying] = useState(false);
 
   const invalidate = (updated: AgentRunResponse) => {
     setError(null);
@@ -117,6 +127,7 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
   // turn that ambiguity into a second command.
   const replyKey = useIntentKey(`agent-reply-${run.id}`);
   const cancelKey = useIntentKey(`agent-cancel-${run.id}`);
+  const checkKey = useIntentKey(`agent-check-delivery-${run.id}`);
   const replyIntent = useRef<ReplyIntentSnapshot | null>(null);
   const displayedQuestionIdentity = questionIdentity(run);
 
@@ -161,12 +172,46 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
     }
   });
 
+  const checkMutation = useRelayMutation({
+    mutationKey: keys.mutation("check-delivery", run.id),
+    // No identifiers of its own: the correlation ID and the message ID are on
+    // the run, so this can only ever repeat the same check. The key is held
+    // across retries for the same reason a reply's is — an ambiguous check that
+    // is retried under a fresh key would stop being the same check.
+    mutationFn: (input: { idempotencyKey: string }) =>
+      apiClient.checkAgentRunDelivery(run.id, { current_password: null }, input.idempotencyKey),
+    onSuccess: (updated) => {
+      checkKey.settle();
+      invalidate(updated);
+    },
+    onError: (caught: unknown) => {
+      if (definitivelyRejected(caught)) {
+        checkKey.settle();
+      }
+      setError(getErrorMessage(caught));
+    }
+  });
+
   // The question is only live while the run is blocked, so a finished run never
   // shows an answer box — nor the "replies unsupported" note, which for an old
   // question would only imply an answer was still expected somewhere.
   const showQuestion = !contentExpired && awaitsAnswer(run);
   const canReply = online && !contentExpired && canReplyToRun(run);
   const canCancel = online && !contentExpired && canCancelRun(run);
+
+  const dispatchDetail = contentExpired ? null : dispatchStateDetail(run);
+  // Offered only where BrainBuddy genuinely does not know: a queued exchange
+  // has provably not been sent, so there is nothing at the agent to look up.
+  const canCheckDelivery =
+    !contentExpired &&
+    run.dispatch_state === "delivery_unconfirmed" &&
+    run.exchange_state !== "queued" &&
+    run.reported_state === null &&
+    !run.connection_disconnected;
+  // A hand-off that never left can be re-offered exactly as it was reviewed —
+  // but only while BrainBuddy still holds what was reviewed.
+  const frozenManifest =
+    !contentExpired && run.dispatch_state === "not_sent" ? run.manifest : null;
 
   useEffect(() => {
     const held = replyIntent.current;
@@ -304,10 +349,34 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
           This agent was disconnected. Disconnecting did not cancel any work it had already accepted.
         </p>
       ) : null}
-      {run.dispatch_state === "delivery_unconfirmed" ? (
-        <p className="mt-1.5 text-[11px] text-slate-500">
-          BrainBuddy could not confirm the agent received this hand-off. It was not re-sent.
-        </p>
+      {dispatchDetail ? (
+        <p className="mt-1.5 text-[11px] text-slate-500">{dispatchDetail}</p>
+      ) : null}
+      {canCheckDelivery ? (
+        <div className="mt-1.5">
+          <p className="m-0 text-[11px] text-slate-500">
+            Runs the same check again with the same correlation ID and the same message ID. It is
+            never a new send.
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="mt-1"
+            disabled={!online}
+            isLoading={checkMutation.isPending}
+            onClick={() => checkMutation.mutate({ idempotencyKey: checkKey.current() })}
+          >
+            Check again
+          </Button>
+        </div>
+      ) : null}
+      {frozenManifest ? (
+        <div className="mt-1.5">
+          <Button type="button" variant="ghost" size="sm" onClick={() => setRetrying(true)}>
+            Try this hand-off again
+          </Button>
+        </div>
       ) : null}
 
       {run.events.length ? (
@@ -340,6 +409,27 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
         <p role="alert" className="mt-2 text-[12px] text-rose-700">
           {error}
         </p>
+      ) : null}
+
+      {retrying && frozenManifest ? (
+        <AgentHandoffOverlay
+          taskId={taskId}
+          taskTitle={frozenManifest.title}
+          // What was frozen is what will be re-sent. The server rebuilds the
+          // identical manifest from these three values, so the token — and with
+          // it the idempotency key, the run ID and the message ID — is the same
+          // one exactly as long as the user changes nothing.
+          seed={{
+            connectionId: frozenManifest.connection_id,
+            includeDetails: frozenManifest.details !== null,
+            supportingItems: frozenManifest.supporting_items
+          }}
+          onClose={() => setRetrying(false)}
+          onDispatched={(updated) => {
+            setRetrying(false);
+            invalidate(updated);
+          }}
+        />
       ) : null}
     </article>
   );
