@@ -1048,6 +1048,147 @@ class AgentRepository(BaseRepository):
             ).fetchall()
         return [(str(row["owner_id"]), str(row["id"])) for row in rows]
 
+    def start_exchange(
+        self,
+        run: AgentRunDocument,
+        *,
+        expected_version: int,
+        started_at: datetime,
+        deadline_at: datetime,
+    ) -> AgentRunDocument | None:
+        """Move one exchange `queued → open`, and spend the first-dispatch trigger.
+
+        Two writes that must not come apart, so they share a transaction.
+
+        The run's `exchange_started_at` is what makes **Queued** and **Sent**
+        different claims, and the connection's `first_dispatch_at` is the spent
+        marker of FR-004's re-authentication trigger. Both mean the same thing —
+        *content has now left BrainBuddy for this destination* — so stamping one
+        without the other would let a queued hand-off that never went out either
+        render as sent or skip the password on its retry.
+
+        Compare-and-set on `run_version`, so a second worker, a replayed
+        confirmation and the observer's recovery cannot each open the same
+        exchange. Returns the started run, or `None` when someone else won.
+        """
+
+        opened = run.model_copy(
+            update={
+                "exchange_state": "open",
+                "exchange_started_at": started_at,
+                "exchange_deadline_at": deadline_at,
+                "updated_at": max(run.updated_at, started_at),
+                "revision": run.revision + 1,
+            }
+        )
+        with self._connection() as conn, _sqlite_guard("Agent run", run.id):
+            cursor = conn.execute(
+                """
+                UPDATE agent_runs SET
+                    dispatched_at = ?,
+                    manifest_token = ?,
+                    content_expires_at = ?,
+                    content_expired = ?,
+                    agent_task_id = ?,
+                    context_id = ?,
+                    next_observation_at = ?,
+                    exchange_state = ?,
+                    identifiers_expire_at = ?,
+                    payload = ?
+                WHERE owner_id = ? AND id = ?
+                  AND json_extract(payload, '$.run_version') = ?
+                  AND exchange_state = 'queued'
+                """,
+                (
+                    opened.dispatched_at.isoformat() if opened.dispatched_at else None,
+                    opened.manifest.token if opened.manifest else None,
+                    opened.content_expires_at.isoformat(),
+                    int(opened.content_expired),
+                    *self._a2a_run_columns(opened),
+                    self._payload(opened),
+                    opened.owner_id,
+                    opened.id,
+                    expected_version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return None
+            row = conn.execute(
+                "SELECT payload FROM agent_connections WHERE owner_id = ? AND id = ?",
+                (opened.owner_id, opened.connection_id),
+            ).fetchone()
+            payload = _decoded_payload(row["payload"]) if row is not None else None
+            if payload is not None and payload.get("first_dispatch_at") is None:
+                payload["first_dispatch_at"] = started_at.isoformat()
+                payload["updated_at"] = started_at.isoformat()
+                payload["revision"] = _bumped_revision(payload)
+                conn.execute(
+                    "UPDATE agent_connections SET payload = ? "
+                    "WHERE owner_id = ? AND id = ?",
+                    (
+                        json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                        opened.owner_id,
+                        opened.connection_id,
+                    ),
+                )
+        return opened
+
+    def acknowledge_duplicate_risk(
+        self, connection_id: str, *, owner_id: str, at: datetime
+    ) -> None:
+        """Stamp the one-time best-effort acknowledgement, once.
+
+        Under the caller's `command_lock`, and conditional on the stamp still
+        being absent, so two confirmations racing on one connection record the
+        first acknowledgement rather than the later one (AC-026).
+        """
+
+        with (
+            self._connection() as conn,
+            _sqlite_guard("Agent connection", connection_id),
+        ):
+            row = conn.execute(
+                "SELECT payload FROM agent_connections WHERE owner_id = ? AND id = ?",
+                (owner_id, connection_id),
+            ).fetchone()
+            payload = _decoded_payload(row["payload"]) if row is not None else None
+            if (
+                payload is None
+                or payload.get("best_effort_acknowledged_at") is not None
+            ):
+                return
+            payload["best_effort_acknowledged_at"] = at.isoformat()
+            payload["updated_at"] = at.isoformat()
+            payload["revision"] = _bumped_revision(payload)
+            conn.execute(
+                "UPDATE agent_connections SET payload = ? WHERE owner_id = ? AND id = ?",
+                (
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                    owner_id,
+                    connection_id,
+                ),
+            )
+
+    def interrupted_exchanges(self) -> list[tuple[str, str, str]]:
+        """Every exchange a restart left mid-flight: owner, run, state.
+
+        One pass over every owner, at boot, before any request is served. A
+        queued exchange and an open one need opposite treatment — one provably
+        never left, the other may already be at the agent — so the state comes
+        back with the row rather than being guessed from it (AC-032).
+        """
+
+        with self._connection() as conn:
+            rows = conn.execute("""
+                SELECT owner_id, id, exchange_state FROM agent_runs
+                WHERE exchange_state IN ('queued', 'open')
+                ORDER BY created_at ASC, id ASC
+                """).fetchall()
+        return [
+            (str(row["owner_id"]), str(row["id"]), str(row["exchange_state"]))
+            for row in rows
+        ]
+
     def find_run_by_manifest_token(
         self, token: str, *, owner_id: str
     ) -> AgentRunDocument | None:
