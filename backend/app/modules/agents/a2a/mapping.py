@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal, cast
+from typing import Literal, TypeGuard
 
 from app.modules.agents.a2a.types import (
     TERMINAL_TASK_STATES,
@@ -55,6 +55,19 @@ MAX_ARTIFACT_MEDIA_TYPE_CHARS = 128
 ResultAvailability = Literal["available", "too_large"]
 ArtifactKind = Literal["text", "file", "data", "link"]
 _SUMMARISED_PART_KINDS: frozenset[ArtifactKind] = frozenset({"file", "data", "link"})
+
+
+def _is_summarised(kind: str) -> TypeGuard[ArtifactKind]:
+    """Whether a part kind earns a placeholder row.
+
+    A ``TypeGuard`` rather than a bare membership test, so the narrowing to
+    ``ArtifactKind`` is one every supported mypy performs. Without it the caller
+    needs a ``cast``, and a checker that *does* narrow set membership on its own
+    then reports that cast as redundant — stating the narrowing once here keeps
+    both of them green with no suppression.
+    """
+
+    return kind in _SUMMARISED_PART_KINDS
 
 
 @dataclass(frozen=True)
@@ -154,7 +167,7 @@ def _artifact_summaries(task: Task, *, limit: int) -> tuple[ArtifactSummary, ...
             # "text" is already in the result; "unknown" means the agent sent a
             # shape the spec does not name, and a placeholder that cannot say
             # what it stands for tells the user nothing.
-            if kind not in _SUMMARISED_PART_KINDS:
+            if not _is_summarised(kind):
                 continue
             raw_name = artifact.name or part.name
             raw_media_type = part.effective_media_type
@@ -166,7 +179,7 @@ def _artifact_summaries(task: Task, *, limit: int) -> tuple[ArtifactSummary, ...
                         if raw_media_type
                         else None
                     ),
-                    kind=cast(ArtifactKind, kind),
+                    kind=kind,
                 )
             )
             if len(summaries) >= limit:
