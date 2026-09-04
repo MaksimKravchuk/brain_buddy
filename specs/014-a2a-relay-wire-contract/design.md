@@ -324,10 +324,16 @@ matches `spec.md` line 19, which declares the same thing.
   Task and run IDs — wrap on word boundaries or break inside the token.
 - **Scrolling**: `M-01-S01`, `M-01-S10 – S16`, `M-02-S01/S02/S07/S10` and every `M-03`
   run frame scroll vertically, including the new `M-03-S26` succession frame, whose
-  timeline is the longest on the screen. In `M-02` the manifest scrolls inside the sheet
-  while **Send to agent** and **Cancel** stay pinned to the bottom, so the consent action
-  is never scrolled off — the push callback address is one more line inside the scrolling
-  manifest and does not displace it.
+  timeline is the longest on the screen. In `M-02` the sheet is bounded by the frame: the
+  manifest and the disclosures scroll in a body between a fixed header and a pinned
+  actions footer, so **Send to agent** and **Cancel** are on screen at every scroll
+  position and the consent action can never be scrolled off. The push callback address is
+  one more line inside the scrolling body and displaces nothing. Verified by rendering at
+  390×851 — before this was structured, the manifest overran the frame and the actions
+  were not reachable at all. In the static mockup a frame whose defining content sits
+  further down (`M-02-S02`, `M-02-S12 – S14`) is drawn part-scrolled, faded at both edges,
+  so the tier block and the acknowledgement row are visible; the header and footer are
+  fixed in every frame.
 - **Tap targets**: 44pt minimum honored. Every action in a sheet is a 44pt-tall row;
   connection-card actions wrap two-up rather than shrinking; the answer field is 56px.
   **Check again** on `M-03-S04` and **Copy link** on `M-03-S10` are both full 44pt rows.

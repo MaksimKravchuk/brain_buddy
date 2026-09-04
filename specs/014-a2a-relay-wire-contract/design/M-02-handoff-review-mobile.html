@@ -145,6 +145,18 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
 .phone .content{flex:1 1 auto;overflow:hidden;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
 .phone .tabbar{flex:0 0 auto;height:66px;background:var(--raised);border-top:1px solid var(--bd);display:flex;align-items:center;justify-content:space-around;padding-bottom:10px;font-size:10px;color:var(--fg5)}
 .sheet{margin-top:auto;background:var(--raised);border:1px solid var(--bd);border-top-left-radius:var(--r-xl);border-top-right-radius:var(--r-xl);box-shadow:var(--sh-float);padding:16px;display:flex;flex-direction:column;gap:12px}
+/* A review sheet is bounded by the 851px frame: the manifest scrolls inside it and the
+   confirm/cancel actions stay pinned at the bottom, inside one-handed reach. */
+.sheet.tall{max-height:720px;min-height:0;overflow:hidden;gap:0;padding:16px 16px 0}
+.sheet.tall .grabber{margin-bottom:12px}
+.sheet-head{flex:0 0 auto;display:flex;flex-direction:column;gap:12px;padding-bottom:12px}
+.sheet-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-bottom:18px;-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 30px),transparent 100%);mask-image:linear-gradient(to bottom,#000 calc(100% - 30px),transparent 100%)}
+.sheet-foot{flex:0 0 auto;display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--bd);padding:12px 0 16px;background:var(--raised)}
+/* Frames whose defining content sits further down the manifest are drawn part-scrolled,
+   faded at both edges, so the affordance the state is named for is actually visible. */
+.sheet-body.scrolled{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 26px,#000 calc(100% - 30px),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 26px,#000 calc(100% - 30px),transparent 100%)}
+.sheet-body.scrolled > :first-child{margin-top:-300px}
+.sheet-body.scrolled.far > :first-child{margin-top:-650px}
 .grabber{width:36px;height:4px;border-radius:var(--r-full);background:var(--fg7);margin:0 auto 4px}
 .scrim{position:relative;flex:1 1 auto;background:rgba(248,250,252,.8);display:flex;flex-direction:column}
 .tap44{min-height:44px}
@@ -173,12 +185,15 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <div class="phone">
     <div class="status"><span>9:41</span><span>390 × 851</span></div>
     <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
-    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet" style="max-height:640px">
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
     <div class="grabber"></div>
+    <div class="sheet-head">
     <p class="label">Review before sending</p>
     <p class="title" style="font-size:17px">Hand to agent</p>
     <p class="caption">Write the migration runbook for the relay cutover</p>
-    <div class="stack g2">
+    </div>
+    <div class="sheet-body">
+        <div class="stack g2">
       <p class="label">Agent</p>
       <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
         <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
@@ -210,7 +225,10 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
       <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Cards do not
       advertise it, so BrainBuddy can only find out once you request it.</p></div><div class="card tint-warn" style="border-radius:14px">
       <p class="caption" style="color:var(--warn-fg)">Everything above is copied out of BrainBuddy to an agent you
-      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div></div>
+      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div>
+  </div></div>
     
   </div>
   <p class="phonecap"><span class="sid">M-02-S01</span>default (review) — Guaranteed single start</p>
@@ -219,12 +237,15 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <div class="phone">
     <div class="status"><span>9:41</span><span>390 × 851</span></div>
     <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
-    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet" style="max-height:640px">
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
     <div class="grabber"></div>
+    <div class="sheet-head">
     <p class="label">Review before sending</p>
     <p class="title" style="font-size:17px">Hand to agent</p>
     <p class="caption">Write the migration runbook for the relay cutover</p>
-    <div class="stack g2">
+    </div>
+    <div class="sheet-body scrolled">
+        <div class="stack g2">
       <p class="label">Agent</p>
       <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
         <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
@@ -260,10 +281,14 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
       <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Cards do not
       advertise it, so BrainBuddy can only find out once you request it.</p></div><div class="card tint-warn" style="border-radius:14px">
       <p class="caption" style="color:var(--warn-fg)">Everything above is copied out of BrainBuddy to an agent you
-      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div></div>
+      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div>
+  </div></div>
     
   </div>
   <p class="phonecap"><span class="sid">M-02-S02</span>review — Best-effort single start</p>
+  <p class="phonecap">Drawn part-scrolled: the sheet opens at the top of the manifest, and this frame is scrolled to the tier block so the disclosure and the extension link are visible. Send and Cancel stay pinned throughout.</p>
   
 </div><div class="phonewrap">
   <div class="phone">
@@ -337,12 +362,15 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <div class="phone">
     <div class="status"><span>9:41</span><span>390 × 851</span></div>
     <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
-    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet" style="max-height:640px">
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
     <div class="grabber"></div>
+    <div class="sheet-head">
     <p class="label">Review before sending</p>
     <p class="title" style="font-size:17px">Hand to agent</p>
     <p class="caption">Write the migration runbook for the relay cutover</p>
-    <div class="card tint-warn" style="border-radius:14px"><p class="caption" style="color:var(--warn-fg)">
+    </div>
+    <div class="sheet-body">
+        <div class="card tint-warn" style="border-radius:14px"><p class="caption" style="color:var(--warn-fg)">
       <strong>What would be sent changed since you reviewed it.</strong> The review has been refreshed — read it again
       before sending. Nothing was dispatched.</p></div>
     <div class="stack g2">
@@ -377,7 +405,10 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
       <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Cards do not
       advertise it, so BrainBuddy can only find out once you request it.</p></div><div class="card tint-warn" style="border-radius:14px">
       <p class="caption" style="color:var(--warn-fg)">Everything above is copied out of BrainBuddy to an agent you
-      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div><span class="btn primary tap44" style="padding:12px">Send to agent</span></div></div>
+      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px">Send to agent</span></div>
+  </div></div>
     
   </div>
   <p class="phonecap"><span class="sid">M-02-S07</span>re-review required — what would be sent changed</p>
@@ -418,12 +449,15 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <div class="phone">
     <div class="status"><span>9:41</span><span>390 × 851</span></div>
     <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
-    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet" style="max-height:640px">
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
     <div class="grabber"></div>
+    <div class="sheet-head">
     <p class="label">Review before sending</p>
     <p class="title" style="font-size:17px">Hand to agent</p>
     <p class="caption">Write the migration runbook for the relay cutover</p>
-    <div class="stack g2">
+    </div>
+    <div class="sheet-body">
+        <div class="stack g2">
       <p class="label">Agent</p>
       <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
         <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
@@ -463,7 +497,9 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
     <div class="card tint-warn" style="border-radius:14px"><p class="caption" style="color:var(--warn-fg)">
       <strong>Offline.</strong> Sending is unavailable and nothing is queued. If the app closes here, reopening loads
       the server projection and rebuilds this review before anything can leave.</p></div>
-    <span class="btn primary tap44" style="padding:12px;opacity:.45">Send to agent</span></div></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px;opacity:.45">Send to agent</span></div>
+  </div></div>
     
   </div>
   <p class="phonecap"><span class="sid">M-02-S10</span>offline / interrupted — send disabled, nothing queued</p>
@@ -488,12 +524,15 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <div class="phone">
     <div class="status"><span>9:41</span><span>390 × 851</span></div>
     <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
-    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet" style="max-height:640px">
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
     <div class="grabber"></div>
+    <div class="sheet-head">
     <p class="label">Review before sending</p>
     <p class="title" style="font-size:17px">Hand to agent</p>
     <p class="caption">Write the migration runbook for the relay cutover</p>
-    <div class="stack g2">
+    </div>
+    <div class="sheet-body scrolled far">
+        <div class="stack g2">
       <p class="label">Agent</p>
       <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
         <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
@@ -533,21 +572,28 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
       <label class="radio tap44" style="align-items:flex-start"><span class="box"></span>
       <span style="font-size:13px;color:var(--warn-fg)">I understand that a duplicate task is possible with this
       agent</span></label>
-      <p class="micro" style="color:var(--warn-fg)">Asked once, on your first hand-off to this agent.</p></div><span class="btn primary tap44" style="padding:12px;opacity:.45">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div></div>
+      <p class="micro" style="color:var(--warn-fg)">Asked once, on your first hand-off to this agent.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px;opacity:.45">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div>
+  </div></div>
     
   </div>
   <p class="phonecap"><span class="sid">M-02-S12</span>best-effort, first hand-off — not acknowledged, sending disabled</p>
+  <p class="phonecap">Drawn part-scrolled to the acknowledgement row, which is what this state is about. The manifest above it is unchanged and scrolls back into view.</p>
   <p class="phonecap">AC-026 / FR-003. Send stays disabled until the box is ticked; the checkbox row is a 44pt target.</p>
 </div><div class="phonewrap">
   <div class="phone">
     <div class="status"><span>9:41</span><span>390 × 851</span></div>
     <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
-    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet" style="max-height:640px">
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
     <div class="grabber"></div>
+    <div class="sheet-head">
     <p class="label">Review before sending</p>
     <p class="title" style="font-size:17px">Hand to agent</p>
     <p class="caption">Write the migration runbook for the relay cutover</p>
-    <div class="stack g2">
+    </div>
+    <div class="sheet-body scrolled far">
+        <div class="stack g2">
       <p class="label">Agent</p>
       <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
         <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
@@ -587,21 +633,28 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
       <label class="radio tap44" style="align-items:flex-start"><span class="box on"></span>
       <span style="font-size:13px;color:var(--warn-fg)">I understand that a duplicate task is possible with this
       agent</span></label>
-      <p class="micro" style="color:var(--warn-fg)">Acknowledged. BrainBuddy will not ask again for this agent.</p></div><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div></div>
+      <p class="micro" style="color:var(--warn-fg)">Acknowledged. BrainBuddy will not ask again for this agent.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div>
+  </div></div>
     
   </div>
   <p class="phonecap"><span class="sid">M-02-S13</span>best-effort, first hand-off — acknowledged, sending enabled</p>
+  <p class="phonecap">Drawn part-scrolled to the acknowledgement row.</p>
   
 </div><div class="phonewrap">
   <div class="phone">
     <div class="status"><span>9:41</span><span>390 × 851</span></div>
     <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
-    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet" style="max-height:640px">
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
     <div class="grabber"></div>
+    <div class="sheet-head">
     <p class="label">Review before sending</p>
     <p class="title" style="font-size:17px">Hand to agent</p>
     <p class="caption">Write the migration runbook for the relay cutover</p>
-    <div class="stack g2">
+    </div>
+    <div class="sheet-body scrolled far">
+        <div class="stack g2">
       <p class="label">Agent</p>
       <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
         <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
@@ -639,10 +692,14 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
       <p class="caption" style="color:var(--warn-fg)">Everything above is copied out of BrainBuddy to an agent you
       operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div><div class="card tint-sunk" style="border-radius:14px">
       <p class="micro">You acknowledged the duplicate risk for this agent on your first hand-off, so there is no
-      acknowledgement step here. The disclosure above still applies to every hand-off.</p></div><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div></div>
+      acknowledgement step here. The disclosure above still applies to every hand-off.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div>
+  </div></div>
     
   </div>
   <p class="phonecap"><span class="sid">M-02-S14</span>best-effort, later hand-off — disclosure without the acknowledgement</p>
+  <p class="phonecap">Drawn part-scrolled to where the acknowledgement row would be, showing that it is absent.</p>
   <p class="phonecap">AC-026. The disclosure and the extension link stay; only the acknowledgement is one-time.</p>
 </div></div>
 
