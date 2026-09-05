@@ -295,7 +295,7 @@ requires-dist = [
     { name = "argon2-cffi", specifier = ">=23.1,<26" },
     { name = "av", specifier = ">=12,<19" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.3,<27.0" },
-    { name = "cryptography", specifier = ">=42.0,<47" },
+    { name = "cryptography", specifier = ">=42.0,<51" },
     { name = "email-validator", specifier = ">=2.1,<3.0" },
     { name = "fastapi", specifier = ">=0.110,<1.0" },
     { name = "httpx", specifier = ">=0.25,<0.29" },
