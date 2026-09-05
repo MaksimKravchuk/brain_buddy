@@ -880,6 +880,55 @@ class TestTheBespokeWireIsGone:
         )
         assert rotated.status_code == 404
 
+    def test_014_FR_017_the_release_runbook_carries_the_three_steps_it_owes(
+        self,
+    ) -> None:
+        """T127's assertion: the runbook is evidence, so it has to say the words.
+
+        Three things in `docs/external-agent-relay-release.md` exist only as
+        prose and can only be checked here: the pre-deploy count this suite
+        produces the number for, the rollout gate Principle III requires, and
+        the closed field list that keeps the attended Hermes run from becoming
+        a leak. A runbook that lost any of them would still read fine.
+        """
+
+        doc = (
+            Path(__file__).resolve().parents[2]
+            / "docs"
+            / "external-agent-relay-release.md"
+        ).read_text(encoding="utf-8")
+        lowered = doc.lower()
+
+        # 1. the pre-deploy count, by the name the ledger row answers to.
+        assert "pre-deploy: count the bespoke connection rows" in lowered
+        assert "bespoke_connection_rows" in doc
+
+        # 2. the rollout gate, stated as a prohibition rather than an intention.
+        assert "external_agent_relay` MUST NOT be turned ON for any user" in doc
+        assert "testflight" in lowered and "app store" in lowered
+
+        # 3. the live-evidence field list, both halves. The forbidden half is
+        #    what makes the permitted half safe, so both are asserted.
+        assert "hermes live evidence" in lowered
+        assert "closed field list" in lowered
+        for permitted in (
+            "protocol version",
+            "guarantee tier",
+            "correlation id",
+            "run id",
+            "`primary_state_label` sequence",
+        ):
+            assert permitted in lowered, f"runbook no longer permits {permitted!r}"
+        for forbidden in (
+            "interface_url",
+            "credential",
+            "push token",
+            "card description",
+            "supporting items",
+            "model output",
+        ):
+            assert forbidden in lowered, f"runbook no longer forbids {forbidden!r}"
+
     def test_014_FR_012_the_bespoke_connector_module_no_longer_exists(self) -> None:
         """Deleted, not merely unused.
 
