@@ -439,8 +439,11 @@ class TestHermesHandOff:
 
         The stub answers after the exchange's dispatch wait, so the hand-off
         closes as **Sent** with nothing invented about the outcome. The truth
-        arrives twice over: the agent's push wakes an observation at once, and
-        the schedule would have found it anyway.
+        arrives on the schedule: a token-secured Hermes refuses to push to a
+        private callback (its own SSRF guard, recorded in review.md), so the
+        observation that settles the run is the scheduled one, and that is
+        exactly what the trigger assertion below checks. Push, where an agent
+        can deliver it, is an acceleration; the schedule is the guarantee.
         """
 
         delayed = start_stub(request, tmp_path, delay_seconds=DELAY_SECONDS)
