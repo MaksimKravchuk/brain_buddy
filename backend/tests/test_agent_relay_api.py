@@ -2786,9 +2786,7 @@ class TestPushCallbackRoute:
         assert stored.push_token_fingerprint is not None
         return run["id"], service.push_token_for(stored) or ""
 
-    def _push(
-        self, client: TestClient, run_id: str, token: str
-    ) -> Any:
+    def _push(self, client: TestClient, run_id: str, token: str) -> Any:
         return client.post(f"/api/a2a/push/{run_id}/{token}", content=b"{}")
 
     def test_014_FR_008_a_verified_push_is_accepted_and_schedules_an_observation(
@@ -2821,7 +2819,9 @@ class TestPushCallbackRoute:
         owner_id = service.agent_repo.owner_of_run(run_id) or ""
         run = service.agent_repo.get_run(run_id, owner_id=owner_id)
         far_off = utcnow() + timedelta(hours=6)
-        service.agent_repo.save_run(run.model_copy(update={"next_observation_at": far_off}))
+        service.agent_repo.save_run(
+            run.model_copy(update={"next_observation_at": far_off})
+        )
 
         assert self._push(client, run_id, token).status_code == 204
 
@@ -2998,8 +2998,7 @@ class TestPushCallbackRoute:
         attempts = PUSH_GLOBAL_MAX_PER_MINUTE + 100
         try:
             statuses = [
-                self._push(client, run_id, token).status_code
-                for _ in range(attempts)
+                self._push(client, run_id, token).status_code for _ in range(attempts)
             ]
         finally:
             service.agent_repo.owner_of_run = original  # type: ignore[method-assign]
@@ -3101,9 +3100,7 @@ class TestPushCallbackRoute:
         assert "403" in auth_docs and "404" in auth_docs
         assert "/a2a/push/" in auth_docs
         assert "429" in auth_docs
-        push_lines = [
-            line for line in auth_docs.splitlines() if "a2a/push" in line
-        ]
+        push_lines = [line for line in auth_docs.splitlines() if "a2a/push" in line]
         assert any(
             "403" in line and "404" in line for line in push_lines
         ), "docs/auth.md must say the push callback answers 403 rather than 404"

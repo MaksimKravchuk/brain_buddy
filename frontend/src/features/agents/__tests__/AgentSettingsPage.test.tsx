@@ -148,7 +148,7 @@ describe("AgentSettingsPage", () => {
     await user.click(within(card).getByRole("button", { name: /disconnect/i }));
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText("Confirm with your password"), "hunter2hunter2");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect", exact: true }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     await waitFor(() => expect(disconnect).toHaveBeenCalledTimes(1));
   });
 
@@ -1027,7 +1027,7 @@ describe("AgentSettingsPage", () => {
 
     await act(async () => {
       await user.type(within(dialog).getByLabelText("Confirm with your password"), "hunter2hunter2");
-      await user.click(within(dialog).getByRole("button", { name: "Disconnect", exact: true }));
+      await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     });
 
     await waitFor(() =>
@@ -1049,7 +1049,7 @@ describe("AgentSettingsPage", () => {
     const user = userEvent.setup();
     await user.click(within(card).getByRole("button", { name: /disconnect/i }));
     const dialog = screen.getByRole("dialog");
-    const confirm = within(dialog).getByRole("button", { name: "Disconnect", exact: true });
+    const confirm = within(dialog).getByRole("button", { name: /^Disconnect$/ });
     expect(confirm).toBeEnabled();
 
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
@@ -1074,9 +1074,9 @@ describe("AgentSettingsPage", () => {
     await user.click(within(card).getByRole("button", { name: /disconnect/i }));
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText("Confirm with your password"), "hunter2hunter2");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect", exact: true }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     await within(dialog).findByRole("alert");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect", exact: true }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     await waitFor(() => expect(disconnect).toHaveBeenCalledTimes(2));
 
     expect(disconnect.mock.calls[1][1]).toEqual(disconnect.mock.calls[0][1]);
@@ -1095,11 +1095,11 @@ describe("AgentSettingsPage", () => {
     const dialog = screen.getByRole("dialog");
     const password = within(dialog).getByLabelText("Confirm with your password");
     await user.type(password, "wrong");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect", exact: true }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     await within(dialog).findByRole("alert");
     await user.clear(password);
     await user.type(password, "correct");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect", exact: true }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     await waitFor(() => expect(disconnect).toHaveBeenCalledTimes(2));
 
     expect(disconnect.mock.calls[1][2]).not.toBe(disconnect.mock.calls[0][2]);
@@ -1156,7 +1156,7 @@ describe("AgentSettingsPage", () => {
     await user.click(within(card).getByRole("button", { name: /disconnect/i }));
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText("Confirm with your password"), "wrong-password");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect", exact: true }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
       /current password is incorrect.*corr-disconnect-2/i

@@ -2871,7 +2871,11 @@ class TestRelayRetentionTiers:
                 blocked_reason="Agent needs additional authentication",
                 result_availability="too_large",
                 artifacts_summary=[
-                    {"name": "report.pdf", "media_type": "application/pdf", "kind": "file"}
+                    {
+                        "name": "report.pdf",
+                        "media_type": "application/pdf",
+                        "kind": "file",
+                    }
                 ],
             )
         )
@@ -2899,7 +2903,9 @@ class TestRelayRetentionTiers:
         """The predicate reads the columns, not the flag it already set."""
 
         repo.create_run(
-            make_run(content_expires_at=NOW - timedelta(seconds=1), content_expired=True)
+            make_run(
+                content_expires_at=NOW - timedelta(seconds=1), content_expired=True
+            )
         )
         run = repo.get_run("agentrun_1", owner_id="user_a")
         repo.save_run(run.model_copy(update={"blocked_reason": "Snuck back in"}))
@@ -3011,9 +3017,7 @@ class TestRelayRetentionTiers:
 
         assert repo.expire_due_identifiers(now=NOW) == 0
 
-        assert (
-            repo.get_run("agentrun_1", owner_id="user_a").agent_task_id == "task-a1"
-        )
+        assert repo.get_run("agentrun_1", owner_id="user_a").agent_task_id == "task-a1"
         # Idempotent: a second pass over an already-expired run does nothing.
         repo.save_run(
             repo.get_run("agentrun_1", owner_id="user_a").model_copy(
@@ -3022,6 +3026,42 @@ class TestRelayRetentionTiers:
         )
         assert repo.expire_due_identifiers(now=NOW) == 1
         assert repo.expire_due_identifiers(now=NOW) == 0
+
+    def test_014_FR_016_the_identifier_sweep_skips_a_row_it_cannot_parse(
+        self, repo: AgentRepository, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """One broken row costs one skipped run, never every other owner's sweep."""
+
+        import logging
+
+        repo.create_run(
+            make_run(
+                run_id="agentrun_broken",
+                dispatched_at=NOW - timedelta(days=91),
+                agent_task_id="task-a1",
+            )
+        )
+        repo.create_run(
+            make_run(
+                owner_id="user_b",
+                run_id="agentrun_healthy",
+                dispatched_at=NOW - timedelta(days=91),
+                agent_task_id="task-b1",
+            )
+        )
+        with sqlite3.connect(repo.root / "agents.sqlite3") as raw:
+            raw.execute(
+                "UPDATE agent_runs SET payload = ? WHERE id = ?",
+                ('{"broken": true}', "agentrun_broken"),
+            )
+
+        with caplog.at_level(logging.WARNING):
+            assert repo.expire_due_identifiers(now=NOW) == 1
+
+        assert repo.get_run("agentrun_healthy", owner_id="user_b").agent_task_id is None
+        assert any(
+            "agentrun_broken" in record.getMessage() for record in caplog.records
+        )
 
     def test_014_FR_016_delete_all_for_owner_covers_every_table(
         self, repo: AgentRepository

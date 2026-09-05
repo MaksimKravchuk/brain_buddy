@@ -109,6 +109,32 @@ AgentArtifactKind = Literal["text", "file", "data", "link"]
 AgentObservationTrigger = Literal["schedule", "push", "command"]
 """What the next observation pass is owed. ``None`` means the schedule."""
 
+AgentPrimaryStateLabel = Literal[
+    "Not sent",
+    "Queued",
+    "Sent",
+    "Delivery unconfirmed",
+    "Accepted",
+    "Running",
+    "Needs you",
+    "Cancellation requested",
+    "Agent reported complete",
+    "Failed",
+    "Cancelled",
+    "Stopped reporting",
+    "Agent no longer reports this run",
+    "Connection disconnected",
+    "Content expired under retention policy",
+]
+"""Every label a surface may render verbatim, and nothing else (FR-014).
+
+Declared here, beside the projection that produces it, and re-exported by
+`schemas.agents` — two literal lists would be one careless edit away from
+disagreeing, and the disagreement would surface as a 500 on a run the user is
+already worried about. The one word that must never appear is "Complete":
+BrainBuddy did not verify the work.
+"""
+
 AgentCancelOutcome = Literal[
     "none",
     "requested",
@@ -764,50 +790,50 @@ def stopped_reporting(
 
 def primary_state_label(
     run: AgentRunDocument, *, now: datetime, reporting_window: timedelta
-) -> str:
+) -> AgentPrimaryStateLabel:
     """The single label every surface renders verbatim (FR-014).
 
-    The order is the whole content of the rule. **Queued** is checked before
+    The *order* is the whole content of this rule, so it is written as an
+    ordered table rather than as branching: the precedence is the thing under
+    review, and a table can be read top to bottom without tracing control flow.
+
+    Two entries earn their position explicitly. **Queued** is checked before
     the dispatch labels because a run's durable `dispatch_state` is already
-    `delivery_unconfirmed` at reservation while nothing has left BrainBuddy;
-    and **Agent no longer reports this run** sits above **Stopped reporting**
+    `delivery_unconfirmed` at reservation while nothing has left BrainBuddy.
+    And **Agent no longer reports this run** sits above **Stopped reporting**
     because "the agent told us the task is gone" is knowledge, while "we have
     not heard back" is the absence of it.
     """
 
-    if run.content_expired:
-        return "Content expired under retention policy"
-    if run.connection_disconnected_at is not None:
-        return "Connection disconnected"
-    if run.reported_state == "completed":
+    ordered: tuple[tuple[bool, AgentPrimaryStateLabel], ...] = (
+        (run.content_expired, "Content expired under retention policy"),
+        (run.connection_disconnected_at is not None, "Connection disconnected"),
         # Never "Complete": BrainBuddy did not verify the work (FR-011).
-        return "Agent reported complete"
-    if run.reported_state == "failed":
-        return "Failed"
-    if run.reported_state == "cancelled":
-        return "Cancelled"
-    if run.agent_task_missing_at is not None:
-        return "Agent no longer reports this run"
-    if stopped_reporting(run, now=now, reporting_window=reporting_window):
-        return "Stopped reporting"
-    if run.reported_state == "blocked":
-        return "Needs you"
-    if run.cancel_requested_at is not None:
-        return "Cancellation requested"
-    if run.reported_state == "running":
-        return "Running"
-    if run.reported_state == "accepted":
-        return "Accepted"
-    if run.exchange_state == "queued":
-        return "Queued"
-    if run.exchange_state == "open" and run.dispatch_state != "not_sent":
+        (run.reported_state == "completed", "Agent reported complete"),
+        (run.reported_state == "failed", "Failed"),
+        (run.reported_state == "cancelled", "Cancelled"),
+        (run.agent_task_missing_at is not None, "Agent no longer reports this run"),
+        (
+            stopped_reporting(run, now=now, reporting_window=reporting_window),
+            "Stopped reporting",
+        ),
+        (run.reported_state == "blocked", "Needs you"),
+        (run.cancel_requested_at is not None, "Cancellation requested"),
+        (run.reported_state == "running", "Running"),
+        (run.reported_state == "accepted", "Accepted"),
+        (run.exchange_state == "queued", "Queued"),
         # An exchange a worker is holding may already be at the agent, so
         # **Sent** is the honest label until it closes without evidence.
-        return "Sent"
-    if run.dispatch_state == "delivery_unconfirmed":
-        return "Delivery unconfirmed"
-    if run.dispatch_state == "sent":
-        return "Sent"
+        (
+            run.exchange_state == "open" and run.dispatch_state != "not_sent",
+            "Sent",
+        ),
+        (run.dispatch_state == "delivery_unconfirmed", "Delivery unconfirmed"),
+        (run.dispatch_state == "sent", "Sent"),
+    )
+    for applies, label in ordered:
+        if applies:
+            return label
     return "Not sent"
 
 
@@ -979,6 +1005,7 @@ __all__ = [
     "AgentArtifactSummary",
     "AgentCancelOutcome",
     "AgentObservationTrigger",
+    "AgentPrimaryStateLabel",
     "AgentResultAvailability",
     "AgentRunEventKind",
     "AgentRunEventTrigger",

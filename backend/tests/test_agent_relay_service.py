@@ -507,9 +507,7 @@ def wire_commands_of(client: FakeA2AClient) -> list[dict[str, Any]]:
             continue
         if method != "SendMessage":
             continue
-        command_id = kwargs["message"].get("metadata", {}).get(
-            "brainbuddy.command_id"
-        )
+        command_id = kwargs["message"].get("metadata", {}).get("brainbuddy.command_id")
         if command_id is not None:
             delivered.append({"type": "reply", "command_id": command_id})
     return delivered
@@ -8485,9 +8483,7 @@ class ObservedRelay:
         self.a2a_client = a2a_client
         self.connection_id = connect(service, key=f"{key}-create")
         make_ready(service, self.connection_id)
-        run_id_holder = dispatch(
-            service, self.connection_id, task_id=task_id, key=key
-        )
+        run_id_holder = dispatch(service, self.connection_id, task_id=task_id, key=key)
         self.run_id = run_id_holder.id
         a2a_client.calls.clear()
 
@@ -8559,7 +8555,9 @@ class TestApplyObservation:
         observed.observe(observed_task("t1", observed.run_id))
         clock.advance(timedelta(seconds=5))
         observed.observe(
-            observed_task("t1", observed.run_id, "TASK_STATE_INPUT_REQUIRED", text="Which?"),
+            observed_task(
+                "t1", observed.run_id, "TASK_STATE_INPUT_REQUIRED", text="Which?"
+            ),
             trigger="push",
         )
 
@@ -8701,9 +8699,10 @@ class TestApplyObservation:
         assert stored.blocked_reason is None
         assert stored.result_availability is None
         assert stored.last_contact_at == clock.now
-        assert [event.summary for event in service.agent_repo.list_events(
-            stored.id, owner_id=OWNER
-        )] == [None]
+        assert [
+            event.summary
+            for event in service.agent_repo.list_events(stored.id, owner_id=OWNER)
+        ] == [None]
 
     def test_014_FR_015_last_contact_is_the_latest_of_every_kind_of_contact(
         self, observed: ObservedRelay, clock: Clock
@@ -9438,3 +9437,263 @@ class TestDisconnectAndBoundedEvidence:
         assert "card" in lowered and "fingerprint" in lowered
         assert "run id" in lowered or "run identifier" in lowered
         assert "purge" in lowered
+
+
+class TestObservationReadEdges:
+    """The reads the observation lane makes, and the answers it refuses to invent."""
+
+    def test_014_FR_008_a_run_with_no_task_yet_is_looked_up_not_read(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient, clock: Clock
+    ) -> None:
+        """The start exchange never named a task, so `GetTask` has no id to use."""
+
+        service = observed.service
+        run = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        assert run.agent_task_id is None, "the start exchange named no task"
+        a2a_client.calls.clear()
+
+        service.read_agent_task(
+            service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        )
+
+        assert a2a_client.calls_to("GetTask") == []
+        assert len(a2a_client.calls_to("ListTasks")) == 1
+
+    def test_014_FR_008_history_is_fetched_only_when_the_state_needs_text(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient
+    ) -> None:
+        """An ordinary poll never carries the conversation with it."""
+
+        service = observed.service
+        stored = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        service.agent_repo.save_run(stored.model_copy(update={"agent_task_id": "t1"}))
+        run = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        a2a_client.script(
+            "GetTask",
+            A2AResult(
+                ok=True, correlation_id="c", task=observed_task("t1", observed.run_id)
+            ),
+        )
+        a2a_client.calls.clear()
+
+        service.read_agent_task(run)
+        assert [
+            call[2]["history_length"] for call in a2a_client.calls_to("GetTask")
+        ] == [0]
+
+        # A question the user has to answer is the case that needs the text.
+        a2a_client.script(
+            "GetTask",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task("t1", observed.run_id, "TASK_STATE_INPUT_REQUIRED"),
+            ),
+        )
+        a2a_client.calls.clear()
+
+        service.read_agent_task(run)
+        assert [
+            call[2]["history_length"] for call in a2a_client.calls_to("GetTask")
+        ] == [0, 20]
+
+    def test_014_FR_008_a_service_without_a_wire_reads_nothing_at_all(
+        self, observed: ObservedRelay
+    ) -> None:
+        """Absent is not empty: a service with no client answers nothing."""
+
+        service = observed.service
+        run = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        service.a2a_client = None
+
+        assert service.read_agent_task(run) is None
+
+    def test_014_FR_008_a_probe_answer_is_adopted_from_the_task_list(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient, clock: Clock
+    ) -> None:
+        """The `ListTasks` answer is a list, and the newest of it is the run's."""
+
+        service = observed.service
+        run = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        service.apply_agent_task(
+            run,
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                tasks=(observed_task("t9", observed.run_id, "TASK_STATE_WORKING"),),
+            ),
+        )
+
+        after = observed.projection()
+        assert after.agent_task_id == "t9"
+        assert after.reported_state == "running"
+
+    def test_014_FR_008_a_foreign_answer_refreshes_the_schedule_and_nothing_else(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """Contact with the agent, and no news about the work."""
+
+        service = observed.service
+        run = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        contact = run.last_contact_at
+        clock.advance(timedelta(minutes=1))
+
+        service.apply_agent_task(
+            run,
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task("t9", "someone-elses-run"),
+            ),
+        )
+
+        after = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        assert after.reported_state is None
+        assert after.last_contact_at == contact
+        assert after.next_observation_at is not None
+
+    def test_014_FR_010_a_reply_is_confirmed_by_the_history_that_carries_it(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient, clock: Clock
+    ) -> None:
+        """AC-015. The agent's own record, not BrainBuddy's inference from timing.
+
+        The reply exchange ended without an answer, so the command was honestly
+        left unconfirmed. A later observation whose history carries the command
+        id is the only evidence that can settle it, and it does.
+        """
+
+        service = observed.service
+        observed.observe(
+            observed_task(
+                "t1", observed.run_id, "TASK_STATE_INPUT_REQUIRED", text="Which env?"
+            )
+        )
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+        replied = service.reply_to_run(
+            observed.run_id,
+            AgentReplyRequest(
+                message="Use staging.", expected_revision=observed.projection().revision
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-history-reply",
+        )
+        command_id = reply_command(replied).id
+        assert reply_command(replied).delivery == "unconfirmed"
+
+        clock.advance(timedelta(minutes=6))
+        acknowledged = Task.model_validate(
+            {
+                "id": "t1",
+                "contextId": observed.run_id,
+                "status": {
+                    "state": "TASK_STATE_WORKING",
+                    "timestamp": "2026-08-09T13:00:00Z",
+                },
+                "history": [{"messageId": command_id, "role": "ROLE_USER"}],
+            }
+        )
+        run = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        service.apply_agent_task(
+            run, A2AResult(ok=True, correlation_id="c", task=acknowledged)
+        )
+
+        settled = observed.projection()
+        assert reply_command(settled).delivery == "confirmed"
+        assert settled.reply_pending is False
+        # A second observation carrying the same history changes nothing.
+        service.apply_agent_task(
+            service.agent_repo.get_run(observed.run_id, owner_id=OWNER),
+            A2AResult(ok=True, correlation_id="c", task=acknowledged),
+        )
+        assert reply_command(observed.projection()).delivery == "confirmed"
+
+    def test_014_FR_010_a_reply_to_a_task_the_agent_forgot_stops_observation(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient
+    ) -> None:
+        """AC-020 reached through the reply path rather than through a poll."""
+
+        observed.observe(
+            observed_task(
+                "t1", observed.run_id, "TASK_STATE_INPUT_REQUIRED", text="Which env?"
+            )
+        )
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code="a2a_task_not_found",
+                a2a_error_code=-32001,
+            ),
+        )
+
+        run = observed.service.reply_to_run(
+            observed.run_id,
+            AgentReplyRequest(
+                message="Use staging.", expected_revision=observed.projection().revision
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-reply-missing",
+        )
+
+        assert run.agent_task_missing is True
+        assert run.primary_state_label == "Agent no longer reports this run"
+        assert reply_command(run).outcome_code == "a2a_task_not_found"
+        stored = observed.service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        assert stored.next_observation_at is None
+
+    def test_014_FR_010_an_agent_that_answers_with_a_message_confirms_the_reply(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient
+    ) -> None:
+        """Some runtimes never create a task: the answer *is* the result."""
+
+        observed.observe(
+            observed_task(
+                "t1", observed.run_id, "TASK_STATE_INPUT_REQUIRED", text="Which env?"
+            )
+        )
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                message=Message.model_validate(
+                    {
+                        "messageId": "m1",
+                        "contextId": observed.run_id,
+                        "role": "ROLE_AGENT",
+                        "parts": [{"text": "Staging it is."}],
+                    }
+                ),
+            ),
+        )
+
+        run = observed.service.reply_to_run(
+            observed.run_id,
+            AgentReplyRequest(
+                message="Use staging.", expected_revision=observed.projection().revision
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-reply-message",
+        )
+
+        assert reply_command(run).delivery == "confirmed"
+        assert run.reported_state == "completed"
+        assert run.result_text == "Staging it is."
+
+    def test_014_FR_008_a_purged_run_absorbs_no_missing_marker_either(
+        self, observed: ObservedRelay, service: AgentRelayService
+    ) -> None:
+        """Nothing a background worker learns may recreate a purged row."""
+
+        run_id = observed.run_id
+        service.delete_all_for_owner(owner_id=OWNER)
+
+        service.record_task_missing(run_id, owner_id=OWNER)
+        service.record_failed_contact(run_id, owner_id=OWNER)
+
+        assert service.agent_repo.list_runs_for_owner(owner_id=OWNER) == []
+        assert service.list_audit(owner_id=OWNER) == []

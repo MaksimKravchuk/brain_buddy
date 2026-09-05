@@ -3,8 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { AgentConnectionResponse } from "../../../api/agentTypes";
 import type { AgentRunResponse } from "../../../api/agentTypes";
 import {
+  artifactPlaceholderCopy,
   authSchemeLabel,
+  cancelOutcomeCopy,
+  compactRunLabel,
   dispatchStateDetail,
+  guaranteeTierLabel,
+  resultAvailabilityCopy,
   rateLimitRetryCopy,
   awaitsAnswer,
   capabilityDisclosure,
@@ -263,5 +268,73 @@ describe("agentCopy", () => {
     expect(
       dispatchStateDetail(runShape({ dispatch_state: "not_sent", dispatch_error_code: null }))
     ).toBeNull();
+  });
+});
+
+
+describe("014-FR-013 the observation-side copy", () => {
+  it("names an artifact's content type and never a download", () => {
+    expect(
+      artifactPlaceholderCopy({
+        name: "report.pdf",
+        media_type: "application/pdf",
+        kind: "file"
+      })
+    ).toBe("report.pdf · application/pdf");
+    // A placeholder that could not say what it stood for would tell the user
+    // nothing, so the kind fills in for a missing name.
+    expect(artifactPlaceholderCopy({ name: null, media_type: null, kind: "data" })).toBe(
+      "Untitled data"
+    );
+    expect(artifactPlaceholderCopy({ name: "  ", media_type: null, kind: "link" })).toBe(
+      "Untitled link"
+    );
+    expect(
+      artifactPlaceholderCopy({ name: "notes", media_type: null, kind: "text" })
+    ).toBe("notes");
+  });
+
+  it("014-FR-014 keeps the cancel outcome a secondary line, never the label", () => {
+    expect(cancelOutcomeCopy({ cancel_outcome: "unsupported" })).toBe(
+      "Cancellation not supported by this agent."
+    );
+    expect(cancelOutcomeCopy({ cancel_outcome: "not_cancelable" })).toBe(
+      "Cancellation not supported by this agent."
+    );
+    expect(cancelOutcomeCopy({ cancel_outcome: "unconfirmed" })).toBe(
+      "Cancellation request unconfirmed — you can try again."
+    );
+    expect(cancelOutcomeCopy({ cancel_outcome: "accepted" })).toBeNull();
+    expect(cancelOutcomeCopy({ cancel_outcome: "none" })).toBeNull();
+  });
+
+  it("014-FR-013 marks a too-large result rather than blaming the agent", () => {
+    expect(resultAvailabilityCopy({ result_availability: "too_large" })).toBe(
+      "Result too large to store."
+    );
+    expect(resultAvailabilityCopy({ result_availability: "available" })).toBeNull();
+    expect(resultAvailabilityCopy({ result_availability: null })).toBeNull();
+  });
+
+  it("014-FR-013 spells the guarantee tier out, or says nothing at all", () => {
+    expect(guaranteeTierLabel("guaranteed")).toBe("Guaranteed single start");
+    expect(guaranteeTierLabel("best_effort")).toBe("Best-effort single start");
+    // An untested connection has no tier, and inventing one would be a
+    // promise about duplicate risk nobody made.
+    expect(guaranteeTierLabel(null)).toBeNull();
+    expect(
+      compactRunLabel({
+        primary_state_label: "Queued",
+        guarantee_tier: null,
+        cancel_outcome: "none"
+      })
+    ).toBe("Queued");
+    expect(
+      compactRunLabel({
+        primary_state_label: "Running",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "unconfirmed"
+      })
+    ).toBe("Running · Best-effort single start");
   });
 });

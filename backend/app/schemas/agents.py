@@ -20,7 +20,10 @@ from pydantic import (
     model_validator,
 )
 
-from app.modules.agents.domain import _reject_endpoint_unsafe_components
+from app.modules.agents.domain import (
+    AgentPrimaryStateLabel,
+    _reject_endpoint_unsafe_components,
+)
 from app.modules.agents.headers import validate_auth_header_name
 from app.modules.agents.validation import sanitize_endpoint_input
 
@@ -63,31 +66,6 @@ and deliberately keeps it, because a timeout is not a refusal."""
 
 AgentResultAvailability = Literal["available", "too_large"]
 AgentArtifactKind = Literal["text", "file", "data", "link"]
-
-AgentPrimaryStateLabel = Literal[
-    "Not sent",
-    "Queued",
-    "Sent",
-    "Delivery unconfirmed",
-    "Accepted",
-    "Running",
-    "Needs you",
-    "Cancellation requested",
-    "Agent reported complete",
-    "Failed",
-    "Cancelled",
-    "Stopped reporting",
-    "Agent no longer reports this run",
-    "Connection disconnected",
-    "Content expired under retention policy",
-]
-"""Every label a surface may render verbatim, and nothing else (FR-014).
-
-Closed rather than left a free string, because the one word that must never
-appear — "Complete" — would otherwise be one typo away on any of three
-clients. BrainBuddy did not verify the work, so the strongest thing it may say
-is that the agent *reported* it complete.
-"""
 
 AGENT_PRIMARY_STATE_LABELS: tuple[str, ...] = get_args(AgentPrimaryStateLabel)
 """The same vocabulary as a sequence, derived rather than restated.

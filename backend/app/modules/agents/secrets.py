@@ -319,8 +319,12 @@ class SecretBox:
 PUSH_TOKEN_BYTES = 32
 
 
-PUSH_TOKEN_PURPOSE = "brainbuddy.push_token.v1"
-"""Domain separation, so a push token can never collide with a fingerprint."""
+PUSH_CALLBACK_DERIVATION_LABEL = "brainbuddy.push_callback.v1"
+"""Domain separation for the derivation below.
+
+Without a label the same key ring would produce the same bytes for a run id
+used as a fingerprint input and as a callback derivation, so one value could be
+recovered from the other."""
 
 
 def derive_push_token(box: SecretBox, run_id: str) -> str:
@@ -343,7 +347,9 @@ def derive_push_token(box: SecretBox, run_id: str) -> str:
     disagreement there reads as a forged token.
     """
 
-    digest = box.fingerprint(f"{PUSH_TOKEN_PURPOSE}:{run_id}").partition(":")[2]
+    digest = box.fingerprint(f"{PUSH_CALLBACK_DERIVATION_LABEL}:{run_id}").partition(
+        ":"
+    )[2]
     raw = bytes.fromhex(digest)[:PUSH_TOKEN_BYTES]
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 

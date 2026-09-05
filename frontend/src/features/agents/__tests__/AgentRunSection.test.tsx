@@ -209,6 +209,29 @@ describe("AgentRunSection", () => {
     expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
   });
 
+  it("014-SC-004 Copy link actually copies the address it is showing", async () => {
+    // A control labelled "Copy link" that quietly did nothing would be exactly
+    // the fabricated affordance this feature's honesty rules exist to prevent.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    renderSection([
+      makeRun({
+        reported_state: "completed",
+        primary_state_label: "Agent reported complete",
+        result_link: "javascript:alert(1)"
+      })
+    ]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Copy link" }));
+
+    // Whatever the scheme: copying is not navigating, and the address is the
+    // user's to inspect.
+    expect(writeText).toHaveBeenCalledWith("javascript:alert(1)");
+  });
+
   it("renders an unsafe result link as inert text", () => {
     renderSection([
       makeRun({

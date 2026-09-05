@@ -470,12 +470,12 @@ def build_container(config: AppConfig) -> Container:
             executor=exchange_executor,
             dispatch_wait_seconds=relay_settings.dispatch_wait_seconds,
             reply_window=timedelta(seconds=relay_settings.reply_window_seconds),
+            observation_interval=timedelta(
+                seconds=relay_settings.observation_interval_seconds
+            ),
         ),
         stale_after=timedelta(seconds=relay_settings.stale_after_seconds),
         reporting_window=timedelta(seconds=relay_settings.reporting_window_seconds),
-        observation_interval=timedelta(
-            seconds=relay_settings.observation_interval_seconds
-        ),
         content_retention=timedelta(seconds=relay_settings.content_retention_seconds),
         allow_private_destinations=relay_settings.allow_private_destinations,
     )

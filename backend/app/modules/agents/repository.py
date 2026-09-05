@@ -1611,7 +1611,6 @@ class AgentRepository(BaseRepository):
                 ),
             )
 
-
     def append_bounded_audit(
         self, entry: AgentAuditEntryDocument, *, bucket: str, day: str
     ) -> bool:
@@ -1635,7 +1634,13 @@ class AgentRepository(BaseRepository):
                     (owner_id, action, bucket, day, created_at)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (entry.owner_id, entry.action, bucket, day, entry.created_at.isoformat()),
+                (
+                    entry.owner_id,
+                    entry.action,
+                    bucket,
+                    day,
+                    entry.created_at.isoformat(),
+                ),
             )
             if claimed.rowcount != 1:
                 return False
@@ -1904,9 +1909,7 @@ class AgentRepository(BaseRepository):
             getattr(run, field) is not None for field in CONTENT_TIER_RUN_FIELDS
         )
 
-    def expire_due_identifier_runs(
-        self, *, now: datetime
-    ) -> list[tuple[str, str]]:
+    def expire_due_identifier_runs(self, *, now: datetime) -> list[tuple[str, str]]:
         """The runs this pass expired, as (run id, owner id).
 
         Returned rather than counted so the caller can write one audit row per

@@ -321,7 +321,9 @@ class AgentObserver:
         if not result.ok:
             self.service.record_failed_contact(run_id, owner_id=owner_id)
             return False
-        self.service.apply_agent_task(run, result, trigger=run.observation_trigger_pending or "schedule")
+        self.service.apply_agent_task(
+            run, result, trigger=run.observation_trigger_pending or "schedule"
+        )
         return True
 
     # --- the control lane ---------------------------------------------------

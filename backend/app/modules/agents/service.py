@@ -33,6 +33,7 @@ from app.exceptions import (
     ValidationFailure,
 )
 from app.schemas.agents import (
+    AgentArtifactSummaryResponse,
     AgentCapabilitiesResponse,
     AgentCardResponse,
     AgentCheckDeliveryRequest,
@@ -44,7 +45,6 @@ from app.schemas.agents import (
     AgentConnectionSigningSecretResponse,
     AgentConnectionUpdateRequest,
     AgentContextItemResponse,
-    AgentArtifactSummaryResponse,
     AgentControlsResponse,
     AgentEventIngestResponse,
     AgentHandoffConfirmRequest,
@@ -96,7 +96,6 @@ from .domain import (
     AGENT_EVENT_ENVELOPE_ADAPTER,
     CANCEL_OUTCOMES_WITHDRAWING_THE_CONTROL,
     MAX_CONTEXT_ITEMS,
-    PREDECESSOR_ENDED_PREFIX,
     PROTOCOL_VERSION,
     TASK_SUCCESSION_SUMMARY,
     TERMINAL_REPORTED_STATES,
@@ -104,11 +103,13 @@ from .domain import (
     AgentAuditEntryDocument,
     AgentCancelOutcome,
     AgentCapabilities,
+    AgentCommandDelivery,
     AgentCommandKind,
     AgentConnectionDocument,
     AgentEventEnvelope,
     AgentIdempotencyRecord,
     AgentManifestContextItem,
+    AgentPrimaryStateLabel,
     AgentPushCallback,
     AgentRunCommandDocument,
     AgentRunDocument,
@@ -120,7 +121,6 @@ from .domain import (
     cancel_control_offered,
     content_is_due,
     inert_reporting_contract,
-    observation_is_suspended,
     primary_state_label,
     project_run_for_access,
     reply_control_offered,
@@ -196,7 +196,7 @@ REPLY_REJECTING_ERROR_CODES: frozenset[int] = frozenset({-32004, -32601})
 #: One `CancelTask` answer to one outcome (a2a-wire.md, Error mapping). Only
 #: an explicit agent answer appears here; every other ending falls through to
 #: `unconfirmed`, which keeps the control and the command id.
-CANCEL_OUTCOME_BY_ERROR_CODE: dict[str, str] = {
+CANCEL_OUTCOME_BY_ERROR_CODE: dict[str, AgentCancelOutcome] = {
     A2A_NOT_CANCELABLE: "not_cancelable",
     A2A_UNSUPPORTED_OPERATION: "unsupported",
     A2A_METHOD_NOT_FOUND: "unsupported",
@@ -205,7 +205,7 @@ CANCEL_OUTCOME_BY_ERROR_CODE: dict[str, str] = {
 
 #: How each outcome reads on the command row. `rejected` only where the
 #: agent answered about this command; `unconfirmed` everywhere else.
-CANCEL_DELIVERY_BY_OUTCOME: dict[str, str] = {
+CANCEL_DELIVERY_BY_OUTCOME: dict[str, AgentCommandDelivery] = {
     "accepted": "confirmed",
     "not_cancelable": "rejected",
     "unsupported": "rejected",
@@ -401,13 +401,16 @@ class ExchangeExecutorPort(Protocol):
 
 @dataclass(frozen=True)
 class ExchangePolicy:
-    """Everything the exchange lane needs from deployment, in one object.
+    """Everything the wire lanes need from deployment, in one object.
 
-    Grouped rather than passed as four more constructor arguments because they
-    are one decision, not four: who runs an exchange, how long the request
-    thread waits on it, how long the agent gets, and how much of the agent's
-    text an observation may keep. A deployment that changes one of these almost
-    always means to change its neighbours.
+    Grouped rather than passed as five more constructor arguments because they
+    are one decision, not five: who runs an exchange, how long the request
+    thread waits on it, how long the agent gets, how often BrainBuddy looks
+    afterwards, and how much of the agent's text an observation may keep. A
+    deployment that changes one of these almost always means to change its
+    neighbours — halving the reply window without touching the observation
+    interval, for instance, just makes the schedule poll a run nobody is
+    waiting on any more.
     """
 
     #: The bounded pool exchanges run on. ``None`` means nothing runs them here,
@@ -420,6 +423,11 @@ class ExchangePolicy:
     dispatch_wait_seconds: float = 0.0
     #: FR-007's promise to the agent, and the bound on one exchange.
     reply_window: timedelta = DEFAULT_REPLY_WINDOW
+    #: The base schedule, and the rate the clients are told to poll at. The
+    #: server may observe *less* often after the reporting window (the FR-008
+    #: backoff); it never observes more often on the schedule, so telling a
+    #: client this number is a promise the server can keep.
+    observation_interval: timedelta = DEFAULT_OBSERVATION_INTERVAL
     observation_limits: ObservationLimits = field(default_factory=ObservationLimits)
 
 
@@ -494,7 +502,6 @@ class AgentRelayService:
         tier_disclosure_url: str = SINGLE_START_EXTENSION_URI,
         stale_after: timedelta = DEFAULT_STALE_AFTER,
         reporting_window: timedelta = DEFAULT_REPORTING_WINDOW,
-        observation_interval: timedelta = DEFAULT_OBSERVATION_INTERVAL,
         content_retention: timedelta = DEFAULT_CONTENT_RETENTION,
         allow_private_destinations: bool = False,
         resolver: Resolver | None = None,
@@ -532,7 +539,7 @@ class AgentRelayService:
         self.tier_disclosure_url = tier_disclosure_url
         self.stale_after = stale_after
         self.reporting_window = reporting_window
-        self.observation_interval = observation_interval
+        self.observation_interval = exchange.observation_interval
         self.content_retention = content_retention
         self.allow_private_destinations = allow_private_destinations
         self._resolver = resolver
@@ -852,7 +859,6 @@ class AgentRelayService:
                 created_at=self._now(),
             )
         )
-
 
     def _bounded_audit(
         self,
@@ -2773,9 +2779,7 @@ class AgentRelayService:
                 if content_due:
                     # Retention is irreversible: state and contact still move,
                     # but a late answer can never recreate expired content.
-                    updates.update(
-                        dict.fromkeys(self._CONTENT_FIELDS_NEVER_REWRITTEN)
-                    )
+                    updates.update(dict.fromkeys(self._CONTENT_FIELDS_NEVER_REWRITTEN))
                     updates["artifacts_summary"] = []
             elif observation is not None and unchanged:
                 # A terminal run that repeats itself is still contact.
@@ -2783,9 +2787,7 @@ class AgentRelayService:
                 updates.setdefault("last_observed_at", observation.observed_at)
             reported = updates.get("reported_state")
             append_row = (
-                observation is not None
-                and reported is not None
-                and not unchanged
+                observation is not None and reported is not None and not unchanged
             )
             # `run_version` is BrainBuddy's own observation version, so only an
             # accepted, *differing* observation advances it. Burning a version
@@ -2879,8 +2881,6 @@ class AgentRelayService:
                 run_id=run.id,
             )
 
-
-
     # --- the push callback (FR-008, contracts/push-callback.md) -------------
 
     def verify_push(self, run_id: str, token: str) -> PushOutcome:
@@ -2942,9 +2942,7 @@ class AgentRelayService:
                         "observation_trigger_pending": "push",
                         # A verified push resets the backoff: the agent is
                         # telling BrainBuddy there is something to see.
-                        "next_observation_at": min(
-                            run.next_observation_at or now, now
-                        ),
+                        "next_observation_at": min(run.next_observation_at or now, now),
                         "updated_at": max(run.updated_at, now),
                         "revision": run.revision + 1,
                     }
@@ -2959,9 +2957,7 @@ class AgentRelayService:
             )
         return PushOutcome(owner_id=owner_id, verified=True, closed=False)
 
-    def _push_is_still_honoured(
-        self, run: AgentRunDocument, *, owner_id: str
-    ) -> bool:
+    def _push_is_still_honoured(self, run: AgentRunDocument, *, owner_id: str) -> bool:
         """Whether an observation this push asked for could still mean anything."""
 
         if (
@@ -2980,9 +2976,7 @@ class AgentRelayService:
 
     # --- the observation lane's service side (FR-008) -----------------------
 
-    def observation_backoff(
-        self, run: AgentRunDocument, *, now: datetime
-    ) -> timedelta:
+    def observation_backoff(self, run: AgentRunDocument, *, now: datetime) -> timedelta:
         """How long until this run is worth asking about again.
 
         Derived from ``last_contact_at`` rather than stored, so there is no
@@ -2998,8 +2992,10 @@ class AgentRelayService:
         silent_for = now - run.last_contact_at
         if silent_for < self.reporting_window:
             return interval
-        missed = int((silent_for - self.reporting_window) / interval) + 1
-        return min(interval * 2**min(missed, _MAX_BACKOFF_DOUBLINGS), interval * 10)
+        overdue = (silent_for - self.reporting_window) // interval
+        doublings = min(int(overdue) + 1, _MAX_BACKOFF_DOUBLINGS)
+        backed_off: timedelta = interval * 2**doublings
+        return min(backed_off, interval * 10)
 
     def _next_observation_at(
         self, run: AgentRunDocument, *, now: datetime
@@ -3042,9 +3038,7 @@ class AgentRelayService:
             self.agent_repo.save_run(
                 run.model_copy(
                     update={
-                        "next_observation_at": self._next_observation_at(
-                            run, now=now
-                        ),
+                        "next_observation_at": self._next_observation_at(run, now=now),
                         "last_observed_at": now,
                         "updated_at": max(run.updated_at, now),
                         "revision": run.revision + 1,
@@ -3109,7 +3103,10 @@ class AgentRelayService:
             # The start exchange never named a task, so the only question
             # available is "is there one in this conversation?".
             return wire.list_tasks(
-                target, context_id=run.context_id, page_size=5, scheduled=True,
+                target,
+                context_id=run.context_id,
+                page_size=5,
+                scheduled=True,
                 run_id=run.id,
             )
         result = wire.get_task(
@@ -3170,6 +3167,8 @@ class AgentRelayService:
             # is contact with the agent and no news about the work.
             self.record_failed_contact(run.id, owner_id=run.owner_id)
             return
+        if answered is not None:
+            self._settle_reply_by_history(run, answered)
         self.apply_observation(
             run.id,
             owner_id=run.owner_id,
@@ -3297,6 +3296,11 @@ class AgentRelayService:
         )
         if not honoured and connection.context_id_honoured is not False:
             self._record_correlation_not_honoured(connection)
+        if updated is None:
+            # The run was purged while the exchange was at the agent. There is
+            # nothing left to describe, and an audit row naming a run that no
+            # longer exists is exactly the residue a purge was asked to remove.
+            return
         with self.agent_repo.command_lock(run.owner_id):
             self._audit(
                 owner_id=run.owner_id,
@@ -3355,14 +3359,19 @@ class AgentRelayService:
         if adopted is None:
             return run
         now = self._now()
-        return self.apply_observation(
-            run.id,
-            owner_id=run.owner_id,
-            observation=project_observation(
-                adopted, now=now, limits=self.observation_limits
-            ),
-            based_on=run.run_version,
-            extra={"dispatch_state": "sent", "dispatch_error_code": None},
+        # A purge that raced the probe leaves the caller with what it read:
+        # nothing was written, and nothing may be invented in its place.
+        return (
+            self.apply_observation(
+                run.id,
+                owner_id=run.owner_id,
+                observation=project_observation(
+                    adopted, now=now, limits=self.observation_limits
+                ),
+                based_on=run.run_version,
+                extra={"dispatch_state": "sent", "dispatch_error_code": None},
+            )
+            or run
         )
 
     def settle_restarted_before_send(self, run_id: str, *, owner_id: str) -> None:
@@ -3597,18 +3606,23 @@ class AgentRelayService:
 
         adopted = self._lookup_task(run, connection)
         if adopted is not None:
-            run = self.apply_observation(
-                run.id,
-                owner_id=owner_id,
-                observation=project_observation(
-                    adopted, now=self._now(), limits=self.observation_limits
-                ),
-                based_on=run.run_version,
-                extra={
-                    "dispatch_state": "sent",
-                    "dispatch_error_code": None,
-                    "exchange_state": "closed",
-                },
+            # `or run` for the purge race, exactly as the probe above: a run
+            # that no longer exists cannot be described by what it used to be.
+            run = (
+                self.apply_observation(
+                    run.id,
+                    owner_id=owner_id,
+                    observation=project_observation(
+                        adopted, now=self._now(), limits=self.observation_limits
+                    ),
+                    based_on=run.run_version,
+                    extra={
+                        "dispatch_state": "sent",
+                        "dispatch_error_code": None,
+                        "exchange_state": "closed",
+                    },
+                )
+                or run
             )
             self._audit(
                 owner_id=owner_id,
@@ -3681,7 +3695,9 @@ class AgentRelayService:
 
         return stopped_reporting(run, now=now, reporting_window=self.reporting_window)
 
-    def _primary_state_label(self, run: AgentRunDocument, *, now: datetime) -> str:
+    def _primary_state_label(
+        self, run: AgentRunDocument, *, now: datetime
+    ) -> AgentPrimaryStateLabel:
         """The one label every surface renders verbatim.
 
         Delegated to `domain` rather than decided here: the observer reasons
@@ -3689,9 +3705,7 @@ class AgentRelayService:
         from two answers to "what is this run doing?".
         """
 
-        return primary_state_label(
-            run, now=now, reporting_window=self.reporting_window
-        )
+        return primary_state_label(run, now=now, reporting_window=self.reporting_window)
 
     def _run_response(self, run: AgentRunDocument) -> AgentRunResponse:
         now = self._now()
@@ -3782,9 +3796,7 @@ class AgentRelayService:
             ],
             result_availability=run.result_availability,
             last_observed_at=run.last_observed_at,
-            observation_interval_seconds=int(
-                self.observation_interval.total_seconds()
-            ),
+            observation_interval_seconds=int(self.observation_interval.total_seconds()),
             identifiers_expired=run.identifiers_expired,
             manifest=(
                 self._manifest_response(run.manifest, connection)
@@ -3828,9 +3840,7 @@ class AgentRelayService:
         # Someone is watching this run, so the backoff a silent agent earned is
         # reset to the base interval before the answer is built (FR-008).
         self.record_run_read(run_id, owner_id=owner_id)
-        return self._run_response(
-            self.agent_repo.get_run(run_id, owner_id=owner_id)
-        )
+        return self._run_response(self.agent_repo.get_run(run_id, owner_id=owner_id))
 
     def list_runs_for_task(
         self, task_id: str, *, owner_id: str
@@ -3978,9 +3988,48 @@ class AgentRelayService:
         return {"url": self.push_callback_url(run.id, token), "token": token}
 
     def _confirmed_by_history(self, task: Task, command_id: str) -> bool:
-        """Whether the returned task itself proves the agent saw this command."""
+        """Whether this task's own history proves the agent saw this command.
+
+        The only correlation available for a reply whose exchange ended
+        ambiguously: the message id *is* the command id, so finding it in the
+        conversation is the agent's own record of having received it — not an
+        inference from timing (data-model.md §4).
+        """
 
         return any(message.message_id == command_id for message in task.history)
+
+    def _settle_reply_by_history(self, run: AgentRunDocument, task: Task) -> None:
+        """Confirm a pending reply the agent has since acknowledged.
+
+        A reply exchange that ended without an answer leaves the command
+        `unconfirmed`, which is the truth at that moment. A later observation
+        whose history carries the command id turns it into the other truth, and
+        it is the only evidence that can.
+        """
+
+        pending = run.reply_pending_command_id
+        if pending is None or not self._confirmed_by_history(task, pending):
+            return
+        command = self.agent_repo.get_command(pending, owner_id=run.owner_id)
+        if command is None or command.delivery == "confirmed":
+            return
+        now = self._now()
+        with self.agent_repo.command_lock(run.owner_id):
+            self.agent_repo.save_command(
+                command.model_copy(
+                    update={"delivery": "confirmed", "confirmed_at": now}
+                )
+            )
+            current = self.agent_repo.get_run(run.id, owner_id=run.owner_id)
+            self.agent_repo.save_run(
+                current.model_copy(
+                    update={
+                        "reply_pending_command_id": None,
+                        "updated_at": max(current.updated_at, now),
+                        "revision": current.revision + 1,
+                    }
+                )
+            )
 
     def _reply_outcome(
         self,
@@ -4018,9 +4067,7 @@ class AgentRelayService:
                 None,
                 {
                     "delivery": "unconfirmed",
-                    "outcome_code": (
-                        code if result.a2a_error_code == -32603 else None
-                    ),
+                    "outcome_code": (code if result.a2a_error_code == -32603 else None),
                 },
             )
         answered = result.task
@@ -4122,7 +4169,9 @@ class AgentRelayService:
             run_id=run.id,
         )
 
-    def _cancel_outcome_for(self, result: A2AResult) -> tuple[str, str | None]:
+    def _cancel_outcome_for(
+        self, result: A2AResult
+    ) -> tuple[AgentCancelOutcome, str | None]:
         """One `CancelTask` answer as (outcome, command outcome code).
 
         Only the three explicit refusals may ever produce a durable capability
@@ -4138,9 +4187,7 @@ class AgentRelayService:
             result.error_code,
         )
 
-    def _run_control(
-        self, call: Callable[[], A2AResult]
-    ) -> A2AResult:
+    def _run_control(self, call: Callable[[], A2AResult]) -> A2AResult:
         """Run one short control call, never behind a hand-off exchange.
 
         A cancel is what *resolves* a blocked exchange on some runtimes, so
@@ -4282,9 +4329,7 @@ class AgentRelayService:
                 interface_url=run.interface_url or connection.endpoint_url,
                 guarantee_tier=run.guarantee_tier,
             ),
-            message=self._reply_message(
-                run, command_id=command_id, message=message
-            ),
+            message=self._reply_message(run, command_id=command_id, message=message),
             push_config=self._reply_push_config(run),
             run_id=run.id,
         )
@@ -4330,9 +4375,7 @@ class AgentRelayService:
             # *this* command, so a report that overtook it does not erase it.
             superseded={
                 "exchange_state": "closed",
-                "reply_pending_command_id": run_updates[
-                    "reply_pending_command_id"
-                ],
+                "reply_pending_command_id": run_updates["reply_pending_command_id"],
             },
             trigger="command",
         )
@@ -4419,9 +4462,7 @@ class AgentRelayService:
                 )
 
             result = self._run_control(
-                partial(
-                    self._send_cancel, run, connection, command_id=command_id
-                )
+                partial(self._send_cancel, run, connection, command_id=command_id)
             )
             self._close_cancel(
                 run,
@@ -4535,9 +4576,7 @@ class AgentRelayService:
                     run_id=run.id,
                     kind="cancel",
                     delivery=CANCEL_DELIVERY_BY_OUTCOME[outcome],
-                    outcome_code=(
-                        None if outcome == "accepted" else outcome_code
-                    ),
+                    outcome_code=(None if outcome == "accepted" else outcome_code),
                     created_at=reserved_at,
                     confirmed_at=now if outcome == "accepted" else None,
                 )

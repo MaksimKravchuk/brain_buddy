@@ -7,9 +7,10 @@ sleep would only make the same assertions slower and less trustworthy.
 
 from __future__ import annotations
 
+import time
 from collections import OrderedDict
-from dataclasses import replace
 from concurrent.futures import Future
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -665,9 +666,7 @@ def dispatched(
     )
     a2a_client.script(
         "SendMessage",
-        A2AResult(
-            ok=True, correlation_id="c", task=agent_task("t1", preview.run_id)
-        ),
+        A2AResult(ok=True, correlation_id="c", task=agent_task("t1", preview.run_id)),
     )
     run = service.dispatch_run(
         task_id,
@@ -1070,9 +1069,7 @@ class TestObservationSchedule:
             ),
         )
 
-        run = service.cancel_run(
-            run_id, owner_id=OWNER, idempotency_key="idem-cancel"
-        )
+        run = service.cancel_run(run_id, owner_id=OWNER, idempotency_key="idem-cancel")
 
         assert run.cancel_outcome == "accepted"
         assert control.submitted, "the cancel ran on the control pool"
@@ -1164,3 +1161,98 @@ class TestObserverLifecycle:
         assert observer.scheduler_thread.is_alive() is False
         assert executor.shutdowns == [{"wait": False, "cancel_futures": True}]
         observer.shutdown()
+
+
+class TestObservationEdges:
+    """What the scheduler does when the world moves under it."""
+
+    def _observer(
+        self, service: AgentRelayService, clock: Clock, **kwargs: Any
+    ) -> AgentObserver:
+        return AgentObserver(
+            service,
+            exchange_executor=SynchronousExecutor(),
+            observation_executor=SynchronousExecutor(),
+            control_executor=SynchronousExecutor(),
+            clock=clock,
+            **kwargs,
+        )
+
+    def test_014_FR_016_a_run_purged_between_selection_and_read_is_skipped(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """The pass takes responsibility for nothing that no longer exists."""
+
+        run_id = dispatched(service, a2a_client, clock, key="idem-vanish")
+        observer = self._observer(service, clock)
+        clock.advance(timedelta(seconds=61))
+        due = repo.due_observations(now=clock.now)
+        assert [pair[1] for pair in due] == [run_id]
+        service.delete_all_for_owner(owner_id=OWNER)
+
+        assert observer.run_once() == 0
+        assert a2a_client.calls_to("GetTask") == []
+
+    def test_014_FR_008_a_wake_for_a_run_nobody_owns_drains_harmlessly(
+        self, service: AgentRelayService, clock: Clock
+    ) -> None:
+        """The push route's own lookup is the gate; this one refuses to guess."""
+
+        observer = self._observer(service, clock)
+
+        observer.wake("agentrun_never_existed")
+
+        assert observer.run_once() == 0
+
+    def test_014_FR_008_an_observation_with_no_wire_writes_nothing(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """Absent is not empty: a service with no client learns nothing."""
+
+        run_id = dispatched(service, a2a_client, clock, key="idem-nowire")
+        observer = self._observer(service, clock)
+        before = repo.get_run(run_id, owner_id=OWNER)
+        service.a2a_client = None
+        clock.advance(timedelta(seconds=61))
+
+        observer.run_once()
+
+        after = repo.get_run(run_id, owner_id=OWNER)
+        assert after.last_observed_at == before.last_observed_at
+        assert after.reported_state == before.reported_state
+
+    def test_014_FR_008_one_failing_pass_does_not_end_the_scheduler(
+        self, service: AgentRelayService, clock: Clock
+    ) -> None:
+        """A scheduler that dies on one bad pass stops every run in the deployment."""
+
+        observer = self._observer(
+            service, clock, observation_interval=timedelta(seconds=0.01)
+        )
+        passes: list[int] = []
+
+        def explode() -> int:
+            passes.append(1)
+            if len(passes) == 1:
+                raise RuntimeError("one bad pass")
+            observer.shutdown()
+            return 0
+
+        observer.run_once = explode  # type: ignore[method-assign]
+
+        assert observer.start() is True
+        for _ in range(200):
+            if len(passes) >= 2:
+                break
+            time.sleep(0.01)
+        observer.shutdown()
+
+        assert len(passes) >= 2, "the loop kept going after the failure"
