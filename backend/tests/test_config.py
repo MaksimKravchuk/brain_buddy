@@ -85,38 +85,6 @@ def test_production_rejects_deterministic_title_completion(
         get_config()
 
 
-def test_relay_manifest_callback_uses_the_configured_api_prefix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
-    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BRAIN_BUDDY_PUBLIC_BASE_URL", "https://relay.example.test")
-    monkeypatch.setenv("BRAIN_BUDDY_API_PREFIX", "/custom")
-
-    config = get_config()
-    container = build_container(config)
-
-    assert config.agent_relay.public_base_url == "https://relay.example.test"
-    assert container.agent_relay_service.callback_url == (
-        "https://relay.example.test/custom/agent-events"
-    )
-
-
-def test_relay_manifest_callback_defaults_to_api_prefix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
-    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BRAIN_BUDDY_PUBLIC_BASE_URL", "https://relay.example.test")
-    monkeypatch.delenv("BRAIN_BUDDY_API_PREFIX", raising=False)
-
-    container = build_container(get_config())
-
-    assert container.agent_relay_service.callback_url == (
-        "https://relay.example.test/api/agent-events"
-    )
-
-
 def test_get_config_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("BRAIN_BUDDY_ENV", raising=False)
     monkeypatch.delenv("BRAIN_BUDDY_DATA_DIR", raising=False)

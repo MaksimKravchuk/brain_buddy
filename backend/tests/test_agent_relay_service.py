@@ -7,8 +7,6 @@ ever touches a network or a paid provider.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import sqlite3
 from collections import OrderedDict
@@ -70,7 +68,6 @@ from app.schemas.agents import (
     AgentConnectionDisconnectRequest,
     AgentConnectionResponse,
     AgentConnectionRotateRequest,
-    AgentConnectionRotateSigningSecretRequest,
     AgentConnectionUpdateRequest,
     AgentContextItemRequest,
     AgentHandoffConfirmRequest,
@@ -422,35 +419,6 @@ def make_ready(service: AgentRelayService, connection_id: str) -> None:
     service.test_connection(connection_id, owner_id=OWNER)
 
 
-def issue_signing_secret(
-    service: AgentRelayService,
-    connection_id: str,
-    *,
-    key: str = "idem-signing",
-    revision: int | None = None,
-) -> str:
-    """Mint the bespoke inbound signing secret for a connection.
-
-    Registration no longer issues one (014 FR-012: the A2A wire has no inbound
-    secret), so the 007 event suites that still need one take it from the
-    rotation route — the only place it is ever shown — until T110–T114 remove
-    that surface with the rest of the bespoke wire.
-    """
-
-    current = service.get_connection(connection_id, owner_id=OWNER)
-    rotated = service.rotate_signing_secret(
-        connection_id,
-        AgentConnectionRotateSigningSecretRequest(
-            current_password="correct-horse-battery-staple",
-            expected_revision=revision if revision is not None else current.revision,
-        ),
-        owner_id=OWNER,
-        idempotency_key=key,
-        reauthenticated=True,
-    )
-    return rotated.inbound_signing_secret
-
-
 def sends(a2a_client: FakeA2AClient) -> list[dict[str, Any]]:
     """Every content-bearing message this dispatch put on the wire.
 
@@ -563,6 +531,150 @@ def dispatch(
         owner_id=OWNER,
         idempotency_key=key,
     )
+
+
+def observed_task(
+    task_id: str,
+    context_id: str,
+    state: str = "TASK_STATE_WORKING",
+    *,
+    text: str | None = None,
+    timestamp: str = "2026-08-09T12:00:00Z",
+) -> Task:
+    status: dict[str, Any] = {"state": state, "timestamp": timestamp}
+    if text is not None:
+        status["message"] = {"role": "ROLE_AGENT", "parts": [{"text": text}]}
+    return Task.model_validate(
+        {"id": task_id, "contextId": context_id, "status": status}
+    )
+
+
+def observation_of(task: Task, *, now: datetime) -> Any:
+    return project_observation(task, now=now, limits=ObservationLimits())
+
+
+A2A_STATE_BY_REPORT: dict[str, str] = {
+    "accepted": "TASK_STATE_SUBMITTED",
+    "running": "TASK_STATE_WORKING",
+    "blocked": "TASK_STATE_INPUT_REQUIRED",
+    "completed": "TASK_STATE_COMPLETED",
+    "failed": "TASK_STATE_FAILED",
+    "cancelled": "TASK_STATE_CANCELED",
+}
+"""Which Task state makes a run read as each reported state (`mapping.py`)."""
+
+
+def report(
+    service: AgentRelayService,
+    run_id: str,
+    state: str,
+    *,
+    text: str | None = None,
+    now: datetime,
+    agent_task_id: str = "agent-task-1",
+    trigger: str = "schedule",
+    based_on: int | None = None,
+) -> Any:
+    """Apply what the agent's Task says, the way the observer applies it.
+
+    The A2A wire has no inbound event: everything BrainBuddy learns about a run
+    it learns by looking at the Task. So a suite that needs a run to *be* in a
+    reported state says so here rather than posting a state to the service.
+    """
+
+    run = service.agent_repo.get_run(run_id, owner_id=OWNER)
+    return service.apply_observation(
+        run_id,
+        owner_id=OWNER,
+        observation=observation_of(
+            observed_task(agent_task_id, run_id, A2A_STATE_BY_REPORT[state], text=text),
+            now=now,
+        ),
+        based_on=run.run_version if based_on is None else based_on,
+        trigger=trigger,
+    )
+
+
+class ObservedRelay:
+    """A ready connection with one dispatched, observable A2A run."""
+
+    def __init__(
+        self,
+        service: AgentRelayService,
+        clock: Clock,
+        a2a_client: FakeA2AClient | None = None,
+        *,
+        key: str = "idem-dispatch",
+        task_id: str = "task_1",
+    ) -> None:
+        self.service = service
+        self.clock = clock
+        a2a_client = a2a_client if a2a_client is not None else service.a2a_client
+        assert isinstance(a2a_client, FakeA2AClient)
+        self.a2a_client = a2a_client
+        self.connection_id = connect(service, key=f"{key}-create")
+        make_ready(service, self.connection_id)
+        run_id_holder = dispatch(service, self.connection_id, task_id=task_id, key=key)
+        self.run_id = run_id_holder.id
+        a2a_client.calls.clear()
+
+    def observe(self, task: Task, *, trigger: str = "schedule") -> Any:
+        run = self.service.agent_repo.get_run(self.run_id, owner_id=OWNER)
+        return self.service.apply_observation(
+            self.run_id,
+            owner_id=OWNER,
+            observation=observation_of(task, now=self.clock.now),
+            based_on=run.run_version,
+            trigger=trigger,
+        )
+
+    def report(
+        self,
+        state: str,
+        *,
+        text: str | None = None,
+        agent_task_id: str = "agent-task-1",
+        trigger: str = "schedule",
+    ) -> Any:
+        """What the agent's Task says this run is doing now."""
+
+        return report(
+            self.service,
+            self.run_id,
+            state,
+            text=text,
+            now=self.clock.now,
+            agent_task_id=agent_task_id,
+            trigger=trigger,
+        )
+
+    def projection(self) -> Any:
+        return self.service.get_run(self.run_id, owner_id=OWNER)
+
+    def audit_actions(self) -> list[str]:
+        return [entry.action for entry in self.service.list_audit(owner_id=OWNER)]
+
+
+def reply_command(run: Any) -> Any:
+    """The run's newest reply command.
+
+    Selected by kind rather than by position: a dispatched run already carries
+    its `start` command, and the two rows share a creation timestamp, so
+    "the last one" is whichever id sorts higher — which is nothing at all.
+    """
+
+    return [command for command in run.commands if command.kind == "reply"][-1]
+
+
+def cancel_command(run: Any) -> Any:
+    return [command for command in run.commands if command.kind == "cancel"][-1]
+
+
+@pytest.fixture
+def observed(
+    service: AgentRelayService, clock: Clock, a2a_client: FakeA2AClient
+) -> ObservedRelay:
+    return ObservedRelay(service, clock, a2a_client)
 
 
 # --- User Story 1: connect an agent honestly ---------------------------------
@@ -1803,7 +1915,6 @@ class TestExternalIoLockScope:
             idempotency_key="idem-callback-create",
             reauthenticated=True,
         )
-        created_secret = issue_signing_secret(service, created.id)
         make_ready(service, created.id)
         preview = service.preview_handoff(
             "task_1",
@@ -1818,28 +1929,20 @@ class TestExternalIoLockScope:
         before_io = clock.now
 
         def send_with_callback(target: Any, **kwargs: Any) -> A2AResult:
-            """An authenticated report that lands while the send is in flight."""
+            """A push-triggered observation that lands while the send is in flight."""
 
             a2a_client.calls.append(("SendMessage", target, kwargs))
             clock.advance(timedelta(minutes=2))
-            event = {
-                "protocol_version": PROTOCOL_VERSION,
-                "connection_id": created.id,
-                "event_id": f"evt_sync_{callback_type}",
-                "run_id": preview.run_id,
-                "type": callback_type,
-                "run_version": 1,
-                **callback_fields,
-            }
-            body = json.dumps(event).encode("utf-8")
-            timestamp = int(clock.now.timestamp())
-            accepted = service.ingest_event(
-                raw_body=body,
-                connection_id=created.id,
-                timestamp=str(timestamp),
-                signature=sign(created_secret, timestamp, body),
+            reported = report(
+                service,
+                preview.run_id,
+                callback_type,
+                text=callback_fields.get("result"),
+                now=clock.now,
+                trigger="push",
             )
-            assert accepted.accepted is True
+            assert reported is not None
+            assert reported.reported_state == callback_type
             if expire_content:
                 persisted = service.agent_repo.get_run(preview.run_id, owner_id=OWNER)
                 clock.now = persisted.content_expires_at
@@ -3923,960 +4026,6 @@ class TestCheckDelivery:
         assert len(sends(a2a_client)) == 1
 
 
-def sign(secret: str, timestamp: int, body: bytes) -> str:
-    digest = hmac.new(
-        secret.encode("utf-8"), f"{timestamp}.".encode() + body, hashlib.sha256
-    ).hexdigest()
-    return f"v1={digest}"
-
-
-REQUIRED_EVENT_CONTENT: dict[str, dict[str, Any]] = {
-    "blocked": {"question": "Which environment?"},
-    "completed": {"result": "Done."},
-    "failed": {"reason": "Out of credit"},
-}
-"""The payload each terminal-or-blocking type must carry to be well formed."""
-
-
-class Relay:
-    """Bundle a ready connection, a dispatched run, and its signing secret."""
-
-    def __init__(self, service: AgentRelayService, clock: Clock) -> None:
-        created = service.create_connection(
-            create_request(),
-            owner_id=OWNER,
-            idempotency_key="idem-create",
-            reauthenticated=True,
-        )
-        self.connection_id = created.id
-        self.secret = issue_signing_secret(
-            service, created.id, key="idem-relay-signing"
-        )
-        service.test_connection(self.connection_id, owner_id=OWNER)
-        self.run = dispatch(service, self.connection_id)
-        self.service = service
-        self.clock = clock
-
-    def emit(self, payload: dict[str, Any], *, secret: str | None = None) -> Any:
-        body = json.dumps(payload).encode("utf-8")
-        timestamp = int(self.clock.now.timestamp())
-        return self.service.ingest_event(
-            raw_body=body,
-            connection_id=self.connection_id,
-            timestamp=str(timestamp),
-            signature=sign(secret or self.secret, timestamp, body),
-        )
-
-    def event(
-        self, event_id: str, event_type: str, version: int, **extra: Any
-    ) -> dict[str, Any]:
-        """A realistic, fully-formed envelope for this connection's run.
-
-        Every field the strict contract requires is present, including the
-        ``connection_id`` the signature binds, so a test that wants a rejection
-        has to say which single thing it is breaking.
-        """
-
-        payload: dict[str, Any] = {
-            "protocol_version": PROTOCOL_VERSION,
-            "connection_id": self.connection_id,
-            "event_id": event_id,
-            "run_id": self.run.id,
-            "type": event_type,
-            "run_version": version,
-        }
-        payload.update(REQUIRED_EVENT_CONTENT.get(event_type, {}))
-        payload.update(extra)
-        return payload
-
-    def projection(self) -> Any:
-        return self.service.get_run(self.run.id, owner_id=OWNER)
-
-
-@pytest.fixture
-def relay(service: AgentRelayService, clock: Clock) -> Relay:
-    return Relay(service, clock)
-
-
-class TestMonitorRun:
-    def test_accepted_and_running_events_update_the_projection(
-        self, relay: Relay, clock: Clock
-    ) -> None:
-        """AC-011: reported state, progress, and last contact — nothing invented."""
-
-        relay.emit(relay.event("evt_1", "accepted", 1))
-        clock.advance(timedelta(minutes=1))
-        relay.emit(relay.event("evt_2", "running", 2, progress="Cloning the repo"))
-
-        run = relay.projection()
-        assert run.reported_state == "running"
-        assert run.run_version == 2
-        assert run.progress_text == "Cloning the repo"
-        assert run.last_contact_at == clock.now
-        assert run.primary_state_label == "Running"
-        assert [event.type for event in run.events] == ["accepted", "running"]
-
-    def test_the_projection_never_carries_a_percentage_or_eta(
-        self, relay: Relay
-    ) -> None:
-        """FR-011: BrainBuddy has no basis for either, so it exposes neither."""
-
-        relay.emit(relay.event("evt_1", "running", 1, progress="Halfway-ish"))
-
-        fields = set(relay.projection().model_dump())
-        assert not fields & {
-            "percent",
-            "percent_complete",
-            "eta",
-            "eta_seconds",
-            "stage",
-        }
-
-    def test_a_completed_event_is_labelled_as_the_agents_claim(
-        self, relay: Relay
-    ) -> None:
-        """AC-014: BrainBuddy did not verify the work, and says so."""
-
-        relay.emit(
-            relay.event("evt_1", "completed", 1, result="Here is the migration plan.")
-        )
-
-        run = relay.projection()
-        assert run.reported_state == "completed"
-        assert run.primary_state_label == "Agent reported complete"
-        assert run.result_text == "Here is the migration plan."
-
-    @pytest.mark.parametrize(
-        "link",
-        [
-            "https://results.example.com/1",
-            "https://rebind.7f000001.nip.io/1",
-            "http://results.example.com/1",
-            "javascript:alert(1)",
-            "file:///etc/passwd",
-            "https://169.254.169.254/1",
-            "https://[::ffff:127.0.0.1]/1",
-        ],
-    )
-    def test_a_reported_result_link_is_shown_but_never_interactive(
-        self, relay: Relay, link: str
-    ) -> None:
-        """FR-014 (v1): the link is displayed honestly, as inert text."""
-
-        relay.emit(relay.event("evt_1", "completed", 1, result=None, result_link=link))
-
-        run = relay.projection()
-        assert run.result_link == link
-        assert run.result_link_interactive is False
-
-    def test_a_failed_event_shows_the_reported_reason(self, relay: Relay) -> None:
-        """AC-015: failure is reported, not retried."""
-
-        relay.emit(relay.event("evt_1", "failed", 1, reason="Out of credit"))
-
-        run = relay.projection()
-        assert run.primary_state_label == "Failed"
-        assert run.failure_reason == "Out of credit"
-
-    def test_silence_past_the_reporting_window_shows_stopped_reporting(
-        self, relay: Relay, clock: Clock
-    ) -> None:
-        """AC-016: an overlay, not a claim that the agent stopped."""
-
-        relay.emit(relay.event("evt_1", "running", 1))
-        clock.advance(relay.service.reporting_window + timedelta(seconds=1))
-
-        run = relay.projection()
-        assert run.stopped_reporting is True
-        assert run.reported_state == "running"
-        assert run.primary_state_label == "Stopped reporting"
-        assert run.last_contact_at is not None
-
-    def test_a_completion_after_silence_still_lands_and_clears_the_overlay(
-        self, relay: Relay, clock: Clock
-    ) -> None:
-        """Edge case: a late but valid event wins over the silence marker."""
-
-        relay.emit(relay.event("evt_1", "running", 1))
-        clock.advance(relay.service.reporting_window + timedelta(minutes=5))
-        assert relay.projection().stopped_reporting is True
-
-        relay.emit(relay.event("evt_2", "completed", 2, result="Late but done"))
-
-        run = relay.projection()
-        assert run.stopped_reporting is False
-        assert run.primary_state_label == "Agent reported complete"
-        assert [event.type for event in run.events] == ["running", "completed"]
-
-    def test_a_terminal_run_never_leaves_its_terminal_state(self, relay: Relay) -> None:
-        """FR-008: after a terminal state, later state changes are rejected."""
-
-        relay.emit(relay.event("evt_1", "completed", 1, result="Done"))
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_2", "running", 2))
-
-        assert relay.projection().reported_state == "completed"
-
-    def test_a_terminal_run_does_not_go_stale(self, relay: Relay, clock: Clock) -> None:
-        """FR-013: the reporting window only applies to non-terminal runs."""
-
-        relay.emit(relay.event("evt_1", "completed", 1, result="Done"))
-        clock.advance(relay.service.reporting_window * 10)
-
-        assert relay.projection().stopped_reporting is False
-
-    def test_a_completed_run_does_not_touch_the_canonical_task(
-        self, relay: Relay
-    ) -> None:
-        """FR-012: an external report never mutates the Task."""
-
-        relay.emit(relay.event("evt_1", "completed", 1, result="Done"))
-
-        # The snapshot port is read-only by construction; assert the run knows
-        # it is only evidence attached to the task.
-        assert relay.projection().task_id == "task_1"
-        assert TASKS["task_1"].title == "Draft the migration plan"
-
-
-class TestEventAuthentication:
-    def test_a_wrong_signature_changes_nothing(self, relay: Relay) -> None:
-        """SC-003: an unauthenticated event is rejected with zero effect."""
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_1", "running", 1), secret="not-the-secret")
-
-        assert relay.projection().reported_state is None
-
-    @pytest.mark.parametrize("timestamp", ["+1", "01", " 1", "1 ", "-1"])
-    def test_noncanonical_timestamp_text_is_refused(
-        self, relay: Relay, timestamp: str
-    ) -> None:
-        body = json.dumps(relay.event("evt_1", "running", 1)).encode("utf-8")
-
-        with pytest.raises(EventRejected) as rejected:
-            relay.service.ingest_event(
-                raw_body=body,
-                connection_id=relay.connection_id,
-                timestamp=timestamp,
-                signature="v1=" + "0" * 64,
-            )
-
-        assert rejected.value.code == "timestamp_invalid"
-
-    def test_a_tampered_body_changes_nothing(self, relay: Relay, clock: Clock) -> None:
-        """The signature covers the whole request, so edits are detected."""
-
-        payload = relay.event("evt_1", "running", 1)
-        body = json.dumps(payload).encode("utf-8")
-        timestamp = int(clock.now.timestamp())
-        signature = sign(relay.secret, timestamp, body)
-        tampered = json.dumps({**payload, "type": "completed"}).encode("utf-8")
-
-        with pytest.raises(EventRejected):
-            relay.service.ingest_event(
-                raw_body=tampered,
-                connection_id=relay.connection_id,
-                timestamp=str(timestamp),
-                signature=signature,
-            )
-
-        assert relay.projection().reported_state is None
-
-    def test_a_stale_timestamp_is_refused(self, relay: Relay, clock: Clock) -> None:
-        """Freshness bounds replay of a captured, correctly signed request."""
-
-        payload = relay.event("evt_1", "running", 1)
-        body = json.dumps(payload).encode("utf-8")
-        old = int((clock.now - timedelta(hours=2)).timestamp())
-
-        with pytest.raises(EventRejected):
-            relay.service.ingest_event(
-                raw_body=body,
-                connection_id=relay.connection_id,
-                timestamp=str(old),
-                signature=sign(relay.secret, old, body),
-            )
-
-        assert relay.projection().reported_state is None
-
-    def test_a_duplicate_event_id_is_consumed_once(self, relay: Relay) -> None:
-        """Duplicate delivery is idempotent."""
-
-        relay.emit(relay.event("evt_1", "running", 1, progress="First"))
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_1", "running", 2, progress="Second"))
-
-        run = relay.projection()
-        assert run.progress_text == "First"
-        assert run.run_version == 1
-
-    @pytest.mark.parametrize("version", [1, 2])
-    def test_an_equal_or_lower_version_cannot_overwrite_a_newer_state(
-        self, relay: Relay, version: int
-    ) -> None:
-        """FR-009: an older event never regresses the projection."""
-
-        relay.emit(relay.event("evt_1", "running", 2, progress="Newer"))
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_late", "accepted", version))
-
-        assert relay.projection().progress_text == "Newer"
-
-    def test_an_unknown_run_is_refused(self, relay: Relay) -> None:
-        """A signed event for a run we do not have changes nothing."""
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_x", "running", 1, run_id="agentrun_missing"))
-
-    def test_an_event_for_another_connections_run_is_refused(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """A connection may only report on runs it was dispatched."""
-
-        other = service.create_connection(
-            create_request(name="Second agent"),
-            owner_id=OWNER,
-            idempotency_key="idem-other",
-            reauthenticated=True,
-        )
-        other_secret = issue_signing_secret(service, other.id, key="idem-other-signing")
-        # Signed correctly, by the right owner, and internally consistent: the
-        # only thing wrong is that this run was never dispatched to *this*
-        # connection.
-        payload = relay.event("evt_1", "running", 1, connection_id=other.id)
-        body = json.dumps(payload).encode("utf-8")
-        timestamp = int(relay.clock.now.timestamp())
-
-        with pytest.raises(EventRejected):
-            service.ingest_event(
-                raw_body=body,
-                connection_id=other.id,
-                timestamp=str(timestamp),
-                signature=sign(other_secret, timestamp, body),
-            )
-
-        assert relay.projection().reported_state is None
-
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            {"run_id": "x", "type": "running", "run_version": 1},
-            {"event_id": "e", "type": "running", "run_version": 1},
-            {"event_id": "e", "run_id": "x", "run_version": 1},
-            {"event_id": "e", "run_id": "x", "type": "running"},
-            {"event_id": "e", "run_id": "x", "type": "nonsense", "run_version": 1},
-            {"event_id": "e", "run_id": "x", "type": "running", "run_version": 0},
-            {"event_id": "e", "run_id": "x", "type": "running", "run_version": "one"},
-        ],
-    )
-    def test_a_malformed_envelope_is_refused(
-        self, relay: Relay, payload: dict[str, Any]
-    ) -> None:
-        """SC-003: schema violations change nothing."""
-
-        with pytest.raises(EventRejected):
-            relay.emit(payload)
-
-        assert relay.projection().reported_state is None
-
-
-class TestStrictEventEnvelope:
-    """FR-009: the versioned envelope is exact, and checked before any mutation.
-
-    A connector report is an unauthenticated caller's JSON until the signature
-    verifies, and even then it is only *authentic*, not *well formed*. Anything
-    the contract does not name for that event type is a protocol error, not
-    something to quietly ignore — silently dropping an unknown field is how a
-    connector ends up believing it reported something BrainBuddy never stored.
-    """
-
-    def test_a_well_formed_envelope_names_its_own_connection(
-        self, relay: Relay
-    ) -> None:
-        """The happy path binds protocol version and connection inside the body."""
-
-        payload = relay.event("evt_1", "running", 1, progress="Cloning the repo")
-
-        assert payload["protocol_version"] == PROTOCOL_VERSION
-        assert payload["connection_id"] == relay.connection_id
-        assert relay.emit(payload).accepted is True
-
-    @pytest.mark.parametrize(
-        "override",
-        [
-            {"protocol_version": "1999-01-01"},
-            {"protocol_version": ""},
-            {"connection_id": "agentconn_someone_else"},
-            {"connection_id": ""},
-        ],
-    )
-    def test_a_body_that_names_the_wrong_scope_is_refused(
-        self, relay: Relay, override: dict[str, Any]
-    ) -> None:
-        """The signature proves who sent it; the body has to agree with that."""
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_1", "running", 1, **override))
-
-        assert relay.projection().reported_state is None
-
-    @pytest.mark.parametrize("field", ["protocol_version", "connection_id"])
-    def test_an_envelope_missing_a_binding_field_is_refused(
-        self, relay: Relay, field: str
-    ) -> None:
-        """Both bindings are required, not defaulted."""
-
-        payload = relay.event("evt_1", "running", 1)
-        payload.pop(field)
-
-        with pytest.raises(EventRejected):
-            relay.emit(payload)
-
-        assert relay.projection().reported_state is None
-
-    def test_an_unknown_field_is_refused_rather_than_ignored(
-        self, relay: Relay
-    ) -> None:
-        """`extra=forbid`: a field we do not understand is a protocol error."""
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_1", "running", 1, percent_complete=42))
-
-        assert relay.projection().reported_state is None
-
-    @pytest.mark.parametrize(
-        ("event_type", "override"),
-        [
-            ("blocked", {"question": None}),
-            ("blocked", {"question": "   "}),
-            ("completed", {"result": None}),
-            ("failed", {"reason": None}),
-            ("failed", {"reason": ""}),
-        ],
-    )
-    def test_a_type_without_its_required_payload_is_refused(
-        self, relay: Relay, event_type: str, override: dict[str, Any]
-    ) -> None:
-        """Each type's own required content is part of the contract."""
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_1", event_type, 1, **override))
-
-        assert relay.projection().reported_state is None
-
-    def test_completed_is_satisfied_by_a_result_link_alone(self, relay: Relay) -> None:
-        """A result the agent hosts elsewhere is still a reported result."""
-
-        relay.emit(
-            relay.event(
-                "evt_1",
-                "completed",
-                1,
-                result=None,
-                result_link="https://results.example.com/1",
-            )
-        )
-
-        assert relay.projection().reported_state == "completed"
-
-    @pytest.mark.parametrize("event_type", ["accepted", "running"])
-    @pytest.mark.parametrize(
-        "override",
-        [
-            {"question": "Which environment?"},
-            {"result": "Done."},
-            {"reason": "Out of credit"},
-            {"result_link": "https://results.example.com/1"},
-        ],
-    )
-    def test_a_non_terminal_type_cannot_carry_terminal_content(
-        self, relay: Relay, event_type: str, override: dict[str, Any]
-    ) -> None:
-        """`running` with a result is not a completion, so it is not accepted."""
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_1", event_type, 1, **override))
-
-        assert relay.projection().reported_state is None
-
-    @pytest.mark.parametrize(
-        ("event_type", "override"),
-        [
-            ("blocked", {"result": "Done."}),
-            ("blocked", {"progress": "Halfway"}),
-            ("completed", {"reason": "Out of credit"}),
-            ("completed", {"question": "Which environment?"}),
-            ("completed", {"progress": "Halfway"}),
-            ("failed", {"result": "Done."}),
-            ("failed", {"result_link": "https://results.example.com/1"}),
-            ("cancelled", {"result": "Done."}),
-            ("cancelled", {"reason": "Out of credit"}),
-            ("cancelled", {"progress": "Halfway"}),
-        ],
-    )
-    def test_a_type_carrying_another_types_field_is_refused(
-        self, relay: Relay, event_type: str, override: dict[str, Any]
-    ) -> None:
-        """Each type carries its own payload and nothing else."""
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_1", event_type, 1, **override))
-
-        assert relay.projection().reported_state is None
-
-    @pytest.mark.parametrize(
-        "override",
-        [
-            {"run_version": "2"},
-            {"event_id": 7},
-            {"run_id": None},
-            {"progress": 12},
-        ],
-    )
-    def test_a_wrongly_typed_field_is_refused(
-        self, relay: Relay, override: dict[str, Any]
-    ) -> None:
-        """No coercion: a string version is not a version."""
-
-        with pytest.raises(EventRejected):
-            relay.emit({**relay.event("evt_1", "running", 1), **override})
-
-        assert relay.projection().reported_state is None
-
-    def test_a_rejected_envelope_leaves_its_event_id_unspent(
-        self, relay: Relay
-    ) -> None:
-        """FR-009: a malformed event must not burn the replay identifier.
-
-        Otherwise one malformed delivery would permanently block the connector
-        from ever retrying that event correctly.
-        """
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_1", "running", 1, percent_complete=42))
-
-        relay.emit(relay.event("evt_1", "running", 1, progress="Cloning the repo"))
-
-        run = relay.projection()
-        assert run.reported_state == "running"
-        assert run.progress_text == "Cloning the repo"
-
-    def test_an_over_long_field_is_refused_without_truncation(
-        self, relay: Relay
-    ) -> None:
-        """Finite limits are refusals, not silent trims."""
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_1", "blocked", 1, question="q" * 4_001))
-
-        assert relay.projection().reported_state is None
-
-    def test_an_oversized_event_is_refused(self, relay: Relay) -> None:
-        """Bounded payloads: a flood cannot be persisted."""
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_big", "running", 1, progress="x" * 200_000))
-
-        assert relay.projection().reported_state is None
-
-    def test_agent_text_is_stored_inert(self, relay: Relay) -> None:
-        """FR-014: markup is text, never something a client should execute."""
-
-        relay.emit(
-            relay.event(
-                "evt_1", "completed", 1, result="<script>alert('x')</script> done"
-            )
-        )
-
-        # Stored verbatim as text; escaping is the renderer's job, and no
-        # server-side interpretation ever happens.
-        assert relay.projection().result_text == "<script>alert('x')</script> done"
-
-
-class TestReplyAndCancel:
-    def test_a_blocked_event_asks_the_user_and_flags_needs_you(
-        self, relay: Relay
-    ) -> None:
-        """AC-012: a question surfaces as a needs-you condition."""
-
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-
-        run = relay.projection()
-        assert run.reported_state == "blocked"
-        assert run.question_text == "Which environment?"
-        assert run.needs_user is True
-        assert run.primary_state_label == "Needs you"
-
-    @pytest.mark.parametrize(
-        ("event_type", "label"),
-        [
-            ("running", "Running"),
-            ("accepted", "Accepted"),
-            ("completed", "Agent reported complete"),
-            ("failed", "Failed"),
-            ("cancelled", "Cancelled"),
-        ],
-    )
-    def test_leaving_blocked_clears_the_question(
-        self, relay: Relay, event_type: str, label: str
-    ) -> None:
-        """FR-008: the question belongs to `blocked`, so it must not outlive it.
-
-        A stale `question_text` is what makes a finished run still offer an
-        answer control for a question nobody is waiting on.
-        """
-
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        relay.emit(relay.event("evt_2", event_type, 2))
-
-        run = relay.projection()
-        assert run.reported_state == event_type
-        assert run.question_text is None
-        assert run.needs_user is False
-        assert run.primary_state_label == label
-
-    def test_clearing_the_question_keeps_it_in_the_timeline(self, relay: Relay) -> None:
-        """History is preserved: only the live state-owned field is cleared."""
-
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        relay.emit(relay.event("evt_2", "running", 2, progress="Deploying"))
-
-        run = relay.projection()
-        assert run.question_text is None
-        assert [(event.type, event.summary) for event in run.events] == [
-            ("blocked", "Which environment?"),
-            ("running", "Deploying"),
-        ]
-
-    def test_a_second_blocked_event_replaces_the_earlier_question(
-        self, relay: Relay
-    ) -> None:
-        """Re-entering `blocked` asks the new question, never the old one."""
-
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        relay.emit(relay.event("evt_2", "running", 2))
-        relay.emit(relay.event("evt_3", "blocked", 3, question="Which branch?"))
-
-        run = relay.projection()
-        assert run.question_text == "Which branch?"
-        assert run.needs_user is True
-
-    def test_a_blocked_event_without_a_question_is_refused(self, relay: Relay) -> None:
-        """`blocked` means "I need an answer", so the question is mandatory.
-
-        Accepting a questionless block would leave the user a needs-you badge
-        with nothing to answer, and would tempt the projection into showing the
-        previous question as if it were still live.
-        """
-
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        relay.emit(relay.event("evt_2", "running", 2))
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_3", "blocked", 3, question=None))
-
-        run = relay.projection()
-        assert run.reported_state == "running"
-        assert run.question_text is None
-
-    def test_leaving_blocked_leaves_other_reported_content_intact(
-        self, relay: Relay
-    ) -> None:
-        """Only the question is state-owned; progress and results are history."""
-
-        relay.emit(relay.event("evt_1", "running", 1, progress="Cloning the repo"))
-        relay.emit(relay.event("evt_2", "blocked", 2, question="Which environment?"))
-        relay.emit(relay.event("evt_3", "completed", 3, result="Done, see the PR."))
-
-        run = relay.projection()
-        assert run.question_text is None
-        assert run.progress_text == "Cloning the repo"
-        assert run.result_text == "Done, see the PR."
-
-    def test_a_reply_is_routed_once_and_does_not_clear_blocked(
-        self, relay: Relay, service: AgentRelayService, a2a_client: FakeA2AClient
-    ) -> None:
-        """AC-012 / FR-008: only a later observation moves the state."""
-
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-
-        run = service.reply_to_run(
-            relay.run.id,
-            AgentReplyRequest(
-                message="Use staging.", expected_revision=relay.projection().revision
-            ),
-            owner_id=OWNER,
-            idempotency_key="idem-reply",
-        )
-
-        assert run.reported_state == "blocked"
-        assert [command.kind for command in run.commands if command.kind == "reply"]
-        assert len(replies(a2a_client)) == 1
-
-    def test_a_synchronous_callback_during_reply_wins_over_transport_merge(
-        self,
-        relay: Relay,
-        service: AgentRelayService,
-        a2a_client: FakeA2AClient,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """A report that lands mid-reply is newer than the reply's own answer."""
-
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        expected_revision = relay.projection().revision
-        sent: list[dict[str, Any]] = []
-
-        def send_with_callback(target: Any, **kwargs: Any) -> A2AResult:
-            sent.append(kwargs["message"])
-            relay.emit(relay.event("evt_2", "running", 2, progress="Continuing"))
-            return A2AResult(ok=True, correlation_id="c")
-
-        monkeypatch.setattr(a2a_client, "send_message", send_with_callback)
-
-        run = service.reply_to_run(
-            relay.run.id,
-            AgentReplyRequest(
-                message="Use staging.", expected_revision=expected_revision
-            ),
-            owner_id=OWNER,
-            idempotency_key="idem-sync-reply",
-        )
-
-        assert run.reported_state == "running"
-        assert run.run_version == 2
-        assert run.progress_text == "Continuing"
-        assert len(sent) == 1
-
-    def test_a_synchronous_callback_during_cancel_wins_over_transport_merge(
-        self,
-        relay: Relay,
-        service: AgentRelayService,
-        a2a_client: FakeA2AClient,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """A run that finished while the cancel was in flight is not un-finished."""
-
-        attempts: list[dict[str, Any]] = []
-
-        def cancel_with_callback(target: Any, **kwargs: Any) -> A2AResult:
-            attempts.append(kwargs)
-            relay.emit(relay.event("evt_1", "completed", 1, result="Already done"))
-            return A2AResult(ok=True, correlation_id="c")
-
-        monkeypatch.setattr(a2a_client, "cancel_task", cancel_with_callback)
-
-        run = service.cancel_run(
-            relay.run.id,
-            owner_id=OWNER,
-            idempotency_key="idem-sync-cancel",
-        )
-
-        assert run.reported_state == "completed"
-        assert run.result_text == "Already done"
-        assert run.cancel_requested is False
-        assert len(attempts) == 1
-
-    def test_a_synchronous_nonterminal_callback_during_cancel_preserves_cancellation_overlay(
-        self,
-        relay: Relay,
-        service: AgentRelayService,
-        a2a_client: FakeA2AClient,
-        clock: Clock,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        before = relay.projection()
-        attempted_at = clock.now
-        callback_at = attempted_at + timedelta(minutes=1)
-        mutation_at = attempted_at + timedelta(minutes=2)
-
-        def cancel_with_callback(target: Any, **kwargs: Any) -> A2AResult:
-            clock.advance(timedelta(minutes=1))
-            relay.emit(
-                relay.event("evt_running", "running", 1, progress="Still working")
-            )
-            clock.advance(timedelta(minutes=1))
-            return A2AResult(ok=True, correlation_id="c")
-
-        monkeypatch.setattr(a2a_client, "cancel_task", cancel_with_callback)
-
-        run = service.cancel_run(
-            relay.run.id,
-            owner_id=OWNER,
-            idempotency_key="idem-sync-nonterminal-cancel",
-        )
-
-        persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
-        assert run.reported_state == "running"
-        assert run.run_version == 1
-        assert run.progress_text == "Still working"
-        assert run.cancel_requested is True
-        assert persisted.cancel_requested_at == attempted_at
-        assert persisted.updated_at >= callback_at
-        assert persisted.updated_at == mutation_at
-        assert run.revision == before.revision + 2
-        command = next(item for item in run.commands if item.kind == "cancel")
-        assert command.delivery == "confirmed"
-
-    def test_a_stale_reply_revision_is_refused_before_connector_delivery(
-        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
-    ) -> None:
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        stale_revision = relay.projection().revision
-        relay.emit(relay.event("evt_2", "blocked", 2, question="Which region?"))
-
-        with pytest.raises(ConflictError):
-            service.reply_to_run(
-                relay.run.id,
-                AgentReplyRequest(
-                    message="Use staging.", expected_revision=stale_revision
-                ),
-                owner_id=OWNER,
-                idempotency_key="idem-stale-reply",
-            )
-
-        assert wire_commands(service) == []
-        assert [c for c in relay.projection().commands if c.kind == "reply"] == []
-
-    def test_replaying_a_reply_causes_at_most_one_send(
-        self, relay: Relay, service: AgentRelayService, a2a_client: FakeA2AClient
-    ) -> None:
-        """FR-007: a duplicate submission returns the same command."""
-
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        payload = AgentReplyRequest(
-            message="Use staging.", expected_revision=relay.projection().revision
-        )
-        for _ in range(3):
-            service.reply_to_run(
-                relay.run.id,
-                payload,
-                owner_id=OWNER,
-                idempotency_key="idem-reply",
-            )
-
-        assert len(replies(a2a_client)) == 1
-
-    def test_an_unconfirmed_reply_stays_visibly_unconfirmed(
-        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
-    ) -> None:
-        """Edge case: a timed-out reply is never claimed as delivered."""
-
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        connector.command_outcome = ConnectorCommandOutcome("unconfirmed")
-
-        run = service.reply_to_run(
-            relay.run.id,
-            AgentReplyRequest(
-                message="Use staging.", expected_revision=relay.projection().revision
-            ),
-            owner_id=OWNER,
-            idempotency_key="idem-reply",
-        )
-
-        reply = next(c for c in run.commands if c.kind == "reply")
-        assert reply.delivery == "unconfirmed"
-        assert run.reply_pending is True
-
-    def test_014_FR_010_reply_is_offered_because_no_card_can_advertise_it(
-        self, service: AgentRelayService, clock: Clock
-    ) -> None:
-        """014-FR-010. An agent card says nothing about replies, so we offer it.
-
-        007 hid the control behind a declared capability. Under A2A there is no
-        such declaration to read, and hiding a control on the strength of a flag
-        no card carries would mean withdrawing it from every agent that does
-        support replies. BrainBuddy offers it and reports what the agent
-        actually answers.
-        """
-
-        relay = Relay(service, clock)
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-
-        run = relay.projection()
-
-        assert run.capabilities.reply is True
-        assert run.capabilities.cancel is True
-
-    def test_cancel_is_requested_but_not_claimed_until_confirmed(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """AC-017: 'Cancelling' is not 'Cancelled'."""
-
-        relay.emit(relay.event("evt_1", "running", 1))
-
-        run = service.cancel_run(
-            relay.run.id, owner_id=OWNER, idempotency_key="idem-cancel"
-        )
-
-        assert run.cancel_requested is True
-        assert run.reported_state == "running"
-        assert run.primary_state_label == "Cancellation requested"
-
-    def test_cancel_becomes_cancelled_only_on_a_connector_event(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """The connector's own report is what makes it cancelled."""
-
-        relay.emit(relay.event("evt_1", "running", 1))
-        service.cancel_run(relay.run.id, owner_id=OWNER, idempotency_key="idem-cancel")
-
-        relay.emit(relay.event("evt_2", "cancelled", 2))
-
-        run = relay.projection()
-        assert run.reported_state == "cancelled"
-        assert run.primary_state_label == "Cancelled"
-        assert run.cancel_requested is False
-
-    @pytest.mark.parametrize(
-        ("terminal_type", "content"),
-        [
-            ("completed", {"result": "Done."}),
-            ("failed", {"reason": "Broken."}),
-            ("cancelled", {}),
-        ],
-    )
-    def test_every_terminal_event_clears_the_pending_cancellation_condition(
-        self,
-        relay: Relay,
-        service: AgentRelayService,
-        terminal_type: str,
-        content: dict[str, str],
-    ) -> None:
-        relay.emit(relay.event("evt_1", "running", 1))
-        service.cancel_run(relay.run.id, owner_id=OWNER, idempotency_key="idem-cancel")
-
-        relay.emit(relay.event("evt_2", terminal_type, 2, **content))
-
-        run = relay.projection()
-        assert run.reported_state == terminal_type
-        assert run.cancel_requested is False
-        assert [
-            command.kind for command in run.commands if command.kind == "cancel"
-        ] == ["cancel"]
-
-    def test_another_owner_cannot_reply_to_or_cancel_the_run(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """Owner isolation covers commands too."""
-
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-
-        with pytest.raises(NotFoundError):
-            service.reply_to_run(
-                relay.run.id,
-                AgentReplyRequest(message="Nope.", expected_revision=1),
-                owner_id=OTHER_OWNER,
-                idempotency_key="idem-reply",
-            )
-        with pytest.raises(NotFoundError):
-            service.cancel_run(
-                relay.run.id, owner_id=OTHER_OWNER, idempotency_key="idem-cancel"
-            )
-
-
 class TestExternalIoMergeRaces:
     @pytest.mark.parametrize("operation", ["reply", "cancel"])
     @pytest.mark.parametrize("bypass_operation_lock", [False, True])
@@ -4898,18 +4047,18 @@ class TestExternalIoMergeRaces:
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
         )
-        relay = Relay(service, clock)
+        observed = ObservedRelay(service, clock, a2a_client)
         clear_wire(service)
         idempotency_key = f"idem-concurrent-{operation}"
         if operation == "reply":
-            relay.emit(relay.event("evt_blocked", "blocked", 1))
+            observed.report("blocked", text="Which environment?")
             payload = AgentReplyRequest(
-                message="Use staging.", expected_revision=relay.projection().revision
+                message="Use staging.", expected_revision=observed.projection().revision
             )
 
             def invoke_command() -> Any:
                 return service.reply_to_run(
-                    relay.run.id,
+                    observed.run_id,
                     payload,
                     owner_id=OWNER,
                     idempotency_key=idempotency_key,
@@ -4919,7 +4068,7 @@ class TestExternalIoMergeRaces:
 
             def invoke_command() -> Any:
                 return service.cancel_run(
-                    relay.run.id,
+                    observed.run_id,
                     owner_id=OWNER,
                     idempotency_key=idempotency_key,
                 )
@@ -4985,7 +4134,7 @@ class TestExternalIoMergeRaces:
         assert len(wire_commands(service)) == 1
         assert len(results) == 2
         command_id = wire_commands(service)[0]["command_id"]
-        assert results[0].id == results[1].id == relay.run.id
+        assert results[0].id == results[1].id == observed.run_id
         assert [item.id for item in results[0].commands if item.kind == operation] == [
             command_id
         ]
@@ -5012,14 +4161,14 @@ class TestExternalIoMergeRaces:
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
         )
-        relay = Relay(service, clock)
+        observed = ObservedRelay(service, clock, a2a_client)
         clear_wire(service)
         a2a_client.script(
             "CancelTask",
             A2AResult(
                 ok=True,
                 correlation_id="c",
-                task=observed_task("t1", relay.run.id, "TASK_STATE_CANCELED"),
+                task=observed_task("t1", observed.run_id, "TASK_STATE_CANCELED"),
             ),
         )
         a2a_client.block_kind = "cancel"
@@ -5028,7 +4177,7 @@ class TestExternalIoMergeRaces:
         def invoke() -> None:
             try:
                 service.cancel_run(
-                    relay.run.id,
+                    observed.run_id,
                     owner_id=OWNER,
                     idempotency_key=f"idem-cancel-race-{race}",
                 )
@@ -5039,14 +4188,14 @@ class TestExternalIoMergeRaces:
         worker.start()
         assert a2a_client.entered.wait(timeout=5)
         if race == "terminal":
-            relay.emit(relay.event("evt_cancel_done", "completed", 1, result="Done"))
+            observed.report("completed", text="Done")
         elif race == "retention":
-            persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+            persisted = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
             service.agent_repo.expire_due_content(now=persisted.content_expires_at)
         elif race == "rotation":
-            current = service.get_connection(relay.connection_id, owner_id=OWNER)
+            current = service.get_connection(observed.connection_id, owner_id=OWNER)
             service.rotate_credential(
-                relay.connection_id,
+                observed.connection_id,
                 AgentConnectionRotateRequest(
                     credential="Bearer rotated-token",
                     current_password="correct-horse-battery-staple",
@@ -5057,9 +4206,9 @@ class TestExternalIoMergeRaces:
                 reauthenticated=True,
             )
         else:
-            current = service.get_connection(relay.connection_id, owner_id=OWNER)
+            current = service.get_connection(observed.connection_id, owner_id=OWNER)
             service.disconnect_connection(
-                relay.connection_id,
+                observed.connection_id,
                 AgentConnectionDisconnectRequest(
                     current_password="correct-horse-battery-staple",
                     expected_revision=current.revision,
@@ -5072,7 +4221,7 @@ class TestExternalIoMergeRaces:
         worker.join(timeout=5)
 
         assert errors == []
-        run = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        run = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
         assert len(wire_commands(service)) == 1
         if race == "terminal":
             assert run.reported_state == "completed"
@@ -5082,7 +4231,7 @@ class TestExternalIoMergeRaces:
             assert run.manifest is None
         elif race == "rotation":
             connection = service.agent_repo.get_connection(
-                relay.connection_id, owner_id=OWNER
+                observed.connection_id, owner_id=OWNER
             )
             assert connection.status == "untested"
             assert run.cancel_requested_at is None
@@ -5150,7 +4299,6 @@ class TestExternalIoMergeRaces:
             idempotency_key="idem-start-race-create",
             reauthenticated=True,
         )
-        created_secret = issue_signing_secret(service, created.id)
         make_ready(service, created.id)
         confirmation = review(service, created.id)
         reserved = service.agent_repo.list_runs_for_task("task_1", owner_id=OWNER)[0]
@@ -5172,22 +4320,13 @@ class TestExternalIoMergeRaces:
         worker.start()
         assert a2a_client.entered.wait(timeout=5)
         if race == "terminal":
-            event = {
-                "protocol_version": PROTOCOL_VERSION,
-                "connection_id": created.id,
-                "event_id": "evt_start_done",
-                "run_id": reserved.id,
-                "type": "completed",
-                "run_version": 1,
-                "result": "Already done",
-            }
-            body = json.dumps(event).encode("utf-8")
-            timestamp = int(clock.now.timestamp())
-            service.ingest_event(
-                raw_body=body,
-                connection_id=created.id,
-                timestamp=str(timestamp),
-                signature=sign(created_secret, timestamp, body),
+            report(
+                service,
+                reserved.id,
+                "completed",
+                text="Already done",
+                now=clock.now,
+                trigger="push",
             )
         elif race == "rotation":
             current = service.get_connection(created.id, owner_id=OWNER)
@@ -5244,10 +4383,10 @@ class TestExternalIoMergeRaces:
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
         )
-        relay = Relay(service, clock)
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        observed = ObservedRelay(service, clock, a2a_client)
+        observed.report("blocked", text="Which environment?")
         payload = AgentReplyRequest(
-            message="Use staging.", expected_revision=relay.projection().revision
+            message="Use staging.", expected_revision=observed.projection().revision
         )
         # Scripted only now, so the dispatch above kept the default answer and
         # only the reply is acknowledged with a task.
@@ -5256,7 +4395,7 @@ class TestExternalIoMergeRaces:
             A2AResult(
                 ok=True,
                 correlation_id="c",
-                task=observed_task("t1", relay.run.id),
+                task=observed_task("t1", observed.run_id),
             ),
         )
         a2a_client.block_kind = "reply"
@@ -5267,7 +4406,7 @@ class TestExternalIoMergeRaces:
             try:
                 results.append(
                     service.reply_to_run(
-                        relay.run.id,
+                        observed.run_id,
                         payload,
                         owner_id=OWNER,
                         idempotency_key=f"idem-race-{race}",
@@ -5281,14 +4420,14 @@ class TestExternalIoMergeRaces:
         assert a2a_client.entered.wait(timeout=5)
 
         if race == "terminal":
-            relay.emit(relay.event("evt_2", "completed", 2, result="Finished"))
+            observed.report("completed", text="Finished")
         elif race == "retention":
-            persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+            persisted = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
             service.agent_repo.expire_due_content(now=persisted.content_expires_at)
         elif race == "rotation":
-            current = service.get_connection(relay.connection_id, owner_id=OWNER)
+            current = service.get_connection(observed.connection_id, owner_id=OWNER)
             service.rotate_credential(
-                relay.connection_id,
+                observed.connection_id,
                 AgentConnectionRotateRequest(
                     credential="Bearer rotated-token",
                     current_password="correct-horse-battery-staple",
@@ -5299,9 +4438,9 @@ class TestExternalIoMergeRaces:
                 reauthenticated=True,
             )
         else:
-            current = service.get_connection(relay.connection_id, owner_id=OWNER)
+            current = service.get_connection(observed.connection_id, owner_id=OWNER)
             service.disconnect_connection(
-                relay.connection_id,
+                observed.connection_id,
                 AgentConnectionDisconnectRequest(
                     current_password="correct-horse-battery-staple",
                     expected_revision=current.revision,
@@ -5316,8 +4455,8 @@ class TestExternalIoMergeRaces:
 
         assert errors == []
         assert len(results) == 1
-        current_run = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
-        replies = service.agent_repo.list_commands(relay.run.id, owner_id=OWNER)
+        current_run = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        replies = service.agent_repo.list_commands(observed.run_id, owner_id=OWNER)
         reply = next(command for command in replies if command.kind == "reply")
         assert current_run.reply_pending_command_id is None
         assert reply.delivery == "confirmed"
@@ -5331,13 +4470,13 @@ class TestExternalIoMergeRaces:
             assert reply.body is None
         elif race == "rotation":
             connection = service.agent_repo.get_connection(
-                relay.connection_id, owner_id=OWNER
+                observed.connection_id, owner_id=OWNER
             )
             assert connection.status == "untested"
             assert service._target(connection).credential == "Bearer rotated-token"
         else:
             connection = service.agent_repo.get_connection(
-                relay.connection_id, owner_id=OWNER
+                observed.connection_id, owner_id=OWNER
             )
             assert connection.status == "disconnected"
             assert connection.credential is None
@@ -5359,7 +4498,7 @@ class TestCommandReplayAfterTheWorldMoved:
     def reply(
         self,
         service: AgentRelayService,
-        relay: Relay,
+        observed: ObservedRelay,
         *,
         key: str = "idem-reply",
         message: str = "Use staging.",
@@ -5368,19 +4507,19 @@ class TestCommandReplayAfterTheWorldMoved:
         revisions = getattr(self, "_reply_revisions", {})
         revision = expected_revision
         if revision is None:
-            revision = revisions.setdefault(key, relay.projection().revision)
+            revision = revisions.setdefault(key, observed.projection().revision)
         self._reply_revisions = revisions
         return service.reply_to_run(
-            relay.run.id,
+            observed.run_id,
             AgentReplyRequest(message=message, expected_revision=revision),
             owner_id=OWNER,
             idempotency_key=key,
         )
 
-    def disconnect(self, service: AgentRelayService, relay: Relay) -> None:
-        current = service.get_connection(relay.connection_id, owner_id=OWNER)
+    def disconnect(self, service: AgentRelayService, observed: ObservedRelay) -> None:
+        current = service.get_connection(observed.connection_id, owner_id=OWNER)
         service.disconnect_connection(
-            relay.connection_id,
+            observed.connection_id,
             AgentConnectionDisconnectRequest(
                 current_password="correct-horse-battery-staple",
                 expected_revision=current.revision,
@@ -5391,17 +4530,20 @@ class TestCommandReplayAfterTheWorldMoved:
         )
 
     def test_a_reply_replayed_after_the_run_finished_returns_its_outcome(
-        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
+        self,
+        observed: ObservedRelay,
+        service: AgentRelayService,
+        connector: FakeConnector,
     ) -> None:
         """The lost response is recovered even though the run has since ended."""
 
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        self.reply(service, relay)
-        relay.emit(relay.event("evt_2", "completed", 2, result="Shipped."))
+        observed.report("blocked", text="Which environment?")
+        self.reply(service, observed)
+        observed.report("completed", text="Shipped.")
 
-        replay = self.reply(service, relay)
+        replay = self.reply(service, observed)
 
-        assert replay.id == relay.run.id
+        assert replay.id == observed.run_id
         assert [c.body for c in replay.commands if c.kind == "reply"] == [
             "Use staging."
         ]
@@ -5409,21 +4551,24 @@ class TestCommandReplayAfterTheWorldMoved:
         assert len(wire_commands(service)) == 1
 
     def test_a_completed_reply_replay_precedes_the_live_revision_check(
-        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
+        self,
+        observed: ObservedRelay,
+        service: AgentRelayService,
+        connector: FakeConnector,
     ) -> None:
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        revision = relay.projection().revision
+        observed.report("blocked", text="Which environment?")
+        revision = observed.projection().revision
         payload = AgentReplyRequest(message="Use staging.", expected_revision=revision)
         service.reply_to_run(
-            relay.run.id,
+            observed.run_id,
             payload,
             owner_id=OWNER,
             idempotency_key="idem-reply-revision-replay",
         )
-        relay.emit(relay.event("evt_2", "completed", 2, result="Shipped."))
+        observed.report("completed", text="Shipped.")
 
         replay = service.reply_to_run(
-            relay.run.id,
+            observed.run_id,
             payload,
             owner_id=OWNER,
             idempotency_key="idem-reply-revision-replay",
@@ -5434,15 +4579,18 @@ class TestCommandReplayAfterTheWorldMoved:
         assert len(wire_commands(service)) == 1
 
     def test_a_reply_replayed_after_a_disconnect_returns_its_outcome(
-        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
+        self,
+        observed: ObservedRelay,
+        service: AgentRelayService,
+        connector: FakeConnector,
     ) -> None:
         """A pulled connection cannot retroactively un-send a delivered reply."""
 
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        self.reply(service, relay)
-        self.disconnect(service, relay)
+        observed.report("blocked", text="Which environment?")
+        self.reply(service, observed)
+        self.disconnect(service, observed)
 
-        replay = self.reply(service, relay)
+        replay = self.reply(service, observed)
 
         assert [c.body for c in replay.commands if c.kind == "reply"] == [
             "Use staging."
@@ -5451,16 +4599,21 @@ class TestCommandReplayAfterTheWorldMoved:
         assert len(wire_commands(service)) == 1
 
     def test_a_cancel_replayed_after_the_run_finished_returns_its_outcome(
-        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
+        self,
+        observed: ObservedRelay,
+        service: AgentRelayService,
+        connector: FakeConnector,
     ) -> None:
         """The request was really made, so the retry says so rather than 'too late'."""
 
-        relay.emit(relay.event("evt_1", "running", 1))
-        service.cancel_run(relay.run.id, owner_id=OWNER, idempotency_key="idem-cancel")
-        relay.emit(relay.event("evt_2", "cancelled", 2))
+        observed.report("running")
+        service.cancel_run(
+            observed.run_id, owner_id=OWNER, idempotency_key="idem-cancel"
+        )
+        observed.report("cancelled")
 
         replay = service.cancel_run(
-            relay.run.id, owner_id=OWNER, idempotency_key="idem-cancel"
+            observed.run_id, owner_id=OWNER, idempotency_key="idem-cancel"
         )
 
         assert replay.cancel_requested is False
@@ -5469,16 +4622,21 @@ class TestCommandReplayAfterTheWorldMoved:
         assert len(wire_commands(service)) == 1
 
     def test_a_cancel_replayed_after_a_disconnect_returns_its_outcome(
-        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
+        self,
+        observed: ObservedRelay,
+        service: AgentRelayService,
+        connector: FakeConnector,
     ) -> None:
         """Same for the connection going away between attempt and retry."""
 
-        relay.emit(relay.event("evt_1", "running", 1))
-        service.cancel_run(relay.run.id, owner_id=OWNER, idempotency_key="idem-cancel")
-        self.disconnect(service, relay)
+        observed.report("running")
+        service.cancel_run(
+            observed.run_id, owner_id=OWNER, idempotency_key="idem-cancel"
+        )
+        self.disconnect(service, observed)
 
         replay = service.cancel_run(
-            relay.run.id, owner_id=OWNER, idempotency_key="idem-cancel"
+            observed.run_id, owner_id=OWNER, idempotency_key="idem-cancel"
         )
 
         assert replay.cancel_requested is True
@@ -5486,49 +4644,55 @@ class TestCommandReplayAfterTheWorldMoved:
         assert len(wire_commands(service)) == 1
 
     def test_another_owner_cannot_replay_a_settled_command(
-        self, relay: Relay, service: AgentRelayService
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         """The record is owner-scoped, and so is the run it points at."""
 
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        self.reply(service, relay)
+        observed.report("blocked", text="Which environment?")
+        self.reply(service, observed)
 
         with pytest.raises(NotFoundError):
             service.reply_to_run(
-                relay.run.id,
+                observed.run_id,
                 AgentReplyRequest(
                     message="Use staging.",
-                    expected_revision=relay.projection().revision,
+                    expected_revision=observed.projection().revision,
                 ),
                 owner_id=OTHER_OWNER,
                 idempotency_key="idem-reply",
             )
 
     def test_the_same_key_with_a_different_message_still_conflicts(
-        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
+        self,
+        observed: ObservedRelay,
+        service: AgentRelayService,
+        connector: FakeConnector,
     ) -> None:
         """Replay is for the *same* request; a new one must not ride the record."""
 
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        self.reply(service, relay)
-        relay.emit(relay.event("evt_2", "completed", 2, result="Shipped."))
+        observed.report("blocked", text="Which environment?")
+        self.reply(service, observed)
+        observed.report("completed", text="Shipped.")
 
         with pytest.raises(ConflictError):
-            self.reply(service, relay, message="Actually production.")
+            self.reply(service, observed, message="Actually production.")
 
         assert len(wire_commands(service)) == 1
 
     def test_a_fresh_key_on_a_finished_run_is_still_refused(
-        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
+        self,
+        observed: ObservedRelay,
+        service: AgentRelayService,
+        connector: FakeConnector,
     ) -> None:
         """Nothing above weakens the live guard for a genuinely new command."""
 
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        self.reply(service, relay)
-        relay.emit(relay.event("evt_2", "completed", 2, result="Shipped."))
+        observed.report("blocked", text="Which environment?")
+        self.reply(service, observed)
+        observed.report("completed", text="Shipped.")
 
         with pytest.raises(ValidationFailure) as refused:
-            self.reply(service, relay, key="idem-reply-2")
+            self.reply(service, observed, key="idem-reply-2")
 
         assert refused.value.detail == {"reason": "run_terminal"}
         assert len(wire_commands(service)) == 1
@@ -5539,14 +4703,14 @@ class TestCommandReplayAfterTheWorldMoved:
 
 class TestDisconnectAndRetention:
     def test_disconnect_destroys_the_credential_and_blocks_new_hand_offs(
-        self, relay: Relay, service: AgentRelayService
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         """AC-018: the secret is destroyed and the connection stops working."""
 
-        current = service.get_connection(relay.connection_id, owner_id=OWNER)
+        current = service.get_connection(observed.connection_id, owner_id=OWNER)
 
         disconnected = service.disconnect_connection(
-            relay.connection_id,
+            observed.connection_id,
             AgentConnectionDisconnectRequest(
                 current_password="correct-horse-battery-staple",
                 expected_revision=current.revision,
@@ -5559,18 +4723,18 @@ class TestDisconnectAndRetention:
         assert disconnected.status == "disconnected"
         assert disconnected.ready_for_handoff is False
         with pytest.raises(ValidationFailure):
-            dispatch(service, relay.connection_id, key="idem-after-disconnect")
+            dispatch(service, observed.connection_id, key="idem-after-disconnect")
 
     def test_disconnect_requires_reauthentication(
-        self, relay: Relay, service: AgentRelayService
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         """FR-016: destructive disconnect is a re-authenticated action."""
 
-        current = service.get_connection(relay.connection_id, owner_id=OWNER)
+        current = service.get_connection(observed.connection_id, owner_id=OWNER)
 
         with pytest.raises(ValidationFailure):
             service.disconnect_connection(
-                relay.connection_id,
+                observed.connection_id,
                 AgentConnectionDisconnectRequest(
                     current_password="correct-horse-battery-staple",
                     expected_revision=current.revision,
@@ -5581,14 +4745,14 @@ class TestDisconnectAndRetention:
             )
 
     def test_disconnect_marks_active_runs_and_preserves_their_history(
-        self, relay: Relay, service: AgentRelayService
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         """FR-016: history stays understandable; the run is not falsely ended."""
 
-        relay.emit(relay.event("evt_1", "running", 1, progress="Working"))
-        current = service.get_connection(relay.connection_id, owner_id=OWNER)
+        observed.report("running", text="Working")
+        current = service.get_connection(observed.connection_id, owner_id=OWNER)
         service.disconnect_connection(
-            relay.connection_id,
+            observed.connection_id,
             AgentConnectionDisconnectRequest(
                 current_password="correct-horse-battery-staple",
                 expected_revision=current.revision,
@@ -5598,20 +4762,20 @@ class TestDisconnectAndRetention:
             reauthenticated=True,
         )
 
-        run = relay.projection()
+        run = observed.projection()
         assert run.connection_disconnected is True
         assert run.primary_state_label == "Connection disconnected"
         assert run.progress_text == "Working"
         assert [event.type for event in run.events] == ["running"]
 
-    def test_events_signed_by_a_destroyed_credential_are_refused(
-        self, relay: Relay, service: AgentRelayService
+    def test_014_FR_016_a_destroyed_connection_can_no_longer_report(
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         """FR-016: a disconnected connection can no longer report."""
 
-        current = service.get_connection(relay.connection_id, owner_id=OWNER)
+        current = service.get_connection(observed.connection_id, owner_id=OWNER)
         service.disconnect_connection(
-            relay.connection_id,
+            observed.connection_id,
             AgentConnectionDisconnectRequest(
                 current_password="correct-horse-battery-staple",
                 expected_revision=current.revision,
@@ -5620,19 +4784,24 @@ class TestDisconnectAndRetention:
             idempotency_key="idem-disconnect",
             reauthenticated=True,
         )
+        before = observed.projection()
 
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_late", "completed", 5, result="Too late"))
+        observed.report("completed", text="Too late")
+
+        after = observed.projection()
+        assert after.reported_state is None
+        assert after.result_text is None
+        assert after.run_version == before.run_version
 
     def test_replying_through_a_disconnected_connection_is_refused(
-        self, relay: Relay, service: AgentRelayService
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         """FR-016: commands stop with the connection."""
 
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
-        current = service.get_connection(relay.connection_id, owner_id=OWNER)
+        observed.report("blocked", text="Which environment?")
+        current = service.get_connection(observed.connection_id, owner_id=OWNER)
         service.disconnect_connection(
-            relay.connection_id,
+            observed.connection_id,
             AgentConnectionDisconnectRequest(
                 current_password="correct-horse-battery-staple",
                 expected_revision=current.revision,
@@ -5644,26 +4813,26 @@ class TestDisconnectAndRetention:
 
         with pytest.raises(ValidationFailure):
             service.reply_to_run(
-                relay.run.id,
+                observed.run_id,
                 AgentReplyRequest(
                     message="Use staging.",
-                    expected_revision=relay.projection().revision,
+                    expected_revision=observed.projection().revision,
                 ),
                 owner_id=OWNER,
                 idempotency_key="idem-reply",
             )
 
     def test_relayed_content_expires_after_thirty_days(
-        self, relay: Relay, clock: Clock, service: AgentRelayService
+        self, observed: ObservedRelay, clock: Clock, service: AgentRelayService
     ) -> None:
         """AC-020 / FR-010: content goes, the run stays, expiry is explicit."""
 
-        relay.emit(relay.event("evt_1", "completed", 1, result="Sensitive result"))
+        observed.report("completed", text="Sensitive result")
         clock.advance(service.content_retention + timedelta(seconds=1))
 
         assert service.run_retention_sweep() == 1
 
-        run = relay.projection()
+        run = observed.projection()
         assert run.content_expired is True
         assert run.result_text is None
         assert run.manifest is None
@@ -5671,23 +4840,24 @@ class TestDisconnectAndRetention:
         assert run.events and run.events[0].summary is None
 
     def test_due_unswept_content_is_redacted_at_every_read_boundary(
-        self, relay: Relay, clock: Clock, service: AgentRelayService
+        self, observed: ObservedRelay, clock: Clock, service: AgentRelayService
     ) -> None:
         """FR-015 is an access boundary, not merely a maintenance schedule."""
 
-        relay.emit(relay.event("evt_due", "blocked", 1, question="Secret question?"))
+        observed.report("blocked", text="Secret question?")
         service.reply_to_run(
-            relay.run.id,
+            observed.run_id,
             AgentReplyRequest(
-                message="Secret answer", expected_revision=relay.projection().revision
+                message="Secret answer",
+                expected_revision=observed.projection().revision,
             ),
             owner_id=OWNER,
             idempotency_key="idem-due-reply",
         )
-        persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        persisted = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
         clock.now = persisted.content_expires_at
 
-        detail = service.get_run(relay.run.id, owner_id=OWNER)
+        detail = service.get_run(observed.run_id, owner_id=OWNER)
         listed = service.list_runs_for_task("task_1", owner_id=OWNER)[0]
         summary = service.latest_run_summaries(owner_id=OWNER, task_ids=["task_1"])[
             "task_1"
@@ -5706,25 +4876,25 @@ class TestDisconnectAndRetention:
         assert summary.primary_state_label == "Content expired under retention policy"
         assert summary.needs_user is False
 
-        unchanged = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        unchanged = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
         assert unchanged == persisted
         assert unchanged.content_expired is False
         assert unchanged.question_text == "Secret question?"
 
     def test_due_unswept_run_rejects_reply_but_still_allows_cancel(
         self,
-        relay: Relay,
+        observed: ObservedRelay,
         clock: Clock,
         service: AgentRelayService,
         connector: FakeConnector,
     ) -> None:
-        relay.emit(relay.event("evt_due", "blocked", 1, question="Secret question?"))
-        persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        observed.report("blocked", text="Secret question?")
+        persisted = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
         clock.now = persisted.content_expires_at
 
         with pytest.raises(ValidationFailure) as refused:
             service.reply_to_run(
-                relay.run.id,
+                observed.run_id,
                 AgentReplyRequest(
                     message="Too late", expected_revision=persisted.revision
                 ),
@@ -5732,7 +4902,7 @@ class TestDisconnectAndRetention:
                 idempotency_key="idem-due-refused",
             )
         cancelled = service.cancel_run(
-            relay.run.id,
+            observed.run_id,
             owner_id=OWNER,
             idempotency_key="idem-due-cancel",
         )
@@ -5744,19 +4914,19 @@ class TestDisconnectAndRetention:
 
     def test_a_fresh_reply_to_an_expired_run_is_refused_without_content_write(
         self,
-        relay: Relay,
+        observed: ObservedRelay,
         clock: Clock,
         service: AgentRelayService,
         connector: FakeConnector,
     ) -> None:
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        observed.report("blocked", text="Which environment?")
         clock.advance(service.content_retention + timedelta(seconds=1))
         assert service.run_retention_sweep() == 1
-        revision = relay.projection().revision
+        revision = observed.projection().revision
 
         with pytest.raises(ValidationFailure) as refused:
             service.reply_to_run(
-                relay.run.id,
+                observed.run_id,
                 AgentReplyRequest(message="New secret", expected_revision=revision),
                 owner_id=OWNER,
                 idempotency_key="idem-after-expiry",
@@ -5764,26 +4934,26 @@ class TestDisconnectAndRetention:
 
         assert refused.value.detail == {"reason": "run_content_expired"}
         assert wire_commands(service) == []
-        assert all(command.body is None for command in relay.projection().commands)
+        assert all(command.body is None for command in observed.projection().commands)
 
     def test_a_completed_same_key_reply_replays_after_content_expiry(
         self,
-        relay: Relay,
+        observed: ObservedRelay,
         clock: Clock,
         service: AgentRelayService,
         connector: FakeConnector,
     ) -> None:
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        observed.report("blocked", text="Which environment?")
         payload = AgentReplyRequest(
-            message="Use staging.", expected_revision=relay.projection().revision
+            message="Use staging.", expected_revision=observed.projection().revision
         )
         first = service.reply_to_run(
-            relay.run.id,
+            observed.run_id,
             payload,
             owner_id=OWNER,
             idempotency_key="idem-reply-before-expiry",
         )
-        persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        persisted = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
         service.agent_repo.save_run(
             persisted.model_copy(update={"content_expires_at": clock.now})
         )
@@ -5791,7 +4961,7 @@ class TestDisconnectAndRetention:
         assert service.run_retention_sweep() == 1
 
         replay = service.reply_to_run(
-            relay.run.id,
+            observed.run_id,
             payload,
             owner_id=OWNER,
             idempotency_key="idem-reply-before-expiry",
@@ -5802,46 +4972,46 @@ class TestDisconnectAndRetention:
         assert len(wire_commands(service)) == 1
         assert all(command.body is None for command in replay.commands)
 
-    def test_event_at_exact_retention_boundary_advances_only_coarse_state(
+    def test_observation_at_exact_retention_boundary_advances_only_coarse_state(
         self,
-        relay: Relay,
+        observed: ObservedRelay,
         clock: Clock,
         service: AgentRelayService,
         tmp_path: Path,
     ) -> None:
-        relay.emit(relay.event("evt_before_due", "blocked", 1, question="Secret?"))
+        """An answer that arrives exactly as content expires may not restore it.
+
+        The stored `content_expired` flag is the sweep's to set; what the write
+        path owes is that the run's own content fields are never rewritten once
+        the boundary is reached, whatever the observation carried.
+        """
+
+        observed.report("blocked", text="Secret?")
         service.reply_to_run(
-            relay.run.id,
+            observed.run_id,
             AgentReplyRequest(
-                message="Secret answer", expected_revision=relay.projection().revision
+                message="Secret answer",
+                expected_revision=observed.projection().revision,
             ),
             owner_id=OWNER,
             idempotency_key="idem-before-due",
         )
-        persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        persisted = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
         clock.now = persisted.content_expires_at
 
-        relay.emit(
-            relay.event(
-                "evt_due",
-                "running",
-                2,
-                progress="Secret progress at the boundary",
-            )
-        )
+        observed.report("running", text="Secret progress at the boundary")
 
-        stored = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
-        assert stored.content_expired is True
+        stored = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        assert observed.projection().content_expired is True
         assert stored.reported_state == "running"
         assert stored.run_version == 2
         assert stored.last_contact_at == clock.now
-        assert stored.manifest is None
         assert stored.progress_text is None
         assert stored.question_text is None
         assert stored.result_text is None
         assert stored.result_link is None
         assert stored.failure_reason is None
-        events = service.agent_repo.list_events(relay.run.id, owner_id=OWNER)
+        events = service.agent_repo.list_events(observed.run_id, owner_id=OWNER)
         assert events[-1].summary is None
 
         with sqlite3.connect(tmp_path / "agents.sqlite3") as conn:
@@ -5849,67 +5019,71 @@ class TestDisconnectAndRetention:
                 json.loads(row[0])
                 for row in conn.execute(
                     "SELECT payload FROM agent_run_events WHERE run_id = ?",
-                    (relay.run.id,),
+                    (observed.run_id,),
                 )
             ]
             command_payloads = [
                 json.loads(row[0])
                 for row in conn.execute(
                     "SELECT payload FROM agent_run_commands WHERE run_id = ?",
-                    (relay.run.id,),
+                    (observed.run_id,),
                 )
             ]
         assert any(event["summary"] is not None for event in event_payloads)
         assert any(command["body"] is not None for command in command_payloads)
 
-        revision = stored.revision
-        assert service.run_retention_sweep() == 0
+        assert service.run_retention_sweep() == 1
+        revision = service.agent_repo.get_run(observed.run_id, owner_id=OWNER).revision
 
         with sqlite3.connect(tmp_path / "agents.sqlite3") as conn:
             event_payloads = [
                 json.loads(row[0])
                 for row in conn.execute(
                     "SELECT payload FROM agent_run_events WHERE run_id = ?",
-                    (relay.run.id,),
+                    (observed.run_id,),
                 )
             ]
             command_payloads = [
                 json.loads(row[0])
                 for row in conn.execute(
                     "SELECT payload FROM agent_run_commands WHERE run_id = ?",
-                    (relay.run.id,),
+                    (observed.run_id,),
                 )
             ]
         assert all(event["summary"] is None for event in event_payloads)
         assert all(command["body"] is None for command in command_payloads)
         assert (
-            service.agent_repo.get_run(relay.run.id, owner_id=OWNER).revision
+            service.agent_repo.get_run(observed.run_id, owner_id=OWNER).manifest is None
+        )
+        assert service.run_retention_sweep() == 0
+        assert (
+            service.agent_repo.get_run(observed.run_id, owner_id=OWNER).revision
             == revision
         )
 
     @pytest.mark.parametrize(
         ("event_type", "content"),
         [
-            ("running", {"progress": "Secret progress"}),
-            ("blocked", {"question": "Secret question?"}),
-            ("completed", {"result": "Secret result"}),
-            ("failed", {"reason": "Secret failure"}),
+            ("running", "Secret progress"),
+            ("blocked", "Secret question?"),
+            ("completed", "Secret result"),
+            ("failed", "Secret failure"),
         ],
     )
-    def test_late_events_advance_expired_runs_without_repopulating_content(
+    def test_late_observations_advance_expired_runs_without_repopulating_content(
         self,
-        relay: Relay,
+        observed: ObservedRelay,
         clock: Clock,
         service: AgentRelayService,
         event_type: str,
-        content: dict[str, str],
+        content: str,
     ) -> None:
         clock.advance(service.content_retention + timedelta(seconds=1))
         assert service.run_retention_sweep() == 1
 
-        relay.emit(relay.event("evt_late", event_type, 1, **content))
+        observed.report(event_type, text=content)
 
-        run = relay.projection()
+        run = observed.projection()
         assert run.content_expired is True
         assert run.reported_state == event_type
         assert run.run_version == 1
@@ -5921,10 +5095,14 @@ class TestDisconnectAndRetention:
         assert run.failure_reason is None
         assert run.events[-1].summary is None
         assert service.run_retention_sweep() == 0
-        assert all(event.summary is None for event in relay.projection().events)
+        assert all(event.summary is None for event in observed.projection().events)
 
     def test_expiry_leaves_no_manifest_fingerprint_in_run_storage(
-        self, relay: Relay, clock: Clock, service: AgentRelayService, tmp_path: Path
+        self,
+        observed: ObservedRelay,
+        clock: Clock,
+        service: AgentRelayService,
+        tmp_path: Path,
     ) -> None:
         """FR-015: the manifest token is content-derived, so it expires with it.
 
@@ -5934,9 +5112,13 @@ class TestDisconnectAndRetention:
         what expiring the content is supposed to prevent.
         """
 
-        token = relay.run.manifest.token if relay.run.manifest else None
+        token = (
+            observed.projection().manifest.token
+            if observed.projection().manifest
+            else None
+        )
         assert token is not None
-        relay.emit(relay.event("evt_1", "completed", 1, result="Sensitive result"))
+        observed.report("completed", text="Sensitive result")
         clock.advance(service.content_retention + timedelta(seconds=1))
 
         assert service.run_retention_sweep() == 1
@@ -5944,7 +5126,7 @@ class TestDisconnectAndRetention:
         with sqlite3.connect(tmp_path / "agents.sqlite3") as conn:
             rows = conn.execute(
                 "SELECT manifest_token, payload FROM agent_runs WHERE id = ?",
-                (relay.run.id,),
+                (observed.run_id,),
             ).fetchall()
 
         assert rows and rows[0][0] is None
@@ -5958,21 +5140,21 @@ class TestDisconnectAndRetention:
         ]
 
     def test_content_within_retention_is_untouched(
-        self, relay: Relay, service: AgentRelayService
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         """Nothing expires early."""
 
-        relay.emit(relay.event("evt_1", "completed", 1, result="Still here"))
+        observed.report("completed", text="Still here")
 
         assert service.run_retention_sweep() == 0
-        assert relay.projection().result_text == "Still here"
+        assert observed.projection().result_text == "Still here"
 
     def test_the_latest_run_summary_powers_the_compact_task_surface(
-        self, relay: Relay, service: AgentRelayService
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         """FR-010: the compact surface shows only the latest run, honestly."""
 
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        observed.report("blocked", text="Which environment?")
 
         summaries = service.latest_run_summaries(
             owner_id=OWNER, task_ids=["task_1", "task_2"]
@@ -5983,72 +5165,26 @@ class TestDisconnectAndRetention:
         assert "task_2" not in summaries
 
     def test_purging_an_owner_removes_every_relay_record(
-        self, relay: Relay, service: AgentRelayService
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         """AC-021: account purge leaves no connection, run, or audit behind."""
 
-        relay.emit(relay.event("evt_1", "running", 1))
+        observed.report("running")
 
         service.delete_all_for_owner(owner_id=OWNER)
 
         assert service.list_connections(owner_id=OWNER) == []
         with pytest.raises(NotFoundError):
-            service.get_run(relay.run.id, owner_id=OWNER)
-
-    def test_event_authenticated_before_account_purge_cannot_recreate_relay_rows(
-        self,
-        relay: Relay,
-        service: AgentRelayService,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        authenticated = Event()
-        resume = Event()
-        original_apply = service._apply_authenticated_event
-
-        def paused_apply(connection: AgentConnectionDocument, event: Any) -> None:
-            authenticated.set()
-            assert resume.wait(timeout=5)
-            original_apply(connection, event)
-
-        monkeypatch.setattr(service, "_apply_authenticated_event", paused_apply)
-        failures: list[BaseException] = []
-
-        def ingest() -> None:
-            try:
-                relay.emit(relay.event("evt_purge_race", "running", 1))
-            except BaseException as exc:  # captured for deterministic thread assertion
-                failures.append(exc)
-
-        contender = Thread(target=ingest)
-        contender.start()
-        assert authenticated.wait(timeout=5)
-        service.delete_all_for_owner(owner_id=OWNER)
-        resume.set()
-        contender.join(timeout=5)
-
-        assert len(failures) == 1
-        assert isinstance(failures[0], EventRejected)
-        assert failures[0].code == "connection_scope_changed"
-        assert service.list_connections(owner_id=OWNER) == []
-        assert service.list_audit(owner_id=OWNER) == []
-        assert service.agent_repo.export_owner_data(
-            owner_id=OWNER, now=relay.clock.now
-        ) == {
-            "connections": [],
-            "runs": [],
-            "events": [],
-            "commands": [],
-            "audit": [],
-        }
+            service.get_run(observed.run_id, owner_id=OWNER)
 
 
 class TestAudit:
     def test_the_audit_trail_records_actions_without_content_or_secrets(
-        self, relay: Relay, service: AgentRelayService
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         """FR-017: IDs, outcomes, and timings only."""
 
-        relay.emit(relay.event("evt_1", "running", 1, progress="Cloning the repo"))
+        observed.report("running", text="Cloning the repo")
 
         entries = service.list_audit(owner_id=OWNER)
         actions = {entry.action for entry in entries}
@@ -6057,199 +5193,21 @@ class TestAudit:
         serialized = json.dumps([entry.model_dump(mode="json") for entry in entries])
         assert "super-secret-token" not in serialized
         assert "Cloning the repo" not in serialized
-        assert relay.secret not in serialized
-
-    def test_pre_authentication_rejections_do_not_create_durable_audit_rows(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        before = len(service.list_audit(owner_id=OWNER))
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_1", "running", 1), secret="wrong")
-
-        assert len(service.list_audit(owner_id=OWNER)) == before
-
-    def test_pre_authentication_rejection_floods_are_bounded_and_valid_events_continue(
-        self, relay: Relay, service: AgentRelayService, clock: Clock
-    ) -> None:
-        before = len(service.list_audit(owner_id=OWNER))
-        body = json.dumps(relay.event("evt_stale", "running", 1)).encode("utf-8")
-        stale = int((clock.now - timedelta(hours=2)).timestamp())
-
-        for index in range(20):
-            with pytest.raises(EventRejected):
-                relay.emit(
-                    relay.event(f"evt_bad_{index}", "running", 1), secret="wrong"
-                )
-            with pytest.raises(EventRejected):
-                service.ingest_event(
-                    raw_body=body,
-                    connection_id=relay.connection_id,
-                    timestamp=str(stale),
-                    signature=sign(relay.secret, stale, body),
-                )
-
-        assert len(service.list_audit(owner_id=OWNER)) == before
-        accepted = relay.emit(relay.event("evt_valid", "running", 1))
-        assert accepted.accepted is True
-
-        current = service.get_connection(relay.connection_id, owner_id=OWNER)
-        service.disconnect_connection(
-            relay.connection_id,
-            AgentConnectionDisconnectRequest(
-                current_password="correct-horse-battery-staple",
-                expected_revision=current.revision,
-            ),
-            owner_id=OWNER,
-            idempotency_key="idem-disconnect-audit-flood",
-            reauthenticated=True,
-        )
-        after_disconnect = len(service.list_audit(owner_id=OWNER))
-        for index in range(20):
-            with pytest.raises(EventRejected):
-                relay.emit(relay.event(f"evt_disconnected_{index}", "running", 2))
-
-        assert len(service.list_audit(owner_id=OWNER)) == after_disconnect
-
-        replacement = service.create_connection(
-            create_request(name="Replacement"),
-            owner_id=OWNER,
-            idempotency_key="idem-create-after-flood",
-            reauthenticated=True,
-        )
-        replacement_secret = issue_signing_secret(
-            service, replacement.id, key="idem-replacement-signing"
-        )
-        make_ready(service, replacement.id)
-        replacement_run = dispatch(
-            service,
-            replacement.id,
-            task_id="task_2",
-            key="idem-dispatch-after-flood",
-        )
-        body = json.dumps(
-            {
-                "protocol_version": PROTOCOL_VERSION,
-                "connection_id": replacement.id,
-                "event_id": "evt_after_flood",
-                "run_id": replacement_run.id,
-                "type": "running",
-                "run_version": 1,
-            }
-        ).encode("utf-8")
-        timestamp = int(clock.now.timestamp())
-        accepted = service.ingest_event(
-            raw_body=body,
-            connection_id=replacement.id,
-            timestamp=str(timestamp),
-            signature=sign(replacement_secret, timestamp, body),
-        )
-        assert accepted.accepted is True
-
-    def test_authenticated_semantic_rejection_audit_is_fixed_cardinality(
-        self, relay: Relay, service: AgentRelayService, clock: Clock
-    ) -> None:
-        before = len(service.list_audit(owner_id=OWNER))
-        timestamp = int(clock.now.timestamp())
-
-        for index in range(20):
-            body = json.dumps(
-                {
-                    "protocol_version": PROTOCOL_VERSION,
-                    "connection_id": relay.connection_id,
-                    "event_id": f"evt_invalid_{index}",
-                }
-            ).encode("utf-8")
-            with pytest.raises(EventRejected) as rejected:
-                service.ingest_event(
-                    raw_body=body,
-                    connection_id=relay.connection_id,
-                    timestamp=str(timestamp),
-                    signature=sign(relay.secret, timestamp, body),
-                )
-            assert rejected.value.code == "envelope_invalid"
-
-        entries = service.list_audit(owner_id=OWNER)
-        assert len(entries) == before + 1
-        rejection = next(entry for entry in entries if entry.action == "event_rejected")
-        assert rejection.outcome == "envelope_invalid"
-        assert rejection.connection_id == relay.connection_id
-        assert rejection.run_id is None
-        assert rejection.correlation_id is None
-        serialized = json.dumps(rejection.model_dump(mode="json"))
-        assert "evt_invalid_" not in serialized
-
-        mismatch_body = json.dumps(
-            {
-                "protocol_version": PROTOCOL_VERSION,
-                "connection_id": "agentconn_other",
-                "event_id": "evt_attacker_controlled",
-                "run_id": "agentrun_attacker_controlled",
-                "type": "running",
-                "run_version": 1,
-            }
-        ).encode("utf-8")
-        with pytest.raises(EventRejected) as rejected:
-            service.ingest_event(
-                raw_body=mismatch_body,
-                connection_id=relay.connection_id,
-                timestamp=str(timestamp),
-                signature=sign(relay.secret, timestamp, mismatch_body),
-            )
-        assert rejected.value.code == "connection_mismatch"
-
-        entries = service.list_audit(owner_id=OWNER)
-        assert len(entries) == before + 2
-        assert {
-            entry.outcome for entry in entries if entry.action == "event_rejected"
-        } == {
-            "connection_mismatch",
-            "envelope_invalid",
-        }
-        serialized = json.dumps(
-            [
-                entry.model_dump(mode="json")
-                for entry in entries
-                if entry.action == "event_rejected"
-            ]
-        )
-        assert "evt_attacker_controlled" not in serialized
-        assert "agentrun_attacker_controlled" not in serialized
-
-        accepted = relay.emit(relay.event("evt_valid_after_auth_flood", "running", 1))
-        assert accepted.accepted is True
-
-        for index in range(5):
-            with pytest.raises(EventRejected) as rejected:
-                relay.emit(relay.event(f"evt_stale_{index}", "running", 1))
-            assert rejected.value.code == "run_version_not_newer"
-
-        rejection_entries = [
-            entry
-            for entry in service.list_audit(owner_id=OWNER)
-            if entry.action == "event_rejected"
-        ]
-        assert len(rejection_entries) == 3
-        assert {entry.outcome for entry in rejection_entries} == {
-            "connection_mismatch",
-            "envelope_invalid",
-            "run_version_not_newer",
-        }
 
 
 class TestSecretHandling:
     def test_no_service_response_can_ever_carry_the_stored_credential(
-        self, relay: Relay, service: AgentRelayService
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         """AC-019: the saved secret is unreachable through every read path."""
 
-        relay.emit(relay.event("evt_1", "completed", 1, result="Done"))
+        observed.report("completed", text="Done")
 
         payloads = [
             json.dumps(
-                service.get_connection(relay.connection_id, owner_id=OWNER).model_dump(
-                    mode="json"
-                )
+                service.get_connection(
+                    observed.connection_id, owner_id=OWNER
+                ).model_dump(mode="json")
             ),
             json.dumps(
                 [
@@ -6258,7 +5216,7 @@ class TestSecretHandling:
                 ]
             ),
             json.dumps(
-                service.get_run(relay.run.id, owner_id=OWNER).model_dump(mode="json")
+                service.get_run(observed.run_id, owner_id=OWNER).model_dump(mode="json")
             ),
             json.dumps(
                 [e.model_dump(mode="json") for e in service.list_audit(owner_id=OWNER)]
@@ -6267,7 +5225,6 @@ class TestSecretHandling:
 
         for payload in payloads:
             assert "super-secret-token" not in payload
-            assert relay.secret not in payload
 
     def test_the_credential_is_not_stored_in_plaintext_on_disk(
         self, tmp_path: Path, service: AgentRelayService
@@ -6301,38 +5258,6 @@ class TestSecretHandling:
         assert rejected.value.detail == {"reason": "credential_unreadable"}
         assert connector.tests == []
 
-    def test_a_signing_secret_copied_to_another_connection_cannot_verify(
-        self, relay: Relay, service: AgentRelayService, tmp_path: Path
-    ) -> None:
-        """The signing secret's AAD names its connection, so it cannot move."""
-
-        repo = AgentRepository(tmp_path)
-        source = repo.get_connection(relay.connection_id, owner_id=OWNER)
-        second = service.create_connection(
-            create_request(name="Second agent"),
-            owner_id=OWNER,
-            idempotency_key="idem-second",
-            reauthenticated=True,
-        )
-        target = repo.get_connection(second.id, owner_id=OWNER)
-        repo.save_connection(
-            target.model_copy(update={"inbound_secret": source.inbound_secret})
-        )
-
-        body = json.dumps(
-            relay.event("evt_1", "running", 1, connection_id=second.id)
-        ).encode("utf-8")
-        timestamp = int(relay.clock.now.timestamp())
-
-        with pytest.raises(EventRejected) as rejected:
-            service.ingest_event(
-                raw_body=body,
-                connection_id=second.id,
-                timestamp=str(timestamp),
-                signature=sign(relay.secret, timestamp, body),
-            )
-        assert rejected.value.code == "signing_secret_unreadable"
-
     def test_a_ciphertext_that_cannot_be_opened_fails_closed(
         self, tmp_path: Path, connector: FakeConnector, clock: Clock
     ) -> None:
@@ -6346,333 +5271,6 @@ class TestSecretHandling:
 
         with pytest.raises(ValidationFailure):
             rekeyed.test_connection(connection_id, owner_id=OWNER)
-
-
-class TestSigningSecretRotation:
-    """Recovering from a lost create response without weakening FR-003.
-
-    The inbound signing secret is shown once. If that one response is lost — a
-    dropped connection, a closed sheet, a crashed app — the owner has a
-    connection they cannot configure and no way back. Rotation is that way back:
-    a re-authenticated, revision-checked, idempotent replacement that invalidates
-    the old secret the moment it is issued.
-    """
-
-    def rotate(
-        self,
-        service: AgentRelayService,
-        connection_id: str,
-        *,
-        key: str = "idem-signing",
-        revision: int | None = None,
-        owner_id: str = OWNER,
-        reauthenticated: bool = True,
-    ) -> Any:
-        current = revision
-        if current is None:
-            current = service.get_connection(connection_id, owner_id=OWNER).revision
-        return service.rotate_signing_secret(
-            connection_id,
-            AgentConnectionRotateSigningSecretRequest(
-                current_password="correct-horse-battery-staple",
-                expected_revision=current,
-            ),
-            owner_id=owner_id,
-            idempotency_key=key,
-            reauthenticated=reauthenticated,
-        )
-
-    def test_event_authenticated_before_concurrent_rotation_cannot_mutate(
-        self,
-        relay: Relay,
-        service: AgentRelayService,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """S1 authentication cannot cross an S2 rotation's owner lock."""
-
-        authenticated = Event()
-        resume = Event()
-        original_apply = service._apply_authenticated_event
-
-        def paused_apply(connection: AgentConnectionDocument, event: Any) -> None:
-            authenticated.set()
-            assert resume.wait(timeout=5)
-            original_apply(connection, event)
-
-        monkeypatch.setattr(service, "_apply_authenticated_event", paused_apply)
-        payload = relay.event("evt_rotation_race", "running", 1, progress="old secret")
-        failures: list[BaseException] = []
-
-        def ingest_old_secret() -> None:
-            try:
-                relay.emit(payload, secret=relay.secret)
-            except BaseException as exc:  # captured for deterministic thread assertion
-                failures.append(exc)
-
-        contender = Thread(target=ingest_old_secret)
-        contender.start()
-        assert authenticated.wait(timeout=5)
-        rotated = self.rotate(service, relay.connection_id, key="idem-race-rotation")
-        resume.set()
-        contender.join(timeout=5)
-
-        assert len(failures) == 1
-        assert isinstance(failures[0], EventRejected)
-        assert failures[0].code == "connection_scope_changed"
-        assert relay.projection().reported_state is None
-        assert service.agent_repo.list_events(relay.run.id, owner_id=OWNER) == []
-
-        relay.emit(payload, secret=rotated.inbound_signing_secret)
-        assert relay.projection().progress_text == "old secret"
-
-    def test_rotation_issues_a_new_secret_and_kills_the_old_one(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """The replacement works immediately; the old one stops working."""
-
-        rotated = self.rotate(service, relay.connection_id)
-
-        assert rotated.inbound_signing_secret
-        assert rotated.inbound_signing_secret != relay.secret
-
-        with pytest.raises(EventRejected):
-            relay.emit(relay.event("evt_old", "running", 1), secret=relay.secret)
-
-        relay.emit(
-            relay.event("evt_new", "running", 1, progress="Cloning the repo"),
-            secret=rotated.inbound_signing_secret,
-        )
-        assert relay.projection().progress_text == "Cloning the repo"
-
-    def test_a_lost_response_is_recovered_by_replaying_the_same_key(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """The whole point: a retry returns the secret, never a blank success.
-
-        Returning an empty string here would be the worst of both worlds — the
-        old secret is already dead, and the caller is told "ok" while holding
-        nothing it can configure its agent with.
-        """
-
-        revision = service.get_connection(relay.connection_id, owner_id=OWNER).revision
-        first = self.rotate(service, relay.connection_id, revision=revision)
-
-        replay = self.rotate(service, relay.connection_id, revision=revision)
-
-        assert replay.inbound_signing_secret == first.inbound_signing_secret
-        assert replay.revision == first.revision
-        relay.emit(
-            relay.event("evt_1", "running", 1),
-            secret=replay.inbound_signing_secret,
-        )
-
-    def test_signing_secret_replay_requires_reauthentication(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        revision = service.get_connection(relay.connection_id, owner_id=OWNER).revision
-        first = self.rotate(service, relay.connection_id, revision=revision)
-
-        with pytest.raises(ValidationFailure) as refused:
-            self.rotate(
-                service,
-                relay.connection_id,
-                revision=revision,
-                reauthenticated=False,
-            )
-
-        assert refused.value.detail == {"reason": "reauthentication_required"}
-        assert first.inbound_signing_secret not in str(refused.value)
-
-    def test_a_replay_does_not_rotate_a_second_time(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """One key, one rotation: the recovered secret is still the live one."""
-
-        revision = service.get_connection(relay.connection_id, owner_id=OWNER).revision
-        first = self.rotate(service, relay.connection_id, revision=revision)
-        self.rotate(service, relay.connection_id, revision=revision)
-
-        relay.emit(
-            relay.event("evt_1", "running", 1),
-            secret=first.inbound_signing_secret,
-        )
-        assert relay.projection().reported_state == "running"
-
-    def test_a_fresh_key_rotates_again_and_retires_the_previous_replacement(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """A genuinely new request is a new rotation, not a replay."""
-
-        first = self.rotate(service, relay.connection_id, key="idem-a")
-        second = self.rotate(service, relay.connection_id, key="idem-b")
-
-        assert second.inbound_signing_secret != first.inbound_signing_secret
-        with pytest.raises(EventRejected):
-            relay.emit(
-                relay.event("evt_1", "running", 1),
-                secret=first.inbound_signing_secret,
-            )
-
-    def test_a_replay_of_a_superseded_rotation_never_returns_the_dead_secret(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """Key A, then key B, then A again: A's receipt describes a dead secret.
-
-        A receipt outlives the rotation that wrote it, so once a later rotation
-        has installed a different secret the earlier one verifies nothing.
-        Handing it back on a replay would be the worst possible answer — a
-        success-shaped response carrying a secret that cannot sign a single
-        report — so the stale replay is refused instead.
-        """
-
-        revision = service.get_connection(relay.connection_id, owner_id=OWNER).revision
-        first = self.rotate(
-            service, relay.connection_id, key="idem-a", revision=revision
-        )
-        second = self.rotate(service, relay.connection_id, key="idem-b")
-
-        with pytest.raises(ConflictError) as refused:
-            self.rotate(service, relay.connection_id, key="idem-a", revision=revision)
-
-        assert first.inbound_signing_secret not in str(refused.value)
-        relay.emit(
-            relay.event("evt_1", "running", 1),
-            secret=second.inbound_signing_secret,
-        )
-        assert relay.projection().reported_state == "running"
-
-    def test_a_replay_still_recovers_after_an_unrelated_connection_change(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """What retires a receipt is a newer secret, not any newer revision.
-
-        A connection test bumps the revision without touching the inbound
-        secret, so the replacement this receipt names is still the live one and
-        the lost-response retry must still deliver it.
-        """
-
-        revision = service.get_connection(relay.connection_id, owner_id=OWNER).revision
-        first = self.rotate(
-            service, relay.connection_id, key="idem-a", revision=revision
-        )
-        service.test_connection(relay.connection_id, owner_id=OWNER)
-
-        replay = self.rotate(
-            service, relay.connection_id, key="idem-a", revision=revision
-        )
-
-        assert replay.inbound_signing_secret == first.inbound_signing_secret
-        relay.emit(
-            relay.event("evt_1", "running", 1),
-            secret=replay.inbound_signing_secret,
-        )
-
-    def test_rotation_requires_reauthentication(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """FR-003: replacing credential material is a re-authenticated action."""
-
-        with pytest.raises(ValidationFailure) as refused:
-            self.rotate(service, relay.connection_id, reauthenticated=False)
-
-        assert refused.value.detail == {"reason": "reauthentication_required"}
-        relay.emit(relay.event("evt_1", "running", 1))
-
-    def test_a_stale_expected_revision_is_a_conflict(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """The owner has to be acting on the connection they last saw."""
-
-        current = service.get_connection(relay.connection_id, owner_id=OWNER).revision
-
-        with pytest.raises(ConflictError):
-            self.rotate(service, relay.connection_id, revision=current - 1)
-
-        relay.emit(relay.event("evt_1", "running", 1))
-
-    def test_a_disconnected_connection_cannot_be_given_a_new_secret(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """FR-016: disconnect destroys credentials; it does not mint them."""
-
-        current = service.get_connection(relay.connection_id, owner_id=OWNER)
-        service.disconnect_connection(
-            relay.connection_id,
-            AgentConnectionDisconnectRequest(
-                current_password="correct-horse-battery-staple",
-                expected_revision=current.revision,
-            ),
-            owner_id=OWNER,
-            idempotency_key="idem-disconnect",
-            reauthenticated=True,
-        )
-
-        with pytest.raises(ValidationFailure) as refused:
-            self.rotate(service, relay.connection_id, revision=current.revision + 1)
-
-        assert refused.value.detail == {"reason": "connection_disconnected"}
-
-    def test_another_owner_cannot_rotate_the_secret(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """Owner isolation, including the shape of the refusal."""
-
-        with pytest.raises(NotFoundError):
-            self.rotate(service, relay.connection_id, owner_id=OTHER_OWNER)
-
-    def test_no_ordinary_read_exposes_the_replacement(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """FR-003: the secret is returned by rotation and by nothing else."""
-
-        rotated = self.rotate(service, relay.connection_id)
-        secret = rotated.inbound_signing_secret
-
-        reads = [
-            json.dumps(
-                service.get_connection(relay.connection_id, owner_id=OWNER).model_dump(
-                    mode="json"
-                )
-            ),
-            json.dumps(
-                [
-                    c.model_dump(mode="json")
-                    for c in service.list_connections(owner_id=OWNER)
-                ]
-            ),
-            json.dumps(
-                service.get_run(relay.run.id, owner_id=OWNER).model_dump(mode="json")
-            ),
-            json.dumps(
-                [e.model_dump(mode="json") for e in service.list_audit(owner_id=OWNER)]
-            ),
-        ]
-
-        for payload in reads:
-            assert secret not in payload
-        assert "inbound_signing_secret" not in reads[0]
-
-    def test_the_recovery_copy_is_never_stored_in_plaintext(
-        self, relay: Relay, service: AgentRelayService, tmp_path: Path
-    ) -> None:
-        """The retry copy is sealed, so the database still holds no secret."""
-
-        rotated = self.rotate(service, relay.connection_id)
-
-        database = (tmp_path / "agents.sqlite3").read_bytes()
-        assert rotated.inbound_signing_secret.encode("utf-8") not in database
-
-    def test_rotation_is_audited_without_the_secret(
-        self, relay: Relay, service: AgentRelayService
-    ) -> None:
-        """FR-017: IDs and outcome only."""
-
-        rotated = self.rotate(service, relay.connection_id)
-
-        entries = service.list_audit(owner_id=OWNER)
-        assert any(entry.action == "signing_secret_rotated" for entry in entries)
-        serialized = json.dumps([entry.model_dump(mode="json") for entry in entries])
-        assert rotated.inbound_signing_secret not in serialized
 
 
 class TestRelayFailureRecoveryEdges:
@@ -6736,29 +5334,29 @@ class TestRelayFailureRecoveryEdges:
                 )
 
         else:
-            relay = Relay(service, clock)
-            # The relay fixture dispatched a run to have something to command.
+            observed = ObservedRelay(service, clock)
+            # The bundle dispatched a run to have something to command.
             # That start is setup, not the call under test.
             a2a_client.calls.clear()
             connector.starts.clear()
             clear_wire(service)
             if operation == "reply":
-                relay.emit(relay.event("evt_window_blocked", "blocked", 1))
+                observed.report("blocked", text="Which environment?")
                 payload = AgentReplyRequest(
                     message="Use staging.",
-                    expected_revision=relay.projection().revision,
+                    expected_revision=observed.projection().revision,
                 )
 
                 def invoke() -> Any:
                     return service.reply_to_run(
-                        relay.run.id, payload, owner_id=OWNER, idempotency_key=key
+                        observed.run_id, payload, owner_id=OWNER, idempotency_key=key
                     )
 
             else:
 
                 def invoke() -> Any:
                     return service.cancel_run(
-                        relay.run.id, owner_id=OWNER, idempotency_key=key
+                        observed.run_id, owner_id=OWNER, idempotency_key=key
                     )
 
         if window == "reservation":
@@ -6881,20 +5479,13 @@ class TestRelayFailureRecoveryEdges:
 
             response_body: dict[str, object] = {"id": resource_id}
         else:
-            relay = Relay(service, clock)
-            resource_id = relay.run.id
+            observed = ObservedRelay(service, clock)
+            resource_id = observed.run_id
             if operation == "reply":
-                relay.emit(
-                    relay.event(
-                        "evt_legacy_blocked",
-                        "blocked",
-                        1,
-                        question="Which environment?",
-                    )
-                )
+                observed.report("blocked", text="Which environment?")
                 payload = AgentReplyRequest(
                     message="Use staging.",
-                    expected_revision=relay.projection().revision,
+                    expected_revision=observed.projection().revision,
                 )
                 command = "reply_to_run"
                 canonical = service._canonical_request(
@@ -6917,7 +5508,7 @@ class TestRelayFailureRecoveryEdges:
                     )
 
                 connection = service.agent_repo.get_connection(
-                    relay.connection_id, owner_id=OWNER
+                    observed.connection_id, owner_id=OWNER
                 )
                 response_body = {
                     "id": resource_id,
@@ -6995,12 +5586,12 @@ class TestRelayFailureRecoveryEdges:
 
     def test_malformed_legacy_revision_is_safely_coerced_during_header_quarantine(
         self,
-        relay: Relay,
+        observed: ObservedRelay,
         tmp_path: Path,
         clock: Clock,
     ) -> None:
-        connection = relay.service.agent_repo.get_connection(
-            relay.connection_id, owner_id=OWNER
+        connection = observed.service.agent_repo.get_connection(
+            observed.connection_id, owner_id=OWNER
         )
         legacy_payload = connection.model_dump(mode="json")
         legacy_payload.update(
@@ -7012,12 +5603,12 @@ class TestRelayFailureRecoveryEdges:
         with sqlite3.connect(database_path) as database:
             database.execute(
                 "UPDATE agent_connections SET payload = ? WHERE owner_id = ? AND id = ?",
-                (json.dumps(legacy_payload), OWNER, relay.connection_id),
+                (json.dumps(legacy_payload), OWNER, observed.connection_id),
             )
 
         restarted = build_service(AgentRepository(tmp_path), FakeConnector(), clock)
         migrated = restarted.agent_repo.get_connection(
-            relay.connection_id, owner_id=OWNER
+            observed.connection_id, owner_id=OWNER
         )
         assert migrated.auth_header_name is None
         assert migrated.credential is None
@@ -7029,13 +5620,13 @@ class TestRelayFailureRecoveryEdges:
             AgentRepository(tmp_path), FakeConnector(), clock
         )
         persisted = restarted_again.agent_repo.get_connection(
-            relay.connection_id, owner_id=OWNER
+            observed.connection_id, owner_id=OWNER
         )
         assert persisted.revision == migrated.revision
         with sqlite3.connect(database_path) as database:
             stored_payload = database.execute(
                 "SELECT payload FROM agent_connections WHERE owner_id = ? AND id = ?",
-                (OWNER, relay.connection_id),
+                (OWNER, observed.connection_id),
             ).fetchone()[0]
         assert "plaintext-legacy-secret" not in stored_payload
 
@@ -7055,31 +5646,31 @@ class TestRelayFailureRecoveryEdges:
     )
     def test_legacy_invalid_header_connection_is_migrated_to_safe_readable_state(
         self,
-        relay: Relay,
+        observed: ObservedRelay,
         tmp_path: Path,
         clock: Clock,
         legacy_header: object,
     ) -> None:
-        connection = relay.service.agent_repo.get_connection(
-            relay.connection_id, owner_id=OWNER
+        connection = observed.service.agent_repo.get_connection(
+            observed.connection_id, owner_id=OWNER
         )
         legacy_payload = connection.model_dump(mode="json")
         legacy_payload["auth_header_name"] = legacy_header
         with sqlite3.connect(tmp_path / "agents.sqlite3") as database:
             database.execute(
                 "UPDATE agent_connections SET payload = ? WHERE owner_id = ? AND id = ?",
-                (json.dumps(legacy_payload), OWNER, relay.connection_id),
+                (json.dumps(legacy_payload), OWNER, observed.connection_id),
             )
 
         connector = FakeConnector()
         restarted = build_service(AgentRepository(tmp_path), connector, clock)
         listed = restarted.list_connections(owner_id=OWNER)
-        run = restarted.get_run(relay.run.id, owner_id=OWNER)
+        run = restarted.get_run(observed.run_id, owner_id=OWNER)
         migrated = restarted.agent_repo.get_connection(
-            relay.connection_id, owner_id=OWNER
+            observed.connection_id, owner_id=OWNER
         )
 
-        assert [item.id for item in listed] == [relay.connection_id]
+        assert [item.id for item in listed] == [observed.connection_id]
         # 014: the repair leaves no header name at all. A bearer connection has
         # none, and writing a placeholder would claim a scheme nobody chose.
         assert listed[0].auth_header_name is None
@@ -7091,15 +5682,15 @@ class TestRelayFailureRecoveryEdges:
         assert migrated.credential is None
         assert migrated.revision == connection.revision + 1
         assert migrated.updated_at > connection.updated_at
-        assert run.id == relay.run.id
-        assert run.connection_id == relay.connection_id
+        assert run.id == observed.run_id
+        assert run.connection_id == observed.connection_id
         with pytest.raises(ValidationFailure) as refused:
-            restarted.test_connection(relay.connection_id, owner_id=OWNER)
+            restarted.test_connection(observed.connection_id, owner_id=OWNER)
         assert refused.value.detail == {"reason": "credential_missing"}
         with pytest.raises(ValidationFailure):
             dispatch(
                 restarted,
-                relay.connection_id,
+                observed.connection_id,
                 task_id="task_2",
                 key=f"idem-legacy-invalid-header-{legacy_header}",
             )
@@ -7109,7 +5700,9 @@ class TestRelayFailureRecoveryEdges:
         restarted_again = build_service(
             AgentRepository(tmp_path), FakeConnector(), clock
         )
-        persisted = restarted_again.get_connection(relay.connection_id, owner_id=OWNER)
+        persisted = restarted_again.get_connection(
+            observed.connection_id, owner_id=OWNER
+        )
         assert persisted.auth_header_name is None
         assert persisted.last_test_error_code == (
             "legacy_invalid_auth_header_requires_reconfiguration"
@@ -7117,14 +5710,14 @@ class TestRelayFailureRecoveryEdges:
 
     def test_retry_after_a_post_send_save_failure_reconciles_the_reserved_command_id(
         self,
-        relay: Relay,
+        observed: ObservedRelay,
         service: AgentRelayService,
         connector: FakeConnector,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        observed.report("blocked", text="Which environment?")
         payload = AgentReplyRequest(
-            message="Use staging.", expected_revision=relay.projection().revision
+            message="Use staging.", expected_revision=observed.projection().revision
         )
         save_command = service.agent_repo.save_command
         failed_once = False
@@ -7139,14 +5732,14 @@ class TestRelayFailureRecoveryEdges:
         monkeypatch.setattr(service.agent_repo, "save_command", fail_after_delivery)
         with pytest.raises(RuntimeError, match="post-delivery"):
             service.reply_to_run(
-                relay.run.id,
+                observed.run_id,
                 payload,
                 owner_id=OWNER,
                 idempotency_key="idem-crash-reply",
             )
 
         recovered = service.reply_to_run(
-            relay.run.id,
+            observed.run_id,
             payload,
             owner_id=OWNER,
             idempotency_key="idem-crash-reply",
@@ -7162,14 +5755,14 @@ class TestRelayFailureRecoveryEdges:
 
     def test_reply_retry_after_post_delivery_failure_reconciles_without_redelivery_after_terminal_callback(
         self,
-        relay: Relay,
+        observed: ObservedRelay,
         service: AgentRelayService,
         connector: FakeConnector,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
+        observed.report("blocked", text="Which environment?")
         payload = AgentReplyRequest(
-            message="Use staging.", expected_revision=relay.projection().revision
+            message="Use staging.", expected_revision=observed.projection().revision
         )
         save_command = service.agent_repo.save_command
         failed_once = False
@@ -7184,22 +5777,22 @@ class TestRelayFailureRecoveryEdges:
         monkeypatch.setattr(service.agent_repo, "save_command", fail_after_delivery)
         with pytest.raises(RuntimeError, match="post-delivery"):
             service.reply_to_run(
-                relay.run.id,
+                observed.run_id,
                 payload,
                 owner_id=OWNER,
                 idempotency_key="idem-terminal-crash-reply",
             )
         original_command_id = wire_commands(service)[0]["command_id"]
-        relay.emit(relay.event("evt_2", "completed", 2, result="Already done"))
+        observed.report("completed", text="Already done")
 
         recovered = service.reply_to_run(
-            relay.run.id,
+            observed.run_id,
             payload,
             owner_id=OWNER,
             idempotency_key="idem-terminal-crash-reply",
         )
         replayed = service.reply_to_run(
-            relay.run.id,
+            observed.run_id,
             payload,
             owner_id=OWNER,
             idempotency_key="idem-terminal-crash-reply",
@@ -7217,7 +5810,7 @@ class TestRelayFailureRecoveryEdges:
 
     def test_cancel_retry_after_post_delivery_failure_reconciles_without_redelivery_after_terminal_callback(
         self,
-        relay: Relay,
+        observed: ObservedRelay,
         service: AgentRelayService,
         connector: FakeConnector,
         monkeypatch: pytest.MonkeyPatch,
@@ -7235,15 +5828,15 @@ class TestRelayFailureRecoveryEdges:
         monkeypatch.setattr(service.agent_repo, "save_command", fail_after_delivery)
         with pytest.raises(RuntimeError, match="cancel outage"):
             service.cancel_run(
-                relay.run.id,
+                observed.run_id,
                 owner_id=OWNER,
                 idempotency_key="idem-terminal-crash-cancel",
             )
         original_command_id = wire_commands(service)[0]["command_id"]
-        relay.emit(relay.event("evt_done", "completed", 1, result="Finished"))
+        observed.report("completed", text="Finished")
 
         recovered = service.cancel_run(
-            relay.run.id,
+            observed.run_id,
             owner_id=OWNER,
             idempotency_key="idem-terminal-crash-cancel",
         )
@@ -7259,7 +5852,7 @@ class TestRelayFailureRecoveryEdges:
 
     def test_cancel_retry_after_post_delivery_failure_preserves_nonterminal_cancellation_overlay(
         self,
-        relay: Relay,
+        observed: ObservedRelay,
         service: AgentRelayService,
         connector: FakeConnector,
         clock: Clock,
@@ -7278,21 +5871,19 @@ class TestRelayFailureRecoveryEdges:
         monkeypatch.setattr(service.agent_repo, "save_command", fail_after_delivery)
         with pytest.raises(RuntimeError, match="cancel outage"):
             service.cancel_run(
-                relay.run.id,
+                observed.run_id,
                 owner_id=OWNER,
                 idempotency_key="idem-active-crash-cancel",
             )
 
         clock.advance(timedelta(minutes=1))
         callback_at = clock.now
-        relay.emit(
-            relay.event("evt_cancel_recovery", "running", 1, progress="Still working")
-        )
+        observed.report("running", text="Still working")
         clock.advance(timedelta(minutes=1))
         recovery_at = clock.now
 
         recovered = service.cancel_run(
-            relay.run.id,
+            observed.run_id,
             owner_id=OWNER,
             idempotency_key="idem-active-crash-cancel",
         )
@@ -7301,7 +5892,7 @@ class TestRelayFailureRecoveryEdges:
         assert recovered.reported_state == "running"
         assert recovered.progress_text == "Still working"
         assert recovered.cancel_requested is True
-        persisted = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        persisted = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
         assert persisted.updated_at >= callback_at
         assert persisted.updated_at == recovery_at
         command = next(item for item in recovered.commands if item.kind == "cancel")
@@ -7471,21 +6062,25 @@ class TestRelayFailureRecoveryEdges:
             )
         assert disconnected.value.detail == {"reason": "connection_disconnected"}
 
-    def test_disconnect_replay_returns_the_same_projection(self, relay: Relay) -> None:
-        current = relay.service.get_connection(relay.connection_id, owner_id=OWNER)
+    def test_disconnect_replay_returns_the_same_projection(
+        self, observed: ObservedRelay
+    ) -> None:
+        current = observed.service.get_connection(
+            observed.connection_id, owner_id=OWNER
+        )
         payload = AgentConnectionDisconnectRequest(
             current_password="correct-horse-battery-staple",
             expected_revision=current.revision,
         )
-        first = relay.service.disconnect_connection(
-            relay.connection_id,
+        first = observed.service.disconnect_connection(
+            observed.connection_id,
             payload,
             owner_id=OWNER,
             idempotency_key="idem-disconnect-replay",
             reauthenticated=True,
         )
-        second = relay.service.disconnect_connection(
-            relay.connection_id,
+        second = observed.service.disconnect_connection(
+            observed.connection_id,
             payload,
             owner_id=OWNER,
             idempotency_key="idem-disconnect-replay",
@@ -7496,23 +6091,28 @@ class TestRelayFailureRecoveryEdges:
         assert second.status == "disconnected"
 
     def test_disconnect_marks_only_dispatched_nonterminal_runs(
-        self, relay: Relay, service: AgentRelayService
+        self, observed: ObservedRelay, service: AgentRelayService
     ) -> None:
         terminal = dispatch(
-            service, relay.connection_id, task_id="task_2", key="idem-task-2"
+            service, observed.connection_id, task_id="task_2", key="idem-task-2"
         )
-        relay.emit(
-            relay.event("evt_done", "completed", 1, result="Done", run_id=terminal.id)
+        report(
+            service,
+            terminal.id,
+            "completed",
+            text="Done",
+            now=observed.clock.now,
+            agent_task_id="agent-task-2",
         )
         preview = service.preview_handoff(
             "task_1",
-            AgentHandoffPreviewRequest(connection_id=relay.connection_id),
+            AgentHandoffPreviewRequest(connection_id=observed.connection_id),
             owner_id=OWNER,
         )
-        current = service.get_connection(relay.connection_id, owner_id=OWNER)
+        current = service.get_connection(observed.connection_id, owner_id=OWNER)
 
         service.disconnect_connection(
-            relay.connection_id,
+            observed.connection_id,
             AgentConnectionDisconnectRequest(
                 current_password="correct-horse-battery-staple",
                 expected_revision=current.revision,
@@ -7522,7 +6122,7 @@ class TestRelayFailureRecoveryEdges:
             reauthenticated=True,
         )
 
-        active = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
+        active = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
         completed = service.agent_repo.get_run(terminal.id, owner_id=OWNER)
         reserved = service.agent_repo.get_run(preview.run_id, owner_id=OWNER)
         assert active.connection_disconnected_at is not None
@@ -7602,113 +6202,30 @@ class TestRelayFailureRecoveryEdges:
         assert refused.value.detail == {"reason": "manifest_not_reserved"}
         assert connector.starts == []
 
-    @pytest.mark.parametrize(
-        "receipt",
-        [
-            {},
-            {"sealed_signing_secret": {"key_id": "v1", "ciphertext": "%%%"}},
-        ],
-    )
-    def test_corrupt_signing_secret_receipt_fails_closed(
-        self,
-        relay: Relay,
-        service: AgentRelayService,
-        receipt: dict[str, Any],
+    def test_014_FR_012_a_disconnected_run_ignores_a_late_observation(
+        self, observed: ObservedRelay
     ) -> None:
-        current = service.get_connection(relay.connection_id, owner_id=OWNER).revision
-        service.rotate_signing_secret(
-            relay.connection_id,
-            AgentConnectionRotateSigningSecretRequest(
-                current_password="correct-horse-battery-staple",
-                expected_revision=current,
-            ),
-            owner_id=OWNER,
-            idempotency_key="idem-corrupt-receipt",
-            reauthenticated=True,
+        """A run whose connection is gone stops learning anything new.
+
+        The observation is not an error — a worker already in flight when the
+        owner disconnected is expected — but it must not advance a run whose
+        connection BrainBuddy no longer has.
+        """
+
+        persisted = observed.service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        observed.service.agent_repo.save_run(
+            persisted.model_copy(
+                update={"connection_disconnected_at": observed.clock.now}
+            )
         )
-        with sqlite3.connect(service.agent_repo.db_path) as database:
-            # The relay bundle also mints a signing secret, so target the row
-            # this test just wrote rather than whichever rotation comes first.
-            stored = database.execute(
-                "SELECT key_hash, response_body FROM agent_idempotency "
-                "WHERE owner_id = ? AND command = 'rotate_signing_secret' "
-                "ORDER BY created_at DESC, rowid DESC LIMIT 1",
-                (OWNER,),
-            ).fetchone()
-            assert stored is not None
-            original = json.loads(stored[1])
-            receipt["installed_secret_fingerprint"] = original[
-                "installed_secret_fingerprint"
-            ]
-            database.execute(
-                "UPDATE agent_idempotency SET response_body = ? "
-                "WHERE owner_id = ? AND key_hash = ?",
-                (json.dumps(receipt), OWNER, stored[0]),
-            )
+        before = observed.projection()
 
-        with pytest.raises(ValidationFailure) as refused:
-            service.rotate_signing_secret(
-                relay.connection_id,
-                AgentConnectionRotateSigningSecretRequest(
-                    current_password="correct-horse-battery-staple",
-                    expected_revision=current,
-                ),
-                owner_id=OWNER,
-                idempotency_key="idem-corrupt-receipt",
-                reauthenticated=True,
-            )
+        observed.report("running", text="Still going")
 
-        assert refused.value.detail == {"reason": "signing_secret_unrecoverable"}
-
-    def test_overflowing_timestamp_is_rejected_without_mutation(
-        self, relay: Relay
-    ) -> None:
-        body = json.dumps(relay.event("evt_overflow", "running", 1)).encode("utf-8")
-
-        with pytest.raises(EventRejected) as refused:
-            relay.service.ingest_event(
-                raw_body=body,
-                connection_id=relay.connection_id,
-                timestamp="9" * 400,
-                signature="v1=" + "0" * 64,
-            )
-
-        assert refused.value.code == "timestamp_invalid"
-        assert relay.projection().reported_state is None
-
-    @pytest.mark.parametrize("body", [b"\xff", b"[]"])
-    def test_authenticated_non_object_body_is_rejected_and_audited(
-        self, relay: Relay, body: bytes
-    ) -> None:
-        timestamp = int(relay.clock.now.timestamp())
-
-        with pytest.raises(EventRejected) as refused:
-            relay.service.ingest_event(
-                raw_body=body,
-                connection_id=relay.connection_id,
-                timestamp=str(timestamp),
-                signature=sign(relay.secret, timestamp, body),
-            )
-
-        assert refused.value.code == "body_invalid"
-        assert any(
-            entry.action == "event_rejected" and entry.outcome == "body_invalid"
-            for entry in relay.service.list_audit(owner_id=OWNER)
-        )
-
-    def test_run_marked_disconnected_rejects_a_late_authenticated_event(
-        self, relay: Relay
-    ) -> None:
-        persisted = relay.service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
-        relay.service.agent_repo.save_run(
-            persisted.model_copy(update={"connection_disconnected_at": relay.clock.now})
-        )
-
-        with pytest.raises(EventRejected) as refused:
-            relay.emit(relay.event("evt_late", "running", 1))
-
-        assert refused.value.code == "connection_disconnected"
-        assert relay.projection().reported_state is None
+        after = observed.projection()
+        assert after.reported_state is None
+        assert after.run_version == before.run_version
+        assert after.events == before.events
 
 
 class TestDispatchScopeReauthentication:
@@ -8446,87 +6963,25 @@ class TestRollbackBoundary:
 # Nothing here is allowed to invent a state, and nothing is allowed to lose one.
 
 
-def observed_task(
-    task_id: str,
-    context_id: str,
-    state: str = "TASK_STATE_WORKING",
-    *,
-    text: str | None = None,
-    timestamp: str = "2026-08-09T12:00:00Z",
-) -> Task:
-    status: dict[str, Any] = {"state": state, "timestamp": timestamp}
-    if text is not None:
-        status["message"] = {"role": "ROLE_AGENT", "parts": [{"text": text}]}
-    return Task.model_validate(
-        {"id": task_id, "contextId": context_id, "status": status}
-    )
-
-
-def observation_of(task: Task, *, now: datetime) -> Any:
-    return project_observation(task, now=now, limits=ObservationLimits())
-
-
-class ObservedRelay:
-    """A ready connection with one dispatched, observable A2A run."""
-
-    def __init__(
-        self,
-        service: AgentRelayService,
-        clock: Clock,
-        a2a_client: FakeA2AClient,
-        *,
-        key: str = "idem-dispatch",
-        task_id: str = "task_1",
-    ) -> None:
-        self.service = service
-        self.clock = clock
-        self.a2a_client = a2a_client
-        self.connection_id = connect(service, key=f"{key}-create")
-        make_ready(service, self.connection_id)
-        run_id_holder = dispatch(service, self.connection_id, task_id=task_id, key=key)
-        self.run_id = run_id_holder.id
-        a2a_client.calls.clear()
-
-    def observe(self, task: Task, *, trigger: str = "schedule") -> Any:
-        run = self.service.agent_repo.get_run(self.run_id, owner_id=OWNER)
-        return self.service.apply_observation(
-            self.run_id,
-            owner_id=OWNER,
-            observation=observation_of(task, now=self.clock.now),
-            based_on=run.run_version,
-            trigger=trigger,
-        )
-
-    def projection(self) -> Any:
-        return self.service.get_run(self.run_id, owner_id=OWNER)
-
-    def audit_actions(self) -> list[str]:
-        return [entry.action for entry in self.service.list_audit(owner_id=OWNER)]
-
-
-def reply_command(run: Any) -> Any:
-    """The run's newest reply command.
-
-    Selected by kind rather than by position: a dispatched run already carries
-    its `start` command, and the two rows share a creation timestamp, so
-    "the last one" is whichever id sorts higher — which is nothing at all.
-    """
-
-    return [command for command in run.commands if command.kind == "reply"][-1]
-
-
-def cancel_command(run: Any) -> Any:
-    return [command for command in run.commands if command.kind == "cancel"][-1]
-
-
-@pytest.fixture
-def observed(
-    service: AgentRelayService, clock: Clock, a2a_client: FakeA2AClient
-) -> ObservedRelay:
-    return ObservedRelay(service, clock, a2a_client)
-
-
 class TestApplyObservation:
+    def test_014_FR_012_a_completed_run_does_not_touch_the_canonical_task(
+        self, observed: ObservedRelay
+    ) -> None:
+        """FR-012: what the agent reports is evidence beside a Task, never a write.
+
+        The snapshot port is read-only by construction, so the guard here is
+        that the settled run still only *points at* its task and the task the
+        hand-off read is byte-for-byte what it was.
+        """
+
+        before = TASKS["task_1"]
+
+        observed.report("completed", text="Done")
+
+        assert observed.projection().task_id == "task_1"
+        assert TASKS["task_1"] == before
+        assert TASKS["task_1"].title == "Draft the migration plan"
+
     def test_014_FR_008_an_identical_observation_only_refreshes_contact(
         self, observed: ObservedRelay, clock: Clock
     ) -> None:
@@ -8630,8 +7085,16 @@ class TestApplyObservation:
 
         assert applied is None
         assert service.list_audit(owner_id=OWNER) == []
+        assert service.list_connections(owner_id=OWNER) == []
         with pytest.raises(NotFoundError):
             service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        assert service.agent_repo.export_owner_data(owner_id=OWNER, now=clock.now) == {
+            "connections": [],
+            "runs": [],
+            "events": [],
+            "commands": [],
+            "audit": [],
+        }
 
     def test_014_FR_016_a_disconnected_run_is_never_written_by_an_observation(
         self, observed: ObservedRelay, service: AgentRelayService, clock: Clock

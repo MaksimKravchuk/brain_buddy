@@ -2,14 +2,11 @@
 
 Drives the real FastAPI app end to end: session auth, the rollout flag, owner
 isolation across two real accounts, re-authentication, idempotency headers, and
-the signed inbound-event endpoint.
+the A2A push callback.
 """
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
-import hmac
 import json
 import sqlite3
 from collections.abc import Generator
@@ -18,20 +15,20 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app.api.agents import MAX_EVENT_BODY_BYTES, _bounded_event_body, _verify_password
+from app.api.agents import MAX_EVENT_BODY_BYTES, _verify_password
 from app.container import Container
 from app.core import get_config
 from app.core.config import FeatureFlagState
 from app.core.rate_limit import sensitive_action_rate_limiter
 from app.main import _run_privacy_maintenance_sweep, create_app
-from app.modules.agents import service as agent_service_module
 from app.modules.agents.a2a.card import (
     MAX_CARD_DESCRIPTION_CHARS,
     CardDiscovery,
 )
+from app.modules.agents.a2a.mapping import ObservationLimits, project_observation
 from app.modules.agents.a2a.types import Task
 from app.modules.agents.connector import (
     ConnectorCommandOutcome,
@@ -40,10 +37,7 @@ from app.modules.agents.connector import (
     ConnectorTestOutcome,
 )
 from app.modules.agents.domain import (
-    PROTOCOL_VERSION,
-    REPORTING_INSTRUCTIONS_VERSION,
     AgentCapabilities,
-    inert_reporting_contract,
 )
 from app.repositories.feature_flag import FlagMode
 from app.schemas.auth import Invite, User
@@ -244,29 +238,6 @@ def register_connection(client: TestClient, *, key: str = "k-create") -> dict[st
     return response.json()
 
 
-def create_connection(client: TestClient, *, key: str = "k-create") -> dict[str, Any]:
-    """A registered connection *plus* a usable bespoke signing secret.
-
-    Registration issues no secret under the A2A wire (014 FR-012), so the 007
-    inbound-event suites — which still need one until T110–T114 delete that
-    surface — take it from the rotation route, the only place it is ever shown.
-    The returned body is the connection as it stands after that rotation, so a
-    caller's `revision` is the real one.
-    """
-
-    created = register_connection(client, key=key)
-    rotated = client.post(
-        f"/api/agent-connections/{created['id']}/signing-secret",
-        headers={"Idempotency-Key": f"{key}-signing"},
-        json={
-            "current_password": TEST_USER_PASSWORD,
-            "expected_revision": created["revision"],
-        },
-    )
-    assert rotated.status_code == 200, rotated.text
-    return dict(rotated.json())
-
-
 def create_task(client: TestClient, title: str = "Draft the migration plan") -> str:
     response = client.post(
         "/api/tasks",
@@ -275,6 +246,92 @@ def create_task(client: TestClient, title: str = "Draft the migration plan") -> 
     )
     assert response.status_code == 201, response.text
     return str(response.json()["id"])
+
+
+def observe(
+    container: Container,
+    run_id: str,
+    *,
+    state: str = "TASK_STATE_WORKING",
+    text: str | None = None,
+    agent_task_id: str = "agent-task-1",
+) -> None:
+    """Apply one observation the way the scheduled observer would."""
+
+    service = container.agent_relay_service
+    owner_id = service.agent_repo.owner_of_run(run_id) or ""
+    run = service.agent_repo.get_run(run_id, owner_id=owner_id)
+    status: dict[str, Any] = {"state": state, "timestamp": "2026-08-09T12:00:00Z"}
+    if text is not None:
+        status["message"] = {"role": "ROLE_AGENT", "parts": [{"text": text}]}
+    task = Task.model_validate(
+        {"id": agent_task_id, "contextId": run_id, "status": status}
+    )
+    service.apply_observation(
+        run_id,
+        owner_id=owner_id,
+        observation=project_observation(task, now=utcnow(), limits=ObservationLimits()),
+        based_on=run.run_version,
+        trigger="schedule",
+    )
+
+
+def blocked_run(
+    client: TestClient,
+    container: Container,
+    connection_id: str,
+    task_id: str,
+    *,
+    question: str = "Which environment?",
+    key: str = "k-dispatch",
+    agent_task_id: str = "agent-task-1",
+) -> dict[str, Any]:
+    """One dispatched run whose agent answered `input_required` with a question.
+
+    The A2A wire has no inbound event: a question reaches BrainBuddy only as a
+    Task state, so the hand-off exchange itself is where the run becomes
+    **Needs you** (AC-012).
+    """
+
+    a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+    preview = client.post(
+        f"/api/tasks/{task_id}/agent-runs/preview",
+        json={"connection_id": connection_id},
+    )
+    assert preview.status_code == 200, preview.text
+    reserved = preview.json()
+    a2a.script(
+        "SendMessage",
+        A2AResult(
+            ok=True,
+            correlation_id="corr",
+            task=Task.model_validate(
+                {
+                    "id": agent_task_id,
+                    "contextId": reserved["run_id"],
+                    "status": {
+                        "state": "TASK_STATE_INPUT_REQUIRED",
+                        "message": {
+                            "role": "ROLE_AGENT",
+                            "parts": [{"text": question}],
+                        },
+                    },
+                }
+            ),
+        ),
+    )
+    response = client.post(
+        f"/api/tasks/{task_id}/agent-runs",
+        headers={"Idempotency-Key": key},
+        json={
+            "connection_id": connection_id,
+            "manifest_token": reserved["token"],
+            "acknowledge_duplicate_risk": True,
+        },
+    )
+    assert response.status_code == 201, response.text
+    a2a.results.pop("SendMessage", None)
+    return dict(response.json())
 
 
 def hand_off(
@@ -358,7 +415,7 @@ class TestAuthAndRollout:
         client: TestClient,
         relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
     ) -> None:
-        created = create_connection(client)
+        created = register_connection(client)
         set_relay_flag(client, FeatureFlagState.OFF)
 
         response = client.post(
@@ -386,12 +443,11 @@ class TestAuthAndRollout:
             created["id"], owner_id=client.get("/api/account").json()["id"]
         )
         assert stored.credential is None
-        assert stored.inbound_secret is None
 
     def test_rollout_off_disconnect_preserves_owner_password_revision_and_key_checks(
         self, client: TestClient, other_client: TestClient
     ) -> None:
-        created = create_connection(client)
+        created = register_connection(client)
         set_relay_flag(client, FeatureFlagState.OFF)
 
         wrong_owner = other_client.post(
@@ -435,7 +491,7 @@ class TestAuthAndRollout:
     def test_rollout_off_keeps_every_dispatch_enabling_mutation_closed(
         self, client: TestClient
     ) -> None:
-        created = create_connection(client)
+        created = register_connection(client)
         task_id = create_task(client, "Blocked while rollout is off")
         set_relay_flag(client, FeatureFlagState.OFF)
 
@@ -456,14 +512,6 @@ class TestAuthAndRollout:
                 headers={"Idempotency-Key": "off-credential"},
                 json={
                     "credential": "Bearer replacement",
-                    "current_password": TEST_USER_PASSWORD,
-                    "expected_revision": created["revision"],
-                },
-            ),
-            client.post(
-                f"/api/agent-connections/{created['id']}/signing-secret",
-                headers={"Idempotency-Key": "off-signing-secret"},
-                json={
                     "current_password": TEST_USER_PASSWORD,
                     "expected_revision": created["revision"],
                 },
@@ -505,7 +553,7 @@ class TestConnectionRoutes:
     def test_updates_name_or_destination_without_returning_secrets(
         self, client: TestClient
     ) -> None:
-        created = create_connection(client)
+        created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         current = client.get(f"/api/agent-connections/{created['id']}").json()
 
@@ -532,7 +580,7 @@ class TestConnectionRoutes:
         assert "inbound_signing_secret" not in moved.json()
 
     def test_rollout_off_blocks_connection_update(self, client: TestClient) -> None:
-        created = create_connection(client)
+        created = register_connection(client)
         set_relay_flag(client, FeatureFlagState.OFF)
 
         response = client.put(
@@ -701,7 +749,7 @@ class TestConnectionRoutes:
         would let a product decision be read as an agent's promise.
         """
 
-        created = create_connection(client)
+        created = register_connection(client)
 
         response = client.post(f"/api/agent-connections/{created['id']}/test")
 
@@ -769,7 +817,7 @@ class TestConnectionRoutes:
             )
         )
         container.agent_relay_service._card_fetcher = fetcher
-        created = create_connection(client)
+        created = register_connection(client)
 
         body = client.post(f"/api/agent-connections/{created['id']}/test").json()
 
@@ -799,7 +847,7 @@ class TestConnectionRoutes:
             ),
         )
         container.agent_relay_service.a2a_client = a2a_client
-        created = create_connection(client)
+        created = register_connection(client)
 
         body = client.post(f"/api/agent-connections/{created['id']}/test").json()
 
@@ -827,7 +875,7 @@ class TestConnectionRoutes:
         container = relay_app[3]
         fetcher = FakeCardFetcher()
         container.agent_relay_service._card_fetcher = fetcher
-        created = create_connection(client)
+        created = register_connection(client)
         assert (
             client.post(f"/api/agent-connections/{created['id']}/test").json()["status"]
             == "ready"
@@ -868,7 +916,7 @@ class TestConnectionRoutes:
             failure_detail={"scheme": "oauth2"},
         )
         container.agent_relay_service._card_fetcher = fetcher
-        created = create_connection(client)
+        created = register_connection(client)
 
         body = client.post(f"/api/agent-connections/{created['id']}/test").json()
         assert body["status"] == "unsupported"
@@ -888,7 +936,7 @@ class TestConnectionRoutes:
     ) -> None:
         """D-01-S22, 014-FR-016. Disconnect stays: it only ever destroys."""
 
-        created = create_connection(client)
+        created = register_connection(client)
         set_relay_flag(client, FeatureFlagState.OFF)
 
         blocked = {
@@ -939,7 +987,7 @@ class TestConnectionRoutes:
     ) -> None:
         """Owner isolation over HTTP."""
 
-        created = create_connection(client)
+        created = register_connection(client)
 
         assert other_client.get("/api/agent-connections").json() == []
         assert (
@@ -958,7 +1006,7 @@ class TestConnectionRoutes:
     ) -> None:
         """AC-018 over HTTP."""
 
-        created = create_connection(client)
+        created = register_connection(client)
 
         wrong_password = client.post(
             f"/api/agent-connections/{created['id']}/disconnect",
@@ -986,202 +1034,6 @@ class TestConnectionRoutes:
         assert ok.json()["status"] == "disconnected"
 
 
-class TestSigningSecretRotationRoute:
-    """Recovering a lost create response over HTTP.
-
-    The create response carries the signing secret exactly once. When it is
-    lost, this route is the only way back, so it has to be as guarded as
-    registration itself and as retry-safe as any other relay command.
-    """
-
-    def rotate(
-        self,
-        client: TestClient,
-        connection_id: str,
-        *,
-        key: str = "k-sign",
-        revision: int | None = None,
-        password: str = TEST_USER_PASSWORD,
-    ) -> Any:
-        if revision is None:
-            revision = client.get(f"/api/agent-connections/{connection_id}").json()[
-                "revision"
-            ]
-        return client.post(
-            f"/api/agent-connections/{connection_id}/signing-secret",
-            headers={"Idempotency-Key": key},
-            json={"current_password": password, "expected_revision": revision},
-        )
-
-    def test_rotation_returns_a_new_secret_the_agent_can_sign_with(
-        self, client: TestClient
-    ) -> None:
-        """The replacement is usable immediately and the old one is not."""
-
-        created = create_connection(client)
-        client.post(f"/api/agent-connections/{created['id']}/test")
-        task_id = create_task(client)
-        run = hand_off(client, created["id"], task_id)
-        current = client.get(f"/api/agent-connections/{created['id']}").json()
-
-        response = self.rotate(client, created["id"], revision=current["revision"])
-
-        assert response.status_code == 200, response.text
-        replacement = response.json()["inbound_signing_secret"]
-        assert replacement and replacement != created["inbound_signing_secret"]
-
-        stale = TestEventIngestRoutes()._emit(
-            client,
-            connection_id=created["id"],
-            secret=created["inbound_signing_secret"],
-            payload={
-                "event_id": "evt_old",
-                "run_id": run["id"],
-                "type": "running",
-                "run_version": 1,
-            },
-        )
-        assert stale.status_code == 403
-
-        fresh = TestEventIngestRoutes()._emit(
-            client,
-            connection_id=created["id"],
-            secret=replacement,
-            payload={
-                "event_id": "evt_new",
-                "run_id": run["id"],
-                "type": "running",
-                "run_version": 1,
-            },
-        )
-        assert fresh.status_code == 202, fresh.text
-
-    def test_replaying_the_key_returns_the_same_secret_not_a_blank_success(
-        self, client: TestClient
-    ) -> None:
-        """A retried request recovers the value; it never answers with nothing."""
-
-        created = create_connection(client)
-        current = client.get(f"/api/agent-connections/{created['id']}").json()
-
-        first = self.rotate(client, created["id"], revision=current["revision"])
-        replay = self.rotate(client, created["id"], revision=current["revision"])
-
-        assert replay.status_code == 200, replay.text
-        assert replay.json()["inbound_signing_secret"]
-        assert (
-            replay.json()["inbound_signing_secret"]
-            == first.json()["inbound_signing_secret"]
-        )
-
-    def test_replaying_a_superseded_key_conflicts_instead_of_handing_back_a_dead_secret(
-        self, client: TestClient
-    ) -> None:
-        """Once a newer rotation lands, the older receipt is not an answer."""
-
-        created = create_connection(client)
-        current = client.get(f"/api/agent-connections/{created['id']}").json()
-
-        first = self.rotate(
-            client, created["id"], key="k-a", revision=current["revision"]
-        )
-        after = client.get(f"/api/agent-connections/{created['id']}").json()
-        self.rotate(client, created["id"], key="k-b", revision=after["revision"])
-
-        replay = self.rotate(
-            client, created["id"], key="k-a", revision=current["revision"]
-        )
-
-        assert replay.status_code == 409, replay.text
-        assert first.json()["inbound_signing_secret"] not in replay.text
-
-    def test_rotation_requires_the_password_and_the_current_revision(
-        self, client: TestClient
-    ) -> None:
-        """Same ceremony as registration and disconnect."""
-
-        created = create_connection(client)
-        current = client.get(f"/api/agent-connections/{created['id']}").json()
-
-        assert (
-            self.rotate(
-                client,
-                created["id"],
-                key="k-a",
-                revision=current["revision"],
-                password="nope",
-            ).status_code
-            == 403
-        )
-        assert (
-            self.rotate(client, created["id"], key="k-b", revision=99).status_code
-            == 409
-        )
-
-    def test_rotation_requires_an_idempotency_key(self, client: TestClient) -> None:
-        """Every relay mutation carries a key."""
-
-        created = create_connection(client)
-
-        response = client.post(
-            f"/api/agent-connections/{created['id']}/signing-secret",
-            json={
-                "current_password": TEST_USER_PASSWORD,
-                "expected_revision": created["revision"],
-            },
-        )
-
-        assert response.status_code == 400
-
-    def test_another_owner_cannot_rotate_the_secret(
-        self, client: TestClient, other_client: TestClient
-    ) -> None:
-        """Owner isolation, answered as a plain 404."""
-
-        created = create_connection(client)
-
-        response = other_client.post(
-            f"/api/agent-connections/{created['id']}/signing-secret",
-            headers={"Idempotency-Key": "k-sign"},
-            json={
-                "current_password": SECOND_PASSWORD,
-                "expected_revision": created["revision"],
-            },
-        )
-
-        assert response.status_code == 404
-
-    def test_no_ordinary_read_carries_the_rotated_secret(
-        self, client: TestClient
-    ) -> None:
-        """FR-003: only this response ever holds it."""
-
-        created = create_connection(client)
-        current = client.get(f"/api/agent-connections/{created['id']}").json()
-        secret = self.rotate(
-            client, created["id"], revision=current["revision"]
-        ).json()["inbound_signing_secret"]
-
-        detail = client.get(f"/api/agent-connections/{created['id']}").json()
-        listed = client.get("/api/agent-connections").json()
-
-        assert "inbound_signing_secret" not in detail
-        assert secret not in json.dumps(listed)
-
-    def test_the_route_is_absent_while_the_rollout_flag_is_off(
-        self, api_client: TestClient
-    ) -> None:
-        """ADR-0008: the flag gates this owner route like every other one."""
-
-        response = api_client.post(
-            "/api/agent-connections/agentconn_1/signing-secret",
-            headers={"Idempotency-Key": "k-sign"},
-            json={"current_password": TEST_USER_PASSWORD, "expected_revision": 1},
-        )
-
-        assert response.status_code == 404
-
-
 class TestHandOffRoutes:
     def test_a_reviewed_hand_off_dispatches_exactly_once(
         self, client: TestClient, container: Container
@@ -1189,7 +1041,7 @@ class TestHandOffRoutes:
         """AC-008 / AC-009 over HTTP: one confirmation, one A2A exchange."""
 
         a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
-        created = create_connection(client)
+        created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
 
@@ -1210,7 +1062,7 @@ class TestHandOffRoutes:
     ) -> None:
         """AC-006 over HTTP."""
 
-        created = create_connection(client)
+        created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
 
@@ -1233,7 +1085,7 @@ class TestHandOffRoutes:
     ) -> None:
         """Cross-owner hand-off fails before any content is sent."""
 
-        created = create_connection(client)
+        created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
 
@@ -1250,7 +1102,7 @@ class TestHandOffRoutes:
     ) -> None:
         """AC-010 over HTTP."""
 
-        created = create_connection(client)
+        created = register_connection(client)
         task_id = create_task(client)
 
         response = client.post(
@@ -1262,43 +1114,8 @@ class TestHandOffRoutes:
         assert connector.starts == []
 
 
-class TestEventIngestRoutes:
-    def _emit(
-        self,
-        client: TestClient,
-        *,
-        connection_id: str,
-        secret: str,
-        payload: dict[str, Any],
-        timestamp: int | None = None,
-    ) -> Any:
-        # The strict envelope binds the protocol version and the connection
-        # inside the signed body; tests state the interesting fields and get
-        # those two for free.
-        envelope = {
-            "protocol_version": PROTOCOL_VERSION,
-            "connection_id": connection_id,
-            **payload,
-        }
-        body = json.dumps(envelope).encode("utf-8")
-        stamp = (
-            timestamp
-            if timestamp is not None
-            else int(datetime.now(tz=UTC).timestamp())
-        )
-        signature = hmac.new(
-            secret.encode("utf-8"), f"{stamp}.".encode() + body, hashlib.sha256
-        ).hexdigest()
-        return client.post(
-            "/api/agent-events",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-BrainBuddy-Connection": connection_id,
-                "X-BrainBuddy-Timestamp": str(stamp),
-                "X-BrainBuddy-Signature": f"v1={signature}",
-            },
-        )
+class TestRunControlRoutes:
+    """Reading, replying to and cancelling a run over HTTP (014-FR-010)."""
 
     def test_rollout_off_preserves_existing_run_control_and_reporting(
         self,
@@ -1306,11 +1123,11 @@ class TestEventIngestRoutes:
     ) -> None:
         """FR-019 blocks new work without abandoning an already-dispatched run."""
 
-        client, _, _, _ = relay_app
-        created = create_connection(client)
+        client, _, _, container = relay_app
+        created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
-        run = hand_off(client, created["id"], task_id)
+        run = blocked_run(client, container, created["id"], task_id)
         fresh_task_id = create_task(client, "Fresh rollout dispatch")
         fresh_preview = client.post(
             f"/api/tasks/{fresh_task_id}/agent-runs/preview",
@@ -1319,19 +1136,7 @@ class TestEventIngestRoutes:
 
         set_relay_flag(client, FeatureFlagState.OFF)
 
-        callback = self._emit(
-            client,
-            connection_id=created["id"],
-            secret=created["inbound_signing_secret"],
-            payload={
-                "event_id": "evt_after_off",
-                "run_id": run["id"],
-                "type": "blocked",
-                "run_version": 1,
-                "question": "Which environment?",
-            },
-        )
-        assert callback.status_code == 202
+        assert run["needs_user"] is True
 
         current = client.get(f"/api/agent-runs/{run['id']}")
         assert current.status_code == 200
@@ -1373,23 +1178,17 @@ class TestEventIngestRoutes:
         """FR-019: OFF cannot suspend expiry of already-relayed content."""
 
         client, _, _, container = relay_app
-        created = create_connection(client, key="retention-off-create")
+        created = register_connection(client, key="retention-off-create")
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client, "Retention while rollout is off")
-        run = hand_off(client, created["id"], task_id, key="retention-off-dispatch")
-        callback = self._emit(
+        run = blocked_run(
             client,
-            connection_id=created["id"],
-            secret=created["inbound_signing_secret"],
-            payload={
-                "event_id": "evt_retention_off",
-                "run_id": run["id"],
-                "type": "blocked",
-                "run_version": 1,
-                "question": "Sensitive retained question?",
-            },
+            container,
+            created["id"],
+            task_id,
+            question="Sensitive retained question?",
+            key="retention-off-dispatch",
         )
-        assert callback.status_code == 202
         current = client.get(f"/api/agent-runs/{run['id']}").json()
         reply = client.post(
             f"/api/agent-runs/{run['id']}/reply",
@@ -1429,262 +1228,15 @@ class TestEventIngestRoutes:
         )
         assert unchanged == expired
 
-    def test_the_bespoke_ingest_route_still_accepts_a_correctly_signed_event(
-        self, client: TestClient, connector: FakeConnector
+    def test_014_FR_010_a_blocked_run_lets_the_owner_reply(
+        self, client: TestClient, container: Container
     ) -> None:
-        """The 007 route works; 014 simply stopped advertising it.
-
-        The manifest's `reporting` block is now an inert rollback placeholder
-        with an empty callback URL — no agent is told about this route any more,
-        because an A2A agent reports by answering. The route itself lives until
-        T110-T114 remove it with the rest of the bespoke wire, and a run
-        dispatched before that must still be able to report, so its signing
-        contract is exercised here against the route directly.
-        """
-
-        created = create_connection(client)
-        client.post(f"/api/agent-connections/{created['id']}/test")
-        task_id = create_task(client)
-        run = hand_off(client, created["id"], task_id)
-        # Read off the run's own frozen manifest rather than off a connector
-        # envelope: 014 sends the start over A2A, and the bespoke block survives
-        # only as the inert rollback placeholder the run row still carries.
-        reporting = inert_reporting_contract(created["id"]).model_dump(mode="json")
-        assert reporting["callback_url"] == "", "the manifest advertises nothing"
-        assert reporting["signature_algorithm"] == "hmac-sha256"
-        assert reporting["signing_bytes"] == "timestamp_bytes + b'.' + raw_body"
-        assert reporting["signature_format"] == "v1=<lowercase hex>"
-
-        body = json.dumps(
-            {
-                "protocol_version": reporting["body_envelope_version"],
-                "connection_id": reporting["connection_id"],
-                "event_id": "evt_contract_vector",
-                "run_id": run["id"],
-                "type": "running",
-                "run_version": 1,
-                "progress": "Using emitted contract",
-            },
-            separators=(",", ":"),
-        ).encode("utf-8")
-        timestamp_bytes = str(int(datetime.now(tz=UTC).timestamp())).encode("ascii")
-        digest = hmac.new(
-            created["inbound_signing_secret"].encode("utf-8"),
-            timestamp_bytes + b"." + body,
-            hashlib.sha256,
-        ).hexdigest()
-
-        response = client.post(
-            "/api/agent-events",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                reporting["connection_header"]: reporting["connection_id"],
-                reporting["timestamp_header"]: timestamp_bytes.decode("ascii"),
-                reporting["signature_header"]: f"v1={digest}",
-            },
-        )
-
-        assert response.status_code == 202, response.text
-        assert response.json() == {"accepted": True, "run_version": 1}
-
-    def test_reporting_v2_accepts_a_fixed_external_golden_vector(
-        self,
-        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Freeze every signed byte so producer and verifier cannot drift together."""
-
-        client, _, connector, container = relay_app
-        fixed_secret = "golden-vector-signing-secret-v2"
-        fixed_timestamp = b"1786320000"
-        fixed_now = datetime(2026, 8, 10, tzinfo=UTC)
-        fixed_body = (
-            b'{"protocol_version":"2026-08-09","connection_id":"agentconn_golden_vector",'
-            b'"event_id":"evt_golden_vector","run_id":"agentrun_golden_vector",'
-            b'"type":"running","run_version":1,"progress":"Fixed golden vector"}'
-        )
-        # Generated independently with OpenSSL over
-        # b"1786320000." + fixed_body using the fixed secret above.
-        expected_digest = (
-            "8464ec9e75dd88ff92f85bad0d5bbe4" "68ae2aa09826d9894cd06feb9064c7700"
-        )
-        original_generate_id = agent_service_module.generate_id
-
-        def fixed_relay_id(prefix: str) -> str:
-            if prefix == "agentconn":
-                return "agentconn_golden_vector"
-            if prefix == "agentrun":
-                return "agentrun_golden_vector"
-            return original_generate_id(prefix)
-
-        monkeypatch.setattr(agent_service_module, "generate_id", fixed_relay_id)
-        monkeypatch.setattr(
-            agent_service_module.secrets,
-            "token_urlsafe",
-            lambda _bytes: fixed_secret,
-        )
-        container.agent_relay_service._now = lambda: fixed_now
-
-        created = create_connection(client, key="golden-create")
-        assert created["id"] == "agentconn_golden_vector"
-        assert created["inbound_signing_secret"] == fixed_secret
-        client.post(f"/api/agent-connections/{created['id']}/test")
-        task_id = create_task(client)
-        run = hand_off(client, created["id"], task_id, key="golden-handoff")
-        assert run["id"] == "agentrun_golden_vector"
-
-        reporting = inert_reporting_contract(created["id"]).model_dump(mode="json")
-        # The instructions version belongs to the manifest, not to the signing
-        # contract: 014 tells an agent nothing about reporting, so only the
-        # signing rule below is still a live promise to a 007-era run.
-        assert REPORTING_INSTRUCTIONS_VERSION == "v2"
-        assert reporting["body_envelope_version"] == "2026-08-09"
-        assert reporting["signature_algorithm"] == "hmac-sha256"
-        assert reporting["signing_bytes"] == "timestamp_bytes + b'.' + raw_body"
-        assert reporting["signature_format"] == "v1=<lowercase hex>"
-        assert reporting["connection_id"] == "agentconn_golden_vector"
-        # The manifest advertises no address any more (014 FR-012); the route
-        # stays until T110-T114, and this vector still pins its signing rule.
-        assert reporting["callback_url"] == ""
-
-        response = client.post(
-            "/api/agent-events",
-            content=fixed_body,
-            headers={
-                "Content-Type": "application/json",
-                reporting["connection_header"]: "agentconn_golden_vector",
-                reporting["timestamp_header"]: fixed_timestamp.decode("ascii"),
-                reporting["signature_header"]: f"v1={expected_digest}",
-            },
-        )
-
-        assert response.status_code == 202, response.text
-        assert response.json() == {"accepted": True, "run_version": 1}
-
-    def test_a_signed_event_updates_the_run(self, client: TestClient) -> None:
-        """AC-011 over HTTP, from an unauthenticated connector."""
-
-        created = create_connection(client)
-        client.post(f"/api/agent-connections/{created['id']}/test")
-        task_id = create_task(client)
-        run = hand_off(client, created["id"], task_id)
-
-        response = self._emit(
-            client,
-            connection_id=created["id"],
-            secret=created["inbound_signing_secret"],
-            payload={
-                "event_id": "evt_1",
-                "run_id": run["id"],
-                "type": "running",
-                "run_version": 1,
-                "progress": "Cloning the repo",
-            },
-        )
-
-        assert response.status_code == 202, response.text
-        projected = client.get(f"/api/agent-runs/{run['id']}").json()
-        assert projected["reported_state"] == "running"
-        assert projected["progress_text"] == "Cloning the repo"
-        assert projected["primary_state_label"] == "Running"
-
-    def test_an_unsigned_event_is_refused_and_changes_nothing(
-        self, client: TestClient
-    ) -> None:
-        """SC-003 over HTTP."""
-
-        created = create_connection(client)
-        client.post(f"/api/agent-connections/{created['id']}/test")
-        task_id = create_task(client)
-        run = hand_off(client, created["id"], task_id)
-
-        response = client.post(
-            "/api/agent-events",
-            json={
-                "protocol_version": PROTOCOL_VERSION,
-                "connection_id": created["id"],
-                "event_id": "evt_1",
-                "run_id": run["id"],
-                "type": "completed",
-                "run_version": 1,
-                "result": "Done.",
-            },
-            headers={"X-BrainBuddy-Connection": created["id"]},
-        )
-
-        assert response.status_code in (400, 401, 403)
-        assert (
-            client.get(f"/api/agent-runs/{run['id']}").json()["reported_state"] is None
-        )
-
-    def test_a_wrongly_signed_event_is_refused(self, client: TestClient) -> None:
-        """A forged signature never moves the projection."""
-
-        created = create_connection(client)
-        client.post(f"/api/agent-connections/{created['id']}/test")
-        task_id = create_task(client)
-        run = hand_off(client, created["id"], task_id)
-
-        response = self._emit(
-            client,
-            connection_id=created["id"],
-            secret="not-the-secret",
-            payload={
-                "event_id": "evt_1",
-                "run_id": run["id"],
-                "type": "completed",
-                "run_version": 1,
-                "result": "Done.",
-            },
-        )
-
-        assert response.status_code == 403
-        assert (
-            client.get(f"/api/agent-runs/{run['id']}").json()["reported_state"] is None
-        )
-
-    def test_the_rejection_body_never_explains_which_check_failed(
-        self, client: TestClient
-    ) -> None:
-        """A prober learns nothing about connections or runs from the error."""
-
-        created = create_connection(client)
-
-        response = self._emit(
-            client,
-            connection_id=created["id"],
-            secret="not-the-secret",
-            payload={
-                "event_id": "evt_1",
-                "run_id": "agentrun_whatever",
-                "type": "running",
-                "run_version": 1,
-            },
-        )
-
-        assert "signature" not in response.text.lower()
-        assert "agentrun_whatever" not in response.text
-
-    def test_a_blocked_event_lets_the_owner_reply(self, client: TestClient) -> None:
         """AC-012 over HTTP."""
 
-        created = create_connection(client)
+        created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
-        run = hand_off(client, created["id"], task_id)
-        self._emit(
-            client,
-            connection_id=created["id"],
-            secret=created["inbound_signing_secret"],
-            payload={
-                "event_id": "evt_1",
-                "run_id": run["id"],
-                "type": "blocked",
-                "run_version": 1,
-                "question": "Which environment?",
-            },
-        )
+        run = blocked_run(client, container, created["id"], task_id)
 
         current = client.get(f"/api/agent-runs/{run['id']}").json()
         response = client.post(
@@ -1702,36 +1254,24 @@ class TestEventIngestRoutes:
         assert body["question_text"] == "Which environment?"
         assert any(command["kind"] == "reply" for command in body["commands"])
 
-    def test_a_stale_question_revision_returns_409_before_reply_delivery(
-        self, client: TestClient, connector: FakeConnector
+    def test_014_FR_010_a_stale_question_revision_returns_409_before_reply_delivery(
+        self, client: TestClient, container: Container
     ) -> None:
-        created = create_connection(client)
+        """A reply written against a superseded question is refused, not sent."""
+
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
-        run = hand_off(client, created["id"], task_id)
-        base = {
-            "run_id": run["id"],
-            "type": "blocked",
-            "question": "Which environment?",
-        }
-        self._emit(
-            client,
-            connection_id=created["id"],
-            secret=created["inbound_signing_secret"],
-            payload={**base, "event_id": "evt_1", "run_version": 1},
-        )
+        run = blocked_run(client, container, created["id"], task_id)
         stale_revision = client.get(f"/api/agent-runs/{run['id']}").json()["revision"]
-        self._emit(
-            client,
-            connection_id=created["id"],
-            secret=created["inbound_signing_secret"],
-            payload={
-                **base,
-                "event_id": "evt_2",
-                "run_version": 2,
-                "question": "Which region?",
-            },
+        observe(
+            container,
+            run["id"],
+            state="TASK_STATE_INPUT_REQUIRED",
+            text="Which region?",
         )
+        a2a.calls.clear()
 
         response = client.post(
             f"/api/agent-runs/{run['id']}/reply",
@@ -1740,154 +1280,14 @@ class TestEventIngestRoutes:
         )
 
         assert response.status_code == 409, response.text
-        assert connector.commands == []
-
-    # --- bounded ingestion on an unauthenticated route ----------------------
-
-    def test_a_declared_oversize_body_is_refused_before_it_is_buffered(
-        self, client: TestClient
-    ) -> None:
-        """A caller announcing more than the cap is refused on the header alone.
-
-        This route takes no session, so an attacker can post to it freely.
-        Reading the body first would let a single declared-huge request pull
-        arbitrary bytes into memory before anyone checks the size.
-        """
-
-        consumed = 0
-
-        def body() -> Generator[bytes, None, None]:
-            nonlocal consumed
-            for _ in range(40):
-                consumed += 8_192
-                yield b"x" * 8_192
-
-        response = client.post(
-            "/api/agent-events",
-            content=body(),
-            headers={
-                "Content-Type": "application/json",
-                "Content-Length": str(40 * 8_192),
-                "X-BrainBuddy-Connection": "agentconn_probe",
-                "X-BrainBuddy-Timestamp": "1",
-                "X-BrainBuddy-Signature": "v1=deadbeef",
-            },
-        )
-
-        assert response.status_code == 413, response.text
-        assert consumed == 0, "the declared size must be refused before buffering"
-
-    def test_an_undeclared_oversize_body_is_still_refused(
-        self, client: TestClient
-    ) -> None:
-        """A chunked caller that declares no length is bounded all the same."""
-
-        def body() -> Generator[bytes, None, None]:
-            for _ in range(40):
-                yield b"x" * 8_192
-
-        response = client.post(
-            "/api/agent-events",
-            content=body(),
-            headers={
-                "Content-Type": "application/json",
-                "X-BrainBuddy-Connection": "agentconn_probe",
-                "X-BrainBuddy-Timestamp": "1",
-                "X-BrainBuddy-Signature": "v1=deadbeef",
-            },
-        )
-
-        assert response.status_code == 413, response.text
-
-    def test_a_body_of_exactly_the_cap_is_not_refused_for_size(
-        self, client: TestClient
-    ) -> None:
-        """The boundary belongs to the accepted side; the signature decides."""
-
-        response = client.post(
-            "/api/agent-events",
-            content=b"x" * MAX_EVENT_BODY_BYTES,
-            headers={
-                "Content-Type": "application/json",
-                "X-BrainBuddy-Connection": "agentconn_probe",
-                "X-BrainBuddy-Timestamp": "1",
-                "X-BrainBuddy-Signature": "v1=deadbeef",
-            },
-        )
-
-        assert response.status_code == 403, response.text
-
-    @pytest.mark.parametrize("declared", ["not-a-number", "-1", "12 34", ""])
-    def test_a_malformed_content_length_is_handled_without_a_server_error(
-        self, client: TestClient, declared: str
-    ) -> None:
-        """A junk length is refused like any other probe, never a 500."""
-
-        response = client.post(
-            "/api/agent-events",
-            content=b'{"event_id":"e"}',
-            headers={
-                "Content-Type": "application/json",
-                "Content-Length": declared,
-                "X-BrainBuddy-Connection": "agentconn_probe",
-                "X-BrainBuddy-Timestamp": "1",
-                "X-BrainBuddy-Signature": "v1=deadbeef",
-            },
-        )
-
-        assert response.status_code in (400, 403, 413), response.text
-
-    def test_an_oversize_body_changes_nothing_and_keeps_its_correlation_id(
-        self, client: TestClient
-    ) -> None:
-        """A refused oversize event is still a traceable, zero-mutation refusal."""
-
-        created = create_connection(client)
-        client.post(f"/api/agent-connections/{created['id']}/test")
-        task_id = create_task(client)
-        run = hand_off(client, created["id"], task_id)
-
-        stamp = int(datetime.now(tz=UTC).timestamp())
-        oversize = json.dumps(
-            {
-                "protocol_version": PROTOCOL_VERSION,
-                "connection_id": created["id"],
-                "event_id": "evt_big",
-                "run_id": run["id"],
-                "type": "completed",
-                "run_version": 1,
-                "result": "x" * (MAX_EVENT_BODY_BYTES + 1_000),
-            }
-        ).encode("utf-8")
-        signature = hmac.new(
-            created["inbound_signing_secret"].encode("utf-8"),
-            f"{stamp}.".encode() + oversize,
-            hashlib.sha256,
-        ).hexdigest()
-
-        response = client.post(
-            "/api/agent-events",
-            content=oversize,
-            headers={
-                "Content-Type": "application/json",
-                "X-BrainBuddy-Connection": created["id"],
-                "X-BrainBuddy-Timestamp": str(stamp),
-                "X-BrainBuddy-Signature": f"v1={signature}",
-            },
-        )
-
-        assert response.status_code == 413, response.text
-        assert response.headers["X-Correlation-ID"]
-        assert (
-            client.get(f"/api/agent-runs/{run['id']}").json()["reported_state"] is None
-        )
+        assert a2a.calls_to("SendMessage") == []
 
     def test_another_owner_cannot_read_or_command_the_run(
         self, client: TestClient, other_client: TestClient
     ) -> None:
         """Owner isolation over the run routes."""
 
-        created = create_connection(client)
+        created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
         run = hand_off(client, created["id"], task_id)
@@ -1902,91 +1302,13 @@ class TestEventIngestRoutes:
         )
 
 
-class TestBoundedEventBodyReader:
-    """The reader itself, driven at the ASGI layer.
-
-    ``TestClient`` materialises a request body before it reaches the app, so the
-    "stops reading" property can only be observed by counting how many chunks
-    the *server* actually pulls off the receive channel.
-    """
-
-    @staticmethod
-    def _request(
-        chunks: list[bytes], *, headers: list[tuple[bytes, bytes]] | None = None
-    ) -> tuple[Request, list[int]]:
-        pulled: list[int] = []
-        remaining = list(chunks)
-
-        async def receive() -> dict[str, Any]:
-            if not remaining:
-                return {"type": "http.request", "body": b"", "more_body": False}
-            chunk = remaining.pop(0)
-            pulled.append(len(chunk))
-            return {"type": "http.request", "body": chunk, "more_body": bool(remaining)}
-
-        scope = {
-            "type": "http",
-            "http_version": "1.1",
-            "method": "POST",
-            "path": "/api/agent-events",
-            "headers": headers or [],
-        }
-        return Request(scope, receive), pulled
-
-    def test_the_reader_stops_pulling_once_the_cap_is_passed(self) -> None:
-        """A caller streaming megabytes never gets megabytes buffered."""
-
-        chunks = [b"x" * 8_192 for _ in range(200)]
-        request, pulled = self._request(chunks)
-
-        with pytest.raises(HTTPException) as raised:
-            asyncio.run(_bounded_event_body(request))
-
-        assert raised.value.status_code == 413
-        assert sum(pulled) <= MAX_EVENT_BODY_BYTES + 8_192
-        assert len(pulled) < len(chunks)
-
-    def test_a_declared_oversize_length_is_refused_without_reading(self) -> None:
-        """The header alone is enough; nothing is pulled off the channel."""
-
-        request, pulled = self._request(
-            [b"x" * 8_192],
-            headers=[(b"content-length", str(MAX_EVENT_BODY_BYTES + 1).encode())],
-        )
-
-        with pytest.raises(HTTPException) as raised:
-            asyncio.run(_bounded_event_body(request))
-
-        assert raised.value.status_code == 413
-        assert pulled == []
-
-    @pytest.mark.parametrize("declared", [b"not-a-number", b"-1", b"", b"1_0"])
-    def test_a_malformed_declared_length_falls_back_to_the_streaming_bound(
-        self, declared: bytes
-    ) -> None:
-        """Junk in the header neither bypasses the cap nor crashes the read."""
-
-        request, _pulled = self._request(
-            [b"x" * 16], headers=[(b"content-length", declared)]
-        )
-
-        assert asyncio.run(_bounded_event_body(request)) == b"x" * 16
-
-    def test_a_body_of_exactly_the_cap_is_returned_whole(self) -> None:
-        """The boundary is inclusive: exactly the cap is still a valid body."""
-
-        request, _pulled = self._request([b"x" * MAX_EVENT_BODY_BYTES])
-
-        assert asyncio.run(_bounded_event_body(request)) == b"x" * MAX_EVENT_BODY_BYTES
-
-
 class TestRunSummaryRoute:
     def test_the_compact_surface_gets_one_summary_per_task(
         self, client: TestClient
     ) -> None:
         """FR-010: the task list asks once for every task's latest run."""
 
-        created = create_connection(client)
+        created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
         other_task_id = create_task(client, "Untouched task")
@@ -2009,7 +1331,7 @@ class TestRunSummaryRoute:
     ) -> None:
         """A task ID guessed from another account yields nothing."""
 
-        created = create_connection(client)
+        created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
         hand_off(client, created["id"], task_id)
@@ -2034,7 +1356,7 @@ class TestAccountPurge:
         """AC-021: the existing purge contract covers relay data."""
 
         container: Container = relay_app[3]
-        created = create_connection(client)
+        created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
         hand_off(client, created["id"], task_id)
@@ -2052,31 +1374,36 @@ class TestAccountPurge:
         """FR-019: OFF cannot strand any owner relay or credential material."""
 
         container: Container = relay_app[3]
-        created = create_connection(client, key="purge-off-create")
+        created = register_connection(client, key="purge-off-create")
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client, "Purge relay data while rollout is off")
-        run = hand_off(client, created["id"], task_id, key="purge-off-dispatch")
-        callback = TestEventIngestRoutes()._emit(
+        run = blocked_run(
             client,
-            connection_id=created["id"],
-            secret=created["inbound_signing_secret"],
-            payload={
-                "event_id": "evt_purge_off",
-                "run_id": run["id"],
-                "type": "running",
-                "run_version": 1,
-                "progress": "Sensitive purge content",
-            },
+            container,
+            created["id"],
+            task_id,
+            question="Sensitive purge content",
+            key="purge-off-dispatch",
         )
-        assert callback.status_code == 202
         owner_id = client.get("/api/auth/me").json()["id"]
+        current = client.get(f"/api/agent-runs/{run['id']}").json()
+        assert (
+            client.post(
+                f"/api/agent-runs/{run['id']}/reply",
+                headers={"Idempotency-Key": "purge-off-reply"},
+                json={
+                    "message": "Sensitive purge reply",
+                    "expected_revision": current["revision"],
+                },
+            ).status_code
+            == 200
+        )
         relay_tables = (
             "agent_connections",
             "agent_runs",
             "agent_run_events",
             "agent_run_commands",
             "agent_audit",
-            "agent_event_ids",
             "agent_idempotency",
         )
         with sqlite3.connect(container.agent_repo.db_path) as connection:
@@ -2090,9 +1417,7 @@ class TestAccountPurge:
                 "SELECT payload FROM agent_connections WHERE owner_id = ?",
                 (owner_id,),
             ).fetchone()[0]
-        assert created["inbound_signing_secret"] not in stored_connection
         assert '"credential":' in stored_connection
-        assert '"inbound_secret":' in stored_connection
 
         set_relay_flag(client, FeatureFlagState.OFF)
         container.account_service.purge_account(owner_id)
