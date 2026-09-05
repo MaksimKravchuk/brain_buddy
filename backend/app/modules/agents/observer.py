@@ -103,6 +103,13 @@ class AgentObserver:
         # The service submits through here, so the bound below is not something
         # a dispatch can route around.
         service.exchange_pump = self.submit_exchange
+        # And the bound itself goes with it. `_slot_available` counts *open*
+        # exchanges, so it cannot see submissions that have not started yet;
+        # the service re-checks this same number at the queued → open
+        # transition, under the lock that serialises it, which is the only
+        # place the count is authoritative. One value, published once, so the
+        # pre-check and the admission can never disagree about the bound.
+        service.max_exchanges_per_connection = self.max_exchanges_per_connection
         service.observer_wake = self.wake
         if control_executor is not None:
             service.control_pump = self.submit_control

@@ -524,6 +524,12 @@ class AgentRelayService:
         # Set by the container once the observer exists, so the service never
         # needs to know how exchanges are scheduled — only that they are.
         self.exchange_pump: Callable[[str, str], Future[Any] | None] | None = None
+        # Published by the same observer, for the same reason: the bound is a
+        # property of the pool, and the pool's cheap pre-check counts *open*
+        # exchanges — so the queued → open transition has to be able to check
+        # it again, where the slot is actually taken (AC-034). `None` means no
+        # pool has claimed this service, and an unpooled service bounds nothing.
+        self.max_exchanges_per_connection: int | None = None
         # The dedicated control lane. A cancel is what *resolves* a blocked
         # exchange on some runtimes, so it must never queue behind the very
         # exchanges it ends (AC-035). `None` means "run it here", which is the
@@ -2251,6 +2257,25 @@ class AgentRelayService:
             },
         }
 
+    def _connection_is_full(self, connection: AgentConnectionDocument) -> bool:
+        """Whether this connection already holds every exchange it may.
+
+        The bound belongs to the pool, so it is published here by whoever owns
+        the pool (`AgentObserver.__init__`, beside `exchange_pump`) rather than
+        configured twice. A service with no pool bound to it has no pool to
+        protect and imposes none — the same thing it does today.
+        """
+
+        limit = self.max_exchanges_per_connection
+        if limit is None:
+            return False
+        return (
+            self.agent_repo.open_exchange_count(
+                connection.id, owner_id=connection.owner_id
+            )
+            >= limit
+        )
+
     def _submit_exchange(self, *, owner_id: str, run_id: str) -> Future[Any] | None:
         """Hand one queued exchange to whoever runs exchanges here.
 
@@ -2309,6 +2334,16 @@ class AgentRelayService:
             }
         )
         with self.agent_repo.command_lock(owner_id):
+            if self._connection_is_full(connection):
+                # The pool's pre-check counted *open* exchanges, and this one
+                # was still queued when it was admitted — as were every other
+                # submission made in the same window. The bound is therefore
+                # decided again here, where the slot is actually taken and
+                # under the lock that serialises the taking. Nothing is
+                # touched: the run stays **Queued**, which is still exactly
+                # what has happened to it, and the next worker to finish
+                # drains it (AC-034).
+                return
             opened = self.agent_repo.start_exchange(
                 prepared,
                 expected_version=run.run_version,
