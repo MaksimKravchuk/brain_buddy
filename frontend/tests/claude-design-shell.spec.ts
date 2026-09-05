@@ -187,7 +187,7 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
     await page.goto("/tasks/next");
 
     await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
-    await expect(page.getByText("Brain Buddy")).toBeVisible();
+    await expect(page.getByText("BrainBuddy")).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Task navigation" })).toBeVisible();
     await expect(page.getByText("Tags", { exact: true })).toBeVisible();
     await expect(page.getByText("Contexts", { exact: true })).toHaveCount(0);
@@ -208,6 +208,36 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
       await expect(page.getByRole("link", { name: "Someday / maybe 0" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Weekly review" })).toBeEnabled();
       await expect(page.getByRole("button", { name: "Thinking Mode — Coming soon" })).toBeDisabled();
+    });
+
+    await test.step("keep enabled primary and secondary actions readable at rest, on hover, and while pressed", async () => {
+      for (const name of ["Brain dump", "New project", "New tag"]) {
+        const button = page.getByRole("button", { name, exact: true });
+        for (const state of ["rest", "hover", "pressed"]) {
+          if (state === "hover") await button.hover();
+          if (state === "pressed") await page.mouse.down();
+          await button.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+          const contrast = await button.evaluate((element) => {
+            const style = getComputedStyle(element);
+            const background = style.backgroundColor === "rgba(0, 0, 0, 0)"
+              ? getComputedStyle(element.closest(".bg-surface-base")!).backgroundColor
+              : style.backgroundColor;
+            const luminance = (color: string) => {
+              const channels = color.match(/[\d.]+/g)!.slice(0, 3).map((value) => {
+                const channel = Number(value) / 255;
+                return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+              });
+              return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+            };
+            const values = [luminance(style.color), luminance(background)].sort((a, b) => a - b);
+            return (values[1] + 0.05) / (values[0] + 0.05);
+          });
+          await attachment(`${name}: ${state} contrast`, `${contrast.toFixed(2)}:1`, ContentType.TEXT);
+          if (contrast < 4.5) throw new Error(`${name} contrast in ${state} was ${contrast}:1; expected at least 4.5:1`);
+        }
+        await page.locator("header").first().hover();
+        await page.mouse.up();
+      }
     });
 
     await test.step("keep wrapped desktop tag actions inside the sidebar", async () => {
@@ -346,6 +376,37 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
     await page.goto("/tasks/next");
 
     await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+    await test.step("make completion touchable and keep capture guidance within the field", async () => {
+      const complete = page.getByRole("button", { name: "Complete Fix onboarding drop-off" });
+      const box = await complete.boundingBox();
+      await attachment("Completion target", JSON.stringify(box), ContentType.JSON);
+      if (!box || box.width < 44 || box.height < 44) throw new Error("Expected a completion target of at least 44×44 CSS pixels");
+      const capture = page.getByRole("combobox", { name: "New task title" });
+      const fits = await capture.evaluate((element: HTMLInputElement) => {
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d")!;
+        context.font = getComputedStyle(element).font;
+        return context.measureText(element.placeholder).width <= element.clientWidth;
+      });
+      await attachment("Capture placeholder fits", String(fits), ContentType.TEXT);
+      if (!fits) throw new Error("The capture placeholder exceeds the visible input width");
+    });
+    await test.step("search from the mobile drawer and return to the filtered list", async () => {
+      await page.goto("/tasks/next?sort=due");
+      await page.getByRole("button", { name: "Open task navigation" }).click();
+      const drawer = page.getByRole("dialog", { name: "Task navigation" });
+      const search = drawer.getByRole("searchbox", { name: "Search tasks" });
+      await search.pressSequentially("review homepage");
+      await search.press("Enter");
+      await expect(drawer).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Open task navigation" })).toBeFocused();
+      await expect(page).toHaveURL(/\/tasks\/next\?sort=due&q=review\+homepage$/);
+      await page.getByRole("button", { name: "Open task navigation" }).click();
+      await drawer.getByRole("searchbox", { name: "Search tasks" }).fill("");
+      await drawer.getByRole("button", { name: "Search", exact: true }).click();
+      await expect(page).toHaveURL(/\/tasks\/next\?sort=due$/);
+      await page.goto("/tasks/next");
+    });
     await page.getByRole("button", { name: "Open task navigation" }).click();
     await expect(page.getByRole("dialog", { name: "Task navigation" })).toBeVisible();
     await test.step("Verify the mobile task drawer fits inside the viewport", async () => {

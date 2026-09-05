@@ -153,7 +153,7 @@ describe("AppRoutes", () => {
 
     expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
     expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
-    expect(screen.getByText("Brain Buddy")).toBeInTheDocument();
+    expect(screen.getByText("BrainBuddy")).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Search tasks" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Brain dump" })).toBeEnabled();
     expect(await screen.findByText("Fix onboarding drop-off")).toBeInTheDocument();
@@ -208,7 +208,7 @@ describe("AppRoutes", () => {
     const rowTitle = await screen.findByText("Fix onboarding drop-off");
     const row = rowTitle.closest("article");
     expect(row).not.toBeNull();
-    expect(row).toHaveClass("rounded-[12px]", "px-3.5", "py-[7px]", "shadow-soft", "transition-all", "duration-200", "ease-smooth");
+    expect(row).toHaveClass("rounded-[12px]", "px-3.5", "py-[7px]", "transition-colors", "duration-200", "ease-smooth");
 
     // The per-row project column is gone (prototype default); the group heading
     // carries the project name instead.
@@ -304,7 +304,7 @@ describe("AppRoutes", () => {
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("due_on="), expect.anything());
-      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("q=invoicereview"), expect.anything());
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("q=invoice+review"), expect.anything());
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("sort=due"), expect.anything());
     });
     expect(screen.queryByRole("button", { name: /Sort by tag/i })).not.toBeInTheDocument();
