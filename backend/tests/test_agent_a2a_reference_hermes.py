@@ -54,6 +54,7 @@ OWNER = "user_hermes"
 PASSWORD = "correct-horse-battery-staple"
 BEARER = "hermes-stub-bearer-token"  # noqa: S105 - synthetic fixture value
 PORT_PREFIX = "A2A_STUB_PORT="
+STUB_AGENT_NAME = "hermes-conformance-stub"
 STUB_DIR = VENDOR_ROOT / "hermes_a2a"
 
 #: The reply delay used by the SC-006 cases. Long enough that the exchange
@@ -108,6 +109,11 @@ def start_stub(
         "A2A_HOST": "127.0.0.1",
         "A2A_PORT": str(port),
         "A2A_STUB_HOME": str(tmp_path / f"hermes-home-{port}"),
+        # The adapter's default card name is `hermes-<hostname>`, which made the
+        # card assertions depend on the machine running the suite. Naming it
+        # through the plugin's own documented knob keeps the vendored code
+        # untouched and the expectation the same on every runner.
+        "A2A_AGENT_NAME": STUB_AGENT_NAME,
         "STUB_REPLY_DELAY_SECONDS": str(delay_seconds),
     }
     if bearer is not None:
@@ -300,7 +306,7 @@ class TestHermesCardAndCredential:
         tested = relay.agent_relay_service.get_connection(connection_id, owner_id=OWNER)
         assert tested.status == "ready"
         assert tested.card is not None
-        assert tested.card.name == "hermes-vm"
+        assert tested.card.name == STUB_AGENT_NAME
         assert tested.card.protocol_version == "1.0"
         assert tested.card.streaming is True
         assert tested.card.push_notifications is True

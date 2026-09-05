@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app.modules.agents.a2a.client import A2AResult
 from app.modules.agents.a2a.types import Task
@@ -1108,15 +1109,17 @@ def test_014_FR_008_main_starts_and_stops_the_observer_exactly_once(
     monkeypatch.setenv("BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST", "1")
     app = main_module.create_app()
     assert starts == ["start"]
+    assert stops == []
 
-    app.router.shutdown()
-    handlers = [
-        handler
-        for handler in app.router.on_shutdown
-        if handler.__name__ == "_stop_maintenance_sweeps"
-    ]
-    assert len(handlers) == 1
-    handlers[0]()
+    # The lifespan is the one supported way to run the shutdown hooks: the
+    # `Router.shutdown()` and `on_shutdown` accessors are gone in Starlette
+    # 1.x, which an unpinned install (CI's) resolves. Entering the client runs
+    # startup, which must not start a second scheduler; leaving it runs
+    # `_stop_maintenance_sweeps`, which must stop the one there is, once.
+    with TestClient(app):
+        assert starts == ["start"]
+        assert stops == []
+    assert starts == ["start"]
     assert stops == ["stop"]
 
 
