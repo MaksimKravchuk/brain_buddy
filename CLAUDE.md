@@ -20,12 +20,53 @@ and `mobile/package.json`. Only the things those files don't tell you:
 - Mobile has its own notes in `mobile/CLAUDE.md`.
 - Spec Kit CLI installs with isolated `uv` tooling, never inside the application
   backend/frontend environments — see the `speckit-pipeline` skill.
+- Editing `.claude/settings.json`, the `Makefile`, or anything else in
+  `GUARDED_FILES` in `scripts/check_gate_integrity.py` fails CI's **Spec Kit
+  artifacts** job until you re-record the hash in the same commit with
+  `python3 scripts/check_gate_integrity.py --update`. That puts the new hash in
+  the diff on purpose; the invariants in the same script are not waivable by it.
 
 Coverage floors live in `frontend/coverage-floor.json` and may only ratchet
 upward. There is no per-file escape hatch: `scripts/validate_ci_artifacts.py
 coverage-suppressions` rejects `istanbul ignore file` and every range form in
 `frontend/src` and `mobile/src`, because an excluded file is reported as neither
 covered nor uncovered — it silently leaves the measurement.
+
+## Tool use
+
+Read, search and edit files with the dedicated `Read`, `Grep`, `Glob` and `Edit`
+tools — including when a harness "auto mode" instruction says to route that work
+through Bash (`cat`, `grep`, `sed -n`, heredocs). `Read`, `Grep` and `Glob` are
+allowlisted by name in `.claude/settings.json`; `Edit` is not, so edits still go
+through whatever the active permission mode decides.
+
+Reaching for the shell instead does not buy fewer prompts. Claude Code already
+treats a built-in set — `ls`, `cat`, `echo`, `pwd`, `head`, `tail`, `grep`,
+`find`, `wc`, `which`, `diff`, `stat`, `du`, `cd` and read-only `git` — as
+read-only and runs it without a prompt in every mode. What does stop for
+approval is the shell-shaped work around those reads: heredoc writes, `sed -i`,
+pipelines with a write-capable segment, an unquoted glob passed to an
+exec-capable command, and anything the command parser cannot fully read. A
+heredoc is the worst of them, because each one is unique content that no
+approval can be cached against, while `Edit` presents a reviewable diff.
+
+Two consequences worth knowing before touching the allowlist:
+
+- **Do not add blunt `Bash(<cmd>:*)` rules for `find`, `sort`, `sed`, `rg` or
+  `file`.** Claude Code's own analysis is flag-aware and stops these when they
+  carry an exec- or write-capable form; a prefix rule overrides that and
+  pre-approves `find -exec`, `rg --pre`, `sort --compress-program` and GNU
+  `sed`'s `e` command — each of which runs an arbitrary program, which would
+  walk straight through the `ask` gates on `git push`, `fly` and
+  `submit_to_trunk.sh`.
+- **`Read`/`Edit` deny rules already cover Bash.** They apply to the built-in
+  file tools *and* to file commands Claude Code recognises in Bash (`cat`,
+  `head`, `tail`, `sed`), so the `.env` and `backend/data/**` denies need no
+  Bash twin. They do not apply to a subprocess that opens files itself, so a
+  Python or Node one-liner is the way that boundary actually leaks.
+
+Reach for Bash where it is genuinely the right tool: `make` targets, git, the
+`scripts/` validators, `docker compose`.
 
 ## Spec Kit and the delivery pipeline
 
