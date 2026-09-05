@@ -24,6 +24,7 @@ from app.exceptions import (
     ValidationFailure,
 )
 from app.workflows.voice_brain_dump.domain import (
+    PatchOperation,
     ProposalPatch,
     ReconciledProposal,
     normalized_title,
@@ -429,21 +430,17 @@ class OpenAITextReconciler:
                 skipped.append(str(exc))
                 continue
             if isinstance(outcome, _DuplicateOf):
-                survivor = patches[outcome.patch_index]
-                patches[outcome.patch_index] = replace(
-                    survivor,
-                    source_segment_ids=[
-                        *survivor.source_segment_ids,
-                        *(
-                            segment_id
-                            for segment_id in draft.source_segment_ids
-                            if segment_id not in survivor.source_segment_ids
-                        ),
-                    ],
+                patches[outcome.patch_index] = self._fold_duplicate(
+                    patches[outcome.patch_index], draft
                 )
                 skipped.append(
                     "duplicate task title within one reconciliation; its cited "
-                    "segments were folded into the surviving proposal."
+                    + (
+                        "segments and predecessors"
+                        if draft.predecessor_ids
+                        else "segments"
+                    )
+                    + " were folded into the surviving proposal."
                 )
                 continue
             draft = outcome
@@ -488,6 +485,54 @@ class OpenAITextReconciler:
                 + " | ".join(skipped)
             )
         return _MaterializedOperations(patches=patches, drafts=drafts, skipped=skipped)
+
+    @staticmethod
+    def _fold_duplicate(
+        survivor: ProposalPatch, draft: _OperationDraft
+    ) -> ProposalPatch:
+        """Fold a duplicate's provenance -- and its lineage -- into the survivor.
+
+        A duplicate ``add`` only contributes the segments it cited. A duplicate
+        structural operation also names the predecessors the model meant to
+        retire; dropping them with the operation would leave those proposals
+        active beside the survivor, so the survivor inherits them: an ``add``
+        survivor becomes the structural operation itself, and two structural
+        operations converging on one title become a ``merge`` of every
+        predecessor either of them named. The projection tombstones every
+        predecessor a patch lists, whatever its operation.
+        """
+
+        source_segment_ids = [
+            *survivor.source_segment_ids,
+            *(
+                segment_id
+                for segment_id in draft.source_segment_ids
+                if segment_id not in survivor.source_segment_ids
+            ),
+        ]
+        predecessor_ids = [
+            *survivor.predecessor_ids,
+            *(
+                predecessor_id
+                for predecessor_id in draft.predecessor_ids
+                if predecessor_id not in survivor.predecessor_ids
+            ),
+        ]
+        operation: PatchOperation = survivor.operation
+        if (
+            draft.operation in _STRUCTURAL_OPERATIONS
+            and predecessor_ids != survivor.predecessor_ids
+        ):
+            if survivor.operation == "add":
+                operation = draft.operation
+            elif len(predecessor_ids) >= 2:
+                operation = "merge"
+        return replace(
+            survivor,
+            operation=operation,
+            source_segment_ids=source_segment_ids,
+            predecessor_ids=predecessor_ids,
+        )
 
     @staticmethod
     def _dedupe_draft(

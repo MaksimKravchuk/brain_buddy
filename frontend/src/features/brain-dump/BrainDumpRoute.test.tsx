@@ -215,7 +215,7 @@ describe("BrainDumpRoute", () => {
     });
   });
 
-  it("records through browser microphone and shows the running transcript instead of draft task cards", async () => {
+  it("015-FR-001 015-SC-002 records through browser microphone and shows the running transcript instead of draft task cards", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
@@ -530,7 +530,7 @@ describe("BrainDumpRoute", () => {
     expect(screen.queryByText("Recording")).not.toBeInTheDocument();
   });
 
-  it("replaces an interim speech result with the cumulative final transcript sequence", async () => {
+  it("015-FR-001 replaces an interim speech result with the cumulative final transcript sequence", async () => {
     const uploaded: Array<{ sequence: number; text: string; stability: string }> = [];
     const persisted = new Map<number, { text: string; stability: string }>();
     fetchMock.mockImplementation((input, init) => {
@@ -1112,7 +1112,7 @@ describe("BrainDumpRoute", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_existing/transcript"), expect.anything()));
   });
 
-  it("keeps the subtitle static and labels the readout as browser preview while recording", async () => {
+  it("015-FR-001 keeps the subtitle static and labels the readout as browser preview while recording", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
@@ -1144,7 +1144,7 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByRole("button", { name: "Record" })).toBeEnabled();
   });
 
-  it("keeps empty review commands as no-ops until an operation exists", async () => {
+  it("015-FR-005 015-SC-003 keeps empty review commands as no-ops until an operation exists", async () => {
     fetchMock.mockImplementation(() => Promise.reject(new Error("should not command a new operation")));
 
     renderBrainDump("/brain-dump/new/review");
@@ -1566,7 +1566,7 @@ describe("BrainDumpRoute", () => {
     expect(await screen.findByText("Task list route: inbox")).toBeInTheDocument();
   });
 
-  it("labels provisional review truthfully and lets its owner delete retained raw audio", async () => {
+  it("015-FR-010 015-SC-007 labels provisional review truthfully and lets its owner delete retained raw audio", async () => {
     const captured = consentedOperation({
       id: "brain_dump_provisional_audio",
       status: "awaiting_confirmation",
@@ -1597,14 +1597,22 @@ describe("BrainDumpRoute", () => {
 
     renderBrainDump("/brain-dump/brain_dump_provisional_audio/review");
 
-    expect(await screen.findByText(/These are provisional drafts/)).toBeInTheDocument();
+    // Provisional drafts carry the browser-transcript caution whether or not they
+    // can be saved yet; while they cannot, the same banner says so, and the
+    // generic not-reconciled notice never stacks on top of it.
+    expect(
+      await screen.findByText(
+        "These tasks were extracted from the browser transcript, not from accurate audio. Review them carefully before saving. They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/not yet reconciled drafts/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send 1 to inbox" })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Delete audio now" }));
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "Delete audio now" })).not.toBeInTheDocument());
   });
 
-  it("enables Save for an explicitly reviewed provisional operation", async () => {
+  it("015-FR-010 015-SC-007 enables Save for an explicitly reviewed provisional operation", async () => {
     const reviewed = consentedOperation({
       id: "brain_dump_reviewed_provisional",
       status: "awaiting_confirmation",
@@ -1635,11 +1643,38 @@ describe("BrainDumpRoute", () => {
 
     const save = await screen.findByRole("button", { name: "Send 1 to inbox" });
     expect(save).toBeEnabled();
+    // Saveable, but still labelled by where the drafts came from.
+    expect(
+      screen.getByText("These tasks were extracted from the browser transcript, not from accurate audio. Review them carefully before saving.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/not yet reconciled drafts/)).not.toBeInTheDocument();
     await userEvent.click(save);
     expect(await screen.findByText("Saved 1 task to Inbox")).toBeInTheDocument();
   });
 
-  it("shows schema-v2 processing stages before editable review", async () => {
+  it("keeps the not-yet-reconciled notice for an unreconciled review instead of the browser-transcript caution", async () => {
+    const unreconciled = consentedOperation({
+      id: "brain_dump_unreconciled",
+      status: "awaiting_confirmation",
+      revision: 3,
+      committable: false,
+      reconciliation_quality: "none",
+      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+    });
+    fetchMock.mockImplementation(() => jsonResponse(unreconciled));
+
+    renderBrainDump("/brain-dump/brain_dump_unreconciled/review");
+
+    expect(
+      await screen.findByText(
+        "These are not yet reconciled drafts. They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/extracted from the browser transcript/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send 1 to inbox" })).toBeDisabled();
+  });
+
+  it("015-FR-006 shows schema-v2 processing stages before editable review", async () => {
     const improving = operation({
       id: "brain_dump_processing",
       status: "accurate_transcribing",
@@ -1802,7 +1837,7 @@ describe("BrainDumpRoute", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/resume"), expect.anything());
   });
 
-  it("shows the accurate transcript, not draft cards, while schema-v2 processing continues", async () => {
+  it("015-FR-006 shows the accurate transcript, not draft cards, while schema-v2 processing continues", async () => {
     const improving = operation({
       id: "brain_dump_processing",
       status: "reconciling",
@@ -1836,7 +1871,7 @@ describe("BrainDumpRoute", () => {
     expect(screen.queryByRole("article")).not.toBeInTheDocument();
   });
 
-  it("falls back to the browser preview transcript while accurate transcription is pending", async () => {
+  it("015-FR-006 falls back to the browser preview transcript while accurate transcription is pending", async () => {
     const transcribing = operation({
       id: "brain_dump_transcribing",
       status: "accurate_transcribing",
@@ -1865,7 +1900,7 @@ describe("BrainDumpRoute", () => {
     ]);
   });
 
-  it("keeps the transcript readout neutral while processing has no preview yet", async () => {
+  it("015-FR-006 keeps the transcript readout neutral while processing has no preview yet", async () => {
     const sealing = operation({ id: "brain_dump_silent", status: "sealing", revision: 3, segments: [] });
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
@@ -2045,6 +2080,8 @@ describe("BrainDumpRoute", () => {
     expect(screen.getByText("proposals could not be reconciled")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete recording" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Review provisional tasks" })).toBeEnabled();
+    // The server did not advertise reconcile_preview, so the browser-transcript fallback is not offered.
+    expect(screen.queryByRole("button", { name: "Extract tasks from the browser transcript" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Review provisional tasks" }));
     expect(screen.getByText("Merged from 2 tasks")).toBeInTheDocument();
     expect(screen.getByText("Split from an earlier task")).toBeInTheDocument();
@@ -2078,7 +2115,92 @@ describe("BrainDumpRoute", () => {
 
     expect(await screen.findByText("Accurate transcription failed")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Review provisional tasks" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Extract tasks from the browser transcript" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete recording" })).toBeEnabled();
+  });
+
+  it("015-FR-009 015-FR-010 015-SC-006 015-SC-007 extracts tasks from the browser transcript when the server offers reconcile_preview", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const terminal = operation({
+        id: "brain_dump_reconcile_preview",
+        status: "terminal_error",
+        revision: 4,
+        available_recovery_actions: ["review_provisional", "reconcile_preview", "cancel"],
+        provider_runs: [
+          {
+            id: "provider_run_stt_terminal",
+            role: "accurate_stt",
+            status: "terminal_error",
+            checkpoint: "sealed",
+            attempt: 3,
+            recovery_count: 2,
+            error: "audio could not be transcribed"
+          }
+        ]
+      });
+      const reconciling = operation({ ...terminal, status: "reconciling", revision: 5, available_recovery_actions: [] });
+      const reviewed = operation({
+        ...terminal,
+        status: "awaiting_confirmation",
+        revision: 6,
+        available_recovery_actions: [],
+        reconciliation_quality: "provisional_only",
+        committable: true,
+        proposals: [proposal("proposal_preview", 1, "Call the dentist")]
+      });
+      let extractionRequested = false;
+      fetchMock.mockImplementation((input, init) => {
+        const url = String(input);
+        if (url.endsWith("/brain_dump_reconcile_preview") && (!init?.method || init.method === "GET")) {
+          return jsonResponse(extractionRequested ? reviewed : terminal);
+        }
+        if (url.endsWith("/brain_dump_reconcile_preview/reconcile_preview") && init?.method === "POST") {
+          extractionRequested = true;
+          return jsonResponse(reconciling);
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      });
+
+      renderBrainDump("/brain-dump/brain_dump_reconcile_preview/review");
+
+      expect(await screen.findByText("Accurate transcription failed")).toBeInTheDocument();
+      const extract = screen.getByRole("button", { name: "Extract tasks from the browser transcript" });
+      expect(extract).toHaveAccessibleDescription(
+        "Sends the browser transcript to the consented task-extraction provider. The result is provisional and is reviewed before anything is saved."
+      );
+      // Offered between the provisional review and the destructive exit.
+      expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
+        "Review provisional tasks",
+        "Extract tasks from the browser transcript",
+        "Delete recording"
+      ]);
+
+      fireEvent.click(extract);
+
+      // The server answers with `reconciling`, so the processing surface takes over.
+      expect(await screen.findByText("Reconciling tasks")).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/brain_dump_reconcile_preview/reconcile_preview"),
+        expect.objectContaining({ method: "POST" })
+      );
+      const extractInit = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/reconcile_preview"))?.[1];
+      expect(JSON.parse(String(extractInit?.body))).toEqual({ expected_revision: 4 });
+      expect(new Headers(extractInit?.headers).get("Idempotency-Key")).toMatch(/^brain-dump-reconcile_preview-\d+$/);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+
+      // The poll lands on a provisional review that is saveable but labelled truthfully.
+      expect(await screen.findByText("Review 1 task")).toBeInTheDocument();
+      expect(
+        screen.getByText("These tasks were extracted from the browser transcript, not from accurate audio. Review them carefully before saving.")
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Send 1 to inbox" })).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows fallback terminal copy and preserves the recovery surface when deletion fails", async () => {
@@ -2569,7 +2691,7 @@ describe("BrainDumpRoute", () => {
 
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/proposals/proposal_1"), expect.anything());
   });
-  it("asks before discarding a recording and starts the question on Keep recording", async () => {
+  it("015-FR-007 015-SC-004 asks before discarding a recording and starts the question on Keep recording", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
@@ -2600,7 +2722,7 @@ describe("BrainDumpRoute", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/cancel"), expect.anything());
   });
 
-  it("closes the discard question on Escape without cancelling and returns focus to Discard", async () => {
+  it("015-FR-007 closes the discard question on Escape without cancelling and returns focus to Discard", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
@@ -2626,7 +2748,7 @@ describe("BrainDumpRoute", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/cancel"), expect.anything());
   });
 
-  it("asks before discarding all reviewed tasks and keeps reviewing when declined", async () => {
+  it("015-FR-007 015-SC-004 asks before discarding all reviewed tasks and keeps reviewing when declined", async () => {
     const captured = operation({
       id: "brain_dump_keep_reviewing",
       status: "awaiting_confirmation",
@@ -2659,7 +2781,7 @@ describe("BrainDumpRoute", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/cancel"), expect.anything());
   });
 
-  it("asks before deleting a failed recording and keeps it when declined", async () => {
+  it("015-FR-007 015-SC-004 asks before deleting a failed recording and keeps it when declined", async () => {
     const terminal = operation({
       id: "brain_dump_terminal_keep",
       status: "terminal_error",
@@ -2692,7 +2814,7 @@ describe("BrainDumpRoute", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/cancel"), expect.anything());
   });
 
-  it("deletes a failed recording permanently after confirmation and returns to a fresh recording screen", async () => {
+  it("015-FR-007 deletes a failed recording permanently after confirmation and returns to a fresh recording screen", async () => {
     const terminal = operation({
       id: "brain_dump_terminal_delete",
       status: "terminal_error",
@@ -2722,7 +2844,7 @@ describe("BrainDumpRoute", () => {
     );
   });
 
-  it("lets the user cancel processing after confirming and returns to a fresh recording screen", async () => {
+  it("015-FR-006 015-FR-007 015-SC-004 lets the user cancel processing after confirming and returns to a fresh recording screen", async () => {
     const reconciling = operation({
       id: "brain_dump_cancel_processing",
       status: "reconciling",
@@ -2788,7 +2910,7 @@ describe("BrainDumpRoute", () => {
     expect(screen.getByRole("button", { name: "Cancel processing" })).toBeEnabled();
   });
 
-  it("keeps processing when the cancel question is declined", async () => {
+  it("015-FR-007 015-SC-004 keeps processing when the cancel question is declined", async () => {
     const transcribing = operation({ id: "brain_dump_keep_processing", status: "accurate_transcribing", revision: 4 });
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
@@ -2810,7 +2932,7 @@ describe("BrainDumpRoute", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/cancel"), expect.anything());
   });
 
-  it("seeds the live tail and the timer from a resumed recording", async () => {
+  it("015-FR-008 015-SC-005 seeds the live tail and the timer from a resumed recording", async () => {
     const resumed = consentedOperation({
       id: "brain_dump_resumed",
       status: "recording",
@@ -2843,7 +2965,7 @@ describe("BrainDumpRoute", () => {
     expect(screen.queryByText("0:00")).not.toBeInTheDocument();
   });
 
-  it("seeds the tail from the latest utterance nothing supersedes and never overwrites a live one", async () => {
+  it("015-FR-008 seeds the tail from the latest utterance nothing supersedes and never overwrites a live one", async () => {
     const paused = consentedOperation({
       id: "brain_dump_resumed_paused",
       status: "paused",
@@ -2898,7 +3020,7 @@ describe("BrainDumpRoute", () => {
     expect(tailOnly(screen.queryAllByText("external concurrent draft"))).toHaveLength(0);
   });
 
-  it("starts the capture timer at zero for a recording begun in this session", async () => {
+  it("015-FR-008 starts the capture timer at zero for a recording begun in this session", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {

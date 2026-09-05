@@ -49,7 +49,12 @@ Each role checks its own retry/deadline/cost limits. The operation also enforces
 reconciler attempts, including retries and recovery. It stops retrying after
 `BRAIN_BUDDY_VOICE_MAX_OPERATION_RECOVERIES`; the persisted runner uses
 `BRAIN_BUDDY_VOICE_LEASE_RECOVERY_MARGIN_SECONDS` before reclaiming an expired
-lease.
+lease. The owner-chosen `reconcile_preview` recovery (ADR-0002, 2026-09-05: a
+text-only reconciler run over the persisted stable browser-preview segments
+after a terminal accurate-STT or reconciler failure) is one more reconciler
+attempt under both caps -- it reserves the reconciler role ceiling, makes no
+STT call, is offered once per operation, and its own retries are bounded by
+the same recovery limit. Its result is always `provisional_only`.
 
 ### Audio, retention, and runner controls
 

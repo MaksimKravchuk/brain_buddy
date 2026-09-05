@@ -300,7 +300,7 @@ def test_seal_uses_semantic_reconciler_when_external_processing_is_allowed(
 def test_seal_reconciles_a_filler_prefixed_dump_into_clean_next_actions(
     api_client,
 ) -> None:
-    """The review list is GTD next actions, never raw preview text.
+    """015-FR-004 015-FR-005 015-SC-001: the review list is GTD next actions, never raw preview text.
 
     Spoken: «Так, надо купить молоко. Сходить в магазин. Покрасить комнату.»
     The browser preview fluctuates through junk fragments while recording; none
@@ -398,7 +398,7 @@ def test_seal_reconciles_a_filler_prefixed_dump_into_clean_next_actions(
 
 
 def test_review_with_no_surviving_proposals_is_not_committable(api_client) -> None:
-    """Nothing actionable (or everything discarded) must not mint an empty save.
+    """015-FR-005 015-SC-003: nothing actionable (or everything discarded) must not mint an empty save.
 
     A reconciled operation whose only proposal the owner deletes at review has
     no batch to freeze: ``committable`` flips to false and commit is refused
@@ -1827,7 +1827,7 @@ def test_split_vendor_upload_accepts_consent_naming_every_vendor(
 def test_transcript_append_records_segments_without_deriving_draft_tasks(
     api_client,
 ) -> None:
-    """Browser preview text is a live status readout, never a task source.
+    """015-FR-002 015-SC-002: browser preview text is a live status readout, never a task source.
 
     Web Speech interim hypotheses fluctuate wildly («Так» -> «Надо» -> «Надо
     купить моло» ...); minting a draft task per fragment produced junk that
@@ -1873,6 +1873,14 @@ def test_transcript_append_records_segments_without_deriving_draft_tasks(
 def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposals(
     api_client,
 ) -> None:
+    """015-FR-002 015-FR-011: owner edits and deletions on seeded provisional proposals survive accurate reconciliation.
+
+    The rules for proposals that already existed before the transcript-first
+    change are unchanged: an edited title stays locked, a deleted proposal stays
+    deleted, and a provider-driven removal of a stale seeded proposal stays
+    visible as a conflict for the owner to confirm.
+    """
+
     operation = _start_operation(
         api_client,
         key="start-preserve-preview-choices",
@@ -1976,6 +1984,12 @@ def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposal
 def test_brain_dump_interim_and_final_segments_persist_without_draft_tasks(
     api_client,
 ) -> None:
+    """015-FR-002: interim and final preview segments persist as transcript only.
+
+    Neither stability level mints a proposal or a proposal patch: the browser
+    preview is persisted as segments and nothing else.
+    """
+
     operation = _start_operation(api_client, key="start-cumulative-final-operation")
 
     interim = api_client.post(
@@ -2238,7 +2252,7 @@ def test_commit_rejects_a_finished_operation_that_was_never_sealed_or_reconciled
 def test_commit_rejects_an_untouched_fast_proposal_after_a_successful_reconcile(
     api_client,
 ) -> None:
-    """A successful operation-level reconciler run must not make an untouched
+    """015-FR-011: a successful operation-level reconciler run must not make an untouched
     pre-existing provisional proposal canonical. Only proposals the reconciler
     (or the user) actually affirmed may become tasks; a sibling proposal the
     reconciler never touched stays provisional and blocks commit until the user
@@ -2857,6 +2871,12 @@ def test_schema_v2_unsupported_operation_command_is_rejected(api_client) -> None
 def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_conflict(
     api_client,
 ) -> None:
+    """015-FR-002 015-FR-011: a user-locked title on a seeded proposal is never overwritten by accurate reconciliation.
+
+    The reconciler's reading surfaces as a visible conflict that blocks commit
+    until the owner resolves it.
+    """
+
     operation = _start_operation(
         api_client, key="start-schema-v2-lock", external_processing_allowed=True
     )
@@ -3022,6 +3042,8 @@ def test_schema_v2_accurate_reconciliation_preserves_opaque_ids_when_order_chang
 
 
 def test_schema_v2_accurate_reconciliation_persists_split_lineage(api_client) -> None:
+    """015-FR-002 015-FR-011: splitting a seeded proposal keeps explicit predecessor and successor lineage."""
+
     operation = _start_operation(
         api_client, key="start-schema-v2-split", external_processing_allowed=True
     )
@@ -4254,3 +4276,370 @@ def test_config_audio_limits_env_overrides(
         assert limits.assumed_chunk_duration_seconds == 2
     finally:
         get_config.cache_clear()
+
+
+# --- reconcile_preview: owner-chosen recovery from browser-preview text -------
+
+_PREVIEW_SEGMENTS: list[dict[str, object]] = [
+    {"sequence": 1, "text": "купить молоко", "stability": "stable"},
+    {"sequence": 2, "text": "позвонить стома", "stability": "interim"},
+    {"sequence": 3, "text": "позвонить стоматологу", "stability": "stable"},
+]
+
+
+def _append_preview_segments(api_client, operation_id: str, *, key: str):
+    response = api_client.post(
+        f"/api/brain-dump-operations/{operation_id}/transcript",
+        headers={"Idempotency-Key": key},
+        json={"segments": _PREVIEW_SEGMENTS},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _terminal_stt_failure_with_preview(api_client, *, key: str) -> dict[str, object]:
+    """Record browser-preview text, then fail accurate STT terminally on seal."""
+
+    operation = _start_operation(
+        api_client,
+        key=f"start-{key}",
+        external_processing_allowed=True,
+        language_hints=["ru"],
+        vocabulary=["стоматолог"],
+    )
+    _append_preview_segments(api_client, operation["id"], key=f"append-{key}")
+    api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
+        _real_adapter(httpx.MockTransport(lambda _request: httpx.Response(400)))
+    )
+    failed = _upload_and_seal(
+        api_client, operation, b"preview recovery audio", f"seal-{key}"
+    )
+    body = failed.json()
+    assert body["status"] == "terminal_error", body
+    assert body["provider_runs"][-1]["role"] == "accurate_stt"
+    assert body["proposals"] == []
+    return body
+
+
+def _post_reconcile_preview(api_client, operation_id: str, *, key: str, revision: int):
+    return api_client.post(
+        f"/api/brain-dump-operations/{operation_id}/reconcile_preview",
+        headers={"Idempotency-Key": key},
+        json={"expected_revision": revision},
+    )
+
+
+def test_015_FR_009_reconcile_preview_recovers_provisional_tasks_from_browser_preview_text(
+    api_client,
+) -> None:
+    """015-FR-009 015-SC-006: after a terminal STT failure the owner recovers provisional tasks from preview text."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    failed = _terminal_stt_failure_with_preview(api_client, key="preview-recovery")
+    assert failed["available_recovery_actions"] == ["reconcile_preview", "cancel"]
+    assert failed["committable"] is False
+    stable_ids = [
+        segment["id"]
+        for segment in failed["segments"]
+        if segment["stability"] == "stable"
+    ]
+    assert len(stable_ids) == 2
+    assert len(failed["segments"]) == 3
+
+    captured: list[dict[str, object]] = []
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        captured.append(context)
+        sent = context["transcript_segments"]
+        return {
+            "operations": [
+                {
+                    "operation": "add",
+                    "proposal_id": None,
+                    "title": "Купить молоко",
+                    "source_segment_ids": [sent[0]["id"]],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                },
+                {
+                    "operation": "add",
+                    "proposal_id": None,
+                    "title": "Позвонить стоматологу",
+                    "source_segment_ids": [sent[1]["id"]],
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                },
+            ]
+        }
+
+    service = api_client.app.state.container.voice_brain_dump_service
+    service.text_reconciler = OpenAITextReconciler(
+        api_key="test-key", model="gpt-4o-preview-fixture", complete=complete
+    )
+
+    queued = _post_reconcile_preview(
+        api_client, failed["id"], key="reconcile-preview", revision=failed["revision"]
+    )
+
+    assert queued.status_code == 200, queued.text
+    queued_body = queued.json()
+    assert queued_body["status"] == "reconciling"
+    assert queued_body["revision"] == failed["revision"] + 1
+    assert queued_body["status_history"] == [*failed["status_history"], "reconciling"]
+    assert queued_body["available_recovery_actions"] == []
+    queued_run = queued_body["provider_runs"][-1]
+    assert (queued_run["role"], queued_run["status"], queued_run["checkpoint"]) == (
+        "reconciler",
+        "pending",
+        "preview_transcribed",
+    )
+    assert queued_run["reserved_cost_usd"] == 0.5
+    assert captured == [], "the request handler never calls the provider"
+
+    replayed = _post_reconcile_preview(
+        api_client, failed["id"], key="reconcile-preview", revision=failed["revision"]
+    )
+    assert replayed.status_code == 200, replayed.text
+    assert replayed.json() == queued_body
+
+    recovered = _advance_persisted_provider_runs(api_client, failed["id"]).json()
+
+    assert len(captured) == 1
+    sent = captured[0]["transcript_segments"]
+    assert [segment["id"] for segment in sent] == stable_ids
+    assert [segment["text"] for segment in sent] == [
+        "купить молоко",
+        "позвонить стоматологу",
+    ]
+    assert [segment["provider_role"] for segment in sent] == [
+        "browser_preview",
+        "browser_preview",
+    ]
+    assert [segment["stability"] for segment in sent] == ["stable", "stable"]
+    assert captured[0]["proposals"] == []
+    assert captured[0]["language_hints"] == ["ru"]
+    assert captured[0]["vocabulary"] == ["стоматолог"]
+
+    assert recovered["status"] == "awaiting_confirmation"
+    assert recovered["reconciliation_quality"] == "provisional_only"
+    assert recovered["committable"] is True
+    assert recovered["available_recovery_actions"] == []
+    run = recovered["provider_runs"][-1]
+    assert run["id"] == queued_run["id"]
+    assert (run["status"], run["checkpoint"], run["provider"], run["model"]) == (
+        "succeeded",
+        "preview_reconciled",
+        "openai",
+        "gpt-4o-preview-fixture",
+    )
+    assert run["reserved_cost_usd"] == 0.0
+    assert [proposal["title"] for proposal in recovered["proposals"]] == [
+        "Купить молоко",
+        "Позвонить стоматологу",
+    ]
+    assert [proposal["source_segment_ids"] for proposal in recovered["proposals"]] == [
+        [stable_ids[0]],
+        [stable_ids[1]],
+    ]
+    assert not any(
+        item["checkpoint"] == "reconciled" for item in recovered["provider_runs"]
+    )
+    assert recovered["raw_audio_expires_at"] is not None
+
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{failed['id']}/commit",
+        headers={"Idempotency-Key": "commit-preview-recovery"},
+        json={"expected_revision": recovered["revision"]},
+    )
+
+    assert committed.status_code == 200, committed.text
+    committed_body = committed.json()
+    assert committed_body["status"] == "completed"
+    assert len(committed_body["committed_task_ids"]) == 2
+    receipts = committed_body["action_receipts"]
+    assert [receipt["reconciliation_quality"] for receipt in receipts] == [
+        "provisional_only",
+        "provisional_only",
+    ]
+    assert {receipt["reconciliation_run_id"] for receipt in receipts} == {run["id"]}
+    assert {receipt["reconciliation_model"] for receipt in receipts} == {
+        "gpt-4o-preview-fixture"
+    }
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    assert sorted(item["title"] for item in inbox["items"]) == [
+        "Купить молоко",
+        "Позвонить стоматологу",
+    ]
+
+
+def test_reconcile_preview_is_flag_gated_like_every_forward_action(api_client) -> None:
+    """With voice_brain_dump OFF, reconcile_preview is a fail-closed 404 while cancel stays reachable."""
+
+    from app.repositories.feature_flag import FlagMode
+
+    failed = _terminal_stt_failure_with_preview(api_client, key="preview-flag-off")
+    api_client.app.state.container.feature_flag_service.set_mode(
+        "voice_brain_dump", FlagMode.OFF, operator_id="test_operator"
+    )
+
+    gated = _post_reconcile_preview(
+        api_client,
+        failed["id"],
+        key="reconcile-preview-off",
+        revision=failed["revision"],
+    )
+
+    assert gated.status_code == 404, gated.text
+    assert "not available" in gated.text.lower()
+    still = api_client.get(f"/api/brain-dump-operations/{failed['id']}").json()
+    assert still["status"] == "terminal_error"
+    assert still["revision"] == failed["revision"]
+    assert still["provider_runs"] == failed["provider_runs"]
+
+    cancelled = api_client.post(
+        f"/api/brain-dump-operations/{failed['id']}/cancel",
+        headers={"Idempotency-Key": "cancel-preview-off"},
+        json={"expected_revision": failed["revision"]},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+
+
+def test_reconcile_preview_rejects_a_stale_expected_revision(api_client) -> None:
+    """A stale expected_revision is a 409 and queues nothing."""
+
+    failed = _terminal_stt_failure_with_preview(api_client, key="preview-stale")
+
+    stale = _post_reconcile_preview(
+        api_client,
+        failed["id"],
+        key="reconcile-preview-stale",
+        revision=failed["revision"] - 1,
+    )
+
+    assert stale.status_code == 409, stale.text
+    after = api_client.get(f"/api/brain-dump-operations/{failed['id']}").json()
+    assert after["status"] == "terminal_error"
+    assert after["revision"] == failed["revision"]
+    assert after["provider_runs"] == failed["provider_runs"]
+    assert after["available_recovery_actions"] == ["reconcile_preview", "cancel"]
+
+
+def test_reconcile_preview_is_not_offered_once_an_accurate_transcript_superseded_the_preview(
+    api_client,
+) -> None:
+    """A terminal reconciler failure after successful STT offers cancel only: the preview was superseded."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client, key="start-preview-superseded", external_processing_allowed=True
+    )
+    _append_preview_segments(
+        api_client, operation["id"], key="append-preview-superseded"
+    )
+
+    def reject(_payload: dict[str, object]) -> dict[str, object]:
+        raise ProviderTerminalError("RECONCILER_PROVIDER_REJECTED")
+
+    service = api_client.app.state.container.voice_brain_dump_service
+    service.text_reconciler = OpenAITextReconciler(api_key="test-key", complete=reject)
+    failed = _upload_and_seal(
+        api_client, operation, b"Buy milk", "seal-preview-superseded"
+    ).json()
+
+    assert failed["status"] == "terminal_error"
+    assert failed["provider_runs"][-1]["role"] == "reconciler"
+    accurate = [
+        segment
+        for segment in failed["segments"]
+        if segment["provider_role"] == "accurate"
+    ]
+    preview_ids = {
+        segment["id"]
+        for segment in failed["segments"]
+        if segment["provider_role"] == "browser_preview"
+    }
+    assert len(accurate) == 1
+    assert set(accurate[0]["supersedes_segment_ids"]) >= preview_ids
+    assert failed["available_recovery_actions"] == ["cancel"]
+
+    refused = _post_reconcile_preview(
+        api_client,
+        failed["id"],
+        key="reconcile-preview-superseded",
+        revision=failed["revision"],
+    )
+    assert refused.status_code == 400, refused.text
+    assert "BRAIN_DUMP_PREVIEW_RECOVERY_UNAVAILABLE" in refused.text
+
+
+def test_reconcile_preview_terminal_failure_leaves_only_cancel(api_client) -> None:
+    """A terminal preview failure keeps the run labelled preview and offers cancel only."""
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    failed = _terminal_stt_failure_with_preview(api_client, key="preview-terminal")
+
+    def reject(_payload: dict[str, object]) -> dict[str, object]:
+        raise ProviderTerminalError("RECONCILER_PROVIDER_REJECTED")
+
+    service = api_client.app.state.container.voice_brain_dump_service
+    service.text_reconciler = OpenAITextReconciler(api_key="test-key", complete=reject)
+    queued = _post_reconcile_preview(
+        api_client,
+        failed["id"],
+        key="reconcile-preview-terminal",
+        revision=failed["revision"],
+    )
+    assert queued.status_code == 200, queued.text
+
+    ended = _advance_persisted_provider_runs(api_client, failed["id"]).json()
+
+    assert ended["status"] == "terminal_error"
+    run = ended["provider_runs"][-1]
+    assert (run["role"], run["status"], run["checkpoint"], run["error_code"]) == (
+        "reconciler",
+        "terminal_error",
+        "preview_transcribed",
+        "RECONCILER_PROVIDER_REJECTED",
+    )
+    assert ended["available_recovery_actions"] == ["cancel"]
+    assert ended["committable"] is False
+    assert ended["proposals"] == []
+    second = _post_reconcile_preview(
+        api_client,
+        failed["id"],
+        key="reconcile-preview-second-shot",
+        revision=ended["revision"],
+    )
+    assert second.status_code == 400, second.text
+    assert "BRAIN_DUMP_PREVIEW_RECOVERY_UNAVAILABLE" in second.text
+
+
+def test_reconcile_preview_is_withdrawn_together_with_consent(api_client) -> None:
+    """Withdrawing consent removes reconcile_preview from the projection and refuses the command."""
+
+    failed = _terminal_stt_failure_with_preview(api_client, key="preview-withdraw")
+
+    withdrawn = api_client.post(
+        f"/api/brain-dump-operations/{failed['id']}/withdraw_consent",
+        headers={"Idempotency-Key": "withdraw-preview"},
+        json={"expected_revision": failed["revision"]},
+    )
+
+    assert withdrawn.status_code == 200, withdrawn.text
+    withdrawn_body = withdrawn.json()
+    assert withdrawn_body["consent"]["external_processing_allowed"] is False
+    assert withdrawn_body["status"] == "terminal_error"
+    assert withdrawn_body["available_recovery_actions"] == ["cancel"]
+    refused = _post_reconcile_preview(
+        api_client,
+        failed["id"],
+        key="reconcile-preview-withdrawn",
+        revision=withdrawn_body["revision"],
+    )
+    assert refused.status_code == 400, refused.text
+    assert "RECONCILER_CONSENT_REQUIRED" in refused.text

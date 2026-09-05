@@ -434,7 +434,7 @@ export function BrainDumpRoute(): React.JSX.Element {
     }
   }
 
-  async function commandInternal(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "withdraw_consent" | "delete_raw_audio") {
+  async function commandInternal(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "reconcile_preview" | "withdraw_consent" | "delete_raw_audio") {
     if (!operationRef.current) {
       return;
     }
@@ -570,7 +570,7 @@ export function BrainDumpRoute(): React.JSX.Element {
     }
   }
 
-  function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "withdraw_consent" | "delete_raw_audio") {
+  function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "reconcile_preview" | "withdraw_consent" | "delete_raw_audio") {
     if (action !== "finish") {
       return commandInternal(action);
     }
@@ -684,6 +684,7 @@ export function BrainDumpRoute(): React.JSX.Element {
         operation={operation}
         providerError={providerError}
         onDelete={() => void command("cancel")}
+        onReconcilePreview={() => void command("reconcile_preview")}
         onReview={() => void command("review_provisional")}
         onRetry={() => void command("retry")}
       />
@@ -750,6 +751,7 @@ function RecoverySurface({
   operation,
   providerError,
   onDelete,
+  onReconcilePreview,
   onReview,
   onRetry
 }: {
@@ -757,9 +759,11 @@ function RecoverySurface({
   operation: BrainDumpOperationResponse;
   providerError: string | null;
   onDelete: () => void;
+  onReconcilePreview: () => void;
   onReview: () => void;
   onRetry: () => void;
 }): React.JSX.Element {
+  const reconcilePreviewHelpId = useId();
   const availableActions = new Set(operation.available_recovery_actions ?? []);
   const retryable = availableActions.has("retry");
   const providerRuns = operation.provider_runs ?? [];
@@ -787,6 +791,27 @@ function RecoverySurface({
         <div className="flex flex-col gap-2">
           {retryable ? <button type="button" className="h-11 rounded-xl bg-brand-primary px-4 text-sm font-semibold text-white" onClick={onRetry}>{retryLabel}</button> : null}
           {availableActions.has("review_provisional") ? <button type="button" className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700" onClick={onReview}>Review provisional tasks</button> : null}
+          {availableActions.has("reconcile_preview") ? (
+            // Owner-initiated fallback when the accurate audio path is unusable:
+            // the browser-preview transcript goes to the consented task-extraction
+            // provider instead. The server answers with `reconciling`, so the
+            // processing surface takes over until the provisional review is ready;
+            // nothing is saved without that review. The label may wrap on a
+            // 390px-wide screen, so the button grows instead of clipping.
+            <div className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                aria-describedby={reconcilePreviewHelpId}
+                className="min-h-11 rounded-xl border border-slate-200 px-4 py-2 text-center text-sm font-medium leading-snug text-slate-700"
+                onClick={onReconcilePreview}
+              >
+                Extract tasks from the browser transcript
+              </button>
+              <p id={reconcilePreviewHelpId} className="px-1 text-xs leading-snug text-slate-500">
+                Sends the browser transcript to the consented task-extraction provider. The result is provisional and is reviewed before anything is saved.
+              </p>
+            </div>
+          ) : null}
           <DestructiveConfirm
             trigger="Delete recording"
             triggerClassName="h-11 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-700"
@@ -1373,9 +1398,19 @@ function ReviewSurface({
             </p>
             <TranscriptReadout segments={segments} headings={processingTranscriptHeadings} emptyText="No transcript was captured for this recording." />
           </div>
+        ) : reconciliationQuality === "provisional_only" ? (
+          // Drafts minted from the browser preview (a no-consent finish, a
+          // provisional review of a failed pipeline, or `reconcile_preview`)
+          // carry this caution whether or not the server already lets them be
+          // saved; it stands in for the not-committable notice below so the two
+          // never stack, and only says why Send is disabled while it still is.
+          <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            These tasks were extracted from the browser transcript, not from accurate audio. Review them carefully before saving.
+            {committable ? null : " They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation."}
+          </div>
         ) : !committable ? (
           <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            These are {reconciliationQuality === "provisional_only" ? "provisional" : "not yet reconciled"} drafts. They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation.
+            These are not yet reconciled drafts. They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation.
           </div>
         ) : null}
         {rawAudioPresent ? (

@@ -561,7 +561,7 @@ test("012-SC-001 012-SC-003 title completion is responsive and never writes befo
 
 });
 
-test("Voice Brain Dump shows a live transcript, reviews the reconciled task and saves exactly one Inbox task", async ({ page }) => {
+test("015-FR-001 015-SC-002 Voice Brain Dump shows a live transcript, reviews the reconciled task and saves exactly one Inbox task", async ({ page }) => {
   await productLabels("Voice Brain Dump happy path");
   await signup(page, unique("voice-happy"));
   await installDeterministicSealedAudioBoundary(page, "untranscribed sealed audio");
@@ -630,7 +630,7 @@ test("Voice Brain Dump shows a live transcript, reviews the reconciled task and 
   });
 });
 
-test("Voice Brain Dump shows a mixed-language preview as transcript and reviews only reconciled next actions", async ({ page }) => {
+test("015-FR-001 015-FR-003 015-FR-005 015-FR-007 015-SC-002 Voice Brain Dump shows a mixed-language preview as transcript and reviews only reconciled next actions", async ({ page }) => {
   await productLabels("Voice Brain Dump reconciled review from accurate audio");
   await signup(page, unique("voice-reconcile-clean"));
   await installDeterministicSealedAudioBoundary(
@@ -687,7 +687,7 @@ test("Voice Brain Dump shows a mixed-language preview as transcript and reviews 
     assertArrayLength(await listInboxTasks(page), 0, "Inbox before explicit Save");
   });
 
-  await test.step("discarding the review is confirmed inline and cancels the operation", async () => {
+  await test.step("015-FR-007 discarding the review is confirmed inline and cancels the operation", async () => {
     await page.getByRole("button", { name: "Discard all", exact: true }).click();
     // The trigger gives way to the question, so only the destructive answer can go on.
     await expect(page.getByRole("group", { name: /Discard all tasks\?/ })).toBeVisible();
@@ -764,7 +764,7 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
   });
 });
 
-test("Voice Brain Dump failures are visible and preserve recoverable live sessions", async ({ page }) => {
+test("015-FR-007 Voice Brain Dump failures are visible and preserve recoverable live sessions", async ({ page }) => {
   await productLabels("Voice Brain Dump failure recovery");
 
   await test.step("unavailable speech recognition still records original audio and starts a backend operation", async () => {
@@ -801,7 +801,7 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     await deniedPage.close();
   });
 
-  await test.step("failed transcript, pause, finish, cancel and commit preserve drafts with visible errors", async () => {
+  await test.step("015-FR-007 failed transcript, pause, finish, cancel and commit preserve drafts with visible errors", async () => {
     const recoveryPage = await page.context().newPage();
     await signup(recoveryPage, unique("voice-failures"));
     await installSpeechBoundary(recoveryPage);

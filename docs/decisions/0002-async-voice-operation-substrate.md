@@ -4,7 +4,8 @@ Date: 2026-07-11
 Status: Proposed
 Decision owner: BrainBuddy
 Related: ADR-0001, Kanban tasks `t_8a1164be` and `t_58293688`
-Last amended: 2026-09-05 (browser preview is a transcript readout, not a task source)
+Last amended: 2026-09-05 (browser preview is a transcript readout, not a task source;
+`reconcile_preview` owner-chosen recovery from preview text)
 
 ## 2026-09-05 amendment: browser preview is a transcript readout, not a task source
 
@@ -56,6 +57,72 @@ to produce:
   lane) already had. An owner-initiated retry from `terminal_error` while a
   sealed checkpoint still exists is the follow-up worth designing; it must
   respect the cost caps and is out of scope here.
+
+### 2026-09-05, same day: `reconcile_preview` — owner-chosen recovery from preview text
+
+The consequence above left a recording whose accurate lane failed terminally
+with nothing but Cancel, even though the browser-preview transcript the owner
+watched while speaking is still persisted. This adds one explicit recovery
+command and one edge to the state machine:
+
+```text
+terminal_error -> reconciling (preview text) -> awaiting_confirmation
+```
+
+- **Trigger and shape.** `POST /api/brain-dump-operations/{id}/reconcile_preview`
+  appears in `available_recovery_actions` only when the operation is
+  `terminal_error`, its last provider run is a terminal `accurate_stt` or
+  `reconciler` failure, no non-deleted proposal survives (`review_provisional`
+  and `reconcile_preview` are mutually exclusive), at least one `stable`
+  `browser_preview` segment stands unsuperseded, consent still allows external
+  processing, and the reconciler's worst-case reservation fits under the
+  operation's cumulative cost cap. The command queues a `role=reconciler` run
+  at the new checkpoint `preview_transcribed` -- the persisted runner makes the
+  vendor call, never the request handler -- over exactly the stable,
+  non-superseded `browser_preview` segments, which keep their `browser_preview`
+  role in the request. No audio is read and no STT call is made.
+- **One shot.** A `preview_transcribed`/`preview_reconciled` run anywhere in the
+  operation's history makes the command unavailable for good: after success,
+  and after a terminal preview failure, where only `cancel` remains. A
+  *retryable* preview failure is retried with `retry` over the preview text
+  (never an STT rewind; it does not need the sealed manifest, so raw audio may
+  already be gone), bounded by `max_operation_recoveries` exactly like the
+  accurate lane. The preview run is a fresh stage (`attempt=1`,
+  `recovery_count=0`) and is deliberately not gated on the accurate lane's
+  exhausted recoveries -- it is a separate, one-shot, cost-capped budget.
+- **Never called accurate.** Success writes
+  `reconciliation_quality="provisional_only"`, sets `manual_review=true` (the
+  same owner-chosen review `review_provisional` opens) and freezes the run at
+  `preview_reconciled`, never `reconciled`. The canonical `accurate` commit gate
+  is therefore unsatisfiable from preview text; commit flows through the
+  provisional path, and every action receipt carries `provisional_only` plus
+  the preview run's provider/model/template provenance. Review screens label
+  the result provisional, as UI-05 already requires.
+- **Qualifies the fast-text rule.** "If audio is intact, offer an
+  accurate-transcript retry from that audio -- not a retry over fast text"
+  still holds for every automatic recovery. This is the single exception, and
+  only because it is explicit, owner-chosen, one shot, visibly labelled
+  provisional-only, and reachable solely once the accurate lane has failed
+  terminally. The server never selects it, and it is not offered while an
+  accurate transcript stands: accurate-STT utterances supersede the preview
+  segments, so a reconciler-stage failure after a successful transcription
+  still offers cancel only -- the better source exists, and re-reconciling *it*
+  remains the out-of-scope follow-up noted above.
+- **Cost.** The run reserves the reconciler role's `max_cost_usd_per_operation`
+  and is admitted only if cumulative spend -- accepted spend plus every
+  unresolved reservation, summed the same way for every stage -- leaves room
+  for it under `max_cumulative_cost_usd_per_operation`; the refusal is the
+  existing `OPERATION_COST_BUDGET_EXCEEDED`. There is no STT spend.
+- **Consent.** The reconciler is external processing. Preview text exists on
+  the operation only because `external_processing_allowed` was true when the
+  browser appended it; the command re-checks consent at enqueue
+  (`RECONCILER_CONSENT_REQUIRED`, `RECONCILER_CONSENT_PROVIDER_MISMATCH`), the
+  runner re-checks it before the call, and the recovery is unavailable after
+  withdrawal, when that text is already scheduled for deletion.
+- **Exposure.** `reconcile_preview` spends money and ships text to a vendor, so
+  it is a forward action gated by the `voice_brain_dump` flag like `retry` and
+  `commit`; the privacy controls (`withdraw_consent`, `cancel`,
+  `delete_raw_audio`) stay reachable with the flag OFF.
 
 Spec `002-async-voice-workflows` (US1 "provisional tasks while speaking",
 required outcome 2, SC-004) describes the retired behaviour; its normative
@@ -350,6 +417,8 @@ recording|sealing|fast_processing|accurate_transcribing|reconciling|committing
   -> terminal_error
 retryable_error -> last durable checkpoint state
 retryable_error -> awaiting_confirmation    (explicit provisional-only review)
+terminal_error -> reconciling               (explicit one-shot preview-text recovery,
+                                             2026-09-05 amendment)
 awaiting_confirmation -> accurate_transcribing (retry from original audio)
 awaiting_confirmation -> reconciling        (rerun after edits)
 awaiting_confirmation -> committing         (confirm frozen batch)
@@ -536,7 +605,9 @@ original audio and provisional tasks for bounded retry or explicitly chosen
 provisional-only review. On reconciler failure, retain the accurate transcript, user edits,
 and stable provisional candidates, mark them unreconciled, and allow retry or explicit
 manual review. If audio is intact, offer an accurate-transcript retry from that audio—not a
-retry over fast text. No fallback bypasses confirmation.
+retry over fast text (qualified exactly once, for the explicit owner-chosen
+`reconcile_preview` recovery, by the 2026-09-05 amendment). No fallback bypasses
+confirmation.
 
 ## Confirmation, commit, idempotency, and partial failure
 

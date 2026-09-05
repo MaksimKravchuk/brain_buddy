@@ -322,7 +322,7 @@ describe("brain dump review — proposals", () => {
     expect(await screen.findByText("Edited by you")).toBeOnTheScreen();
   });
 
-  it("warns when only provisional wording was available", async () => {
+  it("015-FR-010 015-SC-007 warns when only provisional wording was available", async () => {
     await review({
       "GET /brain-dump-operations/op-1": () => ({
         ...AWAITING,
@@ -333,7 +333,7 @@ describe("brain dump review — proposals", () => {
     expect(await screen.findByText(/Provisional only/)).toBeOnTheScreen();
   });
 
-  it("keeps the provisional warning up while the dump is not yet committable", async () => {
+  it("015-FR-010 015-SC-007 keeps the provisional warning up while the dump is not yet committable", async () => {
     await review({
       "GET /brain-dump-operations/op-1": () => ({
         ...AWAITING,
@@ -605,7 +605,7 @@ describe("brain dump review — terminal states", () => {
     );
   });
 
-  it("offers to extract tasks from the browser transcript when the server advertises it", async () => {
+  it("015-FR-009 offers to extract tasks from the browser transcript when the server advertises it", async () => {
     await review({
       "GET /brain-dump-operations/op-1": () =>
         makeOperation({
@@ -627,7 +627,7 @@ describe("brain dump review — terminal states", () => {
     expect(screen.getByText("Discard everything")).toBeOnTheScreen();
   });
 
-  it("posts reconcile_preview with the current revision, waits out reconciling, and reviews the provisional tasks", async () => {
+  it("015-FR-009 015-FR-010 015-SC-006 015-SC-007 posts reconcile_preview with the current revision, waits out reconciling, and reviews the provisional tasks", async () => {
     let calls = 0;
     await review({
       "GET /brain-dump-operations/op-1": () => {

@@ -3225,7 +3225,7 @@ def test_openai_reconciler_does_not_ground_an_english_translation_of_russian_sou
 
 
 def test_openai_reconciler_v3_prompt_locks_language_gtd_phrasing_and_template() -> None:
-    """The v3 prompt locks language, GTD phrasing and a new template version.
+    """015-FR-003: the v3 prompt locks language, GTD phrasing and a new template version.
 
     Titles stay in the transcript's language and are phrased as GTD next actions
     without fillers or duplicates; the bumped template version lets persisted
@@ -3408,7 +3408,7 @@ def test_openai_reconciler_adjunct_fallback_cannot_launder_an_out_of_source_enti
 def test_openai_reconciler_grounds_self_corrected_utterances(
     source_text: str, title: str
 ) -> None:
-    """CLASS 2: an explicit self-correction marker (or an em-dash false start)
+    """015-FR-003 CLASS 2: an explicit self-correction marker (or an em-dash false start)
     means the restated command supersedes what preceded it; the corrected
     reading is an acceptable grounding source. Derived from the live Russian
     eval (utterances 32, 34)."""
@@ -3620,7 +3620,7 @@ def _reconcile_single_segment(
 def test_language_faithful_invariant_drops_translated_title_even_if_grounding_accepts(
     monkeypatch,
 ) -> None:
-    """The invariant is independent of grounding: with semantic grounding
+    """015-FR-003: the invariant is independent of grounding: with semantic grounding
     neutralized (standing in for any grounding path that would tolerate the
     title's meaning -- a shared proper noun, a normalized/loanword verb), a
     title translated out of the Russian source's language is still dropped as a
@@ -3706,7 +3706,7 @@ def test_language_faithful_invariant_accepts_english_title_from_english_source()
 
 
 def test_language_faithful_invariant_accepts_mixed_code_switched_title() -> None:
-    """A code-switched Russian/English utterance yields a code-switched title
+    """015-FR-003: a code-switched Russian/English utterance yields a code-switched title
     (Cyrillic action verbs plus embedded Latin technical terms), which the
     invariant accepts rather than normalizing to a single language."""
 
@@ -3740,7 +3740,7 @@ def _reconcile_adds(source_text: str, titles: list[str]):
 def test_gtd_rephrased_titles_ground_against_filler_prefixed_utterances(
     source_text: str, title: str
 ) -> None:
-    """A verb-first GTD title still grounds against a filler-prefixed utterance.
+    """015-FR-003: a verb-first GTD title still grounds against a filler-prefixed utterance.
 
     Dropping discourse fillers and modal scaffolding and leading with the verb
     is grounded rewording under 005-FR-006 and 005-FR-008, not invention."""
@@ -3751,7 +3751,7 @@ def test_gtd_rephrased_titles_ground_against_filler_prefixed_utterances(
 
 
 def test_filler_only_titles_are_dropped_without_failing_their_siblings() -> None:
-    """A filler-only title is skipped on its own while real tasks survive.
+    """015-FR-004: a filler-only title is skipped on its own while real tasks survive.
 
     «Так»/«Надо» pass token grounding (the filler is spoken) but name no action
     or object, so each is dropped individually."""
@@ -3779,7 +3779,7 @@ def test_filler_title_with_fabricated_provenance_still_fails_the_whole_call() ->
 
 
 def test_duplicate_titles_within_one_reconciliation_collapse_to_one_proposal() -> None:
-    """Restated titles collapse into one proposal that inherits their provenance.
+    """015-FR-004: restated titles collapse into one proposal that inherits their provenance.
 
     Case, whitespace, trailing punctuation, quotes and bare articles do not make
     a second task; the duplicate's cited segments fold into the survivor."""
@@ -3802,7 +3802,7 @@ def test_duplicate_titles_within_one_reconciliation_collapse_to_one_proposal() -
 def test_duplicate_from_another_segment_folds_its_provenance_into_the_survivor() -> (
     None
 ):
-    """A duplicate cited from a second utterance keeps that utterance's provenance."""
+    """015-FR-004: a duplicate cited from a second utterance keeps that utterance's provenance."""
 
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
@@ -3845,8 +3845,164 @@ def test_duplicate_from_another_segment_folds_its_provenance_into_the_survivor()
     ]
 
 
+def test_structural_duplicate_folds_its_predecessors_into_the_surviving_proposal() -> (
+    None
+):
+    """015-FR-004: a merge restating a title this envelope minted still retires its predecessors.
+
+    On a legacy operation the model may emit ``add`` and then a same-titled
+    ``merge`` of two stale proposals. Folding only the merge's cited segments
+    would leave those proposals active beside the survivor, so the survivor
+    inherits the lineage: it becomes the merge itself and the projection
+    tombstones both predecessors (005-FR-008 grounding is unchanged).
+    """
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    active = [
+        ReconciledProposal(
+            id="proposal_a",
+            title="Купить молоко",
+            source_segment_ids=["segment_preview_1"],
+            status="provisional",
+        ),
+        ReconciledProposal(
+            id="proposal_b",
+            title="Молоко",
+            source_segment_ids=["segment_preview_2"],
+            status="provisional",
+        ),
+    ]
+    segments = [
+        TranscriptHypothesis(
+            id=f"segment_{index}",
+            sequence=index,
+            start_ms=(index - 1) * 1000,
+            end_ms=index * 1000,
+            text=text,
+            stability="stable",
+            provider_role="accurate",
+        )
+        for index, text in enumerate(
+            ["купить овсяное молоко", "надо купить овсяное молоко"], start=1
+        )
+    ]
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                _add_op("Купить овсяное молоко", segment_id="segment_1"),
+                {
+                    "operation": "merge",
+                    "proposal_id": None,
+                    "title": "Купить овсяное молоко",
+                    "source_segment_ids": ["segment_2"],
+                    "predecessor_ids": ["proposal_a", "proposal_b"],
+                    "base_revision": None,
+                    "confidence": 0.9,
+                },
+            ]
+        },
+    )
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_structural_fold",
+            transcript_segments=segments,
+            active_proposals=active,
+            user_locks={},
+        )
+    )
+    assert [
+        (patch.operation, patch.title, patch.predecessor_ids, patch.source_segment_ids)
+        for patch in result.patches
+    ] == [
+        (
+            "merge",
+            "Купить овсяное молоко",
+            ["proposal_a", "proposal_b"],
+            ["segment_1", "segment_2"],
+        )
+    ]
+    assert result.skipped_operations == [
+        "duplicate task title within one reconciliation; its cited segments and "
+        "predecessors were folded into the surviving proposal."
+    ]
+    projection = apply_proposal_patches(active, result.patches)
+    assert [proposal.title for proposal in projection.active] == [
+        "Купить овсяное молоко"
+    ]
+    assert {proposal.id for proposal in projection.active}.isdisjoint(
+        {"proposal_a", "proposal_b"}
+    )
+
+
+def test_two_structural_duplicates_merge_every_predecessor_either_named() -> None:
+    """Two supersedes converging on one title become one merge of both predecessors."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    active = [
+        ReconciledProposal(
+            id="proposal_a",
+            title="Купить молоко",
+            source_segment_ids=["segment_preview_1"],
+            status="provisional",
+        ),
+        ReconciledProposal(
+            id="proposal_b",
+            title="Молоко",
+            source_segment_ids=["segment_preview_2"],
+            status="provisional",
+        ),
+    ]
+    segments = [
+        TranscriptHypothesis(
+            id="segment_1",
+            sequence=1,
+            start_ms=0,
+            end_ms=1000,
+            text="купить овсяное молоко",
+            stability="stable",
+            provider_role="accurate",
+        )
+    ]
+
+    def supersede(predecessor_id: str) -> dict[str, object]:
+        return {
+            "operation": "supersede",
+            "proposal_id": None,
+            "title": "Купить овсяное молоко",
+            "source_segment_ids": ["segment_1"],
+            "predecessor_ids": [predecessor_id],
+            "base_revision": None,
+            "confidence": 0.9,
+        }
+
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [supersede("proposal_a"), supersede("proposal_b")]
+        },
+    )
+    result = reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_structural_pair",
+            transcript_segments=segments,
+            active_proposals=active,
+            user_locks={},
+        )
+    )
+    assert [(patch.operation, patch.predecessor_ids) for patch in result.patches] == [
+        ("merge", ["proposal_a", "proposal_b"])
+    ]
+    projection = apply_proposal_patches(active, result.patches)
+    assert [proposal.title for proposal in projection.active] == [
+        "Купить овсяное молоко"
+    ]
+
+
 def test_add_matching_an_active_proposal_affirms_it_instead_of_minting_a_twin() -> None:
-    """Re-deriving an existing proposal affirms it rather than failing or duplicating.
+    """015-FR-004: re-deriving an existing proposal affirms it rather than failing or duplicating.
 
     A pre-existing provisional proposal re-emitted by the model as an ``add`` is
     rewritten into an ``update`` on that proposal (reconciler-touched, citing the
@@ -4016,7 +4172,7 @@ def test_update_converging_on_another_active_title_is_dropped() -> None:
 def test_user_deleted_proposal_cannot_be_restored_under_a_punctuation_variant(
     title: str,
 ) -> None:
-    """A tombstone blocks re-adds that differ only by case, spacing, quotes or punctuation."""
+    """015-FR-004: a tombstone blocks re-adds that differ only by case, spacing, quotes or punctuation."""
 
     deleted = ReconciledProposal(
         id="proposal_deleted",
@@ -4032,7 +4188,83 @@ def test_user_deleted_proposal_cannot_be_restored_under_a_punctuation_variant(
 
 
 def test_envelope_made_only_of_fillers_fails_closed_as_ungrounded() -> None:
-    """An envelope that is nothing but fillers is a malfunctioning model, not zero tasks."""
+    """015-FR-004 015-SC-003: an envelope that is nothing but fillers is a malfunctioning model, not zero tasks."""
 
     with pytest.raises(ValidationFailure, match="dropped as ungrounded"):
         _reconcile_adds("Так, ну, значит", ["Так", "Ну"])
+
+
+def test_browser_preview_recovery_hypotheses_keep_only_stable_unsuperseded_preview_text() -> (
+    None
+):
+    """The preview recovery input is exactly the stable, unsuperseded browser-preview text."""
+
+    from app.utils.time import utcnow
+    from app.workflows.voice_brain_dump.domain import (
+        BrainDumpTranscriptSegmentDocument,
+        browser_preview_recovery_hypotheses,
+    )
+
+    now = utcnow()
+
+    def segment(
+        segment_id: str, sequence: int, text: str, **overrides: object
+    ) -> BrainDumpTranscriptSegmentDocument:
+        return BrainDumpTranscriptSegmentDocument.model_validate(
+            {
+                "id": segment_id,
+                "sequence": sequence,
+                "text": text,
+                "stability": "stable",
+                "created_at": now,
+                **overrides,
+            }
+        )
+
+    segments = [
+        segment(
+            "segment_later",
+            3,
+            "позвонить стоматологу",
+            confidence=0.7,
+            language="ru",
+            model="web-speech",
+        ),
+        segment("segment_interim", 2, "позвонить стома", stability="interim"),
+        segment("segment_first", 1, "купить молоко"),
+        segment("segment_superseded", 4, "так купить хлеб"),
+        segment(
+            "segment_accurate",
+            5,
+            "купить хлеб",
+            provider_role="accurate",
+            supersedes_segment_ids=["segment_superseded"],
+        ),
+        segment("segment_blank", 6, "   "),
+        segment("segment_empty_span", 7, "напомни", start_ms=5, end_ms=1),
+        segment("segment_fast", 8, "купить сыр", provider_role="fast"),
+    ]
+
+    hypotheses = browser_preview_recovery_hypotheses(segments)
+
+    assert [hypothesis.id for hypothesis in hypotheses] == [
+        "segment_first",
+        "segment_later",
+    ]
+    assert [hypothesis.text for hypothesis in hypotheses] == [
+        "купить молоко",
+        "позвонить стоматологу",
+    ]
+    assert {hypothesis.provider_role for hypothesis in hypotheses} == {
+        "browser_preview"
+    }
+    assert {hypothesis.stability for hypothesis in hypotheses} == {"stable"}
+    later = hypotheses[1]
+    assert (later.sequence, later.confidence, later.language, later.model) == (
+        3,
+        0.7,
+        "ru",
+        "web-speech",
+    )
+    assert later.supersedes_segment_ids == []
+    assert browser_preview_recovery_hypotheses([]) == []
