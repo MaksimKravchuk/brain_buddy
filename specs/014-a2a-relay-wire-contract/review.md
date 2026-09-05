@@ -517,3 +517,48 @@ was nothing there to correct. Tests:
 (a run whose fingerprint is the only remaining reference to `v1`; the next
 command is refused naming it) and
 `::test_014_SC_003_a_run_whose_identifiers_expired_holds_no_key`.
+
+**(q) The hand-off retry is gated on the rollout flag on the web too — and there
+the rule was broken the other way.**
+The second review's finding named iOS, where `TaskAgentSection` passed the retry
+callback while the hand-off sheet was mounted only under `enabled`, so **Try this
+hand-off again** on a retained `not_sent` run flipped a flag and showed nothing.
+The web had the same rule broken more consequentially: `RunCard` mounts its own
+`AgentHandoffOverlay`, so the retry stayed fully functional with
+`external_agent_relay` OFF. FR-016 lists what continues while rollout is OFF —
+observation, the verified push, reply and cancel on existing runs, the
+delivery-check lookup, purge and retention — and a retry of a hand-off that never
+left is not on it: nothing reached the agent, so it is a fresh content-bearing
+send. `AgentRunSection` now takes `handoffEnabled` and gates the frozen manifest,
+hence both the button and the overlay, on it; iOS withholds the callback when the
+flag is off. Gated on the flag only, deliberately not on the task being terminal:
+whether a terminal task may still retry a hand-off that never left is a separate
+product question and was left as it was. Tests: web `AgentRunSection.test.tsx`
+"014-FR-012 withholds the retry while rollout is off and still shows the run";
+mobile `TaskAgentSection.test.tsx` and `AgentRunSection.test.tsx` "014-FR-012 …".
+
+**(r) The parity inventory names the delivery check.**
+`contracts/api-client-parity.json` gained `checkAgentRunDelivery` (POST
+`/agent-runs/{id}/check-delivery`, a JSON body of `expected_revision` and
+`current_password`, `Idempotency-Key`), so the web and iOS parity suites compare
+its path, method, body and header the way they compare the other 41 operations;
+the inventory is 42. No spec text states the count, so nothing else moved.
+
+**(s) The forged-push story forges against a real run, and asserts with `holds`,
+not `settles`.**
+The security story used to post a forged token for a run id that did not exist —
+the unknown-run refusal, reached before any stored token is compared — and then
+counted the account's connections, which push handling cannot change. It now
+hands a task to the helloworld sample through the product surface, waits for the
+run to settle terminal, posts a wrong token for *that* run id (403) and then holds
+the run's `revision`, `events.length`, `push_registration` and `reported_state`
+unchanged across 12 s, two of the stack's 5 s observation intervals: a verified
+push never writes in the reply, it only wakes an observation, so a first matching
+read (`settles`) would prove nothing. The `holds` helper is the dual of `settles`
+in the same throw-based idiom, so no zero-duration step is recorded. Residual gap,
+stated rather than hidden: helloworld declares no push support, so its run has no
+`push_token_fingerprint` and the route refuses at the "nothing to compare
+against" branch rather than at the fingerprint comparison; the constant-time
+comparison itself is proved by `test_agent_relay_api.py::TestPushCallbackRoute`,
+and a Hermes-based variant of the story (the plugin declares
+`push_notifications`) would reach `fingerprint_mismatch` end to end.
