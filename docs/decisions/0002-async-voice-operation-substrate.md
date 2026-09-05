@@ -4,7 +4,63 @@ Date: 2026-07-11
 Status: Proposed
 Decision owner: BrainBuddy
 Related: ADR-0001, Kanban tasks `t_8a1164be` and `t_58293688`
-Last amended: 2026-07-19 (real-provider invariants and STT/extraction evaluation separation)
+Last amended: 2026-09-05 (browser preview is a transcript readout, not a task source)
+
+## 2026-09-05 amendment: browser preview is a transcript readout, not a task source
+
+Shipping the browser preview lane as a live *task* source produced junk: Web
+Speech interim hypotheses fluctuate («Так» → «Надо» → «Надо купить моло» →
+«Купить молоко» → «Молоко»), the server minted a `fast` proposal per fragment
+and never retired one, and the reconciler could not clean up after it — a
+provider `remove` is by design a visible conflict, and an untouched `fast`
+proposal blocks commit as `BRAIN_DUMP_PROPOSAL_NOT_RECONCILED`. The owner ended
+up deleting six leftover cards by hand before Save was enabled.
+
+The amendment keeps the substrate and changes what the preview lane is allowed
+to produce:
+
+- Browser-preview segments are persisted and shown as a **transcript readout**
+  (recording and processing screens). They never derive proposals; the "fast"
+  provisional-extraction method is retired from the production path and the
+  `wording_changing` proposal status is no longer produced.
+- Proposals are minted only by the **reconciler from the accurate transcript**
+  after seal. For every new operation the reconciler therefore receives an
+  empty active-proposal set (only `add` operations are valid). Lineage,
+  field-lock and stale-base rules remain in force for proposals that already
+  exist (legacy imports, operations persisted before this amendment).
+- Titles are **GTD next actions**: the action verb first (Russian infinitive,
+  English base form) followed by its object; discourse fillers and modal
+  scaffolding («так», «надо», "so", "I need to") are dropped; each distinct
+  action is proposed once. The prompt is `brain-dump-reconciler-v3`, and the
+  adapter enforces server-side guards independently of the model: a title
+  with no action or object is dropped as ungrounded; a title restated within
+  one reconciliation (case, spacing, quotes, trailing punctuation and bare
+  articles aside) is folded into the surviving proposal, which inherits its
+  cited segments; an `add` that restates an active proposal the envelope does
+  not otherwise replace becomes an `update` affirming that proposal instead of
+  minting a twin; an `update` converging on another active title is dropped.
+  The guard follows the envelope's own renames and removals, and a user
+  deletion cannot be undone under a punctuation variant of the deleted title.
+  Dropped operations are logged by fixed reason (never by content). FR-006
+  language fidelity and FR-008 grounding are unchanged: verb-first reordering
+  is grounded rewording, never translation.
+- A review with no surviving proposal is not committable: an empty envelope
+  (nothing actionable was said) or a review where everything was discarded
+  never mints an empty completion, and the web review shows what was heard
+  instead of a zero-task save.
+- Consequence for recovery: `review_provisional` requires surviving proposals,
+  so for a new operation a *retryable* provider failure offers retry/cancel and
+  a *terminal* one (provider rejection, cost cap, exhausted recovery budget)
+  offers cancel only — the recording can no longer be salvaged as provisional
+  junk. This is the behaviour the mobile client (which never had a preview
+  lane) already had. An owner-initiated retry from `terminal_error` while a
+  sealed checkpoint still exists is the follow-up worth designing; it must
+  respect the cost caps and is out of scope here.
+
+Spec `002-async-voice-workflows` (US1 "provisional tasks while speaking",
+required outcome 2, SC-004) describes the retired behaviour; its normative
+files are hash-frozen as delivered history, so this amendment is the record of
+the change until a follow-up spec revision lands through the Spec Kit pipeline.
 
 ## 2026-07-19 amendment: real-provider invariants
 

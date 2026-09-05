@@ -467,6 +467,12 @@ transaction.
 
 ### 7.1 Required correction to CloudDesign language
 
+> Superseded on 2026-09-05 (ADR-0002 amendment): the recording surface no longer
+> shows a candidate list at all. Browser-preview text is rendered as a transcript
+> readout, and tasks appear only on the review surface once the reconciler has
+> turned the accurate transcript into next actions. The mapping below documents
+> the earlier mockup language and is kept as design history.
+
 During recording, no item is “headed to inbox,” nothing has been sent, and the total may
 change during reconciliation. Replace the mockup's authority language:
 

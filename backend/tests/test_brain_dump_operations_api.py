@@ -22,6 +22,8 @@ from app.workflows.voice_brain_dump.adapters import OpenAiAccurateStt
 from app.workflows.voice_brain_dump.domain import TranscriptHypothesis
 from app.workflows.voice_brain_dump.providers import AccurateSttRequest, SttResult
 
+from .conftest import seed_provisional_proposals
+
 
 def _start_operation(
     api_client,
@@ -209,6 +211,44 @@ def _upload_and_seal(api_client, operation: dict[str, object], audio: bytes, key
     return _advance_persisted_provider_runs(api_client, str(operation["id"]))
 
 
+def _seed_provisional_proposals(
+    api_client,
+    operation: dict[str, object],
+    titles: list[str],
+    *,
+    key: str,
+) -> dict[str, object]:
+    """Append one stable preview segment, then seed provisional proposals citing it.
+
+    See ``conftest.seed_provisional_proposals`` for why a live operation only
+    carries such proposals when persisted before browser preview stopped
+    deriving drafts; returns the refreshed API projection.
+    """
+
+    appended = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/transcript",
+        headers={"Idempotency-Key": f"seed-preview-segment-{key}"},
+        json={
+            "segments": [
+                {"sequence": 1, "text": ". ".join(titles) + ".", "stability": "stable"}
+            ]
+        },
+    )
+    assert appended.status_code == 200, appended.text
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    container = api_client.app.state.container
+    persisted = container.voice_brain_dump_service.get_brain_dump_operation(
+        str(operation["id"]), owner_id=owner_id
+    )
+    seed_provisional_proposals(
+        container.voice_operation_repo,
+        persisted,
+        titles,
+        id_prefix=f"proposal_seed_{key}",
+    )
+    return api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
+
+
 def test_seal_uses_semantic_reconciler_when_external_processing_is_allowed(
     api_client,
 ) -> None:
@@ -257,6 +297,144 @@ def test_seal_uses_semantic_reconciler_when_external_processing_is_allowed(
     ]
 
 
+def test_seal_reconciles_a_filler_prefixed_dump_into_clean_next_actions(
+    api_client,
+) -> None:
+    """The review list is GTD next actions, never raw preview text.
+
+    Spoken: «Так, надо купить молоко. Сходить в магазин. Покрасить комнату.»
+    The browser preview fluctuates through junk fragments while recording; none
+    of them may become a task. After seal the reconciler returns verb-first
+    titles, the server drops a filler-only and a duplicate title, and every
+    surviving proposal is reconciled, so the operation is immediately
+    committable without the owner deleting leftovers by hand.
+    """
+
+    from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
+
+    operation = _start_operation(
+        api_client,
+        key="start-clean-next-actions",
+        external_processing_allowed=True,
+        language_hints=["ru"],
+    )
+    for key, text, stability in (
+        ("preview-clean-1", "Так", "interim"),
+        ("preview-clean-2", "Надо купить моло", "interim"),
+        ("preview-clean-3", "так надо купить молоко сходить в магазин", "stable"),
+    ):
+        appended = api_client.post(
+            f"/api/brain-dump-operations/{operation['id']}/transcript",
+            headers={"Idempotency-Key": key},
+            json={"segments": [{"sequence": 1, "text": text, "stability": stability}]},
+        )
+        assert appended.status_code == 200, appended.text
+        assert appended.json()["proposals"] == []
+
+    def complete(payload: dict[str, object]) -> dict[str, object]:
+        context = json.loads(payload["messages"][1]["content"])  # type: ignore[index]
+        assert context["proposals"] == []
+        segment_ids = [segment["id"] for segment in context["transcript_segments"]]
+
+        def add(title: str) -> dict[str, object]:
+            return {
+                "operation": "add",
+                "proposal_id": None,
+                "title": title,
+                "source_segment_ids": segment_ids,
+                "predecessor_ids": [],
+                "base_revision": None,
+                "confidence": 0.9,
+            }
+
+        # A model that still leaks a filler fragment and a duplicate: both are
+        # dropped server-side, the three real next actions survive.
+        return {
+            "operations": [
+                add("Так"),
+                add("Купить молоко"),
+                add("Сходить в магазин"),
+                add("купить молоко."),
+                add("Покрасить комнату"),
+            ]
+        }
+
+    api_client.app.state.container.voice_brain_dump_service.text_reconciler = (
+        OpenAITextReconciler(api_key="test-key", complete=complete)
+    )
+    sealed = _upload_and_seal(
+        api_client,
+        operation,
+        "Так, надо купить молоко. Сходить в магазин. Покрасить комнату.".encode(),
+        "seal-clean-next-actions",
+    )
+
+    assert sealed.status_code == 200, sealed.text
+    body = sealed.json()
+    assert body["status"] == "awaiting_confirmation"
+    assert body["reconciliation_quality"] == "accurate"
+    active = [proposal for proposal in body["proposals"] if not proposal["deleted"]]
+    assert [proposal["title"] for proposal in active] == [
+        "Купить молоко",
+        "Сходить в магазин",
+        "Покрасить комнату",
+    ]
+    assert {proposal["status"] for proposal in active} == {"reconciled"}
+    assert body["committable"] is True
+    assert all(patch["producer"] == "reconciler" for patch in body["proposal_patches"])
+
+    committed = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-clean-next-actions"},
+        json={"expected_revision": body["revision"]},
+    )
+    assert committed.status_code == 200, committed.text
+    inbox = api_client.get("/api/tasks", params={"state": "inbox"}).json()
+    assert [item["title"] for item in inbox["items"]] == [
+        "Купить молоко",
+        "Сходить в магазин",
+        "Покрасить комнату",
+    ]
+
+
+def test_review_with_no_surviving_proposals_is_not_committable(api_client) -> None:
+    """Nothing actionable (or everything discarded) must not mint an empty save.
+
+    A reconciled operation whose only proposal the owner deletes at review has
+    no batch to freeze: ``committable`` flips to false and commit is refused
+    rather than completing a zero-task operation.
+    """
+
+    operation = _start_operation(
+        api_client, key="start-empty-review", external_processing_allowed=True
+    )
+    sealed = _upload_and_seal(api_client, operation, b"Buy milk.", "seal-empty-review")
+    body = sealed.json()
+    assert body["status"] == "awaiting_confirmation"
+    assert body["committable"] is True
+    (only_proposal,) = [p for p in body["proposals"] if not p["deleted"]]
+
+    deleted = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{only_proposal['id']}",
+        headers={"Idempotency-Key": "delete-only-proposal"},
+        json={"deleted": True, "expected_revision": body["revision"]},
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["committable"] is False
+
+    rejected = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-empty-review"},
+        json={"expected_revision": deleted.json()["revision"]},
+    )
+    assert rejected.status_code == 400, rejected.text
+    assert "not eligible" in rejected.text
+    assert (
+        api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()["status"]
+        == "awaiting_confirmation"
+    )
+
+
 def test_semantic_reconciler_updates_and_removes_existing_proposals(
     api_client,
 ) -> None:
@@ -267,19 +445,12 @@ def test_semantic_reconciler_updates_and_removes_existing_proposals(
         key="start-semantic-update-remove",
         external_processing_allowed=True,
     )
-    preview = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "preview-semantic-update-remove"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "Починить brain body. Удалить лишний черновик.",
-                    "stability": "stable",
-                }
-            ]
-        },
-    ).json()
+    preview = _seed_provisional_proposals(
+        api_client,
+        operation,
+        ["Починить brain body", "Удалить лишний черновик"],
+        key="semantic-update-remove",
+    )
     first, second = preview["proposals"]
 
     def complete(payload: dict[str, object]) -> dict[str, object]:
@@ -426,22 +597,14 @@ def test_seal_persists_semantic_reconciler_failures_for_recovery(
         key=f"start-semantic-failure-{type(provider_error).__name__}",
         external_processing_allowed=True,
     )
-    preview = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={
-            "Idempotency-Key": f"preview-semantic-failure-{type(provider_error).__name__}"
-        },
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "Review provider failure recovery",
-                    "stability": "stable",
-                }
-            ]
-        },
+    # A pre-existing provisional proposal is what keeps ``review_provisional``
+    # reachable for the terminal case; a fresh operation never derives one.
+    _seed_provisional_proposals(
+        api_client,
+        operation,
+        ["Review provider failure recovery"],
+        key=f"semantic-failure-{type(provider_error).__name__}",
     )
-    assert preview.status_code == 200, preview.text
 
     def fail(_payload: dict[str, object]) -> dict[str, object]:
         raise provider_error
@@ -593,20 +756,12 @@ def test_terminal_accurate_stt_failure_allows_explicit_provisional_review(
         key="start-terminal-stt-provisional-review",
         external_processing_allowed=True,
     )
-    preview = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "preview-terminal-stt-provisional-review"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "Call the dentist. Buy milk.",
-                    "stability": "stable",
-                }
-            ]
-        },
+    _seed_provisional_proposals(
+        api_client,
+        operation,
+        ["Call the dentist", "Buy milk"],
+        key="terminal-stt-provisional-review",
     )
-    assert preview.status_code == 200, preview.text
     api_client.app.state.container.voice_brain_dump_service.accurate_stt = (
         _real_adapter(httpx.MockTransport(lambda _request: httpx.Response(400)))
     )
@@ -983,23 +1138,17 @@ def test_schema_v2_conflict_resolution_requires_a_visible_title_conflict(
     api_client,
 ) -> None:
     operation = _start_operation(api_client, key="start-no-title-conflict")
-    preview = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-no-title-conflict"},
-        json={
-            "segments": [
-                {"sequence": 1, "text": "Call the dentist", "stability": "stable"}
-            ]
-        },
+    preview = _seed_provisional_proposals(
+        api_client, operation, ["Call the dentist"], key="no-title-conflict"
     )
-    proposal_id = preview.json()["proposals"][0]["id"]
+    proposal_id = preview["proposals"][0]["id"]
 
     response = api_client.patch(
         f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal_id}",
         headers={"Idempotency-Key": "keep-missing-title-conflict"},
         json={
             "conflict_resolution": "keep",
-            "expected_revision": preview.json()["revision"],
+            "expected_revision": preview["revision"],
         },
     )
 
@@ -1073,15 +1222,9 @@ def test_user_resolves_visible_semantic_title_conflict(
         key=f"start-conflict-{resolution}",
         external_processing_allowed=True,
     )
-    preview = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": f"preview-conflict-{resolution}"},
-        json={
-            "segments": [
-                {"sequence": 1, "text": "Починить brain body", "stability": "stable"}
-            ]
-        },
-    ).json()
+    preview = _seed_provisional_proposals(
+        api_client, operation, ["Починить brain body"], key=f"conflict-{resolution}"
+    )
     proposal = preview["proposals"][0]
     edited = api_client.patch(
         f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal['id']}",
@@ -1681,9 +1824,18 @@ def test_split_vendor_upload_accepts_consent_naming_every_vendor(
     assert len(uploaded.json()["audio_chunks"]) == 1
 
 
-def test_brain_dump_operation_collects_provisional_tasks_without_inbox_writes(
+def test_transcript_append_records_segments_without_deriving_draft_tasks(
     api_client,
 ) -> None:
+    """Browser preview text is a live status readout, never a task source.
+
+    Web Speech interim hypotheses fluctuate wildly («Так» -> «Надо» -> «Надо
+    купить моло» ...); minting a draft task per fragment produced junk that
+    later blocked commit as unreconciled leftovers. An appended transcript now
+    persists as segments only: no proposal, no patch, nothing in the Inbox.
+    Tasks are minted solely by the reconciler from the accurate transcript.
+    """
+
     operation = _start_operation(api_client)
     assert operation["status"] == "recording"
     assert operation["kind"] == "voice_brain_dump"
@@ -1693,109 +1845,29 @@ def test_brain_dump_operation_collects_provisional_tasks_without_inbox_writes(
     assert empty_inbox.status_code == 200
     assert empty_inbox.json()["counts_by_state"]["inbox"] == 0
 
-    append = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-initial-segment"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "Renew car insurance. Reply to Anna about the offsite.",
-                    "stability": "stable",
-                }
-            ]
-        },
-    )
-    assert append.status_code == 200, append.text
-    body = append.json()
-    assert body["status"] == "recording"
-    assert [proposal["title"] for proposal in body["proposals"]] == [
-        "Renew car insurance",
-        "Reply to Anna about the offsite",
-    ]
-    assert [proposal["ordinal"] for proposal in body["proposals"]] == [1, 2]
-    assert {proposal["status"] for proposal in body["proposals"]} == {"provisional"}
+    for key, text, stability in (
+        ("append-interim-1", "Так", "interim"),
+        ("append-interim-2", "Надо купить моло", "interim"),
+        ("append-stable-1", "Так, надо купить молоко. Сходить в магазин.", "stable"),
+    ):
+        append = api_client.post(
+            f"/api/brain-dump-operations/{operation['id']}/transcript",
+            headers={"Idempotency-Key": key},
+            json={"segments": [{"sequence": 1, "text": text, "stability": stability}]},
+        )
+        assert append.status_code == 200, append.text
+        body = append.json()
+        assert body["status"] == "recording"
+        assert body["proposals"] == []
+        assert body["proposal_patches"] == []
+
+    assert [
+        (segment["sequence"], segment["text"], segment["stability"])
+        for segment in body["segments"]
+    ] == [(1, "Так, надо купить молоко. Сходить в магазин.", "stable")]
 
     still_empty = api_client.get("/api/tasks", params={"state": "inbox"})
     assert still_empty.json()["counts_by_state"]["inbox"] == 0
-
-
-def test_mixed_language_final_segment_grows_each_semantic_preview_clause(
-    api_client,
-) -> None:
-    operation = _start_operation(api_client, key="start-mixed-preview-clauses")
-
-    appended = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-mixed-preview-clauses"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": (
-                        "Сделать production smoke. написать Наташе. "
-                        "купить хлеб и молоко. удалить черновик. "
-                        "Починить brain body"
-                    ),
-                    "stability": "stable",
-                }
-            ]
-        },
-    )
-
-    assert appended.status_code == 200, appended.text
-    assert [
-        proposal["title"]
-        for proposal in appended.json()["proposals"]
-        if not proposal["deleted"]
-    ] == [
-        "Сделать production smoke",
-        "Написать Наташе",
-        "Купить хлеб и молоко",
-        "Удалить черновик",
-        "Починить brain body",
-    ]
-
-
-@pytest.mark.parametrize(
-    ("transcript", "expected_titles"),
-    [
-        (
-            "Починить brain body потом позвонить маме",
-            ["Починить brain body", "Позвонить маме"],
-        ),
-        (
-            "Fix brain body then call mom",
-            ["Fix brain body", "Call mom"],
-        ),
-    ],
-)
-def test_final_segment_splits_preview_on_explicit_clause_boundaries(
-    api_client,
-    transcript: str,
-    expected_titles: list[str],
-) -> None:
-    boundary_case = hashlib.sha256(transcript.encode()).hexdigest()[:8]
-    operation = _start_operation(api_client, key=f"start-boundary-{boundary_case}")
-
-    appended = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": f"append-boundary-{boundary_case}"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": transcript,
-                    "stability": "stable",
-                }
-            ]
-        },
-    )
-
-    assert appended.status_code == 200, appended.text
-    assert [proposal["title"] for proposal in appended.json()["proposals"]] == (
-        expected_titles
-    )
 
 
 def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposals(
@@ -1806,32 +1878,26 @@ def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposal
         key="start-preserve-preview-choices",
         external_processing_allowed=True,
     )
-    preview = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-preserve-preview-choices"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": (
-                        "Сделать production smoke. написать Наташе. "
-                        "купить хлеб и молоко. удалить черновик. "
-                        "Починить brain body"
-                    ),
-                    "stability": "stable",
-                }
-            ]
-        },
+    preview = _seed_provisional_proposals(
+        api_client,
+        operation,
+        [
+            "Сделать production smoke",
+            "Написать Наташе",
+            "Купить хлеб и молоко",
+            "Удалить черновик",
+            "Починить brain body",
+        ],
+        key="preserve-preview-choices",
     )
-    assert preview.status_code == 200, preview.text
     bread = next(
         proposal
-        for proposal in preview.json()["proposals"]
+        for proposal in preview["proposals"]
         if "хлеб" in proposal["title"].casefold()
     )
     disposable = next(
         proposal
-        for proposal in preview.json()["proposals"]
+        for proposal in preview["proposals"]
         if "черновик" in proposal["title"].casefold()
     )
     edited_title = "SMOKE Купить хлеб и молоко"
@@ -1841,7 +1907,7 @@ def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposal
         headers={"Idempotency-Key": "edit-preserved-bread"},
         json={
             "title": edited_title,
-            "expected_revision": preview.json()["revision"],
+            "expected_revision": preview["revision"],
         },
     )
     assert edited.status_code == 200, edited.text
@@ -1907,7 +1973,9 @@ def test_accurate_reconciliation_preserves_unmatched_locked_and_deleted_proposal
     assert stale_preview_after["conflicts"][0]["suggested_value"] == "removed"
 
 
-def test_brain_dump_cumulative_final_replaces_interim_words(api_client) -> None:
+def test_brain_dump_interim_and_final_segments_persist_without_draft_tasks(
+    api_client,
+) -> None:
     operation = _start_operation(api_client, key="start-cumulative-final-operation")
 
     interim = api_client.post(
@@ -1920,10 +1988,11 @@ def test_brain_dump_cumulative_final_replaces_interim_words(api_client) -> None:
         },
     )
     assert interim.status_code == 200, interim.text
-    assert [proposal["title"] for proposal in interim.json()["proposals"]] == [
-        "Buy oat milk"
-    ]
-    assert interim.json()["proposals"][0]["status"] == "wording_changing"
+    assert [
+        (segment["sequence"], segment["text"], segment["stability"])
+        for segment in interim.json()["segments"]
+    ] == [(1, "buy oat milk", "interim")]
+    assert interim.json()["proposals"] == []
 
     final = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
@@ -1939,13 +2008,12 @@ def test_brain_dump_cumulative_final_replaces_interim_words(api_client) -> None:
         },
     )
     assert final.status_code == 200, final.text
-    assert [proposal["title"] for proposal in final.json()["proposals"]] == [
-        "Buy oat milk",
-        "Call dentist",
-    ]
-    assert "Buy oat milk buy oat milk" not in {
-        proposal["title"] for proposal in final.json()["proposals"]
-    }
+    assert [
+        (segment["sequence"], segment["text"], segment["stability"])
+        for segment in final.json()["segments"]
+    ] == [(1, "buy oat milk", "interim"), (2, "buy oat milk. call dentist", "stable")]
+    assert final.json()["proposals"] == []
+    assert final.json()["proposal_patches"] == []
 
 
 def test_brain_dump_same_sequence_interim_can_be_replaced_by_final(api_client) -> None:
@@ -1981,71 +2049,16 @@ def test_brain_dump_same_sequence_interim_can_be_replaced_by_final(api_client) -
         (segment["sequence"], segment["text"], segment["stability"])
         for segment in body["segments"]
     ] == [(1, "buy oat milk. call dentist", "stable")]
-    assert [proposal["title"] for proposal in body["proposals"]] == [
-        "Buy oat milk",
-        "Call dentist",
-    ]
+    assert body["proposals"] == []
 
 
-def test_preview_reconciliation_keeps_opaque_proposal_ids_when_candidate_order_changes(
-    api_client,
-) -> None:
-    operation = _start_operation(api_client, key="start-stable-proposal-identity")
-    interim = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-preview-order-interim"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "Email landlord. Email lawyer.",
-                    "stability": "interim",
-                }
-            ]
-        },
-    )
-    assert interim.status_code == 200, interim.text
-    ids_by_title = {
-        proposal["title"]: proposal["id"] for proposal in interim.json()["proposals"]
-    }
-
-    reordered = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "replace-preview-order-final"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "Email lawyer. Email landlord.",
-                    "stability": "stable",
-                }
-            ]
-        },
-    )
-    assert reordered.status_code == 200, reordered.text
-
-    assert {
-        proposal["title"]: proposal["id"] for proposal in reordered.json()["proposals"]
-    } == ids_by_title
-
-
-def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_save(
+def test_user_edits_and_deletes_survive_later_appends_and_accurate_reconciliation(
     api_client,
 ) -> None:
     operation = _start_operation(api_client, key="start-edit-operation")
-    append = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-edit-segment"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "Book flights. Call dentist.",
-                    "stability": "stable",
-                }
-            ]
-        },
-    ).json()
+    append = _seed_provisional_proposals(
+        api_client, operation, ["Book flights", "Call dentist"], key="edit-operation"
+    )
     first_id = append["proposals"][0]["id"]
     second_id = append["proposals"][1]["id"]
 
@@ -2070,12 +2083,10 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
         (patch["operation"], patch["producer"], patch["proposal_id"])
         for patch in deleted.json()["proposal_patches"]
     ] == [
-        ("add", "fast", first_id),
-        ("add", "fast", second_id),
         ("update", "user", first_id),
         ("remove", "user", second_id),
     ]
-    assert deleted.json()["proposal_patches"][2]["locked_fields"] == ["title"]
+    assert deleted.json()["proposal_patches"][0]["locked_fields"] == ["title"]
     repeated_delete = api_client.patch(
         f"/api/brain-dump-operations/{operation['id']}/proposals/{second_id}",
         headers={"Idempotency-Key": "delete-second-proposal-again"},
@@ -2086,6 +2097,8 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
         repeated_delete.json()["proposal_patches"] == deleted.json()["proposal_patches"]
     )
 
+    # A later preview append is a transcript-only write: it neither reverts the
+    # user's choices nor mints any new draft from the browser text.
     later = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
         headers={"Idempotency-Key": "append-reworded-segment"},
@@ -2100,15 +2113,13 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
         },
     )
     assert later.status_code == 200, later.text
-    titles_by_id = {
-        proposal["id"]: proposal["title"] for proposal in later.json()["proposals"]
-    }
-    assert titles_by_id[first_id] == "Book refundable Lisbon flights"
-    assert titles_by_id[second_id] == "Call dentist"
-    assert any(
-        proposal["title"] == "Draft launch post"
+    assert {
+        proposal["id"]: (proposal["title"], proposal["deleted"])
         for proposal in later.json()["proposals"]
-    )
+    } == {
+        first_id: ("Book refundable Lisbon flights", False),
+        second_id: ("Call dentist", True),
+    }
 
     sealed = _upload_and_seal(
         api_client,
@@ -2118,6 +2129,13 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
     )
     assert sealed.status_code == 200, sealed.text
     assert sealed.json()["status"] == "awaiting_confirmation"
+    titles_by_id = {
+        proposal["id"]: proposal["title"]
+        for proposal in sealed.json()["proposals"]
+        if not proposal["deleted"]
+    }
+    assert titles_by_id[first_id] == "Book refundable Lisbon flights"
+    assert "Draft launch post" in titles_by_id.values()
 
     commit = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/commit",
@@ -2138,15 +2156,6 @@ def test_user_edits_survive_later_transcript_reconciliation_and_delete_before_sa
 
 def test_brain_dump_commit_is_atomic_and_idempotent_on_retry(api_client) -> None:
     operation = _start_operation(api_client, key="start-idempotent-operation")
-    api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-idempotent-segment"},
-        json={
-            "segments": [
-                {"sequence": 1, "text": "Pay VAT. Send invoice.", "stability": "stable"}
-            ]
-        },
-    ).json()
     sealed = _upload_and_seal(
         api_client,
         operation,
@@ -2190,26 +2199,29 @@ def test_commit_rejects_a_finished_operation_that_was_never_sealed_or_reconciled
     api_client,
 ) -> None:
     """``finish`` alone (no seal/accurate-STT/reconciler checkpoint) must never
-    let ``commit`` create canonical tasks from bare fast-preview proposals.
+    let ``commit`` create canonical tasks from a bare preview transcript.
 
     This reproduces the exact-head bypass: append -> finish -> commit with no
     sealed audio and no successful reconciler provider run in between.
     """
 
     operation = _start_operation(api_client, key="start-unreconciled-finish")
-    appended = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-unreconciled-finish"},
-        json={
-            "segments": [{"sequence": 1, "text": "Buy milk.", "stability": "stable"}]
-        },
-    ).json()
+    # A pre-existing provisional proposal is what makes this bypass worth
+    # guarding: without one, commit is refused for the trivial reason that
+    # there is nothing to save.
+    appended = _seed_provisional_proposals(
+        api_client, operation, ["Buy milk"], key="unreconciled-finish"
+    )
     finished = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/finish",
         headers={"Idempotency-Key": "finish-unreconciled-finish"},
         json={"expected_revision": appended["revision"]},
     ).json()
     assert finished["status"] == "awaiting_confirmation"
+    assert [proposal["status"] for proposal in finished["proposals"]] == [
+        "ready_to_review"
+    ]
+    assert finished["committable"] is False
 
     rejected = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/commit",
@@ -2227,9 +2239,9 @@ def test_commit_rejects_an_untouched_fast_proposal_after_a_successful_reconcile(
     api_client,
 ) -> None:
     """A successful operation-level reconciler run must not make an untouched
-    browser-preview/fast proposal canonical. Only proposals the reconciler (or
-    the user) actually affirmed may become tasks; a sibling proposal the
-    reconciler never touched stays fast-only and blocks commit until the user
+    pre-existing provisional proposal canonical. Only proposals the reconciler
+    (or the user) actually affirmed may become tasks; a sibling proposal the
+    reconciler never touched stays provisional and blocks commit until the user
     resolves it, even though the operation as a whole did reconcile."""
 
     from app.workflows.voice_brain_dump.adapters import OpenAITextReconciler
@@ -2237,19 +2249,9 @@ def test_commit_rejects_an_untouched_fast_proposal_after_a_successful_reconcile(
     operation = _start_operation(
         api_client, key="start-untouched-fast-sibling", external_processing_allowed=True
     )
-    preview = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-untouched-fast-sibling"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "Buy milk. Call dentist.",
-                    "stability": "stable",
-                }
-            ]
-        },
-    ).json()
+    preview = _seed_provisional_proposals(
+        api_client, operation, ["Buy milk", "Call dentist"], key="untouched-sibling"
+    )
     milk_id = preview["proposals"][0]["id"]
     dentist_id = preview["proposals"][1]["id"]
     assert preview["proposals"][1]["title"] == "Call dentist"
@@ -2571,7 +2573,8 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     assert service.run_due_brain_dump_provider_runs() == 2
     body = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert body["status"] == "awaiting_confirmation"
-    assert "fast_processing" in body["status_history"]
+    assert "sealing" in body["status_history"]
+    assert "fast_processing" not in body["status_history"]
     assert {
         "sealing",
         "accurate_transcribing",
@@ -2606,23 +2609,10 @@ def test_schema_v2_accurate_correction_supersedes_fast_preview_without_canonical
     operation = _start_operation(
         api_client, key="start-schema-v2-supersede", external_processing_allowed=True
     )
-    preview = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-superseded-preview"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "починить brain body",
-                    "stability": "stable",
-                }
-            ]
-        },
+    preview = _seed_provisional_proposals(
+        api_client, operation, ["Починить brain body"], key="superseded-preview"
     )
-    assert preview.status_code == 200, preview.text
-    stale = preview.json()["proposals"][0]
-    assert preview.json()["proposal_patches"][-1]["operation"] == "add"
-    assert preview.json()["proposal_patches"][-1]["producer"] == "fast"
+    stale = preview["proposals"][0]
     assert (
         api_client.get("/api/tasks", params={"state": "inbox"}).json()[
             "counts_by_state"
@@ -2870,23 +2860,16 @@ def test_schema_v2_user_title_lock_blocks_accurate_overwrite_with_visible_confli
     operation = _start_operation(
         api_client, key="start-schema-v2-lock", external_processing_allowed=True
     )
-    fast = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-fast-brain-body"},
-        json={
-            "segments": [
-                {"sequence": 1, "text": "починить brain body", "stability": "stable"}
-            ]
-        },
+    fast = _seed_provisional_proposals(
+        api_client, operation, ["Починить brain body"], key="lock-brain-body"
     )
-    assert fast.status_code == 200, fast.text
-    proposal_id = fast.json()["proposals"][0]["id"]
+    proposal_id = fast["proposals"][0]["id"]
     edited = api_client.patch(
         f"/api/brain-dump-operations/{operation['id']}/proposals/{proposal_id}",
         headers={"Idempotency-Key": "edit-lock-title"},
         json={
             "title": "Починить BrainBuddy MVP",
-            "expected_revision": fast.json()["revision"],
+            "expected_revision": fast["revision"],
         },
     )
     assert edited.status_code == 200, edited.text
@@ -2999,22 +2982,11 @@ def test_schema_v2_accurate_reconciliation_preserves_opaque_ids_when_order_chang
     operation = _start_operation(
         api_client, key="start-schema-v2-lineage", external_processing_allowed=True
     )
-    preview = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-lineage-preview"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "Buy oat milk. Call the dentist.",
-                    "stability": "stable",
-                }
-            ]
-        },
+    preview = _seed_provisional_proposals(
+        api_client, operation, ["Buy oat milk", "Call the dentist"], key="lineage"
     )
-    assert preview.status_code == 200, preview.text
     ids_by_title = {
-        proposal["title"]: proposal["id"] for proposal in preview.json()["proposals"]
+        proposal["title"]: proposal["id"] for proposal in preview["proposals"]
     }
     assert set(ids_by_title) == {"Buy oat milk", "Call the dentist"}
 
@@ -3053,21 +3025,10 @@ def test_schema_v2_accurate_reconciliation_persists_split_lineage(api_client) ->
     operation = _start_operation(
         api_client, key="start-schema-v2-split", external_processing_allowed=True
     )
-    preview = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-split-preview"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "Buy oat milk and call the dentist",
-                    "stability": "stable",
-                }
-            ]
-        },
+    preview = _seed_provisional_proposals(
+        api_client, operation, ["Buy oat milk and call the dentist"], key="split"
     )
-    assert preview.status_code == 200, preview.text
-    predecessor = preview.json()["proposals"][0]
+    predecessor = preview["proposals"][0]
     audio = b"Buy oat milk. Call the dentist."
     digest = hashlib.sha256(audio).hexdigest()
     uploaded = api_client.put(
@@ -3305,30 +3266,6 @@ def test_raw_audio_sweep_defers_expired_pending_provider_work(api_client) -> Non
     reloaded = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert reloaded["raw_audio_present"] is True
     assert reloaded["provider_runs"][-1]["status"] == "pending"
-
-
-def test_proposal_helpers_keep_empty_preview_and_semantic_match_paths_explicit(
-    api_client,
-) -> None:
-    """Preview extraction and matching retain conservative no-op behavior."""
-
-    from app.workflows.voice_brain_dump.domain import BrainDumpProposalDocument
-
-    service = api_client.app.state.container.voice_brain_dump_service
-    now = _start_operation(api_client, key="start-proposal-helper-coverage")[
-        "created_at"
-    ]
-    proposal = BrainDumpProposalDocument(
-        id="proposal_helper",
-        ordinal=1,
-        title="Buy oat milk",
-        created_at=now,
-        updated_at=now,
-    )
-
-    assert service._matching_proposal_index([proposal], "Buy oat milk") == 0
-    assert service._matching_proposal_index([proposal], "Call Mum") is None
-    assert service._proposals_from_segments([proposal], [], now=now) == [proposal]
 
 
 def test_raw_audio_retention_sweep_deletes_expired_terminal_media(api_client) -> None:
@@ -3910,20 +3847,9 @@ def test_validation_failure_uses_bounded_retry_then_preserves_proposals_terminal
     service.text_reconciler = OpenAITextReconciler(
         api_key="test-key", complete=always_invalid
     )
-    preview = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "preview-validation-failure-budget"},
-        json={
-            "segments": [
-                {
-                    "sequence": 1,
-                    "text": "Buy milk",
-                    "stability": "stable",
-                }
-            ]
-        },
+    _seed_provisional_proposals(
+        api_client, operation, ["Buy milk"], key="validation-failure-budget"
     )
-    assert preview.status_code == 200, preview.text
     sealed = _upload_and_seal(
         api_client, operation, b"Buy milk.", "seal-validation-failure-budget"
     )

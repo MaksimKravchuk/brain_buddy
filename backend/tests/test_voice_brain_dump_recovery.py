@@ -63,9 +63,6 @@ def test_structural_lineage_requires_meaningful_textual_evidence() -> None:
         "call",
         "anna",
     }
-    assert VoiceBrainDumpService._extract_task_titles("купить хлеб и молоко") == [
-        "Купить хлеб и молоко"
-    ]
     assert VoiceBrainDumpService._titles_refer_to_same_item("Call", "Call")
     assert not VoiceBrainDumpService._titles_refer_to_same_item("Call", "Email")
 

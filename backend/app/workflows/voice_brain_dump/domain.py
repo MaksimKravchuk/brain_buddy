@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime
@@ -199,6 +200,19 @@ class ProposalProjection:
     active: list[ReconciledProposal]
     history: list[ReconciledProposal]
     patches: list[ProposalPatch]
+
+
+def normalized_title(title: str) -> str:
+    """Case-, whitespace- and trailing-punctuation-insensitive identity of a title.
+
+    The one answer to "is this the same proposal?": the reconciler adapter's
+    duplicate and tombstone guards and the service's lineage matching all key
+    on it, so «Купить молоко.» and «купить  молоко» are one task everywhere.
+    """
+
+    collapsed = re.sub(r"\s+", " ", title).strip()
+    unquoted = collapsed.strip("«»\"'“”‘’()[]")
+    return unquoted.rstrip(".!?…,;:").strip().casefold()
 
 
 def active_transcript_hypotheses(
@@ -424,6 +438,9 @@ BrainDumpStatus = Literal[
 ]
 BrainDumpProposalStatus = Literal[
     "provisional",
+    # Retained read-only for proposals persisted before 2026-09-05, when the
+    # browser-preview lane still minted drafts; nothing produces it any more,
+    # and ``_proposal_document_to_reconciled`` folds it into ``provisional``.
     "wording_changing",
     "ready_to_review",
     "user_edited",

@@ -41,12 +41,15 @@ from app.schemas.tasks import (
 )
 from app.utils.time import utcnow
 from app.workflows.voice_brain_dump.domain import (
+    BrainDumpOperationDocument,
     BrainDumpProviderRunDocument,
     BrainDumpTranscriptSegmentDocument,
 )
 from app.workflows.voice_brain_dump.repository import OperationRepository
 from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
 from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
+
+from .conftest import seed_provisional_proposals
 
 OWNER = "user_branch_owner"
 
@@ -562,6 +565,14 @@ def test_reconcile_restores_pending_create_results(service: TaskService) -> None
     assert [item.id for item in restored_comments] == [comment.id]
 
 
+def _seed_provisional_proposals(
+    voice_service: VoiceBrainDumpService,
+    operation: BrainDumpOperationDocument,
+    titles: list[str],
+) -> BrainDumpOperationDocument:
+    return seed_provisional_proposals(voice_service.operation_repo, operation, titles)
+
+
 def test_brain_dump_operation_uses_sqlite_canonical_when_json_mirror_is_missing(
     data_dir: Path,
 ) -> None:
@@ -752,6 +763,7 @@ def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
         owner_id=OWNER,
         idempotency_key="brain-dump-proposal-segment",
     )
+    operation = _seed_provisional_proposals(voice_service, operation, ["Email broker"])
     proposal_id = operation.proposals[0].id
     payload = BrainDumpProposalUpdateRequest(
         title="Email mortgage broker", expected_revision=operation.revision
@@ -924,6 +936,9 @@ def test_brain_dump_commit_replay_invalid_state_and_deleted_proposals(
         owner_id=OWNER,
         idempotency_key="brain-dump-commit-segments",
     )
+    operation = _seed_provisional_proposals(
+        voice_service, operation, ["Book dentist", "Call bank"]
+    )
     deleted = voice_service.update_brain_dump_proposal(
         operation.id,
         operation.proposals[0].id,
@@ -1047,13 +1062,6 @@ def test_idempotent_result_replay_repairs_stale_canonical_records(
         ).revision
         == 2
     )
-
-
-def test_brain_dump_title_extraction_ignores_blank_and_duplicate_items() -> None:
-    assert VoiceBrainDumpService._extract_task_titles("   \n  ") == []
-    assert VoiceBrainDumpService._extract_task_titles("call bank. Call bank.") == [
-        "Call bank"
-    ]
 
 
 # --- transition branches ---------------------------------------------------
