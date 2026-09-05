@@ -136,3 +136,169 @@ change to spec MUST/AC text, by finding id:
 The remaining findings (A2, A4, U3, U5, C1, C2, G1–G5, I2, I3, I5, I9–I13)
 touched only the plan, design, data model, contracts, checklist and tasks.
 D1–D3 (duplication) were left as they are: the restated text is consistent.
+
+
+## Implementation deviations (recorded by the implementer)
+
+The planning artifacts were reviewed and accepted before any code existed. The
+places where the implementation departed from them are recorded here, with the
+reason, so the reviewers grade what was built rather than what was drawn. Where
+a contract stated the superseded shape, the contract has been corrected in the
+same commit as this entry — a deviation that lives only in a review note is a
+document that will be trusted and be wrong.
+
+**(a) The per-run push token is derived, not random.**
+`contracts/push-callback.md` requires the *same* token to go out again with
+every reply, so a successor task keeps push acceleration, while `data-model.md`
+§7 allows a run to store only `push_token_fingerprint`. Those two are
+satisfiable together only if the token is recomputable, so `derive_push_token`
+computes it as a keyed HMAC over the run id under the relay key ring rather
+than drawing it from `secrets.token_urlsafe`. Storing the plaintext to achieve
+the same thing would put a live route credential in the database; minting a
+fresh one per reply would silently invalidate a push the agent is already
+preparing. The value is indistinguishable from random without the key and
+unguessable with it, because the run id it derives from is itself unguessable.
+
+**(b) A reply runs on the calling request's thread.**
+The plan put start *and* reply exchanges on the bounded exchange pool. A reply
+is issued from a request the user is waiting on, and the pool it would wait for
+is the one saturated by starts — so a reply could block behind the very
+exchanges a reply often resolves, and a deadlock there would be indistinguish-
+able from a slow agent. The reply therefore runs on the calling thread while
+still being recorded as a durable `reply` exchange (state, kind, deadline), so
+restart recovery, the observation suspension and the succession rules all see
+exactly the exchange the plan described. Cancel keeps its dedicated control
+pool for the same reason, unchanged.
+
+**(c) iOS "Copy link" uses React Native's core `Clipboard`.**
+`expo-clipboard` is not a dependency of this app and adding one for a single
+call is a supply-chain cost with no benefit here. The call is isolated behind
+`mobile/src/utils/clipboard.ts`, so migrating to `expo-clipboard` later is one
+edit in one file.
+
+**(d) Two feature-007 link tests were re-targeted, not deleted.**
+They asserted the pre-014 behaviour that a reported link could be interactive
+under some conditions. The 2026-09-04 product decision is that every reported
+link is inert, without exception, so the two cases now assert that instead.
+
+**(e) Two names differ from the data model.**
+`observation_interval` lives on `ExchangePolicy` rather than standing alone,
+because it is one of the exchange lane's bounds and a second home for it would
+be a second thing to keep in step. `AgentPrimaryStateLabel` is declared in
+`domain.py` and re-exported by `schemas/agents.py`, so the label set has one
+definition and the schema module still reads as its owner.
+
+**(f) Two removal tasks and two contract details, found by the reference runtimes.**
+T110 (the service's ingest path) and T114 (the routes and schemas) landed in one
+commit: the route needs the service method, the service method needs the request
+schema, and removing any one alone leaves a tree that cannot import. T115 landed
+before T111–T113 for the same reason — `connector.py` imports the domain
+constants T111 removes.
+
+The two conformance suites then found two things no fake had: A2A 1.0 returns
+the Task *as* the JSON-RPC result for `GetTask` (only `SendMessage` wraps it in
+`{"task": …}`), and a card that declares no security scheme is an agent asking
+for no authentication rather than one refusing yours. Both were product bugs
+against the unmodified reference runtimes, and both are fixed with their own
+unit tests beside the conformance cases. Two smaller ones are asserted as
+observed rather than as planned and say so in the tests: the helloworld sample
+refuses cancel with `-32002 TASK_NOT_CANCELABLE`, not `-32004`; and a
+token-secured Hermes refuses to POST a push notification to a private address,
+so the loopback conformance stack proves the fallback (push is an optimisation,
+the schedule is the guarantee) instead of the push leg.
+
+**(g) `revision` is the owner's edit token and does not move on a quiet
+observation.**
+The plan gave a run two counters without saying which one an owner's answer
+names back. The implementation advanced both on every accepted write, and the
+Compose E2E run found what that costs: the observer polls on a schedule the
+owner cannot see, so a reply carrying the revision the page last read was
+refused as **This run changed elsewhere** whenever any observation — including
+one that learned nothing at all — had run in between. On the E2E stack that is
+five seconds; in production it is sixty, so anyone who takes a minute to answer
+is guaranteed to hit it.
+
+The two counters are now separated by what they are for. `run_version` remains
+BrainBuddy's observation version and the compare-and-set every background write
+is serialised on — unchanged, and still what `data-model.md` ("Write rule for
+background threads") describes. `revision` is the *user-edit* concurrency token
+and advances only when the write moves something the owner could have read and
+been answering; a pass that only records that the agent was asked again still
+refreshes `last_contact_at`/`last_observed_at`/`updated_at` and leaves the token
+alone. Materiality is decided by comparing values rather than by reusing the
+timeline's "did this append a row?" test, because the two sets are not the same:
+an observation carrying different artifacts, or clearing a cancellation request,
+is not a new timeline row but is a change every surface renders.
+
+Nothing in storage keys on `revision` — every conditional write on `agent_runs`
+matches `json_extract(payload, '$.run_version')` (`repository.py` lines 1078 and
+1186) and `save_run` is an unconditional upsert under the process-wide
+`command_lock` — so a write that does not bump it is safe. No request or
+response shape changed, so `contracts/api-deltas.md` line 246 ("unchanged
+requests") stays true.
+
+**(h) A delivery-check lookup has three outcomes, and only one of them
+licenses a resend.**
+The plan and `contracts/api-deltas.md` said "an ambiguous answer leaves the run
+`delivery_unconfirmed`"; the implementation could not tell an ambiguous answer
+from an empty one, because `_lookup_task` returned `None` both when the agent
+answered "no task in this conversation" and when there was no answer at all — a
+timeout, a JSON-RPC error, an unusable payload. **Check again** then resent on
+the strength of a lookup that had established nothing, which is precisely the
+duplicate the lookup exists to prevent (SC-008).
+
+The lookup now returns an explicit outcome — adopted task, confirmed empty, or
+unanswered — and only a *confirmed* empty answer reaches the resend branch. An
+unanswered lookup leaves the run byte-for-byte as it was (`dispatch_state`,
+`exchange_state` and `revision` all unchanged), answers 200 with the same
+**Delivery unconfirmed** projection and the **Check again** control still
+offered, and writes one audit row. No new refusal `reason` was invented: the
+eight in FR-006 are conditions on the *send*, and this is the absence of the
+evidence a send needs, not a ninth condition — so the "complete list" in FR-006
+and in `contracts/api-deltas.md` still holds exactly as ratified.
+
+`data-model.md` §6 gains one audit action, `delivery_lookup_failed`, whose
+outcome is the allowlisted transport code (`a2a_timeout`, `a2a_response_invalid`
+…) and never agent text. It is written per user-triggered check rather than
+bounded per day, like the `task_adopted` row beside it: a check is a tap, not a
+poll.
+
+**(i) `check-delivery` takes an `expected_revision`.**
+The plan gave the request body nothing but `current_password`, on the reasoning
+that every identifier the check needs is already on the run. That is true of
+*identifiers* and false of *concurrency*: the check can end in a message on the
+wire, which makes it a mutation, and `mobile/AGENTS.md` requires every mobile
+mutation to send `Idempotency-Key` **and** `expected_revision`. Without it a
+**Check again** tapped on a cached run that had moved underneath — a run the
+observer had already settled, or that a parallel check had resent for — was
+carried out against a state the user was no longer being shown.
+
+`AgentCheckDeliveryRequest` therefore gains `expected_revision: int | None`
+(`ge=1`, default `None`). When it is sent and differs from `run.revision` the
+call raises the same `ConflictError` the reply path raises, before the lookup
+and so before any resend; a stale client cannot even spend a request at the
+agent. It is optional because the guard is the client's to adopt and a body
+that suddenly *required* it would break a client mid-rollout; both shipped
+clients send it, web for parity with iOS. The body stays `extra="forbid"` and
+gains no other key. `contracts/api-deltas.md` §check-delivery is corrected in
+the same commit.
+
+**(j) `check-delivery` reserves its `Idempotency-Key` rather than only
+requiring one.**
+The route demanded the header from the start and passed it to the service,
+which never spent it. That is worse than not asking: the client is told its
+retry is deduplicated and it is not. The dangerous case is the one the key
+exists for — the resend goes out, its own answer is ambiguous, and the HTTP
+response is lost. The run is still **Delivery unconfirmed**, the agent's new
+task is not visible yet, so the retry's lookup comes back empty and licenses a
+second copy of the same message.
+
+The key now goes through the same `AgentIdempotencyRecord` machinery the
+connection commands use: the call is serialised per key on `operation_lock`,
+the first outcome is stored as the response body, a retry replays it verbatim
+with no lookup and no send, and the same key against a different run is refused
+with the `ConflictError` every other keyed path raises. Refusals are
+deliberately not stored — each one names something the owner can put right, and
+a retry after they have is a different world, not a replay. The record is
+ordinary internal storage under the shape `data-model.md` §5 already describes;
+only the `command` value (`check_delivery`) is new.
