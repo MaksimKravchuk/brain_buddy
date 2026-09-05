@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
-import { AppState } from "react-native";
+import { Alert, AppState, type AlertButton } from "react-native";
 
 import { ToastHost } from "@/components/ToastHost";
 import { makeOperation, makeProposal } from "@/test/brainDump";
@@ -17,11 +17,18 @@ import { renderWithSession } from "@/test/harness";
 import BrainDumpOperationScreen from "../[operationId]";
 
 let backend: FakeBackend;
+let alertSpy: jest.SpyInstance<void, Parameters<typeof Alert.alert>>;
 
-beforeEach(() => jest.useFakeTimers({ doNotFake: ["nextTick"] }));
+beforeEach(() => {
+  jest.useFakeTimers({ doNotFake: ["nextTick"] });
+  // The platform dialog is a device boundary: record what the screen asked it
+  // to show, and let each test answer it by hand.
+  alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+});
 
 afterEach(() => {
   jest.useRealTimers();
+  alertSpy.mockRestore();
   backend?.restore();
 });
 
@@ -42,6 +49,45 @@ async function advancePoll(ms = 10_000) {
   await act(async () => {
     await jest.advanceTimersByTimeAsync(ms);
   });
+}
+
+/** The answers of the latest confirmation the screen raised, safe answer first. */
+function latestConfirmation(): { keep: AlertButton; discard: AlertButton } {
+  const buttons = alertSpy.mock.lastCall?.[2] ?? [];
+  expect(buttons).toHaveLength(2);
+  const [keep, discard] = buttons;
+  return { keep, discard };
+}
+
+/** Choose one answer of the confirmation, as the platform would on a tap. */
+async function answer(button: AlertButton) {
+  await act(async () => {
+    button.onPress?.();
+  });
+}
+
+const DISCARD_REVIEW_DIALOG = [
+  "Discard all tasks?",
+  "Nothing is saved to Inbox and the recording is deleted.",
+  [
+    { text: "Keep reviewing", style: "cancel" },
+    { text: "Discard all tasks", style: "destructive", onPress: expect.any(Function) },
+  ],
+  { cancelable: true },
+] as const;
+
+const DISCARD_RECORDING_DIALOG = [
+  "Discard this recording?",
+  "The audio and transcript are deleted and nothing is saved.",
+  [
+    { text: "Keep", style: "cancel" },
+    { text: "Discard recording", style: "destructive", onPress: expect.any(Function) },
+  ],
+  { cancelable: true },
+] as const;
+
+function cancelCalls() {
+  return backend.callsTo("POST", "/brain-dump-operations/op-1/cancel");
 }
 
 const AWAITING = makeOperation({
@@ -173,13 +219,70 @@ describe("brain dump review — proposals", () => {
     expect(screen.getByDisplayValue("First")).toBeOnTheScreen();
   });
 
-  it("says so when a dump produced nothing", async () => {
+  it("015-FR-005 says nothing was proposed, shows what was heard, and offers no confirm on an empty review", async () => {
+    const at = "2026-01-01T00:00:00Z";
+    await review({
+      "GET /brain-dump-operations/op-1": () =>
+        makeOperation({
+          status: "awaiting_confirmation",
+          committable: true,
+          proposals: [],
+          segments: [
+            // Out of spoken order on purpose; the preview hypothesis s1 is
+            // superseded by the accurate s4, and the interim s3 was never the record.
+            { id: "s2", sequence: 2, text: "Ну…", stability: "stable", created_at: at },
+            {
+              id: "s1",
+              sequence: 1,
+              text: "Tak",
+              stability: "stable",
+              provider_role: "browser_preview",
+              created_at: at,
+            },
+            { id: "s3", sequence: 3, text: "надо", stability: "interim", created_at: at },
+            {
+              id: "s4",
+              sequence: 4,
+              text: "Так, надо…",
+              stability: "stable",
+              provider_role: "accurate",
+              supersedes_segment_ids: ["s1"],
+              created_at: at,
+            },
+          ],
+        }),
+    });
+
+    expect(await screen.findByText("No tasks to review")).toBeOnTheScreen();
+    expect(
+      screen.getByText("No tasks were proposed from this dump. Discard it to record again."),
+    ).toBeOnTheScreen();
+    expect(screen.queryByText(/^Review \d/)).toBeNull();
+    // Absent, not disabled: there is nothing to save.
+    expect(screen.queryByText(/^Confirm /)).toBeNull();
+
+    expect(screen.getByText("What was heard")).toBeOnTheScreen();
+    expect(screen.getByText("Ну…")).toBeOnTheScreen();
+    expect(screen.getByText("Так, надо…")).toBeOnTheScreen();
+    expect(screen.queryByText("Tak")).toBeNull();
+    expect(screen.queryByText("надо")).toBeNull();
+
+    // The one exit left still asks first.
+    await fireEvent.press(screen.getByText("Discard all"));
+    expect(alertSpy).toHaveBeenCalledWith(...DISCARD_REVIEW_DIALOG);
+    expect(cancelCalls()).toHaveLength(0);
+  });
+
+  it("015-FR-005 says when no transcript was captured for an empty review", async () => {
     await review({
       "GET /brain-dump-operations/op-1": () =>
         makeOperation({ status: "awaiting_confirmation", proposals: [] }),
     });
 
-    expect(await screen.findByText("No tasks were proposed from this dump.")).toBeOnTheScreen();
+    expect(await screen.findByText("No tasks to review")).toBeOnTheScreen();
+    expect(screen.getByText("What was heard")).toBeOnTheScreen();
+    expect(screen.getByText("No transcript was captured for this recording.")).toBeOnTheScreen();
+    expect(screen.queryByText(/^Confirm /)).toBeNull();
   });
 
   it("patches an edited title with the operation revision", async () => {
@@ -350,7 +453,7 @@ describe("brain dump review — proposals", () => {
     expect(backend.callsTo("POST", "/brain-dump-operations/op-1/commit")).toHaveLength(0);
   });
 
-  it("offers to delete the kept recording, naming when it expires", async () => {
+  it("offers to delete the retained audio under that name, saying when it expires", async () => {
     await review({
       "GET /brain-dump-operations/op-1": () => ({
         ...AWAITING,
@@ -365,7 +468,9 @@ describe("brain dump review — proposals", () => {
     });
 
     expect(await screen.findByText(/^Recording kept until /)).toBeOnTheScreen();
-    await fireEvent.press(screen.getByLabelText("Delete recording"));
+    // It removes the retained audio only, so it is not named like a discard.
+    expect(screen.queryByLabelText("Delete recording")).toBeNull();
+    await fireEvent.press(screen.getByLabelText("Delete retained audio"));
 
     await waitFor(() =>
       expect(backend.callsTo("POST", "/brain-dump-operations/op-1/delete_raw_audio")).toHaveLength(1),
@@ -449,37 +554,65 @@ describe("brain dump review — commit and discard", () => {
     expect(routerSpy().dismissAll).not.toHaveBeenCalled();
   });
 
-  it("discards everything from the review sheet", async () => {
+  it("015-FR-007 015-SC-004 asks before discarding all from the review sheet and cancels only once confirmed", async () => {
     await review({
-      "GET /brain-dump-operations/op-1": () => AWAITING,
+      "GET /brain-dump-operations/op-1": () => ({ ...AWAITING, revision: 4 }),
       "POST /brain-dump-operations/op-1/cancel": () => makeOperation({ status: "cancelled" }),
     });
     await screen.findByText("Review 2 tasks");
 
     await fireEvent.press(screen.getByText("Discard all"));
 
-    await waitFor(() =>
-      expect(backend.callsTo("POST", "/brain-dump-operations/op-1/cancel")).toHaveLength(1),
-    );
+    expect(alertSpy).toHaveBeenCalledWith(...DISCARD_REVIEW_DIALOG);
+    expect(cancelCalls()).toHaveLength(0);
+
+    await answer(latestConfirmation().discard);
+
+    await waitFor(() => expect(cancelCalls()).toHaveLength(1));
+    expect(cancelCalls()[0].body).toEqual({ expected_revision: 4 });
     expect(routerSpy().dismissAll).toHaveBeenCalled();
     expect(await screen.findByText("Dump discarded — nothing was saved")).toBeOnTheScreen();
   });
 
-  it("closes from the header with the same cancel command", async () => {
+  it("015-FR-007 keeps reviewing, with nothing posted, when the safe answer is chosen", async () => {
+    await review({ "GET /brain-dump-operations/op-1": () => AWAITING });
+    await screen.findByText("Review 2 tasks");
+
+    await fireEvent.press(screen.getByText("Discard all"));
+    await answer(latestConfirmation().keep);
+
+    expect(cancelCalls()).toHaveLength(0);
+    expect(routerSpy().dismissAll).not.toHaveBeenCalled();
+    expect(screen.getByText("Review 2 tasks")).toBeOnTheScreen();
+    expect(screen.getByDisplayValue("Call the notary")).toBeOnTheScreen();
+  });
+
+  it("015-FR-007 015-SC-004 names the header control as a discard and asks before cancelling from it", async () => {
     await review({
-      "GET /brain-dump-operations/op-1": () => AWAITING,
+      "GET /brain-dump-operations/op-1": () => ({ ...AWAITING, revision: 3 }),
       "POST /brain-dump-operations/op-1/cancel": () => makeOperation({ status: "cancelled" }),
     });
     await screen.findByText("Review 2 tasks");
 
-    await fireEvent.press(screen.getByLabelText("Close"));
+    // A control named Close must not delete a recording.
+    expect(screen.queryByLabelText("Close")).toBeNull();
+    await fireEvent.press(screen.getByLabelText("Discard recording"));
 
-    await waitFor(() =>
-      expect(backend.callsTo("POST", "/brain-dump-operations/op-1/cancel")).toHaveLength(1),
-    );
-    expect(
-      backend.callsTo("POST", "/brain-dump-operations/op-1/cancel")[0].headers["Idempotency-Key"],
-    ).toBe(uuidNumber(1));
+    expect(alertSpy).toHaveBeenCalledWith(...DISCARD_REVIEW_DIALOG);
+    expect(cancelCalls()).toHaveLength(0);
+
+    await answer(latestConfirmation().keep);
+    expect(cancelCalls()).toHaveLength(0);
+    expect(screen.getByText("Review 2 tasks")).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByLabelText("Discard recording"));
+    expect(alertSpy).toHaveBeenCalledTimes(2);
+    await answer(latestConfirmation().discard);
+
+    await waitFor(() => expect(cancelCalls()).toHaveLength(1));
+    expect(cancelCalls()[0].body).toEqual({ expected_revision: 3 });
+    expect(cancelCalls()[0].headers["Idempotency-Key"]).toBe(uuidNumber(1));
+    expect(routerSpy().dismissAll).toHaveBeenCalled();
   });
 });
 
@@ -551,6 +684,39 @@ describe("brain dump review — terminal states", () => {
     expect(screen.queryByText("Extract tasks from the browser transcript")).toBeNull();
     // Discarding is always available.
     expect(screen.getByText("Discard everything")).toBeOnTheScreen();
+  });
+
+  it("015-FR-007 015-SC-004 asks before discarding a failed recording and cancels only once confirmed", async () => {
+    await review({
+      "GET /brain-dump-operations/op-1": () =>
+        makeOperation({
+          status: "failed",
+          revision: 5,
+          available_recovery_actions: ["cancel"],
+        } as never),
+      "POST /brain-dump-operations/op-1/cancel": () => makeOperation({ status: "cancelled" }),
+    });
+    await screen.findByText("Couldn't finish");
+
+    await fireEvent.press(screen.getByText("Discard everything"));
+
+    expect(alertSpy).toHaveBeenCalledWith(...DISCARD_RECORDING_DIALOG);
+    expect(cancelCalls()).toHaveLength(0);
+
+    // The safe answer leaves the failed recording, and its audio, where it was.
+    await answer(latestConfirmation().keep);
+    expect(cancelCalls()).toHaveLength(0);
+    expect(routerSpy().dismissAll).not.toHaveBeenCalled();
+    expect(screen.getByText("Couldn't finish")).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByText("Discard everything"));
+    expect(alertSpy).toHaveBeenCalledTimes(2);
+    await answer(latestConfirmation().discard);
+
+    await waitFor(() => expect(cancelCalls()).toHaveLength(1));
+    expect(cancelCalls()[0].body).toEqual({ expected_revision: 5 });
+    expect(routerSpy().dismissAll).toHaveBeenCalled();
+    expect(await screen.findByText("Dump discarded — nothing was saved")).toBeOnTheScreen();
   });
 
   it("falls back to the error code, then to generic guidance", async () => {

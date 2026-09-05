@@ -4,6 +4,7 @@ import {
   buildConsent,
   canCommit,
   CHUNK_BYTES,
+  heardTranscript,
   INITIAL_POLL_DELAY_MS,
   isPollable,
   nextPollDelay,
@@ -11,6 +12,7 @@ import {
   planChunks,
   processingStageLabel,
   visibleProposals,
+  type BrainDumpSegment,
 } from "../machine";
 
 function makeOperation(
@@ -250,6 +252,39 @@ describe("visibleProposals ordering", () => {
 
     expect(visible.map((item) => item.id)).toEqual(["a", "b"]);
     expect(input).toEqual(proposals);
+  });
+});
+
+describe("heardTranscript", () => {
+  function makeSegment(overrides: Partial<BrainDumpSegment> & { id: string }): BrainDumpSegment {
+    return {
+      sequence: 1,
+      text: overrides.id,
+      stability: "stable",
+      created_at: "2026-01-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("keeps settled utterances no later segment supersedes, in spoken order", () => {
+    const heard = heardTranscript([
+      makeSegment({ id: "s2", sequence: 2 }),
+      makeSegment({ id: "s1", sequence: 1, provider_role: "browser_preview" }),
+      makeSegment({ id: "s3", sequence: 3, stability: "interim" }),
+      makeSegment({ id: "s4", sequence: 4, provider_role: "accurate", supersedes_segment_ids: ["s1"] }),
+      makeSegment({ id: "s5", sequence: 5, supersedes_segment_ids: [] }),
+    ]);
+
+    expect(heard.map((segment) => segment.id)).toEqual(["s2", "s4", "s5"]);
+  });
+
+  it("does not reorder the caller's array while sorting its own copy", () => {
+    const segments = [makeSegment({ id: "b", sequence: 2 }), makeSegment({ id: "a", sequence: 1 })];
+    const input = [...segments];
+
+    expect(heardTranscript(input).map((segment) => segment.id)).toEqual(["a", "b"]);
+    expect(input).toEqual(segments);
+    expect(heardTranscript([])).toEqual([]);
   });
 });
 
