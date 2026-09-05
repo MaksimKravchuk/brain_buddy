@@ -46,7 +46,13 @@ description ≤500}`), `auth_schemes_offered[]` (`{name, kind: bearer|api_key|oa
 Every one of these strings — and every `last_test_error_detail` value — is untrusted agent text:
 both clients render it as inert plain text, never an anchor or `Linking` target, never
 HTML/markdown-interpreted, never auto-linkified, exactly as `result_link` is treated (FR-016,
-AC-031); the bounds above are the only processing it receives.
+AC-031); the bounds above are the only processing it receives. `interface_url` is the one
+field that is not prose: it is the dispatch target, and discovery only ever copies the
+interface it *selected*, which has already passed the destination check. A rejected address —
+a `javascript:` scheme, a link-local metadata host — is refused at discovery as
+`a2a_no_supported_interface`; there is no summary at all, so it is never copied into
+`card.interface_url`, into a failure detail, or into any other stored field, and a card that
+starts naming one leaves the last successfully tested card exactly as it was.
 
 **State transitions** (connection): `untested → (test) ready | invalid_credentials |
 unreachable | unsupported`; `ready → stale` is derived (`now >= last_contact_at + stale_after`);

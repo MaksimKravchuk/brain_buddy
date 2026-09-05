@@ -49,7 +49,7 @@ from app.modules.agents.a2a.card import (
     fetch_card,
     interpret_card,
 )
-from app.modules.agents.egress import DestinationRejected
+from app.modules.agents.egress import DestinationRejected, validate_destination
 
 # --- card fixtures ----------------------------------------------------------
 #
@@ -115,6 +115,20 @@ def _refuse_host(url: str) -> None:
     raise DestinationRejected(
         "destination_network_not_allowed", "The agent endpoint must be public."
     )
+
+
+def _real_destination_check(url: str) -> None:
+    """The validator discovery actually runs, with this suite's DNS.
+
+    A stub can only prove that `_select_interface` honours a refusal; this
+    proves the shipped refusal covers the addresses that matter.
+    """
+
+    validate_destination(url, resolver=_only_the_example_hosts)
+
+
+def _only_the_example_hosts(host: str, port: int) -> list[str]:
+    return {"agent.example.com": ["93.184.216.34"]}[host]
 
 
 class TestCardShapes:
@@ -273,6 +287,51 @@ class TestInterfaceSelection:
 
         assert result.failure_code == A2A_NO_SUPPORTED_INTERFACE
         assert result.failure_detail is None
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "javascript:alert(3)",
+            "http://169.254.169.254/latest/meta-data/",
+        ],
+        ids=["javascript-scheme", "link-local-metadata"],
+    )
+    def test_014_FR_002_a_rejected_interface_never_reaches_the_card_summary(
+        self, address: str
+    ) -> None:
+        """`card.interface_url` is the dispatch target, so it is never prose.
+
+        Discovery is the only writer of that field and it copies the interface
+        it *selected* — one that has already been through the real destination
+        check. An address the check refuses therefore cannot appear in the
+        summary, the discovery result or a failure detail: there is no summary
+        at all. Driven through the production `validate_destination` rather than
+        a stub, because the claim is about what the shipped refusal covers.
+        """
+
+        payload = _card(
+            supportedInterfaces=[
+                {
+                    "url": address,
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "1.0",
+                }
+            ]
+        )
+
+        result = interpret_card(
+            payload,
+            auth_scheme="bearer",
+            validate_interface_host=_real_destination_check,
+        )
+
+        assert result.failure_code == A2A_NO_SUPPORTED_INTERFACE
+        assert result.summary is None
+        assert result.interface_url is None
+        assert result.card_fingerprint is None
+        # Not in a detail either: the owner is told the card names no interface
+        # BrainBuddy can use, never handed the address back to render.
+        assert address not in json.dumps(result.failure_detail)
 
     def test_014_FR_001_the_interface_host_is_validated_separately(self) -> None:
         """FR-004: the card may name a *different* host than the one the user

@@ -117,6 +117,26 @@ def mock_transport_card_fetcher(
     return fetch
 
 
+#: The a2a-sdk 1.0 card shape, served whole so a test can move one field of it
+#: and watch what discovery does with the change.
+_CARD_BODY: dict[str, Any] = {
+    "name": "Hermes",
+    "version": "1.2.3",
+    "description": "A research agent.",
+    "supportedInterfaces": [
+        {
+            "url": "https://agent.example.com/rpc",
+            "protocolBinding": "JSONRPC",
+            "protocolVersion": "1.0",
+        }
+    ],
+    "capabilities": {"streaming": True, "pushNotifications": False},
+    "securitySchemes": {"bearer": {"httpAuthSecurityScheme": {"scheme": "bearer"}}},
+    "securityRequirements": [{"bearer": []}],
+    "skills": [{"id": "research", "name": "Research"}],
+}
+
+
 class BlockingCardFetcher(FakeCardFetcher):
     """Discovery held open on a barrier, so a test can move the world under it.
 
@@ -1563,6 +1583,53 @@ class TestConnectByAgentCard:
         assert tested.status == "unsupported"
         assert tested.last_test_error_code == "a2a_not_an_agent"
         assert tested.card is None
+
+    def test_014_FR_002_a_rejected_interface_leaves_the_stored_card_alone(
+        self, tmp_path: Path, clock: Clock, a2a_client: FakeA2AClient
+    ) -> None:
+        """`card.interface_url` is the dispatch target, so it stays trustworthy.
+
+        A card that starts naming an address BrainBuddy refuses to dial is a
+        discovery *failure*: the connection records the code and drops to
+        **unsupported**, and the card the owner can still read is the one the
+        last successful test recorded — with the validated interface it had.
+        The refused address is written nowhere at all.
+        """
+
+        served: dict[str, Any] = {"card": _CARD_BODY}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=served["card"])
+
+        service = build_service(
+            AgentRepository(tmp_path),
+            clock,
+            card_fetcher=mock_transport_card_fetcher(handler),
+            a2a_client=a2a_client,
+        )
+        connection_id = connect(service)
+        ready = service.test_connection(connection_id, owner_id=OWNER)
+        assert ready.status == "ready"
+        assert ready.card is not None
+        assert ready.card.interface_url == "https://agent.example.com/rpc"
+
+        hostile = json.loads(json.dumps(_CARD_BODY))
+        hostile["supportedInterfaces"] = [
+            {
+                "url": "javascript:alert(3)",
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "1.0",
+            }
+        ]
+        served["card"] = hostile
+
+        refused = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert refused.status == "unsupported"
+        assert refused.last_test_error_code == "a2a_no_supported_interface"
+        assert refused.card is not None
+        assert refused.card.interface_url == "https://agent.example.com/rpc"
+        assert "javascript:" not in refused.model_dump_json()
 
     def test_014_FR_002_a_card_that_trickles_past_the_deadline_reads_as_unreachable(
         self, tmp_path: Path, clock: Clock

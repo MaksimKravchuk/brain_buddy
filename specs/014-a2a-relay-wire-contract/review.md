@@ -329,3 +329,37 @@ zero content-bearing sends), whose docstring now says which half it is.
 keeps the prose from drifting back. No behaviour changed, no requirement moved,
 and every task tick stands; `tasks.md` T015, T077 and T128 name that test by
 the name `traceability.md` and `acceptance.md` already cite, so it keeps it.
+
+**(l) `card.interface_url` is the dispatch target, so it is never card prose.**
+T035 and `test_card_text_is_returned_verbatim_and_bounded` asserted that a card
+whose `interface_url` is `javascript:alert(3)` comes back in
+`AgentConnectionResponse.card.interface_url` verbatim, alongside the name and
+description. The AC-031 half of that is right and stays: prose is returned
+exactly as the agent wrote it, because escaping it here would hide what the
+agent claims and the clients are the layer that renders it inertly. The
+`interface_url` half was wrong twice over. `data-model.md` §1 defines that field
+as the validated interface, and `service.py::_a2a_target` dispatches to it, so
+the test asserted that a refused address is a legitimate value of the field
+BrainBuddy sends the owner's task to.
+
+It is also a state real discovery cannot produce: `_select_interface` puts every
+candidate through `validate_interface_host` → `validate_destination`, whose
+allowed schemes are `http` and `https`, so a `javascript:` interface or a
+link-local metadata host is refused as `a2a_no_supported_interface` before a
+summary exists. Only `FakeCardFetcher`, which hands the service a
+`CardDiscovery` directly, could reach it. The test now offers a valid `https://`
+interface and keeps the verbatim-and-bounded assertions for `name`,
+`description` and skill text, and two new tests prove the refusal instead of
+assuming it:
+`test_agent_a2a_card.py::TestInterfaceSelection::test_014_FR_002_a_rejected_interface_never_reaches_the_card_summary`
+(both addresses, through the production `validate_destination` rather than a
+stub: no summary, no interface, no fingerprint, and the address in no failure
+detail) and
+`test_agent_relay_service.py::TestConnectByAgentCard::test_014_FR_002_a_rejected_interface_leaves_the_stored_card_alone`
+(a card that starts naming one drops the connection to **unsupported** and
+leaves the last successfully tested card, with its validated interface, exactly
+as it was).
+
+`data-model.md` §1 now says so in one sentence, and T035's text describes the
+corrected assertion. No production code changed: the refusal was already there
+and it is the tests that had described an impossible state. T035's tick stands.
