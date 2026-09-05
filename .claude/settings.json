@@ -55,7 +55,9 @@
       "Bash(git fetch:*)",
       "Read(//home/user/brain_buddy/**)",
       "Grep",
-      "Glob"
+      "Glob",
+      "mcp__github__pull_request_read",
+      "mcp__github__get_job_logs"
     ],
     "ask": [
       "Bash(./scripts/submit_to_trunk.sh:*)",
