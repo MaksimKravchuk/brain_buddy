@@ -411,3 +411,37 @@ and `::test_reply_retry_after_post_delivery_failure_reconciles_without_redeliver
 broke a `save_command` fake on its *first* call to simulate an outage after the
 send. A reply now saves that row twice, so the fakes name the second one; the
 scenario they assert is unchanged.
+
+**(n) Restart recovery is two steps, and only the first may run before the app
+serves.**
+`main.py` called `agent_observer.recover_interrupted_exchanges()` synchronously
+at startup, and that call performs one `ListTasks` per open exchange under the
+short-call deadline (15 s by default). Eight unreachable exchanges therefore
+delayed the first request by about two minutes, while `fly.backend.toml`'s
+health check gives up after five seconds — so the deployment most in need of
+recovery is the one the platform restarts before it can finish, over and over.
+
+Recovery is now split by what it needs. `mark_interrupted_exchanges()` is pure
+state and no network: a queued exchange is settled **Not sent** and re-offered,
+an open one is marked `interrupted` (and only a start also becomes **Delivery
+unconfirmed**, per (m)), and it returns the runs still owing a lookup. That runs
+at boot, because it is what makes every run honest and it cannot block.
+`resolve_interrupted_exchanges()` submits the lookups to the control lane — the
+one that is never held open — immediately after `agent_observer.start()`, so
+they happen once the app is serving. `recover_interrupted_exchanges()` remains
+as both halves in one synchronous call for callers that want it, which is what
+the observer suite uses.
+
+Nothing about the send invariant changes: the resolver only looks a run up.
+`test_014_SC_007_the_boot_time_mark_asks_the_agent_nothing` pins that the boot
+step makes no client call at all,
+`test_014_FR_006_the_lookups_run_on_the_pool_and_settle_the_runs` that the
+second step is ordinary pool work,
+`test_014_FR_006_a_run_purged_between_the_two_steps_is_left_alone` that the gap
+the split introduces is survivable, and
+`test_014_SC_007_health_answers_before_the_boot_lookups_come_back` drives a real
+`TestClient(app)` whose resolver is held on an event and gets a 200 from
+`/health` before it is released. `research.md` Decision C, `tasks.md` T054, T066
+and T070 and the comment block in `main.py` describe the two steps; the same
+paragraph of `research.md` carried the (k) overclaim in a fourth phrasing and
+the (m) succession-evidence rule, and both are corrected there in this commit.

@@ -216,21 +216,29 @@ def create_app() -> FastAPI:
             app.state.voice_sweep_wake_event,
         )
     if background_maintenance_enabled:
-        # Once, at boot, before a request can be served: every exchange a
-        # restart left mid-flight is settled by what it can prove. A queued one
-        # never left, so it is **Not sent** and offered again; a started one is
-        # resolved by lookup only, because a resend is a send and no send is
-        # ever initiated without a user action (AC-032). Gated with the other
-        # maintenance for the same reason the
+        # Once, at boot, before a request can be served — but only the half of
+        # recovery that needs nothing from the network. Every exchange a restart
+        # left mid-flight is *marked* by what it can prove: a queued one never
+        # left, so it is **Not sent** and offered again; a started one is marked
+        # interrupted. Gated with the other maintenance for the same reason the
         # sweeps are: the test suite builds many short-lived apps in one
         # process, and a boot-time scan over a shared, process-wide lock would
         # race unrelated tests.
-        app.state.container.agent_observer.recover_interrupted_exchanges()
+        interrupted = app.state.container.agent_observer.mark_interrupted_exchanges()
         # Started next to the maintenance thread and under the same gate: the
         # observer is the only thing that ever moves a dispatched run forward,
         # and a test suite that built many short-lived apps in one process
         # would otherwise have as many schedulers racing one another.
         app.state.container.agent_observer.start()
+        # And only now the lookups, on the observer's own pool. Each one is a
+        # `ListTasks` under the short-call deadline; running them here rather
+        # than above is the difference between an unreachable agent delaying one
+        # run's resolution and it holding `/health` closed for the deadline
+        # times the backlog, while `fly.backend.toml`'s five-second check
+        # restarts the machine that is trying to recover. Still a lookup and
+        # never a send: no send is ever initiated without a user action
+        # (AC-032).
+        app.state.container.agent_observer.resolve_interrupted_exchanges(interrupted)
         app.state.privacy_maintenance_thread = _start_privacy_maintenance_thread(
             app.state.container,
             app.state.privacy_maintenance_stop_event,

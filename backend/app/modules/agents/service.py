@@ -3271,7 +3271,12 @@ class AgentRelayService:
             )
 
     def recover_open_exchange(self, run_id: str, *, owner_id: str) -> None:
-        """An exchange a restart interrupted after it had started.
+        """An exchange a restart interrupted after it had started, end to end.
+
+        The two halves in one call, for a caller that wants the whole thing
+        synchronously. Boot does not: it marks every interrupted exchange first
+        and resolves them on a pool afterwards, so no lookup stands between a
+        restart and the first request the app can serve.
 
         Resolved by lookup alone. The message may already be at the agent, so
         the only safe question is "is there a task in this conversation?" — and
@@ -3288,8 +3293,55 @@ class AgentRelayService:
         second copy of the hand-off at an agent that already has it (SC-008).
         """
 
-        run = self._mark_exchange_interrupted(run_id, owner_id=owner_id)
-        if run is None:
+        if self.mark_exchange_interrupted(run_id, owner_id=owner_id) is None:
+            return
+        self.resolve_interrupted_exchange(run_id, owner_id=owner_id)
+
+    def mark_exchange_interrupted(
+        self, run_id: str, *, owner_id: str
+    ) -> AgentRunDocument | None:
+        """Record that a restart caught this exchange, and nothing more.
+
+        No network I/O, which is the whole point: this is the half of recovery
+        that may run before the app serves its first request. `dispatch_state`
+        moves only for a start — see `recover_open_exchange`.
+        """
+
+        with self.agent_repo.command_lock(owner_id):
+            run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+            if run.exchange_state != "open":
+                return None
+            now = self._now()
+            updates: dict[str, Any] = {
+                "exchange_state": "interrupted",
+                "updated_at": max(run.updated_at, now),
+                "revision": run.revision + 1,
+            }
+            if run.exchange_kind != "reply":
+                updates["dispatch_state"] = "delivery_unconfirmed"
+            run = run.model_copy(update=updates)
+            self.agent_repo.save_run(run)
+        return run
+
+    def resolve_interrupted_exchange(self, run_id: str, *, owner_id: str) -> None:
+        """Ask the agent what became of one interrupted exchange.
+
+        The half of recovery that touches the network: one `ListTasks` under the
+        short-call deadline. It runs on a pool once the app is serving, never at
+        boot, because an unreachable agent would otherwise hold the process
+        closed for the deadline times the backlog while the platform's health
+        check gives up in five seconds. Nothing is lost by deferring it — the
+        run is already marked, and marking is what makes it honest.
+
+        A lookup, never a send. The run may have been purged or settled between
+        the two steps, and either way this writes nothing.
+        """
+
+        try:
+            run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+        except NotFoundError:
+            return
+        if run.exchange_state != "interrupted":
             return
         connection = self.agent_repo.get_connection(
             run.connection_id, owner_id=owner_id
@@ -3314,32 +3366,6 @@ class AgentRelayService:
         self._settle_recovered_reply(
             run_id, owner_id=owner_id, task=outcome.task, error_code=outcome.error_code
         )
-
-    def _mark_exchange_interrupted(
-        self, run_id: str, *, owner_id: str
-    ) -> AgentRunDocument | None:
-        """Record that a restart caught this exchange, and nothing more.
-
-        No network I/O, so it is safe to run for every open exchange before the
-        app serves its first request. `dispatch_state` moves only for a start:
-        see `recover_open_exchange`.
-        """
-
-        with self.agent_repo.command_lock(owner_id):
-            run = self.agent_repo.get_run(run_id, owner_id=owner_id)
-            if run.exchange_state != "open":
-                return None
-            now = self._now()
-            updates: dict[str, Any] = {
-                "exchange_state": "interrupted",
-                "updated_at": max(run.updated_at, now),
-                "revision": run.revision + 1,
-            }
-            if run.exchange_kind != "reply":
-                updates["dispatch_state"] = "delivery_unconfirmed"
-            run = run.model_copy(update=updates)
-            self.agent_repo.save_run(run)
-        return run
 
     def _settle_recovered_reply(
         self,

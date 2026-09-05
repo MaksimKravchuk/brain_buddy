@@ -7,6 +7,7 @@ sleep would only make the same assertions slower and less trustworthy.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import Future
@@ -844,6 +845,191 @@ class TestRestartRecoveryOfAReply:
         assert a2a_client.calls_to("SendMessage") == []
 
 
+class TestBootTimeRecoveryIsNotABlockingScan:
+    """Recovery is two steps, and only the first may run before the app serves.
+
+    Marking what a restart interrupted is pure state: it needs nothing from the
+    network and it is what makes the runs honest. Resolving them is one
+    `ListTasks` per open exchange under the short-call deadline, and doing that
+    at boot means an unreachable agent holds `/health` for as long as the
+    deadline times the backlog — while `fly.backend.toml`'s health check gives
+    up after five seconds and restarts the machine that is trying to recover.
+    """
+
+    def test_014_SC_007_the_boot_time_mark_asks_the_agent_nothing(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-032. Everything a restart can settle by itself, and nothing else."""
+
+        observer = AgentObserver(
+            service, exchange_executor=SynchronousExecutor(), clock=clock
+        )
+        connection_id = connect_ready(service)
+        never_left = queue_handoff(service, connection_id, key="idem-d1")
+        in_flight = queue_handoff(
+            service, connection_id, task_id="task_2", key="idem-d2"
+        )
+        assert (
+            repo.start_exchange(
+                repo.get_run(in_flight, owner_id=OWNER),
+                expected_version=0,
+                started_at=clock.now,
+                deadline_at=clock.now + timedelta(minutes=5),
+            )
+            is not None
+        )
+        a2a_client.calls.clear()
+
+        pending = observer.mark_interrupted_exchanges()
+
+        # Not one request: this step is what boot may do, so it may do no I/O.
+        assert a2a_client.calls == []
+        assert pending == [(OWNER, in_flight)]
+        assert repo.get_run(never_left, owner_id=OWNER).dispatch_state == "not_sent"
+        marked = repo.get_run(in_flight, owner_id=OWNER)
+        assert marked.exchange_state == "interrupted"
+        assert marked.dispatch_state == "delivery_unconfirmed"
+
+    def test_014_FR_006_the_lookups_run_on_the_pool_and_settle_the_runs(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """The second step is ordinary pool work, once the app is serving."""
+
+        control = SynchronousExecutor()
+        observer = AgentObserver(
+            service,
+            exchange_executor=SynchronousExecutor(),
+            control_executor=control,
+            clock=clock,
+        )
+        connection_id = connect_ready(service)
+        run_id = queue_handoff(service, connection_id)
+        assert (
+            repo.start_exchange(
+                repo.get_run(run_id, owner_id=OWNER),
+                expected_version=0,
+                started_at=clock.now,
+                deadline_at=clock.now + timedelta(minutes=5),
+            )
+            is not None
+        )
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(
+                ok=True, correlation_id="c", tasks=(agent_task("t-adopted", run_id),)
+            ),
+        )
+
+        pending = observer.mark_interrupted_exchanges()
+        observer.resolve_interrupted_exchanges(pending)
+
+        assert len(control.submitted) == 1
+        resolved = repo.get_run(run_id, owner_id=OWNER)
+        assert resolved.agent_task_id == "t-adopted"
+        assert resolved.dispatch_state == "sent"
+        assert a2a_client.calls_to("SendMessage") == []
+
+    def test_014_FR_006_a_run_purged_between_the_two_steps_is_left_alone(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """The gap between marking and resolving is real, so it is survivable."""
+
+        observer = AgentObserver(
+            service, exchange_executor=SynchronousExecutor(), clock=clock
+        )
+        connection_id = connect_ready(service)
+        run_id = queue_handoff(service, connection_id)
+        assert (
+            repo.start_exchange(
+                repo.get_run(run_id, owner_id=OWNER),
+                expected_version=0,
+                started_at=clock.now,
+                deadline_at=clock.now + timedelta(minutes=5),
+            )
+            is not None
+        )
+        pending = observer.mark_interrupted_exchanges()
+        repo.delete_all_for_owner(owner_id=OWNER)
+        a2a_client.calls.clear()
+
+        observer.resolve_interrupted_exchanges(pending)
+
+        assert a2a_client.calls == []
+
+
+def test_014_SC_007_health_answers_before_the_boot_lookups_come_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-032. An unreachable agent must not be able to hold the app closed.
+
+    `resolve_interrupted_exchange` is where the `ListTasks` happens, so a
+    resolver held on an event is exactly an agent that never answers within the
+    short-call deadline. If boot waited for it, `/health` would not answer here
+    — and in production `fly.backend.toml`'s five-second check would restart the
+    machine that is trying to recover.
+    """
+
+    from app import main as main_module
+    from app.core import get_config
+    from app.modules.agents.observer import AgentObserver as ObserverClass
+    from app.modules.agents.service import AgentRelayService as ServiceClass
+
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path / "boot-data"))
+    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
+    monkeypatch.setenv("BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST", "1")
+    get_config.cache_clear()
+
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    resolved: list[str] = []
+
+    def block(self: Any, run_id: str, *, owner_id: str) -> None:
+        entered.set()
+        release.wait(timeout=5)
+        resolved.append(run_id)
+        finished.set()
+
+    monkeypatch.setattr(
+        ObserverClass,
+        "mark_interrupted_exchanges",
+        lambda self: [("user_a", "agentrun_stranded")],
+    )
+    monkeypatch.setattr(ServiceClass, "resolve_interrupted_exchange", block)
+    monkeypatch.setattr(
+        main_module, "_start_privacy_maintenance_thread", lambda *a, **k: None
+    )
+    monkeypatch.setattr(main_module, "_start_voice_sweep_thread", lambda *a, **k: None)
+
+    try:
+        app = main_module.create_app()
+        with TestClient(app) as client:
+            assert entered.wait(timeout=5), "the lookup never reached the pool"
+            # Boot got this far with the lookup still held, which is the claim.
+            assert release.is_set() is False
+            assert client.get("/health").status_code == 200
+
+            release.set()
+            assert finished.wait(timeout=5), "the resolution never completed"
+    finally:
+        release.set()
+        get_config.cache_clear()
+
+    assert resolved == ["agentrun_stranded"]
+
+
 @pytest.mark.parametrize("opted_in", [False, True])
 def test_014_FR_006_restart_recovery_is_invoked_once_at_boot_under_background_maintenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, opted_in: bool
@@ -868,10 +1054,13 @@ def test_014_FR_006_restart_recovery_is_invoked_once_at_boot_under_background_ma
     get_config.cache_clear()
 
     calls: list[int] = []
+    # The boot step is the *mark*, not the whole recovery: the lookups go to a
+    # pool afterwards (`test_014_SC_007_health_answers_before_the_boot_lookups_
+    # come_back`). This asserts the one-shot scan, whichever half it is.
     monkeypatch.setattr(
         ObserverClass,
-        "recover_interrupted_exchanges",
-        lambda self: calls.append(1) or 0,
+        "mark_interrupted_exchanges",
+        lambda self: calls.append(1) or [],
     )
     # No real maintenance threads: this test is about the one-shot scan, and a
     # background thread outliving its own temp directory is the hazard the
@@ -933,6 +1122,7 @@ OVERCLAIMED_SEND_INVARIANT = (
     "no background thread ever emits a content-bearing message",
     "no background thread ever sends (",
     "no brainbuddy background thread ever emits",
+    "no background thread — scheduler",
 )
 
 
@@ -1443,7 +1633,10 @@ def test_014_FR_008_main_starts_and_stops_the_observer_exactly_once(
     stops: list[str] = []
 
     class RecordingObserver:
-        def recover_interrupted_exchanges(self) -> int:
+        def mark_interrupted_exchanges(self) -> list[tuple[str, str]]:
+            return []
+
+        def resolve_interrupted_exchanges(self, pending: Any) -> int:
             return 0
 
         def start(self) -> bool:
