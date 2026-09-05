@@ -245,8 +245,15 @@ describe("TaskListPage projections", () => {
 
     renderPage();
 
-    expect(await screen.findByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Needs you")).toBeInTheDocument();
+    // D-03-S21: the compact row states the tier in full beside the label, and
+    // repeats a withdrawn cancellation, so the list and the detail cannot
+    // disagree about what the user may still do.
+    expect(
+      await screen.findByText("Running · Guaranteed single start")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Needs you · Best-effort single start · Cancellation not supported")
+    ).toBeInTheDocument();
     expect(mocked.listAgentRunSummaries).toHaveBeenCalledWith(
       ["task-1", "task-2"],
       expect.any(AbortSignal)

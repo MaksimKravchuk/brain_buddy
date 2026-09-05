@@ -1,7 +1,9 @@
 import type {
   AgentCapabilities,
   AgentConnectionResponse,
-  AgentRunResponse
+  AgentGuaranteeTier,
+  AgentRunResponse,
+  AgentRunSummaryResponse
 } from "../../api/agentTypes";
 
 /**
@@ -236,6 +238,45 @@ export function artifactPlaceholderCopy(artifact: {
 
 /** The timeline wording for a task succession row (D-03-S27). */
 export const TASK_SUCCESSION_COPY = "The agent continued this run in a new task";
+
+/** The guarantee tier, spelled out. Never an abbreviation (FR-013, FR-003). */
+export function guaranteeTierLabel(tier: AgentGuaranteeTier | null): string | null {
+  if (tier === "guaranteed") {
+    return "Guaranteed single start";
+  }
+  if (tier === "best_effort") {
+    return "Best-effort single start";
+  }
+  return null;
+}
+
+/**
+ * The compact Task-list row (D-03-S21).
+ *
+ * The tier is spelled out in full rather than abbreviated: it is a statement
+ * about duplicate risk, and a code the user has to learn is a warning nobody
+ * reads. A withdrawn cancellation is stated on the same row, so the list and
+ * the detail view cannot disagree about what the user may still do.
+ */
+export function compactRunLabel(
+  summary: Pick<
+    AgentRunSummaryResponse,
+    "primary_state_label" | "guarantee_tier" | "cancel_outcome"
+  >
+): string {
+  const parts = [summary.primary_state_label];
+  const tier = guaranteeTierLabel(summary.guarantee_tier);
+  if (tier) {
+    parts.push(tier);
+  }
+  if (
+    summary.cancel_outcome === "unsupported" ||
+    summary.cancel_outcome === "not_cancelable"
+  ) {
+    parts.push("Cancellation not supported");
+  }
+  return parts.join(" · ");
+}
 
 type DispatchShape = Pick<
   AgentRunResponse,
