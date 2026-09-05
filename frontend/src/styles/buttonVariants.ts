@@ -11,7 +11,7 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          "bg-brand-primary text-white shadow-soft hover:bg-sky-400 hover:shadow-raised",
+          "bg-sky-700 text-white shadow-soft hover:bg-sky-800 hover:shadow-raised",
         secondary:
           "border border-slate-200 bg-white text-slate-700 shadow-soft hover:border-slate-300 hover:text-slate-900 hover:shadow-raised",
         danger:

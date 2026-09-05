@@ -81,7 +81,7 @@ export async function logoutSession(page: Page): Promise<void> {
 
 export async function openTaskWorkspace(page: Page, email?: string, pathName = "/"): Promise<void> {
   await page.goto(pathName);
-  await expect(page.getByText("Brain Buddy", { exact: true })).toBeVisible();
+  await expect(page.getByText("BrainBuddy", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading")).toBeVisible();
   if (email) await expect(page.getByLabel(email)).toBeVisible();
 }

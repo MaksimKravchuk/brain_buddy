@@ -8,6 +8,7 @@
  */
 
 import { Text } from "react-native";
+import { act } from "react-test-renderer";
 
 import { useAgentRunSummaries } from "@/api/hooks";
 import { renderWithProviders, settle, visibleText } from "@/test/render";
@@ -96,13 +97,28 @@ describe("useAgentRunSummaries", () => {
   });
 
   it("polls boundedly so externally changing compact summaries converge", async () => {
-    const { unmount } = await renderWithProviders(
-      <Probe taskIds={["task_1"]} hasOwner interval={10} />,
-    );
-    await settle();
-    expect(mockListSummaries).toHaveBeenCalledTimes(1);
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(mockListSummaries.mock.calls.length).toBeGreaterThanOrEqual(2);
-    await unmount();
+    jest.useFakeTimers({ doNotFake: ["nextTick"] });
+    let unmount: (() => Promise<void>) | undefined;
+    try {
+      ({ unmount } = await renderWithProviders(
+        <Probe taskIds={["task_1"]} hasOwner interval={10} />,
+      ));
+      // Flush observer notifications without advancing the polling interval.
+      await act(async () => { await jest.advanceTimersByTimeAsync(0); });
+      expect(mockListSummaries).toHaveBeenCalledTimes(1);
+      await act(async () => { await jest.advanceTimersByTimeAsync(9); });
+      expect(mockListSummaries).toHaveBeenCalledTimes(1);
+      await act(async () => { await jest.advanceTimersByTimeAsync(1); });
+      expect(mockListSummaries).toHaveBeenCalledTimes(2);
+      await act(async () => { await jest.advanceTimersByTimeAsync(10); });
+      expect(mockListSummaries).toHaveBeenCalledTimes(3);
+
+      await unmount();
+      await act(async () => { await jest.advanceTimersByTimeAsync(30); });
+      expect(mockListSummaries).toHaveBeenCalledTimes(3);
+    } finally {
+      await unmount?.();
+      jest.useRealTimers();
+    }
   });
 });
