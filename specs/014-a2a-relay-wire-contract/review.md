@@ -445,3 +445,34 @@ the split introduces is survivable, and
 and T070 and the comment block in `main.py` describe the two steps; the same
 paragraph of `research.md` carried the (k) overclaim in a fourth phrasing and
 the (m) succession-evidence rule, and both are corrected there in this commit.
+
+**(o) The card's `securityRequirements` decide whether the credential may be
+sent, not just its `securitySchemes`.**
+`contracts/a2a-wire.md` has always said the owner's `auth_scheme` must satisfy
+at least one requirement. `_select_scheme` never read them: it accepted any
+`securitySchemes` entry whose kind matched and stopped there. `securitySchemes`
+is the catalogue of what an agent *understands*, and `securityRequirements`
+(legacy `security[]`) is what it will accept on a call — so an agent that
+declares bearer for another audience while requiring an API key from this one
+was matched, and BrainBuddy disclosed the owner's bearer token to an endpoint
+certain to reject every request it made.
+
+The requirements are now consulted first. The names inside one alternative are
+conjoined and a connection holds exactly one credential under exactly one
+`auth_scheme`, so an alternative is satisfiable only when every scheme it names
+is of that kind — two of the same kind are met by the same header, two of
+different kinds by neither. A name the card never declared has no scheme behind
+it, states nothing BrainBuddy could check, and is dropped from the alternative
+rather than refused; an alternative left empty by that, or empty to begin with,
+requires nothing and is satisfiable. When no alternative is satisfiable the
+result is `a2a_auth_scheme_unsupported` naming the first scheme of the first
+alternative, which is the one the owner would have to change to. An empty
+requirement list is unchanged: the contract reads it as an agent needing no
+credential and the credential is still sent.
+
+Nothing about the fingerprint moved — `security_requirements` is copied into the
+summary exactly as before, so drift is still measured against what the card
+declared. Five tests in `test_agent_a2a_card.py::TestSecuritySchemes` cover the
+refusal, the conjunction, the satisfiable alternative, the undeclared name and
+the empty list; the `a2a-wire.md` row now states the conjunction and
+undeclared-name rules it left implicit.

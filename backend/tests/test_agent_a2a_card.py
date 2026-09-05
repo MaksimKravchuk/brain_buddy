@@ -543,6 +543,126 @@ class TestSecuritySchemes:
         assert result.failure_code == A2A_AUTH_SCHEME_UNSUPPORTED
         assert result.authenticated is True
 
+    #: A card that accepts two schemes, so the requirements are the only thing
+    #: deciding whether the owner's credential may be sent.
+    _TWO_SCHEMES = {
+        "bearer": {"type": "http", "scheme": "bearer"},
+        "apikey": {"type": "apiKey", "in": "header", "name": "X-Agent-Key"},
+    }
+
+    def test_014_FR_002_a_requirement_the_owners_scheme_cannot_satisfy_refuses(
+        self,
+    ) -> None:
+        """`contracts/a2a-wire.md`: the owner's scheme must satisfy a requirement.
+
+        `securitySchemes` is a catalogue of what the agent *understands*;
+        `securityRequirements` is what it will actually accept on a call. An
+        agent that declares bearer for another audience and requires an API key
+        from this one will reject every request BrainBuddy makes — after the
+        bearer token has already been disclosed to it. Naming the scheme the
+        first requirement asks for is what turns the refusal into an
+        instruction.
+        """
+
+        payload = _card(
+            securitySchemes=self._TWO_SCHEMES,
+            securityRequirements=[{"apikey": []}],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code == A2A_AUTH_SCHEME_UNSUPPORTED
+        assert result.failure_detail == {"scheme": "apikey"}
+        assert result.summary is None
+
+    def test_014_FR_002_an_alternative_conjoining_two_schemes_is_unsatisfiable(
+        self,
+    ) -> None:
+        """One requirement naming two schemes means *both*, and there is one credential.
+
+        A connection holds a single credential under a single `auth_scheme`, so
+        an agent asking for a bearer token *and* an API key on the same call is
+        asking for something BrainBuddy cannot produce. Sending half of it would
+        disclose the credential to a call certain to fail.
+        """
+
+        payload = _card(
+            securitySchemes=self._TWO_SCHEMES,
+            securityRequirements=[{"bearer": [], "apikey": []}],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code == A2A_AUTH_SCHEME_UNSUPPORTED
+        assert result.failure_detail == {"scheme": "apikey"}
+
+    def test_014_FR_002_one_satisfiable_alternative_is_enough(self) -> None:
+        """The list is alternatives: any one of them being satisfiable is a yes."""
+
+        payload = _card(
+            securitySchemes=self._TWO_SCHEMES,
+            securityRequirements=[{"apikey": []}, {"bearer": []}],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code is None
+        assert result.authenticated is True
+        assert result.auth_header_name is None
+        assert result.summary is not None
+        # The fingerprint subset is untouched by any of this: what the card
+        # declared is still what drift is measured against.
+        assert result.summary.security_requirements == [["apikey"], ["bearer"]]
+
+    def test_014_FR_002_a_requirement_naming_an_undeclared_scheme_is_ignored(
+        self,
+    ) -> None:
+        """A name with no scheme behind it says nothing BrainBuddy can act on.
+
+        Refusing on it would turn an agent's own bookkeeping error into a
+        connection the owner cannot make, and accepting it proves nothing either
+        — so it is dropped from the alternative and what remains decides.
+        """
+
+        payload = _card(
+            securitySchemes=self._TWO_SCHEMES,
+            securityRequirements=[{"bearer": [], "audit-only": []}],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code is None
+        assert result.authenticated is True
+
+    def test_014_FR_002_a_card_requiring_nothing_still_takes_the_credential(
+        self,
+    ) -> None:
+        """An empty requirement list is today's behaviour, deliberately kept.
+
+        `contracts/a2a-wire.md`: it means the agent needs no credential, and the
+        credential is still sent — the owner stored it for this agent, and an
+        agent that asks for none will ignore what it does not read.
+        """
+
+        payload = _card(securitySchemes=self._TWO_SCHEMES, securityRequirements=[])
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code is None
+        assert result.authenticated is True
+        assert result.summary is not None
+        assert result.summary.security_required is False
+
     def test_014_FR_002_every_offered_scheme_is_reported_for_the_owner_to_see(
         self,
     ) -> None:
