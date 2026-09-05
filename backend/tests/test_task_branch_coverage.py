@@ -42,13 +42,14 @@ from app.schemas.tasks import (
 from app.utils.time import utcnow
 from app.workflows.voice_brain_dump.domain import (
     BrainDumpOperationDocument,
-    BrainDumpProposalDocument,
     BrainDumpProviderRunDocument,
     BrainDumpTranscriptSegmentDocument,
 )
 from app.workflows.voice_brain_dump.repository import OperationRepository
 from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
 from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
+
+from .conftest import seed_provisional_proposals
 
 OWNER = "user_branch_owner"
 
@@ -569,33 +570,7 @@ def _seed_provisional_proposals(
     operation: BrainDumpOperationDocument,
     titles: list[str],
 ) -> BrainDumpOperationDocument:
-    """Persist pre-existing ``provisional`` proposals on an operation.
-
-    Browser preview no longer derives proposals, so the proposal-editing and
-    commit branches are exercised against explicitly seeded proposals -- the
-    shape a legacy import or a pre-change operation still carries.
-    """
-
-    now = operation.updated_at
-    segment_ids = [segment.id for segment in operation.segments]
-    seeded = operation.model_copy(
-        update={
-            "proposals": [
-                BrainDumpProposalDocument(
-                    id=f"proposal_seed_{index}",
-                    ordinal=index,
-                    title=title,
-                    source_segment_ids=segment_ids,
-                    created_at=now,
-                    updated_at=now,
-                )
-                for index, title in enumerate(titles, start=1)
-            ],
-            "revision": operation.revision + 1,
-        }
-    )
-    voice_service.operation_repo.save_brain_dump_operation(seeded)
-    return voice_service.get_brain_dump_operation(operation.id, owner_id=OWNER)
+    return seed_provisional_proposals(voice_service.operation_repo, operation, titles)
 
 
 def test_brain_dump_operation_uses_sqlite_canonical_when_json_mirror_is_missing(

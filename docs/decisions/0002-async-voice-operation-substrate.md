@@ -32,14 +32,30 @@ to produce:
   English base form) followed by its object; discourse fillers and modal
   scaffolding («так», «надо», "so", "I need to") are dropped; each distinct
   action is proposed once. The prompt is `brain-dump-reconciler-v3`, and the
-  adapter enforces two server-side guards independently of the model: a title
-  with no action or object is dropped as ungrounded, and a duplicate title
-  within one reconciliation (or matching an active proposal it does not
-  replace) is dropped. FR-006 language fidelity and FR-008 grounding are
-  unchanged: verb-first reordering is grounded rewording, never translation.
+  adapter enforces server-side guards independently of the model: a title
+  with no action or object is dropped as ungrounded; a title restated within
+  one reconciliation (case, spacing, quotes, trailing punctuation and bare
+  articles aside) is folded into the surviving proposal, which inherits its
+  cited segments; an `add` that restates an active proposal the envelope does
+  not otherwise replace becomes an `update` affirming that proposal instead of
+  minting a twin; an `update` converging on another active title is dropped.
+  The guard follows the envelope's own renames and removals, and a user
+  deletion cannot be undone under a punctuation variant of the deleted title.
+  Dropped operations are logged by fixed reason (never by content). FR-006
+  language fidelity and FR-008 grounding are unchanged: verb-first reordering
+  is grounded rewording, never translation.
+- A review with no surviving proposal is not committable: an empty envelope
+  (nothing actionable was said) or a review where everything was discarded
+  never mints an empty completion, and the web review shows what was heard
+  instead of a zero-task save.
 - Consequence for recovery: `review_provisional` requires surviving proposals,
-  so for a new operation a terminal provider failure offers retry/cancel only —
-  the behaviour the mobile client (which never had a preview lane) already had.
+  so for a new operation a *retryable* provider failure offers retry/cancel and
+  a *terminal* one (provider rejection, cost cap, exhausted recovery budget)
+  offers cancel only — the recording can no longer be salvaged as provisional
+  junk. This is the behaviour the mobile client (which never had a preview
+  lane) already had. An owner-initiated retry from `terminal_error` while a
+  sealed checkpoint still exists is the follow-up worth designing; it must
+  respect the cost caps and is out of scope here.
 
 Spec `002-async-voice-workflows` (US1 "provisional tasks while speaking",
 required outcome 2, SC-004) describes the retired behaviour; its normative

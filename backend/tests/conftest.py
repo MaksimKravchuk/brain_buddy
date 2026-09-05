@@ -21,6 +21,11 @@ from app.core.rate_limit import (
 from app.main import create_app
 from app.schemas.auth import Invite
 from app.utils.time import utcnow
+from app.workflows.voice_brain_dump.domain import (
+    BrainDumpOperationDocument,
+    BrainDumpProposalDocument,
+)
+from app.workflows.voice_brain_dump.repository import OperationRepository
 
 from .allure_taxonomy import resolve
 
@@ -330,3 +335,42 @@ def anonymous_api_client(
     get_config.cache_clear()
     monkeypatch.delenv("BRAIN_BUDDY_DATA_DIR", raising=False)
     monkeypatch.delenv("BRAIN_BUDDY_ENV", raising=False)
+
+
+def seed_provisional_proposals(
+    repo: OperationRepository,
+    operation: BrainDumpOperationDocument,
+    titles: list[str],
+    *,
+    id_prefix: str = "proposal_seed",
+) -> BrainDumpOperationDocument:
+    """Persist pre-existing ``provisional`` proposals on an operation.
+
+    Browser preview text no longer derives proposals, so a live operation only
+    carries ``provisional`` proposals when it was persisted before that change
+    (or by a legacy import). Tests seed that shape directly to prove lineage,
+    locks, deletions and the commit gate keep working for such leftovers. Every
+    seeded proposal cites the operation's current segments.
+    """
+
+    now = operation.updated_at
+    segment_ids = [segment.id for segment in operation.segments]
+    seeded = operation.model_copy(
+        update={
+            "proposals": [
+                BrainDumpProposalDocument(
+                    id=f"{id_prefix}_{index}",
+                    ordinal=index,
+                    title=title,
+                    status="provisional",
+                    source_segment_ids=segment_ids,
+                    created_at=now,
+                    updated_at=now,
+                )
+                for index, title in enumerate(titles, start=1)
+            ],
+            "revision": operation.revision + 1,
+        }
+    )
+    repo.save_brain_dump_operation(seeded)
+    return seeded

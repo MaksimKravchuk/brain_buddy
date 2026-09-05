@@ -12,7 +12,8 @@ from __future__ import annotations
 from datetime import timedelta
 
 from app.utils.time import utcnow
-from app.workflows.voice_brain_dump.domain import BrainDumpProposalDocument
+
+from .conftest import seed_provisional_proposals
 
 
 def _start(api_client, key: str):
@@ -67,22 +68,8 @@ def test_withdrawal_sets_a_deletion_deadline_and_sweep_purges_derived_text(
     # Browser preview no longer derives proposals; persist one directly so the
     # sweep is proven to purge derived proposals as well as transcript text.
     persisted = service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
-    api_client.app.state.container.voice_operation_repo.save_brain_dump_operation(
-        persisted.model_copy(
-            update={
-                "proposals": [
-                    BrainDumpProposalDocument(
-                        id="proposal_withdraw_seed",
-                        ordinal=1,
-                        title="Buy milk",
-                        source_segment_ids=[persisted.segments[0].id],
-                        created_at=persisted.updated_at,
-                        updated_at=persisted.updated_at,
-                    )
-                ],
-                "revision": persisted.revision + 1,
-            }
-        )
+    seed_provisional_proposals(
+        api_client.app.state.container.voice_operation_repo, persisted, ["Buy milk"]
     )
     appended = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert appended["proposals"], "precondition: uncommitted proposals exist"

@@ -573,7 +573,7 @@ test("Voice Brain Dump shows a live transcript, reviews the reconciled task and 
     await page.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(page);
     await emitSpeech(page, "buy oat milk", false);
-    const transcript = page.getByRole("region", { name: "Browser preview transcript" });
+    const transcript = page.getByRole("region", { name: "What you've said · browser preview" });
     await expect(transcript).toContainText("buy oat milk");
     await emitSpeech(page, "buy oat milk. call dentist", true);
     await expect(transcript).toContainText("buy oat milk. call dentist");
@@ -638,7 +638,7 @@ test("Voice Brain Dump shows a mixed-language preview as transcript and reviews 
       page,
       "Сделать production smoke. написать Наташе. купить хлеб и молоко. удалить черновик. Починить brain body потом позвонить маме"
     );
-    const transcript = page.getByRole("region", { name: "Browser preview transcript" });
+    const transcript = page.getByRole("region", { name: "What you've said · browser preview" });
     await expect(transcript).toContainText("Починить brain body потом позвонить маме");
     await expect(page.getByRole("article")).toHaveCount(0);
     const recording = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
@@ -691,14 +691,14 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
     await page.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(page);
     await emitSpeech(page, "write weekly update", true);
-    await expect(page.getByRole("region", { name: "Browser preview transcript" })).toContainText("write weekly update");
+    await expect(page.getByRole("region", { name: "What you've said · browser preview" })).toContainText("write weekly update");
     operationId = (await page.locator("[data-operation-id]").getAttribute("data-operation-id")) ?? "";
     assertCondition(/^brain_dump_/.test(operationId), `expected persisted brain dump operation id, received ${operationId}`);
     await page.getByRole("button", { name: "Pause" }).click();
     await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
     await page.reload();
     await expect(page.getByText("Paused")).toBeVisible();
-    await expect(page.getByRole("region", { name: "Browser preview transcript" })).toContainText("write weekly update");
+    await expect(page.getByRole("region", { name: "What you've said · browser preview" })).toContainText("write weekly update");
     await page.getByRole("button", { name: "Resume" }).click();
     await expect(page.getByText("Recording")).toBeVisible();
   });
@@ -780,7 +780,7 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     await recoveryPage.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(recoveryPage);
     await emitSpeech(recoveryPage, "prepare quarterly report", true);
-    const transcript = recoveryPage.getByRole("region", { name: "Browser preview transcript" });
+    const transcript = recoveryPage.getByRole("region", { name: "What you've said · browser preview" });
     await expect(transcript).toContainText("prepare quarterly report");
     const operationId = (await recoveryPage.locator("[data-operation-id]").getAttribute("data-operation-id")) ?? "";
     await apiPost<BrainDumpOperation>(
@@ -837,25 +837,19 @@ test("owner isolation hides tasks, brain dump operations, drafts and committed l
     { consent: { microphone: true, external_processing_allowed: true, provider: "openai" } },
     unique("owner-a-start")
   );
-  const withDraft = await apiPost<BrainDumpOperation>(
+  const withTranscript = await apiPost<BrainDumpOperation>(
     page,
     `/api/brain-dump-operations/${operation.id}/transcript`,
     { segments: [{ sequence: 1, text: "owner a private draft", stability: "stable" }] },
     unique("owner-a-transcript")
   );
-  // Production only ever accepts commit for a genuinely sealed and reconciled
-  // batch (`BRAIN_DUMP_NOT_RECONCILED` / `BRAIN_DUMP_PROPOSAL_NOT_RECONCILED`
-  // otherwise); a bare transcript-only `finish` has no reconciler-affirmed
-  // proposal and must not be committed here just to manufacture a linked
-  // task for the isolation assertions below. Delete the untouched fast-only
-  // draft (it is not reconciler-affirmed) and seal real audio through the
-  // deterministic accurate-STT/reconciler pipeline instead.
-  await apiPatch<BrainDumpOperation>(
-    page,
-    `/api/brain-dump-operations/${operation.id}/proposals/${withDraft.proposals[0].id}`,
-    { deleted: true, expected_revision: withDraft.revision },
-    unique("owner-a-delete-draft")
-  );
+  // A browser-preview transcript append is a status readout, never a task
+  // source: it mints no proposal. Production only ever accepts commit for a
+  // genuinely sealed and reconciled batch (`BRAIN_DUMP_NOT_RECONCILED` /
+  // `BRAIN_DUMP_PROPOSAL_NOT_RECONCILED` otherwise), so seal real audio through
+  // the deterministic accurate-STT/reconciler pipeline to obtain a linked task
+  // for the isolation assertions below.
+  assertArrayLength(withTranscript.proposals, 0, "a preview transcript append must not derive proposals");
   const sealed = await sealWithDeterministicAudio(page, operation.id, "owner isolation sealed audio");
   const committed = await apiPost<BrainDumpOperation>(
     page,

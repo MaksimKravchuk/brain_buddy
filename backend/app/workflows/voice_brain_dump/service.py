@@ -63,6 +63,7 @@ from .domain import (
     ReconciledProposal,
     TranscriptHypothesis,
     apply_proposal_patches,
+    normalized_title,
 )
 from .providers import (
     AccurateSttPort,
@@ -125,6 +126,10 @@ def brain_dump_operation_is_committable(
     if any(
         not proposal.deleted and proposal.conflicts for proposal in operation.proposals
     ):
+        return False
+    if not any(not proposal.deleted for proposal in operation.proposals):
+        # Nothing actionable was said (or everything was discarded): there is
+        # no batch to freeze, so "save" must not mint an empty completion.
         return False
     if operation.legacy_import == "legacy_preview_only" or operation.manual_review:
         return True
@@ -1090,10 +1095,13 @@ class VoiceBrainDumpService:
             claimed = operation.model_copy(
                 update={
                     "status": "accurate_transcribing",
+                    # ``fast_processing`` is no longer a stage: the browser
+                    # preview lane derives nothing after seal (ADR-0002,
+                    # 2026-09-05 amendment), so the history goes straight from
+                    # sealing to accurate transcription.
                     "status_history": [
                         *operation.status_history,
                         "sealing",
-                        "fast_processing",
                         "accurate_transcribing",
                     ],
                     "sealed_manifest_hash": manifest_hash,
@@ -1640,6 +1648,18 @@ class VoiceBrainDumpService:
                     recovery_count=recovery_count,
                     estimated_cost_usd=exc.estimated_cost_usd,
                     validation_rejected=isinstance(exc, ValidationFailure),
+                )
+            if reconcile_result.skipped_operations:
+                # Skip reasons are fixed adapter strings (never transcript or
+                # title text), so they are safe to log; they are the only
+                # trace that the model emitted fillers, duplicates or
+                # ungrounded tasks that the server refused.
+                logger.info(
+                    "brain_dump_reconciler_dropped_operations operation_id=%s "
+                    "dropped=%d reasons=%s",
+                    operation.id,
+                    len(reconcile_result.skipped_operations),
+                    " | ".join(reconcile_result.skipped_operations),
                 )
             proposals = self._apply_reconciler_patches(
                 operation.proposals, reconcile_result.patches, now=now
@@ -3563,14 +3583,10 @@ class VoiceBrainDumpService:
         )
 
     @staticmethod
-    def _normalized_transcript_for_replacement(text: str) -> str:
-        return re.sub(r"\s+", " ", text).strip().casefold()
-
-    @classmethod
-    def _proposal_identity_key(cls, title: str) -> str:
+    def _proposal_identity_key(title: str) -> str:
         """Identity is content-derived, never inferred from a candidate position."""
 
-        return cls._normalized_transcript_for_replacement(title)
+        return normalized_title(title)
 
     @staticmethod
     def _titles_refer_to_same_item(candidate: str, existing: str) -> bool:

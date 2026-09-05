@@ -22,6 +22,8 @@ from app.workflows.voice_brain_dump.adapters import OpenAiAccurateStt
 from app.workflows.voice_brain_dump.domain import TranscriptHypothesis
 from app.workflows.voice_brain_dump.providers import AccurateSttRequest, SttResult
 
+from .conftest import seed_provisional_proposals
+
 
 def _start_operation(
     api_client,
@@ -215,58 +217,35 @@ def _seed_provisional_proposals(
     titles: list[str],
     *,
     key: str,
-    segment_text: str | None = None,
 ) -> dict[str, object]:
-    """Persist pre-existing provisional proposals citing one stable preview segment.
+    """Append one stable preview segment, then seed provisional proposals citing it.
 
-    Browser preview text is a status readout and no longer derives proposals,
-    so a live operation only carries ``provisional`` proposals when it was
-    persisted before that change (or by a legacy import). These tests seed that
-    shape directly to prove the reconciler still treats such leftovers safely:
-    lineage, locks, deletions and the commit gate keep working for them.
+    See ``conftest.seed_provisional_proposals`` for why a live operation only
+    carries such proposals when persisted before browser preview stopped
+    deriving drafts; returns the refreshed API projection.
     """
-
-    from app.workflows.voice_brain_dump.domain import BrainDumpProposalDocument
 
     appended = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/transcript",
         headers={"Idempotency-Key": f"seed-preview-segment-{key}"},
         json={
             "segments": [
-                {
-                    "sequence": 1,
-                    "text": segment_text or ". ".join(titles) + ".",
-                    "stability": "stable",
-                }
+                {"sequence": 1, "text": ". ".join(titles) + ".", "stability": "stable"}
             ]
         },
     )
     assert appended.status_code == 200, appended.text
-    segment_id = appended.json()["segments"][0]["id"]
     owner_id = api_client.get("/api/auth/me").json()["id"]
     container = api_client.app.state.container
     persisted = container.voice_brain_dump_service.get_brain_dump_operation(
         str(operation["id"]), owner_id=owner_id
     )
-    now = persisted.updated_at
-    seeded = persisted.model_copy(
-        update={
-            "proposals": [
-                BrainDumpProposalDocument(
-                    id=f"proposal_seed_{key}_{index}",
-                    ordinal=index,
-                    title=title,
-                    status="provisional",
-                    source_segment_ids=[segment_id],
-                    created_at=now,
-                    updated_at=now,
-                )
-                for index, title in enumerate(titles, start=1)
-            ],
-            "revision": persisted.revision + 1,
-        }
+    seed_provisional_proposals(
+        container.voice_operation_repo,
+        persisted,
+        titles,
+        id_prefix=f"proposal_seed_{key}",
     )
-    container.voice_operation_repo.save_brain_dump_operation(seeded)
     return api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
 
 
@@ -416,6 +395,44 @@ def test_seal_reconciles_a_filler_prefixed_dump_into_clean_next_actions(
         "Сходить в магазин",
         "Покрасить комнату",
     ]
+
+
+def test_review_with_no_surviving_proposals_is_not_committable(api_client) -> None:
+    """Nothing actionable (or everything discarded) must not mint an empty save.
+
+    A reconciled operation whose only proposal the owner deletes at review has
+    no batch to freeze: ``committable`` flips to false and commit is refused
+    rather than completing a zero-task operation.
+    """
+
+    operation = _start_operation(
+        api_client, key="start-empty-review", external_processing_allowed=True
+    )
+    sealed = _upload_and_seal(api_client, operation, b"Buy milk.", "seal-empty-review")
+    body = sealed.json()
+    assert body["status"] == "awaiting_confirmation"
+    assert body["committable"] is True
+    (only_proposal,) = [p for p in body["proposals"] if not p["deleted"]]
+
+    deleted = api_client.patch(
+        f"/api/brain-dump-operations/{operation['id']}/proposals/{only_proposal['id']}",
+        headers={"Idempotency-Key": "delete-only-proposal"},
+        json={"deleted": True, "expected_revision": body["revision"]},
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["committable"] is False
+
+    rejected = api_client.post(
+        f"/api/brain-dump-operations/{operation['id']}/commit",
+        headers={"Idempotency-Key": "commit-empty-review"},
+        json={"expected_revision": deleted.json()["revision"]},
+    )
+    assert rejected.status_code == 400, rejected.text
+    assert "not eligible" in rejected.text
+    assert (
+        api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()["status"]
+        == "awaiting_confirmation"
+    )
 
 
 def test_semantic_reconciler_updates_and_removes_existing_proposals(
@@ -2189,19 +2206,22 @@ def test_commit_rejects_a_finished_operation_that_was_never_sealed_or_reconciled
     """
 
     operation = _start_operation(api_client, key="start-unreconciled-finish")
-    appended = api_client.post(
-        f"/api/brain-dump-operations/{operation['id']}/transcript",
-        headers={"Idempotency-Key": "append-unreconciled-finish"},
-        json={
-            "segments": [{"sequence": 1, "text": "Buy milk.", "stability": "stable"}]
-        },
-    ).json()
+    # A pre-existing provisional proposal is what makes this bypass worth
+    # guarding: without one, commit is refused for the trivial reason that
+    # there is nothing to save.
+    appended = _seed_provisional_proposals(
+        api_client, operation, ["Buy milk"], key="unreconciled-finish"
+    )
     finished = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/finish",
         headers={"Idempotency-Key": "finish-unreconciled-finish"},
         json={"expected_revision": appended["revision"]},
     ).json()
     assert finished["status"] == "awaiting_confirmation"
+    assert [proposal["status"] for proposal in finished["proposals"]] == [
+        "ready_to_review"
+    ]
+    assert finished["committable"] is False
 
     rejected = api_client.post(
         f"/api/brain-dump-operations/{operation['id']}/commit",
@@ -2553,7 +2573,8 @@ def test_schema_v2_upload_seal_runs_accurate_reconciliation_from_original_audio(
     assert service.run_due_brain_dump_provider_runs() == 2
     body = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert body["status"] == "awaiting_confirmation"
-    assert "fast_processing" in body["status_history"]
+    assert "sealing" in body["status_history"]
+    assert "fast_processing" not in body["status_history"]
     assert {
         "sealing",
         "accurate_transcribing",

@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, Inbox, Mic, Pause, Play, Square, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { apiClient } from "../../api/client";
@@ -8,6 +8,7 @@ import { taskKeys, useBrainDumpProviders } from "../../api/taskHooks";
 import type { BrainDumpOperationResponse, BrainDumpProposal, BrainDumpProposalStatus } from "../../api/taskTypes";
 import { BrainDumpOverlay, BrainDumpOverlayHeader } from "./BrainDumpOverlay";
 import { useCloseBrainDump } from "./brainDumpNavigation";
+import { operationStatusLabels, processingStatuses } from "./brainDumpStatusLabels";
 
 const TITLE_ID = "brain-dump-title";
 
@@ -43,13 +44,9 @@ const statusLabels: Record<BrainDumpProposalStatus, string> = {
   conflicted: "Needs review"
 };
 
-const processingStatusLabels = new Map<string, string>([
-  ["sealing", "Sealing audio"],
-  ["fast_processing", "Processing audio"],
-  ["accurate_transcribing", "Improving transcript"],
-  ["reconciling", "Reconciling tasks"],
-  ["committing", "Saving tasks"]
-]);
+const processingStatusLabels = new Map<string, string>(
+  processingStatuses.map((status) => [status, operationStatusLabels[status]])
+);
 
 // A background lease-recovery sweep or another process can advance one of
 // these statuses server-side without any client action; the poll keeps a
@@ -642,6 +639,20 @@ export function BrainDumpRoute(): React.JSX.Element {
     );
   }
 
+  if (!operation && params.operationId && params.operationId !== "new" && !error) {
+    // A reload of /brain-dump/{id} (or its /review) is resuming a persisted
+    // operation. Until it arrives, neither "Record" nor an empty review is
+    // true, so say we are loading instead of flashing the wrong surface.
+    return (
+      <BrainDumpOverlay labelledBy={TITLE_ID} size="narrow" operationId={params.operationId}>
+        <BrainDumpOverlayHeader titleId={TITLE_ID} eyebrow="Brain dump" title="Loading your brain dump" />
+        <p role="status" className="px-5 py-4 text-sm text-slate-500 sm:px-6">
+          Fetching the recording and anything already proposed from it…
+        </p>
+      </BrainDumpOverlay>
+    );
+  }
+
   if (operation && processingStatusLabels.has(operation.status)) {
     return <ProcessingSurface error={error} operation={operation} />;
   }
@@ -669,6 +680,7 @@ export function BrainDumpRoute(): React.JSX.Element {
         isSaving={isSaving}
         committable={operation?.committable ?? false}
         proposals={activeProposals}
+        segments={operation?.segments ?? []}
         segmentsById={segmentsById}
         reconciliationQuality={operation?.reconciliation_quality ?? "none"}
         rawAudioExpiresAt={operation?.raw_audio_expires_at}
@@ -874,7 +886,7 @@ function RecordingSurface({
           </div>
           <div>
             <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">Brain dump</h1>
-            <p className="mt-0.5 text-xs text-slate-500">Speak freely — tasks are extracted after you stop</p>
+            <p className="mt-0.5 text-xs text-slate-500">Speak freely — tasks are proposed after you stop</p>
           </div>
           <span className={`inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold tabular-nums ${isRecording ? "text-rose-600" : "text-slate-500"}`}>
             <span className={`h-[7px] w-[7px] rounded-full ${isRecording ? "bg-rose-600 motion-safe:animate-pulse-dot" : "bg-slate-400"}`} aria-hidden />
@@ -975,10 +987,11 @@ function RecordingSurface({
               )}
             </div>
           ) : null}
-          <div className="mb-0.5 mt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">What you&apos;ve said · browser preview</div>
           <TranscriptReadout
             segments={operation?.segments ?? []}
-            emptyText="Your words appear here as you speak. Tasks are extracted after you stop."
+            headings={recordingTranscriptHeadings}
+            emptyText="Your words appear here as you speak. Tasks are proposed after you stop."
+            live
           />
         </div>
       </div>
@@ -1035,61 +1048,87 @@ function RecordingTimer({ running }: { running: boolean }): React.JSX.Element {
 }
 
 type TranscriptSegment = BrainDumpOperationResponse["segments"][number];
+type TranscriptHeadings = { accurate: string; preview: string };
+
+const recordingTranscriptHeadings: TranscriptHeadings = {
+  accurate: "Accurate transcript",
+  preview: "What you've said · browser preview"
+};
+const processingTranscriptHeadings: TranscriptHeadings = {
+  accurate: "Accurate transcript",
+  preview: "Browser preview · provisional"
+};
 
 /**
- * The transcript lane worth reading right now: accurate segments once sealed
- * audio has been transcribed (they supersede the preview), otherwise the
- * browser preview. Either way in spoken order; a still-interim preview segment
- * is the tail that is still forming under the speaker.
+ * The transcript worth reading right now: every settled utterance that no later
+ * segment supersedes (accurate segments name the preview hypotheses they replace
+ * via `supersedes_segment_ids`), in spoken order. Interim hypotheses are left
+ * out — they belong to the live tail under the microphone, not to the record —
+ * so a fragment whose final landed under another sequence can never linger.
  */
 function transcriptLane(segments: TranscriptSegment[]): { source: "accurate" | "preview"; segments: TranscriptSegment[] } {
-  const accurate = segments.filter((segment) => segment.provider_role === "accurate");
-  const lane = accurate.length > 0 ? accurate : segments.filter((segment) => segment.provider_role !== "accurate");
+  const superseded = new Set(segments.flatMap((segment) => segment.supersedes_segment_ids ?? []));
+  const current = segments
+    .filter((segment) => segment.stability === "stable" && !superseded.has(segment.id))
+    .sort((left, right) => left.sequence - right.sequence);
   return {
-    source: accurate.length > 0 ? "accurate" : "preview",
-    segments: [...lane].sort((left, right) => left.sequence - right.sequence)
+    source: current.some((segment) => segment.provider_role === "accurate") ? "accurate" : "preview",
+    segments: current
   };
 }
 
-function TranscriptReadout({ segments, emptyText }: { segments: TranscriptSegment[]; emptyText: string }): React.JSX.Element {
+function TranscriptReadout({
+  segments,
+  headings,
+  emptyText,
+  live = false
+}: {
+  segments: TranscriptSegment[];
+  headings: TranscriptHeadings;
+  emptyText: string;
+  /** Announce newly settled utterances; off where an enclosing status region already does. */
+  live?: boolean;
+}): React.JSX.Element {
+  const headingId = useId();
   const lane = transcriptLane(segments);
-  if (lane.segments.length === 0) {
-    return <p className="rounded-[12px] border-[1.5px] border-dashed border-slate-300 px-3.5 py-3 text-[13px] text-slate-400">{emptyText}</p>;
-  }
   return (
-    <section
-      aria-label={lane.source === "accurate" ? "Accurate transcript" : "Browser preview transcript"}
-      className="rounded-[12px] border border-slate-200 bg-white px-3.5 py-3 shadow-soft"
-    >
-      <ul className="flex flex-col gap-1.5">
-        {lane.segments.map((segment) => (
-          <li key={segment.id} className={segment.stability === "interim" ? "text-sm italic leading-snug text-slate-400" : "text-sm leading-snug text-slate-700"}>
-            {segment.text}
-            {segment.stability === "interim" ? (
-              <span className="ml-[3px] inline-block h-[13px] w-[2px] -translate-y-[1px] bg-brand-primary align-middle motion-safe:animate-caret-blink" aria-hidden />
-            ) : null}
-          </li>
-        ))}
-      </ul>
+    <section aria-labelledby={headingId} aria-live={live ? "polite" : undefined} className="flex flex-col gap-1.5">
+      <p id={headingId} className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+        {headings[lane.source]}
+      </p>
+      {lane.segments.length === 0 ? (
+        <p className="rounded-[12px] border-[1.5px] border-dashed border-slate-300 px-3.5 py-3 text-[13px] text-slate-400">{emptyText}</p>
+      ) : (
+        <ul className="flex flex-col gap-1.5 rounded-[12px] border border-slate-200 bg-white px-3.5 py-3 shadow-soft">
+          {lane.segments.map((segment) => (
+            <li key={segment.id} className="text-sm leading-snug text-slate-700">
+              {segment.text}
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
 
 function ProcessingSurface({ error, operation }: { error: string | null; operation: BrainDumpOperationResponse }): React.JSX.Element {
   const label = processingStatusLabels.get(operation.status) ?? "Processing";
-  const lane = transcriptLane(operation.segments);
   return (
     // Not dismissible: the operation is mid-pipeline server-side and the panel is
     // the only place its progress and outcome surface.
     <BrainDumpOverlay labelledBy={TITLE_ID} size="narrow" operationId={operation.id}>
       <BrainDumpOverlayHeader titleId={TITLE_ID} eyebrow="Brain dump" title={label} meta={operation.status} />
-      <div role="status" aria-live="polite" className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
         {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
-        <p className="mb-3 text-sm text-slate-500">Your tasks appear for review once the accurate transcript has been turned into next actions.</p>
-        <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-          {lane.source === "accurate" ? "Accurate transcript" : "Browser preview · provisional"}
-        </div>
-        <TranscriptReadout segments={operation.segments} emptyText="No transcript was captured for this recording." />
+        {/* Only the stage is announced; the growing transcript below is read on demand. */}
+        <p role="status" aria-live="polite" className="mb-3 text-sm text-slate-500">
+          {label}. Your tasks appear for review once the accurate transcript has been turned into next actions.
+        </p>
+        <TranscriptReadout
+          segments={operation.segments}
+          headings={processingTranscriptHeadings}
+          emptyText="The transcript appears here once processing catches up."
+        />
       </div>
     </BrainDumpOverlay>
   );
@@ -1103,6 +1142,7 @@ function ReviewSurface({
   rawAudioExpiresAt,
   rawAudioPresent,
   proposals,
+  segments,
   segmentsById,
   reconciliationQuality,
   onBack,
@@ -1120,6 +1160,7 @@ function ReviewSurface({
   rawAudioExpiresAt?: string | null;
   rawAudioPresent: boolean;
   proposals: BrainDumpProposal[];
+  segments: TranscriptSegment[];
   segmentsById: Map<string, BrainDumpOperationResponse["segments"][number]>;
   reconciliationQuality: "none" | "provisional_only" | "accurate" | "conflicted";
   onBack: () => void;
@@ -1130,6 +1171,7 @@ function ReviewSurface({
   onSave: () => void;
   onUpdateTitle: (proposal: BrainDumpProposal, title: string) => void;
 }): React.JSX.Element {
+  const isEmpty = proposals.length === 0;
   return (
     // Not dismissible: these drafts exist only inside the operation, so leaving
     // has to be an explicit Discard or Confirm.
@@ -1140,14 +1182,23 @@ function ReviewSurface({
         </button>
         <div className="min-w-0 flex-1">
           <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Brain dump</p>
-          <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">Review {proposals.length} {proposals.length === 1 ? "task" : "tasks"}</h1>
-          <p className="mt-0.5 text-xs text-slate-500">Edit before they land in your inbox</p>
+          <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">
+            {isEmpty ? "No tasks to review" : `Review ${proposals.length} ${proposals.length === 1 ? "task" : "tasks"}`}
+          </h1>
+          <p className="mt-0.5 text-xs text-slate-500">{isEmpty ? "Nothing actionable came out of this dump" : "Edit before they land in your inbox"}</p>
         </div>
       </header>
 
       <main aria-label="Review brain dump proposals" className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6">
         {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
-        {!committable ? (
+        {isEmpty ? (
+          <div className="mb-3 flex flex-col gap-3">
+            <p role="status" className="rounded-xl border border-slate-200 bg-surface-base px-3 py-2 text-sm text-slate-600">
+              No tasks were proposed from this dump. Here is what was heard; discard it or record again.
+            </p>
+            <TranscriptReadout segments={segments} headings={processingTranscriptHeadings} emptyText="No transcript was captured for this recording." />
+          </div>
+        ) : !committable ? (
           <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             These are {reconciliationQuality === "provisional_only" ? "provisional" : "not yet reconciled"} drafts. They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation.
           </div>
@@ -1206,10 +1257,12 @@ function ReviewSurface({
       </main>
 
       <footer className="flex shrink-0 flex-col items-center gap-2.5 border-t border-slate-200 bg-surface-base px-6 py-4 pb-[max(16px,env(safe-area-inset-bottom))]">
-        <button type="button" className="inline-flex h-11 w-full max-w-[320px] items-center justify-center gap-2 rounded-xl bg-brand-primary px-5 text-[15px] font-semibold text-white shadow-glow transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50" disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
-          <Inbox className="h-4 w-4" aria-hidden />
-          {isSaving ? "Sending…" : `Send ${proposals.length} to inbox`}
-        </button>
+        {isEmpty ? null : (
+          <button type="button" className="inline-flex h-11 w-full max-w-[320px] items-center justify-center gap-2 rounded-xl bg-brand-primary px-5 text-[15px] font-semibold text-white shadow-glow transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50" disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
+            <Inbox className="h-4 w-4" aria-hidden />
+            {isSaving ? "Sending…" : `Send ${proposals.length} to inbox`}
+          </button>
+        )}
         <button type="button" className="text-[13px] font-medium text-slate-500 transition-colors duration-200 ease-smooth hover:text-slate-700" onClick={onDiscard}>
           Discard all
         </button>
