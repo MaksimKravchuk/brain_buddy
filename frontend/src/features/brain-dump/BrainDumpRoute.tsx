@@ -631,7 +631,7 @@ export function BrainDumpRoute(): React.JSX.Element {
         <div className="flex flex-col gap-2 px-5 py-4 sm:px-6">
           <button
             type="button"
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand-primary px-5 text-[15px] font-semibold text-white shadow-glow hover:bg-brand-primary-hover"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-700 px-5 text-[15px] font-semibold text-white shadow-glow hover:bg-sky-800"
             onClick={() => navigate("/tasks/inbox", { replace: true })}
           >
             <Inbox className="h-4 w-4" aria-hidden />
@@ -756,7 +756,7 @@ function RecoverySurface({
         </p>
         {error ? <p className="text-sm text-rose-700">{error}</p> : null}
         <div className="flex flex-col gap-2">
-          {retryable ? <button type="button" className="h-11 rounded-xl bg-brand-primary px-4 text-sm font-semibold text-white" onClick={onRetry}>{retryLabel}</button> : null}
+          {retryable ? <button type="button" className="h-11 rounded-xl bg-sky-700 px-4 text-sm font-semibold text-white" onClick={onRetry}>{retryLabel}</button> : null}
           {availableActions.has("review_provisional") ? <button type="button" className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700" onClick={onReview}>Review provisional tasks</button> : null}
           <button type="button" className="h-11 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-700" onClick={onDelete}>Delete recording</button>
         </div>
@@ -902,13 +902,13 @@ function RecordingSurface({
           <DumpWave active={isRecording} />
           <div className="flex w-full flex-col gap-2 pt-1">
             {!operation ? (
-              <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50" disabled={isStarting || (isNewRecording && !providersReady)} onClick={onStart}>
+              <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-sky-700 px-4 text-sm font-semibold text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50" disabled={isStarting || (isNewRecording && !providersReady)} onClick={onStart}>
                 <Mic className="h-4 w-4" aria-hidden />
                 Record
               </button>
             ) : (
               <>
-                <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand-primary px-4 text-sm font-semibold text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover" onClick={onFinish}>
+                <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-sky-700 px-4 text-sm font-semibold text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-sky-800" onClick={onFinish}>
                   <Square className="h-3.5 w-3.5" aria-hidden />
                   Stop &amp; review
                 </button>
@@ -1206,7 +1206,7 @@ function ReviewSurface({
       </main>
 
       <footer className="flex shrink-0 flex-col items-center gap-2.5 border-t border-slate-200 bg-surface-base px-6 py-4 pb-[max(16px,env(safe-area-inset-bottom))]">
-        <button type="button" className="inline-flex h-11 w-full max-w-[320px] items-center justify-center gap-2 rounded-xl bg-brand-primary px-5 text-[15px] font-semibold text-white shadow-glow transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50" disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
+        <button type="button" className="inline-flex h-11 w-full max-w-[320px] items-center justify-center gap-2 rounded-xl bg-sky-700 px-5 text-[15px] font-semibold text-white shadow-glow transition-colors duration-200 ease-smooth hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50" disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
           <Inbox className="h-4 w-4" aria-hidden />
           {isSaving ? "Sending…" : `Send ${proposals.length} to inbox`}
         </button>
