@@ -343,6 +343,35 @@ describe("TaskListPage projections", () => {
     expect(await screen.findByText("Someday / maybe is clear")).toBeInTheDocument();
   });
 
+  it("distinguishes an empty Inbox from no search matches and clears only the search filter", async () => {
+    mocked.listTasks.mockResolvedValue(listResponse([], {
+      counts_by_state: { inbox: 0, next: 0, waiting: 0, someday: 0 }
+    }));
+    const emptyInbox = renderPage("/tasks/inbox");
+    expect(await screen.findByText("Inbox is clear")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear search" })).not.toBeInTheDocument();
+    emptyInbox.unmount();
+
+    mocked.listTasks.mockImplementation(async (filters) => listResponse(
+      filters?.q ? [] : [taskFixture({ state: "inbox", project_id: null })],
+      { counts_by_state: { inbox: filters?.q ? 0 : 9, next: 0, waiting: 0, someday: 0 } }
+    ));
+    renderPage("/tasks/inbox?sort=due&group=off&q=no+matching+task");
+    expect(await screen.findByText("No tasks match your search")).toBeInTheDocument();
+    expect(screen.queryByText("Inbox is clear")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Use Brain dump when you are ready/)).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    screen.getByRole("button", { name: "Clear search" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(currentLocation()).toBe("/tasks/inbox?sort=due&group=off");
+    expect(await screen.findByRole("link", { name: "Fix onboarding drop-off" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Inbox" })).toHaveFocus();
+    expect(screen.queryByText("No tasks match your search")).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("");
+  });
+
   it("says a view is clear without naming a list when the view is a project", async () => {
     mocked.listTasks.mockImplementation(async () => listResponse([]));
     renderPage("/projects/project-launch");
@@ -1119,15 +1148,17 @@ describe("TaskListPage detail wiring", () => {
     await waitFor(() => expect(screen.getByText("Comment rejected.")).toBeInTheDocument());
   });
 
-  it("shows the empty panel with no task selected and closes the open one back to the list", async () => {
+  it("reserves the detail panel for selected tasks and releases it after closing", async () => {
     const user = userEvent.setup();
     const { unmount } = renderPage("/tasks/next");
-    expect(await screen.findByRole("complementary", { name: "Task detail" })).toBeInTheDocument();
+    await screen.findByRole("link", { name: "Fix onboarding drop-off" });
+    expect(screen.queryByRole("complementary", { name: "Task detail" })).not.toBeInTheDocument();
     unmount();
 
     renderPage("/tasks/next/task-1");
     await user.click(await screen.findByRole("button", { name: "Close" }));
     expect(currentLocation()).toBe("/tasks/next");
+    expect(screen.queryByRole("complementary", { name: "Task detail" })).not.toBeInTheDocument();
   });
 
   it("returns focus to the row that opened the panel, or to the heading when that row is gone", async () => {

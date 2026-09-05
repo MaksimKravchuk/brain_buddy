@@ -17,7 +17,7 @@ import { ShellToastContext } from "../../../components/shell/shellToast";
 import { useAuthStore } from "../../../stores/authStore";
 import type { AgentRunResponse } from "../../../api/agentTypes";
 import { canCancelRun, canReplyToRun } from "../../agents/agentCopy";
-import { TaskDetailEmptyPanel, TaskDetailPanel } from "../TaskDetailPanel";
+import { TaskDetailPanel } from "../TaskDetailPanel";
 
 // Stubbed so this suite is about the *panel* — but the stub asks the same two
 // guard functions the real section does, so a control the agent withdrew can
@@ -140,16 +140,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   act(() => {
     useAuthStore.setState({ user: null, status: "loading", deletionCancelledNotice: false });
-  });
-});
-
-describe("TaskDetailEmptyPanel", () => {
-  it("invites the reader to pick a task instead of showing an empty form", () => {
-    render(<TaskDetailEmptyPanel />);
-
-    const panel = screen.getByRole("complementary", { name: "Task detail" });
-    expect(within(panel).getByText("Nothing selected")).toBeInTheDocument();
-    expect(within(panel).getByText("Pick a task to see its details.")).toBeInTheDocument();
   });
 });
 
@@ -331,18 +321,14 @@ describe("TaskDetailPanel chrome", () => {
     expect(screen.getByTestId("agent-run-count")).toHaveTextContent("0");
   });
 
-  it("closes on the chevron and routes the placeholder canvas through the shell toast", async () => {
+  it("closes on the chevron without exposing placeholder thinking actions", async () => {
     const user = userEvent.setup();
-    const { onClose, notify } = renderPanel();
+    const { onClose } = renderPanel();
 
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledTimes(1);
-
-    await user.click(screen.getByRole("button", { name: "Thinking canvas" }));
-    expect(notify).toHaveBeenCalledWith("Thinking canvas isn't built yet — placeholder");
-
-    await user.click(screen.getByRole("button", { name: "Think" }));
-    expect(notify).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "Thinking canvas" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Think" })).not.toBeInTheDocument();
   });
 
   it("opens the overflow menu, cancels the task from it, and closes it again on a second click", async () => {
@@ -659,6 +645,20 @@ describe("TaskDetailPanel transitions", () => {
 
     await user.click(screen.getByRole("button", { name: "Reopen task" }));
     expect(second.onTransition).toHaveBeenCalledWith(cancelled, "reopen", "inbox");
+  });
+
+  it("promotes an Inbox task through an explicit next-action control", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture({ state: "inbox" });
+    const { onTransition } = renderPanel({ task });
+
+    const action = screen.getByRole("button", { name: "Move to Next actions" });
+    action.focus();
+    await user.keyboard("{Enter}");
+
+    expect(onTransition).toHaveBeenCalledWith(task, "move", "next");
+    expect(screen.getByLabelText("List")).toHaveValue("next");
+    expect(screen.queryByRole("button", { name: "Move to Next actions" })).not.toBeInTheDocument();
   });
 
   it("moves an open task between lists and carries the live waiting-for value into a waiting move", async () => {
