@@ -12,6 +12,19 @@ vi.mock("../pages/TreeWorkspace", () => ({
   default: () => <div>legacy CRT workspace</div>
 }));
 
+// Observe router action at the actual workspace boundary while rendering the
+// real task page; shell-only tests cannot catch a Routes location override.
+vi.mock("../features/tasks/TaskListPage", async () => {
+  const actual = await vi.importActual<typeof import("../features/tasks/TaskListPage")>("../features/tasks/TaskListPage");
+  const { useNavigationType } = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return {
+    TaskListPage: (props: Parameters<typeof actual.TaskListPage>[0]) => <>
+      <span data-testid="workspace-navigation-type">{useNavigationType()}</span>
+      <actual.TaskListPage {...props} />
+    </>
+  };
+});
+
 const taskResponse = {
   items: [
     {
@@ -830,6 +843,24 @@ describe("AppRoutes", () => {
     expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
   });
 
+  it("preserves the active search draft through normalized URL replacements in the real route tree", async () => {
+    const user = userEvent.setup();
+    renderRoutes("/tasks/next?sort=due");
+    await screen.findByRole("link", { name: "Fix onboarding drop-off" });
+    await user.click(screen.getByRole("button", { name: "Open task navigation" }));
+    const drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    const search = within(drawer).getByRole("searchbox", { name: "Search tasks" });
+    await user.type(search, "review homepage ");
+    expect(screen.getByTestId("workspace-navigation-type")).toHaveTextContent("REPLACE");
+    // The URL is normalized, but an in-progress trailing space belongs to the
+    // focused draft and must survive before the next word is typed.
+    expect(search).toHaveValue("review homepage ");
+    await user.type(search, "copy{Enter}");
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("review homepage copy");
+    expect(screen.getByLabelText("Sort tasks")).toHaveValue("due");
+  });
+
   it("preserves filtered task routes while focusing detail and restoring the originating row link", async () => {
     const user = userEvent.setup();
     renderRoutes("/tasks/next?sort=priority&q=Persisted");
@@ -841,11 +872,11 @@ describe("AppRoutes", () => {
     const heading = await screen.findByRole("heading", { name: "Task detail" });
     await waitFor(() => expect(heading).toHaveFocus());
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Close task" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
     expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("Persisted");
     expect(screen.getByLabelText("Sort tasks")).toHaveValue("priority");
-    expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toHaveFocus());
   });
 
   it("focuses the Task detail heading immediately on a direct task detail URL and preserves query params on close", async () => {
@@ -856,7 +887,7 @@ describe("AppRoutes", () => {
     await waitFor(() => expect(heading).toHaveFocus());
     expect(screen.getByLabelText("Sort tasks")).toHaveValue("due");
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Close task" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
     expect(screen.getByLabelText("Sort tasks")).toHaveValue("due");
   });
@@ -889,9 +920,9 @@ describe("AppRoutes", () => {
     renderRoutes("/tasks/next/task-direct");
     await screen.findByRole("heading", { name: "Task detail" });
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Close task" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
-    expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus());
   });
 
   it("keeps unbuilt task-bound thinking actions out of the task workspace", async () => {

@@ -30,8 +30,9 @@ import { ShellToastContext } from "./shellToast";
 
 interface AppShellProps {
   children: ReactNode;
-  /** Right-side detail panel (prototype `bbs-detail`), rendered beside the content pane. */
+  /** Overlay detail surface, outside the inert workspace. */
   panel?: ReactNode;
+  panelModal?: boolean;
   counts: TaskCounts;
   projects: ProjectResponse[];
   tags: TagResponse[];
@@ -84,7 +85,7 @@ export function SoonChip(): React.JSX.Element {
 }
 
 export function AppShell(props: AppShellProps): React.JSX.Element {
-  const { children, panel } = props;
+  const { children, panel, panelModal } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -116,6 +117,12 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     setWeeklyReviewOpen(false);
   }, [location.pathname, location.search]);
 
+  useEffect(() => {
+    // Browser history can select a task while navigation is open. Do not leave
+    // that drawer active behind the sheet; typing a search keeps it open.
+    setIsDrawerOpen(false);
+  }, [location.pathname]);
+
   const sidebarProps: SidebarProps = {
     ...props,
     weeklyReviewOpen,
@@ -125,18 +132,20 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
   return (
     <ShellToastContext.Provider value={notify}>
       <div className="min-h-screen bg-surface-base text-slate-900">
-        <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} navigationTriggerRef={navigationTriggerRef} />
-        <DeletionCancelledBanner />
-        <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
-          <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
-            <Sidebar {...sidebarProps} />
-          </aside>
-          <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 lg:pb-16 lg:pt-8">
-            {weeklyReviewOpen ? <WeeklyReviewPlaceholder /> : children}
-          </main>
-          {weeklyReviewOpen ? null : panel}
+        <div inert={panelModal}>
+          <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} navigationTriggerRef={navigationTriggerRef} />
+          <DeletionCancelledBanner />
+          <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
+            <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
+              <Sidebar {...sidebarProps} />
+            </aside>
+            <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 lg:pb-16 lg:pt-8">
+              {weeklyReviewOpen ? <WeeklyReviewPlaceholder /> : children}
+            </main>
+          </div>
+          <NavigationDrawer {...sidebarProps} open={isDrawerOpen} onClose={closeDrawer} />
         </div>
-        <NavigationDrawer {...sidebarProps} open={isDrawerOpen} onClose={closeDrawer} />
+        {weeklyReviewOpen ? null : panel}
         {toast ? (
           <div
             role="status"
@@ -385,13 +394,13 @@ function TopBar({ onOpenDrawer, navigationTriggerRef }: {
 
   return (
     <header
-      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:gap-4 sm:px-5"
+      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
       style={{ height: "56px" }}
     >
       <button
         ref={navigationTriggerRef}
         type="button"
-        className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 lg:hidden"
+        className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 max-[359px]:shrink-0 lg:hidden"
         aria-label="Open task navigation"
         onClick={onOpenDrawer}
       >
@@ -402,10 +411,10 @@ function TopBar({ onOpenDrawer, navigationTriggerRef }: {
         <span>BrainBuddy</span>
       </Link>
       <TaskSearch className="hidden w-[340px] max-w-[32vw] md:flex" />
-      <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+      <div className="ml-auto flex shrink-0 items-center gap-2 max-[359px]:gap-1 sm:gap-3">
         <button
           type="button"
-          className="inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-sky-700 px-3 text-sm font-medium text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-sky-800 active:scale-[0.98] sm:px-4"
+          className="inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-sky-700 px-3 text-sm font-medium text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-sky-800 active:scale-[0.98] max-[359px]:px-2 sm:px-4"
           // Stamping the current location makes brain dump open as a modal over
           // this view instead of replacing it — see AppRoutes.
           onClick={() => navigate("/brain-dump/new", { state: { backgroundLocation: location } })}
