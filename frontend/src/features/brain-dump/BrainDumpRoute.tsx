@@ -6,6 +6,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "../../api/client";
 import { taskKeys, useBrainDumpProviders } from "../../api/taskHooks";
 import type { BrainDumpOperationResponse, BrainDumpProposal, BrainDumpProposalStatus } from "../../api/taskTypes";
+import { getErrorContext } from "../../utils/error";
 import { BrainDumpOverlay, BrainDumpOverlayHeader } from "./BrainDumpOverlay";
 import { useCloseBrainDump } from "./brainDumpNavigation";
 import { operationStatusLabels, processingStatuses } from "./brainDumpStatusLabels";
@@ -69,6 +70,22 @@ function idempotencyKey(suffix: string) {
   return `brain-dump-${suffix}-${Date.now()}`;
 }
 
+/**
+ * The text an error banner shows. A refused request answers with the reason the
+ * server gave (`RECONCILER_CONSENT_REQUIRED: …`, a stale-revision conflict), never
+ * the bare HTTP status text an `ApiError` carries as its message, and names the
+ * request's correlation id so the owner can quote it. Any other Error keeps its
+ * own message; a non-Error rejection gets the caller's wording. The raw payload
+ * and the stack never reach the banner.
+ */
+function describeError(caught: unknown, fallback: string): string {
+  if (!(caught instanceof Error)) {
+    return fallback;
+  }
+  const { message, referenceId } = getErrorContext(caught, fallback);
+  return referenceId ? `${message} Ref: ${referenceId}` : message;
+}
+
 export function BrainDumpRoute(): React.JSX.Element {
   const location = useLocation();
   const params = useParams();
@@ -127,7 +144,7 @@ export function BrainDumpRoute(): React.JSX.Element {
     }
     return map;
   }, [operation]);
-  const hasUnresolvedConflicts = activeProposals.some((proposal) => (proposal.conflicts ?? []).length > 0);
+  const unresolvedConflictCount = activeProposals.filter((proposal) => (proposal.conflicts ?? []).length > 0).length;
 
   const applyOperation = useCallback((next: BrainDumpOperationResponse | null) => {
     const current = operationRef.current;
@@ -178,7 +195,7 @@ export function BrainDumpRoute(): React.JSX.Element {
     const controller = new AbortController();
     apiClient.getBrainDump(operationId, controller.signal).then(applyOperation).catch((caught: unknown) => {
       if (!controller.signal.aborted) {
-        setError(caught instanceof Error ? caught.message : "Could not resume brain dump.");
+        setError(describeError(caught, "Could not resume brain dump."));
       }
     });
     return () => controller.abort();
@@ -271,7 +288,7 @@ export function BrainDumpRoute(): React.JSX.Element {
           idempotencyKey(`segment-${sequence}`)
         )
         .then(applyOperation)
-        .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Transcript upload failed."));
+        .catch((caught: unknown) => setError(describeError(caught, "Transcript upload failed.")));
     };
     recognition.onerror = (event) => setError(event.error === "not-allowed" ? "Microphone permission was denied." : `Microphone error: ${event.error}`);
     recognition.start();
@@ -314,7 +331,7 @@ export function BrainDumpRoute(): React.JSX.Element {
         applyOperation(updated);
       });
       void audioUploadQueueRef.current.catch((caught: unknown) => {
-        setError(caught instanceof Error ? caught.message : "Original audio upload failed.");
+        setError(describeError(caught, "Original audio upload failed."));
       });
     };
     recorder.start(1000);
@@ -428,7 +445,7 @@ export function BrainDumpRoute(): React.JSX.Element {
       if (!streamIsManagedByRecorder) {
         stream?.getTracks().forEach((track) => track.stop());
       }
-      setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
+      setError(describeError(caught, "Microphone permission was denied."));
     } finally {
       setIsStarting(false);
     }
@@ -467,7 +484,7 @@ export function BrainDumpRoute(): React.JSX.Element {
           permissionProbe.getTracks().forEach((track) => track.stop());
         }
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
+        setError(describeError(caught, "Microphone permission was denied."));
         return;
       }
     }
@@ -562,7 +579,7 @@ export function BrainDumpRoute(): React.JSX.Element {
         void queryClient.invalidateQueries({ queryKey: taskKeys.all });
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Brain dump command failed.");
+      setError(describeError(caught, "Brain dump command failed."));
     } finally {
       if (action === "commit") {
         setIsSaving(false);
@@ -607,7 +624,7 @@ export function BrainDumpRoute(): React.JSX.Element {
           : kind === "resolve"
             ? "Could not resolve the conflict."
             : "Could not delete the task.";
-      setError(caught instanceof Error ? caught.message : fallback);
+      setError(describeError(caught, fallback));
     }
   }
 
@@ -695,7 +712,7 @@ export function BrainDumpRoute(): React.JSX.Element {
     return (
       <ReviewSurface
         error={error}
-        hasUnresolvedConflicts={hasUnresolvedConflicts}
+        unresolvedConflictCount={unresolvedConflictCount}
         isSaving={isSaving}
         committable={operation?.committable ?? false}
         proposals={activeProposals}
@@ -1337,7 +1354,7 @@ function ProcessingSurface({
 function ReviewSurface({
   committable,
   error,
-  hasUnresolvedConflicts,
+  unresolvedConflictCount,
   isSaving,
   rawAudioExpiresAt,
   rawAudioPresent,
@@ -1355,7 +1372,8 @@ function ReviewSurface({
 }: {
   committable: boolean;
   error: string | null;
-  hasUnresolvedConflicts: boolean;
+  /** Active proposals still carrying an unanswered conflict; Send stays disabled above zero. */
+  unresolvedConflictCount: number;
   isSaving: boolean;
   rawAudioExpiresAt?: string | null;
   rawAudioPresent: boolean;
@@ -1372,6 +1390,8 @@ function ReviewSurface({
   onUpdateTitle: (proposal: BrainDumpProposal, title: string) => void;
 }): React.JSX.Element {
   const isEmpty = proposals.length === 0;
+  const hasUnresolvedConflicts = unresolvedConflictCount > 0;
+  const conflictHelpId = useId();
   return (
     // Not dismissible: these drafts exist only inside the operation, so leaving
     // has to be an explicit Discard or Confirm.
@@ -1394,7 +1414,7 @@ function ReviewSurface({
         {isEmpty ? (
           <div className="mb-3 flex flex-col gap-3">
             <p role="status" className="rounded-xl border border-slate-200 bg-surface-base px-3 py-2 text-sm text-slate-600">
-              No tasks were proposed from this dump. Here is what was heard; discard it or record again.
+              No tasks were proposed from this dump. Here is what was heard; discard it to record again.
             </p>
             <TranscriptReadout segments={segments} headings={processingTranscriptHeadings} emptyText="No transcript was captured for this recording." />
           </div>
@@ -1468,11 +1488,19 @@ function ReviewSurface({
 
       <footer className="flex shrink-0 flex-col items-center gap-2.5 border-t border-slate-200 bg-surface-base px-6 py-4 pb-[max(16px,env(safe-area-inset-bottom))]">
         {isEmpty ? null : (
-          <button type="button" className="inline-flex h-11 w-full max-w-[320px] items-center justify-center gap-2 rounded-xl bg-brand-primary px-5 text-[15px] font-semibold text-white shadow-glow transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50" disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
+          <button type="button" className="inline-flex h-11 w-full max-w-[320px] items-center justify-center gap-2 rounded-xl bg-brand-primary px-5 text-[15px] font-semibold text-white shadow-glow transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover disabled:cursor-not-allowed disabled:opacity-50" aria-describedby={hasUnresolvedConflicts ? conflictHelpId : undefined} disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
             <Inbox className="h-4 w-4" aria-hidden />
             {isSaving ? "Sending…" : `Send ${proposals.length} to inbox`}
           </button>
         )}
+        {hasUnresolvedConflicts ? (
+          // An open conflict on one of the cards above is what disables Send; say
+          // so beside the button instead of leaving it silently inert. Mobile
+          // words the same line as "… before confirming."
+          <p id={conflictHelpId} role="status" className="max-w-[320px] text-center text-xs text-amber-800">
+            {`Resolve ${unresolvedConflictCount} ${unresolvedConflictCount === 1 ? "conflict" : "conflicts"} before sending.`}
+          </p>
+        ) : null}
         <DestructiveConfirm
           trigger="Discard all"
           triggerClassName="text-[13px] font-medium text-slate-500 transition-colors duration-200 ease-smooth hover:text-slate-700"

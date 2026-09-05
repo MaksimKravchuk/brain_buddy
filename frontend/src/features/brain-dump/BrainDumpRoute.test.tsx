@@ -102,6 +102,28 @@ function conflict(field: string, currentValue: string, suggestedValue: string) {
   };
 }
 
+// A sealed recording whose accurate transcription failed for good, with the
+// one-shot browser-transcript recovery still on offer (design D-04.d).
+function terminalWithPreviewRecovery(id: string) {
+  return operation({
+    id,
+    status: "terminal_error",
+    revision: 4,
+    available_recovery_actions: ["reconcile_preview", "cancel"],
+    provider_runs: [
+      {
+        id: "provider_run_stt_terminal",
+        role: "accurate_stt",
+        status: "terminal_error",
+        checkpoint: "sealed",
+        attempt: 3,
+        recovery_count: 2,
+        error: "audio could not be transcribed"
+      }
+    ]
+  });
+}
+
 function TaskListProbe(): React.JSX.Element {
   const routeParams = useParams();
   return <div>{`Task list route: ${routeParams.state ?? "unknown"}`}</div>;
@@ -1466,7 +1488,9 @@ describe("BrainDumpRoute", () => {
     const deleteButton = await screen.findByRole("button", { name: "Delete Renew car insurance" });
 
     await userEvent.click(deleteButton);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Request failed");
+    // The server's own reason, not the bare status text the ApiError carries.
+    expect(await screen.findByRole("alert")).toHaveTextContent("revision conflict");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Request failed");
     expect(screen.getByDisplayValue("Renew car insurance")).toBeInTheDocument();
 
     await userEvent.click(deleteButton);
@@ -3034,5 +3058,155 @@ describe("BrainDumpRoute", () => {
 
     expect(screen.getByText("0:00")).toBeInTheDocument();
     expect(screen.getByText("Transcript preview appears while you talk")).toBeInTheDocument();
+  });
+  it("015-FR-009 shows the server's refusal and its reference, not the HTTP status, when reconcile_preview is refused", async () => {
+    const refusal =
+      "RECONCILER_CONSENT_REQUIRED: external-processing consent naming the configured task reconciler is required before preview text may leave the device.";
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_refused_preview") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(terminalWithPreviewRecovery("brain_dump_refused_preview"));
+      }
+      if (url.endsWith("/brain_dump_refused_preview/reconcile_preview") && init?.method === "POST") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ detail: refusal }), {
+            status: 403,
+            statusText: "Forbidden",
+            headers: { "Content-Type": "application/json", "X-Correlation-ID": "corr-123" }
+          })
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_refused_preview/review");
+    await userEvent.click(await screen.findByRole("button", { name: "Extract tasks from the browser transcript" }));
+
+    // The reason in words plus the correlation id to quote back, as one banner line.
+    expect(await screen.findByText(`${refusal} Ref: corr-123`)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Forbidden");
+    // The refusal changed nothing server-side, so the recovery exits stay put.
+    expect(screen.getByRole("button", { name: "Extract tasks from the browser transcript" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete recording" })).toBeEnabled();
+  });
+
+  it("keeps a plain error's own message, with no reference, when reconcile_preview fails before the server answers", async () => {
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_unreachable_preview") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(terminalWithPreviewRecovery("brain_dump_unreachable_preview"));
+      }
+      if (url.endsWith("/brain_dump_unreachable_preview/reconcile_preview") && init?.method === "POST") {
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_unreachable_preview/review");
+    await userEvent.click(await screen.findByRole("button", { name: "Extract tasks from the browser transcript" }));
+
+    expect(await screen.findByText("Failed to fetch")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Ref:");
+  });
+
+  it("015-FR-011 counts the conflicts blocking Send beside the button and clears the line as they are resolved", async () => {
+    const conflictedA = proposal("proposal_a", 1, "Call the dentist", {
+      status: "conflicted",
+      conflicts: [conflict("title", "Call the dentist", "Call the dentist on Monday")]
+    });
+    const conflictedB = proposal("proposal_b", 2, "Reply to Anna", {
+      status: "conflicted",
+      conflicts: [conflict("title", "Reply to Anna", "Reply to Anna about the invoice")]
+    });
+    const keptA = proposal("proposal_a", 1, "Call the dentist", { status: "user_edited", user_edited: true });
+    const keptB = proposal("proposal_b", 2, "Reply to Anna", { status: "user_edited", user_edited: true });
+    const review = (revision: number, proposals: unknown[]) =>
+      consentedOperation({ id: "brain_dump_two_conflicts", status: "awaiting_confirmation", revision, proposals });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_two_conflicts") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(review(6, [conflictedA, conflictedB]));
+      }
+      if (url.includes("/proposals/proposal_a")) {
+        return jsonResponse(review(7, [keptA, conflictedB]));
+      }
+      if (url.includes("/proposals/proposal_b")) {
+        return jsonResponse(review(8, [keptA, keptB]));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_two_conflicts/review");
+
+    const send = await screen.findByRole("button", { name: "Send 2 to inbox" });
+    expect(send).toBeDisabled();
+    const line = screen.getByText("Resolve 2 conflicts before sending.");
+    expect(line).toHaveAttribute("role", "status");
+    expect(send).toHaveAccessibleDescription("Resolve 2 conflicts before sending.");
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Keep mine" })[0]);
+    expect(await screen.findByText("Resolve 1 conflict before sending.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send 2 to inbox" })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Keep mine" }));
+    await waitFor(() => expect(screen.queryByText(/before sending\./)).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Send 2 to inbox" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send 2 to inbox" })).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("015-FR-002 reports a refused audio chunk with the server's reason while capture keeps running", async () => {
+    let recorder: { ondataavailable: ((event: { data: Blob }) => void) | null } | null = null;
+    function CapturingRecorder() {
+      const instance = {
+        state: "recording",
+        ondataavailable: null as ((event: { data: Blob }) => void) | null,
+        onstop: null as ((event: Event) => void) | null,
+        mimeType: "audio/webm",
+        start() {},
+        stop() {}
+      };
+      recorder = instance;
+      return instance;
+    }
+    vi.stubGlobal("MediaRecorder", CapturingRecorder);
+    const refusal = "AUDIO_CHUNK_HASH_MISMATCH: the uploaded bytes do not match X-Content-SHA256.";
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
+        return jsonResponse(consentedOperation(), 201);
+      }
+      if (url.endsWith("/brain_dump_1/audio/0") && init?.method === "PUT") {
+        return jsonResponse({ detail: refusal }, 400);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump();
+    await userEvent.click(screen.getByRole("button", { name: "Record" }));
+    const activeRecorder = recorder as unknown as { ondataavailable: ((event: { data: Blob }) => void) | null };
+    activeRecorder.ondataavailable?.({
+      data: { size: 14, type: "audio/webm", arrayBuffer: async () => new ArrayBuffer(14) } as Blob
+    });
+
+    // D-01.j: the banner names the server's reason above the readout, and the
+    // capture underneath it is not interrupted.
+    expect(await screen.findByRole("alert")).toHaveTextContent(refusal);
+    expect(screen.getByText("Recording")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop & review" })).toBeEnabled();
+    expect(micTrackStop).not.toHaveBeenCalled();
+  });
+
+  it("015-FR-005 tells an empty review that discarding is the way back to recording, without promising a record-again control", async () => {
+    fetchMock.mockImplementation(() => Promise.reject(new Error("should not load a new operation")));
+
+    renderBrainDump("/brain-dump/new/review");
+
+    expect(screen.getByRole("heading", { name: "No tasks to review" })).toBeInTheDocument();
+    expect(
+      screen.getByText("No tasks were proposed from this dump. Here is what was heard; discard it to record again.")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /record again/i })).not.toBeInTheDocument();
+    // Discard is that way back: the confirm question leads to a fresh recording screen.
+    expect(screen.getByRole("button", { name: "Discard all" })).toBeInTheDocument();
   });
 });
