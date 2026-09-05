@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import contextlib
 import os
+import queue
 import socket
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -179,6 +181,71 @@ def _drain(process: subprocess.Popen[bytes]) -> str:
     return "<no output captured>"
 
 
+def start_announcing_runtime(
+    request: pytest.FixtureRequest,
+    *,
+    argv: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    prefix: str,
+    name: str,
+) -> tuple[subprocess.Popen[bytes], int]:
+    """Start a runtime that binds port 0 and prints the port it got.
+
+    The output is drained by a thread for the process's whole life. A pipe
+    nobody reads fills at 64 KiB and blocks the child mid-write, which would
+    look exactly like an agent that stopped answering — the failure this suite
+    exists to be able to trust.
+    """
+
+    process = subprocess.Popen(  # noqa: S603 - fixed argv, vendored entrypoint
+        argv,
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    request.addfinalizer(lambda: _reap(process))
+    lines: list[str] = []
+    announced: queue.Queue[int] = queue.Queue(maxsize=1)
+
+    def drain() -> None:
+        assert process.stdout is not None
+        for raw in iter(process.stdout.readline, b""):
+            line = raw.decode(errors="replace").rstrip("\n")
+            lines.append(line)
+            if line.startswith(prefix) and announced.empty():
+                with contextlib.suppress(ValueError, queue.Full):
+                    announced.put_nowait(int(line[len(prefix) :]))
+
+    reader = threading.Thread(target=drain, daemon=True, name=f"{name}-output")
+    reader.start()
+
+    try:
+        port = announced.get(timeout=STARTUP_TIMEOUT_SECONDS)
+    except queue.Empty:
+        _reap(process)
+        pytest.fail(
+            f"{name} never announced its port within "
+            f"{STARTUP_TIMEOUT_SECONDS:.0f}s. Output:\n" + "\n".join(lines[-40:])
+        )
+    return process, port
+
+
+def wait_until(
+    ready: Callable[[], bool], *, name: str, timeout: float = STARTUP_TIMEOUT_SECONDS
+) -> None:
+    """Poll a readiness probe, and fail — never skip — when it never passes."""
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with contextlib.suppress(Exception):
+            if ready():
+                return
+        time.sleep(STARTUP_POLL_SECONDS)
+    pytest.fail(f"{name} did not become ready within {timeout:.0f}s.")
+
+
 def card_is_served(url: str) -> Callable[[], bool]:
     """A readiness probe that only passes on a parseable agent card."""
 
@@ -189,7 +256,9 @@ def card_is_served(url: str) -> Callable[[], bool]:
     return ready
 
 
-def jsonrpc(url: str, method: str, params: dict[str, Any]) -> dict[str, Any]:
+def jsonrpc(
+    url: str, method: str, params: dict[str, Any], *, bearer: str | None = None
+) -> dict[str, Any]:
     """One JSON-RPC call straight at a runtime, bypassing BrainBuddy.
 
     Used only to observe what the *agent* did — never to drive BrainBuddy — so
@@ -197,10 +266,13 @@ def jsonrpc(url: str, method: str, params: dict[str, Any]) -> dict[str, Any]:
     the code under test to confirm its own behaviour.
     """
 
+    headers = {"Content-Type": "application/json", "A2A-Version": "1.0"}
+    if bearer is not None:
+        headers["Authorization"] = f"Bearer {bearer}"
     response = httpx.post(
         url,
         json={"jsonrpc": "2.0", "id": "probe", "method": method, "params": params},
-        headers={"Content-Type": "application/json", "A2A-Version": "1.0"},
+        headers=headers,
         timeout=15.0,
     )
     response.raise_for_status()
