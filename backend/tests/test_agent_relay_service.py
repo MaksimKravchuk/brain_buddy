@@ -2276,7 +2276,7 @@ class TestHandOffReview:
         a2a_client: FakeA2AClient,
         probe_error: str | None,
     ) -> None:
-        """AC-010: task content never leaves through an unusable connection."""
+        """AC-011: task content never leaves through an unusable connection."""
 
         connection_id = connect(service)
         if probe_error is not None:
@@ -2295,7 +2295,7 @@ class TestHandOffReview:
     def test_a_stale_connection_refuses_the_hand_off(
         self, service: AgentRelayService, a2a_client: FakeA2AClient, clock: Clock
     ) -> None:
-        """AC-010: silence past the stale threshold blocks a new hand-off."""
+        """AC-011: silence past the stale threshold blocks a new hand-off."""
 
         connection_id = connect(service)
         make_ready(service, connection_id)
@@ -2311,7 +2311,7 @@ class TestHandOffReview:
         service: AgentRelayService,
         a2a_client: FakeA2AClient,
     ) -> None:
-        """AC-010: cross-owner hand-off fails closed."""
+        """AC-011: cross-owner hand-off fails closed."""
 
         connection_id = connect(service)
         make_ready(service, connection_id)
