@@ -23,7 +23,7 @@ from app.modules.agents.secrets import (
     SecretsUnavailable,
     build_secret_box,
     fingerprint_key_id,
-    generate_push_token,
+    derive_push_token,
     parse_secret_keys,
     push_token_fingerprint,
     push_token_matches,
@@ -507,25 +507,32 @@ def test_two_ephemeral_development_boxes_do_not_share_a_key() -> None:
 # --- 014 FR-008: the per-run push callback token --------------------------
 
 
-def test_014_FR_008_a_push_token_is_random_urlsafe_and_never_repeats(
+def test_014_FR_008_a_push_token_is_urlsafe_unique_per_run_and_reproducible(
     box: SecretBox,
 ) -> None:
     """The token is the whole authentication of an unauthenticated route.
 
-    32 bytes of `secrets.token_urlsafe` because it travels in a *path segment*:
-    a shorter token would be guessable at the route's limiter budget, and a
-    non-urlsafe one would have to be escaped, which is one more place for the
-    two sides to disagree about what was signed.
+    Derived under the key ring rather than drawn from the random pool, because
+    the *same* token has to go out again with every reply so a successor task
+    stays push-accelerated — and the alternative, storing the plaintext, would
+    put a live route credential in the database. Unguessable all the same: the
+    run id it is derived from is unguessable and the key never leaves the
+    process. Urlsafe because it travels in a *path segment*, where an encoding
+    that needed escaping would be one more thing the two sides could disagree
+    about.
     """
 
-    tokens = {generate_push_token() for _ in range(64)}
+    tokens = {derive_push_token(box, f"agentrun_{index}") for index in range(64)}
 
     assert len(tokens) == 64
     for token in tokens:
-        assert len(token) >= 43, "32 random bytes, urlsafe-encoded"
+        assert len(token) >= 43, "32 derived bytes, urlsafe-encoded"
         assert set(token) <= set(
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
         )
+    assert derive_push_token(box, "agentrun_0") == derive_push_token(
+        box, "agentrun_0"
+    ), "a reply must be able to re-offer the token the start registered"
 
 
 def test_014_FR_008_only_a_keyed_fingerprint_of_the_push_token_is_storable(
@@ -541,13 +548,15 @@ def test_014_FR_008_only_a_keyed_fingerprint_of_the_push_token_is_storable(
     being replayed as a comparison oracle across deployments.
     """
 
-    token = generate_push_token()
+    token = derive_push_token(box, "agentrun_1")
     stored = push_token_fingerprint(box, token)
 
     assert token not in stored
     assert stored.startswith("v1:")
     assert push_token_matches(box, stored, token) is True
-    assert push_token_matches(box, stored, generate_push_token()) is False
+    assert (
+        push_token_matches(box, stored, derive_push_token(box, "agentrun_2")) is False
+    )
     # A truncated or malformed stored value is a refusal, never an exception:
     # the push route answers one opaque 403 for every failure mode.
     assert push_token_matches(box, "", token) is False

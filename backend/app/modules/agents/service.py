@@ -44,6 +44,7 @@ from app.schemas.agents import (
     AgentConnectionSigningSecretResponse,
     AgentConnectionUpdateRequest,
     AgentContextItemResponse,
+    AgentArtifactSummaryResponse,
     AgentControlsResponse,
     AgentEventIngestResponse,
     AgentHandoffConfirmRequest,
@@ -76,6 +77,7 @@ from .a2a.client import (
     A2A_CREDENTIALS_REJECTED,
     A2A_EXTENSION_SUPPORT_REQUIRED,
     A2A_METHOD_NOT_FOUND,
+    A2A_NOT_CANCELABLE,
     A2A_RATE_LIMITED,
     A2A_REQUEST_REJECTED,
     A2A_RESPONSE_INVALID,
@@ -92,10 +94,15 @@ from .connector import ConnectorPort, ConnectorTarget
 from .domain import (
     A2A_PROTOCOL_VERSION,
     AGENT_EVENT_ENVELOPE_ADAPTER,
+    CANCEL_OUTCOMES_WITHDRAWING_THE_CONTROL,
     MAX_CONTEXT_ITEMS,
+    PREDECESSOR_ENDED_PREFIX,
     PROTOCOL_VERSION,
+    TASK_SUCCESSION_SUMMARY,
     TERMINAL_REPORTED_STATES,
+    AgentArtifactSummary,
     AgentAuditEntryDocument,
+    AgentCancelOutcome,
     AgentCapabilities,
     AgentCommandKind,
     AgentConnectionDocument,
@@ -106,10 +113,18 @@ from .domain import (
     AgentRunCommandDocument,
     AgentRunDocument,
     AgentRunEventDocument,
+    AgentRunEventKind,
+    AgentRunEventTrigger,
     AgentRunManifest,
     bounded_test_error_detail,
+    cancel_control_offered,
+    content_is_due,
     inert_reporting_contract,
+    observation_is_suspended,
+    primary_state_label,
     project_run_for_access,
+    reply_control_offered,
+    stopped_reporting,
 )
 from .egress import (
     DestinationRejected,
@@ -126,13 +141,44 @@ from .secrets import (
     SealedSecret,
     SecretBox,
     SecretDecryptionFailed,
-    generate_push_token,
+    derive_push_token,
     push_token_fingerprint,
     secret_aad,
 )
 
 DEFAULT_STALE_AFTER = timedelta(days=7)
 DEFAULT_REPORTING_WINDOW = timedelta(hours=1)
+DEFAULT_OBSERVATION_INTERVAL = timedelta(seconds=60)
+
+#: The only agent answers that may reject a *reply* outright: an explicit
+#: statement that the task will not take one. Everything else leaves the
+#: command unconfirmed, because silence is not a refusal.
+REPLY_REJECTING_ERROR_CODES: frozenset[int] = frozenset({-32004, -32601})
+
+#: One `CancelTask` answer to one outcome (a2a-wire.md, Error mapping). Only
+#: an explicit agent answer appears here; every other ending falls through to
+#: `unconfirmed`, which keeps the control and the command id.
+CANCEL_OUTCOME_BY_ERROR_CODE: dict[str, str] = {
+    A2A_NOT_CANCELABLE: "not_cancelable",
+    A2A_UNSUPPORTED_OPERATION: "unsupported",
+    A2A_METHOD_NOT_FOUND: "unsupported",
+    A2A_TASK_NOT_FOUND: "task_missing",
+}
+
+#: How each outcome reads on the command row. `rejected` only where the
+#: agent answered about this command; `unconfirmed` everywhere else.
+CANCEL_DELIVERY_BY_OUTCOME: dict[str, str] = {
+    "accepted": "confirmed",
+    "not_cancelable": "rejected",
+    "unsupported": "rejected",
+    "task_missing": "rejected",
+    "unconfirmed": "unconfirmed",
+}
+"""The base schedule, and the rate the clients are told to poll at.
+
+The server may observe *less* often after the reporting window (the FR-008
+backoff); it never observes more often on the schedule, so telling a client
+this number is a promise the server can keep."""
 DEFAULT_CONTENT_RETENTION = timedelta(days=30)
 EVENT_FRESHNESS_WINDOW = timedelta(minutes=5)
 SCOPE_REAUTH_WINDOW = timedelta(minutes=15)
@@ -410,6 +456,7 @@ class AgentRelayService:
         tier_disclosure_url: str = SINGLE_START_EXTENSION_URI,
         stale_after: timedelta = DEFAULT_STALE_AFTER,
         reporting_window: timedelta = DEFAULT_REPORTING_WINDOW,
+        observation_interval: timedelta = DEFAULT_OBSERVATION_INTERVAL,
         content_retention: timedelta = DEFAULT_CONTENT_RETENTION,
         allow_private_destinations: bool = False,
         resolver: Resolver | None = None,
@@ -425,6 +472,17 @@ class AgentRelayService:
         # Set by the container once the observer exists, so the service never
         # needs to know how exchanges are scheduled — only that they are.
         self.exchange_pump: Callable[[str, str], Future[Any] | None] | None = None
+        # The dedicated control lane. A cancel is what *resolves* a blocked
+        # exchange on some runtimes, so it must never queue behind the very
+        # exchanges it ends (AC-035). `None` means "run it here", which is the
+        # honest fallback for a service constructed without an observer.
+        self.control_pump: Callable[[Callable[[], A2AResult]], Future[A2AResult]] | (
+            None
+        ) = None
+        # Woken by a verified push so the observation it earns runs at once
+        # rather than waiting out the interval. Narrow on purpose: a push may
+        # only *accelerate* an observation, never supply one.
+        self.observer_wake: Callable[[str], None] | None = None
         self.secret_box = secret_box
         self.task_snapshot = task_snapshot
         self.callback_url = callback_url
@@ -432,6 +490,7 @@ class AgentRelayService:
         self.tier_disclosure_url = tier_disclosure_url
         self.stale_after = stale_after
         self.reporting_window = reporting_window
+        self.observation_interval = observation_interval
         self.content_retention = content_retention
         self.allow_private_destinations = allow_private_destinations
         self._resolver = resolver
@@ -750,6 +809,40 @@ class AgentRelayService:
                 correlation_id=correlation_id,
                 created_at=self._now(),
             )
+        )
+
+
+    def _bounded_audit(
+        self,
+        *,
+        owner_id: str,
+        action: str,
+        outcome: str,
+        bucket: str,
+        connection_id: str | None = None,
+        run_id: str | None = None,
+    ) -> bool:
+        """One coarse row per class and UTC day, however often the class recurs.
+
+        The observer polls every sixty seconds and the push route is reachable
+        by anyone who guesses a run id, so an unbounded row per event would
+        turn an accountability record into a growth problem — and the ninetieth
+        row of a day tells the owner nothing the first did not.
+        """
+
+        now = self._now()
+        return self.agent_repo.append_bounded_audit(
+            AgentAuditEntryDocument(
+                id=generate_id("agentaudit"),
+                owner_id=owner_id,
+                action=action,
+                outcome=outcome,
+                connection_id=connection_id,
+                run_id=run_id,
+                created_at=now,
+            ),
+            bucket=bucket,
+            day=now.astimezone(UTC).date().isoformat(),
         )
 
     def _audit_authenticated_event_rejection(
@@ -2365,7 +2458,11 @@ class AgentRelayService:
         # plaintext secret, and the manifest token commits only to the callback
         # *origin*, so the token itself is free to be created at the moment it
         # is about to leave.
-        push_token = generate_push_token() if self._push_capable(connection) else None
+        push_token = (
+            derive_push_token(self.secret_box, run.id)
+            if self._push_capable(connection)
+            else None
+        )
         prepared = run.model_copy(
             update={
                 "push_token_fingerprint": (
@@ -2414,6 +2511,7 @@ class AgentRelayService:
         updates: dict[str, Any] = {
             "reported_state": observation.reported_state,
             "last_contact_at": observation.observed_at,
+            "last_observed_at": observation.observed_at,
         }
         if observation.agent_task_id is not None:
             updates["agent_task_id"] = observation.agent_task_id
@@ -2424,9 +2522,122 @@ class AgentRelayService:
         updates["result_text"] = observation.result_text
         updates["result_link"] = observation.result_link
         updates["failure_reason"] = observation.failure_reason
+        updates["blocked_reason"] = observation.blocked_reason
+        updates["result_availability"] = observation.result_availability
+        updates["artifacts_summary"] = [
+            AgentArtifactSummary(
+                name=artifact.name, media_type=artifact.media_type, kind=artifact.kind
+            )
+            for artifact in observation.artifacts_summary
+        ]
         if observation.terminal:
             updates["cancel_requested_at"] = None
         return updates
+
+    #: The fields an observation may never write back into a run whose content
+    #: tier has expired. Retention is irreversible: state, version and contact
+    #: still move, but a later answer cannot recreate erased text (SC-007).
+    _CONTENT_FIELDS_NEVER_REWRITTEN: tuple[str, ...] = (
+        "progress_text",
+        "question_text",
+        "result_text",
+        "result_link",
+        "failure_reason",
+        "blocked_reason",
+        "result_availability",
+    )
+
+    def _observation_is_unchanged(
+        self, current: AgentRunDocument, observation: Observation
+    ) -> bool:
+        """Whether this answer says exactly what the run already records.
+
+        The sixty-second schedule means most observations are this one, and an
+        unchanged answer must cost a contact timestamp rather than a timeline
+        row — otherwise a healthy run accumulates a thousand identical entries
+        a day and the user can no longer find the moment anything happened.
+        """
+
+        if observation.reported_state is None:
+            return True
+        if current.reported_state != observation.reported_state:
+            return False
+        if (
+            observation.agent_task_id is not None
+            and current.agent_task_id != observation.agent_task_id
+        ):
+            return False
+        if content_is_due(current, now=observation.observed_at):
+            # Nothing textual is written on an expired run, so text cannot be
+            # what changed: the state comparison above is the whole question.
+            return True
+        return all(
+            getattr(current, field) == value
+            for field, value in (
+                ("progress_text", observation.progress_text),
+                ("question_text", observation.question_text),
+                ("result_text", observation.result_text),
+                ("result_link", observation.result_link),
+                ("failure_reason", observation.failure_reason),
+                ("blocked_reason", observation.blocked_reason),
+                ("result_availability", observation.result_availability),
+            )
+        )
+
+    def _observable(self, run: AgentRunDocument) -> bool:
+        """Whether an observation may be written to this run at all.
+
+        Four refusals, each of which is a promise: a disconnected run has no
+        credential behind it, a run whose identifiers expired has nothing left
+        to ask with, an undispatched one was never handed over, and a terminal
+        one has already been settled by the agent's own last word.
+        """
+
+        return not (
+            run.dispatched_at is None
+            or run.connection_disconnected_at is not None
+            or run.identifiers_expired
+        )
+
+    def _event_row(
+        self,
+        run: AgentRunDocument,
+        observation: Observation,
+        *,
+        trigger: AgentRunEventTrigger,
+        summary: str | None,
+        kind: AgentRunEventKind = "observation",
+        previous_agent_task_id: str | None = None,
+        new_agent_task_id: str | None = None,
+        content_due: bool = False,
+    ) -> AgentRunEventDocument:
+        reported = observation.reported_state or run.reported_state
+        assert reported is not None  # guarded by every caller
+        return AgentRunEventDocument(
+            id=generate_id("agentevt"),
+            owner_id=run.owner_id,
+            run_id=run.id,
+            connection_id=run.connection_id,
+            type=reported,
+            run_version=run.run_version,
+            received_at=observation.observed_at,
+            summary=None if content_due else summary,
+            trigger=trigger,
+            agent_state=observation.agent_task_state,
+            kind=kind,
+            previous_agent_task_id=previous_agent_task_id,
+            new_agent_task_id=new_agent_task_id,
+        )
+
+    @staticmethod
+    def _observation_summary(observation: Observation) -> str | None:
+        return (
+            observation.progress_text
+            or observation.question_text
+            or observation.result_text
+            or observation.failure_reason
+            or observation.blocked_reason
+        )
 
     def apply_observation(
         self,
@@ -2437,7 +2648,8 @@ class AgentRelayService:
         based_on: int,
         extra: dict[str, Any] | None = None,
         superseded: dict[str, Any] | None = None,
-    ) -> AgentRunDocument:
+        trigger: AgentRunEventTrigger = "schedule",
+    ) -> AgentRunDocument | None:
         """Write one observation, or lose the race and change nothing.
 
         The compare-and-set on `run_version` is what keeps two answers about the
@@ -2452,12 +2664,22 @@ class AgentRelayService:
         itself. Nothing about the agent's state is written on that path; that
         belongs to the report that won.
 
+        Returns ``None`` when the run is gone. A worker that started before an
+        account purge finishes after it, and it must write nothing at all —
+        not a run, not an event, not an audit row — rather than resurrect what
+        the user asked to be erased (FR-016).
+
         No I/O happens inside the lock — the observation is already projected by
         the time it arrives here.
         """
 
         with self.agent_repo.command_lock(owner_id):
-            current = self.agent_repo.get_run(run_id, owner_id=owner_id)
+            try:
+                current = self.agent_repo.get_run(run_id, owner_id=owner_id)
+            except NotFoundError:
+                return None
+            if not self._observable(current):
+                return current
             if current.run_version != based_on:
                 if not superseded:
                     return current
@@ -2473,58 +2695,115 @@ class AgentRelayService:
                 return overtaken
             now = self._now()
             updates: dict[str, Any] = dict(extra or {})
-            if observation is not None and (
-                current.reported_state not in TERMINAL_REPORTED_STATES
-            ):
+            terminal_lock = current.reported_state in TERMINAL_REPORTED_STATES
+            unchanged = observation is not None and self._observation_is_unchanged(
+                current, observation
+            )
+            rejected = (
+                observation is not None
+                and terminal_lock
+                and not unchanged
+                and observation.reported_state is not None
+            )
+            content_due = content_is_due(current, now=now)
+            if observation is not None and not terminal_lock:
                 updates = {**self._observation_updates(observation), **updates}
-                if current.content_expired:
+                if content_due:
                     # Retention is irreversible: state and contact still move,
                     # but a late answer can never recreate expired content.
                     updates.update(
-                        progress_text=None,
-                        question_text=None,
-                        result_text=None,
-                        result_link=None,
-                        failure_reason=None,
+                        dict.fromkeys(self._CONTENT_FIELDS_NEVER_REWRITTEN)
                     )
+                    updates["artifacts_summary"] = []
+            elif observation is not None and unchanged:
+                # A terminal run that repeats itself is still contact.
+                updates.setdefault("last_contact_at", observation.observed_at)
+                updates.setdefault("last_observed_at", observation.observed_at)
             reported = updates.get("reported_state")
-            # `run_version` is the *agent-reported* version, so only something
-            # the agent actually said advances it. BrainBuddy's own bookkeeping
-            # — which dispatch state an exchange closed in, whether a worker is
-            # holding it — is a fact about BrainBuddy's request, and letting it
-            # burn versions would make a later genuine report look like a
-            # straggler and be dropped.
-            if reported is not None:
+            append_row = (
+                observation is not None
+                and reported is not None
+                and not unchanged
+            )
+            # `run_version` is BrainBuddy's own observation version, so only an
+            # accepted, *differing* observation advances it. Burning a version
+            # on an unchanged poll would make a later genuine report look like
+            # a straggler and be dropped.
+            if append_row:
                 updates["run_version"] = current.run_version + 1
+            if trigger != "schedule" or current.observation_trigger_pending:
+                # The pass that ran is the one that was owed.
+                updates.setdefault("observation_trigger_pending", None)
             updates.update(
                 updated_at=max(current.updated_at, now),
                 revision=current.revision + 1,
             )
             updated = current.model_copy(update=updates)
             self.agent_repo.save_run(updated)
-            if observation is not None and reported is not None:
+            if append_row and observation is not None:
                 self.agent_repo.append_event(
-                    AgentRunEventDocument(
-                        id=generate_id("agentevt"),
-                        owner_id=owner_id,
-                        run_id=updated.id,
-                        connection_id=updated.connection_id,
-                        type=reported,
-                        run_version=updated.run_version,
-                        received_at=observation.observed_at,
-                        summary=(
-                            None
-                            if updated.content_expired
-                            else (
-                                observation.progress_text
-                                or observation.question_text
-                                or observation.result_text
-                                or observation.failure_reason
-                            )
-                        ),
+                    self._event_row(
+                        updated,
+                        observation,
+                        trigger=trigger,
+                        summary=self._observation_summary(observation),
+                        content_due=content_due,
                     )
                 )
+                self._bounded_audit(
+                    owner_id=owner_id,
+                    action="observation_accepted",
+                    outcome=str(reported),
+                    bucket=f"{updated.id}:{reported}",
+                    connection_id=updated.connection_id,
+                    run_id=updated.id,
+                )
+            elif rejected and observation is not None:
+                self._bounded_audit(
+                    owner_id=owner_id,
+                    action="observation_rejected",
+                    outcome="terminal_locked",
+                    bucket=f"{updated.connection_id}:terminal_locked",
+                    connection_id=updated.connection_id,
+                    run_id=updated.id,
+                )
         return updated
+
+    def record_task_missing(self, run_id: str, *, owner_id: str) -> None:
+        """The agent answered that this task does not exist (AC-020).
+
+        Deliberately not a failure: BrainBuddy has lost sight of the work, and
+        saying the work failed would be a claim about someone else's system
+        that nothing here can support. Last contact is preserved for the same
+        reason — the agent did answer.
+        """
+
+        with self.agent_repo.command_lock(owner_id):
+            try:
+                run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+            except NotFoundError:
+                return
+            if run.agent_task_missing_at is not None or not self._observable(run):
+                return
+            now = self._now()
+            self.agent_repo.save_run(
+                run.model_copy(
+                    update={
+                        "agent_task_missing_at": now,
+                        # Nothing left to look for, so nothing left to schedule.
+                        "next_observation_at": None,
+                        "updated_at": max(run.updated_at, now),
+                        "revision": run.revision + 1,
+                    }
+                )
+            )
+            self._audit(
+                owner_id=owner_id,
+                action="agent_task_missing",
+                outcome="observed",
+                connection_id=run.connection_id,
+                run_id=run.id,
+            )
 
     def _adoptable(self, run: AgentRunDocument, task: Task) -> bool:
         """Whether a returned task belongs to *this* run's conversation.
@@ -3025,57 +3304,21 @@ class AgentRelayService:
     # --- run projection -----------------------------------------------------
 
     def _stopped_reporting(self, run: AgentRunDocument, *, now: datetime) -> bool:
-        if run.reported_state in TERMINAL_REPORTED_STATES:
-            return False
-        if run.connection_disconnected_at is not None:
-            return False
-        if run.dispatch_state == "not_sent":
-            return False
-        if run.last_contact_at is None:
-            return False
-        return now >= run.last_contact_at + self.reporting_window
+        """The clock-derived silence condition, with this deployment's window."""
+
+        return stopped_reporting(run, now=now, reporting_window=self.reporting_window)
 
     def _primary_state_label(self, run: AgentRunDocument, *, now: datetime) -> str:
-        if run.content_expired:
-            label = "Content expired under retention policy"
-        elif run.connection_disconnected_at is not None:
-            label = "Connection disconnected"
-        elif run.reported_state == "completed":
-            # Never "Complete": BrainBuddy did not verify the work (FR-011).
-            label = "Agent reported complete"
-        elif run.reported_state == "failed":
-            label = "Failed"
-        elif run.reported_state == "cancelled":
-            label = "Cancelled"
-        elif self._stopped_reporting(run, now=now):
-            label = "Stopped reporting"
-        elif run.reported_state == "blocked":
-            label = "Needs you"
-        elif run.cancel_requested_at is not None:
-            label = "Cancellation requested"
-        elif run.reported_state == "running":
-            label = "Running"
-        elif run.reported_state == "accepted":
-            label = "Accepted"
-        elif run.exchange_state == "queued":
-            # Checked *before* the dispatch labels, and this ordering is the
-            # point: the durable `dispatch_state` is already
-            # `delivery_unconfirmed` at reservation, but nothing has left
-            # BrainBuddy while the exchange is queued. Rendering that as
-            # "Delivery unconfirmed" would claim a send that provably did not
-            # happen (FR-006, D-03-S04 queued variant).
-            label = "Queued"
-        elif run.exchange_state == "open" and run.dispatch_state != "not_sent":
-            # An exchange a worker is holding may already be at the agent, so
-            # **Sent** is the honest label until it closes without evidence.
-            label = "Sent"
-        elif run.dispatch_state == "delivery_unconfirmed":
-            label = "Delivery unconfirmed"
-        elif run.dispatch_state == "sent":
-            label = "Sent"
-        else:
-            label = "Not sent"
-        return label
+        """The one label every surface renders verbatim.
+
+        Delegated to `domain` rather than decided here: the observer reasons
+        about the same precedence, and two copies of it would be one edit away
+        from two answers to "what is this run doing?".
+        """
+
+        return primary_state_label(
+            run, now=now, reporting_window=self.reporting_window
+        )
 
     def _run_response(self, run: AgentRunDocument) -> AgentRunResponse:
         now = self._now()
@@ -3091,11 +3334,23 @@ class AgentRelayService:
         # cancellation (FR-010), so both controls are offered on a live run and
         # withdrawn only once something has actually made them impossible — a
         # disconnected connection, or an agent that refused.
-        controls = AgentControlsResponse(
-            reply=connection is not None and run.connection_disconnected_at is None,
-            cancel=connection is not None and run.connection_disconnected_at is None,
-        )
         commands = self.agent_repo.list_commands(run.id, owner_id=run.owner_id)
+        # A reply the agent explicitly refused for *this* task withdraws the
+        # control: offering it again would invite the user to answer a question
+        # the agent has already said it will not read. An unconfirmed reply is
+        # the opposite case and deliberately keeps it (AC-033).
+        reply_refused = any(
+            command.kind == "reply" and command.delivery == "rejected"
+            for command in commands
+        )
+        controls = AgentControlsResponse(
+            reply=(
+                connection is not None
+                and reply_control_offered(run)
+                and not reply_refused
+            ),
+            cancel=connection is not None and cancel_control_offered(run),
+        )
         reply_pending = any(
             command.kind == "reply" and command.delivery == "unconfirmed"
             for command in commands
@@ -3141,6 +3396,23 @@ class AgentRelayService:
             exchange_state=run.exchange_state,
             exchange_kind=run.exchange_kind,
             push_registration=run.push_registration,
+            agent_task_missing=run.agent_task_missing_at is not None,
+            cancel_outcome=run.cancel_outcome,
+            blocked_reason=run.blocked_reason,
+            artifacts_summary=[
+                AgentArtifactSummaryResponse(
+                    name=artifact.name,
+                    media_type=artifact.media_type,
+                    kind=artifact.kind,
+                )
+                for artifact in run.artifacts_summary
+            ],
+            result_availability=run.result_availability,
+            last_observed_at=run.last_observed_at,
+            observation_interval_seconds=int(
+                self.observation_interval.total_seconds()
+            ),
+            identifiers_expired=run.identifiers_expired,
             manifest=(
                 self._manifest_response(run.manifest, connection)
                 if run.manifest is not None and connection is not None
@@ -3153,6 +3425,10 @@ class AgentRelayService:
                     run_version=event.run_version,
                     received_at=event.received_at,
                     summary=None if run.content_expired else event.summary,
+                    trigger=event.trigger,
+                    kind=event.kind,
+                    previous_agent_task_id=event.previous_agent_task_id,
+                    new_agent_task_id=event.new_agent_task_id,
                 )
                 for event in self.agent_repo.list_events(run.id, owner_id=run.owner_id)
             ],
@@ -3162,6 +3438,7 @@ class AgentRelayService:
                     kind=command.kind,
                     body=None if run.content_expired else command.body,
                     delivery=command.delivery,
+                    outcome_code=command.outcome_code,
                     created_at=command.created_at,
                     confirmed_at=command.confirmed_at,
                 )
@@ -3207,6 +3484,9 @@ class AgentRelayService:
             needs_user=run.reported_state == "blocked" and not run.content_expired,
             stopped_reporting=self._stopped_reporting(run, now=now),
             last_contact_at=run.last_contact_at,
+            guarantee_tier=run.guarantee_tier,
+            cancel_outcome=run.cancel_outcome,
+            agent_task_missing=run.agent_task_missing_at is not None,
         )
 
     # --- commands -----------------------------------------------------------
@@ -3253,6 +3533,236 @@ class AgentRelayService:
             self.agent_repo.get_run(record.resource_id, owner_id=owner_id)
         )
 
+    # --- the reply and cancel exchanges (FR-010) ----------------------------
+
+    def _reply_message(
+        self, run: AgentRunDocument, *, command_id: str, message: str
+    ) -> dict[str, Any]:
+        """The follow-up message, correlated to this command and this task.
+
+        ``messageId`` *is* the command id, so a Task whose history carries it is
+        proof the agent saw this exact answer — the only correlation available
+        on runtimes that serve no history at all.
+        """
+
+        return {
+            "messageId": command_id,
+            "contextId": run.context_id,
+            "taskId": run.agent_task_id,
+            "role": "ROLE_USER",
+            "parts": [{"text": message}],
+            "referenceTaskIds": [run.agent_task_id],
+            "metadata": {
+                "brainbuddy.task_id": run.task_id,
+                "brainbuddy.run_id": run.id,
+                "brainbuddy.command_id": command_id,
+            },
+        }
+
+    def push_token_for(self, run: AgentRunDocument) -> str | None:
+        """This run's push token, or nothing when it never registered one.
+
+        Recomputed from the key ring rather than read from a column: the run
+        stores only the fingerprint (data-model.md §7), and the fingerprint is
+        what says whether a token was ever issued at all.
+        """
+
+        if run.push_token_fingerprint is None:
+            return None
+        return derive_push_token(self.secret_box, run.id)
+
+    def _reply_push_config(self, run: AgentRunDocument) -> dict[str, Any] | None:
+        """The run's own push callback, re-offered with the reply.
+
+        A reply may create a *successor* task, and a config registered against
+        the predecessor would not follow it. Re-sending the same per-run token
+        keeps the successor push-accelerated; nothing is minted, so the token
+        the agent already holds stays the only one.
+        """
+
+        token = self.push_token_for(run)
+        if token is None:
+            return None
+        return {"url": self.push_callback_url(run.id, token), "token": token}
+
+    def _confirmed_by_history(self, task: Task, command_id: str) -> bool:
+        """Whether the returned task itself proves the agent saw this command."""
+
+        return any(message.message_id == command_id for message in task.history)
+
+    def _reply_outcome(
+        self,
+        run: AgentRunDocument,
+        result: A2AResult,
+        *,
+        command_id: str,
+        now: datetime,
+    ) -> tuple[dict[str, Any], Observation | None, dict[str, Any]]:
+        """One reply answer, as (run updates, observation, command updates).
+
+        Three groups again, and for the same reason as a start exchange: what
+        BrainBuddy knows about *its own* request, what the agent said about the
+        work, and what became of the command are three different facts, and a
+        surface that blended them would have to guess which it was showing.
+        """
+
+        if not result.ok:
+            code = result.error_code
+            if result.a2a_error_code in REPLY_REJECTING_ERROR_CODES:
+                # An explicit answer about this command: the agent will not act
+                # on it, so the control is withdrawn rather than left inviting
+                # a second attempt that cannot work.
+                return ({}, None, {"delivery": "rejected", "outcome_code": code})
+            if code == A2A_TASK_NOT_FOUND:
+                return (
+                    {"agent_task_missing_at": now, "next_observation_at": None},
+                    None,
+                    {"delivery": "unconfirmed", "outcome_code": code},
+                )
+            # Ambiguous: silence is not a refusal, so the command stays
+            # unconfirmed and the control returns after a later observation.
+            return (
+                {},
+                None,
+                {
+                    "delivery": "unconfirmed",
+                    "outcome_code": (
+                        code if result.a2a_error_code == -32603 else None
+                    ),
+                },
+            )
+        answered = result.task
+        if answered is not None:
+            if not self._adoptable(run, answered):
+                # Something answered, but it named another conversation. Nothing
+                # about this run's work may be adopted from it.
+                return (
+                    {"last_contact_at": now},
+                    None,
+                    {
+                        "delivery": "unconfirmed",
+                        "outcome_code": A2A_RESPONSE_INVALID,
+                    },
+                )
+            observation = project_observation(
+                answered, now=now, limits=self.observation_limits
+            )
+            return (
+                {},
+                observation,
+                {
+                    "delivery": "confirmed",
+                    "outcome_code": None,
+                    "agent_task_id_after": answered.id,
+                    "confirmed_at": now,
+                },
+            )
+        if result.message is not None:
+            return (
+                {},
+                project_observation(
+                    result.message, now=now, limits=self.observation_limits
+                ),
+                {"delivery": "confirmed", "outcome_code": None, "confirmed_at": now},
+            )
+        return (
+            {"last_contact_at": now},
+            None,
+            {"delivery": "unconfirmed", "outcome_code": A2A_RESPONSE_INVALID},
+        )
+
+    def _open_reply_exchange(
+        self, run: AgentRunDocument, *, owner_id: str, now: datetime
+    ) -> AgentRunDocument:
+        """Mark the reply exchange open, so a restart can tell what happened.
+
+        Durable before the send, exactly as a start exchange is. The window it
+        opens is also what suspends scheduled observation of the predecessor
+        task: a Hermes reply may block for the full reply window, and a terminal
+        observation arriving inside it would lock a run the agent is about to
+        continue in a new task (AC-033).
+        """
+
+        opened = run.model_copy(
+            update={
+                "exchange_state": "open",
+                "exchange_kind": "reply",
+                "exchange_started_at": now,
+                "exchange_deadline_at": now + self.reply_window,
+                "updated_at": max(run.updated_at, now),
+                "revision": run.revision + 1,
+            }
+        )
+        self.agent_repo.save_run(opened)
+        return opened
+
+    def _record_task_succession(
+        self,
+        run: AgentRunDocument,
+        *,
+        previous_agent_task_id: str | None,
+        observation: Observation,
+    ) -> None:
+        """Append the one row a succession earns, and nothing else.
+
+        Not a state change: the run keeps its correlation id and its projected
+        state, and the row exists so the user can see that the identifier they
+        were shown yesterday is not the one being observed today (D-03-S27).
+        """
+
+        self.agent_repo.append_event(
+            self._event_row(
+                run,
+                observation,
+                trigger="command",
+                summary=TASK_SUCCESSION_SUMMARY,
+                kind="task_succession",
+                previous_agent_task_id=previous_agent_task_id,
+                new_agent_task_id=observation.agent_task_id,
+                content_due=False,
+            )
+        )
+        self._audit(
+            owner_id=run.owner_id,
+            action="task_succession_recorded",
+            outcome="adopted",
+            connection_id=run.connection_id,
+            run_id=run.id,
+        )
+
+    def _cancel_outcome_for(self, result: A2AResult) -> tuple[str, str | None]:
+        """One `CancelTask` answer as (outcome, command outcome code).
+
+        Only the three explicit refusals may ever produce a durable capability
+        statement. Everything else — an internal error, a 5xx, a timeout, a
+        dropped connection — is `unconfirmed`, which keeps the control and the
+        command id, because BrainBuddy does not know whether the agent acted.
+        """
+
+        if result.ok:
+            return "accepted", None
+        return (
+            CANCEL_OUTCOME_BY_ERROR_CODE.get(result.error_code or "", "unconfirmed"),
+            result.error_code,
+        )
+
+    def _run_control(
+        self, call: Callable[[], A2AResult]
+    ) -> A2AResult:
+        """Run one short control call, never behind a hand-off exchange.
+
+        A cancel is what *resolves* a blocked exchange on some runtimes, so
+        queueing it behind the exchanges it ends would wait out the entire reply
+        window while the surface could not tell pool saturation from an agent
+        that simply ignores cancellation (AC-035).
+        """
+
+        pump = self.control_pump
+        if pump is None:
+            return call()
+        future = pump(call)
+        return future.result()
+
     def reply_to_run(
         self,
         run_id: str,
@@ -3261,6 +3771,14 @@ class AgentRelayService:
         owner_id: str,
         idempotency_key: str,
     ) -> AgentRunResponse:
+        """Answer the agent's question, once, over the same conversation.
+
+        The send happens outside every lock: a reply is a held exchange the
+        agent may sit on for the whole reply window, and holding the
+        process-wide command lock across it would stop every other owner's
+        commands for as long as one agent felt like thinking.
+        """
+
         command_name = "reply_to_run"
         canonical = self._canonical_request(command_name, payload, target=run_id)
         operation_fingerprint = self._key_fingerprint(owner_id, idempotency_key)
@@ -3287,7 +3805,8 @@ class AgentRelayService:
                 run, connection = self._require_commandable(run_id, owner_id=owner_id)
                 if project_run_for_access(run, now=self._now()).content_expired:
                     raise ValidationFailure(
-                        "This run's relayed content has expired, so it can no longer accept replies.",
+                        "This run's relayed content has expired, so it can no "
+                        "longer accept replies.",
                         detail={"reason": "run_content_expired"},
                     )
                 if run.revision != payload.expected_revision:
@@ -3306,7 +3825,6 @@ class AgentRelayService:
                     record=record,
                     now=now,
                 )
-                target = self._target(connection)
                 self._begin_delivery_attempt(
                     owner_id=owner_id,
                     key_hash=key_hash,
@@ -3317,55 +3835,23 @@ class AgentRelayService:
                     created_at=reserved_at,
                     request_hash=record.request_hash if record is not None else None,
                 )
+                # Durable before the send, so a restart can tell a reply that
+                # may be at the agent from one that provably never left.
+                run = self._open_reply_exchange(run, owner_id=owner_id, now=now)
 
-            outcome = self.connector.command(
-                target,
-                envelope={
-                    "type": "reply",
-                    "protocol_version": PROTOCOL_VERSION,
-                    "run_id": run.id,
-                    "command_id": command_id,
-                    "message": payload.message,
-                },
+            result = self._send_reply(
+                run, connection, command_id=command_id, message=payload.message
             )
 
+            current = self._close_reply_exchange(
+                run,
+                connection,
+                result,
+                command_id=command_id,
+                message=payload.message,
+                reserved_at=reserved_at,
+            )
             with self.agent_repo.command_lock(owner_id):
-                current = self.agent_repo.get_run(run.id, owner_id=owner_id)
-                current_connection = self.agent_repo.get_connection(
-                    connection.id, owner_id=owner_id
-                )
-                self.agent_repo.save_command(
-                    AgentRunCommandDocument(
-                        id=command_id,
-                        owner_id=owner_id,
-                        run_id=run.id,
-                        kind="reply",
-                        body=None if current.content_expired else payload.message,
-                        delivery=(
-                            "confirmed"
-                            if outcome.status == "confirmed"
-                            else "unconfirmed"
-                        ),
-                        created_at=reserved_at,
-                        confirmed_at=now if outcome.status == "confirmed" else None,
-                    )
-                )
-                unchanged_scope = (
-                    current.revision == run.revision
-                    and current_connection.revision == connection.revision
-                    and current_connection.status != "disconnected"
-                    and current.reported_state not in TERMINAL_REPORTED_STATES
-                    and not current.content_expired
-                )
-                if unchanged_scope:
-                    current = current.model_copy(
-                        update={
-                            "reply_pending_command_id": command_id,
-                            "updated_at": now,
-                            "revision": current.revision + 1,
-                        }
-                    )
-                    self.agent_repo.save_run(current)
                 self._remember(
                     owner_id=owner_id,
                     key_hash=key_hash,
@@ -3379,15 +3865,101 @@ class AgentRelayService:
                 self._audit(
                     owner_id=owner_id,
                     action="run_replied",
-                    outcome=outcome.status,
+                    outcome=str(current.delivery if current else "unconfirmed"),
                     connection_id=connection.id,
                     run_id=run.id,
                 )
-            return self._run_response(current)
+            return self._run_response(
+                self.agent_repo.get_run(run.id, owner_id=owner_id)
+            )
+
+    def _send_reply(
+        self,
+        run: AgentRunDocument,
+        connection: AgentConnectionDocument,
+        *,
+        command_id: str,
+        message: str,
+    ) -> A2AResult:
+        wire = self.a2a_client
+        if wire is None:  # pragma: no cover - a service without a wire cannot reply
+            return A2AResult(ok=False, correlation_id="", error_code=A2A_UNREACHABLE)
+        return wire.send_message(
+            self._a2a_target(
+                connection,
+                interface_url=run.interface_url or connection.endpoint_url,
+                guarantee_tier=run.guarantee_tier,
+            ),
+            message=self._reply_message(
+                run, command_id=command_id, message=message
+            ),
+            push_config=self._reply_push_config(run),
+            run_id=run.id,
+        )
+
+    def _close_reply_exchange(
+        self,
+        run: AgentRunDocument,
+        connection: AgentConnectionDocument,
+        result: A2AResult,
+        *,
+        command_id: str,
+        message: str,
+        reserved_at: datetime,
+    ) -> AgentRunCommandDocument | None:
+        """Settle one reply: the command, the run, and the succession row."""
+
+        owner_id = run.owner_id
+        now = self._now()
+        run_updates, observation, command_updates = self._reply_outcome(
+            run, result, command_id=command_id, now=now
+        )
+        run_updates["exchange_state"] = "closed"
+        previous_task_id = run.agent_task_id
+        succeeded = (
+            observation is not None
+            and observation.agent_task_id is not None
+            and observation.agent_task_id != previous_task_id
+        )
+        if command_updates["delivery"] == "confirmed":
+            # An acknowledged reply is contact, and it clears the pending
+            # marker: the question the user answered is answered.
+            run_updates["reply_pending_command_id"] = None
+            run_updates.setdefault("last_contact_at", now)
+        else:
+            run_updates["reply_pending_command_id"] = command_id
+        updated = self.apply_observation(
+            run.id,
+            owner_id=owner_id,
+            observation=observation,
+            based_on=run.run_version,
+            extra=run_updates,
+            trigger="command",
+        )
+        with self.agent_repo.command_lock(owner_id):
+            command = AgentRunCommandDocument(
+                id=command_id,
+                owner_id=owner_id,
+                run_id=run.id,
+                kind="reply",
+                body=None if run.content_expired else message,
+                created_at=reserved_at,
+                **command_updates,
+            )
+            self.agent_repo.save_command(command)
+            if succeeded and updated is not None and observation is not None:
+                self._record_task_succession(
+                    updated,
+                    previous_agent_task_id=previous_task_id,
+                    observation=observation,
+                )
+        return command
 
     def cancel_run(
         self, run_id: str, *, owner_id: str, idempotency_key: str
     ) -> AgentRunResponse:
+        """Ask the agent to stop, and report only what it actually said."""
+
         command_name = "cancel_run"
         canonical = self._canonical_request(command_name, {}, target=run_id)
         operation_fingerprint = self._key_fingerprint(owner_id, idempotency_key)
@@ -3411,6 +3983,11 @@ class AgentRelayService:
                 if reconciled is not None:
                     return reconciled
                 run, connection = self._require_commandable(run_id, owner_id=owner_id)
+                if run.cancel_outcome in CANCEL_OUTCOMES_WITHDRAWING_THE_CONTROL:
+                    # The agent already answered this question. Asking again
+                    # cannot change the answer, and sending a second CancelTask
+                    # would only be a request made to hear it repeated.
+                    return self._run_response(run)
                 now = self._now()
                 attempt_receipt: dict[str, object] = {
                     "id": run.id,
@@ -3426,7 +4003,9 @@ class AgentRelayService:
                     now=now,
                     response_body=attempt_receipt,
                 )
-                target = self._target(connection)
+                # An ambiguous attempt keeps its command id: a retry has to be
+                # the *same* request, or the agent could act on two (AC-029).
+                command_id = run.cancel_command_id or command_id
                 self._begin_delivery_attempt(
                     owner_id=owner_id,
                     key_hash=key_hash,
@@ -3439,53 +4018,19 @@ class AgentRelayService:
                     response_body=attempt_receipt,
                 )
 
-            outcome = self.connector.command(
-                target,
-                envelope={
-                    "type": "cancel",
-                    "protocol_version": PROTOCOL_VERSION,
-                    "run_id": run.id,
-                    "command_id": command_id,
-                },
+            result = self._run_control(
+                partial(
+                    self._send_cancel, run, connection, command_id=command_id
+                )
             )
-
+            self._close_cancel(
+                run,
+                connection,
+                result,
+                command_id=command_id,
+                reserved_at=reserved_at,
+            )
             with self.agent_repo.command_lock(owner_id):
-                current = self.agent_repo.get_run(run.id, owner_id=owner_id)
-                current_connection = self.agent_repo.get_connection(
-                    connection.id, owner_id=owner_id
-                )
-                merge_time = max(current.updated_at, self._now())
-                self.agent_repo.save_command(
-                    AgentRunCommandDocument(
-                        id=command_id,
-                        owner_id=owner_id,
-                        run_id=run.id,
-                        kind="cancel",
-                        delivery=(
-                            "confirmed"
-                            if outcome.status == "confirmed"
-                            else "unconfirmed"
-                        ),
-                        created_at=reserved_at,
-                        confirmed_at=(
-                            merge_time if outcome.status == "confirmed" else None
-                        ),
-                    )
-                )
-                unchanged_scope = (
-                    current_connection.revision == connection.revision
-                    and current_connection.status != "disconnected"
-                    and current.reported_state not in TERMINAL_REPORTED_STATES
-                )
-                if unchanged_scope:
-                    current = current.model_copy(
-                        update={
-                            "cancel_requested_at": now,
-                            "updated_at": merge_time,
-                            "revision": current.revision + 1,
-                        }
-                    )
-                    self.agent_repo.save_run(current)
                 self._remember(
                     owner_id=owner_id,
                     key_hash=key_hash,
@@ -3496,14 +4041,90 @@ class AgentRelayService:
                     delivery_attempted=True,
                     created_at=reserved_at,
                 )
-                self._audit(
+            return self._run_response(
+                self.agent_repo.get_run(run.id, owner_id=owner_id)
+            )
+
+    def _send_cancel(
+        self,
+        run: AgentRunDocument,
+        connection: AgentConnectionDocument,
+        *,
+        command_id: str,
+    ) -> A2AResult:
+        wire = self.a2a_client
+        if wire is None:  # pragma: no cover - a service without a wire cannot cancel
+            return A2AResult(ok=False, correlation_id="", error_code=A2A_UNREACHABLE)
+        return wire.cancel_task(
+            self._a2a_target(
+                connection,
+                interface_url=run.interface_url or connection.endpoint_url,
+                guarantee_tier=run.guarantee_tier,
+            ),
+            task_id=run.agent_task_id or "",
+            command_id=command_id,
+            run_id=run.id,
+        )
+
+    def _close_cancel(
+        self,
+        run: AgentRunDocument,
+        connection: AgentConnectionDocument,
+        result: A2AResult,
+        *,
+        command_id: str,
+        reserved_at: datetime,
+    ) -> None:
+        """Settle one cancel: outcome, command row, and the audit fact."""
+
+        owner_id = run.owner_id
+        now = self._now()
+        outcome, outcome_code = self._cancel_outcome_for(result)
+        observation = (
+            project_observation(result.task, now=now, limits=self.observation_limits)
+            if result.ok and result.task is not None
+            else None
+        )
+        updates: dict[str, Any] = {
+            "cancel_outcome": outcome,
+            "cancel_command_id": None if outcome != "unconfirmed" else command_id,
+        }
+        if outcome == "accepted":
+            updates["cancel_requested_at"] = now
+            updates["last_contact_at"] = now
+        elif outcome == "task_missing":
+            updates["agent_task_missing_at"] = now
+            updates["next_observation_at"] = None
+        self.apply_observation(
+            run.id,
+            owner_id=owner_id,
+            observation=observation,
+            based_on=run.run_version,
+            extra=updates,
+            trigger="command",
+        )
+        with self.agent_repo.command_lock(owner_id):
+            self.agent_repo.save_command(
+                AgentRunCommandDocument(
+                    id=command_id,
                     owner_id=owner_id,
-                    action="run_cancel_requested",
-                    outcome=outcome.status,
-                    connection_id=connection.id,
                     run_id=run.id,
+                    kind="cancel",
+                    delivery=CANCEL_DELIVERY_BY_OUTCOME[outcome],
+                    outcome_code=(
+                        None if outcome == "accepted" else outcome_code
+                    ),
+                    created_at=reserved_at,
+                    confirmed_at=now if outcome == "accepted" else None,
                 )
-            return self._run_response(current)
+            )
+            self._audit(
+                owner_id=owner_id,
+                action="run_cancel_requested",
+                outcome=outcome,
+                connection_id=connection.id,
+                run_id=run.id,
+            )
 
     # --- inbound events -----------------------------------------------------
 

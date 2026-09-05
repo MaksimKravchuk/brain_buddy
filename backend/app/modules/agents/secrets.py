@@ -33,7 +33,6 @@ import hmac
 import json
 import os
 import re
-import secrets
 from collections import OrderedDict
 
 from cryptography.exceptions import InvalidTag
@@ -320,15 +319,33 @@ class SecretBox:
 PUSH_TOKEN_BYTES = 32
 
 
-def generate_push_token() -> str:
-    """A fresh per-run push callback token.
+PUSH_TOKEN_PURPOSE = "brainbuddy.push_token.v1"
+"""Domain separation, so a push token can never collide with a fingerprint."""
 
-    ``token_urlsafe`` rather than hex because the value is a *path segment*: an
-    encoding that needed escaping would give the two sides one more thing to
-    disagree about, and a disagreement here reads as a forged token.
+
+def derive_push_token(box: SecretBox, run_id: str) -> str:
+    """The one push callback token for a run, recomputable and never stored.
+
+    Derived rather than drawn from ``secrets.token_urlsafe`` for one reason
+    that matters: the same token has to go out again with every reply, so a
+    successor task created by that reply stays push-accelerated
+    (``contracts/push-callback.md``). Storing the plaintext to achieve that
+    would put a live route credential in the database, and minting a fresh one
+    per reply would silently invalidate a push the agent is already preparing.
+    Deriving it under the key ring keeps the data model's promise exactly — a
+    run stores only ``push_token_fingerprint`` — while making the value
+    reproducible inside the process that holds the key.
+
+    Indistinguishable from random without the key, and unguessable with it,
+    because the run id it is derived from is itself unguessable. ``urlsafe``
+    because the value travels in a *path segment*: an encoding that needed
+    escaping would give the two sides one more thing to disagree about, and a
+    disagreement there reads as a forged token.
     """
 
-    return secrets.token_urlsafe(PUSH_TOKEN_BYTES)
+    digest = box.fingerprint(f"{PUSH_TOKEN_PURPOSE}:{run_id}").partition(":")[2]
+    raw = bytes.fromhex(digest)[:PUSH_TOKEN_BYTES]
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
 def push_token_fingerprint(box: SecretBox, token: str) -> str:
@@ -381,7 +398,7 @@ __all__ = [
     "SealedSecret",
     "SecretBox",
     "SecretDecryptionFailed",
-    "generate_push_token",
+    "derive_push_token",
     "push_token_fingerprint",
     "push_token_matches",
     "SecretsUnavailable",

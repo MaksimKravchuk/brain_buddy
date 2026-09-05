@@ -8329,3 +8329,665 @@ class TestRollbackBoundary:
 
         with pytest.raises(PydanticValidationError):
             self.Frozen007RunManifest.model_validate(payload)
+
+
+# --- User Story 3: observation, reply, cancel and push (spec 014) ------------
+#
+# Every case below is about the one promise the observation lane makes: run
+# state comes only from BrainBuddy's own authenticated read of the agent's task.
+# Nothing here is allowed to invent a state, and nothing is allowed to lose one.
+
+
+def observed_task(
+    task_id: str,
+    context_id: str,
+    state: str = "TASK_STATE_WORKING",
+    *,
+    text: str | None = None,
+    timestamp: str = "2026-08-09T12:00:00Z",
+) -> Task:
+    status: dict[str, Any] = {"state": state, "timestamp": timestamp}
+    if text is not None:
+        status["message"] = {"role": "ROLE_AGENT", "parts": [{"text": text}]}
+    return Task.model_validate(
+        {"id": task_id, "contextId": context_id, "status": status}
+    )
+
+
+def observation_of(task: Task, *, now: datetime) -> Any:
+    return project_observation(task, now=now, limits=ObservationLimits())
+
+
+class ObservedRelay:
+    """A ready connection with one dispatched, observable A2A run."""
+
+    def __init__(
+        self,
+        service: AgentRelayService,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        *,
+        key: str = "idem-dispatch",
+        task_id: str = "task_1",
+    ) -> None:
+        self.service = service
+        self.clock = clock
+        self.a2a_client = a2a_client
+        self.connection_id = connect(service, key=f"{key}-create")
+        make_ready(service, self.connection_id)
+        run_id_holder = dispatch(
+            service, self.connection_id, task_id=task_id, key=key
+        )
+        self.run_id = run_id_holder.id
+        a2a_client.calls.clear()
+
+    def observe(self, task: Task, *, trigger: str = "schedule") -> Any:
+        run = self.service.agent_repo.get_run(self.run_id, owner_id=OWNER)
+        return self.service.apply_observation(
+            self.run_id,
+            owner_id=OWNER,
+            observation=observation_of(task, now=self.clock.now),
+            based_on=run.run_version,
+            trigger=trigger,
+        )
+
+    def projection(self) -> Any:
+        return self.service.get_run(self.run_id, owner_id=OWNER)
+
+    def audit_actions(self) -> list[str]:
+        return [entry.action for entry in self.service.list_audit(owner_id=OWNER)]
+
+
+def reply_command(run: Any) -> Any:
+    """The run's newest reply command.
+
+    Selected by kind rather than by position: a dispatched run already carries
+    its `start` command, and the two rows share a creation timestamp, so
+    "the last one" is whichever id sorts higher — which is nothing at all.
+    """
+
+    return [command for command in run.commands if command.kind == "reply"][-1]
+
+
+def cancel_command(run: Any) -> Any:
+    return [command for command in run.commands if command.kind == "cancel"][-1]
+
+
+@pytest.fixture
+def observed(
+    service: AgentRelayService, clock: Clock, a2a_client: FakeA2AClient
+) -> ObservedRelay:
+    return ObservedRelay(service, clock, a2a_client)
+
+
+class TestApplyObservation:
+    def test_014_FR_008_an_identical_observation_only_refreshes_contact(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """AC-019. Sixty-second polling must not become sixty timeline rows."""
+
+        observed.observe(observed_task("t1", observed.run_id))
+        first = observed.projection()
+        assert first.run_version == 1
+        assert len(first.events) == 1
+
+        clock.advance(timedelta(seconds=60))
+        observed.observe(observed_task("t1", observed.run_id))
+
+        again = observed.projection()
+        assert again.run_version == 1, "an unchanged state is not a new version"
+        assert len(again.events) == 1
+        assert again.last_contact_at == clock.now
+        assert again.last_observed_at == clock.now
+        assert observed.audit_actions().count("observation_accepted") == 1
+
+    def test_014_FR_008_a_differing_observation_appends_one_row_with_its_trigger(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """FR-009. Why the observation ran is part of what the row records."""
+
+        observed.observe(observed_task("t1", observed.run_id))
+        clock.advance(timedelta(seconds=5))
+        observed.observe(
+            observed_task("t1", observed.run_id, "TASK_STATE_INPUT_REQUIRED", text="Which?"),
+            trigger="push",
+        )
+
+        run = observed.projection()
+        assert [(event.type, event.trigger) for event in run.events] == [
+            ("running", "schedule"),
+            ("blocked", "push"),
+        ]
+        assert [event.kind for event in run.events] == ["observation", "observation"]
+        assert run.question_text == "Which?"
+        assert run.primary_state_label == "Needs you"
+
+    def test_observation_accepted_audit_rows_are_bounded_per_run_state_and_day(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """014-SC-007. An audit trail that grows per poll is a retention problem."""
+
+        for index in range(6):
+            clock.advance(timedelta(seconds=60))
+            state = "TASK_STATE_WORKING" if index % 2 else "TASK_STATE_SUBMITTED"
+            observed.observe(observed_task("t1", observed.run_id, state))
+
+        accepted = observed.audit_actions().count("observation_accepted")
+        assert accepted == 2, "one row per run, state class and UTC day"
+
+        clock.advance(timedelta(days=1))
+        observed.observe(observed_task("t1", observed.run_id, "TASK_STATE_SUBMITTED"))
+        assert observed.audit_actions().count("observation_accepted") == 3
+
+    def test_014_FR_008_a_later_observation_never_reopens_a_terminal_run(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """AC-017. "Completed" then "running" is a straggler, not a reopening."""
+
+        observed.observe(
+            observed_task("t1", observed.run_id, "TASK_STATE_COMPLETED", text="Done.")
+        )
+        settled = observed.projection()
+        assert settled.primary_state_label == "Agent reported complete"
+
+        clock.advance(timedelta(seconds=60))
+        observed.observe(observed_task("t1", observed.run_id, "TASK_STATE_WORKING"))
+
+        after = observed.projection()
+        assert after.reported_state == "completed"
+        assert after.run_version == settled.run_version
+        assert len(after.events) == len(settled.events)
+        assert observed.audit_actions().count("observation_rejected") == 1
+
+        for _ in range(4):
+            clock.advance(timedelta(minutes=1))
+            observed.observe(observed_task("t1", observed.run_id, "TASK_STATE_WORKING"))
+        assert observed.audit_actions().count("observation_rejected") == 1
+
+    def test_014_FR_008_no_write_happens_for_a_run_that_is_gone(
+        self, observed: ObservedRelay, service: AgentRelayService, clock: Clock
+    ) -> None:
+        """FR-016. A purge that raced an observation is not undone by it."""
+
+        service.delete_all_for_owner(owner_id=OWNER)
+
+        applied = service.apply_observation(
+            observed.run_id,
+            owner_id=OWNER,
+            observation=observation_of(
+                observed_task("t1", observed.run_id), now=clock.now
+            ),
+            based_on=0,
+        )
+
+        assert applied is None
+        assert service.list_audit(owner_id=OWNER) == []
+        with pytest.raises(NotFoundError):
+            service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+
+    def test_014_FR_016_a_disconnected_run_is_never_written_by_an_observation(
+        self, observed: ObservedRelay, service: AgentRelayService, clock: Clock
+    ) -> None:
+        """AC-022. Disconnect freezes the run; a late read must not thaw it."""
+
+        observed.observe(observed_task("t1", observed.run_id))
+        service.disconnect_connection(
+            observed.connection_id,
+            AgentConnectionDisconnectRequest(
+                current_password="correct-horse-battery-staple",
+                expected_revision=service.get_connection(
+                    observed.connection_id, owner_id=OWNER
+                ).revision,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-disconnect",
+            reauthenticated=True,
+        )
+        frozen = observed.projection()
+
+        observed.observe(
+            observed_task("t1", observed.run_id, "TASK_STATE_COMPLETED", text="Done.")
+        )
+
+        after = observed.projection()
+        assert after.reported_state == frozen.reported_state
+        assert after.primary_state_label == "Connection disconnected"
+        assert after.run_version == frozen.run_version
+
+    def test_014_SC_007_an_identifiers_expired_run_is_never_observed_again(
+        self, observed: ObservedRelay, service: AgentRelayService
+    ) -> None:
+        """There is nothing left to ask with: the identifiers are gone."""
+
+        run = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        service.agent_repo.save_run(
+            run.model_copy(update={"identifiers_expired": True})
+        )
+
+        observed.observe(observed_task("t1", observed.run_id, "TASK_STATE_COMPLETED"))
+
+        after = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        assert after.reported_state is None
+        assert after.run_version == run.run_version
+
+    def test_observation_after_content_expiry_writes_no_agent_text(
+        self, observed: ObservedRelay, service: AgentRelayService, clock: Clock
+    ) -> None:
+        """014-SC-007. Retention is irreversible: state moves, text does not."""
+
+        clock.advance(timedelta(days=31))
+        observed.observe(
+            observed_task(
+                "t1",
+                observed.run_id,
+                "TASK_STATE_INPUT_REQUIRED",
+                text="What is the password?",
+            )
+        )
+
+        stored = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        assert stored.reported_state == "blocked"
+        assert stored.question_text is None
+        assert stored.blocked_reason is None
+        assert stored.result_availability is None
+        assert stored.last_contact_at == clock.now
+        assert [event.summary for event in service.agent_repo.list_events(
+            stored.id, owner_id=OWNER
+        )] == [None]
+
+    def test_014_FR_015_last_contact_is_the_latest_of_every_kind_of_contact(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """AC-019. An unchanged observation is still contact, and says so."""
+
+        dispatched = observed.projection().last_contact_at
+        assert dispatched is not None
+
+        clock.advance(timedelta(minutes=10))
+        observed.observe(observed_task("t1", observed.run_id))
+        assert observed.projection().last_contact_at == clock.now
+
+        clock.advance(timedelta(minutes=10))
+        observed.observe(observed_task("t1", observed.run_id))
+        assert observed.projection().last_contact_at == clock.now
+        assert observed.projection().primary_state_label == "Running"
+
+        clock.advance(timedelta(hours=2))
+        stale = observed.projection()
+        assert stale.primary_state_label == "Stopped reporting"
+        assert stale.stopped_reporting is True
+        assert stale.last_contact_at is not None
+        assert stale.last_contact_at < clock.now
+
+    def test_014_FR_013_an_over_cap_result_is_marked_never_stopped_reporting(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """AC-016. BrainBuddy's byte budget is not the agent going quiet."""
+
+        task = observed_task("t1", observed.run_id, "TASK_STATE_COMPLETED")
+        run = observed.service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        observed.service.apply_observation(
+            observed.run_id,
+            owner_id=OWNER,
+            observation=project_observation(
+                task,
+                now=clock.now,
+                limits=ObservationLimits(),
+                result_availability="too_large",
+            ),
+            based_on=run.run_version,
+        )
+
+        clock.advance(timedelta(hours=5))
+        projection = observed.projection()
+        assert projection.result_availability == "too_large"
+        assert projection.result_text is None
+        assert projection.primary_state_label == "Agent reported complete"
+        assert projection.stopped_reporting is False
+
+    def test_014_FR_010_a_missing_task_withdraws_both_controls_and_keeps_contact(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """AC-020. "We can no longer see it" is not "it failed"."""
+
+        observed.observe(observed_task("t1", observed.run_id))
+        contact = observed.projection().last_contact_at
+
+        clock.advance(timedelta(minutes=1))
+        observed.service.record_task_missing(observed.run_id, owner_id=OWNER)
+
+        run = observed.projection()
+        assert run.agent_task_missing is True
+        assert run.primary_state_label == "Agent no longer reports this run"
+        assert run.capabilities.reply is False
+        assert run.capabilities.cancel is False
+        assert run.last_contact_at == contact
+        assert run.reported_state == "running", "no failure is claimed"
+
+
+class TestReplyOverTheA2AWire:
+    def _blocked(self, observed: ObservedRelay) -> Any:
+        observed.observe(
+            observed_task(
+                "t1", observed.run_id, "TASK_STATE_INPUT_REQUIRED", text="Which env?"
+            )
+        )
+        return observed.projection()
+
+    def _reply(
+        self,
+        observed: ObservedRelay,
+        *,
+        key: str = "idem-reply",
+        message: str = "Use staging.",
+    ) -> Any:
+        return observed.service.reply_to_run(
+            observed.run_id,
+            AgentReplyRequest(
+                message=message, expected_revision=observed.projection().revision
+            ),
+            owner_id=OWNER,
+            idempotency_key=key,
+        )
+
+    def test_014_FR_010_a_reply_is_one_send_carrying_the_command_id(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient, clock: Clock
+    ) -> None:
+        """AC-015. The reply is correlated by its own id, not by timing."""
+
+        self._blocked(observed)
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task("t1", observed.run_id, "TASK_STATE_WORKING"),
+            ),
+        )
+
+        run = self._reply(observed)
+
+        outgoing = sends(a2a_client)
+        assert len(outgoing) == 1
+        message = outgoing[0]
+        command = reply_command(run)
+        assert message["messageId"] == command.id
+        assert message["contextId"] == observed.run_id
+        assert message["taskId"] == "t1"
+        assert message["referenceTaskIds"] == ["t1"]
+        assert message["metadata"]["brainbuddy.command_id"] == command.id
+        assert [part["text"] for part in message["parts"]] == ["Use staging."]
+        assert command.delivery == "confirmed"
+        assert run.reported_state == "running"
+        assert "run_replied" in observed.audit_actions()
+
+    def test_014_FR_010_a_reply_carries_the_same_push_config_as_the_start(
+        self,
+        service: AgentRelayService,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """A successor task keeps push acceleration; the schedule is the fallback."""
+
+        card_fetcher.discovery = ready_discovery(
+            summary=card_summary(push_notifications=True)
+        )
+        observed = ObservedRelay(service, clock, a2a_client, key="idem-push-reply")
+        start_config = [
+            call[2].get("push_config")
+            for call in service.a2a_client.calls  # type: ignore[union-attr]
+            if call[0] == "SendMessage"
+        ]
+        self._blocked(observed)
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True, correlation_id="c", task=observed_task("t1", observed.run_id)
+            ),
+        )
+
+        self._reply(observed)
+
+        reply_config = a2a_client.calls_to("SendMessage")[-1][2]["push_config"]
+        assert reply_config is not None
+        assert reply_config["url"].startswith(PUSH_BASE)
+        assert start_config == start_config  # the start registered one too
+
+    def test_014_FR_010_a_successor_task_is_adopted_and_the_reply_never_refused(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient, clock: Clock
+    ) -> None:
+        """AC-028, D-03-S27. The identifier moved; the run did not."""
+
+        self._blocked(observed)
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task("t2", observed.run_id, "TASK_STATE_WORKING"),
+            ),
+        )
+
+        run = self._reply(observed)
+
+        assert run.agent_task_id == "t2"
+        assert run.correlation_id == observed.run_id
+        succession = [event for event in run.events if event.kind == "task_succession"]
+        assert len(succession) == 1
+        assert succession[0].previous_agent_task_id == "t1"
+        assert succession[0].new_agent_task_id == "t2"
+        assert succession[0].summary == "The agent continued this run in a new task"
+        assert reply_command(run).delivery == "confirmed"
+        stored = observed.service.agent_repo.get_command(
+            reply_command(run).id, owner_id=OWNER
+        )
+        assert stored is not None
+        assert stored.agent_task_id_after == "t2"
+        assert "task_succession_recorded" in observed.audit_actions()
+
+    def test_014_FR_010_a_foreign_conversation_is_never_adopted_by_a_reply(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient
+    ) -> None:
+        """A task from another conversation would attach this run to strange work."""
+
+        self._blocked(observed)
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task("t9", "someone-elses-run", "TASK_STATE_WORKING"),
+            ),
+        )
+
+        run = self._reply(observed)
+
+        assert run.agent_task_id == "t1"
+        assert reply_command(run).delivery == "unconfirmed"
+        assert reply_command(run).outcome_code == "a2a_response_invalid"
+        assert not [event for event in run.events if event.kind == "task_succession"]
+
+    def test_014_FR_010_a_terminal_task_withdraws_the_reply_and_states_the_reason(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient, clock: Clock
+    ) -> None:
+        """AC-033 (c). `-32004` with no successor is the agent's own answer."""
+
+        self._blocked(observed)
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code="a2a_unsupported_operation",
+                a2a_error_code=-32004,
+            ),
+        )
+        a2a_client.script(
+            "GetTask",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task(
+                    "t1", observed.run_id, "TASK_STATE_FAILED", text="Timed out."
+                ),
+            ),
+        )
+
+        run = self._reply(observed)
+
+        assert reply_command(run).delivery == "rejected"
+        assert reply_command(run).outcome_code == "a2a_unsupported_operation"
+        assert run.capabilities.reply is False
+
+    def test_ambiguous_reply_stays_unconfirmed_and_returns_only_after_blocked(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient, clock: Clock
+    ) -> None:
+        """AC-033. Silence is not a rejection, and it is not an acknowledgement."""
+
+        self._blocked(observed)
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+
+        run = self._reply(observed)
+        assert reply_command(run).delivery == "unconfirmed"
+        assert reply_command(run).outcome_code is None
+        assert run.exchange_state == "closed"
+
+        clock.advance(timedelta(minutes=6))
+        observed.observe(
+            observed_task(
+                "t1", observed.run_id, "TASK_STATE_INPUT_REQUIRED", text="Still which?"
+            )
+        )
+
+        after = observed.projection()
+        assert after.capabilities.reply is True
+        assert reply_command(after).delivery == "unconfirmed"
+
+        second = self._reply(observed, key="idem-reply-2", message="Staging, again.")
+        assert reply_command(second).id != reply_command(run).id
+
+
+class TestCancelOverTheA2AWire:
+    def _cancel(self, observed: ObservedRelay, *, key: str = "idem-cancel") -> Any:
+        return observed.service.cancel_run(
+            observed.run_id, owner_id=OWNER, idempotency_key=key
+        )
+
+    @pytest.mark.parametrize(
+        ("error_code", "a2a_code", "expected"),
+        [
+            ("a2a_not_cancelable", -32002, "not_cancelable"),
+            ("a2a_unsupported_operation", -32004, "unsupported"),
+            ("a2a_method_not_found", -32601, "unsupported"),
+            ("a2a_task_not_found", -32001, "task_missing"),
+            ("a2a_internal_error", -32603, "unconfirmed"),
+            ("a2a_server_error", None, "unconfirmed"),
+            ("a2a_timeout", None, "unconfirmed"),
+            ("a2a_unreachable", None, "unconfirmed"),
+        ],
+    )
+    def test_014_FR_010_every_cancel_answer_maps_to_exactly_one_outcome(
+        self,
+        observed: ObservedRelay,
+        a2a_client: FakeA2AClient,
+        error_code: str,
+        a2a_code: int | None,
+        expected: str,
+    ) -> None:
+        """AC-018, AC-029. Only the agent's own words may withdraw the control."""
+
+        observed.observe(observed_task("t1", observed.run_id))
+        a2a_client.script(
+            "CancelTask",
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code=error_code,
+                a2a_error_code=a2a_code,
+            ),
+        )
+
+        run = self._cancel(observed)
+
+        assert run.cancel_outcome == expected
+        # `task_missing` withdraws the control too, but for a different reason:
+        # not "the agent refuses", but "there is nothing left to cancel".
+        withdrawn = expected in {"unsupported", "not_cancelable", "task_missing"}
+        assert run.capabilities.cancel is not withdrawn
+        assert run.reported_state == "running", "the last observed state survives"
+
+    def test_014_FR_010_an_accepted_cancel_is_confirmed_and_observed(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient
+    ) -> None:
+        observed.observe(observed_task("t1", observed.run_id))
+        a2a_client.script(
+            "CancelTask",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task("t1", observed.run_id, "TASK_STATE_CANCELED"),
+            ),
+        )
+
+        run = self._cancel(observed)
+
+        assert run.cancel_outcome == "accepted"
+        assert run.reported_state == "cancelled"
+        assert run.primary_state_label == "Cancelled"
+        assert cancel_command(run).delivery == "confirmed"
+
+    def test_cancel_transient_error_then_success_reuses_the_command_id(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient
+    ) -> None:
+        """AC-029. A retry must not be a second request the agent can act on."""
+
+        observed.observe(observed_task("t1", observed.run_id))
+        a2a_client.script(
+            "CancelTask",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+        first = self._cancel(observed)
+        assert first.cancel_outcome == "unconfirmed"
+        first_command_id = a2a_client.calls_to("CancelTask")[-1][2]["command_id"]
+
+        a2a_client.script(
+            "CancelTask",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task("t1", observed.run_id, "TASK_STATE_CANCELED"),
+            ),
+        )
+        second = self._cancel(observed, key="idem-cancel-2")
+
+        assert second.cancel_outcome == "accepted"
+        assert a2a_client.calls_to("CancelTask")[-1][2]["command_id"] == (
+            first_command_id
+        )
+
+    def test_014_FR_010_a_recorded_refusal_replays_without_a_second_request(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient
+    ) -> None:
+        """Asking again cannot change an answer the agent already gave."""
+
+        observed.observe(observed_task("t1", observed.run_id))
+        a2a_client.script(
+            "CancelTask",
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code="a2a_not_cancelable",
+                a2a_error_code=-32002,
+            ),
+        )
+        self._cancel(observed)
+        before = len(a2a_client.calls_to("CancelTask"))
+
+        replayed = self._cancel(observed, key="idem-cancel-again")
+
+        assert replayed.cancel_outcome == "not_cancelable"
+        assert len(a2a_client.calls_to("CancelTask")) == before

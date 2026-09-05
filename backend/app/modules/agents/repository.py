@@ -322,6 +322,19 @@ class AgentRepository(BaseRepository):
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_audit_created
                     ON agent_audit(created_at);
+                -- The bounded-cardinality ledger behind `append_bounded_audit`.
+                -- A real unique key rather than a read-then-write, so two
+                -- workers racing the same class still write exactly one row.
+                CREATE TABLE IF NOT EXISTS agent_audit_buckets (
+                    owner_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    bucket TEXT NOT NULL,
+                    day TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (owner_id, action, bucket, day)
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_audit_buckets_created
+                    ON agent_audit_buckets(created_at);
                 CREATE TABLE IF NOT EXISTS agent_idempotency (
                     owner_id TEXT NOT NULL,
                     key_hash TEXT NOT NULL,
@@ -1506,6 +1519,48 @@ class AgentRepository(BaseRepository):
                 ),
             )
 
+
+    def append_bounded_audit(
+        self, entry: AgentAuditEntryDocument, *, bucket: str, day: str
+    ) -> bool:
+        """Write one audit row per (owner, action, bucket, UTC day), or none.
+
+        The observer polls every sixty seconds and a hostile caller can post to
+        the push route as fast as the limiter allows, so an unbounded audit row
+        per event is a retention problem wearing an accountability costume: it
+        would grow without bound, and the ninetieth row of a day tells the owner
+        nothing the first did not. The deduplication key is a real unique index
+        rather than a read-then-write, so two workers racing the same class
+        still produce exactly one row.
+
+        Returns whether this call is the one that wrote it.
+        """
+
+        with self._connection() as conn, _sqlite_guard("Agent audit", entry.id):
+            claimed = conn.execute(
+                """
+                INSERT OR IGNORE INTO agent_audit_buckets
+                    (owner_id, action, bucket, day, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (entry.owner_id, entry.action, bucket, day, entry.created_at.isoformat()),
+            )
+            if claimed.rowcount != 1:
+                return False
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO agent_audit (owner_id, id, created_at, payload)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    entry.owner_id,
+                    entry.id,
+                    entry.created_at.isoformat(),
+                    self._payload(entry),
+                ),
+            )
+            return True
+
     def list_audit(self, *, owner_id: str) -> list[AgentAuditEntryDocument]:
         with self._connection() as conn:
             rows = conn.execute(
@@ -1522,6 +1577,12 @@ class AgentRepository(BaseRepository):
         with self._connection() as conn, _sqlite_guard("Agent audit", "retention"):
             cursor = conn.execute(
                 "DELETE FROM agent_audit WHERE created_at < ?", (cutoff,)
+            )
+            # The bucket ledger goes with the rows it bounded. Keeping it would
+            # make a purged day still suppress a new row for the same class,
+            # which is the one way this table could cost an owner evidence.
+            conn.execute(
+                "DELETE FROM agent_audit_buckets WHERE created_at < ?", (cutoff,)
             )
             return int(cursor.rowcount or 0)
 
@@ -1957,6 +2018,9 @@ class AgentRepository(BaseRepository):
                 "DELETE FROM agent_connections WHERE owner_id = ?", (owner_id,)
             )
             conn.execute("DELETE FROM agent_audit WHERE owner_id = ?", (owner_id,))
+            conn.execute(
+                "DELETE FROM agent_audit_buckets WHERE owner_id = ?", (owner_id,)
+            )
             conn.execute(
                 "DELETE FROM agent_idempotency WHERE owner_id = ?", (owner_id,)
             )

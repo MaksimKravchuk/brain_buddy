@@ -10,7 +10,7 @@ which or invent a blended progress number (FR-008, FR-011).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import (
     AfterValidator,
@@ -39,7 +39,63 @@ AgentReportedState = Literal[
     "accepted", "running", "blocked", "completed", "failed", "cancelled"
 ]
 AgentCommandKind = Literal["start", "reply", "cancel"]
-AgentCommandDelivery = Literal["unconfirmed", "confirmed"]
+AgentCommandDelivery = Literal["unconfirmed", "confirmed", "rejected"]
+"""How a command ended. ``rejected`` only ever comes from an explicit agent
+error correlated to *this* command — never from a timeout, which proves
+nothing about whether the agent acted (data-model.md §4)."""
+
+AgentRunEventTrigger = Literal["dispatch", "schedule", "push", "command"]
+AgentRunEventKind = Literal["observation", "task_succession"]
+AgentCancelOutcome = Literal[
+    "none",
+    "requested",
+    "unconfirmed",
+    "accepted",
+    "unsupported",
+    "not_cancelable",
+    "task_missing",
+]
+"""What became of a cancellation request (AC-018, AC-029).
+
+``unsupported`` and ``not_cancelable`` come only from an explicit agent
+answer and withdraw the control; ``unconfirmed`` is the ambiguous outcome
+and deliberately keeps it, because a timeout is not a refusal."""
+
+AgentResultAvailability = Literal["available", "too_large"]
+AgentArtifactKind = Literal["text", "file", "data", "link"]
+
+AgentPrimaryStateLabel = Literal[
+    "Not sent",
+    "Queued",
+    "Sent",
+    "Delivery unconfirmed",
+    "Accepted",
+    "Running",
+    "Needs you",
+    "Cancellation requested",
+    "Agent reported complete",
+    "Failed",
+    "Cancelled",
+    "Stopped reporting",
+    "Agent no longer reports this run",
+    "Connection disconnected",
+    "Content expired under retention policy",
+]
+"""Every label a surface may render verbatim, and nothing else (FR-014).
+
+Closed rather than left a free string, because the one word that must never
+appear — "Complete" — would otherwise be one typo away on any of three
+clients. BrainBuddy did not verify the work, so the strongest thing it may say
+is that the agent *reported* it complete.
+"""
+
+AGENT_PRIMARY_STATE_LABELS: tuple[str, ...] = get_args(AgentPrimaryStateLabel)
+"""The same vocabulary as a sequence, derived rather than restated.
+
+Two literal lists would be one careless edit away from disagreeing, and the
+disagreement would surface as a 500 on a run the user is already worried about.
+"""
+
 AgentExchangeState = Literal["none", "queued", "open", "closed", "interrupted"]
 AgentExchangeKind = Literal["start", "reply"]
 AgentPushRegistration = Literal["unregistered", "registered", "refused", "unsupported"]
@@ -392,12 +448,39 @@ class AgentReplyRequest(StrictBaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class AgentArtifactSummaryResponse(StrictBaseModel):
+    """A placeholder for something the agent produced and BrainBuddy never fetched.
+
+    Names the content type rather than the content: the relay stores no
+    attachment, and a row that implied otherwise would promise a download that
+    does not exist (D-03-S11).
+    """
+
+    name: str | None = None
+    media_type: str | None = None
+    kind: AgentArtifactKind
+
+
 class AgentRunEventResponse(StrictBaseModel):
+    """One row of the run timeline.
+
+    ``kind`` and ``type`` answer different questions and are kept apart on
+    purpose: ``type`` is the run's projected state at that moment, while
+    ``kind`` says whether the row *is* that observation or the note that the
+    agent moved the work into a new task (D-03-S27).
+    """
+
     id: str
     type: AgentReportedState
     run_version: int
     received_at: datetime
     summary: str | None = None
+    trigger: AgentRunEventTrigger = "schedule"
+    kind: AgentRunEventKind = "observation"
+    # Only ever populated on a `task_succession` row; identifier tier, so both
+    # go null at 90 days with the rest of the run's identifiers.
+    previous_agent_task_id: str | None = None
+    new_agent_task_id: str | None = None
 
 
 class AgentRunCommandResponse(StrictBaseModel):
@@ -405,6 +488,9 @@ class AgentRunCommandResponse(StrictBaseModel):
     kind: AgentCommandKind
     body: str | None = None
     delivery: AgentCommandDelivery
+    # The agent's own answer, as a coarse code. Absent for every ambiguous
+    # ending, because "we never heard back" is not an outcome the agent gave.
+    outcome_code: str | None = None
     created_at: datetime
     confirmed_at: datetime | None = None
 
@@ -434,7 +520,7 @@ class AgentRunResponse(StrictBaseModel):
     needs_user: bool
 
     # A single label clients render verbatim, so web and iOS cannot drift.
-    primary_state_label: str
+    primary_state_label: AgentPrimaryStateLabel
 
     progress_text: str | None = None
     question_text: str | None = None
@@ -466,6 +552,23 @@ class AgentRunResponse(StrictBaseModel):
     exchange_state: AgentExchangeState = "none"
     exchange_kind: AgentExchangeKind | None = None
     push_registration: AgentPushRegistration = "unregistered"
+    # --- what observation established (spec 014, FR-008, FR-009) -----------
+    #
+    # Every default below is the absence of a claim, not a neutral-looking
+    # state: a run nobody has observed yet says only that.
+    agent_task_missing: bool = False
+    cancel_outcome: AgentCancelOutcome = "none"
+    blocked_reason: str | None = None
+    artifacts_summary: list[AgentArtifactSummaryResponse] = Field(default_factory=list)
+    # `too_large` is an honest marker, never **Stopped reporting**: the state
+    # was observed, only the result exceeded what BrainBuddy stores.
+    result_availability: AgentResultAvailability | None = None
+    last_observed_at: datetime | None = None
+    # The configured *base* interval. The server may observe less often after
+    # the reporting window (FR-008 backoff); the client polls at this rate and
+    # is never told a schedule the server is not keeping.
+    observation_interval_seconds: int = 60
+    identifiers_expired: bool = False
 
     manifest: AgentManifestResponse | None = None
     events: list[AgentRunEventResponse] = Field(default_factory=list)
@@ -480,10 +583,16 @@ class AgentRunSummaryResponse(StrictBaseModel):
     id: str
     task_id: str
     agent_name: str
-    primary_state_label: str
+    primary_state_label: AgentPrimaryStateLabel
     needs_user: bool
     stopped_reporting: bool
     last_contact_at: datetime | None = None
+    # The compact row states the tier in full and shows the same withdrawals
+    # the full projection does, so the two surfaces cannot disagree about what
+    # the user may still do (D-03-S21).
+    guarantee_tier: AgentGuaranteeTier | None = None
+    cancel_outcome: AgentCancelOutcome = "none"
+    agent_task_missing: bool = False
 
 
 class AgentEventIngestResponse(StrictBaseModel):
@@ -492,7 +601,15 @@ class AgentEventIngestResponse(StrictBaseModel):
 
 
 __all__ = [
+    "AGENT_PRIMARY_STATE_LABELS",
+    "AgentArtifactKind",
+    "AgentArtifactSummaryResponse",
     "AgentAuthScheme",
+    "AgentCancelOutcome",
+    "AgentPrimaryStateLabel",
+    "AgentResultAvailability",
+    "AgentRunEventKind",
+    "AgentRunEventTrigger",
     "AgentCheckDeliveryRequest",
     "AgentExchangeKind",
     "AgentExchangeState",
