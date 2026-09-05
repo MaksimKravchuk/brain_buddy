@@ -130,48 +130,6 @@ describe("apiClient external agent relay contract", () => {
     });
   });
 
-  it("replaces the signing secret at its own endpoint, never the credential one", async () => {
-    fetchMock.mockResolvedValue(
-      response({ id: "conn-1", revision: 3, inbound_signing_secret: "sk-inbound-new" })
-    );
-
-    const replaced = await apiClient.rotateAgentSigningSecret(
-      "conn-1",
-      { current_password: "hunter2hunter2", expected_revision: 2 },
-      "signing-secret-key"
-    );
-
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`${API_BASE_URL}/agent-connections/conn-1/signing-secret`);
-    expect(init.method).toBe("POST");
-    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("signing-secret-key");
-    // No credential field: this route replaces what the agent signs *with*, not
-    // what BrainBuddy authenticates *to* it with.
-    expect(JSON.parse(String(init.body))).toEqual({
-      current_password: "hunter2hunter2",
-      expected_revision: 2
-    });
-    expect(replaced.inbound_signing_secret).toBe("sk-inbound-new");
-  });
-
-  it("surfaces a superseded signing-secret replay as a conflict rather than a secret", async () => {
-    fetchMock.mockResolvedValue(
-      response(
-        { message: "This agent's signing secret has been replaced since that request." },
-        409,
-        { "X-Correlation-ID": "corr-signing-9" }
-      )
-    );
-
-    await expect(
-      apiClient.rotateAgentSigningSecret(
-        "conn-1",
-        { current_password: "hunter2hunter2", expected_revision: 2 },
-        "signing-secret-key"
-      )
-    ).rejects.toMatchObject({ status: 409, correlationId: "corr-signing-9" });
-  });
-
   it("014-FR-005 previews a hand-off without an idempotency key and confirms it with one", async () => {
     fetchMock.mockImplementation(() =>
       Promise.resolve(response({ token: "manifest-token", supporting_items: [] }))

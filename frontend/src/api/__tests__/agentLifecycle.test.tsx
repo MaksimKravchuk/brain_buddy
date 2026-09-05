@@ -60,7 +60,6 @@ describe("relay mutation lifecycle", () => {
       createConnection: vi.fn(async () => undefined),
       testConnection: vi.fn(async () => undefined),
       rotateCredential: vi.fn(async () => undefined),
-      rotateSigningSecret: vi.fn(async () => undefined),
       disconnectConnection: vi.fn(async () => undefined),
       confirmHandoff: vi.fn(async () => undefined),
       replyToRun: vi.fn(async () => undefined),
@@ -113,9 +112,9 @@ describe("relay mutation lifecycle", () => {
     const relaySurfaces = [handoffSource, runSectionSource, settingsSource].join("\n");
 
     // Eight since 014 removed the signing-secret replacement (the A2A wire has
-    // no inbound secret, so the mutation that replaced one has no call site),
-    // plus check-delivery: **Check again** is a relay mutation like any other
-    // and must not be the one call site that escapes the session guard.
+    // no inbound secret, so neither the mutation nor its call site exists any
+    // more), plus check-delivery: **Check again** is a relay mutation like any
+    // other and must not be the one call site that escapes the session guard.
     expect(relaySurfaces).not.toMatch(/\buseMutation\s*\(/);
     expect(relaySurfaces.match(/\buseRelayMutation\s*\(\{/g)).toHaveLength(9);
   });

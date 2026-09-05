@@ -10,7 +10,6 @@ import {
   usePreviewAgentHandoff,
   useReplyToAgentRun,
   useRotateAgentCredential,
-  useRotateAgentSigningSecret,
   useTestAgentConnection,
 } from "@/api/hooks";
 import { pressText, renderWithProviders, settle, visibleText } from "@/test/render";
@@ -20,7 +19,6 @@ const mockApi = {
   createAgentConnection: jest.fn(),
   testAgentConnection: jest.fn(),
   rotateAgentCredential: jest.fn(),
-  rotateAgentSigningSecret: jest.fn(),
   disconnectAgentConnection: jest.fn(),
   previewAgentHandoff: jest.fn(),
   confirmAgentHandoff: jest.fn(),
@@ -40,7 +38,6 @@ function OfflineRelayHarness() {
   const create = useCreateAgentConnection();
   const test = useTestAgentConnection();
   const rotateCredential = useRotateAgentCredential();
-  const rotateSigning = useRotateAgentSigningSecret();
   const disconnect = useDisconnectAgentConnection();
   const preview = usePreviewAgentHandoff("task-1");
   const confirm = useConfirmAgentHandoff("task-1");
@@ -51,7 +48,6 @@ function OfflineRelayHarness() {
     create,
     test,
     rotateCredential,
-    rotateSigning,
     disconnect,
     preview,
     confirm,
@@ -87,17 +83,6 @@ function OfflineRelayHarness() {
         }
       >
         <Text>Rotate credential</Text>
-      </Pressable>
-      <Pressable
-        onPress={() =>
-          rotateSigning.mutate({
-            connectionId: "connection-1",
-            payload: connectionPayload,
-            idempotencyKey: "signing-key",
-          })
-        }
-      >
-        <Text>Rotate signing</Text>
       </Pressable>
       <Pressable
         onPress={() =>
@@ -165,7 +150,6 @@ describe("relay mutations while React Query reports offline", () => {
       "Create",
       "Test",
       "Rotate credential",
-      "Rotate signing",
       "Disconnect",
       "Preview",
       "Confirm",
@@ -177,16 +161,16 @@ describe("relay mutations while React Query reports offline", () => {
     await settle();
 
     expect(Object.values(mockApi).map((endpoint) => endpoint.mock.calls.length)).toEqual(
-      Array(9).fill(1),
+      Array(8).fill(1),
     );
-    expect(visibleText(rendered.renderer)).toContain(Array(9).fill("error").join(","));
+    expect(visibleText(rendered.renderer)).toContain(Array(8).fill("error").join(","));
 
     await act(async () => {
       onlineManager.setOnline(true);
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     });
     expect(Object.values(mockApi).map((endpoint) => endpoint.mock.calls.length)).toEqual(
-      Array(9).fill(1),
+      Array(8).fill(1),
     );
 
     await rendered.unmount();

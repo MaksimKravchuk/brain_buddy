@@ -50,8 +50,6 @@ import type {
   AgentConnectionDisconnectRequest,
   AgentConnectionResponse,
   AgentConnectionRotateRequest,
-  AgentConnectionRotateSigningSecretRequest,
-  AgentConnectionSigningSecretResponse,
   AgentConnectionUpdateRequest,
   AgentCheckDeliveryRequest,
   AgentHandoffConfirmRequest,
@@ -506,30 +504,6 @@ export const apiClient = {
       headers: { "Idempotency-Key": idempotencyKey },
       body: payload
     });
-  },
-
-  /**
-   * Issue a replacement inbound signing secret.
-   *
-   * The create response shows that secret once, so this is the only way back
-   * from losing it. The replacement takes effect immediately, which is why the
-   * request carries the password and the revision the user was looking at.
-   * Retrying an ambiguous attempt must reuse the same key: the server answers
-   * a matching replay with the same secret rather than a blank success.
-   */
-  rotateAgentSigningSecret(
-    connectionId: string,
-    payload: AgentConnectionRotateSigningSecretRequest,
-    idempotencyKey: string
-  ) {
-    return request<AgentConnectionSigningSecretResponse>(
-      `/agent-connections/${connectionId}/signing-secret`,
-      {
-        method: "POST",
-        headers: { "Idempotency-Key": idempotencyKey },
-        body: payload
-      }
-    );
   },
 
   disconnectAgentConnection(

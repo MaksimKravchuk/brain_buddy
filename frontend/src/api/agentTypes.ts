@@ -175,28 +175,6 @@ export interface AgentConnectionRotateRequest {
   expected_revision: number;
 }
 
-/**
- * Replace the secret the *agent* signs its reports with.
- *
- * Deliberately carries no credential field: this is the inbound direction, and
- * conflating it with `AgentConnectionRotateRequest` would let a UI ask for the
- * wrong secret and break the connection it was trying to repair.
- */
-export interface AgentConnectionRotateSigningSecretRequest {
-  current_password: string;
-  expected_revision: number;
-}
-
-/**
- * The replacement, returned by rotation and by nothing else.
- *
- * The last shape in this file that can carry a secret. It survives only until
- * the bespoke inbound wire is removed with the route that issues it.
- */
-export interface AgentConnectionSigningSecretResponse extends AgentConnectionResponse {
-  inbound_signing_secret: string;
-}
-
 export interface AgentConnectionDisconnectRequest {
   current_password: string;
   expected_revision: number;

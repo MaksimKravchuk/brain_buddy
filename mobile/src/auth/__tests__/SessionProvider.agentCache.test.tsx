@@ -21,7 +21,7 @@ import {
   useCreateAgentConnection,
   usePreviewAgentHandoff,
   useReplyToAgentRun,
-  useRotateAgentSigningSecret,
+  useRotateAgentCredential,
   useTestAgentConnection,
 } from "@/api/hooks";
 import { SessionProvider, useSession } from "@/auth/SessionProvider";
@@ -148,7 +148,7 @@ const mockApi = {
   testAgentConnection: jest.fn(),
   previewAgentHandoff: jest.fn(),
   createAgentConnection: jest.fn(),
-  rotateAgentSigningSecret: jest.fn(),
+  rotateAgentCredential: jest.fn(),
   confirmAgentHandoff: jest.fn(),
   replyToAgentRun: jest.fn(),
   cancelAgentRun: jest.fn(),
@@ -211,7 +211,7 @@ function RelayMutationHarness() {
   useAgentConnection("connection-1");
   const createConnection = useCreateAgentConnection();
   const testConnection = useTestAgentConnection();
-  const rotateSigningSecret = useRotateAgentSigningSecret();
+  const rotateCredential = useRotateAgentCredential();
   const previewHandoff = usePreviewAgentHandoff("task-1");
   const confirmHandoff = useConfirmAgentHandoff("task-1");
   const reply = useReplyToAgentRun();
@@ -237,12 +237,16 @@ function RelayMutationHarness() {
         onPress={() => testConnection.mutate("connection-1")}
       />
       <Pressable
-        accessibilityLabel="Rotate signing secret"
+        accessibilityLabel="Rotate credential"
         onPress={() =>
-          rotateSigningSecret.mutate({
+          rotateCredential.mutate({
             connectionId: "connection-1",
-            payload: { current_password: "password", expected_revision: 2 },
-            idempotencyKey: "rotate-signing-key",
+            payload: {
+              credential: "next",
+              current_password: "password",
+              expected_revision: 2,
+            },
+            idempotencyKey: "rotate-credential-key",
           })
         }
       />
@@ -322,7 +326,7 @@ describe("SessionProvider private agent cleanup", () => {
     mockApi.testAgentConnection.mockReset().mockResolvedValue({ id: "connection-1" });
     mockApi.previewAgentHandoff.mockReset().mockResolvedValue({ manifest_token: "token" });
     mockApi.createAgentConnection.mockReset().mockResolvedValue({ id: "connection-1" });
-    mockApi.rotateAgentSigningSecret.mockReset().mockResolvedValue({ id: "connection-1" });
+    mockApi.rotateAgentCredential.mockReset().mockResolvedValue({ id: "connection-1" });
     mockApi.confirmAgentHandoff.mockReset().mockResolvedValue({ id: "run-1" });
     mockApi.replyToAgentRun.mockReset().mockResolvedValue({ id: "run-1" });
     mockApi.cancelAgentRun.mockReset().mockResolvedValue({ id: "run-1" });
@@ -359,7 +363,7 @@ describe("SessionProvider private agent cleanup", () => {
     for (const accessibilityLabel of [
       "Create relay",
       "Test relay",
-      "Rotate signing secret",
+      "Rotate credential",
       "Preview handoff",
       "Confirm handoff",
       "Reply to run",
@@ -370,9 +374,9 @@ describe("SessionProvider private agent cleanup", () => {
         await Promise.resolve();
       });
     }
-    mockApi.rotateAgentSigningSecret.mockRejectedValueOnce(new ApiError("stale", 409, null));
+    mockApi.rotateAgentCredential.mockRejectedValueOnce(new ApiError("stale", 409, null));
     await act(async () => {
-      renderer.root.findByProps({ accessibilityLabel: "Rotate signing secret" }).props.onPress();
+      renderer.root.findByProps({ accessibilityLabel: "Rotate credential" }).props.onPress();
       await Promise.resolve();
     });
 
@@ -388,7 +392,7 @@ describe("SessionProvider private agent cleanup", () => {
       expect.objectContaining({ connection_id: "connection-1" }),
     );
     expect(mockApi.previewAgentHandoff.mock.calls[0]).toHaveLength(2);
-    expect(mockApi.rotateAgentSigningSecret.mock.calls[0][2]).toBe("rotate-signing-key");
+    expect(mockApi.rotateAgentCredential.mock.calls[0][2]).toBe("rotate-credential-key");
     expect(mockApi.confirmAgentHandoff.mock.calls[0][2]).toBe("handoff-key");
     expect(mockApi.replyToAgentRun.mock.calls[0][2]).toBe("reply-key");
     expect(mockApi.cancelAgentRun).toHaveBeenCalledWith("run-1", "cancel-key");

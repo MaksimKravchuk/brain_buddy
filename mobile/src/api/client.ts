@@ -18,8 +18,6 @@ import type {
   AgentCheckDeliveryRequest,
   AgentConnectionResponse,
   AgentConnectionRotateRequest,
-  AgentConnectionRotateSigningSecretRequest,
-  AgentConnectionSigningSecretResponse,
   AgentConnectionUpdateRequest,
   AgentHandoffConfirmRequest,
   AgentHandoffPreviewRequest,
@@ -635,19 +633,6 @@ export function createApiClient(options: ApiClientOptions) {
       return relayMutation<AgentConnectionResponse>(
         "rotateAgentCredential",
         `/agent-connections/${connectionId}/credential`,
-        payload,
-        idempotencyKey,
-      );
-    },
-
-    rotateAgentSigningSecret(
-      connectionId: string,
-      payload: AgentConnectionRotateSigningSecretRequest,
-      idempotencyKey: string,
-    ) {
-      return relayMutation<AgentConnectionSigningSecretResponse>(
-        "rotateAgentSigningSecret",
-        `/agent-connections/${connectionId}/signing-secret`,
         payload,
         idempotencyKey,
       );
