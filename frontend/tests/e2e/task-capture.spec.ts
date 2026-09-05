@@ -56,7 +56,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     const project = await createProjectViaApi(page, `Smart project ${viewport.width}`);
     const tag = await createTagViaApi(page, `smart-${viewport.width}`);
     await page.reload();
-    await expect(page.getByText("Brain Buddy", { exact: true })).toBeVisible();
+    await expect(page.getByText("BrainBuddy", { exact: true })).toBeVisible();
 
     const title = `Durable Smart Add ${viewport.width}`;
     const field = page.getByLabel("New task title");

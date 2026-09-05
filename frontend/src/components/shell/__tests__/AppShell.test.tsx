@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { apiClient } from "../../../api/client";
@@ -24,6 +24,7 @@ const tags: TagResponse[] = [
 
 function RoutedTaskListContent() {
   const { pathname, search, state } = useLocation();
+  const navigate = useNavigate();
   const notify = useShellToast();
 
   return (
@@ -32,6 +33,8 @@ function RoutedTaskListContent() {
       <span className="sr-only" data-testid="pathname">{pathname}</span>
       <div data-testid="location">{`${pathname}${search}`}</div>
       <div data-testid="location-state">{state ? JSON.stringify(state) : "none"}</div>
+      <button type="button" onClick={() => navigate(-1)}>Previous test view</button>
+      <button type="button" onClick={() => navigate(1)}>Next test view</button>
       <button type="button" onClick={() => notify("Thinking canvas isn't built yet — placeholder")}>
         Raise shell toast
       </button>
@@ -113,7 +116,7 @@ describe("AppShell canonical sidebar", () => {
   it("keeps the mobile header labels from wrapping inside the fixed-height chrome", () => {
     renderShell();
 
-    expect(screen.getByRole("link", { name: "Brain Buddy" })).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(screen.getByRole("link", { name: "BrainBuddy" })).toHaveClass("shrink-0", "whitespace-nowrap");
     expect(screen.getByRole("button", { name: "Brain dump" })).toHaveClass("shrink-0", "whitespace-nowrap", "px-3", "sm:px-4");
   });
 
@@ -328,6 +331,53 @@ describe("AppShell canonical sidebar", () => {
 });
 
 describe("AppShell top bar", () => {
+  it("synchronizes a focused search with Back and Forward history", async () => {
+    const user = userEvent.setup();
+    renderShell({}, ["/tasks/next?q=earlier", "/tasks/next?q=latest"]);
+    const search = screen.getByRole("searchbox", { name: "Search tasks" });
+    await user.type(search, " phrase ");
+    expect(search).toHaveValue("latest phrase ");
+    expect(currentLocation()).toBe("/tasks/next?q=latest+phrase");
+
+    // Browser history shortcuts preserve the field's focus.
+    fireEvent.click(screen.getByRole("button", { name: "Previous test view" }));
+    await waitFor(() => expect(search).toHaveValue("earlier"));
+    expect(search).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Next test view" }));
+    await waitFor(() => expect(search).toHaveValue("latest phrase"));
+    expect(search).toHaveFocus();
+  });
+
+  it("searches from the mobile drawer and returns to the filtered list on Enter", async () => {
+    const user = userEvent.setup();
+    renderShell({}, ["/tasks/next?sort=due&q=drop"]);
+
+    await user.click(screen.getByRole("button", { name: "Open task navigation" }));
+    const drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    const search = within(drawer).getByRole("searchbox", { name: "Search tasks" });
+    expect(search).toHaveValue("drop");
+    await user.clear(search);
+    await user.type(search, "review homepage{Enter}");
+
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+    expect(currentLocation()).toBe("/tasks/next?sort=due&q=review+homepage");
+    expect(screen.getByRole("button", { name: "Open task navigation" })).toHaveFocus();
+    expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("review homepage");
+  });
+
+  it("clears a mobile search without dropping other filters", async () => {
+    const user = userEvent.setup();
+    renderShell({}, ["/tasks/next?sort=due&q=drop"]);
+
+    await user.click(screen.getByRole("button", { name: "Open task navigation" }));
+    const drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    await user.clear(within(drawer).getByRole("searchbox", { name: "Search tasks" }));
+    await user.click(within(drawer).getByRole("button", { name: "Search" }));
+
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+    expect(currentLocation()).toBe("/tasks/next?sort=due");
+  });
+
   it("writes the search box into the query string and clears it again when emptied", async () => {
     const user = userEvent.setup();
     renderShell();
@@ -441,7 +491,7 @@ describe("AppShell account menu", () => {
     expect(screen.queryByRole("menu", { name: "Account" })).not.toBeInTheDocument();
 
     await user.click(trigger);
-    await user.click(screen.getByRole("link", { name: "Brain Buddy" }));
+    await user.click(screen.getByRole("link", { name: "BrainBuddy" }));
     expect(screen.queryByRole("menu", { name: "Account" })).not.toBeInTheDocument();
 
     await user.click(trigger);

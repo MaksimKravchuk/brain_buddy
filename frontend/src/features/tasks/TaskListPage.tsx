@@ -18,7 +18,7 @@ import { applySmartAddSuggestion, parseSmartAdd, smartAddChips, smartAddSuggesti
 import type { SmartAddDraft, SmartAddSuggestion } from "./smartAdd";
 import { SmartAddSuggestions } from "./SmartAddSuggestions";
 import { TaskTitleAutocompleteSuggestions } from "./TaskTitleAutocompleteSuggestions";
-import { TaskDetailEmptyPanel, TaskDetailPanel } from "./TaskDetailPanel";
+import { TaskDetailPanel } from "./TaskDetailPanel";
 import { getTaskDetailAutosaveController } from "./taskDetailAutosave";
 import type { AutosaveResult } from "./taskDetailAutosave";
 import { useTaskTitleAutocomplete } from "./useTaskTitleAutocomplete";
@@ -447,7 +447,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     agentRuns: agentRunSummaries
   };
 
-  const panel = !panelOpen ? null : taskId ? (
+  const panel = panelOpen && taskId ? (
     <TaskDetailPanel
       task={detailQuery.data}
       autosave={detailController ?? undefined}
@@ -467,9 +467,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       onTransitionSubtask={(task, subtask, action) => subtaskTransitionMutation.mutate({ task, subtask, action })}
       onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
     />
-  ) : (
-    <TaskDetailEmptyPanel />
-  );
+  ) : null;
 
   return (
     <AppShell
@@ -599,7 +597,15 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             <TaskList {...taskListProps} tasks={tasks} />
           )
         ) : (
-          <EmptyState state={state} />
+          <EmptyState
+            state={state}
+            onClearSearch={searchQuery.trim() ? () => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("q");
+              setSearchParams(next, { replace: true });
+              listHeadingRef.current?.focus();
+            } : undefined}
+          />
         )}
 
         {taskQuery.hasNextPage ? (
@@ -781,8 +787,8 @@ function TaskRow({
 
   return (
     <article
-      className={`group rounded-[12px] border px-3.5 py-[7px] shadow-soft transition-all duration-200 ease-smooth hover:shadow-raised ${
-        isSelected ? "border-brand-primary bg-info-bg shadow-raised" : "border-slate-200 bg-white"
+      className={`group rounded-[12px] border px-3.5 py-[7px] transition-colors duration-200 ease-smooth ${
+        isSelected ? "border-sky-700 bg-info-bg" : "border-slate-200 bg-white hover:bg-slate-50"
       } ${isTerminal ? "opacity-45" : ""}`}
       role="listitem"
       onClick={(event) => {
@@ -808,11 +814,13 @@ function TaskRow({
         ) : (
           <button
             type="button"
-            className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-slate-300 bg-white text-transparent transition-colors duration-200 ease-smooth hover:border-brand-primary"
+            className="group/complete -my-[7px] -ml-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
             aria-label={`Complete ${task.title}`}
             onClick={() => onComplete(task)}
           >
-            <Check className="h-[11px] w-[11px]" aria-hidden />
+            <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-slate-300 bg-white text-transparent transition-colors duration-200 ease-smooth group-hover/complete:border-sky-700">
+              <Check className="h-[11px] w-[11px]" aria-hidden />
+            </span>
           </button>
         )}
         <Link
@@ -916,7 +924,7 @@ function TaskCreator({
   const completionsOpen = !popupOpen && autocomplete.candidates.length === 3;
 
   const placeholder = state === "next"
-    ? "Add a next action — or dump everything on your mind with the mic above"
+    ? "Add a next action"
     : contextProjectId
       ? "Add a task to this project"
       : "Add a task";
@@ -1151,12 +1159,16 @@ function LoadingState({ label }: { label: string }): React.JSX.Element {
   );
 }
 
-function EmptyState({ state }: { state?: OpenTaskState }): React.JSX.Element {
+function EmptyState({ state, onClearSearch }: { state?: OpenTaskState; onClearSearch?: () => void }): React.JSX.Element {
   const label = state ? stateLabels[state] : "This view";
   return (
     <div className="rounded-xl border border-dashed border-slate-200 bg-white/70 px-5 py-8 text-center text-sm text-slate-600">
-      <p className="font-medium text-slate-900">{label} is clear</p>
-      <p className="mt-1">Use Brain dump when you are ready to capture what's on your mind.</p>
+      <p className="font-medium text-slate-900">{onClearSearch ? "No tasks match your search" : `${label} is clear`}</p>
+      {onClearSearch ? (
+        <Button variant="secondary" className="mt-3" onClick={onClearSearch}>Clear search</Button>
+      ) : (
+        <p className="mt-1">Use Brain dump when you are ready to capture what's on your mind.</p>
+      )}
     </div>
   );
 }
