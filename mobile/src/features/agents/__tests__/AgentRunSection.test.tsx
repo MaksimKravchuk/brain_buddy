@@ -5,13 +5,16 @@
  * inert, and a control the connector cannot honour is never offered.
  */
 
+import { ApiError } from "@/api/client";
 import { AgentRunSection } from "@/features/agents/AgentRunSection";
 import { makeManifest, makeRun, makeRunEvent } from "@/test/agentFixtures";
 import {
   getByLabel,
   pressText,
+  queryByLabel,
   queryByText,
   renderWithProviders,
+  settle,
   typeInto,
   visibleText,
 } from "@/test/render";
@@ -47,6 +50,10 @@ function props(overrides: Partial<Parameters<typeof AgentRunSection>[0]> = {}) {
     error: null,
     online: true,
     onRunUpdated: jest.fn(),
+    // The task screen supplies this only while the rollout allows a hand-off.
+    // Here it is always present, so these tests read the run monitor's own rule
+    // for the retry rather than the rollout gate above it.
+    onRetryHandoff: jest.fn(),
     ...overrides,
   };
 }
@@ -462,6 +469,33 @@ describe("AgentRunSection dispatch states", () => {
     await unmount();
   });
 
+  it("014-FR-012 draws no retry when the screen offers nowhere for it to go", async () => {
+    // The task screen withholds the handler while rollout is off, and a control
+    // whose press flips a state nothing reads is worse than no control at all.
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          onRetryHandoff: undefined,
+          runs: [
+            makeRun({
+              dispatch_state: "not_sent",
+              dispatch_error_code: "restarted_before_send",
+              reported_state: null,
+              primary_state_label: "Not sent",
+              manifest: makeManifest(),
+            }),
+          ],
+        })}
+      />,
+    );
+
+    // The run itself is unchanged: rollout gates new work, not visibility.
+    expect(visibleText(renderer)).toContain("Nothing left Brain Buddy");
+    expect(queryByText(renderer, "Try this hand-off again")).toBeNull();
+
+    await unmount();
+  });
+
   it("014-FR-006 names the rate-limited category on a hand-off that was refused", async () => {
     const { renderer, unmount } = await renderWithProviders(
       <AgentRunSection
@@ -515,6 +549,44 @@ describe("AgentRunSection dispatch states", () => {
       { current_password: null, expected_revision: unconfirmed.revision },
       "idem_key_test",
     );
+
+    await unmount();
+  });
+
+  it("014-FR-006 surfaces a refused delivery check with its correlation reference", async () => {
+    // A refusal (rollout_disabled, connection_not_ready, agent_card_changed, a
+    // 409 on expected_revision) or a transport failure used to stop silently
+    // here: the control simply did nothing and the run kept its old label.
+    mockCheckDelivery.mockRejectedValue(
+      new ApiError("Bad Request", 400, {
+        message: "This agent is not part of the current rollout.",
+        reference_id: "corr_check_refused",
+        detail: { reason: "rollout_disabled" },
+      }),
+    );
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              dispatch_state: "delivery_unconfirmed",
+              exchange_state: "closed",
+              reported_state: null,
+              primary_state_label: "Delivery unconfirmed",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    await pressText(renderer, "Check again");
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("This agent is not part of the current rollout.");
+    expect(text).toContain("ref: corr_check_refused");
+    // The run is unchanged, so the check stays on offer.
+    expect(queryByText(renderer, "Check again")).not.toBeNull();
 
     await unmount();
   });
@@ -578,6 +650,57 @@ describe("014-SC-004 every run state reads as itself on iOS", () => {
     );
 
     expect(visibleText(renderer)).toContain(label);
+
+    await unmount();
+  });
+
+  it("014-FR-009 M-03-S09 states the block reason as inert text with no reply control", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "blocked",
+              needs_user: true,
+              primary_state_label: "Needs you",
+              blocked_reason: "Agent needs additional authentication",
+              question_text: null,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    // "Needs you" alone is a dead end: the user is told they are needed and
+    // never told what for.
+    expect(visibleText(renderer)).toContain("Agent needs additional authentication");
+    // Inert. A field here would invite typing a credential to a third party.
+    expect(queryByLabel(renderer, "Your answer")).toBeNull();
+    expect(queryByText(renderer, "Send answer")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-FR-009 hides the block reason once retention has expired the content", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "blocked",
+              needs_user: true,
+              primary_state_label: "Needs you",
+              blocked_reason: "Agent needs additional authentication",
+              content_expired: true,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const text = visibleText(renderer);
+    expect(text).not.toContain("Agent needs additional authentication");
+    expect(text).toContain("Content expired under retention policy");
 
     await unmount();
   });

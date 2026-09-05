@@ -158,6 +158,13 @@ export function projectRunAt(run: AgentRunResponse, now: number = Date.now()): A
     result_link: null,
     result_link_interactive: false,
     failure_reason: null,
+    // Content tier as well (data-model.md §8). The projection feeds the cached
+    // snapshot, not only the rendered card, so anything the agent said — the
+    // block reason, the names and media types of its artifacts, whether its
+    // result fitted — has to go with the rest of the 30-day content.
+    blocked_reason: null,
+    artifacts_summary: [],
+    result_availability: null,
     manifest: null,
     events: run.events.map((event) => ({ ...event, summary: null })),
     commands: run.commands.map((command) => ({ ...command, body: null })),

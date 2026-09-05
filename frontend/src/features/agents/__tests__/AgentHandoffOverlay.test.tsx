@@ -41,6 +41,13 @@ const readyConnection: AgentConnectionResponse = {
   revision: 2
 };
 
+const secondReadyConnection: AgentConnectionResponse = {
+  ...readyConnection,
+  id: "conn-second",
+  name: "Ops runner",
+  agent_address: "https://ops.example.com"
+};
+
 const untestedConnection: AgentConnectionResponse = {
   ...readyConnection,
   id: "conn-untested",
@@ -219,6 +226,42 @@ describe("AgentHandoffOverlay", () => {
     await waitFor(() =>
       expect(confirm.mock.calls[0][1]).toMatchObject({ acknowledge_duplicate_risk: true })
     );
+  });
+
+  it("014-FR-003 asks the duplicate-risk acknowledgement again when the agent changes", async () => {
+    // AC-026. The tick is consent for one specific agent. Carrying it across a
+    // change of selection would arm Send for an agent nobody agreed to.
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([
+      readyConnection,
+      secondReadyConnection
+    ]);
+    vi.mocked(apiClient.previewAgentHandoff).mockImplementation(async (_taskId, payload) => ({
+      ...manifest,
+      connection_id: payload.connection_id,
+      acknowledgement_required: true
+    }));
+    const user = userEvent.setup();
+    renderOverlay();
+    await selectReadyAgent(user);
+
+    await act(async () => {
+      await user.click(screen.getByRole("checkbox", { name: /duplicate task is possible/i }));
+    });
+    expect(screen.getByRole("button", { name: "Send to agent" })).toBeEnabled();
+
+    await act(async () => {
+      await user.click(screen.getByRole("radio", { name: /Ops runner/ }));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox", { name: /duplicate task is possible/i })).not.toBeChecked()
+    );
+    expect(screen.getByRole("button", { name: "Send to agent" })).toBeDisabled();
+
+    await act(async () => {
+      await user.click(screen.getByRole("checkbox", { name: /duplicate task is possible/i }));
+    });
+    expect(screen.getByRole("button", { name: "Send to agent" })).toBeEnabled();
   });
 
   it("014-SC-005 does not ask again once the connection carries the acknowledgement", async () => {

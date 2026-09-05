@@ -82,6 +82,31 @@ interface AgentRun {
   reported_state: string | null;
   primary_state_label: string;
   agent_task_id: string | null;
+  push_registration: string;
+  revision: number;
+  events: Array<{ id: string }>;
+}
+
+/**
+ * The facts an inbound push may never change on its own.
+ *
+ * A *verified* push only wakes an observation (`app/api/agents.py`
+ * `receive_agent_push` never parses the body for state), so everything an
+ * accepted forgery could produce lands here: another revision, another timeline
+ * row, a callback the run now believes in, or a state nobody observed.
+ */
+function pushFacts(run: AgentRun): {
+  revision: number;
+  events: number;
+  push_registration: string;
+  reported_state: string | null;
+} {
+  return {
+    revision: run.revision,
+    events: run.events.length,
+    push_registration: run.push_registration,
+    reported_state: run.reported_state
+  };
 }
 
 /** Comparison that does not care what order an object's keys were built in. */
@@ -141,6 +166,34 @@ async function settles<T>(
   timeout = 60_000
 ): Promise<T> {
   return readUntil(what, read, (value) => same(value, expected), expected, timeout);
+}
+
+/**
+ * Read the API for a while and refuse the moment it stops saying this.
+ *
+ * The dual of `settles`, and the right shape for a *rejection*: `settles`
+ * returns on its first matching read, so it would pass even if a refused
+ * request were applied a beat later on the next observation pass. This keeps
+ * asking, across more than one observation interval, and the repeated awaited
+ * reads are what give the step its duration.
+ */
+async function holds<T>(
+  what: string,
+  read: () => Promise<T>,
+  expected: T,
+  duration: number
+): Promise<void> {
+  const deadline = Date.now() + duration;
+  for (;;) {
+    const actual = await read();
+    if (!same(actual, expected)) {
+      refuse(what, actual, expected);
+    }
+    if (Date.now() >= deadline) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+  }
 }
 
 /** Read the API until it produces a value at all, then hand that value back. */
@@ -456,7 +509,7 @@ test.describe("external agent relay over the A2A wire", () => {
   });
 
   test("014-SC-003 A2A security rejections", async ({ page }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
     await test.step("an invalid credential is refused, and echoes nothing (D-01-S12)", async () => {
       await connectAgent(page, {
@@ -496,19 +549,54 @@ test.describe("external agent relay over the A2A wire", () => {
       }
     });
 
-    await test.step("a forged push token changes nothing", async () => {
-      const before = (await apiGet<AgentConnection[]>(page, "/api/agent-connections")).length;
+    await test.step("a forged push token for a real dispatched run changes nothing", async () => {
+      // Aimed at a run that exists. An unknown run id is refused before any
+      // stored token is compared, so forging only for `agentrun_does_not_exist`
+      // would still pass if BrainBuddy accepted an arbitrary token for a real
+      // dispatched run — which is the thing SC-003 is about.
+      await connectAgent(page, {
+        name: "Hello World Agent",
+        address: HELLOWORLD_URL,
+        credential: "unused-by-the-sample"
+      });
+      await openAgentSettings(page);
+      await testConnection(page, "Hello World Agent", "Tested ready");
+
+      const task = await createTaskViaApi(page, "Hold a real run for the forged push");
+      await openTask(page, task.id);
+      const { review } = await openHandoffReview(page, "Hello World Agent");
+      await review
+        .getByRole("checkbox", { name: /duplicate task is possible with this agent/i })
+        .check();
+      await review.getByRole("button", { name: "Send to agent" }).click();
+      // The sample answers inside the exchange, so this is the run's final
+      // state: nothing legitimate is still moving, and any later change to it
+      // could only have come from the forgery.
+      await expect(runCard(page, "Hello World Agent")).toContainText("Agent reported complete", {
+        timeout: 60_000
+      });
+
+      const [dispatched] = await runsForTask(page, task.id);
+      const readRun = async (): Promise<AgentRun> =>
+        apiGet<AgentRun>(page, `/api/agent-runs/${dispatched.id}`);
+      const before = pushFacts(await readRun());
+
       const forged = await page.request.post(
-        `${backendUrl}/api/a2a/push/agentrun_does_not_exist/forged-token`,
+        `${backendUrl}/api/a2a/push/${dispatched.id}/forged-token`,
         { data: {} }
       );
       if (forged.status() !== 403) {
-        refuse("the answer to a forged push token", forged.status(), 403);
+        refuse("the answer to a forged push token for a real run", forged.status(), 403);
       }
-      await settles(
-        "how many connections the account has after the forged push",
-        async () => (await apiGet<AgentConnection[]>(page, "/api/agent-connections")).length,
-        before
+
+      // Held across more than one observation interval (5s in this stack): a
+      // push that was wrongly accepted would not change the run in the reply,
+      // it would wake an observation that lands a moment later.
+      await holds(
+        "what the forged push left behind on the run",
+        async () => pushFacts(await readRun()),
+        before,
+        12_000
       );
     });
   });

@@ -109,7 +109,15 @@ function questionIdentity(run: AgentRunResponse): string {
  * disclosed capabilities: an unsupported reply or cancel is stated as
  * unsupported rather than rendered as a button that would fail.
  */
-function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): React.JSX.Element {
+function RunCard({
+  taskId,
+  run,
+  handoffEnabled
+}: {
+  taskId: string;
+  run: AgentRunResponse;
+  handoffEnabled: boolean;
+}): React.JSX.Element {
   const queryClient = useQueryClient();
   const keys = useAgentKeys();
   const online = useRelayOnline();
@@ -224,9 +232,12 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
     run.reported_state === null &&
     !run.connection_disconnected;
   // A hand-off that never left can be re-offered exactly as it was reviewed —
-  // but only while BrainBuddy still holds what was reviewed.
+  // but only while BrainBuddy still holds what was reviewed, and only while the
+  // rollout allows a hand-off at all. Nothing reached the agent, so re-sending
+  // is a fresh content-bearing send rather than acting on work already out
+  // there, and rollout OFF withholds exactly that (FR-016, 007 FR-019).
   const frozenManifest =
-    !contentExpired && run.dispatch_state === "not_sent" ? run.manifest : null;
+    handoffEnabled && !contentExpired && run.dispatch_state === "not_sent" ? run.manifest : null;
 
   useEffect(() => {
     const held = replyIntent.current;
@@ -310,6 +321,17 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
                 </p>
               )}
             </div>
+          ) : null}
+
+          {run.blocked_reason ? (
+            // D-03-S10. The run needs the user and the agent named why, so the
+            // reason is stated verbatim — and stated *without* a control. What
+            // blocks an agent here is a credential problem at the agent, which
+            // no answer typed into BrainBuddy can solve; a reply box beside
+            // this sentence is how a secret gets forwarded to a third party.
+            <p className="mt-2 whitespace-pre-wrap rounded-lg border border-needs-you-border bg-needs-you-bg px-2.5 py-2 text-[12.5px] text-needs-you-fg">
+              {run.blocked_reason}
+            </p>
           ) : null}
 
           {run.result_text ? (
@@ -495,12 +517,15 @@ export function AgentRunSection({
   taskId,
   runs,
   isLoading,
-  error
+  error,
+  handoffEnabled
 }: {
   taskId: string;
   runs: AgentRunResponse[];
   isLoading: boolean;
   error: unknown;
+  /** The account's `external_agent_relay` flag. Gates the retry, not the view. */
+  handoffEnabled: boolean;
 }): React.JSX.Element | null {
   if (error && runs.length === 0) {
     return (
@@ -530,7 +555,7 @@ export function AgentRunSection({
       ) : null}
       <div className="flex flex-col gap-2">
         {runs.map((run) => (
-          <RunCard key={run.id} taskId={taskId} run={run} />
+          <RunCard key={run.id} taskId={taskId} run={run} handoffEnabled={handoffEnabled} />
         ))}
       </div>
     </div>

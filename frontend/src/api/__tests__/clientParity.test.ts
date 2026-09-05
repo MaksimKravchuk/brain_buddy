@@ -33,7 +33,7 @@ type OperationName =
   | "testAgentConnection" | "rotateAgentCredential"
   | "disconnectAgentConnection" | "previewAgentHandoff" | "confirmAgentHandoff"
   | "listAgentRuns" | "getAgentRun" | "listAgentRunSummaries" | "replyToAgentRun"
-  | "cancelAgentRun";
+  | "checkAgentRunDelivery" | "cancelAgentRun";
 type Manifest = { operations: Record<OperationName, { path: string; method: string; body: "none" | "json" | "binary"; idempotency: boolean; headers: string[] }> };
 function isManifest(value: unknown): value is Manifest {
   return typeof value === "object" && value !== null && "operations" in value && typeof value.operations === "object" && value.operations !== null;
@@ -84,6 +84,7 @@ const adapters = {
   getAgentRun: (c) => c.getAgentRun("run-1"),
   listAgentRunSummaries: (c) => c.listAgentRunSummaries(["task-1", "task-2"]),
   replyToAgentRun: (c) => c.replyToAgentRun("run-1", { message: "reply", expected_revision: 1 }, "key-agent-reply"),
+  checkAgentRunDelivery: (c) => c.checkAgentRunDelivery("run-1", { current_password: null, expected_revision: 1 }, "key-agent-check-delivery"),
   cancelAgentRun: (c) => c.cancelAgentRun("run-1", "key-agent-cancel"),
 } satisfies Record<OperationName, Adapter>;
 
@@ -92,14 +93,14 @@ function jsonResponse(): Response {
 }
 
 describe("common client wire parity inventory", () => {
-  it("covers exactly 41 common operations with typed adapters", async () => {
+  it("covers exactly 42 common operations with typed adapters", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => jsonResponse());
     vi.stubGlobal("fetch", fetchMock);
     const names = Object.keys(manifest.operations) as OperationName[];
-    expect(names).toHaveLength(41);
+    expect(names).toHaveLength(42);
     expect(Object.keys(adapters).sort()).toEqual(names.sort());
     for (const name of names) await adapters[name](apiClient);
-    expect(fetchMock).toHaveBeenCalledTimes(41);
+    expect(fetchMock).toHaveBeenCalledTimes(42);
     fetchMock.mock.calls.forEach(([url, init], index) => {
       const operation = manifest.operations[names[index]];
       expect(String(url)).toBe(`/api${operation.path}`);

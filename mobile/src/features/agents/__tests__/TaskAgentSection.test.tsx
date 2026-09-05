@@ -312,6 +312,38 @@ describe("014-SC-004 the compact task line agrees with the run monitor", () => {
     await unmount();
   });
 
+  it("014-FR-013 describes the newest run when a task has more than one", async () => {
+    // The API answers a task's runs newest first (repository.py orders by
+    // created_at DESC, id DESC), so reading the last element described the
+    // *oldest* hand-off — a failed attempt from yesterday shown as the state of
+    // the run that is running right now.
+    mockListConnections.mockResolvedValue([makeConnection()]);
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        id: "run_new",
+        primary_state_label: "Running",
+        reported_state: "running",
+        guarantee_tier: "guaranteed",
+        created_at: "2026-08-09T12:00:00Z",
+      }),
+      makeRun({
+        id: "run_old",
+        primary_state_label: "Failed",
+        reported_state: "failed",
+        guarantee_tier: "best_effort",
+        created_at: "2026-08-08T09:00:00Z",
+      }),
+    ]);
+
+    const { renderer, unmount } = await renderWithProviders(<TaskAgentSection {...props()} />);
+    await settle();
+
+    expect(visibleText(renderer)).toContain("Running · Guaranteed single start");
+    expect(visibleText(renderer)).not.toContain("Failed · Best-effort single start");
+
+    await unmount();
+  });
+
   it("014-FR-013 shows the missing-task label and withdraws both controls", async () => {
     mockListConnections.mockResolvedValue([makeConnection()]);
     mockListRuns.mockResolvedValue([
@@ -645,6 +677,36 @@ describe("useAgentRunsFeed absorb polling", () => {
 });
 
 describe("TaskAgentSection retry of a hand-off that never left", () => {
+  it("014-FR-012 withholds the retry while rollout is off and still shows the run", async () => {
+    // The sheet that serves a retry is mounted only while the flag is on, so an
+    // offered control here would flip a state nothing reads. It is also the
+    // right answer on its own terms: nothing reached the agent, so re-sending
+    // is a fresh content-bearing send, which rollout OFF withholds (FR-016,
+    // 007 FR-019) while leaving already-dispatched work observable.
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        dispatch_state: "not_sent",
+        dispatch_error_code: "restarted_before_send",
+        reported_state: null,
+        primary_state_label: "Not sent",
+        manifest: makeManifest({ connection_id: "conn_1" }),
+      }),
+    ]);
+
+    const { renderer, unmount } = await renderWithProviders(
+      <TaskAgentSection {...props({ enabled: false })} />,
+    );
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Not sent");
+    expect(text).toContain("Nothing left Brain Buddy");
+    expect(queryByText(renderer, "Try this hand-off again")).toBeNull();
+    expect(queryByText(renderer, "Hand to agent")).toBeNull();
+
+    await unmount();
+  });
+
   it("014-SC-004 reopens the review seeded from the run's frozen manifest", async () => {
     const frozen = makeManifest({
       connection_id: "conn_1",
