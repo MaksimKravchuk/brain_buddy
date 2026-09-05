@@ -500,6 +500,10 @@ function RunCard({
               Check again
             </BBText>
           </Pressable>
+          {/* A refused or failed check must not look like a check that found
+              nothing: the reason and its correlation reference belong beside
+              the control that produced them, exactly as reply and cancel do. */}
+          {checkDelivery.isError ? <ErrorBanner error={checkDelivery.error} /> : null}
         </>
       ) : null}
       {canRetryHandoff(run) ? (

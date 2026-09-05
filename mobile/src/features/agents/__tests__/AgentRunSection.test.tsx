@@ -5,6 +5,7 @@
  * inert, and a control the connector cannot honour is never offered.
  */
 
+import { ApiError } from "@/api/client";
 import { AgentRunSection } from "@/features/agents/AgentRunSection";
 import { makeManifest, makeRun, makeRunEvent } from "@/test/agentFixtures";
 import {
@@ -13,6 +14,7 @@ import {
   queryByLabel,
   queryByText,
   renderWithProviders,
+  settle,
   typeInto,
   visibleText,
 } from "@/test/render";
@@ -516,6 +518,44 @@ describe("AgentRunSection dispatch states", () => {
       { current_password: null, expected_revision: unconfirmed.revision },
       "idem_key_test",
     );
+
+    await unmount();
+  });
+
+  it("014-FR-006 surfaces a refused delivery check with its correlation reference", async () => {
+    // A refusal (rollout_disabled, connection_not_ready, agent_card_changed, a
+    // 409 on expected_revision) or a transport failure used to stop silently
+    // here: the control simply did nothing and the run kept its old label.
+    mockCheckDelivery.mockRejectedValue(
+      new ApiError("Bad Request", 400, {
+        message: "This agent is not part of the current rollout.",
+        reference_id: "corr_check_refused",
+        detail: { reason: "rollout_disabled" },
+      }),
+    );
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              dispatch_state: "delivery_unconfirmed",
+              exchange_state: "closed",
+              reported_state: null,
+              primary_state_label: "Delivery unconfirmed",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    await pressText(renderer, "Check again");
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("This agent is not part of the current rollout.");
+    expect(text).toContain("ref: corr_check_refused");
+    // The run is unchanged, so the check stays on offer.
+    expect(queryByText(renderer, "Check again")).not.toBeNull();
 
     await unmount();
   });

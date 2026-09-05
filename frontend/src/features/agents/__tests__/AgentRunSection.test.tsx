@@ -865,6 +865,41 @@ describe("AgentRunSection dispatch states", () => {
     expect(confirm).not.toHaveBeenCalled();
   });
 
+  it("014-FR-006 surfaces a refused delivery check with its correlation reference", async () => {
+    // Parity with iOS. A refusal (rollout_disabled, connection_not_ready,
+    // agent_card_changed, a 409 on expected_revision) or a transport failure
+    // must never look like a check that ran and found nothing.
+    vi.spyOn(apiClient, "checkAgentRunDelivery").mockRejectedValue(
+      new ApiError(
+        "Bad Request",
+        400,
+        {
+          message: "This agent is not part of the current rollout.",
+          detail: { reason: "rollout_disabled" }
+        },
+        "corr-check-refused"
+      )
+    );
+    const user = userEvent.setup();
+    renderSection([
+      makeRun({
+        dispatch_state: "delivery_unconfirmed",
+        exchange_state: "closed",
+        primary_state_label: "Delivery unconfirmed"
+      })
+    ]);
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Check again" }));
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This agent is not part of the current rollout.");
+    expect(alert).toHaveTextContent("corr-check-refused");
+    // The run is unchanged, so the check stays on offer.
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
+  });
+
   it("014-FR-006 never offers Check again while the browser is offline", async () => {
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
     onlineManager.setOnline(false);
