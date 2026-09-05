@@ -127,7 +127,7 @@ terminal_error -> reconciling (preview text) -> awaiting_confirmation
 Spec `002-async-voice-workflows` (US1 "provisional tasks while speaking",
 required outcome 2, SC-004) describes the retired behaviour; its normative
 files are hash-frozen as delivered history, so this amendment is the record of
-the change until a follow-up spec revision lands through the Spec Kit pipeline.
+the change; the follow-up specification is `specs/015-transcript-first-brain-dump/`.
 
 ## 2026-07-19 amendment: real-provider invariants
 
