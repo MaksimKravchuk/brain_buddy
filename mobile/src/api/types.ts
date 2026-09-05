@@ -353,12 +353,82 @@ export type BrainDumpAction =
 // commands stay in separate fields so no client blends them into an invented
 // progress number.
 
-/** What the connector disclosed. A false capability hides its control. */
+/**
+ * What the agent's own card declared. Never a Brain Buddy claim.
+ *
+ * Kept apart from `AgentControls`: blending the two would let a product
+ * decision be rendered as something the agent promised (FR-002, FR-010).
+ */
 export interface AgentCapabilities {
-  progress: boolean;
+  streaming: boolean;
+  push_notifications: boolean;
+}
+
+/** The controls Brain Buddy offers here. Cards advertise neither (FR-010). */
+export interface AgentControls {
   reply: boolean;
   cancel: boolean;
 }
+
+export type AgentAuthScheme = "bearer" | "api_key";
+export type AgentGuaranteeTier = "guaranteed" | "best_effort";
+export type AgentDisconnectReason = "owner" | "superseded_wire_contract";
+export type AgentExchangeState = "none" | "queued" | "open" | "closed" | "interrupted";
+export type AgentExchangeKind = "start" | "reply";
+export type AgentPushRegistration =
+  | "unregistered"
+  | "registered"
+  | "refused"
+  | "unsupported";
+export type AgentSchemeKind =
+  | "bearer"
+  | "api_key"
+  | "oauth2"
+  | "oidc"
+  | "mtls"
+  | "other";
+
+export interface AgentSkill {
+  id: string | null;
+  name: string | null;
+  description: string | null;
+}
+
+export interface AgentAuthSchemeOffer {
+  name: string;
+  kind: AgentSchemeKind;
+  header_name: string | null;
+}
+
+/**
+ * The discovery result read off the agent's published card.
+ *
+ * Every string here is untrusted agent text and is rendered inertly: never a
+ * `Linking` target, never auto-linked, never markup-interpreted, exactly as
+ * `result_link` is treated (FR-016, AC-031). `interface_url` is shown so the
+ * owner can see where their content would go — which is also why it is never
+ * made tappable.
+ */
+export interface AgentCard {
+  name: string | null;
+  version: string | null;
+  description: string | null;
+  protocol_version: string | null;
+  interface_url: string | null;
+  streaming: boolean;
+  push_notifications: boolean;
+  skills: AgentSkill[];
+  auth_schemes_offered: AgentAuthSchemeOffer[];
+  extension_uris: string[];
+  fetched_at: string | null;
+}
+
+/** Closed per-code shapes for the last test's coarse detail. */
+export type AgentTestErrorDetail =
+  | { found_version: string }
+  | { scheme: string }
+  | { retry_after_seconds: number | null }
+  | { interface_url: string | null };
 
 export type AgentConnectionStatus =
   | "untested"
@@ -379,19 +449,34 @@ export type AgentReportedState =
   | "cancelled";
 
 export type AgentCommandKind = "start" | "reply" | "cancel";
-export type AgentCommandDelivery = "unconfirmed" | "confirmed";
+export type AgentCommandDelivery = "unconfirmed" | "confirmed" | "rejected";
 
 export interface AgentConnectionResponse {
   id: string;
   name: string;
-  endpoint_url: string;
-  auth_header_name: string;
+  agent_address: string;
+  auth_scheme: AgentAuthScheme;
+  /** Card-sourced, and only for an API-key connection. Never user input. */
+  auth_header_name: string | null;
   status: AgentConnectionStatus;
   /** Server-derived from the clock: last contact older than the threshold. */
   stale: boolean;
   ready_for_handoff: boolean;
   capabilities: AgentCapabilities;
+  controls_offered: AgentControls;
+  card: AgentCard | null;
+  guarantee_tier: AgentGuaranteeTier | null;
+  /** Server-owned sentences. Rendered verbatim; never re-worded client-side. */
+  tier_disclosure: string | null;
+  tier_disclosure_url: string | null;
+  cancellation_disclosure: string | null;
+  /** The fifth connection condition: the card moved under the connection. */
+  agent_changed: boolean;
+  best_effort_acknowledged_at: string | null;
+  correlation_id_honoured: boolean | null;
+  disconnect_reason: AgentDisconnectReason | null;
   last_test_error_code: string | null;
+  last_test_error_detail: AgentTestErrorDetail | null;
   last_contact_at: string | null;
   last_tested_at: string | null;
   stale_after_seconds: number;
@@ -399,22 +484,18 @@ export interface AgentConnectionResponse {
   revision: number;
 }
 
-/** The only response that ever carries the inbound signing secret — once. */
-export interface AgentConnectionCreatedResponse extends AgentConnectionResponse {
-  inbound_signing_secret: string;
-}
-
 export interface AgentConnectionCreateRequest {
   name: string;
-  endpoint_url: string;
-  auth_header_name?: string;
+  agent_address: string;
+  auth_scheme?: AgentAuthScheme;
   credential: string;
   current_password: string;
 }
 
 export interface AgentConnectionUpdateRequest {
   name?: string;
-  endpoint_url?: string;
+  agent_address?: string;
+  auth_scheme?: AgentAuthScheme;
   current_password?: string;
   expected_revision: number;
 }
@@ -423,16 +504,6 @@ export interface AgentConnectionRotateRequest {
   credential: string;
   current_password: string;
   expected_revision: number;
-}
-
-export interface AgentConnectionRotateSigningSecretRequest {
-  current_password: string;
-  expected_revision: number;
-}
-
-/** Returned once after replacing the inbound signing secret; never cache it. */
-export interface AgentConnectionSigningSecretResponse extends AgentConnectionResponse {
-  inbound_signing_secret: string;
 }
 
 export interface AgentConnectionDisconnectRequest {
@@ -445,15 +516,36 @@ export interface AgentContextItem {
   body: string;
 }
 
+export interface AgentPushCallback {
+  registered: boolean;
+  url_preview: string | null;
+  disclosure: string | null;
+}
+
+/**
+ * **Check again** carries no identifiers of its own: every id is on the run.
+ *
+ * It does carry the revision the user was looking at. The check can end in a
+ * message on the wire, so it is a mutation like any other and names the state
+ * it was composed against; a check replayed from a stale cached run would
+ * resend for a state nobody is being shown any more.
+ */
+export interface AgentCheckDeliveryRequest {
+  current_password?: string | null;
+  expected_revision?: number | null;
+}
+
 export interface AgentHandoffPreviewRequest {
   connection_id: string;
   include_details?: boolean;
-  context_items?: AgentContextItem[];
+  supporting_items?: AgentContextItem[];
 }
 
 export interface AgentHandoffConfirmRequest extends AgentHandoffPreviewRequest {
   manifest_token: string;
   current_password?: string | null;
+  /** Part of the canonical request identity, so a replay carries it (AC-026). */
+  acknowledge_duplicate_risk?: boolean;
 }
 
 export interface AgentReportingContract {
@@ -478,19 +570,74 @@ export interface AgentManifestResponse {
   agent_name: string;
   title: string;
   details: string | null;
-  context_items: AgentContextItem[];
-  reporting: AgentReportingContract;
-  reporting_instructions: string;
-  instructions_version: string;
+  supporting_items: AgentContextItem[];
+  message_id: string;
+  correlation_id: string;
+  /** Where content would actually go: the interface the card named. */
+  destination_interface: string;
   protocol_version: string;
-  destination_endpoint: string;
+  guarantee_tier: AgentGuaranteeTier;
+  /** Server-owned sentences, rendered verbatim. Never re-worded client-side. */
+  tier_disclosure: string;
+  tier_disclosure_url: string;
+  acknowledgement_required: boolean;
+  cancellation_disclosure: string;
+  push_callback: AgentPushCallback | null;
   external_copy_notice: string;
   reauthentication_required: boolean;
+  parts_preview: string[];
 }
 
 export interface AgentReplyRequest {
   message: string;
   expected_revision: number;
+}
+
+/** Why an observation ran. Shown as detail on the row it produced. */
+export type AgentRunEventTrigger = "dispatch" | "schedule" | "push" | "command";
+
+/**
+ * What a timeline row *is*.
+ *
+ * `task_succession` is not a state change: the agent moved the work into a new
+ * task inside the same conversation, and the row exists so the identifier the
+ * user saw yesterday is not silently replaced (M-03-S26).
+ */
+export type AgentRunEventKind = "observation" | "task_succession";
+
+/**
+ * What became of a cancellation request (AC-018, AC-029).
+ *
+ * `unsupported` and `not_cancelable` come only from an explicit agent answer
+ * and withdraw the control. `unconfirmed` is the ambiguous ending and keeps it:
+ * Brain Buddy does not know whether the request landed, and hiding the control
+ * would present its own uncertainty as the agent's refusal.
+ */
+export type AgentCancelOutcome =
+  | "none"
+  | "requested"
+  | "unconfirmed"
+  | "accepted"
+  | "unsupported"
+  | "not_cancelable"
+  | "task_missing";
+
+/** Whether the terminal result could be stored at all. */
+export type AgentResultAvailability = "available" | "too_large";
+
+export type AgentArtifactKind = "text" | "file" | "data" | "link";
+
+/**
+ * A placeholder for something the agent produced and Brain Buddy never fetched.
+ *
+ * Names the content type rather than the content: the relay stores no
+ * attachment, so a row implying a download would promise something that does
+ * not exist (M-03-S10).
+ */
+export interface AgentArtifactSummary {
+  name: string | null;
+  media_type: string | null;
+  kind: AgentArtifactKind;
 }
 
 export interface AgentRunEvent {
@@ -499,6 +646,10 @@ export interface AgentRunEvent {
   run_version: number;
   received_at: string;
   summary: string | null;
+  trigger: AgentRunEventTrigger;
+  kind: AgentRunEventKind;
+  previous_agent_task_id: string | null;
+  new_agent_task_id: string | null;
 }
 
 export interface AgentRunCommand {
@@ -506,6 +657,8 @@ export interface AgentRunCommand {
   kind: AgentCommandKind;
   body: string | null;
   delivery: AgentCommandDelivery;
+  /** The agent's own answer as a coarse code, or null when it never gave one. */
+  outcome_code: string | null;
   created_at: string;
   confirmed_at: string | null;
 }
@@ -546,7 +699,35 @@ export interface AgentRunResponse {
   content_expires_at: string;
   last_contact_at: string | null;
   reporting_window_seconds: number;
-  capabilities: AgentCapabilities;
+  /** The controls still offered on *this* run. Never a card declaration. */
+  capabilities: AgentControls;
+  /** The A2A exchange this run is waiting on: Queued and Sent stay apart. */
+  guarantee_tier: AgentGuaranteeTier | null;
+  message_id: string | null;
+  correlation_id: string | null;
+  agent_task_id: string | null;
+  exchange_open: boolean;
+  exchange_state: AgentExchangeState;
+  exchange_kind: AgentExchangeKind | null;
+  push_registration: AgentPushRegistration;
+
+  /**
+   * What Brain Buddy's own observation of the agent's task established.
+   *
+   * Every default here is the absence of a claim rather than a neutral-looking
+   * state: a run nobody has observed yet says only that.
+   */
+  agent_task_missing: boolean;
+  cancel_outcome: AgentCancelOutcome;
+  blocked_reason: string | null;
+  artifacts_summary: AgentArtifactSummary[];
+  /** `too_large` is an honest marker, never **Stopped reporting**. */
+  result_availability: AgentResultAvailability | null;
+  last_observed_at: string | null;
+  /** The base poll rate. The server may observe less often after the window. */
+  observation_interval_seconds: number;
+  identifiers_expired: boolean;
+
   manifest: AgentManifestResponse | null;
   events: AgentRunEvent[];
   commands: AgentRunCommand[];
@@ -570,4 +751,12 @@ export interface AgentRunSummaryResponse {
   needs_user: boolean;
   stopped_reporting: boolean;
   last_contact_at: string | null;
+  /**
+   * The compact row states the tier in full and shows the same withdrawals the
+   * full projection does, so the two surfaces cannot disagree about what the
+   * user may still do (M-03-S24).
+   */
+  guarantee_tier: AgentGuaranteeTier | null;
+  cancel_outcome: AgentCancelOutcome;
+  agent_task_missing: boolean;
 }

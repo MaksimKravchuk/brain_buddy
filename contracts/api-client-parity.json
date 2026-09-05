@@ -35,7 +35,6 @@
     "updateAgentConnection": {"family":"Agent Relay","method":"PUT","path":"/agent-connections/connection-1","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
     "testAgentConnection": {"family":"Agent Relay","method":"POST","path":"/agent-connections/connection-1/test","body":"none","idempotency":false,"headers":[],"notes":"server contract has no idempotency key"},
     "rotateAgentCredential": {"family":"Agent Relay","method":"POST","path":"/agent-connections/connection-1/credential","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
-    "rotateAgentSigningSecret": {"family":"Agent Relay","method":"POST","path":"/agent-connections/connection-1/signing-secret","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
     "disconnectAgentConnection": {"family":"Agent Relay","method":"POST","path":"/agent-connections/connection-1/disconnect","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
     "previewAgentHandoff": {"family":"Agent Relay","method":"POST","path":"/tasks/task-1/agent-runs/preview","body":"json","idempotency":false,"headers":[],"notes":"preview reserves nothing"},
     "confirmAgentHandoff": {"family":"Agent Relay","method":"POST","path":"/tasks/task-1/agent-runs","body":"json","idempotency":true,"headers":[],"notes":"confirmation is durable"},

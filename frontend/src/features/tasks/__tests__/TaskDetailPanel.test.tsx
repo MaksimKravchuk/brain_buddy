@@ -15,14 +15,19 @@ import type {
 import { apiClient } from "../../../api/client";
 import { ShellToastContext } from "../../../components/shell/shellToast";
 import { useAuthStore } from "../../../stores/authStore";
+import type { AgentRunResponse } from "../../../api/agentTypes";
+import { canCancelRun, canReplyToRun } from "../../agents/agentCopy";
 import { TaskDetailEmptyPanel, TaskDetailPanel } from "../TaskDetailPanel";
 
+// Stubbed so this suite is about the *panel* — but the stub asks the same two
+// guard functions the real section does, so a control the agent withdrew can
+// never be shown here while being hidden there.
 vi.mock("../../agents/AgentRunSection", () => ({
-  AgentRunSection: ({ runs }: { runs: Array<{ capabilities?: { reply: boolean; cancel: boolean }; reported_state?: string }> }) => (
+  AgentRunSection: ({ runs }: { runs: AgentRunResponse[] }) => (
     <div data-testid="agent-run-count">
       {runs.length}
-      {runs.some((run) => run.reported_state === "blocked" && run.capabilities?.reply) ? <button>Send answer</button> : null}
-      {runs.some((run) => run.capabilities?.cancel) ? <button>Request cancellation</button> : null}
+      {runs.some((run) => canReplyToRun(run)) ? <button>Send answer</button> : null}
+      {runs.some((run) => canCancelRun(run)) ? <button>Request cancellation</button> : null}
     </div>
   )
 }));
@@ -260,7 +265,19 @@ describe("TaskDetailPanel chrome", () => {
     expect(screen.queryByRole("heading", { name: "External agent" })).not.toBeInTheDocument();
 
     terminalEmpty.unmount();
-    vi.mocked(apiClient.listAgentRuns).mockResolvedValue([{} as never]);
+    vi.mocked(apiClient.listAgentRuns).mockResolvedValue([
+      // A real run shape, because the stub now asks the shared guards about it
+      // and a bare `{}` would only prove that an empty object has no controls.
+      {
+        id: "agentrun_terminal",
+        primary_state_label: "Agent reported complete",
+        reported_state: "completed",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "none",
+        agent_task_missing: false,
+        capabilities: { reply: false, cancel: false }
+      } as never
+    ]);
     renderPanel({
       task: taskFixture({
         state: "completed",
@@ -784,5 +801,73 @@ describe("TaskDetailPanel terminal presentation", () => {
 
     expect(screen.getByLabelText("Title")).toHaveClass("line-through");
     expect(within(screen.getByLabelText("List")).getByRole("option", { name: label })).toBeInTheDocument();
+  });
+});
+
+describe("014-SC-004 the compact Task surface says what the full one says", () => {
+  it("014-FR-013 shows the guarantee tier in full and the withdrawn cancellation", async () => {
+    // D-03-S21. Spelled out rather than abbreviated: the tier is a statement
+    // about duplicate risk, and a code the user has to learn is a warning
+    // nobody reads.
+    vi.spyOn(apiClient, "listAgentRuns").mockResolvedValue([
+      {
+        id: "agentrun_1",
+        primary_state_label: "Running",
+        reported_state: "running",
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "not_cancelable",
+        agent_task_missing: false,
+        capabilities: { reply: true, cancel: true },
+        events: [],
+        commands: [],
+        artifacts_summary: []
+      } as never
+    ]);
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "user-1", email: "max@example.test", feature_flags: {} },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    const line = await screen.findByTestId("agent-run-summary-line");
+    expect(line).toHaveTextContent("Running · Guaranteed single start · Cancellation not supported");
+    expect(screen.queryByRole("button", { name: "Request cancellation" })).not.toBeInTheDocument();
+  });
+
+  it("014-FR-013 shows the missing-task label and withdraws both controls", async () => {
+    vi.spyOn(apiClient, "listAgentRuns").mockResolvedValue([
+      {
+        id: "agentrun_1",
+        primary_state_label: "Agent no longer reports this run",
+        reported_state: "blocked",
+        needs_user: true,
+        question_text: "Which environment?",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "none",
+        agent_task_missing: true,
+        capabilities: { reply: true, cancel: true },
+        events: [],
+        commands: [],
+        artifacts_summary: []
+      } as never
+    ]);
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "user-1", email: "max@example.test", feature_flags: {} },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    const line = await screen.findByTestId("agent-run-summary-line");
+    expect(line).toHaveTextContent("Agent no longer reports this run · Best-effort single start");
+    expect(screen.queryByRole("button", { name: "Send answer" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request cancellation" })).not.toBeInTheDocument();
   });
 });

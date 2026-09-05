@@ -47,13 +47,11 @@ import type {
 } from "./adminTypes";
 import type {
   AgentConnectionCreateRequest,
-  AgentConnectionCreatedResponse,
   AgentConnectionDisconnectRequest,
   AgentConnectionResponse,
   AgentConnectionRotateRequest,
-  AgentConnectionRotateSigningSecretRequest,
-  AgentConnectionSigningSecretResponse,
   AgentConnectionUpdateRequest,
+  AgentCheckDeliveryRequest,
   AgentHandoffConfirmRequest,
   AgentHandoffPreviewRequest,
   AgentManifestResponse,
@@ -473,7 +471,9 @@ export const apiClient = {
   },
 
   createAgentConnection(payload: AgentConnectionCreateRequest, idempotencyKey: string) {
-    return request<AgentConnectionCreatedResponse>("/agent-connections", {
+    // A plain connection: registration issues no secret under the A2A wire, so
+    // there is nothing here for a caller to have to handle exactly once.
+    return request<AgentConnectionResponse>("/agent-connections", {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: payload
@@ -504,30 +504,6 @@ export const apiClient = {
       headers: { "Idempotency-Key": idempotencyKey },
       body: payload
     });
-  },
-
-  /**
-   * Issue a replacement inbound signing secret.
-   *
-   * The create response shows that secret once, so this is the only way back
-   * from losing it. The replacement takes effect immediately, which is why the
-   * request carries the password and the revision the user was looking at.
-   * Retrying an ambiguous attempt must reuse the same key: the server answers
-   * a matching replay with the same secret rather than a blank success.
-   */
-  rotateAgentSigningSecret(
-    connectionId: string,
-    payload: AgentConnectionRotateSigningSecretRequest,
-    idempotencyKey: string
-  ) {
-    return request<AgentConnectionSigningSecretResponse>(
-      `/agent-connections/${connectionId}/signing-secret`,
-      {
-        method: "POST",
-        headers: { "Idempotency-Key": idempotencyKey },
-        body: payload
-      }
-    );
   },
 
   disconnectAgentConnection(
@@ -581,6 +557,25 @@ export const apiClient = {
 
   replyToAgentRun(runId: string, payload: AgentReplyRequest, idempotencyKey: string) {
     return request<AgentRunResponse>(`/agent-runs/${runId}/reply`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: payload
+    });
+  },
+
+  /**
+   * **Check again** on a `delivery_unconfirmed` run.
+   *
+   * It carries no identifiers of its own: the run already holds the correlation
+   * ID and the message ID the server looks the task up by, so this can only ever
+   * be the *same* check — never a second hand-off.
+   */
+  checkAgentRunDelivery(
+    runId: string,
+    payload: AgentCheckDeliveryRequest,
+    idempotencyKey: string
+  ) {
+    return request<AgentRunResponse>(`/agent-runs/${runId}/check-delivery`, {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: payload

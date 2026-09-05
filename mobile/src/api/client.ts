@@ -13,13 +13,11 @@
  */
 
 import type {
-  AgentConnectionCreatedResponse,
   AgentConnectionCreateRequest,
   AgentConnectionDisconnectRequest,
+  AgentCheckDeliveryRequest,
   AgentConnectionResponse,
   AgentConnectionRotateRequest,
-  AgentConnectionRotateSigningSecretRequest,
-  AgentConnectionSigningSecretResponse,
   AgentConnectionUpdateRequest,
   AgentHandoffConfirmRequest,
   AgentHandoffPreviewRequest,
@@ -585,11 +583,11 @@ export function createApiClient(options: ApiClientOptions) {
     },
 
     /**
-     * The 201 body is the only time the inbound signing secret is ever
-     * returned — show it once and never persist it.
+     * A plain connection: registration issues no secret under the A2A wire, so
+     * there is nothing here a caller has to handle exactly once (FR-012).
      */
     createAgentConnection(payload: AgentConnectionCreateRequest, idempotencyKey: string) {
-      return relayMutation<AgentConnectionCreatedResponse>(
+      return relayMutation<AgentConnectionResponse>(
         "createAgentConnection",
         "/agent-connections",
         payload,
@@ -635,19 +633,6 @@ export function createApiClient(options: ApiClientOptions) {
       return relayMutation<AgentConnectionResponse>(
         "rotateAgentCredential",
         `/agent-connections/${connectionId}/credential`,
-        payload,
-        idempotencyKey,
-      );
-    },
-
-    rotateAgentSigningSecret(
-      connectionId: string,
-      payload: AgentConnectionRotateSigningSecretRequest,
-      idempotencyKey: string,
-    ) {
-      return relayMutation<AgentConnectionSigningSecretResponse>(
-        "rotateAgentSigningSecret",
-        `/agent-connections/${connectionId}/signing-secret`,
         payload,
         idempotencyKey,
       );
@@ -718,6 +703,26 @@ export function createApiClient(options: ApiClientOptions) {
       return relayMutation<AgentRunResponse>(
         "replyToAgentRun",
         `/agent-runs/${runId}/reply`,
+        payload,
+        idempotencyKey,
+      );
+    },
+
+    /**
+     * **Check again** on a `delivery_unconfirmed` run.
+     *
+     * It names no identifiers of its own: the correlation ID and the message ID
+     * are already on the run, so this can only ever repeat the same check —
+     * never become a second hand-off.
+     */
+    checkAgentRunDelivery(
+      runId: string,
+      payload: AgentCheckDeliveryRequest,
+      idempotencyKey: string,
+    ) {
+      return relayMutation<AgentRunResponse>(
+        "checkAgentRunDelivery",
+        `/agent-runs/${runId}/check-delivery`,
         payload,
         idempotencyKey,
       );

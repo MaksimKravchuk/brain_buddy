@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { StyleSheet, TextInput, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import { isDefinitiveMutationFailure } from "@/api/client";
-import type { AgentConnectionCreatedResponse } from "@/api/types";
+import type { AgentAuthScheme, AgentConnectionResponse } from "@/api/types";
 import { useCreateAgentConnection } from "@/api/hooks";
 import { BBText } from "@/components/BBText";
 import { Button } from "@/components/Button";
@@ -15,27 +15,24 @@ import { sha256 } from "js-sha256";
 interface AddConnectionSheetProps {
   visible: boolean;
   onClose: () => void;
-  /** Receives the 201 body so the signing secret can be shown exactly once. */
-  onCreated: (connection: AgentConnectionCreatedResponse) => void;
+  /** Receives the saved connection. There is no secret to hand over (FR-012). */
+  onCreated: (connection: AgentConnectionResponse) => void;
 }
 
-const DEFAULT_AUTH_HEADER = "X-Agent-Key";
-
 /**
- * Adds an agent the user operates. The credential is entered masked, sent
- * once, and never rendered again from any later response — no response type
- * can even carry it.
+ * Adds an agent the user operates, by its address plus one of exactly two
+ * credential schemes (M-01-S08).
+ *
+ * The credential is entered masked, sent once, and never rendered again from
+ * any later response — no response type can even carry it. Dismissing the sheet
+ * discards everything silently: nothing was stored, nothing was sent, and the
+ * four fields are cheap to re-enter, so a warning would only be noise.
  */
 export function AddConnectionSheet({ visible, onClose, onCreated }: AddConnectionSheetProps) {
-  const issuedSecret = useRef<string | null>(null);
-  const create = useCreateAgentConnection({
-    onSigningSecret: (secret) => {
-      issuedSecret.current = secret;
-    },
-  });
+  const create = useCreateAgentConnection();
   const [name, setName] = useState("");
   const [endpoint, setEndpoint] = useState("");
-  const [authHeader, setAuthHeader] = useState(DEFAULT_AUTH_HEADER);
+  const [authScheme, setAuthScheme] = useState<AgentAuthScheme>("bearer");
   const [credential, setCredential] = useState("");
   const [password, setPassword] = useState("");
   const [ambiguousIntent, setAmbiguousIntent] = useState<{ fingerprint: string } | null>(null);
@@ -44,10 +41,9 @@ export function AddConnectionSheet({ visible, onClose, onCreated }: AddConnectio
 
   const clearSensitiveForm = () => {
     create.reset();
-    issuedSecret.current = null;
     setName("");
     setEndpoint("");
-    setAuthHeader(DEFAULT_AUTH_HEADER);
+    setAuthScheme("bearer");
     setCredential("");
     setPassword("");
     setRecoveryError(null);
@@ -75,18 +71,16 @@ export function AddConnectionSheet({ visible, onClose, onCreated }: AddConnectio
   const canSubmit =
     name.trim().length > 0 &&
     endpoint.trim().length > 0 &&
-    authHeader.trim().length > 0 &&
     credential.length > 0 &&
     password.length > 0;
 
   const submit = () => {
     const trimmedName = name.trim();
     const trimmedEndpoint = endpoint.trim();
-    const trimmedAuthHeader = authHeader.trim();
     const intent = JSON.stringify([
       trimmedName,
       trimmedEndpoint,
-      trimmedAuthHeader,
+      authScheme,
       credential,
       password,
     ]);
@@ -102,8 +96,8 @@ export function AddConnectionSheet({ visible, onClose, onCreated }: AddConnectio
       {
         payload: {
           name: trimmedName,
-          endpoint_url: trimmedEndpoint,
-          auth_header_name: trimmedAuthHeader,
+          agent_address: trimmedEndpoint,
+          auth_scheme: authScheme,
           credential,
           current_password: password,
         },
@@ -111,14 +105,8 @@ export function AddConnectionSheet({ visible, onClose, onCreated }: AddConnectio
       },
       {
         onSuccess: (connection) => {
-          const secret = issuedSecret.current;
-          if (!secret) {
-            setRecoveryError("No signing secret was returned. Replace it before connecting your agent.");
-            return;
-          }
-          const created = { ...connection, inbound_signing_secret: secret };
           settleForm();
-          onCreated(created);
+          onCreated(connection);
         },
         onError: (error) => {
           if (isDefinitiveMutationFailure(error)) {
@@ -169,12 +157,12 @@ export function AddConnectionSheet({ visible, onClose, onCreated }: AddConnectio
       </View>
 
       <View style={styles.field}>
-        <BBText variant="label">Endpoint URL</BBText>
+        <BBText variant="label">Agent address</BBText>
         <TextInput
           style={styles.input}
           value={endpoint}
           onChangeText={setEndpoint}
-          placeholder="https://your-agent.example.com/brain-buddy"
+          placeholder="https://your-agent.example.com"
           placeholderTextColor={colors.fg6}
           autoCapitalize="none"
           autoCorrect={false}
@@ -182,23 +170,42 @@ export function AddConnectionSheet({ visible, onClose, onCreated }: AddConnectio
           editable={!create.isPending}
         />
         <BBText variant="micro" color={colors.fg5}>
-          Must be an HTTPS destination. Loopback, link-local, metadata-service, and private-network
-          addresses are refused unless your deployment enables that network class.
+          Brain Buddy fetches the agent card from this address&apos;s standard well-known location.
+          It must be an HTTPS destination. Loopback, link-local, metadata-service, and
+          private-network addresses are refused unless your deployment enables that network class.
         </BBText>
       </View>
 
       <View style={styles.field}>
-        <BBText variant="label">Auth header name</BBText>
-        <TextInput
-          style={styles.input}
-          value={authHeader}
-          onChangeText={setAuthHeader}
-          placeholder={DEFAULT_AUTH_HEADER}
-          placeholderTextColor={colors.fg6}
-          autoCapitalize="none"
-          autoCorrect={false}
-          editable={!create.isPending}
-        />
+        <BBText variant="label">Credential scheme</BBText>
+        <View style={styles.schemeRow}>
+          {(
+            [
+              ["bearer", "Bearer token"],
+              ["api_key", "API key"],
+            ] as const
+          ).map(([scheme, label]) => (
+            <Pressable
+              key={scheme}
+              accessibilityRole="radio"
+              accessibilityState={{
+                checked: authScheme === scheme,
+                disabled: create.isPending,
+              }}
+              accessibilityLabel={label}
+              disabled={create.isPending}
+              onPress={() => setAuthScheme(scheme)}
+              style={[styles.scheme, authScheme === scheme ? styles.schemeChecked : null]}
+            >
+              <BBText variant="body">{label}</BBText>
+            </Pressable>
+          ))}
+        </View>
+        {authScheme === "api_key" ? (
+          <BBText variant="micro" color={colors.fg5}>
+            Read from the agent card when you test. You do not type it.
+          </BBText>
+        ) : null}
       </View>
 
       <View style={styles.field}>
@@ -207,7 +214,7 @@ export function AddConnectionSheet({ visible, onClose, onCreated }: AddConnectio
           style={styles.input}
           value={credential}
           onChangeText={setCredential}
-          placeholder="Sent as the auth header value"
+          placeholder="Sent as the credential"
           placeholderTextColor={colors.fg6}
           autoCapitalize="none"
           autoCorrect={false}
@@ -244,6 +251,22 @@ export function AddConnectionSheet({ visible, onClose, onCreated }: AddConnectio
 const styles = StyleSheet.create({
   field: {
     gap: space.s2,
+  },
+  schemeRow: {
+    flexDirection: "row",
+    gap: space.s3,
+  },
+  scheme: {
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: space.s3,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+  },
+  schemeChecked: {
+    borderColor: colors.fg1,
+    backgroundColor: colors.surfaceRaised,
   },
   input: {
     borderWidth: 1,
