@@ -63,7 +63,6 @@ IDEMPOTENCY_RETENTION = timedelta(hours=24)
 AUDIT_RETENTION = timedelta(days=90)
 """Upper bound on audit metadata (FR-015). Content retention is far shorter."""
 
-EVENT_ID_RETENTION = timedelta(days=30)
 """How long a consumed event ID blocks a replay; matches content retention."""
 
 A2A_WIRE_MIGRATION = "a2a_wire_contract_v1"
@@ -244,7 +243,6 @@ class AgentRepository(BaseRepository):
                 "SELECT 1 FROM agent_run_events LIMIT 1",
                 "SELECT 1 FROM agent_run_commands LIMIT 1",
                 "SELECT 1 FROM agent_audit LIMIT 1",
-                "SELECT 1 FROM agent_event_ids LIMIT 1",
                 "SELECT 1 FROM agent_idempotency LIMIT 1",
             ):
                 if conn.execute(query).fetchone() is not None:
@@ -382,13 +380,7 @@ class AgentRepository(BaseRepository):
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_commands_run
                     ON agent_run_commands(owner_id, run_id, created_at);
-                CREATE TABLE IF NOT EXISTS agent_event_ids (
-                    owner_id TEXT NOT NULL,
-                    connection_id TEXT NOT NULL,
-                    event_id TEXT NOT NULL,
-                    consumed_at TEXT NOT NULL,
-                    PRIMARY KEY (owner_id, connection_id, event_id)
-                );
+                DROP TABLE IF EXISTS agent_event_ids;
                 CREATE TABLE IF NOT EXISTS agent_audit (
                     owner_id TEXT NOT NULL,
                     id TEXT NOT NULL,
@@ -1446,26 +1438,6 @@ class AgentRepository(BaseRepository):
 
     # --- events -------------------------------------------------------------
 
-    def consume_event_id(
-        self, *, owner_id: str, connection_id: str, event_id: str, now: datetime
-    ) -> bool:
-        """Atomically claim one replay identifier. ``False`` means duplicate.
-
-        Executed as a single conditional INSERT so two concurrent deliveries of
-        the same event can never both proceed to mutate the projection (FR-009).
-        """
-
-        with self._connection() as conn, _sqlite_guard("Agent event", event_id):
-            cursor = conn.execute(
-                """
-                INSERT OR IGNORE INTO agent_event_ids
-                    (owner_id, connection_id, event_id, consumed_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (owner_id, connection_id, event_id, now.isoformat()),
-            )
-            return cursor.rowcount == 1
-
     def append_event(self, event: AgentRunEventDocument) -> None:
         with (
             self._content_insert_transaction(event.owner_id) as conn,
@@ -1989,14 +1961,6 @@ class AgentRepository(BaseRepository):
                 raise
         return expired
 
-    def purge_expired_event_ids(self, *, now: datetime) -> int:
-        cutoff = (now - EVENT_ID_RETENTION).isoformat()
-        with self._connection() as conn, _sqlite_guard("Agent event", "retention"):
-            cursor = conn.execute(
-                "DELETE FROM agent_event_ids WHERE consumed_at < ?", (cutoff,)
-            )
-            return int(cursor.rowcount or 0)
-
     # --- idempotency --------------------------------------------------------
 
     def get_idempotency(
@@ -2073,10 +2037,9 @@ class AgentRepository(BaseRepository):
     ) -> LiveIdempotencyKeys:
         """Key ids referenced by every live sealed value owned by ``owner_id``.
 
-        Connection credentials and inbound signing secrets live until disconnect,
-        replacement, or deletion. Signing-secret replay receipts live only for the
-        idempotency retention window. This reads key labels from stored envelopes;
-        it never opens ciphertext or exposes malformed stored values.
+        Connection credentials live until disconnect, replacement or deletion.
+        This reads key labels from stored envelopes; it never opens ciphertext
+        or exposes malformed stored values.
         """
 
         cutoff = (now - IDEMPOTENCY_RETENTION).isoformat()
@@ -2112,10 +2075,8 @@ class AgentRepository(BaseRepository):
             if not isinstance(payload, dict):
                 unreadable += 1
                 continue
-            for field in ("credential", "inbound_secret"):
-                sealed = payload.get(field)
-                if sealed is None:
-                    continue
+            sealed = payload.get("credential")
+            if sealed is not None:
                 key_id = key_id_from_sealed(sealed)
                 if key_id is None:
                     unreadable += 1
@@ -2128,22 +2089,6 @@ class AgentRepository(BaseRepository):
                 unreadable += 1
             else:
                 key_ids.add(fingerprint_id)
-            try:
-                response = json.loads(row["response_body"])
-            except (TypeError, json.JSONDecodeError):
-                unreadable += 1
-                continue
-            if not isinstance(response, dict):
-                unreadable += 1
-                continue
-            sealed = response.get("sealed_signing_secret")
-            if sealed is None:
-                continue
-            key_id = key_id_from_sealed(sealed)
-            if key_id is None:
-                unreadable += 1
-            else:
-                key_ids.add(key_id)
 
         return LiveIdempotencyKeys(frozenset(key_ids), unreadable)
 
@@ -2211,7 +2156,6 @@ class AgentRepository(BaseRepository):
                 "DELETE FROM agent_run_commands WHERE owner_id = ?", (owner_id,)
             )
             conn.execute("DELETE FROM agent_runs WHERE owner_id = ?", (owner_id,))
-            conn.execute("DELETE FROM agent_event_ids WHERE owner_id = ?", (owner_id,))
             conn.execute(
                 "DELETE FROM agent_connections WHERE owner_id = ?", (owner_id,)
             )
@@ -2228,7 +2172,6 @@ __all__ = [
     "A2A_WIRE_MIGRATION",
     "AUDIT_RETENTION",
     "DUE_OBSERVATION_BATCH",
-    "EVENT_ID_RETENTION",
     "IDEMPOTENCY_RETENTION",
     "AgentRepository",
 ]

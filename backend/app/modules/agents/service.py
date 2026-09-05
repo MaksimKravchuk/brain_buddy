@@ -4369,7 +4369,6 @@ class AgentRelayService:
                 run_id=run_id,
             )
         self.agent_repo.purge_expired_audit(now=now)
-        self.agent_repo.purge_expired_event_ids(now=now)
         # Owner-scoped purges only fire when that owner calls; retention is a
         # promise about the rows, so the sweep drops every expired one.
         self.agent_repo.purge_all_expired_idempotency(now=now)
