@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import timedelta
+from functools import partial
 from typing import Never
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
@@ -14,7 +16,9 @@ from app.core.config import (
     AppEnvironment,
     VoiceProviderSettings,
 )
-from app.modules.agents.connector import GenericHttpConnector
+from app.modules.agents.a2a.card import fetch_card
+from app.modules.agents.a2a.client import A2AClient
+from app.modules.agents.observer import AgentObserver
 from app.modules.agents.repository import AgentRepository
 from app.modules.agents.secrets import (
     SealedSecret,
@@ -22,7 +26,11 @@ from app.modules.agents.secrets import (
     SecretsUnavailable,
     build_secret_box,
 )
-from app.modules.agents.service import AgentRelayService, TaskSnapshot
+from app.modules.agents.service import (
+    AgentRelayService,
+    ExchangePolicy,
+    TaskSnapshot,
+)
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.autocomplete import TaskTitleAutocompleteService
 from app.repositories import (
@@ -95,6 +103,7 @@ class Container:
     task_service: TaskService
     voice_brain_dump_service: VoiceBrainDumpService
     agent_relay_service: AgentRelayService
+    agent_observer: AgentObserver
     task_title_autocomplete_service: TaskTitleAutocompleteService
 
 
@@ -411,20 +420,70 @@ def build_container(config: AppConfig) -> Container:
         return TaskSnapshot(id=task.id, title=task.title, details=task.details)
 
     relay_settings = config.agent_relay
+    # Bounded on purpose, and bounded *here*: a held `SendMessage` occupies a
+    # worker for up to the reply window, so an unbounded pool would let a single
+    # slow agent consume the process (data-model.md §9).
+    exchange_executor = ThreadPoolExecutor(
+        max_workers=relay_settings.exchange_workers,
+        thread_name_prefix="agent-exchange",
+    )
+    # Separate pools, not tuning: an observation must not queue behind a held
+    # exchange, and a cancel — which is what *resolves* a held exchange on some
+    # runtimes — must not queue behind either (data-model.md §9, AC-035).
+    observation_executor = ThreadPoolExecutor(
+        max_workers=relay_settings.observer_workers,
+        thread_name_prefix="agent-observation",
+    )
+    control_executor = ThreadPoolExecutor(
+        max_workers=relay_settings.control_workers,
+        thread_name_prefix="agent-control",
+    )
     agent_relay_service = AgentRelayService(
         agent_repo,
-        connector=GenericHttpConnector(
+        a2a_client=A2AClient(
             timeout_seconds=relay_settings.connector_timeout_seconds,
+            reply_window_seconds=relay_settings.reply_window_seconds,
             max_response_bytes=relay_settings.connector_max_response_bytes,
+            task_max_response_bytes=relay_settings.a2a_task_max_response_bytes,
             allow_private_destinations=relay_settings.allow_private_destinations,
         ),
         secret_box=agent_secret_box,
         task_snapshot=_task_snapshot,
-        callback_url=config.agent_relay_callback_url,
+        push_base_url=config.agent_relay_push_base_url,
+        # Deployment policy for discovery is bound here, once, rather than held
+        # by the service: the service's job is to decide what a card *means*,
+        # not how long BrainBuddy waits for one.
+        card_fetcher=partial(
+            fetch_card,
+            timeout_seconds=relay_settings.connector_timeout_seconds,
+            max_response_bytes=relay_settings.connector_max_response_bytes,
+            allow_private_destinations=relay_settings.allow_private_destinations,
+        ),
+        exchange=ExchangePolicy(
+            executor=exchange_executor,
+            dispatch_wait_seconds=relay_settings.dispatch_wait_seconds,
+            reply_window=timedelta(seconds=relay_settings.reply_window_seconds),
+            observation_interval=timedelta(
+                seconds=relay_settings.observation_interval_seconds
+            ),
+        ),
         stale_after=timedelta(seconds=relay_settings.stale_after_seconds),
         reporting_window=timedelta(seconds=relay_settings.reporting_window_seconds),
         content_retention=timedelta(seconds=relay_settings.content_retention_seconds),
         allow_private_destinations=relay_settings.allow_private_destinations,
+    )
+    # Constructed after the service and given it, so there is no cycle: the
+    # client never needs a service, the service never needs a container, and the
+    # observer binds itself as the service's exchange pump.
+    agent_observer = AgentObserver(
+        agent_relay_service,
+        exchange_executor=exchange_executor,
+        observation_executor=observation_executor,
+        control_executor=control_executor,
+        max_exchanges_per_connection=relay_settings.max_exchanges_per_connection,
+        observation_interval=timedelta(
+            seconds=relay_settings.observation_interval_seconds
+        ),
     )
 
     # Grace period between a deletion request and the irreversible purge.
@@ -492,5 +551,6 @@ def build_container(config: AppConfig) -> Container:
         task_service=task_service,
         voice_brain_dump_service=voice_brain_dump_service,
         agent_relay_service=agent_relay_service,
+        agent_observer=agent_observer,
         task_title_autocomplete_service=task_title_autocomplete_service,
     )
