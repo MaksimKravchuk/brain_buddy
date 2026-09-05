@@ -8,6 +8,7 @@ sleep would only make the same assertions slower and less trustworthy.
 from __future__ import annotations
 
 from collections import OrderedDict
+from dataclasses import replace
 from concurrent.futures import Future
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -615,3 +616,551 @@ def test_014_FR_002_a_guaranteed_card_still_recovers_by_lookup(
     observer.recover_interrupted_exchanges()
 
     assert a2a_client.calls_to("SendMessage") == []
+
+
+# --- the observation lane (spec 014, US3) ------------------------------------
+
+
+def observed_task(
+    task_id: str,
+    context_id: str | None,
+    state: str = "TASK_STATE_WORKING",
+    *,
+    text: str | None = None,
+) -> Task:
+    """A task whose state and text a test chooses, unlike `agent_task`."""
+
+    status: dict[str, Any] = {"state": state, "timestamp": "2026-08-09T12:00:00Z"}
+    if text is not None:
+        status["message"] = {"role": "ROLE_AGENT", "parts": [{"text": text}]}
+    return Task.model_validate(
+        {"id": task_id, "contextId": context_id, "status": status}
+    )
+
+
+def dispatched(
+    service: AgentRelayService,
+    a2a_client: FakeA2AClient,
+    clock: Clock,
+    *,
+    connection_id: str | None = None,
+    task_id: str = "task_1",
+    key: str = "idem-dispatch",
+    owner_id: str = OWNER,
+) -> str:
+    """One confirmed hand-off whose exchange has closed with a live task."""
+
+    connection_id = connection_id or connect_ready(
+        service, owner_id=owner_id, key=f"{key}-create"
+    )
+    executor = SynchronousExecutor()
+    observer = AgentObserver(service, exchange_executor=executor, clock=clock)
+    a2a_client.script(
+        "SendMessage", A2AResult(ok=True, correlation_id="c", task=agent_task("t1", ""))
+    )
+    preview = service.preview_handoff(
+        task_id,
+        AgentHandoffPreviewRequest(connection_id=connection_id),
+        owner_id=owner_id,
+    )
+    a2a_client.script(
+        "SendMessage",
+        A2AResult(
+            ok=True, correlation_id="c", task=agent_task("t1", preview.run_id)
+        ),
+    )
+    run = service.dispatch_run(
+        task_id,
+        AgentHandoffConfirmRequest(
+            connection_id=connection_id,
+            manifest_token=preview.token,
+            acknowledge_duplicate_risk=True,
+        ),
+        owner_id=owner_id,
+        idempotency_key=key,
+    )
+    assert observer is not None
+    a2a_client.calls.clear()
+    a2a_client.results.clear()
+    return run.id
+
+
+class TestObservationSchedule:
+    def _observer(
+        self,
+        service: AgentRelayService,
+        clock: Clock,
+        *,
+        observation_executor: Any | None = None,
+    ) -> AgentObserver:
+        return AgentObserver(
+            service,
+            exchange_executor=SynchronousExecutor(),
+            observation_executor=observation_executor or SynchronousExecutor(),
+            control_executor=SynchronousExecutor(),
+            clock=clock,
+        )
+
+    def test_014_FR_008_run_once_observes_every_due_run_across_owners(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-014. The scheduler is process-wide; one owner never blocks another."""
+
+        mine = dispatched(service, a2a_client, clock, key="idem-mine")
+        theirs = dispatched(
+            service, a2a_client, clock, key="idem-theirs", owner_id=OTHER_OWNER
+        )
+        observer = self._observer(service, clock)
+        a2a_client.script(
+            "GetTask",
+            A2AResult(ok=True, correlation_id="c", task=observed_task("t1", mine)),
+        )
+        clock.advance(timedelta(seconds=61))
+
+        assert observer.run_once() == 2
+
+        assert repo.get_run(mine, owner_id=OWNER).last_observed_at == clock.now
+        assert repo.get_run(theirs, owner_id=OTHER_OWNER).last_observed_at == clock.now
+
+    def test_014_FR_008_one_probe_per_unreachable_connection_covers_its_runs(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """A dead agent costs one request per pass, not one per run."""
+
+        connection_id = connect_ready(service, key="idem-shared")
+        first = dispatched(
+            service,
+            a2a_client,
+            clock,
+            connection_id=connection_id,
+            key="idem-run-a",
+        )
+        second = dispatched(
+            service,
+            a2a_client,
+            clock,
+            connection_id=connection_id,
+            task_id="task_2",
+            key="idem-run-b",
+        )
+        observer = self._observer(service, clock)
+        a2a_client.script(
+            "GetTask",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_unreachable"),
+        )
+        clock.advance(timedelta(seconds=61))
+
+        observer.run_once()
+
+        assert len(a2a_client.calls_to("GetTask")) == 1
+        for run_id in (first, second):
+            run = repo.get_run(run_id, owner_id=OWNER)
+            assert run.next_observation_at is not None
+            assert run.next_observation_at > clock.now
+
+    def test_014_FR_008_an_in_flight_run_is_never_observed_twice_at_once(
+        self,
+        service: AgentRelayService,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """Coalescing: a slow observation must not stack up behind itself."""
+
+        run_id = dispatched(service, a2a_client, clock)
+        deferred = DeferredExecutor()
+        observer = self._observer(service, clock, observation_executor=deferred)
+        clock.advance(timedelta(seconds=61))
+
+        assert observer.run_once() == 1
+        assert observer.run_once() == 0
+
+        deferred.run_pending()
+        clock.advance(timedelta(seconds=61))
+        assert observer.run_once() == 1
+        assert run_id
+
+    def test_014_FR_008_the_interval_backs_off_after_the_reporting_window(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-019. A silent agent is polled less, never abandoned."""
+
+        run_id = dispatched(service, a2a_client, clock)
+        observer = self._observer(service, clock)
+        a2a_client.script(
+            "GetTask",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+
+        clock.advance(timedelta(seconds=61))
+        observer.run_once()
+        base = repo.get_run(run_id, owner_id=OWNER).next_observation_at
+        assert base == clock.now + timedelta(seconds=60)
+
+        clock.advance(timedelta(hours=2))
+        observer.run_once()
+        backed_off = repo.get_run(run_id, owner_id=OWNER).next_observation_at
+        assert backed_off is not None
+        assert backed_off > clock.now + timedelta(seconds=60)
+        assert backed_off <= clock.now + timedelta(seconds=600), "capped at 10x"
+
+    def test_014_FR_008_a_user_read_of_the_run_resets_the_backoff(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """Someone is watching, so BrainBuddy looks again at the base rate."""
+
+        run_id = dispatched(service, a2a_client, clock)
+        observer = self._observer(service, clock)
+        a2a_client.script(
+            "GetTask",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+        clock.advance(timedelta(hours=3))
+        observer.run_once()
+        assert repo.get_run(run_id, owner_id=OWNER).next_observation_at is not None
+
+        service.get_run(run_id, owner_id=OWNER)
+
+        assert repo.get_run(run_id, owner_id=OWNER).next_observation_at == (
+            clock.now + timedelta(seconds=60)
+        )
+
+    def test_014_FR_010_a_missing_task_stops_observation_for_good(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-020. There is nothing left to look for, so nothing looks again."""
+
+        run_id = dispatched(service, a2a_client, clock)
+        observer = self._observer(service, clock)
+        a2a_client.script(
+            "GetTask",
+            A2AResult(
+                ok=False,
+                correlation_id="c",
+                error_code="a2a_task_not_found",
+                a2a_error_code=-32001,
+            ),
+        )
+        clock.advance(timedelta(seconds=61))
+
+        observer.run_once()
+
+        run = repo.get_run(run_id, owner_id=OWNER)
+        assert run.agent_task_missing_at == clock.now
+        assert run.next_observation_at is None
+        clock.advance(timedelta(hours=1))
+        assert observer.run_once() == 0
+
+    def test_014_FR_008_a_terminal_observation_stops_the_schedule(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        run_id = dispatched(service, a2a_client, clock)
+        observer = self._observer(service, clock)
+        a2a_client.script(
+            "GetTask",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task(
+                    "t1", run_id, "TASK_STATE_COMPLETED", text="All done."
+                ),
+            ),
+        )
+        clock.advance(timedelta(seconds=61))
+
+        observer.run_once()
+
+        run = repo.get_run(run_id, owner_id=OWNER)
+        assert run.reported_state == "completed"
+        assert run.next_observation_at is None
+
+    def test_014_SC_006_a_delayed_agent_shows_sent_then_a_true_terminal_state(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """014-SC-006. Five minutes of silence is not a failure BrainBuddy invents."""
+
+        run_id = dispatched(service, a2a_client, clock)
+        observer = self._observer(service, clock)
+        a2a_client.script(
+            "GetTask",
+            A2AResult(ok=True, correlation_id="c", task=observed_task("t1", run_id)),
+        )
+
+        for _ in range(5):
+            clock.advance(timedelta(seconds=60))
+            observer.run_once()
+            projection = service.get_run(run_id, owner_id=OWNER)
+            assert projection.primary_state_label in {"Sent", "Running"}
+            assert projection.reported_state != "failed"
+
+        a2a_client.script(
+            "GetTask",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task("t1", run_id, "TASK_STATE_COMPLETED", text="Done."),
+            ),
+        )
+        clock.advance(timedelta(seconds=60))
+        observer.run_once()
+
+        assert service.get_run(run_id, owner_id=OWNER).primary_state_label == (
+            "Agent reported complete"
+        )
+        assert repo.get_run(run_id, owner_id=OWNER).last_observed_at == clock.now
+
+    def test_ambiguous_reply_exchange_resumes_observation_at_the_deadline(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-033. The suspension has an exit, so no run is left unobserved."""
+
+        run_id = dispatched(service, a2a_client, clock)
+        observer = self._observer(service, clock)
+        run = repo.get_run(run_id, owner_id=OWNER)
+        repo.save_run(
+            run.model_copy(
+                update={
+                    "exchange_state": "open",
+                    "exchange_kind": "reply",
+                    "exchange_started_at": clock.now,
+                    "exchange_deadline_at": clock.now + timedelta(seconds=315),
+                    "next_observation_at": clock.now,
+                }
+            )
+        )
+        a2a_client.script(
+            "GetTask",
+            A2AResult(ok=True, correlation_id="c", task=observed_task("t1", run_id)),
+        )
+
+        observer.run_once()
+        assert a2a_client.calls_to("GetTask") == []
+
+        clock.advance(timedelta(seconds=316))
+        observer.run_once()
+
+        assert len(a2a_client.calls_to("GetTask")) == 1
+
+    def test_no_background_thread_ever_sends_content(
+        self,
+        service: AgentRelayService,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-032. Only a person's own confirmation may put content on the wire."""
+
+        run_id = dispatched(service, a2a_client, clock)
+        observer = self._observer(service, clock)
+        a2a_client.script(
+            "GetTask",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+        clock.advance(timedelta(seconds=61))
+
+        observer.run_once()
+        observer.recover_interrupted_exchanges()
+        observer.drain_queued_exchanges()
+        service.run_retention_sweep()
+
+        assert a2a_client.calls_to("SendMessage") == []
+        assert run_id
+
+    def test_purge_during_observation_writes_no_row(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """FR-016. A worker that outlived a purge must not recreate its run."""
+
+        run_id = dispatched(service, a2a_client, clock)
+        deferred = DeferredExecutor()
+        observer = self._observer(service, clock, observation_executor=deferred)
+        a2a_client.script(
+            "GetTask",
+            A2AResult(ok=True, correlation_id="c", task=observed_task("t1", run_id)),
+        )
+        clock.advance(timedelta(seconds=61))
+        observer.run_once()
+
+        service.delete_all_for_owner(owner_id=OWNER)
+        deferred.run_pending()
+
+        assert repo.list_runs_for_owner(owner_id=OWNER) == []
+        assert service.list_audit(owner_id=OWNER) == []
+
+    def test_014_FR_008_a_verified_push_wakes_an_observation_at_once(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """A push only accelerates the pass the schedule would run anyway."""
+
+        run_id = dispatched(service, a2a_client, clock)
+        observer = self._observer(service, clock)
+        a2a_client.script(
+            "GetTask",
+            A2AResult(ok=True, correlation_id="c", task=observed_task("t1", run_id)),
+        )
+
+        observer.wake(run_id)
+        assert observer.run_once() == 1
+
+        assert repo.get_run(run_id, owner_id=OWNER).last_observed_at == clock.now
+        assert len(a2a_client.calls_to("GetTask")) == 1
+
+    def test_014_FR_008_a_control_call_never_waits_behind_an_exchange(
+        self,
+        service: AgentRelayService,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-035. Cancel has its own lane, because cancel is what ends a hold."""
+
+        run_id = dispatched(service, a2a_client, clock)
+        held = DeferredExecutor()
+        control = SynchronousExecutor()
+        AgentObserver(
+            service,
+            exchange_executor=held,
+            observation_executor=SynchronousExecutor(),
+            control_executor=control,
+            clock=clock,
+        )
+        a2a_client.script(
+            "CancelTask",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task("t1", run_id, "TASK_STATE_CANCELED"),
+            ),
+        )
+
+        run = service.cancel_run(
+            run_id, owner_id=OWNER, idempotency_key="idem-cancel"
+        )
+
+        assert run.cancel_outcome == "accepted"
+        assert control.submitted, "the cancel ran on the control pool"
+        assert held.pending == [], "and never on the held exchange pool"
+
+
+def test_014_FR_008_main_starts_and_stops_the_observer_exactly_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """T092's guardrail: one scheduler per app, and none under TEST.
+
+    The suite builds many short-lived apps in one process over a process-wide
+    lock, so a scheduler started per app would race unrelated tests — which is
+    why the same gate that holds back the maintenance sweeps holds this back
+    too, and why the opt-in has to be explicit.
+    """
+
+    from app import main as main_module
+
+    starts: list[str] = []
+    stops: list[str] = []
+
+    class RecordingObserver:
+        def recover_interrupted_exchanges(self) -> int:
+            return 0
+
+        def start(self) -> bool:
+            starts.append("start")
+            return True
+
+        def shutdown(self) -> None:
+            stops.append("stop")
+
+    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        main_module, "build_container", _container_with(RecordingObserver())
+    )
+
+    monkeypatch.setenv("BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST", "1")
+    app = main_module.create_app()
+    assert starts == ["start"]
+
+    app.router.shutdown()
+    handlers = [
+        handler
+        for handler in app.router.on_shutdown
+        if handler.__name__ == "_stop_maintenance_sweeps"
+    ]
+    assert len(handlers) == 1
+    handlers[0]()
+    assert stops == ["stop"]
+
+
+def _container_with(observer: Any) -> Any:
+    """Wrap the real container builder, swapping in a recording observer."""
+
+    from app.container import build_container as real_build_container
+
+    def build(config: Any) -> Any:
+        container = real_build_container(config)
+        container.agent_observer.shutdown()
+        return replace(container, agent_observer=observer)
+
+    return build
+
+
+class TestObserverLifecycle:
+    def test_observer_scheduler_starts_and_stops_once(
+        self, service: AgentRelayService, clock: Clock
+    ) -> None:
+        """The scheduler is a tracked thread, joined at shutdown with a bound."""
+
+        executor = SynchronousExecutor()
+        observer = AgentObserver(
+            service,
+            exchange_executor=executor,
+            observation_executor=SynchronousExecutor(),
+            control_executor=SynchronousExecutor(),
+            clock=clock,
+            observation_interval=timedelta(seconds=0.01),
+        )
+
+        assert observer.start() is True
+        assert observer.start() is False, "starting twice would double every pass"
+
+        observer.shutdown()
+
+        assert observer.scheduler_thread is not None
+        assert observer.scheduler_thread.is_alive() is False
+        assert executor.shutdowns == [{"wait": False, "cancel_futures": True}]
+        observer.shutdown()

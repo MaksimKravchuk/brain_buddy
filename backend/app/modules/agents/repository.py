@@ -1292,6 +1292,22 @@ class AgentRepository(BaseRepository):
             )
             return int(cursor.rowcount or 0)
 
+    def owner_of_run(self, run_id: str) -> str | None:
+        """Who owns this run, without a session to say so.
+
+        The one place a run is looked up without an owner, and it exists for
+        exactly two callers with no session between them: the push callback,
+        which is called by the agent, and the observer's wake queue. It answers
+        with an owner id and nothing else, so a caller that guesses a run id
+        learns only what it already guessed.
+        """
+
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT owner_id FROM agent_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+        return None if row is None else str(row["owner_id"])
+
     def get_run(self, run_id: str, *, owner_id: str) -> AgentRunDocument:
         with self._connection() as conn:
             row = conn.execute(

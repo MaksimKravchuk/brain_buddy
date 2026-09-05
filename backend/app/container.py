@@ -428,6 +428,17 @@ def build_container(config: AppConfig) -> Container:
         max_workers=relay_settings.exchange_workers,
         thread_name_prefix="agent-exchange",
     )
+    # Separate pools, not tuning: an observation must not queue behind a held
+    # exchange, and a cancel — which is what *resolves* a held exchange on some
+    # runtimes — must not queue behind either (data-model.md §9, AC-035).
+    observation_executor = ThreadPoolExecutor(
+        max_workers=relay_settings.observer_workers,
+        thread_name_prefix="agent-observation",
+    )
+    control_executor = ThreadPoolExecutor(
+        max_workers=relay_settings.control_workers,
+        thread_name_prefix="agent-control",
+    )
     agent_relay_service = AgentRelayService(
         agent_repo,
         connector=GenericHttpConnector(
@@ -462,6 +473,9 @@ def build_container(config: AppConfig) -> Container:
         ),
         stale_after=timedelta(seconds=relay_settings.stale_after_seconds),
         reporting_window=timedelta(seconds=relay_settings.reporting_window_seconds),
+        observation_interval=timedelta(
+            seconds=relay_settings.observation_interval_seconds
+        ),
         content_retention=timedelta(seconds=relay_settings.content_retention_seconds),
         allow_private_destinations=relay_settings.allow_private_destinations,
     )
@@ -471,7 +485,12 @@ def build_container(config: AppConfig) -> Container:
     agent_observer = AgentObserver(
         agent_relay_service,
         exchange_executor=exchange_executor,
+        observation_executor=observation_executor,
+        control_executor=control_executor,
         max_exchanges_per_connection=relay_settings.max_exchanges_per_connection,
+        observation_interval=timedelta(
+            seconds=relay_settings.observation_interval_seconds
+        ),
     )
 
     # Grace period between a deletion request and the irreversible purge.

@@ -89,7 +89,7 @@ from .a2a.client import (
     A2ATarget,
 )
 from .a2a.mapping import Observation, ObservationLimits, project_observation
-from .a2a.types import Task
+from .a2a.types import TERMINAL_TASK_STATES, Task, TaskState
 from .connector import ConnectorPort, ConnectorTarget
 from .domain import (
     A2A_PROTOCOL_VERSION,
@@ -149,6 +149,23 @@ from .secrets import (
 DEFAULT_STALE_AFTER = timedelta(days=7)
 DEFAULT_REPORTING_WINDOW = timedelta(hours=1)
 DEFAULT_OBSERVATION_INTERVAL = timedelta(seconds=60)
+
+#: History length for the one case that needs it. Twenty messages is enough
+#: to carry a question or a closing summary, and small enough that an agent
+#: cannot make an ordinary poll expensive by talking a lot.
+OBSERVATION_HISTORY_LENGTH = 20
+
+#: Beyond this many doublings the cap has long since applied; computing
+#: `2 ** missed` for a run silent for months would be an integer nobody
+#: needs.
+_MAX_BACKOFF_DOUBLINGS = 16
+
+#: The states whose meaning is carried by text the user has to read: a
+#: question they are being asked, or the agent's closing account of what it
+#: did. Everything else is legible from the state alone.
+TEXT_BEARING_TASK_STATES: frozenset[TaskState] = frozenset(
+    {TaskState.INPUT_REQUIRED, *TERMINAL_TASK_STATES}
+)
 
 #: The only agent answers that may reject a *reply* outright: an explicit
 #: statement that the task will not take one. Everything else leaves the
@@ -2750,6 +2767,18 @@ class AgentRelayService:
                 revision=current.revision + 1,
             )
             updated = current.model_copy(update=updates)
+            if "next_observation_at" not in updates:
+                # Every write is also a scheduling decision, made here because
+                # this is the one place that sees the run *after* the answer
+                # landed: a terminal, missing or disconnected run stops being
+                # asked about, and everything else earns its next look.
+                updated = updated.model_copy(
+                    update={
+                        "next_observation_at": self._next_observation_at(
+                            updated, now=now
+                        )
+                    }
+                )
             self.agent_repo.save_run(updated)
             if append_row and observation is not None:
                 self.agent_repo.append_event(
@@ -2815,6 +2844,207 @@ class AgentRelayService:
                 connection_id=run.connection_id,
                 run_id=run.id,
             )
+
+
+    # --- the observation lane's service side (FR-008) -----------------------
+
+    def observation_backoff(
+        self, run: AgentRunDocument, *, now: datetime
+    ) -> timedelta:
+        """How long until this run is worth asking about again.
+
+        Derived from ``last_contact_at`` rather than stored, so there is no
+        counter to drift: inside the reporting window it is the base interval,
+        and past it the gap doubles per missed interval up to ten times the
+        base. A silent agent is polled less, never abandoned — the run keeps
+        being observed until its identifiers expire.
+        """
+
+        interval = self.observation_interval
+        if run.last_contact_at is None:
+            return interval
+        silent_for = now - run.last_contact_at
+        if silent_for < self.reporting_window:
+            return interval
+        missed = int((silent_for - self.reporting_window) / interval) + 1
+        return min(interval * 2**min(missed, _MAX_BACKOFF_DOUBLINGS), interval * 10)
+
+    def _next_observation_at(
+        self, run: AgentRunDocument, *, now: datetime
+    ) -> datetime | None:
+        """When to look again, or never.
+
+        ``None`` is four different facts with one consequence: the run is
+        terminal, the agent no longer reports it, the connection is gone, or
+        the identifiers have expired. In every one of them another request
+        would be made to produce an answer nobody can act on.
+        """
+
+        if (
+            run.reported_state in TERMINAL_REPORTED_STATES
+            or run.agent_task_missing_at is not None
+            or run.connection_disconnected_at is not None
+            or run.identifiers_expired
+            or run.dispatched_at is None
+        ):
+            return None
+        return now + self.observation_backoff(run, now=now)
+
+    def record_failed_contact(self, run_id: str, *, owner_id: str) -> None:
+        """An observation that could not reach the agent. A schedule, not a state.
+
+        Deliberately writes nothing about the run's work: BrainBuddy failing to
+        reach an agent says nothing about what that agent is doing, and the
+        **Stopped reporting** overlay derives from `last_contact_at`, which this
+        must not touch.
+        """
+
+        with self.agent_repo.command_lock(owner_id):
+            try:
+                run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+            except NotFoundError:
+                return
+            if not self._observable(run):
+                return
+            now = self._now()
+            self.agent_repo.save_run(
+                run.model_copy(
+                    update={
+                        "next_observation_at": self._next_observation_at(
+                            run, now=now
+                        ),
+                        "last_observed_at": now,
+                        "updated_at": max(run.updated_at, now),
+                        "revision": run.revision + 1,
+                    }
+                )
+            )
+
+    def record_run_read(self, run_id: str, *, owner_id: str) -> None:
+        """Someone is watching, so look again at the base rate (FR-008).
+
+        The backoff exists to spare a silent agent, not to make the product
+        stale for a user who has the run open. It resets the *schedule* only —
+        a read is not contact and must never move `last_contact_at`.
+        """
+
+        with self.agent_repo.command_lock(owner_id):
+            try:
+                run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+            except NotFoundError:  # pragma: no cover - the caller just read it
+                return
+            if not self._observable(run) or run.next_observation_at is None:
+                return
+            now = self._now()
+            resumed = min(run.next_observation_at, now + self.observation_interval)
+            if resumed == run.next_observation_at:
+                return
+            self.agent_repo.save_run(
+                run.model_copy(
+                    update={
+                        "next_observation_at": resumed,
+                        "updated_at": max(run.updated_at, now),
+                        "revision": run.revision + 1,
+                    }
+                )
+            )
+
+    def read_agent_task(self, run: AgentRunDocument) -> A2AResult | None:
+        """One authenticated read of the agent's task, or nothing to read.
+
+        ``GetTask`` with no history routinely, because the state is the point
+        and the history is agent-controlled bulk. A bounded history is fetched
+        only when the state that came back *needs* text — a question to answer,
+        a terminal summary to show — so an ordinary poll of a working task
+        never carries the conversation with it.
+        """
+
+        wire = self.a2a_client
+        if wire is None:
+            return None
+        try:
+            connection = self.agent_repo.get_connection(
+                run.connection_id, owner_id=run.owner_id
+            )
+        except NotFoundError:  # pragma: no cover - connection rows outlive runs
+            return None
+        target = self._a2a_target(
+            connection,
+            interface_url=run.interface_url or connection.endpoint_url,
+            guarantee_tier=run.guarantee_tier,
+        )
+        if run.agent_task_id is None:
+            # The start exchange never named a task, so the only question
+            # available is "is there one in this conversation?".
+            return wire.list_tasks(
+                target, context_id=run.context_id, page_size=5, scheduled=True,
+                run_id=run.id,
+            )
+        result = wire.get_task(
+            target,
+            task_id=run.agent_task_id,
+            context_id=run.context_id,
+            history_length=0,
+            scheduled=True,
+            run_id=run.id,
+        )
+        if not self._needs_history(result):
+            return result
+        return wire.get_task(
+            target,
+            task_id=run.agent_task_id,
+            context_id=run.context_id,
+            history_length=OBSERVATION_HISTORY_LENGTH,
+            scheduled=True,
+            run_id=run.id,
+        )
+
+    def _needs_history(self, result: A2AResult) -> bool:
+        """Whether the answer named a state whose text the user has to see."""
+
+        if not result.ok or result.task is None:
+            return False
+        if result.task.status.text:
+            return False
+        return result.task.status.state in TEXT_BEARING_TASK_STATES
+
+    def apply_agent_task(
+        self,
+        run: AgentRunDocument,
+        result: A2AResult,
+        *,
+        trigger: AgentRunEventTrigger = "schedule",
+    ) -> None:
+        """Hand one successful read to the projection, and reschedule."""
+
+        now = self._now()
+        answered = result.task
+        observation = None
+        if answered is not None and self._adoptable(run, answered):
+            observation = project_observation(
+                answered,
+                now=now,
+                limits=self.observation_limits,
+                result_availability=result.result_availability,
+            )
+        elif result.tasks:
+            adopted = self._newest_adoptable(run, result)
+            if adopted is not None:
+                observation = project_observation(
+                    adopted, now=now, limits=self.observation_limits
+                )
+        if observation is None:
+            # Something answered, but nothing in this run's conversation. That
+            # is contact with the agent and no news about the work.
+            self.record_failed_contact(run.id, owner_id=run.owner_id)
+            return
+        self.apply_observation(
+            run.id,
+            owner_id=run.owner_id,
+            observation=observation,
+            based_on=run.run_version,
+            trigger=trigger,
+        )
 
     def _adoptable(self, run: AgentRunDocument, task: Task) -> bool:
         """Whether a returned task belongs to *this* run's conversation.
@@ -3463,7 +3693,12 @@ class AgentRelayService:
         run = self.agent_repo.get_run(run_id, owner_id=owner_id)
         if run.dispatched_at is None:
             raise NotFoundError("Agent run", run_id)
-        return self._run_response(run)
+        # Someone is watching this run, so the backoff a silent agent earned is
+        # reset to the base interval before the answer is built (FR-008).
+        self.record_run_read(run_id, owner_id=owner_id)
+        return self._run_response(
+            self.agent_repo.get_run(run_id, owner_id=owner_id)
+        )
 
     def list_runs_for_task(
         self, task_id: str, *, owner_id: str
