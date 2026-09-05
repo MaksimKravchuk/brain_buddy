@@ -3224,11 +3224,10 @@ def test_openai_reconciler_does_not_ground_an_english_translation_of_russian_sou
         )
 
 
-def test_openai_reconciler_v2_prompt_locks_language_and_bumps_template_version() -> (
-    None
-):
-    """The v2 prompt must instruct titles to stay in the transcript's language,
-    and the template version must be bumped so persisted runs distinguish it."""
+def test_openai_reconciler_v3_prompt_locks_language_gtd_phrasing_and_template() -> None:
+    """The v3 prompt must keep titles in the transcript's language, phrase them
+    as GTD next actions without fillers or duplicates, and bump the template
+    version so persisted runs distinguish it from v2 output."""
 
     from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
 
@@ -3239,7 +3238,7 @@ def test_openai_reconciler_v2_prompt_locks_language_and_bumps_template_version()
         return {"operations": []}
 
     reconciler = OpenAITextReconciler(api_key="test-key", complete=complete)
-    assert reconciler.template_version == "brain-dump-reconciler-v2"
+    assert reconciler.template_version == "brain-dump-reconciler-v3"
     reconciler.reconcile(_minimal_reconcile_request())
 
     messages = captured["messages"]
@@ -3250,6 +3249,11 @@ def test_openai_reconciler_v2_prompt_locks_language_and_bumps_template_version()
     # Conciseness lock: titles must not accrete deadlines/tags/contexts/etc.
     assert "keep each title concise" in system_prompt
     assert "do not append" in system_prompt
+    # GTD phrasing: verb first, fillers dropped, one proposal per action.
+    assert "gtd next action" in system_prompt
+    assert "action verb" in system_prompt
+    assert "filler" in system_prompt
+    assert "each distinct action once" in system_prompt
 
 
 def _grounds_single_add(source_text: str, title: str):
@@ -3713,3 +3717,135 @@ def test_language_faithful_invariant_accepts_mixed_code_switched_title() -> None
         "Протестировать production smoke на staging"
     ]
     assert result.skipped_operations == []
+
+
+def _reconcile_adds(source_text: str, titles: list[str]):
+    """Reconcile several adds against one accurate utterance."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=3000,
+        text=source_text,
+        stability="stable",
+        provider_role="accurate",
+    )
+    reconciler = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {"operations": [_add_op(title) for title in titles]},
+    )
+    return reconciler.reconcile(
+        ReconcileTextRequest(
+            operation_id="operation_gtd_next_actions",
+            transcript_segments=[segment],
+            active_proposals=[],
+            user_locks={},
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("source_text", "title"),
+    [
+        ("Так, надо купить молоко", "Купить молоко"),
+        ("ну значит сходить в магазин", "Сходить в магазин"),
+        ("потом позвонить маме", "Позвонить маме"),
+        ("so um I need to call the dentist tomorrow", "Call the dentist"),
+        ("okay and then email the landlord", "Email the landlord"),
+    ],
+)
+def test_gtd_rephrased_titles_ground_against_filler_prefixed_utterances(
+    source_text: str, title: str
+) -> None:
+    """Dropping discourse fillers/modal scaffolding and leading with the verb is
+    grounded rewording (FR-006/FR-008), so a GTD next action still grounds."""
+
+    result = _grounds_single_add(source_text, title)
+    assert [patch.title for patch in result.patches] == [title]
+    assert result.skipped_operations == []
+
+
+def test_filler_only_titles_are_dropped_without_failing_their_siblings() -> None:
+    """«Так»/«Надо» pass token grounding (the filler is spoken) but name no
+    action or object; they are skipped individually while real tasks survive."""
+
+    result = _reconcile_adds(
+        "Так, надо купить молоко", ["Так", "Надо", "Ну ладно", "Купить молоко"]
+    )
+    assert [patch.title for patch in result.patches] == ["Купить молоко"]
+    assert len(result.skipped_operations) == 3
+    assert all("no action or object" in reason for reason in result.skipped_operations)
+
+
+def test_duplicate_titles_within_one_reconciliation_collapse_to_one_proposal() -> None:
+    result = _reconcile_adds(
+        "Так, надо купить молоко. Ещё купить молоко.",
+        ["Купить молоко", "купить молоко.", "Купить  молоко"],
+    )
+    assert [patch.title for patch in result.patches] == ["Купить молоко"]
+    assert len(result.skipped_operations) == 2
+    assert all("duplicate" in reason for reason in result.skipped_operations)
+
+
+def test_add_duplicating_an_active_proposal_is_dropped_but_supersede_is_not() -> None:
+    """An add that repeats an active proposal's title is a duplicate; a
+    supersede may legitimately carry its predecessor's title forward."""
+
+    from app.workflows.voice_brain_dump.adapters.reconciler import OpenAITextReconciler
+
+    segment = TranscriptHypothesis(
+        id="segment_accurate",
+        sequence=1,
+        start_ms=0,
+        end_ms=3000,
+        text="Купить молоко",
+        stability="stable",
+        provider_role="accurate",
+    )
+    active = ReconciledProposal(
+        id="proposal_existing",
+        title="Купить молоко",
+        source_segment_ids=["segment_preview"],
+        status="provisional",
+    )
+    request = ReconcileTextRequest(
+        operation_id="operation_duplicate_active",
+        transcript_segments=[segment],
+        active_proposals=[active],
+        user_locks={},
+    )
+
+    duplicate_add = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {"operations": [_add_op("Купить молоко")]},
+    )
+    with pytest.raises(ValidationFailure, match="dropped as ungrounded"):
+        duplicate_add.reconcile(request)
+
+    supersede = OpenAITextReconciler(
+        api_key="test-key",
+        complete=lambda _payload: {
+            "operations": [
+                {
+                    "operation": "supersede",
+                    "proposal_id": None,
+                    "title": "Купить молоко",
+                    "source_segment_ids": ["segment_accurate"],
+                    "predecessor_ids": ["proposal_existing"],
+                    "base_revision": None,
+                    "confidence": 0.9,
+                }
+            ]
+        },
+    )
+    result = supersede.reconcile(request)
+    assert [patch.operation for patch in result.patches] == ["supersede"]
+    assert result.skipped_operations == []
+
+
+def test_envelope_made_only_of_fillers_fails_closed_as_ungrounded() -> None:
+    with pytest.raises(ValidationFailure, match="dropped as ungrounded"):
+        _reconcile_adds("Так, ну, значит", ["Так", "Ну"])

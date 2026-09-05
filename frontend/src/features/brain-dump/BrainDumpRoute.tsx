@@ -45,7 +45,7 @@ const statusLabels: Record<BrainDumpProposalStatus, string> = {
 
 const processingStatusLabels = new Map<string, string>([
   ["sealing", "Sealing audio"],
-  ["fast_processing", "Building provisional tasks"],
+  ["fast_processing", "Processing audio"],
   ["accurate_transcribing", "Improving transcript"],
   ["reconciling", "Reconciling tasks"],
   ["committing", "Saving tasks"]
@@ -643,7 +643,7 @@ export function BrainDumpRoute(): React.JSX.Element {
   }
 
   if (operation && processingStatusLabels.has(operation.status)) {
-    return <ProcessingSurface error={error} operation={operation} proposals={activeProposals} />;
+    return <ProcessingSurface error={error} operation={operation} />;
   }
 
   if (operation && (operation.status === "retryable_error" || operation.status === "terminal_error")) {
@@ -697,7 +697,6 @@ export function BrainDumpRoute(): React.JSX.Element {
       lastTranscript={lastTranscript}
       locallyStartedOperationId={localCaptureOperationIdRef.current}
       operation={operation}
-      proposals={activeProposals}
       providersReady={providersReady}
       providersFailed={providersFailed}
       onCancel={() => void command("cancel")}
@@ -777,7 +776,6 @@ function RecordingSurface({
   lastTranscript,
   locallyStartedOperationId,
   operation,
-  proposals,
   providersReady,
   providersFailed,
   onCancel,
@@ -804,7 +802,6 @@ function RecordingSurface({
   lastTranscript: string;
   locallyStartedOperationId: string | null;
   operation: BrainDumpOperationResponse | null;
-  proposals: BrainDumpProposal[];
   providersReady: boolean;
   providersFailed: boolean;
   onCancel: () => void;
@@ -821,7 +818,6 @@ function RecordingSurface({
   onVocabularyTextChange: (value: string) => void;
   vocabularyText: string;
 }): React.JSX.Element {
-  const count = proposals.length;
   // A stopped recorder must never keep showing Recording/Paused: consent
   // withdrawal already stopped local capture (see `stopMediaRecorder` in
   // `command()`), even though the server may leave `status` unchanged for a
@@ -878,9 +874,7 @@ function RecordingSurface({
           </div>
           <div>
             <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">Brain dump</h1>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {count ? `${count} ${count === 1 ? "task" : "tasks"} captured` : "Speak freely — tasks are extracted as you go"}
-            </p>
+            <p className="mt-0.5 text-xs text-slate-500">Speak freely — tasks are extracted after you stop</p>
           </div>
           <span className={`inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold tabular-nums ${isRecording ? "text-rose-600" : "text-slate-500"}`}>
             <span className={`h-[7px] w-[7px] rounded-full ${isRecording ? "bg-rose-600 motion-safe:animate-pulse-dot" : "bg-slate-400"}`} aria-hidden />
@@ -944,8 +938,9 @@ function RecordingSurface({
           <span className="text-xs text-slate-500">Nothing is saved until you stop</span>
         </div>
 
-        {/* Captured-task stack: provisional tasks headed to the inbox. */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-6 pb-4 pt-[18px]" aria-live="polite">
+        {/* Live transcript readout: raw text is a status, never a draft task. Tasks
+            are only minted by the reconciler from the accurate transcript after Stop. */}
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-6 pb-4 pt-[18px]">
           {error ? <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
           {!operation && isNewRecording ? (
             <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-soft">
@@ -980,13 +975,11 @@ function RecordingSurface({
               )}
             </div>
           ) : null}
-          <div className="mb-0.5 mt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Headed to inbox · {count}</div>
-          {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
-          {proposals.length === 0 ? (
-            <p className="rounded-[12px] border-[1.5px] border-dashed border-slate-300 px-3.5 py-3 text-[13px] text-slate-400">
-              Tasks appear here as you speak
-            </p>
-          ) : null}
+          <div className="mb-0.5 mt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">What you&apos;ve said · browser preview</div>
+          <TranscriptReadout
+            segments={operation?.segments ?? []}
+            emptyText="Your words appear here as you speak. Tasks are extracted after you stop."
+          />
         </div>
       </div>
     </BrainDumpOverlay>
@@ -1041,44 +1034,50 @@ function RecordingTimer({ running }: { running: boolean }): React.JSX.Element {
   );
 }
 
-function ProposalCard({ proposal }: { proposal: BrainDumpProposal }): React.JSX.Element {
-  if (proposal.status === "wording_changing") {
-    // The prototype's "forming" card: dashed with a shimmer sweep while the
-    // wording is still moving under the speaker.
-    return (
-      <article
-        aria-label={`Draft task ${proposal.ordinal}: ${proposal.title}`}
-        className="relative flex items-center gap-2.5 overflow-hidden rounded-[12px] border-[1.5px] border-dashed border-slate-300 px-3.5 py-[11px]"
-      >
-        <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-slate-400/15 to-transparent motion-safe:animate-shimmer-sweep" aria-hidden />
-        <span className="text-[11px] font-semibold text-slate-400">#{proposal.ordinal}</span>
-        <div className="min-w-0 flex-1 text-sm text-slate-500">{proposal.title}</div>
-        <span className="text-[11px] text-slate-400">{statusLabels[proposal.status]}</span>
-      </article>
-    );
+type TranscriptSegment = BrainDumpOperationResponse["segments"][number];
+
+/**
+ * The transcript lane worth reading right now: accurate segments once sealed
+ * audio has been transcribed (they supersede the preview), otherwise the
+ * browser preview. Either way in spoken order; a still-interim preview segment
+ * is the tail that is still forming under the speaker.
+ */
+function transcriptLane(segments: TranscriptSegment[]): { source: "accurate" | "preview"; segments: TranscriptSegment[] } {
+  const accurate = segments.filter((segment) => segment.provider_role === "accurate");
+  const lane = accurate.length > 0 ? accurate : segments.filter((segment) => segment.provider_role !== "accurate");
+  return {
+    source: accurate.length > 0 ? "accurate" : "preview",
+    segments: [...lane].sort((left, right) => left.sequence - right.sequence)
+  };
+}
+
+function TranscriptReadout({ segments, emptyText }: { segments: TranscriptSegment[]; emptyText: string }): React.JSX.Element {
+  const lane = transcriptLane(segments);
+  if (lane.segments.length === 0) {
+    return <p className="rounded-[12px] border-[1.5px] border-dashed border-slate-300 px-3.5 py-3 text-[13px] text-slate-400">{emptyText}</p>;
   }
   return (
-    <article
-      aria-label={`Draft task ${proposal.ordinal}: ${proposal.title}`}
-      className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-[12px] border border-slate-200 bg-white px-3.5 py-[11px] shadow-soft motion-safe:animate-card-in"
+    <section
+      aria-label={lane.source === "accurate" ? "Accurate transcript" : "Browser preview transcript"}
+      className="rounded-[12px] border border-slate-200 bg-white px-3.5 py-3 shadow-soft"
     >
-      <span className="text-[11px] font-semibold text-slate-500">#{proposal.ordinal}</span>
-      <div className="min-w-0 flex-1 text-sm font-medium text-slate-900">{proposal.title}</div>
-      <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700">{statusLabels[proposal.status]}</span>
-    </article>
+      <ul className="flex flex-col gap-1.5">
+        {lane.segments.map((segment) => (
+          <li key={segment.id} className={segment.stability === "interim" ? "text-sm italic leading-snug text-slate-400" : "text-sm leading-snug text-slate-700"}>
+            {segment.text}
+            {segment.stability === "interim" ? (
+              <span className="ml-[3px] inline-block h-[13px] w-[2px] -translate-y-[1px] bg-brand-primary align-middle motion-safe:animate-caret-blink" aria-hidden />
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
-function ProcessingSurface({
-  error,
-  operation,
-  proposals
-}: {
-  error: string | null;
-  operation: BrainDumpOperationResponse;
-  proposals: BrainDumpProposal[];
-}): React.JSX.Element {
+function ProcessingSurface({ error, operation }: { error: string | null; operation: BrainDumpOperationResponse }): React.JSX.Element {
   const label = processingStatusLabels.get(operation.status) ?? "Processing";
+  const lane = transcriptLane(operation.segments);
   return (
     // Not dismissible: the operation is mid-pipeline server-side and the panel is
     // the only place its progress and outcome surface.
@@ -1086,10 +1085,11 @@ function ProcessingSurface({
       <BrainDumpOverlayHeader titleId={TITLE_ID} eyebrow="Brain dump" title={label} meta={operation.status} />
       <div role="status" aria-live="polite" className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
         {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
-        <div className="flex flex-col gap-2">
-          {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
-          {proposals.length === 0 ? <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">We are keeping the task list first while the accurate transcript catches up.</p> : null}
+        <p className="mb-3 text-sm text-slate-500">Your tasks appear for review once the accurate transcript has been turned into next actions.</p>
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+          {lane.source === "accurate" ? "Accurate transcript" : "Browser preview · provisional"}
         </div>
+        <TranscriptReadout segments={operation.segments} emptyText="No transcript was captured for this recording." />
       </div>
     </BrainDumpOverlay>
   );

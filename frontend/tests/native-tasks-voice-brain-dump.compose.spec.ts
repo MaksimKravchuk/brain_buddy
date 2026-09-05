@@ -561,7 +561,7 @@ test("012-SC-001 012-SC-003 title completion is responsive and never writes befo
 
 });
 
-test("Voice Brain Dump records provisional cards, reviews edits/deletes and saves exactly one Inbox task", async ({ page }) => {
+test("Voice Brain Dump shows a live transcript, reviews the reconciled task and saves exactly one Inbox task", async ({ page }) => {
   await productLabels("Voice Brain Dump happy path");
   await signup(page, unique("voice-happy"));
   await installDeterministicSealedAudioBoundary(page, "untranscribed sealed audio");
@@ -573,11 +573,12 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await page.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(page);
     await emitSpeech(page, "buy oat milk", false);
-    await expect(page.getByRole("article", { name: "Draft task 1: Buy oat milk" })).toBeVisible();
-    await expect(page.getByText("Wording still changing")).toBeVisible();
+    const transcript = page.getByRole("region", { name: "Browser preview transcript" });
+    await expect(transcript).toContainText("buy oat milk");
     await emitSpeech(page, "buy oat milk. call dentist", true);
-    await expect(page.getByRole("article", { name: "Draft task 1: Buy oat milk" })).toBeVisible();
-    await expect(page.getByRole("article", { name: "Draft task 2: Call dentist" })).toBeVisible();
+    await expect(transcript).toContainText("buy oat milk. call dentist");
+    // Raw preview text is a status readout: no draft task card is ever minted from it.
+    await expect(page.getByRole("article")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Stop & review" })).toBeVisible();
     const overflow = await page.evaluate(async () => {
       // Preserve this browser-side measurement as a real Allure step rather
@@ -594,21 +595,16 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
     await page.getByRole("button", { name: "Resume" }).click();
     await expect(page.getByText("Recording")).toBeVisible();
     await page.getByRole("button", { name: "Stop & review" }).click();
-    // Accurate STT reconciles the explicit sealed-audio fixture independently of the
-    // browser preview text and surfaces one additional draft beside the preview drafts.
-    await expect(page.getByRole("heading", { name: "Review 3 tasks" })).toBeVisible({ timeout: 15_000 });
+    // Only the reconciler's reading of the sealed-audio fixture becomes a task;
+    // the browser preview text contributes no draft of its own.
+    await expect(page.getByRole("heading", { name: "Review 1 task" })).toBeVisible({ timeout: 15_000 });
   });
 
-  await test.step("edit one draft, delete two drafts and prove nothing canonical exists before Save", async () => {
+  await test.step("edit the reconciled draft and prove nothing canonical exists before Save", async () => {
+    await expect(page.getByLabel("Task title #1")).toHaveValue("Untranscribed sealed audio");
     await page.getByLabel("Task title #1").fill("Buy oat milk for breakfast");
     await page.keyboard.press("Tab");
     await expect(page.getByText("Edited", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Delete Call dentist" }).click();
-    // The deleted card is gone; its words may legitimately survive inside a
-    // sibling card's cited-utterance quote, so assert on the card, not the page.
-    await expect(page.getByRole("button", { name: "Delete Call dentist" })).toHaveCount(0);
-    await page.getByRole("button", { name: "Delete Untranscribed sealed audio" }).click();
-    await expect(page.getByRole("button", { name: "Delete Untranscribed sealed audio" })).toHaveCount(0);
     const beforeSave = await listInboxTasks(page);
     assertArrayLength(beforeSave, 0, "Inbox should remain empty before saving reviewed drafts");
   });
@@ -623,19 +619,16 @@ test("Voice Brain Dump records provisional cards, reviews edits/deletes and save
   });
 });
 
-test("Voice Brain Dump grows a mixed-language preview and preserves user choices through accurate reconciliation", async ({ page }) => {
-  await productLabels("Voice Brain Dump reconciliation preserves user choices");
-  await signup(page, unique("voice-reconcile-locks"));
+test("Voice Brain Dump shows a mixed-language preview as transcript and reviews only reconciled next actions", async ({ page }) => {
+  await productLabels("Voice Brain Dump reconciled review from accurate audio");
+  await signup(page, unique("voice-reconcile-clean"));
   await installDeterministicSealedAudioBoundary(
     page,
     "Надо починить BrainBuddy, потом сделать production smoke и написать Наташе"
   );
   let operationId = "";
-  let breadId = "";
-  let deletedId = "";
-  const editedTitle = "SMOKE Купить хлеб и молоко";
 
-  await test.step("one stable mixed-language result splits потом and grows six provisional proposals", async () => {
+  await test.step("a stable mixed-language preview is shown as transcript, never as draft tasks", async () => {
     await page.goto("/brain-dump/new");
     await allowSecureCloudTranscription(page);
     await page.getByRole("button", { name: "Record" }).click();
@@ -645,65 +638,43 @@ test("Voice Brain Dump grows a mixed-language preview and preserves user choices
       page,
       "Сделать production smoke. написать Наташе. купить хлеб и молоко. удалить черновик. Починить brain body потом позвонить маме"
     );
-    await expect(page.getByText("6 tasks captured")).toBeVisible();
-    await expect(page.getByText("Купить хлеб и молоко", { exact: true })).toBeVisible();
-    await expect(page.getByText("Починить brain body", { exact: true })).toBeVisible();
-    await expect(page.getByText("Позвонить маме", { exact: true })).toBeVisible();
-  });
-
-  await test.step("record a title lock and deletion without writing canonical tasks", async () => {
-    let operation = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
-    const bread = operation.proposals.find((proposal) => proposal.title.includes("хлеб"));
-    const disposable = operation.proposals.find((proposal) => proposal.title.includes("черновик"));
-    assertCondition(bread && disposable, "expected bread and disposable preview proposals");
-    breadId = bread.id;
-    deletedId = disposable.id;
-    operation = await apiPatch<BrainDumpOperation>(
-      page,
-      `/api/brain-dump-operations/${operationId}/proposals/${breadId}`,
-      { title: editedTitle, expected_revision: operation.revision },
-      unique("edit-locked-bread")
-    );
-    await apiPatch<BrainDumpOperation>(
-      page,
-      `/api/brain-dump-operations/${operationId}/proposals/${deletedId}`,
-      { deleted: true, expected_revision: operation.revision },
-      unique("delete-preview-draft")
-    );
+    const transcript = page.getByRole("region", { name: "Browser preview transcript" });
+    await expect(transcript).toContainText("Починить brain body потом позвонить маме");
+    await expect(page.getByRole("article")).toHaveCount(0);
+    const recording = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
+    assertArrayLength(recording.proposals, 0, "browser preview must not derive proposals");
     assertArrayLength(await listInboxTasks(page), 0, "Inbox before reconciliation");
   });
 
-  await test.step("accurate reconciliation keeps the locked proposal and deletion while correcting other tasks", async () => {
+  await test.step("accurate reconciliation yields exactly the reconciled tasks with nothing left to clean up", async () => {
     await page.getByRole("button", { name: "Stop & review" }).click();
-    await expect(page.getByRole("heading", { name: "Review 6 tasks" })).toBeVisible({ timeout: 15_000 });
-    // Accurate STT wants to remove two browser-only proposals. Removal is a
-    // destructive change to user-visible state, so reconciliation must expose
-    // conflicts rather than silently accepting the provider output.
-    const useSuggestionButtons = page.getByRole("button", { name: "Use suggestion" });
-    await expect(useSuggestionButtons).toHaveCount(2);
-    await useSuggestionButtons.first().click();
-    await expect(useSuggestionButtons).toHaveCount(1);
-    await useSuggestionButtons.first().click();
-    await expect(page.getByRole("heading", { name: "Review 4 tasks" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Review 3 tasks" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("button", { name: "Use suggestion" })).toHaveCount(0);
     const reconciled = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
-    const activeTitles = reconciled.proposals
-      .filter((proposal) => !proposal.deleted)
-      .map((proposal) => proposal.title)
-      .sort();
+    const active = reconciled.proposals.filter((proposal) => !proposal.deleted);
     assertStringArrayEquals(
-      activeTitles,
-      ["Починить BrainBuddy", "Сделать production smoke", "Написать Наташе", editedTitle].sort(),
+      active.map((proposal) => proposal.title).sort(),
+      ["Починить BrainBuddy", "Сделать production smoke", "Написать Наташе"].sort(),
       "Reconciled active proposal titles"
     );
-    const edited = reconciled.proposals.find((proposal) => proposal.id === breadId);
-    const deleted = reconciled.proposals.find((proposal) => proposal.id === deletedId);
+    await expect(page.getByRole("button", { name: "Send 3 to inbox" })).toBeEnabled();
+  });
+
+  await test.step("review edits and deletions are honoured and nothing canonical exists before Save", async () => {
+    await page.getByLabel("Task title #1").fill("SMOKE Починить BrainBuddy");
+    await page.keyboard.press("Tab");
+    await expect(page.getByText("Edited", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Delete Написать Наташе" }).click();
+    await expect(page.getByRole("button", { name: "Delete Написать Наташе" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Review 2 tasks" })).toBeVisible();
+    const edited = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
+    const locked = edited.proposals.find((proposal) => proposal.title === "SMOKE Починить BrainBuddy");
     assertCondition(
-      edited?.title === editedTitle && edited.locked_fields.includes("title") && edited.user_edited,
-      "user-edited bread proposal and title lock must survive reconciliation"
+      locked?.locked_fields.includes("title") && locked.user_edited,
+      "a review edit must lock the title on the reconciled proposal"
     );
-    assertCondition(deleted?.deleted, "user-deleted proposal must remain deleted");
     assertArrayLength(await listInboxTasks(page), 0, "Inbox before explicit Save");
-    await page.getByRole("button", { name: "Discard" }).click();
+    await page.getByRole("button", { name: "Discard all" }).click();
   });
 });
 
@@ -720,29 +691,23 @@ test("Voice Brain Dump resume and commit idempotency do not create duplicate Inb
     await page.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(page);
     await emitSpeech(page, "write weekly update", true);
-    await expect(page.getByRole("article", { name: "Draft task 1: Write weekly update" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Browser preview transcript" })).toContainText("write weekly update");
     operationId = (await page.locator("[data-operation-id]").getAttribute("data-operation-id")) ?? "";
     assertCondition(/^brain_dump_/.test(operationId), `expected persisted brain dump operation id, received ${operationId}`);
     await page.getByRole("button", { name: "Pause" }).click();
     await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
     await page.reload();
     await expect(page.getByText("Paused")).toBeVisible();
-    await expect(page.getByRole("article", { name: "Draft task 1: Write weekly update" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Browser preview transcript" })).toContainText("write weekly update");
     await page.getByRole("button", { name: "Resume" }).click();
     await expect(page.getByText("Recording")).toBeVisible();
   });
 
   await test.step("confirm once, retry commit against completed operation, then verify one committed task after relogin", async () => {
     await page.getByRole("button", { name: "Stop & review" }).click();
-    // Accurate STT reconciles the sealed original audio in addition to the browser
-    // preview-derived draft; delete the placeholder before saving so committed state
-    // still reflects exactly one recovered task.
-    await expect(page.getByRole("heading", { name: "Review 2 tasks" })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("button", { name: "Delete Untranscribed sealed audio" }).click();
-    await expect(page.getByRole("heading", { name: "Review 1 task" })).toBeVisible();
-    // The surviving browser preview was not reconciled from the separate
-    // sealed-audio fixture. A user edit is the explicit review that makes it
-    // eligible for canonical-task commit.
+    // Only the reconciler's reading of the sealed original audio becomes a draft;
+    // the browser preview text never mints one, so there is nothing to delete.
+    await expect(page.getByRole("heading", { name: "Review 1 task" })).toBeVisible({ timeout: 15_000 });
     await page.getByLabel("Task title #1").fill("Write weekly update for the team");
     await page.keyboard.press("Tab");
     await expect(page.getByText("Edited", { exact: true })).toBeVisible();
@@ -815,7 +780,8 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     await recoveryPage.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(recoveryPage);
     await emitSpeech(recoveryPage, "prepare quarterly report", true);
-    await expect(recoveryPage.getByRole("article", { name: "Draft task 1: Prepare quarterly report" })).toBeVisible();
+    const transcript = recoveryPage.getByRole("region", { name: "Browser preview transcript" });
+    await expect(transcript).toContainText("prepare quarterly report");
     const operationId = (await recoveryPage.locator("[data-operation-id]").getAttribute("data-operation-id")) ?? "";
     await apiPost<BrainDumpOperation>(
       recoveryPage,
@@ -825,16 +791,16 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     );
     await emitSpeech(recoveryPage, "different browser draft", true);
     await expect(recoveryPage.getByRole("alert")).toBeVisible();
-    await expect(recoveryPage.getByRole("article", { name: "Draft task 1: Prepare quarterly report" })).toBeVisible();
+    await expect(transcript).toContainText("prepare quarterly report");
 
     await recoveryPage.getByRole("button", { name: "Pause" }).click();
     await expect(recoveryPage.getByRole("alert")).toBeVisible();
-    await expect(recoveryPage.getByRole("article", { name: "Draft task 1: Prepare quarterly report" })).toBeVisible();
+    await expect(transcript).toContainText("prepare quarterly report");
     await recoveryPage.getByRole("button", { name: "Stop & review" }).click();
     await expect(recoveryPage.getByRole("alert")).toBeVisible();
     await recoveryPage.getByRole("button", { name: "Discard" }).click();
     await expect(recoveryPage.getByRole("alert")).toBeVisible();
-    await expect(recoveryPage.getByRole("article", { name: "Draft task 1: Prepare quarterly report" })).toBeVisible();
+    await expect(transcript).toContainText("prepare quarterly report");
 
     // The stale local projection intentionally rejected several commands above.
     // Resume from the persisted operation route to obtain the current revision,
@@ -850,10 +816,12 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
       { title: "Concurrent edit", expected_revision: loaded.revision },
       unique("external-proposal")
     );
-    // The concurrent proposal mutation is now surfaced as a reconciliation
-    // conflict. Commit is honestly gated until the user resolves it, rather
-    // than submitting a stale revision and manufacturing a duplicate task.
-    await expect(recoveryPage.getByRole("button", { name: /Send .* to inbox/ })).toBeDisabled();
+    // The page still holds the pre-edit revision, so Save is refused by the
+    // server's optimistic lock (visible error, no task) rather than committing
+    // stale state and manufacturing a duplicate task.
+    await recoveryPage.getByRole("button", { name: /Send .* to inbox/ }).click();
+    await expect(recoveryPage.getByRole("alert")).toBeVisible();
+    assertArrayLength(await listInboxTasks(recoveryPage), 0, "a stale-revision save must not create a task");
     await expect(recoveryPage.getByLabel("Task title #1")).toBeVisible();
     await recoveryPage.close();
   });

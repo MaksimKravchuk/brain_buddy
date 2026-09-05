@@ -133,6 +133,13 @@ def _strict_response_schema(
 Completion = Callable[[dict[str, object]], dict[str, object]]
 
 
+def _normalized_title(title: str) -> str:
+    """Case/whitespace/trailing-punctuation-insensitive identity of a title."""
+
+    collapsed = re.sub(r"\s+", " ", title).strip()
+    return collapsed.rstrip(".!?…,;:").strip().casefold()
+
+
 @dataclass(slots=True)
 class _MaterializedOperations:
     """Surviving patches, their originating drafts, and skipped-op reasons.
@@ -153,8 +160,12 @@ class OpenAITextReconciler:
 
     api_key: str = field(repr=False)
     model: str = "gpt-4o"
-    template_version: str = "brain-dump-reconciler-v2"
+    template_version: str = "brain-dump-reconciler-v3"
     """Safe, configured identifier for the system prompt in ``_payload``.
+
+    v3 phrases every title as a GTD next action (verb first, discourse fillers
+    dropped, one proposal per distinct action) and pairs that with the
+    server-side filler/duplicate guards in ``_materialize``.
 
     Bump this whenever the system/response-schema prompt text materially
     changes, so persisted provider runs and receipts (ADR-0002 audit
@@ -282,8 +293,17 @@ class OpenAITextReconciler:
                         "a filler or self-correction, or modifies an existing proposal. "
                         "Reminder and note phrasings (for example «напомни…», "
                         '"remind me…", «запиши…») are actionable task '
-                        "creates. Keep each title concise: the core action and its "
-                        "object, phrased as in the source. Do not append deadlines, "
+                        "creates. Phrase every title as a GTD next action: it starts with the "
+                        "concrete action verb (Russian infinitive, English base form) followed "
+                        "by its object, for example «Купить молоко», «Сходить в магазин», "
+                        '"Call the dentist". Drop discourse fillers, hesitations and modal '
+                        "scaffolding that carry no action («так», «ну», «значит», «надо», "
+                        '«нужно», "so", "um", "I need to"); a fragment with no action, such as '
+                        "«Так» or «Надо», is never a task. Emit each distinct action once: when "
+                        "the transcript repeats or rephrases the same action and object, produce "
+                        "one proposal citing every segment that states it, never a duplicate. "
+                        "Keep each title concise: the core action and its "
+                        "object, using the words spoken in the source. Do not append deadlines, "
                         "dates, times, contexts, tags, labels, project names, or note "
                         "text to the title unless the title would be meaningless "
                         "without them. New "
@@ -374,10 +394,33 @@ class OpenAITextReconciler:
         drafts: list[_OperationDraft] = []
         skipped: list[str] = []
         allocated_ids: set[str] = set(existing)
+        # One proposal per distinct action: a title minted earlier in this same
+        # envelope, or already carried by an active proposal the operation does
+        # not replace, makes a later structural operation a duplicate.
+        minted_titles: set[str] = set()
+        active_titles = {
+            proposal_id: _normalized_title(proposal.title)
+            for proposal_id, proposal in existing.items()
+            if not proposal.tombstoned
+        }
 
         for index, draft in enumerate(operations):
             try:
                 self._validate_draft(draft, existing, known_segments, source_text_by_id)
+                if draft.operation in {"add", "split", "merge", "supersede"}:
+                    assert draft.title is not None
+                    title_key = _normalized_title(draft.title)
+                    clashes_active = any(
+                        title == title_key
+                        for proposal_id, title in active_titles.items()
+                        if proposal_id not in draft.predecessor_ids
+                    )
+                    if title_key in minted_titles or clashes_active:
+                        raise _SemanticGroundingFailure(
+                            "duplicate task title within one reconciliation; the "
+                            "same action and object is proposed only once."
+                        )
+                    minted_titles.add(title_key)
             except _SemanticGroundingFailure as exc:
                 # One hallucinated/ungrounded task: drop it and keep its
                 # well-formed siblings. Protocol violations are not caught here
@@ -458,6 +501,15 @@ class OpenAITextReconciler:
             return
         if not draft.title or not draft.title.strip():
             raise ValidationFailure("Reconciler operation requires a task title.")
+        if not OpenAITextReconciler._title_names_an_action(draft.title):
+            # A discourse fragment («Так», «Надо», "so um") names no action or
+            # object. It can pass token grounding because the same filler is
+            # spoken in the cited utterance, so it is rejected here as its own
+            # skip reason; well-formed siblings in the same envelope survive.
+            raise _SemanticGroundingFailure(
+                "unsupported task title carries no action or object; a discourse "
+                "filler is never a task."
+            )
         if (
             not draft.source_segment_ids
             or not set(draft.source_segment_ids) <= known_segments
@@ -635,6 +687,43 @@ class OpenAITextReconciler:
         }
     )
 
+    # Discourse fillers, hesitations and sequencing words that open a spoken
+    # clause («Так, надо купить молоко», "so um call the dentist", «потом
+    # позвонить маме»). Consulted only by ``_title_names_an_action``: a title
+    # made of nothing but these (plus negation/prefix scaffolding) names no
+    # action or object and is never a task. Deliberately NOT folded into
+    # ``_ACTION_PREFIX_TERMS`` -- that set also decides which clause token is
+    # the predicate for grounding's identity anchors, and widening it there
+    # changes what grounds.
+    _DISCOURSE_FILLER_TERMS = frozenset(
+        {
+            "so",
+            "okay",
+            "ok",
+            "well",
+            "um",
+            "uh",
+            "hmm",
+            "yeah",
+            "also",
+            "then",
+            "and",
+            "так",
+            "ну",
+            "вот",
+            "значит",
+            "итак",
+            "ладно",
+            "короче",
+            "ещё",
+            "еще",
+            "потом",
+            "затем",
+            "и",
+            "а",
+        }
+    )
+
     # Action changes are material intent changes. The reconciler may normalize
     # only an explicitly listed equivalent, never infer that matching objects
     # make arbitrary verbs interchangeable. Action recognition itself must not
@@ -664,6 +753,23 @@ class OpenAITextReconciler:
         ("так", "нет"),
         ("то", "есть"),
     )
+
+    @staticmethod
+    def _title_names_an_action(title: str) -> bool:
+        """Whether a title carries any lexical predicate or object at all.
+
+        Negation markers, the modal/prefix scaffolding and discourse fillers are
+        not content; a title made only of those («Так», «Ну надо», "so um") has
+        nothing left to bind to a spoken action and is not a task.
+        """
+
+        tokens = re.findall(r"[^\W\d_]+", title.casefold(), flags=re.UNICODE)
+        return any(
+            token not in OpenAITextReconciler._NEGATION_MARKERS
+            and token not in OpenAITextReconciler._ACTION_PREFIX_TERMS
+            and token not in OpenAITextReconciler._DISCOURSE_FILLER_TERMS
+            for token in tokens
+        )
 
     @staticmethod
     def _tokens_equivalent(first: str, second: str) -> bool:

@@ -1948,50 +1948,15 @@ class VoiceBrainDumpService:
                 created_at=now,
             )
         segments = sorted(segments_by_sequence.values(), key=lambda item: item.sequence)
-        proposals = self._proposals_from_segments(
-            operation.proposals, segments, now=now
-        )
-        existing_by_id = {proposal.id: proposal for proposal in operation.proposals}
-        patch_drafts: list[ProposalPatch] = []
-        for proposal in proposals:
-            previous = existing_by_id.get(proposal.id)
-            if previous is None:
-                patch_drafts.append(
-                    ProposalPatch.add(
-                        proposal_id=proposal.id,
-                        title=proposal.title,
-                        source_segment_ids=proposal.source_segment_ids,
-                        producer="fast",
-                    )
-                )
-                continue
-            title = proposal.title if proposal.title != previous.title else None
-            source_segment_ids = (
-                proposal.source_segment_ids
-                if proposal.source_segment_ids != previous.source_segment_ids
-                else None
-            )
-            if title is not None or source_segment_ids is not None:
-                patch_drafts.append(
-                    ProposalPatch.update(
-                        proposal_id=proposal.id,
-                        title=title,
-                        source_segment_ids=source_segment_ids,
-                        producer="fast",
-                        base_revision=previous.title_revision,
-                    )
-                )
-        proposal_patches = self._append_proposal_patch_documents(
-            operation_id=operation.id,
-            existing=operation.proposal_patches,
-            drafts=patch_drafts,
-            now=now,
-        )
+        # Browser preview text is a live status readout, never a task source.
+        # Proposals are minted only by the reconciler from the accurate
+        # transcript after seal (``_reconcile_accurate_checkpoint``), so a
+        # half-recognised interim fragment ("Так", "Надо купить моло") can
+        # never surface as a draft task, and no fast-lane leftover can later
+        # block commit as an unreconciled proposal.
         updated = operation.model_copy(
             update={
                 "segments": segments,
-                "proposals": proposals,
-                "proposal_patches": proposal_patches,
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }
@@ -2524,11 +2489,11 @@ class VoiceBrainDumpService:
         ``finish``/``transition_brain_dump_operation`` can move an operation to
         ``awaiting_confirmation`` directly from ``recording``/``paused`` (e.g.
         when external-processing consent was never granted, so nothing could
-        be sealed or reconciled). That path only ever carries "fast" preview
-        proposals from the live heuristic extractor and must never be
-        committable as canonical tasks — it is provisional-only and review is
-        limited to editing/discarding, per ADR-0002's model-output-as-proposals
-        invariant.
+        be sealed or reconciled). That path carries no reconciler output -- at
+        most pre-existing ``provisional`` proposals from a legacy import -- and
+        must never be committable as canonical tasks: it is provisional-only
+        and review is limited to editing/discarding, per ADR-0002's
+        model-output-as-proposals invariant.
 
         This deliberately does not require ``sealed_manifest_hash`` to still be
         set: raw audio may be deleted promptly after a successful reconciliation
@@ -2692,9 +2657,8 @@ class VoiceBrainDumpService:
                 if unreconciled:
                     raise ValidationFailure(
                         "BRAIN_DUMP_PROPOSAL_NOT_RECONCILED: an operation-level "
-                        "reconciler success cannot make an untouched browser-"
-                        "preview/fast proposal canonical; edit or delete it "
-                        "before save.",
+                        "reconciler success cannot make an untouched provisional "
+                        "proposal canonical; edit or delete it before save.",
                         {"proposal_ids": unreconciled},
                     )
             if not committable:
@@ -3598,141 +3562,6 @@ class VoiceBrainDumpService:
             }
         )
 
-    def _matching_proposal_index(
-        self, proposals: list[BrainDumpProposalDocument], title: str
-    ) -> int | None:
-        for index, proposal in enumerate(proposals):
-            if self._titles_refer_to_same_item(
-                title, proposal.title
-            ) or self._titles_share_first_word(title, proposal.title):
-                return index
-        return None
-
-    def _proposals_from_segments(
-        self,
-        existing: list[BrainDumpProposalDocument],
-        segments: list[BrainDumpTranscriptSegmentDocument],
-        *,
-        now: datetime,
-    ) -> list[BrainDumpProposalDocument]:
-        if not segments:
-            return existing
-        proposal_segments = self._segments_for_proposal_extraction(segments)
-        if not proposal_segments:
-            return existing
-        latest_is_interim = proposal_segments[-1].stability == "interim"
-        candidates = self._extract_task_titles(
-            " ".join(segment.text for segment in proposal_segments)
-        )
-        segment_ids = [segment.id for segment in proposal_segments]
-        status: BrainDumpProposalStatus = (
-            "wording_changing" if latest_is_interim else "provisional"
-        )
-        proposals = list(existing)
-        proposal_index_by_title = {
-            self._proposal_identity_key(proposal.title): index
-            for index, proposal in enumerate(proposals)
-            if not proposal.deleted
-        }
-        for title in candidates:
-            existing_index = proposal_index_by_title.get(
-                self._proposal_identity_key(title)
-            )
-            if existing_index is not None:
-                proposal = proposals[existing_index]
-                if proposal.user_edited or proposal.deleted:
-                    continue
-                if (
-                    proposal.title == title
-                    and proposal.source_segment_ids == segment_ids
-                ):
-                    continue
-                proposals[existing_index] = proposal.model_copy(
-                    update={
-                        "title": title,
-                        "status": status,
-                        "source_segment_ids": segment_ids,
-                        "updated_at": now,
-                        "revision": proposal.revision + 1,
-                    }
-                )
-                continue
-            semantic_matches = [
-                (index, proposal)
-                for index, proposal in enumerate(proposals)
-                if self._proposal_semantic_key(proposal.title)
-                == self._proposal_semantic_key(title)
-            ]
-            protected_matches = [
-                proposal
-                for _index, proposal in semantic_matches
-                if proposal.user_edited or proposal.deleted
-            ]
-            if protected_matches or any(
-                (proposal.user_edited or proposal.deleted)
-                and self._titles_share_first_word(title, proposal.title)
-                for proposal in proposals
-            ):
-                # A conservative lock/deletion guard is allowed to omit an
-                # ambiguous preview candidate; it must never overwrite it.
-                continue
-            mutable_matches = [
-                (index, proposal)
-                for index, proposal in semantic_matches
-                if not proposal.deleted and not proposal.user_edited
-            ]
-            if len(mutable_matches) == 1:
-                matched_index, proposal = mutable_matches[0]
-                proposals[matched_index] = proposal.model_copy(
-                    update={
-                        "title": title,
-                        "status": status,
-                        "source_segment_ids": segment_ids,
-                        "updated_at": now,
-                        "revision": proposal.revision + 1,
-                    }
-                )
-                proposal_index_by_title[self._proposal_identity_key(title)] = (
-                    matched_index
-                )
-                continue
-            proposals.append(
-                BrainDumpProposalDocument(
-                    id=generate_id("proposal"),
-                    ordinal=len(proposals) + 1,
-                    title=title,
-                    status=status,
-                    source_segment_ids=segment_ids,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-            proposal_index_by_title[self._proposal_identity_key(title)] = (
-                len(proposals) - 1
-            )
-        return proposals
-
-    @classmethod
-    def _segments_for_proposal_extraction(
-        cls, segments: list[BrainDumpTranscriptSegmentDocument]
-    ) -> list[BrainDumpTranscriptSegmentDocument]:
-        proposal_segments: list[BrainDumpTranscriptSegmentDocument] = []
-        for segment in segments:
-            if segment.stability == "stable":
-                stable_text = cls._normalized_transcript_for_replacement(segment.text)
-                proposal_segments = [
-                    existing
-                    for existing in proposal_segments
-                    if not (
-                        existing.stability == "interim"
-                        and stable_text.startswith(
-                            cls._normalized_transcript_for_replacement(existing.text)
-                        )
-                    )
-                ]
-            proposal_segments.append(segment)
-        return proposal_segments
-
     @staticmethod
     def _normalized_transcript_for_replacement(text: str) -> str:
         return re.sub(r"\s+", " ", text).strip().casefold()
@@ -3742,53 +3571,6 @@ class VoiceBrainDumpService:
         """Identity is content-derived, never inferred from a candidate position."""
 
         return cls._normalized_transcript_for_replacement(title)
-
-    @classmethod
-    def _proposal_semantic_key(cls, title: str) -> str:
-        """Use a unique two-token key only to preserve an existing opaque ID."""
-
-        return " ".join(cls._proposal_identity_key(title).split()[:2])
-
-    @staticmethod
-    def _extract_task_titles(text: str) -> list[str]:
-        """Heuristically split live browser-preview text into draft titles.
-
-        This feeds only the local, non-committable "fast" preview proposals
-        shown while the user is still talking (see ``append_brain_dump_transcript``).
-        It must never gain fixture-specific literal branches: those belong to
-        test-only deterministic providers, not this always-on production path.
-        Canonical tasks may only be created from a sealed, reconciled batch —
-        enforced separately in ``commit_brain_dump_operation`` — so this
-        heuristic's imprecision cannot itself produce an invented task.
-        """
-
-        normalized = re.sub(r"\s+", " ", text).strip()
-        if not normalized:
-            return []
-        rough_parts = re.split(
-            r"(?:\s*\d+[.)]\s+|[.;\n]+|\bthen\b|\bпотом\b)",
-            normalized,
-            flags=re.IGNORECASE,
-        )
-        titles: list[str] = []
-        seen: set[str] = set()
-        for part in rough_parts:
-            title = re.sub(r"^[-*•\s]+", "", part).strip(" ,")
-            title = re.sub(
-                r"^(?:and\s+)?(?:i\s+)?(?:need|should|must|have)\s+to\s+",
-                "",
-                title,
-                flags=re.IGNORECASE,
-            )
-            if not title:
-                continue
-            title = title[0].upper() + title[1:]
-            key = title.casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            titles.append(title)
-        return titles
 
     @staticmethod
     def _titles_refer_to_same_item(candidate: str, existing: str) -> bool:

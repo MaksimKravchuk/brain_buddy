@@ -80,6 +80,18 @@ function proposal(id: string, ordinal: number, title: string, extras: Record<str
   };
 }
 
+function segment(id: string, sequence: number, text: string, extras: Record<string, unknown> = {}) {
+  return {
+    id,
+    sequence,
+    text,
+    stability: "stable",
+    provider_role: "browser_preview",
+    created_at: "2026-07-16T00:00:00Z",
+    ...extras
+  };
+}
+
 function conflict(field: string, currentValue: string, suggestedValue: string) {
   return {
     field,
@@ -203,7 +215,7 @@ describe("BrainDumpRoute", () => {
     });
   });
 
-  it("records through browser microphone and continuously renders provisional numbered inbox tasks", async () => {
+  it("records through browser microphone and shows the running transcript instead of draft task cards", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
@@ -213,9 +225,9 @@ describe("BrainDumpRoute", () => {
         return jsonResponse(
           operation({
             revision: 2,
-            proposals: [
-              proposal("proposal_1", 1, "Renew car insurance"),
-              proposal("proposal_2", 2, "Reply to Anna about the offsite", { status: "wording_changing" })
+            segments: [
+              segment("segment_1", 1, "Renew car insurance. Reply to Anna about the offsite."),
+              segment("segment_2", 2, "and book the", { stability: "interim" })
             ]
           })
         );
@@ -234,13 +246,17 @@ describe("BrainDumpRoute", () => {
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ audio: true });
     expect(micTrackStop).not.toHaveBeenCalled();
     expect(recognition?.start).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Speak freely — tasks are extracted after you stop")).toBeInTheDocument();
+    expect(screen.getByText("Your words appear here as you speak. Tasks are extracted after you stop.")).toBeInTheDocument();
 
     act(() => emitSpeech("Renew car insurance. Reply to Anna about the offsite."));
-    expect(await screen.findByText("2 tasks captured")).toBeInTheDocument();
-    expect(screen.getByText("Headed to inbox · 2")).toBeInTheDocument();
-    expect(screen.getByText("#1")).toBeInTheDocument();
-    expect(screen.getByText("Renew car insurance")).toBeInTheDocument();
-    expect(screen.getByText("Wording still changing")).toBeInTheDocument();
+    const transcript = await screen.findByRole("region", { name: "Browser preview transcript" });
+    expect(within(transcript).getByText("Renew car insurance. Reply to Anna about the offsite.")).toBeInTheDocument();
+    expect(within(transcript).getByText("and book the")).toBeInTheDocument();
+    // Raw preview text is a status readout: no draft task card is minted from it.
+    expect(screen.queryByText(/Headed to inbox/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/tasks captured/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
     expect(screen.getByText("Nothing is saved until you stop"));
 
     await userEvent.click(screen.getByRole("button", { name: "Pause" }));
@@ -533,11 +549,7 @@ describe("BrainDumpRoute", () => {
                 stability: body.segments[0].stability,
                 created_at: "2026-07-16T00:00:00Z"
               }
-            ],
-            proposals:
-              body.segments[0].stability === "interim"
-                ? [proposal("proposal_1", 1, "Buy oat milk", { status: "wording_changing" })]
-                : [proposal("proposal_1", 1, "Buy oat milk"), proposal("proposal_2", 2, "Call dentist")]
+            ]
           })
         );
       }
@@ -547,19 +559,21 @@ describe("BrainDumpRoute", () => {
     renderBrainDump();
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     act(() => emitSpeech("buy oat milk", false));
-    expect(await screen.findByRole("article", { name: "Draft task 1: Buy oat milk" })).toBeInTheDocument();
+    const forming = await screen.findByRole("region", { name: "Browser preview transcript" });
+    expect(within(forming).getByText("buy oat milk")).toBeInTheDocument();
 
     act(() => emitSpeech("buy oat milk. call dentist", true));
 
     await waitFor(() =>
-      expect(uploaded.map((segment) => [segment.sequence, segment.stability, segment.text])).toEqual([
+      expect(uploaded.map((item) => [item.sequence, item.stability, item.text])).toEqual([
         [1, "interim", "buy oat milk"],
         [1, "stable", "buy oat milk. call dentist"]
       ])
     );
-    expect(await screen.findByRole("article", { name: "Draft task 1: Buy oat milk" })).toBeInTheDocument();
-    expect(screen.getByRole("article", { name: "Draft task 2: Call dentist" })).toBeInTheDocument();
-    expect(screen.queryByText("Buy oat milk buy oat milk")).not.toBeInTheDocument();
+    const settled = await screen.findByRole("region", { name: "Browser preview transcript" });
+    expect(await within(settled).findByText("buy oat milk. call dentist")).toBeInTheDocument();
+    expect(within(settled).queryByText("buy oat milk")).not.toBeInTheDocument();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
   });
 
   it("replaces the new recording route with the created operation route", async () => {
@@ -1054,14 +1068,14 @@ describe("BrainDumpRoute", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/brain_dump_existing/transcript"), expect.anything()));
   });
 
-  it("shows the singular captured task count while recording", async () => {
+  it("keeps the subtitle static and labels the readout as browser preview while recording", async () => {
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/brain-dump-operations") && init?.method === "POST") {
         return jsonResponse(operation(), 201);
       }
       if (url.endsWith("/brain_dump_1/transcript")) {
-        return jsonResponse(operation({ revision: 2, proposals: [proposal("proposal_1", 1, "Renew car insurance")] }));
+        return jsonResponse(operation({ revision: 2, segments: [segment("segment_1", 1, "Renew car insurance.")] }));
       }
       throw new Error(`unexpected fetch ${url}`);
     });
@@ -1070,7 +1084,12 @@ describe("BrainDumpRoute", () => {
     await userEvent.click(screen.getByRole("button", { name: "Record" }));
     act(() => emitSpeech("Renew car insurance."));
 
-    expect(await screen.findByText("1 task captured")).toBeInTheDocument();
+    const transcript = await screen.findByRole("region", { name: "Browser preview transcript" });
+    expect(within(transcript).getByText("Renew car insurance.")).toBeInTheDocument();
+    // No running task count: nothing is a task until the reconciler says so.
+    expect(screen.getByText("Speak freely — tasks are extracted after you stop")).toBeInTheDocument();
+    expect(screen.getByText("What you've said · browser preview")).toBeInTheDocument();
+    expect(screen.queryByText(/task captured/)).not.toBeInTheDocument();
   });
 
   it("returns from an empty review route to a new recording screen", async () => {
@@ -1735,12 +1754,18 @@ describe("BrainDumpRoute", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/resume"), expect.anything());
   });
 
-  it("keeps provisional proposals visible while schema-v2 processing continues", async () => {
+  it("shows the accurate transcript, not draft cards, while schema-v2 processing continues", async () => {
     const improving = operation({
       id: "brain_dump_processing",
       status: "reconciling",
       revision: 5,
-      proposals: [proposal("proposal_1", 1, "Renew car insurance")]
+      segments: [
+        segment("segment_preview", 1, "renew car insurance"),
+        segment("segment_accurate", 2, "Renew the car insurance.", {
+          provider_role: "accurate",
+          supersedes_segment_ids: ["segment_preview"]
+        })
+      ]
     });
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
@@ -1753,8 +1778,59 @@ describe("BrainDumpRoute", () => {
     renderBrainDump("/brain-dump/brain_dump_processing");
 
     expect(await screen.findByText("Reconciling tasks")).toBeInTheDocument();
-    expect(screen.getByRole("article", { name: "Draft task 1: Renew car insurance" })).toBeInTheDocument();
-    expect(screen.queryByText("We are keeping the task list first while the accurate transcript catches up.")).not.toBeInTheDocument();
+    expect(screen.getByText("Your tasks appear for review once the accurate transcript has been turned into next actions.")).toBeInTheDocument();
+    const transcript = screen.getByRole("region", { name: "Accurate transcript" });
+    expect(within(transcript).getByText("Renew the car insurance.")).toBeInTheDocument();
+    // The superseded browser preview is not shown once accurate segments exist.
+    expect(within(transcript).queryByText("renew car insurance")).not.toBeInTheDocument();
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the browser preview transcript while accurate transcription is pending", async () => {
+    const transcribing = operation({
+      id: "brain_dump_transcribing",
+      status: "accurate_transcribing",
+      revision: 4,
+      segments: [
+        segment("segment_two", 2, "call the dentist"),
+        segment("segment_one", 1, "renew car insurance")
+      ]
+    });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_transcribing") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(transcribing);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_transcribing");
+
+    expect(await screen.findByText("Improving transcript")).toBeInTheDocument();
+    expect(screen.getByText("Browser preview · provisional")).toBeInTheDocument();
+    const transcript = screen.getByRole("region", { name: "Browser preview transcript" });
+    // Spoken order, whatever order the server listed the segments in.
+    expect(within(transcript).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "renew car insurance",
+      "call the dentist"
+    ]);
+  });
+
+  it("says so when a processing operation captured no transcript at all", async () => {
+    const sealing = operation({ id: "brain_dump_silent", status: "sealing", revision: 3, segments: [] });
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/brain_dump_silent") && (!init?.method || init.method === "GET")) {
+        return jsonResponse(sealing);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    renderBrainDump("/brain-dump/brain_dump_silent");
+
+    expect(await screen.findByText("Sealing audio")).toBeInTheDocument();
+    expect(screen.getByText("No transcript was captured for this recording.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /transcript/ })).not.toBeInTheDocument();
   });
 
   it("renders conflict value fallbacks when the reconciler omits current or suggested text", async () => {
