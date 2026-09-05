@@ -66,12 +66,6 @@ _KEY_FORMAT_ERROR = (
 AAD_PURPOSE_OUTBOUND_CREDENTIAL = "outbound-credential"
 """The credential BrainBuddy sends *to* the user's agent."""
 
-AAD_PURPOSE_INBOUND_SIGNING = "inbound-signing-secret"
-"""The secret the user's agent signs its reports *with*."""
-
-AAD_PURPOSE_SIGNING_RECEIPT = "signing-secret-receipt"
-"""A one-time replacement secret held only for lost-response recovery."""
-
 _AAD_SCHEME = "brain-buddy/agent-relay"
 
 
@@ -398,9 +392,7 @@ def build_secret_box(raw_keys: str | None, *, environment: AppEnvironment) -> Se
 
 __all__ = [
     "PUSH_TOKEN_BYTES",
-    "AAD_PURPOSE_INBOUND_SIGNING",
     "AAD_PURPOSE_OUTBOUND_CREDENTIAL",
-    "AAD_PURPOSE_SIGNING_RECEIPT",
     "SealedSecret",
     "SecretBox",
     "SecretDecryptionFailed",
