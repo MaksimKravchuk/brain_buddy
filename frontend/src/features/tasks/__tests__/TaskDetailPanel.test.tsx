@@ -838,6 +838,54 @@ describe("014-SC-004 the compact Task surface says what the full one says", () =
     expect(screen.queryByRole("button", { name: "Request cancellation" })).not.toBeInTheDocument();
   });
 
+  it("014-FR-013 describes the newest run when a task has more than one", async () => {
+    // The API answers a task's runs newest first (repository.py orders by
+    // created_at DESC, id DESC), so reading the last element described the
+    // *oldest* hand-off — a failed attempt from yesterday shown as the state of
+    // the run that is running right now.
+    vi.spyOn(apiClient, "listAgentRuns").mockResolvedValue([
+      {
+        id: "agentrun_new",
+        primary_state_label: "Running",
+        reported_state: "running",
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "none",
+        agent_task_missing: false,
+        capabilities: { reply: true, cancel: true },
+        created_at: "2026-08-09T12:00:00Z",
+        events: [],
+        commands: [],
+        artifacts_summary: []
+      } as never,
+      {
+        id: "agentrun_old",
+        primary_state_label: "Failed",
+        reported_state: "failed",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "none",
+        agent_task_missing: false,
+        capabilities: { reply: true, cancel: true },
+        created_at: "2026-08-08T09:00:00Z",
+        events: [],
+        commands: [],
+        artifacts_summary: []
+      } as never
+    ]);
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "user-1", email: "max@example.test", feature_flags: {} },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    const line = await screen.findByTestId("agent-run-summary-line");
+    expect(line).toHaveTextContent("Running · Guaranteed single start");
+    expect(line).not.toHaveTextContent("Failed");
+  });
+
   it("014-FR-013 shows the missing-task label and withdraws both controls", async () => {
     vi.spyOn(apiClient, "listAgentRuns").mockResolvedValue([
       {

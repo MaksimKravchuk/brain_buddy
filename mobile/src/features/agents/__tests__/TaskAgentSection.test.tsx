@@ -312,6 +312,38 @@ describe("014-SC-004 the compact task line agrees with the run monitor", () => {
     await unmount();
   });
 
+  it("014-FR-013 describes the newest run when a task has more than one", async () => {
+    // The API answers a task's runs newest first (repository.py orders by
+    // created_at DESC, id DESC), so reading the last element described the
+    // *oldest* hand-off — a failed attempt from yesterday shown as the state of
+    // the run that is running right now.
+    mockListConnections.mockResolvedValue([makeConnection()]);
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        id: "run_new",
+        primary_state_label: "Running",
+        reported_state: "running",
+        guarantee_tier: "guaranteed",
+        created_at: "2026-08-09T12:00:00Z",
+      }),
+      makeRun({
+        id: "run_old",
+        primary_state_label: "Failed",
+        reported_state: "failed",
+        guarantee_tier: "best_effort",
+        created_at: "2026-08-08T09:00:00Z",
+      }),
+    ]);
+
+    const { renderer, unmount } = await renderWithProviders(<TaskAgentSection {...props()} />);
+    await settle();
+
+    expect(visibleText(renderer)).toContain("Running · Guaranteed single start");
+    expect(visibleText(renderer)).not.toContain("Failed · Best-effort single start");
+
+    await unmount();
+  });
+
   it("014-FR-013 shows the missing-task label and withdraws both controls", async () => {
     mockListConnections.mockResolvedValue([makeConnection()]);
     mockListRuns.mockResolvedValue([

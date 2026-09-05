@@ -7,7 +7,7 @@ import { AgentRunSection } from "@/features/agents/AgentRunSection";
 import { HandoffSheet, type AgentHandoffSeed } from "@/features/agents/HandoffSheet";
 import { BBText } from "@/components/BBText";
 import { Button } from "@/components/Button";
-import { compactRunLabel } from "@/agents/machine";
+import { compactRunLabel, runsNewestFirst } from "@/agents/machine";
 import { colors, space } from "@/theme/tokens";
 
 interface TaskAgentSectionProps {
@@ -58,7 +58,10 @@ export function TaskAgentSection({
     setSheetVisible(true);
   };
 
-  const latestRun = feed.runs.length ? feed.runs[feed.runs.length - 1] : null;
+  // Derived rather than read off the response order. The API answers a task's
+  // runs newest first, so the last element was the *oldest* one: a failed
+  // attempt from last week described as the state of the run working right now.
+  const latestRun = runsNewestFirst(feed.runs)[0] ?? null;
 
   return (
     <View style={styles.section}>

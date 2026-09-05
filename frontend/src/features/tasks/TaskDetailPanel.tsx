@@ -7,7 +7,7 @@ import { hasFeatureFlag } from "../../api/auth";
 import { apiClient } from "../../api/client";
 import { AgentHandoffOverlay } from "../agents/AgentHandoffOverlay";
 import { AgentRunSection } from "../agents/AgentRunSection";
-import { compactRunLabel } from "../agents/agentCopy";
+import { compactRunLabel, newestRun } from "../agents/agentCopy";
 import { useAuthStore } from "../../stores/authStore";
 import type {
   OpenTaskState,
@@ -635,7 +635,7 @@ function AgentTaskRelay({ task, isTerminal }: { task: TaskResponse; isTerminal: 
   // than crashing the entire task panel.
   const runs = Array.isArray(runsQuery.data) ? runsQuery.data : [];
   const canStartHandoff = handoffEnabled && !isTerminal;
-  const latestRun = runs.length ? runs[runs.length - 1] : null;
+  const latestRun = newestRun(runs);
 
   return (
     <>
