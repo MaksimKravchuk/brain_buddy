@@ -476,3 +476,34 @@ declared. Five tests in `test_agent_a2a_card.py::TestSecuritySchemes` cover the
 refusal, the conjunction, the satisfiable alternative, the undeclared name and
 the empty list; the `a2a-wire.md` row now states the conjunction and
 undeclared-name rules it left implicit.
+
+**(p) A run's `push_token_fingerprint` holds its key like every other live
+sealed reference.**
+`live_sealed_key_ids` counted connection credentials and idempotency receipts
+and stopped there. `derive_push_token` and `push_token_fingerprint` are both
+anchored to the oldest configured key (`SecretBox.fingerprint`), so retiring
+that key silently invalidated every live push token: the token the agent already
+holds no longer matches the fingerprint, and a reply re-derives a *different*
+token that does not match the stored fingerprint either — 403 in both
+directions, with no refusal anywhere and nothing to tell an operator what they
+had just done. The fail-closed design in `secrets.py`'s header ("rotation fails
+closed while any live fingerprint needs a retired key") was the right design and
+this reference had simply been left out of it.
+
+The key id of every dispatched run's `push_token_fingerprint` is now reported
+alongside the credentials and the receipts, so `_require_intact_key_ring`
+refuses relay commands with `RelayKeyRotationUnsafe` naming the key until it is
+restored. The bound is the identifier tier, matching the promise the data
+already makes: expiry nulls the column, and the query also excludes any run
+dispatched more than `IDENTIFIER_RETENTION` ago in case the sweep has not
+reached it — a token nobody can present is not a reason to keep a key
+configured for ever. Malformed values fail closed through the same `unreadable`
+counter the receipts use.
+
+`data-model.md` §7 and the `secrets.py` module header say so.
+`docs/external-agent-relay-release.md` describes no rotation procedure, so there
+was nothing there to correct. Tests:
+`test_agent_relay_service.py::TestKeyRotationPreservesAtMostOnce::test_014_SC_003_a_live_push_fingerprint_holds_its_key_against_retirement`
+(a run whose fingerprint is the only remaining reference to `v1`; the next
+command is refused naming it) and
+`::test_014_SC_003_a_run_whose_identifiers_expired_holds_no_key`.

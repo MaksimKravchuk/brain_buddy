@@ -17,11 +17,15 @@ Rotation has exactly two safe moves, and the order matters:
   anything, and the *oldest* entry — the fingerprint anchor, see
   ``SecretBox.fingerprint`` — does not move.
 * **Retiring** a key removes the last entry, which does move the anchor. Stored
-  fingerprints become unfindable and sealed credentials become undecryptable,
-  so this is safe only once every live reference is gone under its own retention
-  contract. That precondition is enforced rather than documented: relay commands
-  fail closed while any live fingerprint, connection credential, inbound signing
-  secret, or signing-secret replay receipt names a key id the ring no longer has.
+  fingerprints become unfindable, sealed credentials become undecryptable, and
+  every derived push token stops matching — ``derive_push_token`` is anchored
+  here too, so the token an agent already holds and the fingerprint a reply
+  re-derives against would both change, giving a 403 in each direction with
+  nothing to say why. Retiring is therefore safe only once every live reference
+  is gone under its own retention contract. That precondition is enforced rather
+  than documented: relay commands fail closed while any live fingerprint,
+  connection credential, run push-token fingerprint, inbound signing secret, or
+  signing-secret replay receipt names a key id the ring no longer has.
 """
 
 from __future__ import annotations

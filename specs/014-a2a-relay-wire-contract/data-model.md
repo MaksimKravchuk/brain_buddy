@@ -300,6 +300,17 @@ control pool (§9). The verified push wakes the observer through the narrow wake
 The token never appears in a response, error envelope, audit row, timeline event or log line
 (`contracts/push-callback.md`, Redaction).
 
+Both `derive_push_token` and `push_token_fingerprint` are anchored to the *oldest* configured
+relay key (`SecretBox.fingerprint`), so `push_token_fingerprint` is a **live sealed reference**
+and holds that key exactly as a connection credential or an idempotency receipt does: while any
+dispatched run whose identifiers have not expired carries one,
+`AgentRepository.live_sealed_key_ids` reports its key id and `_require_intact_key_ring` refuses
+every relay command with `RelayKeyRotationUnsafe` naming the key until it is restored. Without
+that, retiring the anchor would silently invalidate every live push token — the token the agent
+holds no longer matches, and a reply re-derives a different one that does not match the stored
+fingerprint either, so both directions 403 with no refusal anywhere. Identifier expiry nulls the
+fingerprint (§8) and the run stops holding the key with it.
+
 ## 8. Retention tiers (SC-007)
 
 | tier | fields | bound | sweep step |

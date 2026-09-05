@@ -143,6 +143,19 @@ IDENTIFIER_TIER_RUN_FIELDS: tuple[str, ...] = (
 
 #: How long a dispatched run keeps the identifiers an agent could act on.
 IDENTIFIER_RETENTION = timedelta(days=90)
+
+#: Every push-token fingerprint an agent could still present. Bounded by the
+#: identifier tier: expiry nulls the column, and a token nobody can present is
+#: not a reason to keep a key configured for ever. The `dispatched_at` bound is
+#: the same promise for a row the sweep has not reached yet.
+_LIVE_PUSH_FINGERPRINTS = """
+    SELECT json_extract(payload, '$.push_token_fingerprint') AS key_hash
+    FROM agent_runs
+    WHERE dispatched_at IS NOT NULL
+        AND dispatched_at >= ?
+        AND json_extract(payload, '$.identifiers_expired') IS NOT 1
+        AND json_extract(payload, '$.push_token_fingerprint') IS NOT NULL
+"""
 """Upper bound on the runs one scheduler pass may claim.
 
 A backlog — an outage, a restart, a clock jump — must not turn into one
@@ -2037,12 +2050,22 @@ class AgentRepository(BaseRepository):
     ) -> LiveIdempotencyKeys:
         """Key ids referenced by every live sealed value owned by ``owner_id``.
 
-        Connection credentials live until disconnect, replacement or deletion.
+        Three kinds of reference, and each one breaks differently if its key
+        goes away. Connection credentials live until disconnect, replacement or
+        deletion, and become undecryptable. Idempotency receipts are found by a
+        fingerprint anchored to the oldest key, and become unfindable — which
+        turns a retry into a second delivery. A run's ``push_token_fingerprint``
+        is anchored to that same key, and its token is *derived* from it, so
+        retiring it invalidates the token the agent already holds and the
+        fingerprint a reply would re-derive against: 403 in both directions with
+        nothing anywhere saying why.
+
         This reads key labels from stored envelopes; it never opens ciphertext
         or exposes malformed stored values.
         """
 
         cutoff = (now - IDEMPOTENCY_RETENTION).isoformat()
+        identifier_cutoff = (now - IDENTIFIER_RETENTION).isoformat()
         with self._connection() as conn:
             if owner_id is None:
                 connection_rows = conn.execute(
@@ -2053,6 +2076,9 @@ class AgentRepository(BaseRepository):
                     "WHERE created_at >= ?",
                     (cutoff,),
                 ).fetchall()
+                push_rows = conn.execute(
+                    _LIVE_PUSH_FINGERPRINTS, (identifier_cutoff,)
+                ).fetchall()
             else:
                 connection_rows = conn.execute(
                     "SELECT payload FROM agent_connections WHERE owner_id = ?",
@@ -2062,6 +2088,10 @@ class AgentRepository(BaseRepository):
                     "SELECT key_hash, response_body FROM agent_idempotency "
                     "WHERE owner_id = ? AND created_at >= ?",
                     (owner_id, cutoff),
+                ).fetchall()
+                push_rows = conn.execute(
+                    f"{_LIVE_PUSH_FINGERPRINTS} AND owner_id = ?",
+                    (identifier_cutoff, owner_id),
                 ).fetchall()
 
         key_ids: set[str] = set()
@@ -2083,7 +2113,7 @@ class AgentRepository(BaseRepository):
                 else:
                     key_ids.add(key_id)
 
-        for row in receipt_rows:
+        for row in list(receipt_rows) + list(push_rows):
             fingerprint_id = fingerprint_key_id(str(row["key_hash"]))
             if fingerprint_id is None:
                 unreadable += 1

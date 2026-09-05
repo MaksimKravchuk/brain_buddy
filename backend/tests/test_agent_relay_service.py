@@ -45,7 +45,11 @@ from app.modules.agents.headers import (
     RESERVED_AUTH_HEADER_NAMES,
     validate_auth_header_name,
 )
-from app.modules.agents.repository import IDEMPOTENCY_RETENTION, AgentRepository
+from app.modules.agents.repository import (
+    IDEMPOTENCY_RETENTION,
+    IDENTIFIER_RETENTION,
+    AgentRepository,
+)
 from app.modules.agents.secrets import SealedSecret, SecretBox
 from app.modules.agents.service import (
     SCOPE_REAUTH_WINDOW,
@@ -6775,6 +6779,85 @@ class TestKeyRotationPreservesAtMostOnce:
 
         assert refused.value.retired_key_ids == ("v1",)
         assert len(scenario.deliveries) == 1
+
+    def _pushable_service(
+        self,
+        tmp_path: Path,
+        clock: Clock,
+        ring: OrderedDict[str, bytes],
+        a2a_client: FakeA2AClient,
+    ) -> AgentRelayService:
+        """A service whose agent advertises push, so runs mint a push token."""
+
+        fetcher = FakeCardFetcher()
+        fetcher.discovery = ready_discovery(
+            summary=card_summary(push_notifications=True)
+        )
+        return build_service(
+            AgentRepository(tmp_path),
+            clock,
+            keys=ring,
+            card_fetcher=fetcher,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
+
+    def test_014_SC_003_a_live_push_fingerprint_holds_its_key_against_retirement(
+        self, tmp_path: Path, clock: Clock, a2a_client: FakeA2AClient
+    ) -> None:
+        """014-FR-008. Retiring the anchor key silently breaks every live push token.
+
+        `derive_push_token` and `push_token_fingerprint` are both anchored to
+        the oldest configured key, so retiring it invalidates the token the
+        agent already holds *and* the fingerprint a reply would re-derive
+        against: 403 in both directions, with nothing anywhere saying why. The
+        run's fingerprint is a live sealed reference like a credential or a
+        receipt, so it holds its key the same way — the next command is refused
+        naming the key until it is restored.
+        """
+
+        setup = self._pushable_service(tmp_path, clock, rotated_ring(), a2a_client)
+        connection_id = connect(setup)
+        make_ready(setup, connection_id)
+        run = dispatch(setup, connection_id, key="idem-pushable")
+        stored = setup.agent_repo.get_run(run.id, owner_id=OWNER)
+        # The credential seals under the *active* key and every fingerprint is
+        # anchored to the oldest, so v1 is the push token's key and v1 alone.
+        assert stored.push_token_fingerprint is not None
+        assert stored.push_token_fingerprint.startswith("v1:")
+
+        # Everything else that could hold v1 is gone: only the run is left.
+        clock.advance(IDEMPOTENCY_RETENTION + timedelta(hours=1))
+        setup.agent_repo.purge_expired_idempotency(owner_id=OWNER, now=clock())
+
+        retired = self._pushable_service(tmp_path, clock, retired_ring(), a2a_client)
+        with pytest.raises(RelayKeyRotationUnsafe) as refused:
+            retired._require_intact_key_ring(clock())
+
+        assert refused.value.retired_key_ids == ("v1",)
+
+    def test_014_SC_003_a_run_whose_identifiers_expired_holds_no_key(
+        self, tmp_path: Path, clock: Clock, a2a_client: FakeA2AClient
+    ) -> None:
+        """The guard follows the retention promise rather than outliving it.
+
+        Identifier expiry nulls `push_token_fingerprint`, and a token nobody
+        can present is not a reason to keep a key configured for ever.
+        """
+
+        setup = self._pushable_service(tmp_path, clock, rotated_ring(), a2a_client)
+        connection_id = connect(setup)
+        make_ready(setup, connection_id)
+        dispatch(setup, connection_id, key="idem-pushable")
+
+        clock.advance(IDENTIFIER_RETENTION + timedelta(hours=1))
+        setup.agent_repo.purge_expired_idempotency(owner_id=OWNER, now=clock())
+        assert setup.agent_repo.expire_due_identifiers(now=clock()) == 1
+
+        retired = self._pushable_service(tmp_path, clock, retired_ring(), a2a_client)
+
+        retired._require_intact_key_ring(clock())
+        assert retired.agent_repo.live_sealed_key_ids(now=clock()).key_ids == {"v2"}
 
     @pytest.mark.parametrize("operation", ["start", "reply", "cancel"])
     def test_a_key_may_be_retired_once_every_reference_is_gone(
