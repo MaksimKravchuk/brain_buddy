@@ -49,7 +49,7 @@ import {
   uniqueKey
 } from "./gtdHelpers";
 
-import type { APIRequestContext, Locator, Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 /** Where the helloworld sample listens, from inside the backend's namespace. */
 const HELLOWORLD_URL = "http://127.0.0.1:9999";
@@ -234,24 +234,32 @@ async function runsForTask(page: Page, taskId: string): Promise<AgentRun[]> {
  *
  * Only ever used to ask the *agent* what it holds. A story that asked
  * BrainBuddy to confirm its own claim would prove nothing about the wire.
+ *
+ * Node's own `fetch` rather than Playwright's `request` fixture, for two
+ * reasons. The fixture is a browser-shaped client that carries the context's
+ * cookies, and this is the one call in the suite that leaves for a third party
+ * — BrainBuddy's session cookie has no business being offered to an agent.
+ * And requesting the fixture at all makes the reporter record a 'Create
+ * request context' setup step that completes within the millisecond, which the
+ * Allure taxonomy validator rejects as a no-op. `fetch` records no step.
  */
 async function agentRpc(
-  request: APIRequestContext,
   url: string,
   method: string,
   params: Record<string, unknown>,
   bearer?: string
 ): Promise<Record<string, unknown>> {
-  const response = await request.post(url, {
+  const response = await fetch(url, {
+    method: "POST",
     headers: {
       "Content-Type": "application/json",
       "A2A-Version": "1.0",
       ...(bearer ? { Authorization: `Bearer ${bearer}` } : {})
     },
-    data: { jsonrpc: "2.0", id: "e2e", method, params }
+    body: JSON.stringify({ jsonrpc: "2.0", id: "e2e", method, params })
   });
-  if (!response.ok()) {
-    throw new Error(`${method} at ${url} answered ${response.status()}: ${await response.text()}`);
+  if (!response.ok) {
+    throw new Error(`${method} at ${url} answered ${response.status}: ${await response.text()}`);
   }
   return (await response.json()) as Record<string, unknown>;
 }
@@ -374,7 +382,7 @@ test.describe("external agent relay over the A2A wire", () => {
     });
   });
 
-  test("014-SC-002 A2A replay creates one task", async ({ page, request }) => {
+  test("014-SC-002 A2A replay creates one task", async ({ page }) => {
     test.setTimeout(120_000);
 
     await connectAgent(page, {
@@ -434,7 +442,6 @@ test.describe("external agent relay over the A2A wire", () => {
 
       // The claim is about the *agent*, so the agent is what gets asked.
       const listed = await agentRpc(
-        request,
         HERMES_HOST_URL,
         "ListTasks",
         { contextId: runId, pageSize: 20 },

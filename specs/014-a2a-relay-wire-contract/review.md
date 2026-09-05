@@ -140,7 +140,7 @@ D1–D3 (duplication) were left as they are: the restated text is consistent.
 
 ## Implementation deviations (recorded by the implementer)
 
-The planning artifacts were reviewed and accepted before any code existed. Six
+The planning artifacts were reviewed and accepted before any code existed. Seven
 places where the implementation departed from them are recorded here, with the
 reason, so the reviewers grade what was built rather than what was drawn. Where
 a contract stated the superseded shape, the contract has been corrected in the
@@ -206,3 +206,33 @@ refuses cancel with `-32002 TASK_NOT_CANCELABLE`, not `-32004`; and a
 token-secured Hermes refuses to POST a push notification to a private address,
 so the loopback conformance stack proves the fallback (push is an optimisation,
 the schedule is the guarantee) instead of the push leg.
+
+**(g) `revision` is the owner's edit token and does not move on a quiet
+observation.**
+The plan gave a run two counters without saying which one an owner's answer
+names back. The implementation advanced both on every accepted write, and the
+Compose E2E run found what that costs: the observer polls on a schedule the
+owner cannot see, so a reply carrying the revision the page last read was
+refused as **This run changed elsewhere** whenever any observation — including
+one that learned nothing at all — had run in between. On the E2E stack that is
+five seconds; in production it is sixty, so anyone who takes a minute to answer
+is guaranteed to hit it.
+
+The two counters are now separated by what they are for. `run_version` remains
+BrainBuddy's observation version and the compare-and-set every background write
+is serialised on — unchanged, and still what `data-model.md` ("Write rule for
+background threads") describes. `revision` is the *user-edit* concurrency token
+and advances only when the write moves something the owner could have read and
+been answering; a pass that only records that the agent was asked again still
+refreshes `last_contact_at`/`last_observed_at`/`updated_at` and leaves the token
+alone. Materiality is decided by comparing values rather than by reusing the
+timeline's "did this append a row?" test, because the two sets are not the same:
+an observation carrying different artifacts, or clearing a cancellation request,
+is not a new timeline row but is a change every surface renders.
+
+Nothing in storage keys on `revision` — every conditional write on `agent_runs`
+matches `json_extract(payload, '$.run_version')` (`repository.py` lines 1078 and
+1186) and `save_run` is an unconditional upsert under the process-wide
+`command_lock` — so a write that does not bump it is safe. No request or
+response shape changed, so `contracts/api-deltas.md` line 246 ("unchanged
+requests") stays true.

@@ -210,6 +210,10 @@ SCOPE_REAUTH_WINDOW = timedelta(minutes=15)
 RESERVATION_TTL = timedelta(hours=1)
 DEFAULT_REPLY_WINDOW = timedelta(minutes=5)
 
+#: Stands in for "this run has no such field", so a key nobody recognises reads
+#: as a change rather than as an absence that happens to compare equal to it.
+_UNSET = object()
+
 #: Failures that prove the message was refused before the agent could act on it.
 #:
 #: Everything *not* here is ambiguous by construction and becomes **Delivery
@@ -2352,6 +2356,45 @@ class AgentRelayService:
         "result_availability",
     )
 
+    #: What a write may refresh without changing anything the owner is looking
+    #: at. `revision` is the owner's *edit* token — the value a reply names back
+    #: — so a pass that only records that the agent was asked again must leave
+    #: it alone (FR-010). `run_version` is the separate observation version and
+    #: is unaffected by this rule.
+    _CONTACT_ONLY_RUN_FIELDS: frozenset[str] = frozenset(
+        {
+            "last_contact_at",
+            "last_observed_at",
+            "next_observation_at",
+            "observation_trigger_pending",
+            "updated_at",
+            "revision",
+        }
+    )
+
+    def _changes_what_the_owner_reads(
+        self, current: AgentRunDocument, updates: dict[str, Any]
+    ) -> bool:
+        """Whether this write moves anything the owner could be answering.
+
+        Compared by value rather than inferred from `append_row`, because the
+        two are not the same set: an observation carrying different artifacts
+        or clearing a cancellation request counts as "unchanged" for the
+        timeline — `_observation_is_unchanged` deliberately does not compare
+        those — while still rewriting fields every surface renders. Asking what
+        actually differs keeps this rule at least as strict as the old
+        unconditional bump wherever the owner would notice.
+
+        Unknown keys fail safe: something this method does not recognise is
+        treated as a change rather than quietly excused.
+        """
+
+        return any(
+            field not in self._CONTACT_ONLY_RUN_FIELDS
+            and getattr(current, field, _UNSET) != value
+            for field, value in updates.items()
+        )
+
     def _observation_is_unchanged(
         self, current: AgentRunDocument, observation: Observation
     ) -> bool:
@@ -2546,10 +2589,19 @@ class AgentRelayService:
             if trigger != "schedule" or current.observation_trigger_pending:
                 # The pass that ran is the one that was owed.
                 updates.setdefault("observation_trigger_pending", None)
-            updates.update(
-                updated_at=max(current.updated_at, now),
-                revision=current.revision + 1,
-            )
+            # `revision` is the owner's edit token, so it moves only when this
+            # write moves something the owner could have been answering. An
+            # observation that finds the agent saying exactly what it said last
+            # time is contact and nothing else: bumping here would make every
+            # answer slower than one polling interval — five seconds on the E2E
+            # stack, sixty in production — fail as "this run changed elsewhere"
+            # (FR-010). Nothing in storage keys on `revision`: the single-writer
+            # guarantee is `command_lock` plus the `run_version` compare-and-set
+            # in `repository._upsert_run`'s conditional callers (data-model.md,
+            # "Write rule for background threads").
+            if self._changes_what_the_owner_reads(current, updates):
+                updates["revision"] = current.revision + 1
+            updates["updated_at"] = max(current.updated_at, now)
             updated = current.model_copy(update=updates)
             if "next_observation_at" not in updates:
                 # Every write is also a scheduling decision, made here because

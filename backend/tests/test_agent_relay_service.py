@@ -6863,6 +6863,10 @@ class TestApplyObservation:
         assert len(again.events) == 1
         assert again.last_contact_at == clock.now
         assert again.last_observed_at == clock.now
+        # Nor a new edit token: the owner has nothing new to read, so a reply
+        # written against `first` is still an answer to what they were asked
+        # (FR-010).
+        assert again.revision == first.revision
         assert observed.audit_actions().count("observation_accepted") == 1
 
     def test_014_FR_008_a_differing_observation_appends_one_row_with_its_trigger(
@@ -7098,6 +7102,110 @@ class TestApplyObservation:
         assert run.capabilities.cancel is False
         assert run.last_contact_at == contact
         assert run.reported_state == "running", "no failure is claimed"
+
+
+class TestReplyAcrossTheObservationSchedule:
+    """014-FR-010, 014-FR-008. An answer outlives the polling that runs under it.
+
+    `revision` is the token the owner's reply names back, and the observer runs
+    on a schedule the owner cannot see. If an observation that learned nothing
+    still advanced that token, then every answer slower than one polling
+    interval would be refused as "this run changed elsewhere" — five seconds on
+    the E2E stack, sixty in production. The run did not change; only the moment
+    BrainBuddy last asked did.
+    """
+
+    QUESTION = "Which environment?"
+
+    def _blocked(self, observed: ObservedRelay) -> Any:
+        """Put the run in the state that offers a reply, and read it once."""
+
+        observed.report("blocked", text=self.QUESTION)
+        return observed.projection()
+
+    def test_014_FR_010_an_answer_survives_the_polls_taken_while_it_was_typed(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """AC-015. Three unchanged passes, and the answer is still an answer."""
+
+        read = self._blocked(observed)
+
+        for _ in range(3):
+            clock.advance(timedelta(seconds=5))
+            observed.report("blocked", text=self.QUESTION)
+
+        current = observed.service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        assert current.revision == read.revision, (
+            "an observation that learned nothing must not invalidate an answer "
+            "the owner is still typing"
+        )
+        # Contact still moves: the agent did answer, three times.
+        assert current.last_contact_at == clock.now
+
+        replied = observed.service.reply_to_run(
+            observed.run_id,
+            AgentReplyRequest(message="Use staging.", expected_revision=read.revision),
+            owner_id=OWNER,
+            idempotency_key="idem-reply-after-polls",
+        )
+
+        assert replied.id == observed.run_id
+        assert sends(observed.a2a_client), "the answer reached the agent"
+
+    def test_014_FR_010_an_answer_to_a_question_that_moved_is_still_refused(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """AC-015. The guard still guards: only *no news* is harmless.
+
+        The other half of the same rule. Loosening the token so a quiet poll
+        stops invalidating an answer must not loosen it for an observation that
+        replaced the very question being answered.
+        """
+
+        read = self._blocked(observed)
+        clock.advance(timedelta(seconds=5))
+        observed.report("blocked", text="Which region?")
+
+        with pytest.raises(ConflictError) as caught:
+            observed.service.reply_to_run(
+                observed.run_id,
+                AgentReplyRequest(
+                    message="Use staging.", expected_revision=read.revision
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-reply-stale",
+            )
+
+        assert "changed elsewhere" in str(caught.value)
+
+    def test_014_FR_008_revision_moves_only_when_the_owner_would_see_it(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """The two version counters answer two different questions.
+
+        `run_version` is BrainBuddy's observation version and orders reports
+        against each other; `revision` is the owner's edit token and orders an
+        answer against what the owner read. A quiet poll moves neither.
+        """
+
+        self._blocked(observed)
+        before = observed.service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+
+        clock.advance(timedelta(seconds=5))
+        observed.report("blocked", text=self.QUESTION)
+        unchanged = observed.service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+
+        assert unchanged.revision == before.revision
+        assert unchanged.run_version == before.run_version
+        assert unchanged.last_contact_at == clock.now
+        assert unchanged.last_observed_at == clock.now
+
+        clock.advance(timedelta(seconds=5))
+        observed.report("running", text="Cloning the repository")
+        differing = observed.service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+
+        assert differing.revision == before.revision + 1
+        assert differing.run_version == before.run_version + 1
 
 
 class TestReplyOverTheA2AWire:
