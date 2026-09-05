@@ -248,7 +248,7 @@ Legend:
 | edit/remove/reorder candidate | remove at `bbm-app.jsx:354`; labels imply edit/date but do not implement them | only remove mutates local review array | user patches; edits lock fields; freeze invalidation | edit/remove **T1**, reorder **T2** |
 | add date in review | `bbm-app.jsx:351`; `bbm-screens.jsx:190` | label only | proposal field patch; exact date semantics | **T2** |
 | explicit confirmation | `bbm-app.jsx:360` | appends fixed items directly to local Inbox | `confirm` idempotent batch commit | **T1**, relabel as confirm/add |
-| close/discard/reopen/resume | close/discard at `bbm-app.jsx:342,361`; no resume UI | close currently discards; no persisted operation | UI close never cancels; discard is explicit cancel; refetch projection on reopen | **T1** |
+| close/discard/reopen/resume | close/discard at `bbm-app.jsx:342,361`; no resume UI | close currently discards; no persisted operation | UI close never cancels; discard is explicit cancel behind an inline confirmation; refetch projection on reopen | **T1** |
 | offline/chunk retry | absent | absent | numbered chunks, manifest, missing-chunk resume | **T1 safety requirement** |
 | retryable/terminal errors | absent | absent | operation error states and checkpoint retry | **T1** |
 | commit progress/partial result | absent | absent | action DAG and per-action results | **T1** |

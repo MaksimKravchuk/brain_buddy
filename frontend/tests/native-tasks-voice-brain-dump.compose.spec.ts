@@ -685,7 +685,26 @@ test("Voice Brain Dump shows a mixed-language preview as transcript and reviews 
       "a review edit must lock the title on the reconciled proposal"
     );
     assertArrayLength(await listInboxTasks(page), 0, "Inbox before explicit Save");
-    await page.getByRole("button", { name: "Discard all" }).click();
+  });
+
+  await test.step("discarding the review is confirmed inline and cancels the operation", async () => {
+    await page.getByRole("button", { name: "Discard all", exact: true }).click();
+    // The trigger gives way to the question, so only the destructive answer can go on.
+    await expect(page.getByRole("group", { name: /Discard all tasks\?/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Discard all", exact: true })).toHaveCount(0);
+    const cancelResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/brain-dump-operations/${operationId}/cancel`) && response.request().method() === "POST"
+    );
+    await page.getByRole("button", { name: "Discard all tasks" }).click();
+    await cancelResponse;
+    await expect(page.getByRole("button", { name: "Record" })).toBeVisible();
+    const discarded = await apiGet<BrainDumpOperation>(page, `/api/brain-dump-operations/${operationId}`);
+    assertCondition(
+      discarded.status === "cancelled",
+      `discarding the review must cancel the operation; status=${discarded.status}`
+    );
+    assertArrayLength(await listInboxTasks(page), 0, "Inbox after discarding the review");
   });
 });
 
@@ -809,8 +828,14 @@ test("Voice Brain Dump failures are visible and preserve recoverable live sessio
     await expect(transcript).toContainText("prepare quarterly report");
     await recoveryPage.getByRole("button", { name: "Stop & review" }).click();
     await expect(recoveryPage.getByRole("alert")).toBeVisible();
-    await recoveryPage.getByRole("button", { name: "Discard" }).click();
+    // Discard asks first; the confirmed cancel is then refused by the stale
+    // revision, and the question must close with the attempt rather than stay
+    // open over the alert.
+    await recoveryPage.getByRole("button", { name: "Discard", exact: true }).click();
+    await recoveryPage.getByRole("button", { name: "Discard recording" }).click();
     await expect(recoveryPage.getByRole("alert")).toBeVisible();
+    await expect(recoveryPage.getByRole("button", { name: "Discard recording" })).toHaveCount(0);
+    await expect(recoveryPage.getByRole("button", { name: "Discard", exact: true })).toBeVisible();
     await expect(transcript).toContainText("prepare quarterly report");
 
     // The stale local projection intentionally rejected several commands above.
