@@ -384,3 +384,28 @@ An auditor cannot waive its own finding. These need a human.
   FR-006, FR-010 and FR-016. Every test it names exists and asserts what the
   clause says. The one thing it promised that had not landed — `AC-011` in the
   T051 docstrings — landed during the re-check.
+
+## Second review round: verified, not re-graded
+
+After this grade, Codex reviewed the five stacked pull requests (#203–#207) and
+returned fourteen findings; the orchestrator verified each against the code
+(all fourteen real, two of them wording and test-shape defects in the planning
+artifacts) and two implementer lanes fixed them test-first — commits `12fc101`
+… `a3ad09f` (backend and planning) and `74babcf` … `a80e985` (web, iOS, e2e),
+merged at `8ec4f94`, with `review.md` deviations (k)–(s) and their contract and
+data-model corrections. `delivery-verifier` then ran the full chain on the merged
+tree `5958a4b`: backend 2977 passed (line 98.59 %, branch 95.69 %), web 956
+passed (99.00 / 97.91 / 98.72 / 99.20), iOS 1542 passed plus 32 integration
+checks (95.73 / 90.96 / 96.50 / 95.76), taxonomy OK on all three stores, 27/27
+requirements traced, each store one clean run. The stores were regenerated once
+more on `5d9ed3a` after `main` was merged in.
+
+**This round was not re-graded by the acceptance-auditor**: the product owner
+asked to release without spending another audit run. The verdict above therefore
+stands at `91b26b6`, with the second round's changes covered by the verifier and
+by the tests named in `review.md` (k)–(s) rather than by a criterion-by-criterion
+re-read. The criteria the round touched — FR-002, FR-003, FR-006, FR-009, FR-010,
+FR-012, FR-013, FR-015, FR-016, SC-003, SC-007, SC-008 — each gained tests that
+fail if the fix is reverted; none of the six fixes of the first round was undone.
+An auditor re-grade remains available as a post-freeze step if the reviewer wants
+one.
