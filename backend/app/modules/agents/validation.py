@@ -13,13 +13,21 @@ def sanitize_endpoint_input(
     model_name: str,
     data: object,
     endpoint_validator: Callable[[str], str],
+    *,
+    field: str = "endpoint_url",
 ) -> object:
-    """Validate an endpoint without retaining its rejected value in diagnostics."""
+    """Validate an endpoint without retaining its rejected value in diagnostics.
 
-    if not isinstance(data, Mapping) or "endpoint_url" not in data:
+    ``field`` exists because feature 014 renamed the *API* field to
+    ``agent_address`` while deliberately keeping the *storage* key as
+    ``endpoint_url`` (the 007 image must still parse a 014 row on rollback). One
+    sanitiser serves both rather than two near-identical copies drifting apart.
+    """
+
+    if not isinstance(data, Mapping) or field not in data:
         return data
 
-    endpoint = data["endpoint_url"]
+    endpoint = data[field]
     message: str | None = None
     if not isinstance(endpoint, str):
         message = "Input should be a valid string"
@@ -39,7 +47,7 @@ def sanitize_endpoint_input(
         [
             {
                 "type": "value_error",
-                "loc": ("endpoint_url",),
+                "loc": (field,),
                 "input": _REDACTED,
                 "ctx": {"error": ValueError(message)},
             }

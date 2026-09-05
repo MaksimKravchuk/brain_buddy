@@ -216,6 +216,20 @@ def create_app() -> FastAPI:
             app.state.voice_sweep_wake_event,
         )
     if background_maintenance_enabled:
+        # Once, at boot, before a request can be served: every exchange a
+        # restart left mid-flight is settled by what it can prove. A queued one
+        # never left, so it is **Not sent** and offered again; a started one is
+        # resolved by lookup only, because no background thread ever resends
+        # (AC-032). Gated with the other maintenance for the same reason the
+        # sweeps are: the test suite builds many short-lived apps in one
+        # process, and a boot-time scan over a shared, process-wide lock would
+        # race unrelated tests.
+        app.state.container.agent_observer.recover_interrupted_exchanges()
+        # Started next to the maintenance thread and under the same gate: the
+        # observer is the only thing that ever moves a dispatched run forward,
+        # and a test suite that built many short-lived apps in one process
+        # would otherwise have as many schedulers racing one another.
+        app.state.container.agent_observer.start()
         app.state.privacy_maintenance_thread = _start_privacy_maintenance_thread(
             app.state.container,
             app.state.privacy_maintenance_stop_event,
@@ -232,6 +246,11 @@ def create_app() -> FastAPI:
             app.state.voice_sweep_stop_event.set()
             app.state.voice_sweep_wake_event.set()
             app.state.privacy_maintenance_stop_event.set()
+            # Stops the scheduler, joins it under a bound, and cancels only
+            # the pool work that never started: an exchange already in flight
+            # may be at the agent, and dropping it would leave a run nobody
+            # will ever settle.
+            app.state.container.agent_observer.shutdown()
             if app.state.voice_sweep_thread is not None:
                 app.state.voice_sweep_thread.join(timeout=5)
             if app.state.privacy_maintenance_thread is not None:
