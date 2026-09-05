@@ -106,13 +106,6 @@ def _require_idempotency_key(idempotency_key: str | None) -> str:
     return idempotency_key
 
 
-def _too_large() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-        detail="Event payload is too large.",
-    )
-
-
 def _declared_body_length(request: Request) -> int | None:
     """The caller's own ``Content-Length``, or ``None`` if it is unusable.
 

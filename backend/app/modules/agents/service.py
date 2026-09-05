@@ -868,41 +868,6 @@ class AgentRelayService:
             day=now.astimezone(UTC).date().isoformat(),
         )
 
-    def _audit_authenticated_event_rejection(
-        self,
-        *,
-        owner_id: str,
-        connection_id: str,
-        rejection_class: str,
-    ) -> None:
-        """Keep one coarse rejection fact per connection, class, and UTC day.
-
-        All key material comes from authenticated server-known state. In
-        particular, attacker-controlled event and run identifiers never affect
-        row cardinality or appear in the durable payload.
-        """
-
-        now = self._now()
-        bucket = now.astimezone(UTC).date().isoformat()
-        identity = "\x1f".join(
-            (owner_id, connection_id, rejection_class, bucket)
-        ).encode("utf-8")
-        audit_id = f"agentaudit_rejection_{hashlib.sha256(identity).hexdigest()[:24]}"
-        self.agent_repo.append_audit(
-            AgentAuditEntryDocument(
-                id=audit_id,
-                owner_id=owner_id,
-                action="event_rejected",
-                outcome=rejection_class,
-                connection_id=connection_id,
-                created_at=now,
-            )
-        )
-        # Semantic checks run inside the owner transaction. Land this coarse row
-        # before EventRejected unwinds and rolls that transaction back; no event
-        # or projection mutation occurs before any rejection site.
-        self.agent_repo.commit_checkpoint()
-
     def _validate_endpoint(self, endpoint_url: str) -> None:
         try:
             validate_destination(

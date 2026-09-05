@@ -547,6 +547,57 @@ class TestConnectionRoutes:
 
         assert response.status_code == 404
 
+    def test_014_FR_003_replacing_the_credential_needs_the_password_and_the_revision(
+        self, client: TestClient
+    ) -> None:
+        """AC-003 over HTTP. The route is the only way a credential is replaced.
+
+        Both proofs are the point: the account password, because a stolen
+        session must not be able to repoint an agent's authentication; and the
+        revision the owner was looking at, because a credential replaced
+        against a stale view is a race the owner never saw.
+        """
+
+        created = register_connection(client, key="k-credential")
+
+        wrong_password = client.post(
+            f"/api/agent-connections/{created['id']}/credential",
+            headers={"Idempotency-Key": "k-credential-wrong"},
+            json={
+                "credential": "Bearer replacement",
+                "current_password": "not-the-account-password",
+                "expected_revision": created["revision"],
+            },
+        )
+        stale_revision = client.post(
+            f"/api/agent-connections/{created['id']}/credential",
+            headers={"Idempotency-Key": "k-credential-stale"},
+            json={
+                "credential": "Bearer replacement",
+                "current_password": TEST_USER_PASSWORD,
+                "expected_revision": created["revision"] + 5,
+            },
+        )
+        replaced = client.post(
+            f"/api/agent-connections/{created['id']}/credential",
+            headers={"Idempotency-Key": "k-credential-ok"},
+            json={
+                "credential": "Bearer replacement",
+                "current_password": TEST_USER_PASSWORD,
+                "expected_revision": created["revision"],
+            },
+        )
+
+        assert wrong_password.status_code == 403, wrong_password.text
+        assert stale_revision.status_code == 409, stale_revision.text
+        assert replaced.status_code == 200, replaced.text
+        body = replaced.json()
+        assert body["revision"] > created["revision"]
+        # The replacement is stored, never returned: this response is read by
+        # the client that just sent it and by nothing else (FR-003).
+        assert "credential" not in body
+        assert "Bearer replacement" not in replaced.text
+
     def test_014_FR_012_creating_a_connection_returns_no_secret_at_all(
         self, client: TestClient
     ) -> None:
@@ -2259,6 +2310,34 @@ class TestPushCallbackRoute:
         )
 
         assert response.status_code == 413
+
+    @pytest.mark.parametrize(
+        ("content_length", "why"),
+        [
+            ("not-a-number", "a junk header must not decide the response"),
+            ("-1", "a negative length is not a declaration"),
+        ],
+    )
+    def test_014_FR_008_a_malformed_content_length_falls_back_to_the_stream_bound(
+        self, client: TestClient, container: Container, content_length: str, why: str
+    ) -> None:
+        """Step 1's header shortcut is a shortcut, never the defence.
+
+        A caller controls its own `Content-Length`, so a value BrainBuddy cannot
+        parse is treated as "not declared" and the streaming bound decides. The
+        alternative — erroring on the header — would let a stranger choose which
+        response an unauthenticated route returns.
+        """
+
+        run_id, token = self._pushable(client, container, key=f"k-push-cl-{len(why)}")
+
+        response = client.post(
+            f"/api/a2a/push/{run_id}/{token}",
+            content=b"{}",
+            headers={"Content-Length": content_length},
+        )
+
+        assert response.status_code == 204, why
 
     def test_global_push_limiter_trips_before_the_run_lookup(
         self, client: TestClient, container: Container

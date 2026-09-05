@@ -659,8 +659,6 @@ def project_run_for_access(run: AgentRunDocument, *, now: datetime) -> AgentRunD
 # edit away from two answers to "what is this run doing?".
 
 
-CANCEL_UNSUPPORTED_LINE = "Cancellation not supported by this agent."
-CANCEL_UNCONFIRMED_LINE = "Cancellation request unconfirmed — you can try again."
 RESULT_TOO_LARGE_LINE = "Result unavailable (too large to store)."
 
 
@@ -740,21 +738,6 @@ def primary_state_label(
         if applies:
             return label
     return "Not sent"
-
-
-def cancel_outcome_line(run: AgentRunDocument) -> str | None:
-    """The secondary sentence a cancel outcome earns, if any.
-
-    Never the primary label: what the agent said about cancellation is a
-    different fact from what the run is doing, and collapsing the two would
-    hide a run that is still working behind a refusal notice.
-    """
-
-    if run.cancel_outcome in CANCEL_OUTCOMES_WITHDRAWING_THE_CONTROL:
-        return CANCEL_UNSUPPORTED_LINE
-    if run.cancel_outcome == "unconfirmed":
-        return CANCEL_UNCONFIRMED_LINE
-    return None
 
 
 def reply_control_offered(run: AgentRunDocument) -> bool:
@@ -901,8 +884,6 @@ class AgentIdempotencyRecord(StorageBaseModel):
 __all__ = [
     "A2A_PROTOCOL_VERSION",
     "CANCEL_OUTCOMES_WITHDRAWING_THE_CONTROL",
-    "CANCEL_UNCONFIRMED_LINE",
-    "CANCEL_UNSUPPORTED_LINE",
     "PREDECESSOR_ENDED_PREFIX",
     "RESULT_TOO_LARGE_LINE",
     "TASK_SUCCESSION_SUMMARY",
@@ -915,7 +896,6 @@ __all__ = [
     "AgentRunEventKind",
     "AgentRunEventTrigger",
     "cancel_control_offered",
-    "cancel_outcome_line",
     "content_is_due",
     "observation_is_suspended",
     "primary_state_label",
