@@ -192,7 +192,7 @@ function AutosaveStatus({ snapshot }: { snapshot?: AutosaveSnapshot }): React.JS
     retrying: "Retrying…",
     saved: "Saved",
     conflicted: "Not saved",
-    failed: "Not saved"
+    failed: snapshot.error?.kind === "protocol" ? "Save unverified" : "Not saved"
   };
   const announcements: Partial<Record<AutosaveSnapshot["status"], string>> = {
     saving: "Saving changes",
@@ -200,7 +200,7 @@ function AutosaveStatus({ snapshot }: { snapshot?: AutosaveSnapshot }): React.JS
     retrying: "Retrying your edits",
     saved: "All changes saved",
     conflicted: "Task changed elsewhere",
-    failed: "Changes not saved"
+    failed: snapshot.error?.kind === "protocol" ? "Could not verify whether changes were saved" : "Changes not saved"
   };
   const Icon = snapshot.status === "saving" || snapshot.status === "retrying"
     ? LoaderCircle
@@ -208,7 +208,7 @@ function AutosaveStatus({ snapshot }: { snapshot?: AutosaveSnapshot }): React.JS
   return (
     <>
       <span className={`flex min-w-0 items-center gap-1 whitespace-nowrap text-xs ${snapshot.status === "saved" ? "text-[#065f46]" : "text-[#92400e]"}`}>
-        <Icon className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin motion-reduce:animate-none" aria-hidden />
+        <Icon className={`h-3.5 w-3.5 shrink-0 ${snapshot.status === "saving" || snapshot.status === "retrying" ? "motion-safe:animate-spin motion-reduce:animate-none" : ""}`} aria-hidden />
         <span>{labels[snapshot.status]}</span>
       </span>
       <span data-testid="autosave-announcement" className="sr-only" aria-live="polite" aria-atomic="true">{announcements[snapshot.status]}</span>
@@ -222,19 +222,29 @@ function AutosaveRecovery({ snapshot, controller }: { snapshot?: AutosaveSnapsho
   if (!snapshot || !controller || (snapshot.status !== "conflicted" && snapshot.status !== "failed" && snapshot.status !== "retrying")) return null;
   const conflict = snapshot.status === "conflicted";
   const offline = snapshot.error?.offline;
-  const heading = conflict ? "Task changed elsewhere" : offline ? "You’re offline" : "Couldn’t save changes";
+  const protocol = snapshot.error?.kind === "protocol";
+  const checkSavedVersion = protocol && !snapshot.inFlight;
+  const heading = conflict ? "Task changed elsewhere" : protocol ? "Couldn’t verify the saved version" : offline ? "You’re offline" : "Couldn’t save changes";
   const body = conflict
-    ? snapshot.conflict?.refetchFailed ? "Your edits are safe here. Check your connection and try again." : "Your edits are safe here. Retry to apply them to the latest task."
-    : offline ? "Your edits are kept on this device. Retry when you’re back online." : "Your edits are safe here. Check your connection and try again.";
+    ? snapshot.conflict?.refetchFailed ? "The latest task couldn’t be loaded. Your edits remain in this tab. Try again." : "Your edits remain in this tab. Retry to apply them to the latest task."
+    : protocol ? snapshot.error?.refetchFailed ? "The saved version couldn’t be loaded or verified. Your edits remain in this tab. Try checking again."
+      : checkSavedVersion ? "The server returned an unexpected task version. Your edits remain in this tab. Check the saved version before retrying."
+        : "The server response couldn’t be verified. Your edits remain in this tab. Retry to confirm the save."
+      : offline ? "Your edits remain in this tab. Retry when you’re back online."
+        : snapshot.error?.kind === "unauthorized" ? "Your session has ended. Keep this tab open and sign in again before retrying."
+          : snapshot.error?.kind === "unavailable" ? "This task is no longer available. Your edits remain in this tab so you can copy them."
+            : snapshot.error?.kind === "validation" ? "The server didn’t accept this change. Review the error details before retrying."
+              : "Your edits remain in this tab. Try again when the service is available.";
   const errorDetail = !conflict && snapshot.error?.message && snapshot.error.message !== "Couldn’t save changes"
     ? snapshot.error.message
     : null;
   const retryDisabled = snapshot.status === "retrying"
+    || Boolean(!conflict && !protocol && snapshot.error && !snapshot.error.retryAllowed)
     || Boolean(conflict && !snapshot.conflict?.latestServerTask && !snapshot.conflict?.refetchFailed);
   return (
     <section role="alert" className="mx-4 mb-3 rounded-xl border border-[#fde68a] bg-[#fffbeb] p-3 text-[#92400e]">
       <h3 ref={headingRef} tabIndex={-1} className="m-0 text-sm font-semibold">{heading}</h3>
-      {errorDetail ? <p className="mb-0 mt-1 text-xs leading-relaxed">{errorDetail}</p> : null}
+      {errorDetail ? <details className="mt-1 text-xs leading-relaxed"><summary className="cursor-pointer focus-visible:shadow-ring-focus">Error details</summary><p className="mb-0 mt-1">{errorDetail}</p></details> : null}
       <p className="mb-3 mt-1 text-xs leading-relaxed">{snapshot.status === "retrying" ? "Applying your edits to the latest task…" : body}</p>
       {confirmDiscard ? (
         <div>
@@ -246,7 +256,7 @@ function AutosaveRecovery({ snapshot, controller }: { snapshot?: AutosaveSnapsho
         </div>
       ) : (
         <div className="flex gap-2 max-[339px]:flex-col">
-          <button type="button" disabled={retryDisabled} aria-disabled={retryDisabled} className="min-h-11 flex-1 rounded-lg bg-[#92400e] px-3 text-sm font-semibold text-white focus-visible:shadow-ring-focus disabled:opacity-60" onClick={() => snapshot.conflict?.refetchFailed ? void controller.retryRefetch() : controller.retry()}>{conflict ? "Retry my edits" : "Retry"}</button>
+          <button type="button" disabled={retryDisabled} aria-disabled={retryDisabled} className="min-h-11 flex-1 rounded-lg bg-[#92400e] px-3 text-sm font-semibold text-white focus-visible:shadow-ring-focus disabled:opacity-60" onClick={() => checkSavedVersion || snapshot.conflict?.refetchFailed ? void controller.retryRefetch() : controller.retry()}>{checkSavedVersion ? "Check saved version" : protocol ? "Retry verification" : conflict ? "Retry my edits" : "Retry"}</button>
           {conflict ? <button type="button" className="min-h-11 flex-1 rounded-lg border border-[#fde68a] px-3 text-sm font-medium focus-visible:shadow-ring-focus" onMouseDown={(event) => event.preventDefault()} onClick={() => setConfirmDiscard(true)}>Discard my edits</button> : null}
         </div>
       )}
