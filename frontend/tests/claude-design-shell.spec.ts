@@ -302,11 +302,12 @@ test("clicking a task opens the docked right-side detail panel", async ({ page }
     const panel = await page.getByRole("complementary", { name: "Task detail" }).boundingBox();
     const details = await page.getByRole("textbox", { name: "Details", exact: true }).boundingBox();
     const properties = await page.getByRole("region", { name: "Task properties" }).boundingBox();
-    expect(panel?.width).toBeGreaterThanOrEqual(380);
-    expect(details).not.toBeNull();
-    expect(properties).not.toBeNull();
-    expect(details!.y + details!.height).toBeLessThanOrEqual(properties!.y);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    await attachment("Task content geometry", JSON.stringify({ panel, details, properties, overflow }), ContentType.JSON);
+    if (!panel || !details || !properties) throw new Error("Expected visible task content and property geometry");
+    if (panel.width < 380) throw new Error(`Expected a detail panel at least 380px wide, received ${panel.width}px`);
+    if (details.y + details.height > properties.y) throw new Error("Expected task details before secondary properties");
+    if (overflow !== 0) throw new Error(`Expected no workspace horizontal overflow, received ${overflow}px`);
   });
 
   await page.getByRole("button", { name: "Close" }).click();
@@ -378,8 +379,13 @@ test("mobile task detail wraps a long task title without horizontal overflow", a
       throw new Error(`Expected a fully visible wrapped mobile title, received ${JSON.stringify(titleMetrics)}`);
     }
     const completionTarget = await page.getByRole("button", { name: "Complete task", exact: true }).boundingBox();
-    expect(completionTarget?.width).toBeGreaterThanOrEqual(44);
-    expect(completionTarget?.height).toBeGreaterThanOrEqual(44);
+    await attachment("Mobile detail geometry", JSON.stringify({ titleMetrics, completionTarget }), ContentType.JSON);
+    // Transform matrices can report a 44px target as 43.999999px. Allow only
+    // 0.01 CSS pixel of measurement rounding, not an undersized touch control.
+    const measurementTolerance = 0.01;
+    if (!completionTarget || completionTarget.width < 44 - measurementTolerance || completionTarget.height < 44 - measurementTolerance) {
+      throw new Error(`Expected a completion target of at least 44×44 CSS pixels, received ${JSON.stringify(completionTarget)}`);
+    }
   });
 });
 
