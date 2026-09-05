@@ -363,3 +363,51 @@ as it was).
 `data-model.md` §1 now says so in one sentence, and T035's text describes the
 corrected assertion. No production code changed: the refusal was already there
 and it is the tests that had described an impossible state. T035's tick stands.
+
+**(m) A restart caught mid-*reply* must not take the start's delivery back.**
+`recover_open_exchange` treated every interrupted exchange the same and set
+`dispatch_state: delivery_unconfirmed` on all of them. For a `reply` that is
+false and dangerous: the start of such a run was delivered — `dispatch_state ==
+"sent"` is the record of it — and only the owner's answer is in doubt. Marking
+it `delivery_unconfirmed` made the run eligible for **Check again**, whose
+resend path sends `_start_message`. One restart during one reply was enough to
+put a second copy of the hand-off at an agent that already had it, which is
+exactly the duplicate SC-008 exists to prevent.
+
+Recovery now branches on `exchange_kind`. A start is unchanged. A reply is
+marked `interrupted` and nothing else; the lookup runs, an adopted task is
+applied, and the reply command is reconciled. Two things had to become durable
+for that to be possible at all: the reply's command row and the run's
+`reply_pending_command_id` are now written when the exchange *opens*, as
+`unconfirmed`, the way `dispatch_run` has always written its `start` row at
+reservation. Writing them only after the send meant a restart mid-reply left no
+record that the owner had answered — no `reply_pending`, nothing for a later
+observation to confirm, and the answer gone from a page that had shown it.
+`_close_reply_exchange` rewrites the row with the outcome and now also aligns
+the run's marker directly, because an observation write is refused outright for
+a run whose connection was disconnected or whose identifiers expired, and a
+marker left behind there would claim an answer is outstanding that the agent
+had already acknowledged.
+
+**Contract correction.** `data-model.md` §4 and `contracts/a2a-wire.md` said a
+restart-interrupted reply is confirmed "by succession evidence — a task in the
+run's conversation created after the reply command — because Hermes serves no
+history". That rule was never implemented, and it should not be: a task created
+after the command is not evidence that the agent read the *answer*, and any
+successor the agent created from the start message alone would be read as an
+acknowledgement the user never got. Recovery therefore confirms only on the
+agent's own record — the reply's `messageId` in the task's `history[]`, the same
+correlation `_settle_reply_by_history` already uses for the observation path —
+and otherwise leaves the command `unconfirmed`, which is the state the run
+already knows how to show and which keeps the reply control offered. Both
+documents now say that. `data-model.md` §6 gains one audit action,
+`exchange_interrupted`, written once per interrupted reply recovery could not
+settle, whose outcome is the lookup's allowlisted transport code or
+`reply_unacknowledged`.
+
+Two existing crash-simulation tests
+(`TestRelayFailureRecoveryEdges::test_retry_after_a_post_send_save_failure_reconciles_the_reserved_command_id`
+and `::test_reply_retry_after_post_delivery_failure_reconciles_without_redelivery_after_terminal_callback`)
+broke a `save_command` fake on its *first* call to simulate an outage after the
+send. A reply now saves that row twice, so the fakes name the second one; the
+scenario they assert is unchanged.

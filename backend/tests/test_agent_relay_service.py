@@ -5909,12 +5909,16 @@ class TestRelayFailureRecoveryEdges:
             message="Use staging.", expected_revision=observed.projection().revision
         )
         save_command = service.agent_repo.save_command
-        failed_once = False
+        # A reply writes its command row twice: once *before* the send, which is
+        # what lets a restart find an answer that may already be at the agent,
+        # and once after, carrying the outcome. The crash being simulated is the
+        # second one — a storage outage that lost the answer, not the request.
+        saves = 0
 
         def fail_after_delivery(command: Any) -> None:
-            nonlocal failed_once
-            if not failed_once:
-                failed_once = True
+            nonlocal saves
+            saves += 1
+            if saves == 2:
                 raise RuntimeError("simulated post-delivery storage outage")
             save_command(command)
 
@@ -5953,12 +5957,14 @@ class TestRelayFailureRecoveryEdges:
             message="Use staging.", expected_revision=observed.projection().revision
         )
         save_command = service.agent_repo.save_command
-        failed_once = False
+        # The second save is the post-delivery one; the first is the pre-send
+        # reservation a restart would recover from (see the test above).
+        saves = 0
 
         def fail_after_delivery(command: Any) -> None:
-            nonlocal failed_once
-            if not failed_once:
-                failed_once = True
+            nonlocal saves
+            saves += 1
+            if saves == 2:
                 raise RuntimeError("simulated post-delivery storage outage")
             save_command(command)
 

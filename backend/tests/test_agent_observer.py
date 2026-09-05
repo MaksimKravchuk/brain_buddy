@@ -25,9 +25,11 @@ from app.modules.agents.repository import AgentRepository
 from app.modules.agents.secrets import SecretBox
 from app.modules.agents.service import AgentRelayService, TaskSnapshot
 from app.schemas.agents import (
+    AgentCheckDeliveryRequest,
     AgentConnectionCreateRequest,
     AgentHandoffConfirmRequest,
     AgentHandoffPreviewRequest,
+    AgentReplyRequest,
 )
 
 from .a2a_fakes import FakeA2AClient, FakeCardFetcher, card_summary, ready_discovery
@@ -688,6 +690,158 @@ class TestRestartRecovery:
         resolved = repo.get_run(run_id, owner_id=OWNER)
         assert resolved.agent_task_id is None
         assert resolved.dispatch_state == "delivery_unconfirmed"
+
+
+class TestRestartRecoveryOfAReply:
+    """A restart caught mid-*reply* is a different question from mid-hand-off.
+
+    The start of such a run was delivered — that is what `dispatch_state ==
+    "sent"` records — and only the owner's answer is in doubt. Treating the two
+    the same would take a settled delivery back to **Delivery unconfirmed**,
+    which is the one state whose resend path puts the *start* message on the
+    wire a second time.
+    """
+
+    def _interrupted_reply(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> str:
+        """A run whose reply exchange the process died inside of."""
+
+        run_id = dispatched(service, a2a_client, clock)
+        run = service.get_run(run_id, owner_id=OWNER)
+
+        def die(*args: Any, **kwargs: Any) -> A2AResult:
+            raise RuntimeError("the process stopped mid-send")
+
+        a2a_client.send_message = die  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError):
+            service.reply_to_run(
+                run_id,
+                AgentReplyRequest(
+                    message="Yes, go ahead", expected_revision=run.revision
+                ),
+                owner_id=OWNER,
+                idempotency_key="idem-reply",
+            )
+        del a2a_client.send_message
+        interrupted = repo.get_run(run_id, owner_id=OWNER)
+        assert interrupted.exchange_state == "open"
+        assert interrupted.exchange_kind == "reply"
+        assert interrupted.dispatch_state == "sent"
+        return run_id
+
+    def test_014_FR_010_a_restart_during_a_reply_never_reopens_the_start(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-030, AC-032, 014-SC-008. The start was delivered; only the answer is in doubt.
+
+        Marking a recovered *reply* `delivery_unconfirmed` would make the run
+        eligible for **Check again**, whose resend path sends `_start_message` —
+        a second copy of the hand-off the agent already has.
+        """
+
+        observer = AgentObserver(
+            service, exchange_executor=SynchronousExecutor(), clock=clock
+        )
+        run_id = self._interrupted_reply(service, repo, clock, a2a_client)
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        observer.recover_interrupted_exchanges()
+
+        recovered = repo.get_run(run_id, owner_id=OWNER)
+        assert recovered.exchange_state == "interrupted"
+        assert recovered.dispatch_state == "sent"
+        assert a2a_client.calls_to("SendMessage") == []
+
+        # And the check that would have resent finds nothing to resolve.
+        checked = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check",
+        )
+        assert checked.dispatch_state == "sent"
+        assert a2a_client.calls_to("SendMessage") == []
+
+    def test_014_FR_010_a_recovered_reply_stays_unacknowledged_until_the_agent_says_so(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-030. The honest state: sent, not acknowledged, and answerable again."""
+
+        observer = AgentObserver(
+            service, exchange_executor=SynchronousExecutor(), clock=clock
+        )
+        run_id = self._interrupted_reply(service, repo, clock, a2a_client)
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        observer.recover_interrupted_exchanges()
+
+        run = service.get_run(run_id, owner_id=OWNER)
+        assert run.reply_pending is True
+        assert [
+            command.delivery for command in run.commands if command.kind == "reply"
+        ] == ["unconfirmed"]
+        assert run.capabilities.reply is True
+        assert [
+            row.action
+            for row in repo.list_audit(owner_id=OWNER)
+            if row.action == "exchange_interrupted"
+        ] == ["exchange_interrupted"]
+
+    def test_014_FR_010_the_command_id_in_the_history_acknowledges_the_reply(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """The agent's own record of the message is the only evidence there is."""
+
+        observer = AgentObserver(
+            service, exchange_executor=SynchronousExecutor(), clock=clock
+        )
+        run_id = self._interrupted_reply(service, repo, clock, a2a_client)
+        command_id = repo.get_run(run_id, owner_id=OWNER).reply_pending_command_id
+        assert command_id is not None
+        answered = Task.model_validate(
+            {
+                "id": "t1",
+                "contextId": run_id,
+                "status": {"state": "TASK_STATE_WORKING"},
+                "history": [
+                    {
+                        "messageId": command_id,
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "Yes, go ahead"}],
+                    }
+                ],
+            }
+        )
+        a2a_client.script(
+            "ListTasks", A2AResult(ok=True, correlation_id="c", tasks=(answered,))
+        )
+
+        observer.recover_interrupted_exchanges()
+
+        run = service.get_run(run_id, owner_id=OWNER)
+        assert run.reply_pending is False
+        assert [
+            command.delivery for command in run.commands if command.kind == "reply"
+        ] == ["confirmed"]
+        assert repo.get_run(run_id, owner_id=OWNER).dispatch_state == "sent"
+        assert a2a_client.calls_to("SendMessage") == []
 
 
 @pytest.mark.parametrize("opted_in", [False, True])

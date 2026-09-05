@@ -113,10 +113,12 @@ start exchange that was still queued — never started — settles as **Not sent
 (`restarted_before_send`) and the hand-off is re-offered with the same ids; nothing is
 resent. A start exchange that had started is marked interrupted and resolved by the
 Probe / lookup above: adopt the task if found, else the run stays **Delivery unconfirmed**
-for the user's **Check again**. A reply exchange that had started is likewise resolved by
-lookup only and confirmed by succession evidence — a task in the run's conversation
-(`contextId` = run id) created after the reply command — because Hermes serves no history
-(F5); otherwise the reply stays unconfirmed. No BrainBuddy `SendMessage` is ever initiated
+for the user's **Check again**. A reply exchange that had started keeps its
+`dispatch_state` — the *start* was delivered, and calling that delivery unconfirmed would
+offer a **Check again** whose resend puts the hand-off at the agent twice — and is resolved by
+lookup only: the task it finds confirms the reply when the task's `history[]` names the reply's
+`messageId`, which is the agent's own record of having received it; otherwise the reply stays
+unconfirmed, the run says so, and a fresh reply is still offered. No BrainBuddy `SendMessage` is ever initiated
 without a user action: an exchange worker executes the send, and recovery only looks a run
 up.
 

@@ -230,12 +230,19 @@ run's identifier expiry at 90 d.
 | `outcome_code` | str \| None | `a2a_task_not_cancelable`, `a2a_unsupported_operation`, `a2a_task_not_found`, `a2a_internal_error`, `a2a_rate_limited` |
 | `agent_task_id_after` | str \| None | task returned by the reply exchange (identifier tier) |
 
+The row is durable **before** the send, exactly as a hand-off's is (`dispatch_run` writes its
+`start` row at reservation): a reply command row and the run's `reply_pending_command_id` are
+both written when the reply exchange opens, `delivery=unconfirmed`, and rewritten with the
+outcome when it closes. Writing it only afterwards is what used to leave a restart caught
+mid-reply with no record that the owner had answered at all.
+
 Confirmation rules: start → confirmed by `sent`; reply → confirmed only when a Task whose
 `history[]` contains our `messageId` is observed **or** the reply exchange itself returns a
-Task/Message (explicit correlation) **or**, after a restart interrupted the reply exchange
-(`exchange_kind=reply`), by succession evidence — a task in the run's conversation created
-after the command's `created_at`, found by the recovery lookup — because Hermes serves no
-history; a reply exchange is never resent. A reply whose exchange ended ambiguously and is
+Task/Message (explicit correlation). That includes the recovery lookup after a restart
+interrupted the reply exchange (`exchange_kind=reply`): the task it finds confirms the command
+when the task's history names it, and otherwise the command stays `unconfirmed` — the run
+shows the honest "sent, not acknowledged" state and a fresh reply is still offered. A reply
+exchange is never resent. A reply whose exchange ended ambiguously and is
 never acknowledged stays `unconfirmed` and is settled in the timeline when the observation
 suspension ends (§2); a later reply gets a new command id; cancel → confirmed when `CancelTask` returns a Task,
 `rejected` only on an explicit `-32002`/`-32004`/`-32601`/`-32001` answer, and left
@@ -253,7 +260,10 @@ exchange is still open returns the live projection without a second exchange.
 ## 6. Audit entry (`AgentAuditEntryDocument`) — unchanged shape, new actions
 
 Actions: `card_fetched`, `connection_tested`, `card_drift_detected`, `run_dispatched`,
-`exchange_closed`, `task_adopted`, `delivery_lookup_failed` (one row per delivery check whose
+`exchange_closed`, `exchange_interrupted` (one row per reply exchange a restart interrupted
+that recovery could not settle — outcome is the lookup's allowlisted transport code or
+`reply_unacknowledged`; the run keeps `dispatch_state=sent`, because the *start* was
+delivered and only the owner's answer is unresolved), `task_adopted`, `delivery_lookup_failed` (one row per delivery check whose
 correlation-ID lookup did not come back — outcome is the allowlisted transport code, and the
 run is left exactly as it was: an unanswered lookup is not evidence that nothing exists, so it
 licenses no resend, FR-006/SC-008), `task_succession_recorded` (one row per `task_succession`

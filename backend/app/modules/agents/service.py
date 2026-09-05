@@ -3275,43 +3275,103 @@ class AgentRelayService:
 
         Resolved by lookup alone. The message may already be at the agent, so
         the only safe question is "is there a task in this conversation?" — and
-        the only safe answer to "no" is to leave the run **Delivery unconfirmed**
-        for the user's own **Check again**. A resend is a send, and no send is
-        ever initiated without a user action.
+        the only safe answer to "no" is to leave the run as it was, for the
+        user's own **Check again**. A resend is a send, and no send is ever
+        initiated without a user action.
+
+        Which message was in flight decides what "interrupted" costs. A **start**
+        leaves the delivery itself in doubt, so the run becomes **Delivery
+        unconfirmed**. A **reply**'s start was delivered — `dispatch_state ==
+        "sent"` is the record of it — and only the owner's answer is unresolved;
+        moving that run to **Delivery unconfirmed** would make it eligible for a
+        **Check again** whose resend path sends `_start_message`, putting a
+        second copy of the hand-off at an agent that already has it (SC-008).
+        """
+
+        run = self._mark_exchange_interrupted(run_id, owner_id=owner_id)
+        if run is None:
+            return
+        connection = self.agent_repo.get_connection(
+            run.connection_id, owner_id=owner_id
+        )
+        outcome = self._lookup_task(run, connection)
+        if outcome.task is not None:
+            self.apply_observation(
+                run.id,
+                owner_id=owner_id,
+                observation=project_observation(
+                    outcome.task, now=self._now(), limits=self.observation_limits
+                ),
+                based_on=run.run_version,
+                extra={
+                    "dispatch_state": "sent",
+                    "dispatch_error_code": None,
+                    "exchange_state": "closed",
+                },
+            )
+        if run.exchange_kind != "reply":
+            return
+        self._settle_recovered_reply(
+            run_id, owner_id=owner_id, task=outcome.task, error_code=outcome.error_code
+        )
+
+    def _mark_exchange_interrupted(
+        self, run_id: str, *, owner_id: str
+    ) -> AgentRunDocument | None:
+        """Record that a restart caught this exchange, and nothing more.
+
+        No network I/O, so it is safe to run for every open exchange before the
+        app serves its first request. `dispatch_state` moves only for a start:
+        see `recover_open_exchange`.
         """
 
         with self.agent_repo.command_lock(owner_id):
             run = self.agent_repo.get_run(run_id, owner_id=owner_id)
             if run.exchange_state != "open":
-                return
+                return None
             now = self._now()
-            run = run.model_copy(
-                update={
-                    "exchange_state": "interrupted",
-                    "dispatch_state": "delivery_unconfirmed",
-                    "updated_at": max(run.updated_at, now),
-                    "revision": run.revision + 1,
-                }
-            )
+            updates: dict[str, Any] = {
+                "exchange_state": "interrupted",
+                "updated_at": max(run.updated_at, now),
+                "revision": run.revision + 1,
+            }
+            if run.exchange_kind != "reply":
+                updates["dispatch_state"] = "delivery_unconfirmed"
+            run = run.model_copy(update=updates)
             self.agent_repo.save_run(run)
-        connection = self.agent_repo.get_connection(
-            run.connection_id, owner_id=owner_id
-        )
-        adopted = self._lookup_task(run, connection).task
-        if adopted is None:
+        return run
+
+    def _settle_recovered_reply(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        task: Task | None,
+        error_code: str | None,
+    ) -> None:
+        """Reconcile the answer a restart caught in flight, or admit it did not.
+
+        The agent's own record is the only evidence there is: the reply's
+        message id *is* the command id, so finding it in the task's history is
+        the agent saying it received the answer. Anything else — a lookup that
+        did not come back, one that came back empty, a task whose history does
+        not name the command — leaves the command unacknowledged, which is the
+        honest state the run already knows how to show, and a fresh reply stays
+        offered exactly as the reply rules already permit.
+        """
+
+        run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+        if task is not None:
+            self._settle_reply_by_history(run, task)
+            run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+        if run.reply_pending_command_id is None:
             return
-        self.apply_observation(
-            run.id,
+        self._audit(
             owner_id=owner_id,
-            observation=project_observation(
-                adopted, now=self._now(), limits=self.observation_limits
-            ),
-            based_on=run.run_version,
-            extra={
-                "dispatch_state": "sent",
-                "dispatch_error_code": None,
-                "exchange_state": "closed",
-            },
+            action="exchange_interrupted",
+            outcome=error_code or "reply_unacknowledged",
+            connection_id=run.connection_id,
+            run_id=run.id,
         )
 
     def _lookup_task(
@@ -4074,15 +4134,30 @@ class AgentRelayService:
         )
 
     def _open_reply_exchange(
-        self, run: AgentRunDocument, *, owner_id: str, now: datetime
+        self,
+        run: AgentRunDocument,
+        *,
+        owner_id: str,
+        now: datetime,
+        command_id: str,
+        message: str,
+        reserved_at: datetime,
     ) -> AgentRunDocument:
         """Mark the reply exchange open, so a restart can tell what happened.
 
-        Durable before the send, exactly as a start exchange is. The window it
-        opens is also what suspends scheduled observation of the predecessor
-        task: a Hermes reply may block for the full reply window, and a terminal
-        observation arriving inside it would lock a run the agent is about to
-        continue in a new task (AC-033).
+        Durable before the send, exactly as a start exchange is — and that now
+        includes the command itself. A hand-off writes its command row at
+        reservation (`dispatch_run`); a reply used to write its own only after
+        the send returned, so a restart caught mid-reply left a run with no
+        record that the owner had answered at all: no `reply_pending`, nothing
+        for a later observation to confirm, and the answer silently gone from a
+        page that had shown it. The row is written unconfirmed, which is exactly
+        what is true from this moment until the agent says otherwise.
+
+        The window this opens is also what suspends scheduled observation of the
+        predecessor task: a Hermes reply may block for the full reply window,
+        and a terminal observation arriving inside it would lock a run the agent
+        is about to continue in a new task (AC-033).
         """
 
         opened = run.model_copy(
@@ -4091,11 +4166,25 @@ class AgentRelayService:
                 "exchange_kind": "reply",
                 "exchange_started_at": now,
                 "exchange_deadline_at": now + self.reply_window,
+                # Which command is outstanding, durably, so restart recovery has
+                # something to reconcile against the agent's history.
+                "reply_pending_command_id": command_id,
                 "updated_at": max(run.updated_at, now),
                 "revision": run.revision + 1,
             }
         )
         self.agent_repo.save_run(opened)
+        self.agent_repo.save_command(
+            AgentRunCommandDocument(
+                id=command_id,
+                owner_id=owner_id,
+                run_id=run.id,
+                kind="reply",
+                body=None if run.content_expired else message,
+                delivery="unconfirmed",
+                created_at=reserved_at,
+            )
+        )
         return opened
 
     def _record_task_succession(
@@ -4239,7 +4328,14 @@ class AgentRelayService:
                 )
                 # Durable before the send, so a restart can tell a reply that
                 # may be at the agent from one that provably never left.
-                run = self._open_reply_exchange(run, owner_id=owner_id, now=now)
+                run = self._open_reply_exchange(
+                    run,
+                    owner_id=owner_id,
+                    now=now,
+                    command_id=command_id,
+                    message=payload.message,
+                    reserved_at=reserved_at,
+                )
 
             result = self._send_reply(
                 run, connection, command_id=command_id, message=payload.message
@@ -4353,6 +4449,12 @@ class AgentRelayService:
                 **command_updates,
             )
             self.agent_repo.save_command(command)
+            self._align_reply_marker(
+                run.id,
+                owner_id=owner_id,
+                pending=run_updates["reply_pending_command_id"],
+                now=now,
+            )
             if succeeded and updated is not None and observation is not None:
                 self._record_task_succession(
                     updated,
@@ -4360,6 +4462,36 @@ class AgentRelayService:
                     observation=observation,
                 )
         return command
+
+    def _align_reply_marker(
+        self, run_id: str, *, owner_id: str, pending: str | None, now: datetime
+    ) -> None:
+        """Make the run's outstanding-reply marker agree with the command.
+
+        The marker is set when the exchange opens, so a restart can find the
+        command it interrupted. Closing normally usually clears it through the
+        observation write — but an observation is refused outright for a run
+        whose connection was disconnected, whose identifiers expired or that was
+        purged mid-exchange, and a marker left behind there would claim an
+        answer is outstanding that the agent has already acknowledged. Called
+        under the caller's lock; a run that no longer exists is left alone.
+        """
+
+        try:
+            current = self.agent_repo.get_run(run_id, owner_id=owner_id)
+        except NotFoundError:  # pragma: no cover - purged mid-exchange
+            return
+        if current.reply_pending_command_id == pending:
+            return
+        self.agent_repo.save_run(
+            current.model_copy(
+                update={
+                    "reply_pending_command_id": pending,
+                    "updated_at": max(current.updated_at, now),
+                    "revision": current.revision + 1,
+                }
+            )
+        )
 
     def cancel_run(
         self, run_id: str, *, owner_id: str, idempotency_key: str
