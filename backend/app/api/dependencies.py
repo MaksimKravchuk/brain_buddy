@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import cast
 
 from fastapi import Depends, HTTPException, Request, status
@@ -114,6 +115,20 @@ def get_agent_relay_service(
     container: Container = Depends(get_container),
 ) -> AgentRelayService:
     return container.agent_relay_service
+
+
+def get_agent_observer_wake(
+    container: Container = Depends(get_container),
+) -> Callable[[str], None]:
+    """The one thing the push route may ask the observer to do (FR-008).
+
+    A run id in, nothing out. Narrow on purpose: a verified push may only make
+    BrainBuddy *look* sooner, never tell it what it would have seen, and a
+    route holding the observer itself would be one refactor away from being
+    able to write a state nobody observed.
+    """
+
+    return container.agent_observer.wake
 
 
 def get_current_user(

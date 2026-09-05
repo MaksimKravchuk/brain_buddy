@@ -23,8 +23,9 @@ EPIC_TASKS = "Task Management"
 EPIC_AUTH = "Authentication & Access"
 EPIC_AI = "AI Validation"
 EPIC_QUALITY = "Platform Quality"
-# Spec 014. The relay suites earn their own epic; the vendored runtimes are the
-# first of them to land.
+# Spec 014. The relay suites previously fell through to EPIC_QUALITY, which
+# filed a product capability under test mechanics; the A2A wire contract adds
+# enough surface that it earns its own epic.
 EPIC_AGENT_RELAY = "External agent relay"
 
 # Module stem -> (epic, feature, story). Keyed by the test file name without the
@@ -148,10 +149,61 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
     "health": (EPIC_QUALITY, "Health", "Health endpoint"),
     "utils_file_ops": (EPIC_QUALITY, "File utilities", "Atomic file operations"),
     "utils_time": (EPIC_QUALITY, "Time utilities", "Time helpers"),
+    # External agent relay (spec 014, the A2A wire contract)
+    "agent_a2a_card": (
+        EPIC_AGENT_RELAY,
+        "A2A discovery",
+        "Agent card parsing and guarantee tier",
+    ),
+    "agent_a2a_client": (
+        EPIC_AGENT_RELAY,
+        "A2A client",
+        "Pinned JSON-RPC calls and error mapping",
+    ),
+    "agent_a2a_mapping": (
+        EPIC_AGENT_RELAY,
+        "A2A observation mapping",
+        "Task state projection",
+    ),
+    "agent_observer": (
+        EPIC_AGENT_RELAY,
+        "Background observer",
+        "Scheduling, exchanges and restart recovery",
+    ),
+    "agent_repository_migration": (
+        EPIC_AGENT_RELAY,
+        "Wire migration",
+        "Superseding the bespoke wire",
+    ),
+    "agent_a2a_extension_identifier": (
+        EPIC_AGENT_RELAY,
+        "Single-start extension",
+        "Published extension identifier",
+    ),
     "vendor_provenance": (
         EPIC_AGENT_RELAY,
         "Reference runtimes",
         "Vendored runtime provenance",
+    ),
+    "agent_a2a_reference_helloworld": (
+        EPIC_AGENT_RELAY,
+        "Reference runtimes",
+        "Conformance against the a2a-sdk helloworld sample",
+    ),
+    "agent_a2a_reference_hermes": (
+        EPIC_AGENT_RELAY,
+        "Reference runtimes",
+        "Conformance against the Hermes A2A plugin",
+    ),
+    "agent_relay_service": (
+        EPIC_AGENT_RELAY,
+        "Relay service",
+        "Connection, hand-off and observation rules",
+    ),
+    "agent_relay_api": (
+        EPIC_AGENT_RELAY,
+        "Relay API",
+        "Relay HTTP endpoints and push callback",
     ),
 }
 

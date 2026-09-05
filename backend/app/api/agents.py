@@ -11,6 +11,8 @@ runs by reading error messages.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -24,24 +26,28 @@ from fastapi import (
 
 from app.api.contracts import error_responses
 from app.api.dependencies import (
+    external_agent_relay_enabled,
+    get_agent_observer_wake,
     get_agent_relay_service,
     get_auth_service,
     get_current_user,
+    get_feature_flag_service,
     require_external_agent_relay_enabled,
 )
-from app.core.rate_limit import sensitive_action_rate_limiter
+from app.core.rate_limit import (
+    BoundedKeyRateLimiter,
+    FixedWindowCounter,
+    sensitive_action_rate_limiter,
+)
 from app.exceptions import ReauthFailedError, ValidationFailure
-from app.modules.agents.service import AgentRelayService, EventRejected
+from app.modules.agents.service import AgentRelayService
 from app.schemas.agents import (
-    AgentConnectionCreatedResponse,
+    AgentCheckDeliveryRequest,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
     AgentConnectionResponse,
     AgentConnectionRotateRequest,
-    AgentConnectionRotateSigningSecretRequest,
-    AgentConnectionSigningSecretResponse,
     AgentConnectionUpdateRequest,
-    AgentEventIngestResponse,
     AgentHandoffConfirmRequest,
     AgentHandoffPreviewRequest,
     AgentManifestResponse,
@@ -50,24 +56,54 @@ from app.schemas.agents import (
     AgentRunSummaryResponse,
 )
 from app.schemas.auth import User
-from app.services import AuthService
+from app.services import AuthService, FeatureFlagService
 
 router = APIRouter(tags=["agents"])
 
 MAX_EVENT_BODY_BYTES = 64_000
+
+#: Process-wide budget consulted *before* any database read, so a flood costs
+#: one integer comparison rather than a lookup per request
+#: (`contracts/push-callback.md`, step 2).
+PUSH_GLOBAL_MAX_PER_MINUTE = 600
+#: Per-run budget, reachable only once a run has actually been found. The
+#: existence signal that follows from it is deliberate and is recorded in
+#: `docs/auth.md`: run ids are unguessable, and the token authorises only an
+#: observation BrainBuddy would perform anyway.
+PUSH_RUN_MAX_PER_MINUTE = 30
+#: Keys are minted only for known, dispatched runs, and dropped when a run can
+#: never be pushed for again — so this cap is a second line, not the first.
+PUSH_LIMITER_MAX_KEYS = 1024
+
+push_global_limiter = FixedWindowCounter(
+    max_events=PUSH_GLOBAL_MAX_PER_MINUTE, window_seconds=60.0
+)
+push_run_limiter = BoundedKeyRateLimiter(
+    max_attempts=PUSH_RUN_MAX_PER_MINUTE,
+    window_seconds=60.0,
+    max_keys=PUSH_LIMITER_MAX_KEYS,
+)
+
+
+def _push_rejected() -> HTTPException:
+    """The one refusal this route can make.
+
+    Byte-identical for an unknown run, a forged token and a run that has
+    closed, with no distinguishing header and no ``Retry-After``: the caller is
+    an agent with no session, and any difference between the three would let a
+    prober map runs by reading error shapes. The distinction is recorded, once
+    per class per day, in the owner's own audit.
+    """
+
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail="Notification rejected."
+    )
 
 
 def _require_idempotency_key(idempotency_key: str | None) -> str:
     if not idempotency_key:
         raise ValidationFailure("Idempotency-Key header is required.")
     return idempotency_key
-
-
-def _too_large() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-        detail="Event payload is too large.",
-    )
 
 
 def _declared_body_length(request: Request) -> int | None:
@@ -86,30 +122,6 @@ def _declared_body_length(request: Request) -> int | None:
     except ValueError:
         return None
     return declared if declared >= 0 else None
-
-
-async def _bounded_event_body(request: Request) -> bytes:
-    """Read an inbound event body without ever buffering more than the cap.
-
-    This route is unauthenticated by design, so the size limit has to hold
-    against a caller who is not merely careless. A declared length over the cap
-    is refused on the header alone, before a single byte is read, and a caller
-    that declares nothing (or lies) is cut off the moment the accumulated body
-    passes the cap.
-    """
-
-    declared = _declared_body_length(request)
-    if declared is not None and declared > MAX_EVENT_BODY_BYTES:
-        raise _too_large()
-
-    chunks: list[bytes] = []
-    size = 0
-    async for chunk in request.stream():
-        size += len(chunk)
-        if size > MAX_EVENT_BODY_BYTES:
-            raise _too_large()
-        chunks.append(chunk)
-    return b"".join(chunks)
 
 
 def _verify_password(
@@ -151,7 +163,7 @@ def list_agent_connections(
 
 @router.post(
     "/agent-connections",
-    response_model=AgentConnectionCreatedResponse,
+    response_model=AgentConnectionResponse,
     status_code=status.HTTP_201_CREATED,
     responses=error_responses(400, 401, 403, 404, 409, 422, 429),
 )
@@ -161,7 +173,13 @@ def create_agent_connection(
     current_user: User = Depends(require_external_agent_relay_enabled),
     service: AgentRelayService = Depends(get_agent_relay_service),
     auth_service: AuthService = Depends(get_auth_service),
-) -> AgentConnectionCreatedResponse:
+) -> AgentConnectionResponse:
+    """Register an agent by address. The 201 carries no secret of any kind.
+
+    Under the A2A wire there is nothing for the owner to copy into their agent:
+    push callbacks use a per-run token BrainBuddy mints and never shows (FR-012).
+    """
+
     key = _require_idempotency_key(idempotency_key)
     reauthenticated = _verify_password(
         auth_service, current_user, payload.current_password
@@ -245,40 +263,6 @@ def rotate_agent_credential(
         auth_service, current_user, payload.current_password
     )
     return service.rotate_credential(
-        connection_id,
-        payload,
-        owner_id=current_user.id,
-        idempotency_key=key,
-        reauthenticated=reauthenticated,
-    )
-
-
-@router.post(
-    "/agent-connections/{connection_id}/signing-secret",
-    response_model=AgentConnectionSigningSecretResponse,
-    responses=error_responses(400, 401, 403, 404, 409, 422, 429),
-)
-def rotate_agent_signing_secret(
-    connection_id: str,
-    payload: AgentConnectionRotateSigningSecretRequest,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(require_external_agent_relay_enabled),
-    service: AgentRelayService = Depends(get_agent_relay_service),
-    auth_service: AuthService = Depends(get_auth_service),
-) -> AgentConnectionSigningSecretResponse:
-    """Replace the inbound signing secret when the create response was lost.
-
-    The 201 from registration is the only place that secret is shown, so this
-    is the sole way back from losing it. Retrying with the same Idempotency-Key
-    returns the same replacement rather than a blank success — the old secret
-    is already dead by then, so an empty answer would strand the caller.
-    """
-
-    key = _require_idempotency_key(idempotency_key)
-    reauthenticated = _verify_password(
-        auth_service, current_user, payload.current_password
-    )
-    return service.rotate_signing_secret(
         connection_id,
         payload,
         owner_id=current_user.id,
@@ -431,6 +415,45 @@ def reply_to_agent_run(
 
 
 @router.post(
+    "/agent-runs/{run_id}/check-delivery",
+    response_model=AgentRunResponse,
+    responses=error_responses(400, 401, 404, 409, 422, 429),
+)
+def check_agent_run_delivery(
+    run_id: str,
+    payload: AgentCheckDeliveryRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
+    service: AgentRelayService = Depends(get_agent_relay_service),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> AgentRunResponse:
+    """Look this run up at the agent, and resend only what the rules allow.
+
+    Deliberately *not* gated on the rollout flag. The lookup carries no task
+    content and can only settle a run that already exists, so a rollback must
+    not strand an already-dispatched hand-off in **Delivery unconfirmed**
+    forever. The flag is passed down instead, and the service refuses the
+    *resend* branch with `rollout_disabled` after the lookup has run (AC-036).
+    """
+
+    key = _require_idempotency_key(idempotency_key)
+    reauthenticated = (
+        _verify_password(auth_service, current_user, payload.current_password)
+        if payload.current_password
+        else False
+    )
+    return service.check_delivery(
+        run_id,
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=key,
+        reauthenticated=reauthenticated,
+        resend_allowed=external_agent_relay_enabled(current_user, feature_flags),
+    )
+
+
+@router.post(
     "/agent-runs/{run_id}/cancel",
     response_model=AgentRunResponse,
     responses=error_responses(400, 401, 404, 409, 422),
@@ -448,48 +471,77 @@ def cancel_agent_run(
     )
 
 
-# --- inbound connector events -----------------------------------------------
+# --- the A2A push callback --------------------------------------------------
 
 
 @router.post(
-    "/agent-events",
-    response_model=AgentEventIngestResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    responses=error_responses(400, 403, 413, 422),
+    "/a2a/push/{run_id}/{token}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(403, 413, 422, 429),
 )
-async def ingest_agent_event(
+async def receive_agent_push(
+    run_id: str,
+    token: str,
     request: Request,
-    response: Response,
-    connection_id: str | None = Header(default=None, alias="X-BrainBuddy-Connection"),
-    timestamp: str | None = Header(default=None, alias="X-BrainBuddy-Timestamp"),
-    signature: str | None = Header(default=None, alias="X-BrainBuddy-Signature"),
     service: AgentRelayService = Depends(get_agent_relay_service),
-) -> AgentEventIngestResponse:
-    """Accept one signed report from a user's agent.
+    wake: Callable[[str], None] = Depends(get_agent_observer_wake),
+) -> Response:
+    """Accept one push notification from a user's agent, and only look sooner.
 
-    Not gated on the rollout flag: a run that was already dispatched must remain
-    able to report even if the owner's flag is later turned off, otherwise the
-    user is left with a run frozen mid-flight and no way to learn its outcome.
+    No session, because the caller is the agent; not flag-gated, because a run
+    that was already dispatched must keep being observed whatever the owner's
+    rollout state later becomes. The body is never parsed for state — the
+    authenticated `GetTask` that follows is the only thing that may change what
+    a run says — so the whole route is: bound the body, bound the route, find
+    the run, compare the token in constant time, and wake the observer.
+
+    The order below is the contract's, and each step earns its place: the body
+    cap runs before anything is read, the process-wide limiter before any
+    database read, and the per-run limiter only once a run is known — so an
+    unknown id can never mint a limiter key or a durable row.
     """
 
-    raw_body = await _bounded_event_body(request)
-    if not connection_id or not timestamp or not signature:
-        # Same shape as a bad signature: an unsigned probe learns nothing.
+    await _bounded_push_body(request)
+    if not push_global_limiter.check():
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Event rejected.",
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many notifications.",
         )
-    try:
-        return service.ingest_event(
-            raw_body=raw_body,
-            connection_id=connection_id,
-            timestamp=timestamp,
-            signature=signature,
-        )
-    except EventRejected as exc:
-        # One opaque refusal for every failure mode. The specific reason is in
-        # the owner's audit trail, never in the response.
+    outcome = service.verify_push(run_id, token)
+    if outcome.owner_id is None or not outcome.verified:
+        if outcome.closed:
+            # The run can never be pushed for again, so its bucket is retention
+            # of something with no use.
+            push_run_limiter.evict(run_id)
+        raise _push_rejected()
+    if not push_run_limiter.check(run_id):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Event rejected.",
-        ) from exc
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many notifications.",
+        )
+    wake(run_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def _bounded_push_body(request: Request) -> None:
+    """Read and discard the push body without ever buffering past the cap.
+
+    Discarded rather than returned, because nothing may read it: the body is an
+    agent's claim about a run, and the whole design of this route is that only
+    BrainBuddy's own authenticated read decides what a run says.
+    """
+
+    declared = _declared_body_length(request)
+    if declared is not None and declared > MAX_EVENT_BODY_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Notification payload is too large.",
+        )
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_EVENT_BODY_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Notification payload is too large.",
+            )
