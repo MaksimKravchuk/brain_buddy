@@ -21,7 +21,6 @@ from pydantic import (
     ConfigDict,
     Field,
     SerializerFunctionWrapHandler,
-    TypeAdapter,
     model_serializer,
     model_validator,
 )
@@ -38,7 +37,7 @@ from app.modules.agents.a2a.card import (
 )
 from app.modules.agents.authority import validate_endpoint_authority
 from app.modules.agents.validation import sanitize_endpoint_input
-from app.schemas.common import StorageBaseModel, StrictBaseModel
+from app.schemas.common import StorageBaseModel
 
 from .headers import validate_auth_header_name
 from .secrets import SealedSecret
@@ -161,11 +160,6 @@ TERMINAL_REPORTED_STATES: frozenset[str] = frozenset(
     {"completed", "failed", "cancelled"}
 )
 
-PROTOCOL_VERSION = "2026-08-09"
-"""Version of the connector wire contract this build speaks."""
-
-REPORTING_INSTRUCTIONS_VERSION = "v2"
-
 _ASCII_ENDPOINT_PATH_RE = re.compile(r"(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-])*)*")
 
 
@@ -235,94 +229,6 @@ def _reject_endpoint_unsafe_components(value: str) -> str:
 NonBlankStr = Annotated[str, AfterValidator(_require_nonblank)]
 AuthHeaderName = Annotated[str, AfterValidator(validate_auth_header_name)]
 
-_ProgressText = Annotated[str, Field(max_length=MAX_PROGRESS_CHARS)]
-_QuestionText = Annotated[NonBlankStr, Field(max_length=MAX_QUESTION_CHARS)]
-_ResultText = Annotated[NonBlankStr, Field(max_length=MAX_RESULT_CHARS)]
-_ReasonText = Annotated[NonBlankStr, Field(max_length=MAX_RESULT_CHARS)]
-_ResultLink = Annotated[NonBlankStr, Field(max_length=2_000)]
-
-
-class AgentEventEnvelopeBase(StrictBaseModel):
-    """The fields every report carries, whatever its type.
-
-    ``protocol_version`` and ``connection_id`` live *inside* the signed body so
-    the envelope states its own scope: the signature then binds a report to one
-    connection and one protocol version, and a body lifted onto a different
-    route cannot be replayed as if it belonged there.
-    """
-
-    model_config = StrictBaseModel.model_config | {"strict": True}
-
-    protocol_version: NonBlankStr = Field(max_length=64)
-    connection_id: NonBlankStr = Field(max_length=200)
-    event_id: NonBlankStr = Field(max_length=200)
-    run_id: NonBlankStr = Field(max_length=200)
-    run_version: int = Field(ge=1)
-
-
-class AgentAcceptedEvent(AgentEventEnvelopeBase):
-    """The agent has taken the work but has not started reporting on it."""
-
-    type: Literal["accepted"]
-    progress: _ProgressText | None = None
-
-
-class AgentRunningEvent(AgentEventEnvelopeBase):
-    """Work is under way; optional free text, never a percentage or an ETA."""
-
-    type: Literal["running"]
-    progress: _ProgressText | None = None
-
-
-class AgentBlockedEvent(AgentEventEnvelopeBase):
-    """The agent needs an answer, so it has to say what it is asking."""
-
-    type: Literal["blocked"]
-    question: _QuestionText
-
-
-class AgentCompletedEvent(AgentEventEnvelopeBase):
-    """The agent claims it finished, and points at what it produced."""
-
-    type: Literal["completed"]
-    result: _ResultText | None = None
-    result_link: _ResultLink | None = None
-
-    @model_validator(mode="after")
-    def _requires_a_result(self) -> AgentCompletedEvent:
-        if self.result is None and self.result_link is None:
-            raise ValueError("completed requires result or result_link")
-        return self
-
-
-class AgentFailedEvent(AgentEventEnvelopeBase):
-    """The agent gave up, and has to say why."""
-
-    type: Literal["failed"]
-    reason: _ReasonText
-
-
-class AgentCancelledEvent(AgentEventEnvelopeBase):
-    """The agent stopped on request. There is nothing else to report."""
-
-    type: Literal["cancelled"]
-
-
-AgentEventEnvelope = Annotated[
-    AgentAcceptedEvent
-    | AgentRunningEvent
-    | AgentBlockedEvent
-    | AgentCompletedEvent
-    | AgentFailedEvent
-    | AgentCancelledEvent,
-    Field(discriminator="type"),
-]
-
-AGENT_EVENT_ENVELOPE_ADAPTER: TypeAdapter[AgentEventEnvelope] = TypeAdapter(
-    AgentEventEnvelope
-)
-"""Parses one inbound report, or refuses it whole."""
-
 
 class AgentCapabilities(StorageBaseModel):
     """What the agent's own card declared it can do.
@@ -384,7 +290,6 @@ class AgentConnectionDocument(StorageBaseModel):
     # rolled-back 007 image would refuse to parse (plan.md, Rollback boundary).
     auth_header_name: Annotated[AuthHeaderName, Field(max_length=128)] | None = None
     credential: SealedSecret | None = None
-    inbound_secret: SealedSecret | None = None
     capabilities: AgentCapabilities = Field(default_factory=AgentCapabilities)
     # The bounded copy of the card the last *successful test* read. Kept for the
     # connection's lifetime and erased on disconnect with the credential — never
@@ -528,7 +433,7 @@ class AgentReportingContract(StorageBaseModel):
         "timestamp_bytes + b'.' + raw_body"
     )
     signature_format: Literal["v1=<lowercase hex>"] = "v1=<lowercase hex>"
-    body_envelope_version: str = PROTOCOL_VERSION
+    body_envelope_version: str = "2026-08-09"
 
 
 class AgentPushCallback(StorageBaseModel):
@@ -570,7 +475,7 @@ class AgentRunManifest(StorageBaseModel):
         default_factory=lambda: AgentReportingContract(connection_id="")
     )
     reporting_instructions: str = ""
-    instructions_version: str = REPORTING_INSTRUCTIONS_VERSION
+    instructions_version: str = "v2"
     # The A2A protocol version, not the retired bespoke wire version. Defaulted
     # so a frozen 007 row still parses, but every 014 manifest states "1.0".
     protocol_version: str = A2A_PROTOCOL_VERSION
@@ -1016,7 +921,6 @@ __all__ = [
     "primary_state_label",
     "reply_control_offered",
     "stopped_reporting",
-    "AGENT_EVENT_ENVELOPE_ADAPTER",
     "AgentExchangeKind",
     "AgentPushCallback",
     "AgentPushRegistration",
@@ -1030,28 +934,18 @@ __all__ = [
     "MAX_QUESTION_CHARS",
     "MAX_REPLY_CHARS",
     "MAX_RESULT_CHARS",
-    "PROTOCOL_VERSION",
-    "REPORTING_INSTRUCTIONS_VERSION",
     "TERMINAL_REPORTED_STATES",
-    "AgentAcceptedEvent",
     "AgentAuditEntryDocument",
-    "AgentBlockedEvent",
-    "AgentCancelledEvent",
     "AgentCapabilities",
     "AgentCommandDelivery",
     "AgentCommandKind",
-    "AgentCompletedEvent",
     "AgentConnectionDocument",
     "AgentConnectionStatus",
     "AgentDispatchState",
-    "AgentEventEnvelope",
-    "AgentEventEnvelopeBase",
-    "AgentFailedEvent",
     "AgentIdempotencyRecord",
     "AgentManifestContextItem",
     "AgentReportedState",
     "AgentReportingContract",
-    "AgentRunningEvent",
     "AgentRunCommandDocument",
     "AgentRunDocument",
     "AgentRunEventDocument",

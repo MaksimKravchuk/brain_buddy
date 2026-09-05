@@ -811,10 +811,9 @@ class TestHandOffOnASupersededConnection:
         content, so this proves the connection check is the first gate rather
         than one of several.
 
-        The reason asserted here is today's. When T110-T115 surface
-        `disconnect_reason`, it becomes `superseded_wire_contract` and this
-        assertion must move with the xfail below it — deliberately, so the two
-        cannot drift apart.
+        The reason is `superseded_wire_contract` because T110-T115 landed and
+        the refusal now carries `disconnect_reason`; the case below is what
+        states *why* that distinction is worth carrying.
         """
 
         db_path = pre_014_database(tmp_path)
@@ -828,13 +827,8 @@ class TestHandOffOnASupersededConnection:
                 owner_id=OWNER,
             )
 
-        assert raised.value.detail == {"reason": "connection_disconnected"}
+        assert raised.value.detail == {"reason": "superseded_wire_contract"}
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the refusal names the superseded wire only once T110-T115 "
-        "surface disconnect_reason; strict, so the removal must un-mark it",
-    )
     def test_014_FR_012_the_refusal_names_the_superseded_wire_contract(
         self, tmp_path: Path
     ) -> None:

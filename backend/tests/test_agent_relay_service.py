@@ -34,8 +34,6 @@ from app.modules.agents.a2a.client import A2AResult
 from app.modules.agents.a2a.mapping import ObservationLimits, project_observation
 from app.modules.agents.a2a.types import Message, Task
 from app.modules.agents.domain import (
-    PROTOCOL_VERSION,
-    REPORTING_INSTRUCTIONS_VERSION,
     AgentCapabilities,
     AgentConnectionDocument,
     AgentRunManifest,
@@ -1648,7 +1646,6 @@ class TestConnectionTestConcurrency:
         persisted = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
         assert persisted.status == "disconnected"
         assert persisted.credential is None
-        assert persisted.inbound_secret is None
         assert persisted.disconnected_at is not None
         assert tested and tested[0].status == "disconnected"
 
@@ -6758,12 +6755,12 @@ class TestRollbackBoundary:
         assert payload["reporting"]["callback_url"] == ""
         assert payload["reporting"]["connection_id"] == "conn-1"
         assert payload["reporting_instructions"] == ""
-        assert payload["instructions_version"] == REPORTING_INSTRUCTIONS_VERSION
+        assert payload["instructions_version"] == "v2"
         # The 007 defaults are present, not merely defaulted at read time: a
         # rolled-back image validating this row must not depend on its own
         # defaults matching ours.
         assert payload["reporting"]["signature_algorithm"] == "hmac-sha256"
-        assert payload["reporting"]["body_envelope_version"] == PROTOCOL_VERSION
+        assert payload["reporting"]["body_envelope_version"] == "2026-08-09"
 
         restored = self.Frozen007RunManifest.model_validate(payload)
         assert restored.reporting.callback_url == ""

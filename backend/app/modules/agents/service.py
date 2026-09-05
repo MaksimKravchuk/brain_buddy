@@ -430,6 +430,26 @@ class CardFetcherPort(Protocol):
     ) -> CardDiscovery: ...
 
 
+def _disconnected_refusal(
+    connection: AgentConnectionDocument, message: str
+) -> ValidationFailure:
+    """Refuse on a disconnected connection, saying *who* disconnected it.
+
+    "Disconnected" is true of a migrated 007 record but useless: the owner never
+    disconnected it, an upgrade did, and the corrective action is to add the
+    agent again by its address rather than to wonder what they clicked. So the
+    reason travels with the refusal (FR-012, SC-010).
+    """
+
+    if connection.disconnect_reason == "superseded_wire_contract":
+        return ValidationFailure(
+            "This connection was made under BrainBuddy's previous agent wire, "
+            "which no longer exists. Add the agent again by its address.",
+            detail={"reason": "superseded_wire_contract"},
+        )
+    return ValidationFailure(message, detail={"reason": "connection_disconnected"})
+
+
 class AgentRelayService:
     """Owns connections, runs, and the honest projection of both."""
 
@@ -1120,10 +1140,7 @@ class AgentRelayService:
             if record is not None:
                 return AgentConnectionResponse.model_validate(record.response_body)
             if connection.status == "disconnected":
-                raise ValidationFailure(
-                    "This agent is disconnected.",
-                    detail={"reason": "connection_disconnected"},
-                )
+                raise _disconnected_refusal(connection, "This agent is disconnected.")
             if connection.revision != payload.expected_revision:
                 raise ConflictError(
                     "Agent connection",
@@ -1408,9 +1425,8 @@ class AgentRelayService:
 
         connection = self.agent_repo.get_connection(connection_id, owner_id=owner_id)
         if connection.status == "disconnected":
-            raise ValidationFailure(
-                "This agent is disconnected. Connect it again to test it.",
-                detail={"reason": "connection_disconnected"},
+            raise _disconnected_refusal(
+                connection, "This agent is disconnected. Connect it again to test it."
             )
         # Before any request leaves: a refused network class must not be able to
         # collect even the credential-free card fetch.
@@ -1490,10 +1506,7 @@ class AgentRelayService:
                     detail={"reason": "reauthentication_required"},
                 )
             if connection.status == "disconnected":
-                raise ValidationFailure(
-                    "This agent is disconnected.",
-                    detail={"reason": "connection_disconnected"},
-                )
+                raise _disconnected_refusal(connection, "This agent is disconnected.")
             if connection.revision != payload.expected_revision:
                 raise ConflictError(
                     "Agent connection",
@@ -1575,10 +1588,9 @@ class AgentRelayService:
             now = self._now()
             updated = connection.model_copy(
                 update={
-                    # Both secrets go. Events signed by the old inbound secret
-                    # can no longer be verified, which is the point (FR-016).
+                    # The credential goes: a disconnected connection must not
+                    # be able to reach the agent again (FR-016).
                     "credential": None,
-                    "inbound_secret": None,
                     "status": "disconnected",
                     "capabilities": AgentCapabilities(),
                     # The discovered card goes with the credential: it is
@@ -1647,10 +1659,10 @@ class AgentRelayService:
     ) -> AgentConnectionDocument:
         connection = self.agent_repo.get_connection(connection_id, owner_id=owner_id)
         if connection.status == "disconnected":
-            raise ValidationFailure(
+            raise _disconnected_refusal(
+                connection,
                 "This agent is disconnected. Connect it again before handing "
                 "work to it.",
-                detail={"reason": "connection_disconnected"},
             )
         if connection.agent_changed:
             # Its own reason, not a generic "not ready": the corrective action
