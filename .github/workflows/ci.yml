@@ -1015,6 +1015,8 @@ jobs:
       # Pinned so the prebuilt images below are exactly what Compose starts.
       BRAIN_BUDDY_BACKEND_IMAGE: brain-buddy-backend:ci
       BRAIN_BUDDY_FRONTEND_IMAGE: brain-buddy-frontend:ci
+      BRAIN_BUDDY_A2A_HELLOWORLD_IMAGE: brain-buddy-a2a-helloworld:ci
+      BRAIN_BUDDY_HERMES_A2A_IMAGE: brain-buddy-hermes-a2a:ci
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -1080,6 +1082,14 @@ jobs:
           # with the one the E2E stack actually serves.
           build frontend/Dockerfile "${BRAIN_BUDDY_FRONTEND_IMAGE}" frontend \
             --build-arg VITE_API_BASE_URL=/api
+          # The two reference runtimes the relay stories drive (014-FR-017).
+          # Through the same helper for the same reason: their layers are cached
+          # against main like everything else, and --no-build below fails closed
+          # if either tag is missing rather than building an unpinned agent.
+          build scripts/fixtures/a2a-helloworld/Dockerfile \
+            "${BRAIN_BUDDY_A2A_HELLOWORLD_IMAGE}" a2a-helloworld
+          build scripts/fixtures/hermes-a2a/Dockerfile \
+            "${BRAIN_BUDDY_HERMES_A2A_IMAGE}" hermes-a2a
 
       - name: Run Compose smoke and Playwright E2E
         env:
