@@ -7,6 +7,7 @@ import { hasFeatureFlag } from "../../api/auth";
 import { apiClient } from "../../api/client";
 import { AgentHandoffOverlay } from "../agents/AgentHandoffOverlay";
 import { AgentRunSection } from "../agents/AgentRunSection";
+import { compactRunLabel } from "../agents/agentCopy";
 import { useAuthStore } from "../../stores/authStore";
 import type {
   OpenTaskState,
@@ -642,6 +643,7 @@ function AgentTaskRelay({ task, isTerminal }: { task: TaskResponse; isTerminal: 
   // than crashing the entire task panel.
   const runs = Array.isArray(runsQuery.data) ? runsQuery.data : [];
   const canStartHandoff = handoffEnabled && !isTerminal;
+  const latestRun = runs.length ? runs[runs.length - 1] : null;
 
   return (
     <>
@@ -666,6 +668,18 @@ function AgentTaskRelay({ task, isTerminal }: { task: TaskResponse; isTerminal: 
           {!runs.length && canStartHandoff ? (
             <p className="m-0 text-[12px] text-slate-500">
               Review exactly what would be sent before anything leaves BrainBuddy.
+            </p>
+          ) : null}
+          {latestRun ? (
+            // The same compact line the Task list shows (D-03-S21), so the two
+            // surfaces cannot disagree about the tier or about a control the
+            // agent has already withdrawn.
+            <p className="m-0 text-[11.5px] text-slate-500" data-testid="agent-run-summary-line">
+              {compactRunLabel({
+                primary_state_label: latestRun.primary_state_label,
+                guarantee_tier: latestRun.guarantee_tier,
+                cancel_outcome: latestRun.cancel_outcome
+              })}
             </p>
           ) : null}
         </div>

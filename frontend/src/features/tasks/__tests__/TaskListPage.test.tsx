@@ -224,7 +224,10 @@ describe("TaskListPage projections", () => {
         primary_state_label: "Running",
         needs_user: false,
         stopped_reporting: false,
-        last_contact_at: "2026-08-11T12:00:00Z"
+        last_contact_at: "2026-08-11T12:00:00Z",
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "none",
+        agent_task_missing: false
       },
       "task-2": {
         id: "agentrun-2",
@@ -233,14 +236,24 @@ describe("TaskListPage projections", () => {
         primary_state_label: "Needs you",
         needs_user: true,
         stopped_reporting: false,
-        last_contact_at: "2026-08-11T12:01:00Z"
+        last_contact_at: "2026-08-11T12:01:00Z",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "not_cancelable",
+        agent_task_missing: false
       }
     });
 
     renderPage();
 
-    expect(await screen.findByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Needs you")).toBeInTheDocument();
+    // D-03-S21: the compact row states the tier in full beside the label, and
+    // repeats a withdrawn cancellation, so the list and the detail cannot
+    // disagree about what the user may still do.
+    expect(
+      await screen.findByText("Running · Guaranteed single start")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Needs you · Best-effort single start · Cancellation not supported")
+    ).toBeInTheDocument();
     expect(mocked.listAgentRunSummaries).toHaveBeenCalledWith(
       ["task-1", "task-2"],
       expect.any(AbortSignal)

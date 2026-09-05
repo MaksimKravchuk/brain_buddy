@@ -115,8 +115,18 @@ export function DisconnectSheet({ connection, onClose, onDisconnected }: Disconn
             </BBText>
           </View>
 
+          {/* Word for word what the desktop confirmation says (D-01-S23): a
+              connection that could no longer say where it pointed would outlive
+              the decision to stop pointing there, so the card goes with the
+              key and the dialog says so (AC-022, AC-024). */}
           <BBText variant="caption" color={colors.fg4}>
-            {`Brain Buddy destroys the stored credential, stops polling, and refuses new hand-offs and replies through ${connection.name}. Active runs become "Connection disconnected". Existing run history stays, redacted, until it expires.`}
+            The stored credential and the agent-card summary Brain Buddy discovered — its name,
+            version, description, skills and interface — are erased together, along with the card
+            fingerprint.
+          </BBText>
+
+          <BBText variant="caption" color={colors.fg4}>
+            {`Brain Buddy stops observing and refuses new hand-offs and replies through ${connection.name}. Active runs become "Connection disconnected". Existing run history stays, redacted, until it expires.`}
           </BBText>
 
           {disconnect.isError ? <ErrorBanner error={disconnect.error} /> : null}
@@ -140,16 +150,19 @@ export function DisconnectSheet({ connection, onClose, onDisconnected }: Disconn
             />
           </View>
 
+          {/* Safe first, destructive last (M-01-S21). On a sheet the thumb
+              rests near the bottom, so the action that destroys a credential is
+              the one furthest from an accidental tap. */}
+          <Button variant="ghost" onPress={close} disabled={disconnect.isPending}>
+            Keep it connected
+          </Button>
           <Button
             variant="destructive"
             onPress={submit}
-            disabled={password.length === 0}
+            disabled={password.length === 0 || disconnect.isPending}
             loading={disconnect.isPending}
           >
             Disconnect and destroy the credential
-          </Button>
-          <Button variant="ghost" onPress={close} disabled={disconnect.isPending}>
-            Keep this agent connected
           </Button>
         </View>
       ) : null}
