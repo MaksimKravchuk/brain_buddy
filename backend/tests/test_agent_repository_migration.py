@@ -18,11 +18,11 @@ That is irreversible, which is why the evidence here is deliberately blunt:
 this suite is what `quickstart.md` §9 and `docs/external-agent-relay-release.md`
 point at before the 014 image is allowed near production data.
 
-Three assertions in this module describe the *end* of the removal (the bespoke
-routes, the bespoke module, and the refusal reason the API surfaces). They are
-marked `xfail(strict=True)`: they are red until tasks T110–T115 delete the old
-wire, and strict is the point — the day the removal lands they go from expected
-failure to unexpected pass and this suite turns red until they are un-marked.
+Three assertions in this module describe the *end* of the removal: the bespoke
+routes answer 404, the bespoke module cannot be imported, and the refusal on a
+migrated record names the wire rather than the owner. Each was an
+`xfail(strict=True)` until T110–T115 deleted the old wire, which is how each one
+turned red on the day it came true and had to be un-marked deliberately.
 """
 
 from __future__ import annotations
