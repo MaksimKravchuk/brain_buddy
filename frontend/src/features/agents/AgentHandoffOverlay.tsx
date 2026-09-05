@@ -251,6 +251,10 @@ export function AgentHandoffOverlay({
                       onChange={() => {
                         setError(null);
                         setReReviewNotice(null);
+                        // The tick is consent for one specific agent. Carrying
+                        // it across a change of selection would arm Send for an
+                        // agent the user never acknowledged (AC-026).
+                        setAcknowledged(false);
                         setConnectionId(connection.id);
                       }}
                     />

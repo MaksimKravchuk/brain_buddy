@@ -245,6 +245,10 @@ function HandoffSheetContent({
   const choose = (id: string) => {
     onConnectionIdChange(id);
     setRereviewNotice(null);
+    // The tap is consent for one specific agent. Carrying it across a change of
+    // selection would arm Send for an agent the user never acknowledged
+    // (AC-026).
+    setAcknowledged(false);
   };
 
   const toggleDetails = () => {

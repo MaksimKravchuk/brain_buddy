@@ -547,6 +547,48 @@ describe("HandoffSheet review contract", () => {
     await unmount();
   });
 
+  it("014-FR-003 asks the duplicate-risk acknowledgement again when the agent changes", async () => {
+    // AC-026. The tick is consent for one specific agent; selecting another
+    // must ask again rather than arm Send for an agent nobody acknowledged.
+    mockPreview.mockImplementation(
+      async (_taskId: string, payload: { connection_id: string }) =>
+        makeManifest({
+          acknowledgement_required: true,
+          connection_id: payload.connection_id,
+          agent_name: payload.connection_id === "conn_2" ? "Second agent" : "My Claude Code box",
+        }),
+    );
+    const { renderer, unmount } = await renderWithProviders(<HandoffSheet {...props()} />);
+    await settle();
+    await pressText(renderer, "My Claude Code box");
+    await settle();
+
+    await pressLabel(
+      renderer,
+      "I understand that a duplicate task is possible with this agent",
+    );
+    await settle();
+    expect(isDisabled(currentSendButton(renderer))).toBe(false);
+
+    await pressText(renderer, "Second agent");
+    await settle();
+
+    expect(
+      getByLabel(renderer, "I understand that a duplicate task is possible with this agent")
+        .props.accessibilityState?.checked,
+    ).toBe(false);
+    expect(isDisabled(currentSendButton(renderer))).toBe(true);
+
+    await pressLabel(
+      renderer,
+      "I understand that a duplicate task is possible with this agent",
+    );
+    await settle();
+    expect(isDisabled(currentSendButton(renderer))).toBe(false);
+
+    await unmount();
+  });
+
   it("014-FR-016 renders an adversarial agent name and destination as inert text", async () => {
     mockPreview.mockResolvedValue(
       makeManifest({
