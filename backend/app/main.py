@@ -219,8 +219,9 @@ def create_app() -> FastAPI:
         # Once, at boot, before a request can be served: every exchange a
         # restart left mid-flight is settled by what it can prove. A queued one
         # never left, so it is **Not sent** and offered again; a started one is
-        # resolved by lookup only, because no background thread ever resends
-        # (AC-032). Gated with the other maintenance for the same reason the
+        # resolved by lookup only, because a resend is a send and no send is
+        # ever initiated without a user action (AC-032). Gated with the other
+        # maintenance for the same reason the
         # sweeps are: the test suite builds many short-lived apps in one
         # process, and a boot-time scan over a shared, process-wide lock would
         # race unrelated tests.

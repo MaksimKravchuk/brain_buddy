@@ -131,10 +131,12 @@ spent trigger, and the reachable case of the rule is the retry of a hand-off tha
 `interface_url`, and is serialised: the `interrupted|delivery_unconfirmed → open` transition is a compare-and-set on
 `run_version` under the process-wide command lock before any I/O, so a concurrent check, a
 replayed confirmation or the observer's restart-recovery lookup re-reads, sees `open` and
-returns the winner without network I/O (SC-008). No background thread — observer scheduler,
-observation pool, exchange pool, control pool, restart recovery or retention sweep — ever
-emits a content-bearing `SendMessage`; the only sends are a confirmed hand-off, its
-user-triggered replay and a user reply. Neither path ever mints a new run or message id.
+returns the winner without network I/O (SC-008). No content-bearing `SendMessage` is ever
+initiated without a user action: the exchange pool *executes* one, because a send an agent
+holds open for the reply window may not sit on the request thread, but the only things that
+start one are a confirmed hand-off, its user-triggered replay and a user reply — the
+observer scheduler, the observation pool, the control pool, restart recovery and the
+retention sweep emit none. Neither path ever mints a new run or message id.
 
 **Observation state machine** (FR-009): `reported_state ∈ {accepted, running, blocked,
 completed, failed, cancelled}`; terminal = `{completed, failed, cancelled}`; a differing

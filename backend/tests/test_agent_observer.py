@@ -483,6 +483,57 @@ class TestExchangePool:
         # Exactly one message per run: nothing was skipped and nothing doubled.
         assert len(wire.calls_to("SendMessage")) == 4
 
+    def test_014_FR_006_the_confirmed_send_is_executed_on_an_exchange_worker(
+        self,
+        service: AgentRelayService,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """The invariant is about who *initiates* a send, not who executes it.
+
+        `dispatch_run` returns after its courtesy wait while an exchange worker
+        still holds the `SendMessage`, so a background thread does put the
+        confirmed content on the wire. What no background thread ever does is
+        *decide* to: this one is executing a hand-off a person confirmed, and
+        nothing but that person's action ever puts work in the pool.
+        """
+
+        executor = DeferredExecutor()
+        AgentObserver(service, exchange_executor=executor, clock=clock)
+        connection_id = connect_ready(service)
+        preview = service.preview_handoff(
+            "task_1",
+            AgentHandoffPreviewRequest(connection_id=connection_id),
+            owner_id=OWNER,
+        )
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True, correlation_id="c", task=agent_task("t1", preview.run_id)
+            ),
+        )
+
+        run = service.dispatch_run(
+            "task_1",
+            AgentHandoffConfirmRequest(
+                connection_id=connection_id,
+                manifest_token=preview.token,
+                acknowledge_duplicate_risk=True,
+            ),
+            owner_id=OWNER,
+            idempotency_key="idem-dispatch",
+        )
+
+        # The request thread finished the user's call having sent nothing.
+        assert run.exchange_state == "queued"
+        assert a2a_client.calls_to("SendMessage") == []
+
+        # The worker is what emits it — a background thread, carrying out the
+        # confirmation and never a decision of its own.
+        executor.run_pending()
+
+        assert len(a2a_client.calls_to("SendMessage")) == 1
+
     def test_014_FR_008_shutdown_cancels_the_work_that_never_started(
         self, service: AgentRelayService, clock: Clock
     ) -> None:
@@ -715,6 +766,46 @@ def test_014_FR_002_a_guaranteed_card_still_recovers_by_lookup(
     observer.recover_interrupted_exchanges()
 
     assert a2a_client.calls_to("SendMessage") == []
+
+
+SPEC_ROOT = (
+    Path(__file__).resolve().parents[2] / "specs" / "014-a2a-relay-wire-contract"
+)
+
+#: What the planning artifacts used to claim, in every form they claimed it.
+#: Read literally each one is false — an exchange worker is a background thread
+#: and it is the thing that emits the confirmed hand-off.
+OVERCLAIMED_SEND_INVARIANT = (
+    "no background thread ever emits a content-bearing message",
+    "no background thread ever sends (",
+    "no brainbuddy background thread ever emits",
+)
+
+
+def test_014_FR_006_the_send_invariant_is_written_as_initiation_not_execution() -> None:
+    """The documents state the invariant the code and these tests actually hold.
+
+    `test_014_FR_006_the_confirmed_send_is_executed_on_an_exchange_worker` and
+    `test_no_background_thread_ever_sends_content` are the two halves of it: a
+    background worker *executes* every send, and nothing but a user action ever
+    *initiates* one. A plan that promised the stronger, false thing would be
+    read as a bug report against the pool that makes the reply window survivable.
+    """
+
+    documents = {
+        "plan.md": SPEC_ROOT / "plan.md",
+        "research.md": SPEC_ROOT / "research.md",
+        "data-model.md": SPEC_ROOT / "data-model.md",
+        "a2a-wire.md": SPEC_ROOT / "contracts" / "a2a-wire.md",
+    }
+
+    for name, path in documents.items():
+        # Unwrapped: these are hard-wrapped prose files, so a sentence spans
+        # lines and asserting on the raw text would only measure the margin.
+        prose = " ".join(path.read_text(encoding="utf-8").lower().split())
+        for claim in OVERCLAIMED_SEND_INVARIANT:
+            assert claim not in prose, f"{name} overclaims: {claim}"
+        assert "initiated without a user action" in prose, f"{name} omits the rule"
 
 
 # --- the observation lane (spec 014, US3) ------------------------------------
@@ -1075,7 +1166,14 @@ class TestObservationSchedule:
         clock: Clock,
         a2a_client: FakeA2AClient,
     ) -> None:
-        """AC-032. Only a person's own confirmation may put content on the wire."""
+        """AC-032. Only a person's own confirmation may put content on the wire.
+
+        The name is about *initiation*, which is the invariant: an exchange
+        worker is a background thread and it does emit the confirmed hand-off
+        (`test_014_FR_006_the_confirmed_send_is_executed_on_an_exchange_worker`).
+        What no background entry point ever does is start one — and these four
+        are every entry point there is.
+        """
 
         run_id = dispatched(service, a2a_client, clock)
         observer = self._observer(service, clock)

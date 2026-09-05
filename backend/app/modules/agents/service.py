@@ -3276,7 +3276,8 @@ class AgentRelayService:
         Resolved by lookup alone. The message may already be at the agent, so
         the only safe question is "is there a task in this conversation?" — and
         the only safe answer to "no" is to leave the run **Delivery unconfirmed**
-        for the user's own **Check again**. No background thread ever resends.
+        for the user's own **Check again**. A resend is a send, and no send is
+        ever initiated without a user action.
         """
 
         with self.agent_repo.command_lock(owner_id):

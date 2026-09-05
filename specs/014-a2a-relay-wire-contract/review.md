@@ -302,3 +302,30 @@ deliberately not stored — each one names something the owner can put right, an
 a retry after they have is a different world, not a replay. The record is
 ordinary internal storage under the shape `data-model.md` §5 already describes;
 only the `command` value (`check_delivery`) is new.
+
+**(k) The send invariant is about who *initiates* a send, not who executes it.**
+The plan's Consent & Safety check promised that "no background thread ever
+emits a content-bearing message", and `research.md`, `data-model.md` §3 and
+`contracts/a2a-wire.md` said the same thing in their own words —
+`data-model.md` even listed the exchange pool among the threads that emit none.
+Read literally every one of them is false, and false in a way that reads as a
+bug report against the design the rest of the plan asks for: `dispatch_run`
+returns after its courtesy wait while an exchange worker still holds the
+`SendMessage`, precisely because an agent may hold that call open for the whole
+reply window and a send that long may not sit on the request thread.
+
+The invariant the code and the tests actually hold is that **no send is ever
+initiated without a user action**. A worker executes a user-confirmed hand-off,
+its user-triggered replay or a user reply; the observation scheduler, the
+observation and control pools, restart recovery and the retention sweep only
+ever look a run up. The four documents now say that, and the two halves are
+pinned separately —
+`test_agent_observer.py::TestExchangePool::test_014_FR_006_the_confirmed_send_is_executed_on_an_exchange_worker`
+(the request thread returns having sent nothing; the pool's worker is what puts
+the message on the wire) and the existing
+`::test_no_background_thread_ever_sends_content` (four background entry points,
+zero content-bearing sends), whose docstring now says which half it is.
+`test_014_FR_006_the_send_invariant_is_written_as_initiation_not_execution`
+keeps the prose from drifting back. No behaviour changed, no requirement moved,
+and every task tick stands; `tasks.md` T015, T077 and T128 name that test by
+the name `traceability.md` and `acceptance.md` already cite, so it keeps it.

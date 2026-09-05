@@ -116,8 +116,9 @@ Probe / lookup above: adopt the task if found, else the run stays **Delivery unc
 for the user's **Check again**. A reply exchange that had started is likewise resolved by
 lookup only and confirmed by succession evidence — a task in the run's conversation
 (`contextId` = run id) created after the reply command — because Hermes serves no history
-(F5); otherwise the reply stays unconfirmed. No BrainBuddy background thread ever emits
-`SendMessage`.
+(F5); otherwise the reply stays unconfirmed. No BrainBuddy `SendMessage` is ever initiated
+without a user action: an exchange worker executes the send, and recovery only looks a run
+up.
 
 ## Error mapping (JSON-RPC `error.code`, A2A §5.4)
 

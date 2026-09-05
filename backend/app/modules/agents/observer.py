@@ -191,7 +191,8 @@ class AgentObserver:
           the user to worry about a message that provably does not exist.
         - **open** — the send may already be at the agent. BrainBuddy looks the
           run up by its correlation ID and adopts what it finds; it never
-          resends here, because no background thread ever resends (AC-032).
+          resends here, because a resend is a send and no send is ever
+          initiated without a user action (AC-032).
         """
 
         recovered = 0
