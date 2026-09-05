@@ -140,7 +140,7 @@ D1–D3 (duplication) were left as they are: the restated text is consistent.
 
 ## Implementation deviations (recorded by the implementer)
 
-The planning artifacts were reviewed and accepted before any code existed. Seven
+The planning artifacts were reviewed and accepted before any code existed. The
 places where the implementation departed from them are recorded here, with the
 reason, so the reviewers grade what was built rather than what was drawn. Where
 a contract stated the superseded shape, the contract has been corrected in the
@@ -236,3 +236,29 @@ matches `json_extract(payload, '$.run_version')` (`repository.py` lines 1078 and
 `command_lock` — so a write that does not bump it is safe. No request or
 response shape changed, so `contracts/api-deltas.md` line 246 ("unchanged
 requests") stays true.
+
+**(h) A delivery-check lookup has three outcomes, and only one of them
+licenses a resend.**
+The plan and `contracts/api-deltas.md` said "an ambiguous answer leaves the run
+`delivery_unconfirmed`"; the implementation could not tell an ambiguous answer
+from an empty one, because `_lookup_task` returned `None` both when the agent
+answered "no task in this conversation" and when there was no answer at all — a
+timeout, a JSON-RPC error, an unusable payload. **Check again** then resent on
+the strength of a lookup that had established nothing, which is precisely the
+duplicate the lookup exists to prevent (SC-008).
+
+The lookup now returns an explicit outcome — adopted task, confirmed empty, or
+unanswered — and only a *confirmed* empty answer reaches the resend branch. An
+unanswered lookup leaves the run byte-for-byte as it was (`dispatch_state`,
+`exchange_state` and `revision` all unchanged), answers 200 with the same
+**Delivery unconfirmed** projection and the **Check again** control still
+offered, and writes one audit row. No new refusal `reason` was invented: the
+eight in FR-006 are conditions on the *send*, and this is the absence of the
+evidence a send needs, not a ninth condition — so the "complete list" in FR-006
+and in `contracts/api-deltas.md` still holds exactly as ratified.
+
+`data-model.md` §6 gains one audit action, `delivery_lookup_failed`, whose
+outcome is the allowlisted transport code (`a2a_timeout`, `a2a_response_invalid`
+…) and never agent text. It is written per user-triggered check rather than
+bounded per day, like the `task_adopted` row beside it: a check is a tap, not a
+poll.

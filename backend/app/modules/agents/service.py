@@ -358,6 +358,33 @@ class TaskSnapshot:
     details: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class _LookupOutcome:
+    """What one correlation-ID lookup actually established.
+
+    Three answers, not two. "The agent holds no task for this run" and
+    "BrainBuddy could not find out" are both *no task in hand*, and collapsing
+    them into a bare ``None`` is how a timed-out lookup licenses a resend of a
+    message the agent may already be working on — the duplicate SC-008 forbids.
+    Only :attr:`confirmed_empty` is evidence, and only evidence may be acted on.
+    """
+
+    #: The newest task in this run's own conversation, when the agent named one.
+    task: Task | None = None
+    #: Whether the agent answered at all. False for a timeout, a JSON-RPC error,
+    #: an unusable payload, or a deployment with no wire to look with.
+    answered: bool = False
+    #: The allowlisted transport code behind an unanswered lookup, for the audit
+    #: row. Never agent text.
+    error_code: str | None = None
+
+    @property
+    def confirmed_empty(self) -> bool:
+        """The agent answered, and its answer named no task for this run."""
+
+        return self.answered and self.task is None
+
+
 class TaskSnapshotPort(Protocol):
     def __call__(self, task_id: str, *, owner_id: str) -> TaskSnapshot: ...
 
@@ -3155,7 +3182,7 @@ class AgentRelayService:
         request made to answer a question nobody asked.
         """
 
-        adopted = self._lookup_task(run, connection)
+        adopted = self._lookup_task(run, connection).task
         if adopted is None:
             return run
         now = self._now()
@@ -3234,7 +3261,7 @@ class AgentRelayService:
         connection = self.agent_repo.get_connection(
             run.connection_id, owner_id=owner_id
         )
-        adopted = self._lookup_task(run, connection)
+        adopted = self._lookup_task(run, connection).task
         if adopted is None:
             return
         self.apply_observation(
@@ -3253,13 +3280,13 @@ class AgentRelayService:
 
     def _lookup_task(
         self, run: AgentRunDocument, connection: AgentConnectionDocument
-    ) -> Task | None:
+    ) -> _LookupOutcome:
         """The correlation-ID lookup: one `ListTasks`, never a send."""
 
         if self.a2a_client is None:
             # Nothing to look with. An absent answer is not an empty one, so
             # the caller is told nothing rather than "no task exists".
-            return None
+            return _LookupOutcome(error_code=A2A_UNREACHABLE)
         result = self.a2a_client.list_tasks(
             self._a2a_target(
                 connection,
@@ -3270,7 +3297,11 @@ class AgentRelayService:
             page_size=5,
             run_id=run.id,
         )
-        return self._newest_adoptable(run, result)
+        return _LookupOutcome(
+            task=self._newest_adoptable(run, result),
+            answered=result.ok,
+            error_code=result.error_code,
+        )
 
     def _newest_adoptable(
         self, run: AgentRunDocument, result: A2AResult
@@ -3381,9 +3412,15 @@ class AgentRelayService:
         Ordered deliberately. The lookup is safe — it reads, it carries no task
         content, and a task it finds settles the run without any send at all —
         so it runs first and runs even while rollout is OFF. Only after it comes
-        back empty do the *send* preconditions apply, and each of those refuses
-        with its own reason rather than a generic failure, because each one asks
-        the owner for a different next step.
+        back *confirmed* empty do the *send* preconditions apply, and each of
+        those refuses with its own reason rather than a generic failure, because
+        each one asks the owner for a different next step.
+
+        The lookup has three outcomes, not two, and the third is the one that
+        matters: a lookup that did not come back establishes nothing, so it
+        licenses nothing. The run stays exactly as it was — **Delivery
+        unconfirmed**, with **Check again** still offered — and the failure is
+        audited rather than turned into a second message (SC-008).
 
         It can never mint a second run: every identifier it uses is already on
         the run, and the resend wins the same single-writer transition a first
@@ -3404,8 +3441,8 @@ class AgentRelayService:
         )
         self._refuse_before_the_lookup(run, connection)
 
-        adopted = self._lookup_task(run, connection)
-        if adopted is not None:
+        outcome = self._lookup_task(run, connection)
+        if outcome.task is not None:
             # `or run` for the purge race, exactly as the probe above: a run
             # that no longer exists cannot be described by what it used to be.
             run = (
@@ -3413,7 +3450,9 @@ class AgentRelayService:
                     run.id,
                     owner_id=owner_id,
                     observation=project_observation(
-                        adopted, now=self._now(), limits=self.observation_limits
+                        outcome.task,
+                        now=self._now(),
+                        limits=self.observation_limits,
                     ),
                     based_on=run.run_version,
                     extra={
@@ -3427,7 +3466,21 @@ class AgentRelayService:
             self._audit(
                 owner_id=owner_id,
                 action="task_adopted",
-                outcome=adopted.id,
+                outcome=outcome.task.id,
+                connection_id=connection.id,
+                run_id=run.id,
+            )
+            return self._run_response(run)
+
+        if not outcome.confirmed_empty:
+            # The lookup did not come back. That is not evidence that nothing
+            # exists, and only evidence licenses a send: the run stays
+            # **Delivery unconfirmed**, exactly as it was, and the user's own
+            # **Check again** is still the honest next step (SC-008).
+            self._audit(
+                owner_id=owner_id,
+                action="delivery_lookup_failed",
+                outcome=outcome.error_code or "unknown",
                 connection_id=connection.id,
                 run_id=run.id,
             )

@@ -245,7 +245,10 @@ exchange is still open returns the live projection without a second exchange.
 ## 6. Audit entry (`AgentAuditEntryDocument`) — unchanged shape, new actions
 
 Actions: `card_fetched`, `connection_tested`, `card_drift_detected`, `run_dispatched`,
-`exchange_closed`, `task_adopted`, `task_succession_recorded` (one row per `task_succession`
+`exchange_closed`, `task_adopted`, `delivery_lookup_failed` (one row per delivery check whose
+correlation-ID lookup did not come back — outcome is the allowlisted transport code, and the
+run is left exactly as it was: an unanswered lookup is not evidence that nothing exists, so it
+licenses no resend, FR-006/SC-008), `task_succession_recorded` (one row per `task_succession`
 timeline row, §3), `observation_accepted` (written only
 when the observation changed the state, bounded per run/state class/UTC day — never one row
 per 60-second poll), `observation_rejected` (bounded per owner/connection/class/day),

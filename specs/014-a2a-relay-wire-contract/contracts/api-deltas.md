@@ -153,10 +153,15 @@ D-03-S05 / M-03-S04) — body `{ "current_password": null | "…" }`, needed onl
 branch runs and the dispatch reauthentication rule (`requires_dispatch_reauthentication`,
 FR-004) applies to the connection; the lookup never needs it. Performs the same
 lookup-before-resend once with the run's own correlation ID and message ID: a found task is
-adopted and the run becomes `sent`; when the agent reports no task the identical start
-message is resent once with the same message ID to the interface recorded at dispatch —
-unless the connection has `correlation_id_honoured: false`, in which case nothing is resent;
-an ambiguous answer leaves the run `delivery_unconfirmed`. The resend branch — never the
+adopted and the run becomes `sent`; when the agent *answers* and reports no task the identical
+start message is resent once with the same message ID to the interface recorded at dispatch —
+unless the connection has `correlation_id_honoured: false`, in which case nothing is resent.
+A lookup that never came back — a timeout, a JSON-RPC error, an unusable payload, or a
+deployment with no wire to look with — establishes nothing and therefore licenses nothing: the
+run is returned unchanged as `delivery_unconfirmed` (200, and no refusal `reason` — the eight
+below are all conditions on the *send*, and this is the absence of evidence for one), the
+**Check again** control stays offered, and one `delivery_lookup_failed` audit row records the
+allowlisted transport code. The resend branch — never the
 lookup — is refused, leaving the run `delivery_unconfirmed`, with `400 {reason:
 "connection_not_ready"}` when the connection is not `ready`, is stale, or its verified scope
 was reset since the run was dispatched (an agent-address, authentication-scheme, credential or

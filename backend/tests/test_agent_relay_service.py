@@ -3299,10 +3299,14 @@ class TestExchangeEdges:
             service.agent_repo.get_run(run_id, owner_id=OWNER).exchange_state
             == "closed"
         )
-        # And a lookup with no wire reports nothing rather than "nothing found".
+        # And a lookup with no wire reports nothing rather than "nothing found":
+        # unanswered, so never `confirmed_empty`, so it licenses no resend.
         run = service.agent_repo.get_run(run_id, owner_id=OWNER)
         connection = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
-        assert service._lookup_task(run, connection) is None
+        outcome = service._lookup_task(run, connection)
+        assert outcome.task is None
+        assert outcome.answered is False
+        assert outcome.confirmed_empty is False
 
     def test_014_FR_006_a_second_worker_on_one_exchange_sends_nothing(
         self,
@@ -3866,6 +3870,81 @@ class TestCheckDelivery:
             idempotency_key="idem-check-spent",
         )
 
+        assert len(sends(a2a_client)) == 1
+
+    @pytest.mark.parametrize(
+        "error_code",
+        ["a2a_timeout", "a2a_request_rejected", "a2a_response_invalid"],
+    )
+    def test_014_SC_008_a_failed_lookup_never_licenses_a_resend(
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
+        error_code: str,
+    ) -> None:
+        """SC-008. "I could not find out" is not "nothing exists".
+
+        A timeout, a JSON-RPC error and an unusable payload all leave
+        BrainBuddy without an answer. Sending again on that basis is exactly
+        the duplicate the correlation-ID lookup exists to prevent.
+        """
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(ok=False, correlation_id="c", error_code=error_code),
+        )
+
+        checked = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-failed-lookup",
+        )
+
+        assert sends(a2a_client) == []
+        assert checked.dispatch_state == "delivery_unconfirmed"
+        assert checked.primary_state_label == "Delivery unconfirmed"
+
+    def test_014_FR_006_a_failed_lookup_is_audited_and_keeps_check_again_offered(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """The run is untouched, so the user's own **Check again** still stands."""
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        before = service.agent_repo.get_run(run_id, owner_id=OWNER)
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+
+        service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-audited",
+        )
+
+        after = service.agent_repo.get_run(run_id, owner_id=OWNER)
+        assert after.dispatch_state == before.dispatch_state
+        assert after.exchange_state == before.exchange_state
+        assert after.revision == before.revision
+        failures = [
+            entry
+            for entry in service.list_audit(owner_id=OWNER)
+            if entry.action == "delivery_lookup_failed"
+        ]
+        assert [entry.outcome for entry in failures] == ["a2a_timeout"]
+        assert failures[0].run_id == run_id
+        # A second check is still the honest next step, and it still works.
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+        again = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-audited-2",
+        )
+        assert again.dispatch_state == "sent"
         assert len(sends(a2a_client)) == 1
 
     def test_014_SC_008_concurrent_checks_converge_on_one_resend(
