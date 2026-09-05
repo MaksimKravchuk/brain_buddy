@@ -23,6 +23,13 @@ PY
 # them with the tags it prebuilt from the cached layers of main.
 export BRAIN_BUDDY_BACKEND_IMAGE="${BRAIN_BUDDY_BACKEND_IMAGE:-brain-buddy-backend:${PROJECT_NAME}}"
 export BRAIN_BUDDY_FRONTEND_IMAGE="${BRAIN_BUDDY_FRONTEND_IMAGE:-brain-buddy-frontend:${PROJECT_NAME}}"
+export BRAIN_BUDDY_A2A_HELLOWORLD_IMAGE="${BRAIN_BUDDY_A2A_HELLOWORLD_IMAGE:-brain-buddy-a2a-helloworld:${PROJECT_NAME}}"
+export BRAIN_BUDDY_HERMES_A2A_IMAGE="${BRAIN_BUDDY_HERMES_A2A_IMAGE:-brain-buddy-hermes-a2a:${PROJECT_NAME}}"
+
+# The two reference runtimes the relay stories drive. Behind a Compose profile
+# so nothing else in the stack has to know they exist (014-FR-017).
+export COMPOSE_PROFILES="${COMPOSE_PROFILES:-agents}"
+export BRAIN_BUDDY_HERMES_A2A_TOKEN="${BRAIN_BUDDY_HERMES_A2A_TOKEN:-hermes-${PROJECT_NAME}}"
 
 # Building here is the default so a bare run from a clean checkout still works.
 # CI sets 0 because it already built both images with a shared layer cache;
@@ -82,6 +89,8 @@ BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST=1 \
 BRAIN_BUDDY_VOICE_SWEEP_INTERVAL_SECONDS=1 \
 BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER=openai \
 BRAIN_BUDDY_FEATURE_FLAGS=voice_brain_dump=on \
+BRAIN_BUDDY_AGENT_ALLOW_PRIVATE_DESTINATIONS=1 \
+BRAIN_BUDDY_PUBLIC_BASE_URL="http://backend:8000" \
 BRAIN_BUDDY_PORT="${BACKEND_PORT}" \
 FRONTEND_PORT="${FRONTEND_PORT}" \
 VITE_API_BASE_URL=/api \
@@ -111,6 +120,22 @@ for attempt in {1..60}; do
   sleep 2
 done
 
+# `external_agent_relay` is a *runtime* flag: the operator API is the only
+# thing with authority over it (ADR-0019), so the harness turns it on the same
+# way a human would rather than by handing the backend an environment variable
+# request-time gating no longer consults.
+echo "[e2e] Turning on external_agent_relay through the operator API."
+OPERATOR_COOKIE_JAR="$(mktemp)"
+curl -fsS -c "${OPERATOR_COOKIE_JAR}" -X POST "${BACKEND_URL}/api/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${BRAIN_BUDDY_ADMIN_EMAIL}\",\"password\":\"${BRAIN_BUDDY_ADMIN_PASSWORD}\"}" \
+  >/dev/null
+curl -fsS -b "${OPERATOR_COOKIE_JAR}" -X PUT \
+  "${BACKEND_URL}/api/admin/feature-flags/external_agent_relay/mode" \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"on"}' >/dev/null
+rm -f "${OPERATOR_COOKIE_JAR}"
+
 echo "[e2e] Running short Compose API smoke."
 COMPOSE_PROJECT_NAME="${PROJECT_NAME}" \
 API_BASE_URL="${BACKEND_URL}" \
@@ -121,5 +146,6 @@ echo "[e2e] Running Playwright Chromium acceptance journeys."
 cd "${ROOT_DIR}/frontend"
 BRAIN_BUDDY_E2E_COMPOSE_PROJECT="${PROJECT_NAME}" \
 BRAIN_BUDDY_E2E_BACKEND_URL="${BACKEND_URL}" \
+BRAIN_BUDDY_E2E_HERMES_TOKEN="${BRAIN_BUDDY_HERMES_A2A_TOKEN}" \
 PLAYWRIGHT_BASE_URL="${FRONTEND_URL}" \
 npx playwright test --config playwright.config.ts "$@"
