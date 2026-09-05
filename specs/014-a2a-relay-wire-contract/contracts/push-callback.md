@@ -33,8 +33,12 @@ The hand-off review discloses this registration before confirmation (FR-005, AC-
 `AgentManifestResponse.push_callback` carries `registered`, a token-masked `url_preview` and
 the server-owned disclosure sentence (`api-deltas.md`).
 
-`token`: 32 random bytes, urlsafe base64, unique per run, generated at dispatch, stored only
-as `SecretBox.fingerprint(token)` — kept until identifier expiry (90 d), not cleared at
+`token`: 32 bytes, urlsafe base64, unique per run, **derived** at dispatch as a keyed HMAC
+over the run id under the relay key ring (`derive_push_token`) rather than drawn at random,
+because the same token has to go out again with every reply and the run stores only its
+fingerprint — a value that must be reproducible cannot also be forgotten. It is
+indistinguishable from random without the key and unguessable with it, because the run id it
+derives from is itself unguessable. Stored only as `SecretBox.fingerprint(token)` — kept until identifier expiry (90 d), not cleared at
 terminal, so a late valid push is still recognised as such (below). `url` is built from
 `agent_relay_push_base_url` (`BRAIN_BUDDY_PUBLIC_BASE_URL` + api prefix + `/a2a/push`), which
 production validates as a canonical public HTTPS origin (`backend/app/core/config.py`
