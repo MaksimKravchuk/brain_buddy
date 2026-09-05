@@ -125,7 +125,6 @@ def _seed_relay_export_data(
                 title=f"{marker}-manifest-title",
                 details=f"{marker}-manifest-details",
                 reporting=AgentReportingContract(
-                    callback_url="https://brainbuddy.example/api/agent-events",
                     connection_id=connection_id,
                 ),
                 reporting_instructions=f"{marker}-reporting-instructions",

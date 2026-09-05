@@ -54,10 +54,13 @@ chunk, so a drip-feeding agent never trips it): reply window + 15 s for a start 
 exchange, `connector_timeout_seconds` (10 s) + 5 s for every other call (`data-model.md` §9). A breach closes the
 stream and raises `EgressDeadlineExceeded` — start ⇒ delivery unconfirmed (lookup before any
 resend), reply ⇒ command unconfirmed, observe ⇒ contact not refreshed, cancel ⇒
-`cancel_outcome=unconfirmed`, test ⇒ `a2a_unreachable`. Start and reply exchanges run on the
-exchange pool (at most `max_exchanges_per_connection` per connection); `CancelTask` and
-`CreateTaskPushNotificationConfig` run on a dedicated control pool and never wait behind
-exchanges; observations run on the observation pool.
+`cancel_outcome=unconfirmed`, test ⇒ `a2a_unreachable`. Start exchanges run on the exchange pool
+(at most `max_exchanges_per_connection` per connection). A reply runs on the calling
+request's thread while still being recorded as a durable `reply` exchange (state, kind,
+deadline), because a reply is issued from a request the user is waiting on and the pool it
+would queue for is the one starts saturate — and a reply is often what *resolves* one of
+those held exchanges. `CancelTask` and `CreateTaskPushNotificationConfig` run on a dedicated
+control pool and never wait behind exchanges; observations run on the observation pool.
 
 Only proto-defined fields are ever sent (the SDK server rejects unknown params). Responses
 must be a JSON object with `jsonrpc`, matching `id`, and exactly one of `result`/`error`;

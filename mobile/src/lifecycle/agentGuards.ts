@@ -218,20 +218,6 @@ export function canRotateCredential(
   return ALLOWED;
 }
 
-export function canReplaceSigningSecret(
-  connection: ConnectionGuardInput,
-  options: AgentGuardOptions = {},
-): AgentGuard {
-  const offline = offlineGuard(options, "a signing-secret replacement");
-  if (offline) {
-    return offline;
-  }
-  if (connection.status === "disconnected") {
-    return refuse("This agent is disconnected, so its signing secret is already destroyed.");
-  }
-  return ALLOWED;
-}
-
 export function canDisconnect(
   connection: ConnectionGuardInput,
   options: AgentGuardOptions = {},

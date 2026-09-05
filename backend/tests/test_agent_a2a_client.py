@@ -99,6 +99,76 @@ def _client(
     )
 
 
+def _bare_task_result(task_id: str = "task-1", context_id: str = "run-1") -> Any:
+    """The shape both reference runtimes actually use for `GetTask`."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": {
+                    "id": task_id,
+                    "contextId": context_id,
+                    "status": {
+                        "state": "TASK_STATE_COMPLETED",
+                        "timestamp": "2026-08-09T12:00:00Z",
+                        "message": {
+                            "role": "ROLE_AGENT",
+                            "parts": [{"text": "Done."}],
+                        },
+                    },
+                },
+            },
+        )
+
+    return handler
+
+
+def test_014_FR_017_get_task_reads_a_task_returned_as_the_result_itself() -> None:
+    """A2A 1.0 returns the Task *as* the result, not under a `task` key.
+
+    Both vendored reference runtimes do exactly this — the a2a-sdk sample and
+    the Hermes adapter — while `SendMessage` wraps its answer in `{"task": …}`.
+    Reading only the wrapped shape means every scheduled observation comes back
+    "the agent answered, but said nothing about this run", which is contact
+    without news: a completed run would sit at **Running** forever and only a
+    conformance test against a real server could catch it (014-FR-017).
+    """
+
+    client = _client(_bare_task_result())
+
+    result = client.get_task(TARGET, task_id="task-1", context_id="run-1")
+
+    assert result.ok
+    assert result.task is not None
+    assert result.task.id == "task-1"
+    assert result.task.context_id == "run-1"
+    assert result.task.status.state is TaskState.COMPLETED
+
+
+def test_014_FR_006_an_empty_result_is_still_an_answer_with_no_task() -> None:
+    """The negative case: a bare `{}` must not be coerced into a Task.
+
+    `CancelTask` and an empty `ListTasks` both answer with an empty object, and
+    inventing a task from one would attach a run to work that does not exist.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        return httpx.Response(
+            200, json={"jsonrpc": "2.0", "id": payload["id"], "result": {}}
+        )
+
+    result = _client(handler).get_task(TARGET, task_id="task-1")
+
+    assert result.ok
+    assert result.task is None
+    assert result.tasks == ()
+
+
 def _task_body(
     *,
     task_id: str = "task-1",

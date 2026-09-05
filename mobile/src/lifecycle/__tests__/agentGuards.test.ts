@@ -10,7 +10,6 @@ import {
   canDisconnect,
   canHandOff,
   canOpenResultLink,
-  canReplaceSigningSecret,
   canReply,
   canRotateCredential,
   canTestConnection,
@@ -283,17 +282,6 @@ describe("connection management guards", () => {
     expect(canRotateCredential(makeConnection({ status: "unreachable" }))).toEqual({ ok: true });
     expectSentence(canRotateCredential(makeConnection({ status: "disconnected" })));
     expectSentence(canRotateCredential(makeConnection(), { online: false }));
-  });
-
-  it("replaces the signing secret on any connection that is not disconnected", () => {
-    // Recovery has to work on a connection that is *failing*: an untested or
-    // unreachable agent is exactly the one whose secret the owner has lost.
-    expect(canReplaceSigningSecret(makeConnection({ status: "untested" }))).toEqual({ ok: true });
-    expect(canReplaceSigningSecret(makeConnection({ status: "unreachable" }))).toEqual({
-      ok: true,
-    });
-    expectSentence(canReplaceSigningSecret(makeConnection({ status: "disconnected" })));
-    expectSentence(canReplaceSigningSecret(makeConnection(), { online: false }));
   });
 
   it("does not offer disconnect twice", () => {

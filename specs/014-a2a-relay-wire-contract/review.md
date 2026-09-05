@@ -136,3 +136,73 @@ change to spec MUST/AC text, by finding id:
 The remaining findings (A2, A4, U3, U5, C1, C2, G1–G5, I2, I3, I5, I9–I13)
 touched only the plan, design, data model, contracts, checklist and tasks.
 D1–D3 (duplication) were left as they are: the restated text is consistent.
+
+
+## Implementation deviations (recorded by the implementer)
+
+The planning artifacts were reviewed and accepted before any code existed. Six
+places where the implementation departed from them are recorded here, with the
+reason, so the reviewers grade what was built rather than what was drawn. Where
+a contract stated the superseded shape, the contract has been corrected in the
+same commit as this entry — a deviation that lives only in a review note is a
+document that will be trusted and be wrong.
+
+**(a) The per-run push token is derived, not random.**
+`contracts/push-callback.md` requires the *same* token to go out again with
+every reply, so a successor task keeps push acceleration, while `data-model.md`
+§7 allows a run to store only `push_token_fingerprint`. Those two are
+satisfiable together only if the token is recomputable, so `derive_push_token`
+computes it as a keyed HMAC over the run id under the relay key ring rather
+than drawing it from `secrets.token_urlsafe`. Storing the plaintext to achieve
+the same thing would put a live route credential in the database; minting a
+fresh one per reply would silently invalidate a push the agent is already
+preparing. The value is indistinguishable from random without the key and
+unguessable with it, because the run id it derives from is itself unguessable.
+
+**(b) A reply runs on the calling request's thread.**
+The plan put start *and* reply exchanges on the bounded exchange pool. A reply
+is issued from a request the user is waiting on, and the pool it would wait for
+is the one saturated by starts — so a reply could block behind the very
+exchanges a reply often resolves, and a deadlock there would be indistinguish-
+able from a slow agent. The reply therefore runs on the calling thread while
+still being recorded as a durable `reply` exchange (state, kind, deadline), so
+restart recovery, the observation suspension and the succession rules all see
+exactly the exchange the plan described. Cancel keeps its dedicated control
+pool for the same reason, unchanged.
+
+**(c) iOS "Copy link" uses React Native's core `Clipboard`.**
+`expo-clipboard` is not a dependency of this app and adding one for a single
+call is a supply-chain cost with no benefit here. The call is isolated behind
+`mobile/src/utils/clipboard.ts`, so migrating to `expo-clipboard` later is one
+edit in one file.
+
+**(d) Two feature-007 link tests were re-targeted, not deleted.**
+They asserted the pre-014 behaviour that a reported link could be interactive
+under some conditions. The 2026-09-04 product decision is that every reported
+link is inert, without exception, so the two cases now assert that instead.
+
+**(e) Two names differ from the data model.**
+`observation_interval` lives on `ExchangePolicy` rather than standing alone,
+because it is one of the exchange lane's bounds and a second home for it would
+be a second thing to keep in step. `AgentPrimaryStateLabel` is declared in
+`domain.py` and re-exported by `schemas/agents.py`, so the label set has one
+definition and the schema module still reads as its owner.
+
+**(f) Two removal tasks and two contract details, found by the reference runtimes.**
+T110 (the service's ingest path) and T114 (the routes and schemas) landed in one
+commit: the route needs the service method, the service method needs the request
+schema, and removing any one alone leaves a tree that cannot import. T115 landed
+before T111–T113 for the same reason — `connector.py` imports the domain
+constants T111 removes.
+
+The two conformance suites then found two things no fake had: A2A 1.0 returns
+the Task *as* the JSON-RPC result for `GetTask` (only `SendMessage` wraps it in
+`{"task": …}`), and a card that declares no security scheme is an agent asking
+for no authentication rather than one refusing yours. Both were product bugs
+against the unmodified reference runtimes, and both are fixed with their own
+unit tests beside the conformance cases. Two smaller ones are asserted as
+observed rather than as planned and say so in the tests: the helloworld sample
+refuses cancel with `-32002 TASK_NOT_CANCELABLE`, not `-32004`; and a
+token-secured Hermes refuses to POST a push notification to a private address,
+so the loopback conformance stack proves the fallback (push is an optimisation,
+the schedule is the guarantee) instead of the push leg.

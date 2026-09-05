@@ -428,6 +428,59 @@ class TestSecuritySchemes:
 
         assert result.failure_code == A2A_AUTH_SCHEME_UNSUPPORTED
 
+    def test_014_FR_017_a_card_declaring_no_scheme_asks_for_no_authentication(
+        self,
+    ) -> None:
+        """An agent that declares nothing is not refusing — it is open.
+
+        The official a2a-sdk `helloworld` sample publishes no `securitySchemes`
+        at all, and FR-017 requires BrainBuddy to interoperate with the
+        unmodified sample. "No scheme offered" and "a scheme that is not the
+        one you chose" are different facts: the second is a mismatch worth
+        refusing before a credential leaves, the first is an agent saying it
+        wants none. Discovery therefore succeeds and says so, and the caller is
+        the one that must then send nothing (014-FR-002, 014-FR-017).
+        """
+
+        payload = _card()
+        payload.pop("securitySchemes", None)
+        payload.pop("securityRequirements", None)
+        payload.pop("security", None)
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.ok, result.failure_code
+        assert result.authenticated is False
+        assert result.auth_header_name is None
+        assert result.summary is not None
+        assert result.summary.auth_schemes_offered == []
+
+    def test_014_FR_002_a_card_that_offers_a_scheme_still_has_to_offer_yours(
+        self,
+    ) -> None:
+        """The negative case, so the allowance above cannot be read as a hole.
+
+        One declared scheme is enough to make silence meaningful again: an
+        agent that named `apiKey` and nothing else has refused bearer, and the
+        refusal must survive the "no schemes at all" allowance.
+        """
+
+        payload = _card(
+            securitySchemes={
+                "apikey": {"type": "apiKey", "in": "header", "name": "X-Agent-Key"}
+            },
+            securityRequirements=[{"apikey": []}],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code == A2A_AUTH_SCHEME_UNSUPPORTED
+        assert result.authenticated is True
+
     def test_014_FR_002_every_offered_scheme_is_reported_for_the_owner_to_see(
         self,
     ) -> None:

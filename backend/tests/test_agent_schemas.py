@@ -15,24 +15,18 @@ from pydantic import ValidationError
 from app.api.errors import register_exception_handlers
 from app.modules.agents.authority import validate_endpoint_authority
 from app.modules.agents.domain import (
-    AGENT_EVENT_ENVELOPE_ADAPTER,
-    AgentCompletedEvent,
     _reject_endpoint_unsafe_components,
 )
 from app.modules.agents.egress import _is_governed_private, _is_publicly_routable
 from app.schemas.agents import (
     AgentCheckDeliveryRequest,
-    AgentConnectionCreatedResponse,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
     AgentConnectionResponse,
     AgentConnectionRotateRequest,
-    AgentConnectionRotateSigningSecretRequest,
-    AgentConnectionSigningSecretResponse,
     AgentConnectionUpdateRequest,
     AgentContextItemRequest,
     AgentControlsResponse,
-    AgentEventIngestResponse,
     AgentHandoffConfirmRequest,
     AgentHandoffPreviewRequest,
     AgentManifestResponse,
@@ -90,21 +84,6 @@ def _connection_payload() -> dict[str, object]:
         "stale_after_seconds": 300,
         "created_at": NOW,
         "revision": 2,
-    }
-
-
-def _reporting_payload() -> dict[str, str]:
-    return {
-        "callback_url": "https://brainbuddy.example.com/api/agents/events",
-        "connection_id": "agentconn_1",
-        "connection_header": "X-BrainBuddy-Connection",
-        "timestamp_header": "X-BrainBuddy-Timestamp",
-        "signature_header": "X-BrainBuddy-Signature",
-        "timestamp_format": "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero",
-        "signature_algorithm": "hmac-sha256",
-        "signing_bytes": "timestamp_bytes + b'.' + raw_body",
-        "signature_format": "v1=<lowercase hex>",
-        "body_envelope_version": "2026-08-09",
     }
 
 
@@ -169,10 +148,6 @@ def test_connection_requests_normalize_names_and_enforce_sensitive_constraints()
         )
     with pytest.raises(ValidationError):
         AgentConnectionDisconnectRequest(
-            current_password="password", expected_revision=0
-        )
-    with pytest.raises(ValidationError):
-        AgentConnectionRotateSigningSecretRequest(
             current_password="password", expected_revision=0
         )
 
@@ -474,16 +449,6 @@ def test_connection_responses_cannot_serialize_saved_credentials() -> None:
         AgentConnectionResponse.model_validate(
             {**_connection_payload(), "credential": "must-not-leak"}
         )
-
-    for response_type in (
-        AgentConnectionCreatedResponse,
-        AgentConnectionSigningSecretResponse,
-    ):
-        issued = response_type.model_validate(
-            {**_connection_payload(), "inbound_signing_secret": "shown-once"}
-        )
-        assert issued.inbound_signing_secret == "shown-once"
-        assert "credential" not in issued.model_dump()
 
 
 def test_014_FR_001_connection_writes_name_a_scheme_and_never_a_header_name() -> None:
@@ -899,10 +864,6 @@ def test_run_projection_keeps_reported_derived_and_requested_state_separate() ->
         "cancel_outcome": "none",
         "agent_task_missing": False,
     }
-    assert AgentEventIngestResponse(accepted=True, run_version=3).model_dump() == {
-        "accepted": True,
-        "run_version": 3,
-    }
 
 
 def test_reply_schema_rejects_empty_messages_and_stale_revisions() -> None:
@@ -919,35 +880,6 @@ def test_reply_schema_rejects_empty_messages_and_stale_revisions() -> None:
     ):
         with pytest.raises(ValidationError):
             AgentReplyRequest.model_validate(payload)
-
-
-def test_signed_event_envelopes_reject_blank_identity_and_resultless_completion() -> (
-    None
-):
-    """Authenticated event bodies still require nonblank identity and completion evidence."""
-
-    base = {
-        "protocol_version": "2026-08-09",
-        "connection_id": "agentconn_1",
-        "event_id": "event_1",
-        "run_id": "agentrun_1",
-        "run_version": 1,
-    }
-
-    with pytest.raises(ValidationError, match="must not be blank"):
-        AGENT_EVENT_ENVELOPE_ADAPTER.validate_python(
-            {**base, "protocol_version": "   ", "type": "accepted"}
-        )
-    with pytest.raises(
-        ValidationError, match="completed requires result or result_link"
-    ):
-        AGENT_EVENT_ENVELOPE_ADAPTER.validate_python({**base, "type": "completed"})
-
-    completed = AGENT_EVENT_ENVELOPE_ADAPTER.validate_python(
-        {**base, "type": "completed", "result": "Coverage restored"}
-    )
-    assert isinstance(completed, AgentCompletedEvent)
-    assert completed.result == "Coverage restored"
 
 
 def test_invalid_resolver_answers_fail_both_network_class_predicates() -> None:

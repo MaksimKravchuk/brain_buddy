@@ -94,11 +94,11 @@ Focus: (1) wire contract, identifiers and observation honesty; (2) privacy, secu
 <!-- BrainBuddy constitution gates: typed writer receipt is required before freeze. -->
 <!-- BrainBuddy pre-freeze receipt contract: checklist. Preserve this section. -->
 
-- [ ] CHK052 Writer receipt validates with `scripts/validate_pre_freeze_receipt.py` against the full lowercase implementation SHA
+- [x] CHK052 Writer receipt validates with `scripts/validate_pre_freeze_receipt.py` against the full lowercase implementation SHA
 
 ## Notes
 
 - Check items off as completed: `[x]`
 - Add comments or findings inline
-- CHK051: decided and ticked at the `/speckit-analyze` stage (2026-09-04). The chosen copy when the agent gives no retry-after is "Test again shortly.", with **Test connection** offered at once; FR-002, AC-037, design.md D-01-S25 / M-01-S22 and tasks T048 / T050 all carry it. T130 confirms the implementation renders exactly that string.
+- CHK051: decided and ticked at the `/speckit-analyze` stage (2026-09-04). The chosen copy when the agent gives no retry-after is "Test again shortly.", with **Test connection** offered at once; FR-002, AC-037, design.md D-01-S25 / M-01-S22 and tasks T048 / T050 all carry it. T130 confirmed it on 2026-09-05: `rateLimitRetryCopy` in `frontend/src/features/agents/agentCopy.ts` and `mobile/src/agents/machine.ts` both return exactly `"Test again shortly."` when `retry_after_seconds` is null or absent, and both are asserted — `agentCopy.test.ts`, `AgentSettingsPage.test.tsx` (the D-01-S25 parametrised case) and `machine.test.ts`. No amendment was needed.
 - CHK052 is completed by the feature-implementer before the pre-freeze receipt.

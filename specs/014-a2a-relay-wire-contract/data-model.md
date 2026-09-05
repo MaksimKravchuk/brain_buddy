@@ -260,7 +260,9 @@ the keyed `SecretBox.fingerprint`). 90-day purge unchanged (`AUDIT_RETENTION`).
 
 ## 7. Push token (no document) — FR-008
 
-Generated per run (32 random bytes, urlsafe), sent to the agent inside
+Derived per run (32 bytes, urlsafe, a keyed HMAC over the run id under the relay key ring —
+`derive_push_token`; never stored in plaintext, and recomputable so every reply carries the
+same token), sent to the agent inside
 `TaskPushNotificationConfig.url` and `.token` with the start message and again with every
 reply message when the card supports push (so a successor task keeps push acceleration; the
 schedule stays the fallback), stored only as `push_token_fingerprint`. Verification, in the

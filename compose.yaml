@@ -23,6 +23,15 @@ services:
       BRAIN_BUDDY_ADMIN_EMAIL: ${BRAIN_BUDDY_ADMIN_EMAIL:-}
       BRAIN_BUDDY_ADMIN_PASSWORD: ${BRAIN_BUDDY_ADMIN_PASSWORD:-}
       BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS: ${BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS:-}
+      # The relay's E2E fixtures live on this Compose network, which is a
+      # private address range. The opt-in is per-deployment and governed
+      # (014-FR-004); production leaves it unset and the destination check
+      # refuses every private address.
+      BRAIN_BUDDY_AGENT_ALLOW_PRIVATE_DESTINATIONS: ${BRAIN_BUDDY_AGENT_ALLOW_PRIVATE_DESTINATIONS:-0}
+      # The origin the per-run A2A push callback is built from. It is part of
+      # the manifest token, so a stack that moved cannot let a stale
+      # confirmation hand an agent an address BrainBuddy no longer answers on.
+      BRAIN_BUDDY_PUBLIC_BASE_URL: ${BRAIN_BUDDY_PUBLIC_BASE_URL:-}
     volumes:
       - backend-data:/app/data
     ports:
@@ -49,6 +58,47 @@ services:
         condition: service_healthy
     ports:
       - "${FRONTEND_PORT:-8080}:80"
+
+  # --- external agent relay E2E fixtures (profile: agents) ------------------
+  #
+  # Both are *reference runtimes*, not doubles: the point of running them is
+  # that nobody adapted them to BrainBuddy (014-FR-017, 014-SC-001). They are
+  # behind a profile so an ordinary `docker compose up` does not start two
+  # agents nobody asked for.
+
+  a2a-helloworld:
+    profiles: ["agents"]
+    image: ${BRAIN_BUDDY_A2A_HELLOWORLD_IMAGE:-brain-buddy-a2a-helloworld:local}
+    build:
+      context: .
+      dockerfile: scripts/fixtures/a2a-helloworld/Dockerfile
+    # The sample hard-codes `127.0.0.1:9999`, so it is only reachable from
+    # inside the namespace it binds in. Joining the backend's namespace is what
+    # makes `http://127.0.0.1:9999` a real address for the backend without
+    # editing a single line of the vendored sample.
+    network_mode: "service:backend"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  hermes-a2a:
+    profiles: ["agents"]
+    image: ${BRAIN_BUDDY_HERMES_A2A_IMAGE:-brain-buddy-hermes-a2a:local}
+    build:
+      context: .
+      dockerfile: scripts/fixtures/hermes-a2a/Dockerfile
+    environment:
+      A2A_HOST: "0.0.0.0"
+      A2A_PORT: "9900"
+      # Without a token the adapter refuses to bind anywhere but loopback, so
+      # this is what makes the fixture reachable as a Compose service at all.
+      A2A_BEARER_TOKEN: ${BRAIN_BUDDY_HERMES_A2A_TOKEN:-hermes-e2e-bearer-token}
+      # The card advertises the address the *backend* can reach, which is the
+      # service name — not this container's bind host.
+      A2A_PUBLIC_URL: http://hermes-a2a:9900/
+      STUB_REPLY_DELAY_SECONDS: ${BRAIN_BUDDY_HERMES_A2A_DELAY_SECONDS:-0}
+    expose:
+      - "9900"
 
 volumes:
   backend-data:

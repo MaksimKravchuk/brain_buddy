@@ -200,6 +200,25 @@ class A2AResult:
     result_availability: ResultAvailability | None = None
 
 
+def _bare_task(result: dict[str, Any]) -> Task | None:
+    """A Task returned *as* the result, which is what 1.0 does for reads.
+
+    ``SendMessage`` answers with ``{"task": {...}}`` because it may instead
+    answer with a message; ``GetTask`` and ``CancelTask`` have only one thing to
+    return and return it directly. Both vendored reference runtimes do exactly
+    this, and reading only the wrapped shape turned every scheduled observation
+    into "contact, no news" — a completed run stuck at **Running** for ever.
+
+    ``id`` and ``status`` together are the discriminator, so the empty object an
+    agent answers a cancel or an empty listing with is never coerced into a task
+    that does not exist.
+    """
+
+    if "id" in result and "status" in result:
+        return Task.model_validate(result)
+    return None
+
+
 class A2AClientPort(Protocol):
     """The client surface the service and observer depend on.
 
@@ -688,7 +707,11 @@ class A2AClient:
         result: dict[str, Any], correlation_id: str, status_code: int
     ) -> A2AResult:
         try:
-            task = Task.model_validate(result["task"]) if "task" in result else None
+            task = (
+                Task.model_validate(result["task"])
+                if "task" in result
+                else _bare_task(result)
+            )
             message = (
                 Message.model_validate(result["message"])
                 if "message" in result

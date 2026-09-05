@@ -40,17 +40,14 @@ from app.core.rate_limit import (
     sensitive_action_rate_limiter,
 )
 from app.exceptions import ReauthFailedError, ValidationFailure
-from app.modules.agents.service import AgentRelayService, EventRejected
+from app.modules.agents.service import AgentRelayService
 from app.schemas.agents import (
     AgentCheckDeliveryRequest,
     AgentConnectionCreateRequest,
     AgentConnectionDisconnectRequest,
     AgentConnectionResponse,
     AgentConnectionRotateRequest,
-    AgentConnectionRotateSigningSecretRequest,
-    AgentConnectionSigningSecretResponse,
     AgentConnectionUpdateRequest,
-    AgentEventIngestResponse,
     AgentHandoffConfirmRequest,
     AgentHandoffPreviewRequest,
     AgentManifestResponse,
@@ -109,13 +106,6 @@ def _require_idempotency_key(idempotency_key: str | None) -> str:
     return idempotency_key
 
 
-def _too_large() -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-        detail="Event payload is too large.",
-    )
-
-
 def _declared_body_length(request: Request) -> int | None:
     """The caller's own ``Content-Length``, or ``None`` if it is unusable.
 
@@ -132,30 +122,6 @@ def _declared_body_length(request: Request) -> int | None:
     except ValueError:
         return None
     return declared if declared >= 0 else None
-
-
-async def _bounded_event_body(request: Request) -> bytes:
-    """Read an inbound event body without ever buffering more than the cap.
-
-    This route is unauthenticated by design, so the size limit has to hold
-    against a caller who is not merely careless. A declared length over the cap
-    is refused on the header alone, before a single byte is read, and a caller
-    that declares nothing (or lies) is cut off the moment the accumulated body
-    passes the cap.
-    """
-
-    declared = _declared_body_length(request)
-    if declared is not None and declared > MAX_EVENT_BODY_BYTES:
-        raise _too_large()
-
-    chunks: list[bytes] = []
-    size = 0
-    async for chunk in request.stream():
-        size += len(chunk)
-        if size > MAX_EVENT_BODY_BYTES:
-            raise _too_large()
-        chunks.append(chunk)
-    return b"".join(chunks)
 
 
 def _verify_password(
@@ -297,40 +263,6 @@ def rotate_agent_credential(
         auth_service, current_user, payload.current_password
     )
     return service.rotate_credential(
-        connection_id,
-        payload,
-        owner_id=current_user.id,
-        idempotency_key=key,
-        reauthenticated=reauthenticated,
-    )
-
-
-@router.post(
-    "/agent-connections/{connection_id}/signing-secret",
-    response_model=AgentConnectionSigningSecretResponse,
-    responses=error_responses(400, 401, 403, 404, 409, 422, 429),
-)
-def rotate_agent_signing_secret(
-    connection_id: str,
-    payload: AgentConnectionRotateSigningSecretRequest,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: User = Depends(require_external_agent_relay_enabled),
-    service: AgentRelayService = Depends(get_agent_relay_service),
-    auth_service: AuthService = Depends(get_auth_service),
-) -> AgentConnectionSigningSecretResponse:
-    """Replace the inbound signing secret when the create response was lost.
-
-    The 201 from registration is the only place that secret is shown, so this
-    is the sole way back from losing it. Retrying with the same Idempotency-Key
-    returns the same replacement rather than a blank success — the old secret
-    is already dead by then, so an empty answer would strand the caller.
-    """
-
-    key = _require_idempotency_key(idempotency_key)
-    reauthenticated = _verify_password(
-        auth_service, current_user, payload.current_password
-    )
-    return service.rotate_signing_secret(
         connection_id,
         payload,
         owner_id=current_user.id,
@@ -613,50 +545,3 @@ async def _bounded_push_body(request: Request) -> None:
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail="Notification payload is too large.",
             )
-
-
-# --- inbound connector events -----------------------------------------------
-
-
-@router.post(
-    "/agent-events",
-    response_model=AgentEventIngestResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    responses=error_responses(400, 403, 413, 422),
-)
-async def ingest_agent_event(
-    request: Request,
-    response: Response,
-    connection_id: str | None = Header(default=None, alias="X-BrainBuddy-Connection"),
-    timestamp: str | None = Header(default=None, alias="X-BrainBuddy-Timestamp"),
-    signature: str | None = Header(default=None, alias="X-BrainBuddy-Signature"),
-    service: AgentRelayService = Depends(get_agent_relay_service),
-) -> AgentEventIngestResponse:
-    """Accept one signed report from a user's agent.
-
-    Not gated on the rollout flag: a run that was already dispatched must remain
-    able to report even if the owner's flag is later turned off, otherwise the
-    user is left with a run frozen mid-flight and no way to learn its outcome.
-    """
-
-    raw_body = await _bounded_event_body(request)
-    if not connection_id or not timestamp or not signature:
-        # Same shape as a bad signature: an unsigned probe learns nothing.
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Event rejected.",
-        )
-    try:
-        return service.ingest_event(
-            raw_body=raw_body,
-            connection_id=connection_id,
-            timestamp=timestamp,
-            signature=signature,
-        )
-    except EventRejected as exc:
-        # One opaque refusal for every failure mode. The specific reason is in
-        # the owner's audit trail, never in the response.
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Event rejected.",
-        ) from exc

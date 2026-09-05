@@ -506,16 +506,6 @@ export interface AgentConnectionRotateRequest {
   expected_revision: number;
 }
 
-export interface AgentConnectionRotateSigningSecretRequest {
-  current_password: string;
-  expected_revision: number;
-}
-
-/** Returned once after replacing the inbound signing secret; never cache it. */
-export interface AgentConnectionSigningSecretResponse extends AgentConnectionResponse {
-  inbound_signing_secret: string;
-}
-
 export interface AgentConnectionDisconnectRequest {
   current_password: string;
   expected_revision: number;

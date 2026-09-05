@@ -480,9 +480,6 @@ class TaskTitleAutocompleteSettings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
-AGENT_EVENTS_PATH = "/agent-events"
-"""The relay endpoint path below the application's configured API prefix."""
-
 AGENT_PUSH_PATH = "/a2a/push"
 """The A2A push-notification callback path below the configured API prefix.
 
@@ -754,15 +751,6 @@ class AppConfig(BaseModel):
     @property
     def log_level(self) -> str:
         return self.logging.normalized_level
-
-    @property
-    def agent_relay_callback_url(self) -> str:
-        """Build the callback from the same prefix mounted by FastAPI."""
-
-        return (
-            f"{self.agent_relay.public_base_url.rstrip('/')}"
-            f"{self.api_prefix.rstrip('/')}{AGENT_EVENTS_PATH}"
-        )
 
     @property
     def agent_relay_push_base_url(self) -> str:

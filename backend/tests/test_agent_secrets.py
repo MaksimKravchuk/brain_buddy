@@ -15,7 +15,6 @@ import pytest
 
 from app.core.config import AppEnvironment
 from app.modules.agents.secrets import (
-    AAD_PURPOSE_INBOUND_SIGNING,
     AAD_PURPOSE_OUTBOUND_CREDENTIAL,
     SealedSecret,
     SecretBox,
@@ -148,28 +147,6 @@ class TestOwnerBoundAssociatedData:
                     AAD_PURPOSE_OUTBOUND_CREDENTIAL,
                     owner_id="user_a",
                     connection_id="conn_2",
-                ),
-            )
-
-    def test_purposes_are_domain_separated(self, box: SecretBox) -> None:
-        """An outbound credential can never be opened as a signing secret."""
-
-        sealed = box.seal(
-            "hermes-token-value",
-            aad=secret_aad(
-                AAD_PURPOSE_OUTBOUND_CREDENTIAL,
-                owner_id="user_a",
-                connection_id="conn_1",
-            ),
-        )
-
-        with pytest.raises(SecretDecryptionFailed):
-            box.open(
-                sealed,
-                aad=secret_aad(
-                    AAD_PURPOSE_INBOUND_SIGNING,
-                    owner_id="user_a",
-                    connection_id="conn_1",
                 ),
             )
 

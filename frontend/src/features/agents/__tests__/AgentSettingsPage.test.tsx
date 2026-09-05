@@ -995,7 +995,6 @@ describe("AgentSettingsPage", () => {
 
   it("014-FR-012 offers no signing-secret control at all", async () => {
     vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
-    const replace = vi.spyOn(apiClient, "rotateAgentSigningSecret");
     renderPage();
 
     const card = await screen.findByRole("article", { name: "Hermes" });
@@ -1005,7 +1004,8 @@ describe("AgentSettingsPage", () => {
     // would advertise a step the owner does not have to take.
     expect(within(card).queryByRole("button", { name: /signing secret/i })).toBeNull();
     expect(within(card).queryByText(/signing secret/i)).toBeNull();
-    expect(replace).not.toHaveBeenCalled();
+    // Not merely unrendered: the client cannot call the route at all.
+    expect("rotateAgentSigningSecret" in apiClient).toBe(false);
   });
 
   it("warns that disconnecting does not cancel external work before it is confirmed", async () => {

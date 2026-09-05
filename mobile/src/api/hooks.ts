@@ -29,10 +29,7 @@ import type {
   AgentConnectionCreateRequest,
   AgentCheckDeliveryRequest,
   AgentConnectionDisconnectRequest,
-  AgentConnectionResponse,
   AgentConnectionRotateRequest,
-  AgentConnectionRotateSigningSecretRequest,
-  AgentConnectionSigningSecretResponse,
   AgentConnectionUpdateRequest,
   AgentHandoffConfirmRequest,
   AgentHandoffPreviewRequest,
@@ -713,33 +710,6 @@ export function useRotateAgentCredential() {
         input.payload,
         requireIdempotencyKey("useRotateAgentCredential", input.idempotencyKey),
       ),
-    onSuccess: invalidate,
-    onError: (error: unknown) => {
-      if (error instanceof ApiError && error.status === 409) {
-        invalidate();
-      }
-    },
-  });
-}
-
-export function useRotateAgentSigningSecret(options?: { onSigningSecret(secret: string): void }) {
-  const { api, owner } = useAgentContext();
-  const invalidate = useInvalidateAgents(owner);
-  return useRelayMutation<AgentConnectionSigningSecretResponse, AgentConnectionResponse, {
-    connectionId: string;
-    payload: AgentConnectionRotateSigningSecretRequest;
-    idempotencyKey: string;
-  }>({
-    mutationKey: agentKeys.mutation(owner, "rotate-signing-secret"),
-    mutationFn: (input) => api.rotateAgentSigningSecret(
-      input.connectionId,
-      input.payload,
-      requireIdempotencyKey("useRotateAgentSigningSecret", input.idempotencyKey),
-    ),
-    consume: ({ inbound_signing_secret: secret, ...connection }) => {
-      options?.onSigningSecret(secret);
-      return connection;
-    },
     onSuccess: invalidate,
     onError: (error: unknown) => {
       if (error instanceof ApiError && error.status === 409) {

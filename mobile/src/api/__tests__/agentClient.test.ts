@@ -147,28 +147,6 @@ describe("agent connections", () => {
     });
   });
 
-  it("replaces the signing secret on its own route, carrying no credential", async () => {
-    const { client, calls } = makeClient([
-      jsonResponse({ id: "conn1", revision: 5, inbound_signing_secret: "sk-inbound-new" }),
-    ]);
-    const replaced = await client.rotateAgentSigningSecret(
-      "conn1",
-      { current_password: "correct-horse", expected_revision: 4 },
-      "key-signing",
-    );
-
-    expect(calls[0].url).toBe("https://example.test/api/agent-connections/conn1/signing-secret");
-    expect(calls[0].init.method).toBe("POST");
-    expect(headersOf(calls[0])["Idempotency-Key"]).toBe("key-signing");
-    // The inbound secret and the outbound credential are different secrets on
-    // different routes; the body must never blur them.
-    expect(bodyOf(calls[0])).toEqual({
-      current_password: "correct-horse",
-      expected_revision: 4,
-    });
-    expect(replaced.inbound_signing_secret).toBe("sk-inbound-new");
-  });
-
   it("disconnects with the account password and expected_revision", async () => {
     const { client, calls } = makeClient([jsonResponse({ id: "conn1" })]);
     await client.disconnectAgentConnection(
@@ -301,12 +279,6 @@ describe("relay mutation intent boundary", () => {
       client.rotateAgentCredential(
         "conn1",
         { credential: "next", current_password: "password", expected_revision: 1 },
-        key,
-      )],
-    ["rotate signing secret", (client: ReturnType<typeof createApiClient>, key: string) =>
-      client.rotateAgentSigningSecret(
-        "conn1",
-        { current_password: "password", expected_revision: 1 },
         key,
       )],
     ["disconnect", (client: ReturnType<typeof createApiClient>, key: string) =>

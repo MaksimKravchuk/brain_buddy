@@ -31,7 +31,7 @@ from app.modules.agents.domain import (
     AgentRunDocument,
     AgentRunEventDocument,
 )
-from app.modules.agents.repository import EVENT_ID_RETENTION, AgentRepository
+from app.modules.agents.repository import AgentRepository
 from app.modules.agents.secrets import SealedSecret
 
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
@@ -549,7 +549,6 @@ class TestConnections:
             "legacy_invalid_connection_requires_reconfiguration"
         }
         assert all(item.credential is None for item in quarantined)
-        assert all(item.inbound_secret is None for item in quarantined)
         assert all(
             not any(item.capabilities.model_dump().values()) for item in quarantined
         )
@@ -822,7 +821,10 @@ class TestRuns:
     ) -> None:
         """Confirmation resolves the exact reservation the review produced."""
 
-        from app.modules.agents.domain import AgentReportingContract, AgentRunManifest
+        from app.modules.agents.domain import (
+            AgentRunManifest,
+            inert_reporting_contract,
+        )
 
         manifest = AgentRunManifest(
             token="a" * 64,
@@ -831,10 +833,7 @@ class TestRuns:
             connection_id="agentconn_1",
             agent_name="Hermes",
             title="Draft the plan",
-            reporting=AgentReportingContract(
-                callback_url="https://brainbuddy.example/api/agent-events",
-                connection_id="agentconn_1",
-            ),
+            reporting=inert_reporting_contract("agentconn_1"),
             reporting_instructions="Report to the callback URL.",
         )
         repo.create_connection(make_connection())
@@ -871,72 +870,7 @@ class TestRuns:
         assert repo.find_connection_anywhere("agentconn_missing") is None
 
 
-class TestEventReplayConsumption:
-    def test_expired_event_ids_are_purged(self, repo: AgentRepository) -> None:
-        repo.create_connection(make_connection())
-        repo.consume_event_id(
-            owner_id="user_a",
-            connection_id="agentconn_1",
-            event_id="evt_old",
-            now=NOW - EVENT_ID_RETENTION - timedelta(seconds=1),
-        )
-
-        assert repo.purge_expired_event_ids(now=NOW) == 1
-
-    def test_a_fresh_event_id_is_consumed_once(self, repo: AgentRepository) -> None:
-        """The first sighting of an event ID wins."""
-
-        repo.create_connection(make_connection())
-
-        assert (
-            repo.consume_event_id(
-                owner_id="user_a",
-                connection_id="agentconn_1",
-                event_id="evt_1",
-                now=NOW,
-            )
-            is True
-        )
-
-    def test_a_replayed_event_id_is_refused(self, repo: AgentRepository) -> None:
-        """A duplicate delivery is rejected atomically, before any mutation."""
-
-        repo.create_connection(make_connection())
-        repo.consume_event_id(
-            owner_id="user_a", connection_id="agentconn_1", event_id="evt_1", now=NOW
-        )
-
-        assert (
-            repo.consume_event_id(
-                owner_id="user_a",
-                connection_id="agentconn_1",
-                event_id="evt_1",
-                now=NOW,
-            )
-            is False
-        )
-
-    def test_the_same_event_id_on_a_different_connection_is_independent(
-        self, repo: AgentRepository
-    ) -> None:
-        """Replay identifiers are scoped to the connection that signed them."""
-
-        repo.create_connection(make_connection())
-        repo.create_connection(make_connection(connection_id="agentconn_2"))
-        repo.consume_event_id(
-            owner_id="user_a", connection_id="agentconn_1", event_id="evt_1", now=NOW
-        )
-
-        assert (
-            repo.consume_event_id(
-                owner_id="user_a",
-                connection_id="agentconn_2",
-                event_id="evt_1",
-                now=NOW,
-            )
-            is True
-        )
-
+class TestRunEventOrdering:
     def test_appended_events_come_back_in_chronological_order(
         self, repo: AgentRepository
     ) -> None:
@@ -1406,10 +1340,12 @@ class TestRetentionAndPurge:
         repo.create_connection(
             make_connection(
                 credential={"key_id": "k1", "ciphertext": "credential-secret"},
-                inbound_secret={"key_id": "k1", "ciphertext": "signing-secret"},
             )
         )
-        from app.modules.agents.domain import AgentReportingContract, AgentRunManifest
+        from app.modules.agents.domain import (
+            AgentRunManifest,
+            inert_reporting_contract,
+        )
 
         manifest = AgentRunManifest(
             token="a" * 64,
@@ -1419,10 +1355,7 @@ class TestRetentionAndPurge:
             agent_name="Hermes",
             title="private task title",
             details="private task details",
-            reporting=AgentReportingContract(
-                callback_url="https://brainbuddy.example/api/agent-events",
-                connection_id="agentconn_1",
-            ),
+            reporting=inert_reporting_contract("agentconn_1"),
             reporting_instructions="private reporting instructions",
         )
         repo.create_run(
@@ -1496,7 +1429,10 @@ class TestRetentionAndPurge:
     def test_export_redacts_due_unswept_content_without_mutating_storage(
         self, repo: AgentRepository
     ) -> None:
-        from app.modules.agents.domain import AgentReportingContract, AgentRunManifest
+        from app.modules.agents.domain import (
+            AgentRunManifest,
+            inert_reporting_contract,
+        )
 
         repo.create_connection(make_connection())
         manifest = AgentRunManifest(
@@ -1507,10 +1443,7 @@ class TestRetentionAndPurge:
             agent_name="Hermes",
             title="expired title",
             details="expired details",
-            reporting=AgentReportingContract(
-                callback_url="https://brainbuddy.example/api/agent-events",
-                connection_id="agentconn_1",
-            ),
+            reporting=inert_reporting_contract("agentconn_1"),
             reporting_instructions="expired reporting instructions",
         )
         repo.create_run(
@@ -1711,9 +1644,6 @@ class TestRetentionAndPurge:
                 created_at=NOW,
             )
         )
-        repo.consume_event_id(
-            owner_id="user_a", connection_id="agentconn_1", event_id="evt_1", now=NOW
-        )
         repo.create_connection(
             make_connection(owner_id="user_b", connection_id="agentconn_9")
         )
@@ -1829,17 +1759,10 @@ class TestIdempotency:
         self, repo: AgentRepository
     ) -> None:
         sealed_v1 = SealedSecret(key_id="kid-0", ciphertext="sealed")
-        repo.create_connection(
-            make_connection(credential=sealed_v1, inbound_secret=sealed_v1)
-        )
+        repo.create_connection(make_connection(credential=sealed_v1))
         repo.save_idempotency(
             owner_id="user_a",
-            record=make_idempotency(
-                key_hash=fingerprint("kid-1", "k1"),
-                response_body={
-                    "sealed_signing_secret": sealed_v1.model_dump(mode="json")
-                },
-            ),
+            record=make_idempotency(key_hash=fingerprint("kid-1", "k1")),
         )
 
         live = repo.live_sealed_key_ids(owner_id="user_a", now=NOW)
@@ -1856,9 +1779,6 @@ class TestIdempotency:
             owner_id="user_a",
             record=make_idempotency(
                 key_hash=fingerprint("kid-1", "k1"),
-                response_body={
-                    "sealed_signing_secret": sealed_v1.model_dump(mode="json")
-                },
                 created_at=NOW - timedelta(hours=25),
             ),
         )
@@ -1868,49 +1788,27 @@ class TestIdempotency:
         assert live.key_ids == {"kid-0"}
         assert live.unreadable == 0
 
-    @pytest.mark.parametrize(
-        ("table", "payload"),
-        [
-            ("agent_connections", {"credential": {"key_id": "bad key"}}),
-            (
-                "agent_idempotency",
-                {"sealed_signing_secret": {"key_id": "bad key"}},
-            ),
-        ],
-    )
     def test_malformed_sealed_key_ids_fail_closed_without_being_returned(
-        self, repo: AgentRepository, table: str, payload: dict[str, object]
+        self, repo: AgentRepository
     ) -> None:
+        """A stored envelope whose key label is unreadable is counted, never returned."""
+
         with sqlite3.connect(repo.db_path) as database:
-            if table == "agent_connections":
-                database.execute(
-                    "INSERT INTO agent_connections "
-                    "(owner_id, id, status, created_at, payload) VALUES (?, ?, ?, ?, ?)",
-                    ("user_a", "broken", "ready", NOW.isoformat(), json.dumps(payload)),
-                )
-            else:
-                database.execute(
-                    "INSERT INTO agent_idempotency "
-                    "(owner_id, key_hash, command, request_hash, resource_id, "
-                    "command_id, delivery_attempted, completed, response_body, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        "user_a",
-                        fingerprint("kid-1", "broken"),
-                        "rotate_signing_secret",
-                        fingerprint("kid-1", "request"),
-                        "broken",
-                        None,
-                        0,
-                        1,
-                        json.dumps(payload),
-                        NOW.isoformat(),
-                    ),
-                )
+            database.execute(
+                "INSERT INTO agent_connections "
+                "(owner_id, id, status, created_at, payload) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "user_a",
+                    "broken",
+                    "ready",
+                    NOW.isoformat(),
+                    json.dumps({"credential": {"key_id": "bad key"}}),
+                ),
+            )
 
         live = repo.live_sealed_key_ids(owner_id="user_a", now=NOW)
 
-        assert live.key_ids <= {"kid-1"}
+        assert live.key_ids == frozenset()
         assert "bad key" not in live.key_ids
         assert live.unreadable == 1
 

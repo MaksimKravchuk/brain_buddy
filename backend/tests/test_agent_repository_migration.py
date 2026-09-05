@@ -18,11 +18,11 @@ That is irreversible, which is why the evidence here is deliberately blunt:
 this suite is what `quickstart.md` §9 and `docs/external-agent-relay-release.md`
 point at before the 014 image is allowed near production data.
 
-Three assertions in this module describe the *end* of the removal (the bespoke
-routes, the bespoke module, and the refusal reason the API surfaces). They are
-marked `xfail(strict=True)`: they are red until tasks T110–T115 delete the old
-wire, and strict is the point — the day the removal lands they go from expected
-failure to unexpected pass and this suite turns red until they are un-marked.
+Three assertions in this module describe the *end* of the removal: the bespoke
+routes answer 404, the bespoke module cannot be imported, and the refusal on a
+migrated record names the wire rather than the owner. Each was an
+`xfail(strict=True)` until T110–T115 deleted the old wire, which is how each one
+turned red on the day it came true and had to be un-marked deliberately.
 """
 
 from __future__ import annotations
@@ -300,10 +300,8 @@ def refuse_snapshot(task_id: str, *, owner_id: str) -> Any:  # pragma: no cover 
 def build_service(repo: AgentRepository) -> AgentRelayService:
     return AgentRelayService(
         repo,
-        connector=object(),  # type: ignore[arg-type] - never reached; see below
         secret_box=SecretBox(OrderedDict({"v1": b"\x07" * 32})),
         task_snapshot=refuse_snapshot,
-        callback_url="https://brainbuddy.example.com/api/agent-events",
         now=lambda: NOW,
     )
 
@@ -813,10 +811,9 @@ class TestHandOffOnASupersededConnection:
         content, so this proves the connection check is the first gate rather
         than one of several.
 
-        The reason asserted here is today's. When T110-T115 surface
-        `disconnect_reason`, it becomes `superseded_wire_contract` and this
-        assertion must move with the xfail below it — deliberately, so the two
-        cannot drift apart.
+        The reason is `superseded_wire_contract` because T110-T115 landed and
+        the refusal now carries `disconnect_reason`; the case below is what
+        states *why* that distinction is worth carrying.
         """
 
         db_path = pre_014_database(tmp_path)
@@ -830,13 +827,8 @@ class TestHandOffOnASupersededConnection:
                 owner_id=OWNER,
             )
 
-        assert raised.value.detail == {"reason": "connection_disconnected"}
+        assert raised.value.detail == {"reason": "superseded_wire_contract"}
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the refusal names the superseded wire only once T110-T115 "
-        "surface disconnect_reason; strict, so the removal must un-mark it",
-    )
     def test_014_FR_012_the_refusal_names_the_superseded_wire_contract(
         self, tmp_path: Path
     ) -> None:
@@ -864,19 +856,13 @@ class TestHandOffOnASupersededConnection:
 class TestTheBespokeWireIsGone:
     """The removal itself, asserted from outside.
 
-    Both cases are `xfail(strict=True)` until T110-T115 land. Strict is what
-    makes them useful: on the day the bespoke wire is deleted they stop being
-    expected failures, this suite goes red, and whoever landed the removal has
-    to come here and say so.
+    Both cases are live: T114 deleted the routes, so FastAPI answers 404 for
+    them, and T115 deleted `connector.py`, so importing it raises. They stay
+    here as the standing proof that neither can come back unnoticed.
 
     014-FR-012, 014-SC-010.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the bespoke routes are deleted by T110-T114; strict, so the "
-        "removal must un-mark this",
-    )
     def test_014_SC_010_the_bespoke_event_and_signing_secret_routes_answer_404(
         self, api_client: TestClient
     ) -> None:
@@ -894,11 +880,55 @@ class TestTheBespokeWireIsGone:
         )
         assert rotated.status_code == 404
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="connector.py is deleted by T115; strict, so the removal must "
-        "un-mark this",
-    )
+    def test_014_FR_017_the_release_runbook_carries_the_three_steps_it_owes(
+        self,
+    ) -> None:
+        """T127's assertion: the runbook is evidence, so it has to say the words.
+
+        Three things in `docs/external-agent-relay-release.md` exist only as
+        prose and can only be checked here: the pre-deploy count this suite
+        produces the number for, the rollout gate Principle III requires, and
+        the closed field list that keeps the attended Hermes run from becoming
+        a leak. A runbook that lost any of them would still read fine.
+        """
+
+        doc = (
+            Path(__file__).resolve().parents[2]
+            / "docs"
+            / "external-agent-relay-release.md"
+        ).read_text(encoding="utf-8")
+        lowered = doc.lower()
+
+        # 1. the pre-deploy count, by the name the ledger row answers to.
+        assert "pre-deploy: count the bespoke connection rows" in lowered
+        assert "bespoke_connection_rows" in doc
+
+        # 2. the rollout gate, stated as a prohibition rather than an intention.
+        assert "external_agent_relay` MUST NOT be turned ON for any user" in doc
+        assert "testflight" in lowered and "app store" in lowered
+
+        # 3. the live-evidence field list, both halves. The forbidden half is
+        #    what makes the permitted half safe, so both are asserted.
+        assert "hermes live evidence" in lowered
+        assert "closed field list" in lowered
+        for permitted in (
+            "protocol version",
+            "guarantee tier",
+            "correlation id",
+            "run id",
+            "`primary_state_label` sequence",
+        ):
+            assert permitted in lowered, f"runbook no longer permits {permitted!r}"
+        for forbidden in (
+            "interface_url",
+            "credential",
+            "push token",
+            "card description",
+            "supporting items",
+            "model output",
+        ):
+            assert forbidden in lowered, f"runbook no longer forbids {forbidden!r}"
+
     def test_014_FR_012_the_bespoke_connector_module_no_longer_exists(self) -> None:
         """Deleted, not merely unused.
 
