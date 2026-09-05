@@ -284,8 +284,8 @@ test("clicking a task opens the docked right-side detail panel", async ({ page }
   await page.goto("/tasks/next");
 
   await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
-  // With no selection the panel shows the prototype's empty state.
-  await expect(page.getByText("Nothing selected")).toBeVisible();
+  // Unselected lists keep the workspace width instead of reserving an empty column.
+  await expect(page.getByRole("complementary", { name: "Task detail" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
 
   await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
@@ -298,9 +298,20 @@ test("clicking a task opens the docked right-side detail panel", async ({ page }
     await expect(page.getByRole("link", { name: "Fix onboarding drop-off" })).toBeVisible();
   });
 
+  await test.step("give task content room before secondary properties without overflowing the workspace", async () => {
+    const panel = await page.getByRole("complementary", { name: "Task detail" }).boundingBox();
+    const details = await page.getByRole("textbox", { name: "Details", exact: true }).boundingBox();
+    const properties = await page.getByRole("region", { name: "Task properties" }).boundingBox();
+    expect(panel?.width).toBeGreaterThanOrEqual(380);
+    expect(details).not.toBeNull();
+    expect(properties).not.toBeNull();
+    expect(details!.y + details!.height).toBeLessThanOrEqual(properties!.y);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0);
+  });
+
   await page.getByRole("button", { name: "Close" }).click();
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
-  await expect(page.getByText("Nothing selected")).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Task detail" })).toHaveCount(0);
 });
 
 test("task detail preserves the filtered route, focus, and Back history after detail whitespace clicks", async ({ page }) => {
@@ -366,6 +377,9 @@ test("mobile task detail wraps a long task title without horizontal overflow", a
     if (titleMetrics.scrollWidth > titleMetrics.clientWidth || titleMetrics.scrollHeight > titleMetrics.clientHeight + 1) {
       throw new Error(`Expected a fully visible wrapped mobile title, received ${JSON.stringify(titleMetrics)}`);
     }
+    const completionTarget = await page.getByRole("button", { name: "Complete task", exact: true }).boundingBox();
+    expect(completionTarget?.width).toBeGreaterThanOrEqual(44);
+    expect(completionTarget?.height).toBeGreaterThanOrEqual(44);
   });
 });
 

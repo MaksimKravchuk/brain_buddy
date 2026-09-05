@@ -1,4 +1,4 @@
-import { Bot, Check, ChevronRight, CircleAlert, Inbox, LoaderCircle, MoreHorizontal, Network, X } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronRight, CircleAlert, LoaderCircle, MoreHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
 
@@ -17,7 +17,6 @@ import type {
   TaskSubtaskResponse
 } from "../../api/taskTypes";
 import { Button } from "../../components/ui/Button";
-import { useShellToast } from "../../components/shell/shellToast";
 import { getErrorMessage } from "../../utils/error";
 import type { AutosaveSnapshot, EditableField, TaskDetailAutosaveController } from "./taskDetailAutosave";
 
@@ -32,36 +31,21 @@ const stateLabels: Record<OpenTaskState, string> = {
 
 const openStateOptions: OpenTaskState[] = ["inbox", "next", "waiting", "someday"];
 
-// The panel is a docked 320px column from 1100px up (prototype `.bbs-detail`)
-// and a fixed right slide-over below that breakpoint.
+// Give task content a readable docked column on desktop and the full viewport
+// below that breakpoint. Unselected lists do not reserve a detail column.
 const activePanelClass =
-  "fixed bottom-0 right-0 top-14 z-40 flex w-full max-w-none flex-col overflow-x-hidden overflow-y-auto border-l border-slate-200 bg-white shadow-floating motion-safe:animate-slide-in-right min-[1100px]:static min-[1100px]:z-auto min-[1100px]:w-[320px] min-[1100px]:max-w-none min-[1100px]:shrink-0 min-[1100px]:animate-none min-[1100px]:shadow-none";
+  "fixed bottom-0 right-0 top-14 z-40 flex w-full max-w-none flex-col overflow-x-hidden overflow-y-auto border-l border-slate-200 bg-white shadow-floating motion-safe:animate-slide-in-right min-[1100px]:static min-[1100px]:z-auto min-[1100px]:w-[380px] min-[1100px]:max-w-none min-[1100px]:shrink-0 min-[1100px]:animate-none min-[1100px]:shadow-none min-[1400px]:w-[420px]";
 
 const iconButtonClass =
   "inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-soft transition-colors duration-200 ease-smooth hover:border-slate-300 hover:text-slate-800";
 
-const propLabelClass = "text-slate-400";
+const propLabelClass = "text-slate-600";
 
 const propFieldClass =
   "w-full min-w-0 appearance-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[12.5px] text-slate-800 outline-none transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary";
 
 const dashedInputClass =
-  "w-full rounded-lg border-[1.5px] border-dashed border-slate-300 bg-transparent px-2.5 py-1.5 text-[13px] text-slate-900 outline-none transition-colors duration-200 ease-smooth placeholder:text-slate-400 focus:border-solid focus:border-brand-primary";
-
-export function TaskDetailEmptyPanel(): React.JSX.Element {
-  return (
-    <aside
-      aria-label="Task detail"
-      className="hidden w-[320px] shrink-0 flex-col items-center justify-center overflow-y-auto border-l border-slate-200 bg-surface-base min-[1100px]:flex"
-    >
-      <div className="flex flex-col items-center gap-1.5 px-8 text-center text-slate-300">
-        <Inbox className="h-[26px] w-[26px]" aria-hidden />
-        <div className="mt-1 text-sm font-semibold text-slate-900">Nothing selected</div>
-        <p className="m-0 text-[12.5px] leading-relaxed text-slate-500">Pick a task to see its details.</p>
-      </div>
-    </aside>
-  );
-}
+  "w-full rounded-lg border-[1.5px] border-dashed border-slate-300 bg-transparent px-2.5 py-1.5 text-[13px] text-slate-900 outline-none transition-colors duration-200 ease-smooth placeholder:text-slate-500 focus:border-solid focus:border-brand-primary";
 
 export function TaskDetailPanel({
   task,
@@ -94,7 +78,6 @@ export function TaskDetailPanel({
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
 }): React.JSX.Element {
-  const notify = useShellToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const isTerminal = Boolean(task && (task.state === "completed" || task.state === "cancelled"));
   const autosaveSnapshot = useSyncExternalStore(
@@ -118,14 +101,6 @@ export function TaskDetailPanel({
         </button>
         <span className="relative ml-auto flex min-w-0 items-center gap-1">
           <AutosaveStatus snapshot={autosaveSnapshot} />
-          <button
-            type="button"
-            aria-label="Thinking canvas"
-            className={iconButtonClass}
-            onClick={() => notify("Thinking canvas isn't built yet — placeholder")}
-          >
-            <Network className="h-[15px] w-[15px]" aria-hidden />
-          </button>
           {task && !isTerminal ? (
             <>
               <button
@@ -172,7 +147,6 @@ export function TaskDetailPanel({
           projects={projects}
           tags={tags}
           isTerminal={isTerminal}
-          notify={notify}
           onSave={onSave}
           onTransition={onTransition}
           onCreateSubtask={onCreateSubtask}
@@ -262,7 +236,6 @@ function TaskDetailBody({
   projects,
   tags,
   isTerminal,
-  notify,
   onSave,
   onTransition,
   onCreateSubtask,
@@ -276,7 +249,6 @@ function TaskDetailBody({
   projects: ProjectResponse[];
   tags: TagResponse[];
   isTerminal: boolean;
-  notify: (message: string) => void;
   onSave: (task: TaskResponse, payload: TaskDetailSavePayload) => void;
   onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
   onCreateSubtask: (task: TaskResponse, title: string) => void;
@@ -331,16 +303,18 @@ function TaskDetailBody({
         <button
           type="button"
           aria-label={isTerminal ? "Reopen task" : "Complete task"}
-          className={`mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
+          className="group -ml-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+          onClick={() => autosave ? autosave.barrier(isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined) : onTransition(task, isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined)}
+        >
+          <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
             task.state === "completed"
               ? "border-brand-primary bg-brand-primary text-white"
               : task.state === "cancelled"
                 ? "border-slate-300 bg-slate-200 text-slate-500"
-                : "border-slate-300 bg-white text-transparent hover:border-brand-primary"
-          }`}
-          onClick={() => autosave ? autosave.barrier(isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined) : onTransition(task, isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined)}
-        >
-          {task.state === "cancelled" ? <X className="h-2.5 w-2.5" aria-hidden /> : <Check className="h-[11px] w-[11px]" aria-hidden />}
+                : "border-slate-300 bg-white text-transparent group-hover:border-sky-700"
+          }`}>
+            {task.state === "cancelled" ? <X className="h-2.5 w-2.5" aria-hidden /> : <Check className="h-[11px] w-[11px]" aria-hidden />}
+          </span>
         </button>
         {/* A textarea so long titles wrap like the prototype's static title;
             Enter commits instead of inserting a newline. */}
@@ -377,8 +351,49 @@ function TaskDetailBody({
         ))}
       </span>
 
-      <div className="grid grid-cols-[64px_1fr] items-center gap-x-2.5 gap-y-2 px-4 pb-3.5 text-[12.5px]">
-        <span className={propLabelClass}>date</span>
+      <div className="flex flex-col gap-2 px-4 py-3">
+        <div className="flex flex-col gap-1.5">
+          <h3 className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Details</h3>
+          <textarea
+            aria-label={fieldLabel("Details", "details")}
+            value={draft?.details ?? details}
+            rows={3}
+            placeholder="Notes, links, whatever helps you pick this up again"
+            className={`${dashedInputClass} resize-none`}
+            onChange={(event) => { setDetails(event.currentTarget.value); change("details", event.currentTarget.value as never, 750); }}
+            onBlur={() => {
+              const nextDetails = details.trim();
+              if (autosave) autosave.flush("details");
+              else if (nextDetails !== (task.details ?? "")) {
+                save({ details: nextDetails || null });
+              }
+            }}
+          />
+        </div>
+      </div>
+
+      {!isTerminal && (draft?.state ?? draftState) === "inbox" ? (
+        <div className="px-4 pb-4">
+          <p className="mb-2 mt-0 text-xs leading-relaxed text-slate-600">What is the next concrete action?</p>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            leftIcon={<ArrowRight aria-hidden />}
+            onClick={() => {
+              setDraftState("next");
+              if (autosave) autosave.transition("next");
+              else onTransition(task, "move", "next");
+            }}
+          >
+            Move to Next actions
+          </Button>
+        </div>
+      ) : null}
+
+      <section aria-label="Task properties" className="grid grid-cols-[76px_1fr] items-center gap-x-2.5 gap-y-2 border-t border-slate-200 px-4 pb-3.5 pt-3 text-[12.5px]">
+        <h3 className="col-span-2 m-0 text-xs font-semibold text-slate-600">Organize</h3>
+        <span className={propLabelClass}>Due date</span>
         <input
           aria-label={fieldLabel("Due date", "due_date")}
           type="date"
@@ -391,7 +406,7 @@ function TaskDetailBody({
           }}
         />
 
-        <span className={propLabelClass}>list</span>
+        <span className={propLabelClass}>List</span>
         <select
           aria-label={fieldLabel("List", "state")}
           value={isTerminal && !draft ? "" : draft?.state ?? draftState}
@@ -419,7 +434,7 @@ function TaskDetailBody({
           ))}
         </select>
 
-        <span className={propLabelClass}>project</span>
+        <span className={propLabelClass}>Project</span>
         <span className="flex min-w-0 items-center gap-1.5">
           <span
             className="h-2 w-2 shrink-0 rounded-full"
@@ -436,7 +451,7 @@ function TaskDetailBody({
               if (autosave) change("project_id", (value || null) as never, 0); else save({ project_id: value || null });
             }}
           >
-            <option value="">none</option>
+            <option value="">No project</option>
             {projects.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name}
@@ -445,7 +460,7 @@ function TaskDetailBody({
           </select>
         </span>
 
-        <span className={propLabelClass}>priority</span>
+        <span className={propLabelClass}>Priority</span>
         <select
           aria-label={fieldLabel("Priority", "priority")}
           value={draft?.priority ?? priority}
@@ -456,13 +471,13 @@ function TaskDetailBody({
             if (autosave) change("priority", value as never, 0); else save({ priority: value });
           }}
         >
-          <option value="none">none</option>
+          <option value="none">None</option>
           <option value="low">Low</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
         </select>
 
-        <span className={`${propLabelClass} self-start pt-1`}>tags</span>
+        <span className={`${propLabelClass} self-start pt-1`}>Tags</span>
         <span className="flex min-w-0 flex-wrap gap-1.5">
           {tags.map((tag) => {
             const currentTagIds = draft?.tag_ids ?? tagIds;
@@ -487,12 +502,12 @@ function TaskDetailBody({
           })}
         </span>
 
-        <span className={propLabelClass}>waiting</span>
+        <span className={propLabelClass}>Waiting for</span>
         <input
           ref={waitingRef}
           aria-label={fieldLabel("Waiting for", "waiting_for")}
           value={draft?.waiting_for ?? waitingFor}
-          placeholder="never"
+          placeholder="Person or response"
           className={`${propFieldClass} scroll-mb-[88px]`}
           onChange={(event) => { setWaitingFor(event.currentTarget.value); setWaitingRequired(false); change("waiting_for", event.currentTarget.value as never, task.state === "waiting" ? 500 : 60_000); }}
           onBlur={() => {
@@ -503,28 +518,7 @@ function TaskDetailBody({
           }}
         />
         {waitingRequired ? <span className="col-start-2 text-xs text-[#92400e]">Add who or what you’re waiting for</span> : null}
-      </div>
-
-      <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
-        <div className="flex flex-col gap-1.5">
-          <h3 className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Details</h3>
-          <textarea
-            aria-label={fieldLabel("Details", "details")}
-            value={draft?.details ?? details}
-            rows={2}
-            placeholder="Notes, links, whatever helps you pick this up again"
-            className={`${dashedInputClass} resize-none`}
-            onChange={(event) => { setDetails(event.currentTarget.value); change("details", event.currentTarget.value as never, 750); }}
-            onBlur={() => {
-              const nextDetails = details.trim();
-              if (autosave) autosave.flush("details");
-              else if (nextDetails !== (task.details ?? "")) {
-                save({ details: nextDetails || null });
-              }
-            }}
-          />
-        </div>
-      </div>
+      </section>
 
       <AgentTaskRelay task={task} isTerminal={isTerminal} />
 
@@ -564,15 +558,17 @@ function TaskDetailBody({
             <div key={subtask.id} className="flex items-center gap-2 text-[13px] text-slate-700">
               <button
                 type="button"
-                className={`flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
-                  done
-                    ? "border-brand-primary bg-brand-primary text-white"
-                    : "border-slate-300 bg-white text-transparent hover:border-brand-primary"
-                }`}
+                className="group -ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
                 aria-label={done ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
                 onClick={() => onTransitionSubtask(task, subtask, done ? "reopen" : "complete")}
               >
-                <Check className="h-[9px] w-[9px]" aria-hidden />
+                <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
+                  done
+                    ? "border-brand-primary bg-brand-primary text-white"
+                    : "border-slate-300 bg-white text-transparent group-hover:border-sky-700"
+                }`}>
+                  <Check className="h-[11px] w-[11px]" aria-hidden />
+                </span>
               </button>
               <span className={done ? "text-slate-500 line-through" : ""}>{subtask.title}</span>
             </div>
@@ -603,20 +599,6 @@ function TaskDetailBody({
             </span>
           </div>
         ))}
-      </div>
-
-      <div className="sticky bottom-0 mt-auto flex items-center gap-1.5 border-t border-slate-200 bg-surface-base px-3 py-2.5">
-        <Button
-          variant="secondary"
-          size="sm"
-          leftIcon={<Network aria-hidden />}
-          onClick={() => notify("Thinking canvas isn't built yet — placeholder")}
-        >
-          Think
-        </Button>
-        <span aria-hidden className="ml-auto font-mono text-[10.5px] text-slate-400">
-          ⌘\
-        </span>
       </div>
     </div>
   );

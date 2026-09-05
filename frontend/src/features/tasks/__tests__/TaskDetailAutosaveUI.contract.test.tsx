@@ -92,6 +92,28 @@ describe("task detail autosave contract UI", () => {
     expect(update).toHaveBeenCalledWith("task-ux", expect.objectContaining({ tag_ids: [] }), expect.any(String));
   });
 
+  it("saves the current draft before moving an Inbox task to Next actions", async () => {
+    const update = vi.spyOn(apiClient, "updateTask").mockResolvedValue(task({
+      state: "inbox", title: "Send the proposal", revision: 2
+    }));
+    const transition = vi.spyOn(apiClient, "transitionTask").mockResolvedValue(task({
+      title: "Send the proposal", revision: 3
+    }));
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task({ state: "inbox" }));
+    renderAutosave(controller);
+
+    const user = userEvent.setup();
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "Send the proposal");
+    await user.click(screen.getByRole("button", { name: "Move to Next actions" }));
+    await act(async () => { await controller.whenIdle(); });
+
+    expect(update).toHaveBeenCalledWith("task-ux", expect.objectContaining({ title: "Send the proposal", expected_revision: 1 }), expect.any(String));
+    expect(transition).toHaveBeenCalledWith("task-ux", expect.objectContaining({ action: "move", to_state: "next", expected_revision: 2 }), expect.any(String));
+    expect(screen.getByLabelText("List")).toHaveValue("next");
+    expect(screen.queryByRole("button", { name: "Move to Next actions" })).not.toBeInTheDocument();
+  });
+
   it("reopens a terminal task through the autosave barrier", async () => {
     const transition = vi.spyOn(apiClient, "transitionTask").mockResolvedValue(task({
       state: "inbox",
@@ -177,7 +199,7 @@ describe("task detail autosave contract UI", () => {
 
   it("uses full viewport width below desktop and reserves keyboard scroll margin", () => {
     renderAutosave();
-    expect(screen.getByRole("complementary")).toHaveClass("w-full", "min-[1100px]:w-[320px]");
+    expect(screen.getByRole("complementary")).toHaveClass("w-full", "min-[1100px]:w-[380px]");
     expect(screen.getByLabelText("Waiting for")).toHaveClass("scroll-mb-[88px]");
   });
 
