@@ -920,6 +920,7 @@ class AgentRelayService:
         interface_url: str,
         auth_header_name: str | None = None,
         guarantee_tier: str | None = None,
+        authenticated: bool | None = None,
     ) -> A2ATarget:
         """Where one A2A call goes, and the credential it may carry.
 
@@ -927,13 +928,24 @@ class AgentRelayService:
         a *test* uses the interface the card just named while an *observation*
         must use the one pinned at dispatch: a card that moves mid-run must not
         be able to redirect a live run's traffic.
+
+        `authenticated` is the same question for the credential: an agent whose
+        card declares no security scheme asked for none, so it is sent none.
+        A *test* knows that from the discovery it just performed; every later
+        call reads it back off the stored card summary. Absent a card — a
+        connection that has never been tested — the credential is sent, because
+        withholding it would silently downgrade a connection to anonymous.
         """
 
+        if authenticated is None:
+            authenticated = connection.card is None or bool(
+                connection.card.auth_schemes_offered
+            )
         return A2ATarget(
             interface_url=interface_url,
             auth_scheme=connection.auth_scheme,
             auth_header_name=auth_header_name or connection.auth_header_name,
-            credential=self._open_credential(connection),
+            credential=self._open_credential(connection) if authenticated else "",
             guarantee_tier=(
                 "guaranteed"
                 if (guarantee_tier or connection.guarantee_tier) == "guaranteed"
@@ -1263,6 +1275,7 @@ class AgentRelayService:
             interface_url=discovery.interface_url,
             auth_header_name=discovery.auth_header_name,
             guarantee_tier=discovery.guarantee_tier,
+            authenticated=discovery.authenticated,
         )
         result = client.list_tasks(target, page_size=1)
         if result.error_code == A2A_METHOD_NOT_FOUND:

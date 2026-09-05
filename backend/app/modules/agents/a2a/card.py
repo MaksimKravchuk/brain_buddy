@@ -179,6 +179,11 @@ class CardDiscovery:
     summary: AgentCardSummary | None = None
     interface_url: str | None = None
     auth_header_name: str | None = None
+    #: Whether the agent asked to be authenticated at all. ``False`` only when
+    #: the card declares no security scheme, which is an agent saying it wants
+    #: none — the caller must then send no credential rather than one the agent
+    #: never asked for (FR-002, FR-017).
+    authenticated: bool = True
     guarantee_tier: GuaranteeTier | None = None
     card_fingerprint: str | None = None
     failure_code: str | None = None
@@ -309,33 +314,42 @@ def _usable_header_name(raw: str | None) -> str | None:
 
 def _select_scheme(
     card: AgentCard, auth_scheme: AuthScheme
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, bool]:
     """Pick the card scheme satisfying the owner's choice.
 
-    Returns ``(header_name, failing_scheme_name)``; ``header_name`` is ``None``
-    for bearer, which derives ``Authorization`` at request time and therefore
-    stores no header name at all.
+    Returns ``(header_name, failing_scheme_name, authenticated)``;
+    ``header_name`` is ``None`` for bearer, which derives ``Authorization`` at
+    request time and therefore stores no header name at all.
 
     Sending a bearer token to an agent that only accepts an API key would leak
     the credential to an endpoint certain to reject it, so a mismatch is refused
     before the disclosure rather than after.
+
+    A card that declares *no* scheme is the one case that is not a mismatch. It
+    is an agent asking for no authentication — the official a2a-sdk sample is
+    exactly that — so discovery succeeds and reports ``authenticated=False``,
+    and the credential the owner stored is simply never sent. Silence is only
+    meaningful when there is nothing to compare against: one declared scheme is
+    enough to make a bearer choice a refusal again.
     """
 
     offered = _offered_schemes(card)
+    if not offered:
+        return None, None, False
     for name, kind, header in offered:
         if kind != auth_scheme:
             continue
         if kind == "bearer":
-            return None, None
+            return None, None, True
         usable = _usable_header_name(header)
         if usable is not None:
-            return usable, None
-        return None, name
+            return usable, None, True
+        return None, name, True
 
     # Nothing matched. Name the scheme the owner would have to change: a bare
     # "unsupported" leaves them guessing which of their agent's schemes is the
     # problem.
-    return None, (offered[0][0] if offered else auth_scheme)
+    return None, offered[0][0], True
 
 
 # --- interface selection ------------------------------------------------------
@@ -474,7 +488,7 @@ def interpret_card(
         )
         return _failure(failure or A2A_NO_SUPPORTED_INTERFACE, detail)
 
-    header_name, failing_scheme = _select_scheme(card, auth_scheme)
+    header_name, failing_scheme, authenticated = _select_scheme(card, auth_scheme)
     if failing_scheme is not None:
         return _failure(A2A_AUTH_SCHEME_UNSUPPORTED, {"scheme": failing_scheme})
 
@@ -516,6 +530,7 @@ def interpret_card(
         summary=summary,
         interface_url=interface.url,
         auth_header_name=header_name,
+        authenticated=authenticated,
         guarantee_tier=tier,
         card_fingerprint=card_fingerprint(summary),
     )

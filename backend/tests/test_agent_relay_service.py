@@ -721,6 +721,36 @@ class TestConnectAnAgent:
         assert first.id == second.id
         assert len(service.list_connections(owner_id=OWNER)) == 1
 
+    def test_014_FR_017_an_agent_that_asked_for_no_authentication_is_sent_none(
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
+        card_fetcher: FakeCardFetcher,
+    ) -> None:
+        """A card with no security scheme is an agent asking for nothing.
+
+        FR-017 requires interoperating with the unmodified a2a-sdk sample,
+        which publishes no `securitySchemes` at all. Connecting is right; so is
+        not sending it a credential it never asked for. Both halves are the
+        test, because either one alone is a bug: a refusal would fail SC-001,
+        and a sent bearer would disclose the owner's token to an endpoint that
+        never requested it.
+        """
+
+        open_summary = card_summary(
+            auth_schemes_offered=[], security_required=False, security_requirements=[]
+        )
+        card_fetcher.discovery = ready_discovery(
+            summary=open_summary, authenticated=False
+        )
+        connection_id = connect(service)
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.status == "ready"
+        assert tested.auth_header_name is None
+        assert [target.credential for _m, target, _k in a2a_client.calls] == [""]
+
     def test_014_FR_002_the_bespoke_connector_probe_is_no_longer_the_test_path(
         self, service: AgentRelayService, a2a_client: FakeA2AClient
     ) -> None:
