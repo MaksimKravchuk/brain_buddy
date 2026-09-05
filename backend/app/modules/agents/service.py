@@ -3270,47 +3270,30 @@ class AgentRelayService:
                 run_id=run.id,
             )
 
-    def recover_open_exchange(self, run_id: str, *, owner_id: str) -> None:
-        """An exchange a restart interrupted after it had started, end to end.
+    def mark_exchange_interrupted(self, run_id: str, *, owner_id: str) -> None:
+        """Record that a restart caught this exchange after it had started.
 
-        The two halves in one call, for a caller that wants the whole thing
-        synchronously. Boot does not: it marks every interrupted exchange first
-        and resolves them on a pool afterwards, so no lookup stands between a
-        restart and the first request the app can serve.
-
-        Resolved by lookup alone. The message may already be at the agent, so
-        the only safe question is "is there a task in this conversation?" — and
-        the only safe answer to "no" is to leave the run as it was, for the
-        user's own **Check again**. A resend is a send, and no send is ever
-        initiated without a user action.
+        No network I/O, which is the whole point: this is the half of recovery
+        that may run before the app serves its first request. What it *means*
+        is `resolve_interrupted_exchange`, on a pool, once the app is up.
 
         Which message was in flight decides what "interrupted" costs. A **start**
         leaves the delivery itself in doubt, so the run becomes **Delivery
-        unconfirmed**. A **reply**'s start was delivered — `dispatch_state ==
-        "sent"` is the record of it — and only the owner's answer is unresolved;
-        moving that run to **Delivery unconfirmed** would make it eligible for a
-        **Check again** whose resend path sends `_start_message`, putting a
-        second copy of the hand-off at an agent that already has it (SC-008).
-        """
+        unconfirmed** and waits for the user's own **Check again**. A **reply**'s
+        start was delivered — `dispatch_state == "sent"` is the record of it —
+        and only the owner's answer is unresolved; moving that run to **Delivery
+        unconfirmed** would make it eligible for a **Check again** whose resend
+        path sends `_start_message`, putting a second copy of the hand-off at an
+        agent that already has it (SC-008).
 
-        if self.mark_exchange_interrupted(run_id, owner_id=owner_id) is None:
-            return
-        self.resolve_interrupted_exchange(run_id, owner_id=owner_id)
-
-    def mark_exchange_interrupted(
-        self, run_id: str, *, owner_id: str
-    ) -> AgentRunDocument | None:
-        """Record that a restart caught this exchange, and nothing more.
-
-        No network I/O, which is the whole point: this is the half of recovery
-        that may run before the app serves its first request. `dispatch_state`
-        moves only for a start — see `recover_open_exchange`.
+        A run that is no longer open is left exactly as it is, so running this
+        twice costs nothing.
         """
 
         with self.agent_repo.command_lock(owner_id):
             run = self.agent_repo.get_run(run_id, owner_id=owner_id)
             if run.exchange_state != "open":
-                return None
+                return
             now = self._now()
             updates: dict[str, Any] = {
                 "exchange_state": "interrupted",
@@ -3319,9 +3302,7 @@ class AgentRelayService:
             }
             if run.exchange_kind != "reply":
                 updates["dispatch_state"] = "delivery_unconfirmed"
-            run = run.model_copy(update=updates)
-            self.agent_repo.save_run(run)
-        return run
+            self.agent_repo.save_run(run.model_copy(update=updates))
 
     def resolve_interrupted_exchange(self, run_id: str, *, owner_id: str) -> None:
         """Ask the agent what became of one interrupted exchange.

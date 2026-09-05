@@ -446,6 +446,16 @@ and T070 and the comment block in `main.py` describe the two steps; the same
 paragraph of `research.md` carried the (k) overclaim in a fourth phrasing and
 the (m) succession-evidence rule, and both are corrected there in this commit.
 
+The split left `AgentRelayService.recover_open_exchange` — the mark and the
+lookup in one call — with no caller, because the observer's own
+`recover_interrupted_exchanges` is the two halves in sequence. It is deleted
+rather than kept as a convenience nothing uses, and the (m) rationale for
+branching on `exchange_kind` moves to `mark_exchange_interrupted`, which is
+where the branch actually is. Both halves check the state they act on, so boot
+running twice or a resolver arriving after the observer already settled the run
+costs nothing —
+`test_014_FR_006_neither_step_touches_a_run_that_is_no_longer_in_flight`.
+
 **(o) The card's `securityRequirements` decide whether the credential may be
 sent, not just its `securitySchemes`.**
 `contracts/a2a-wire.md` has always said the owner's `auth_scheme` must satisfy

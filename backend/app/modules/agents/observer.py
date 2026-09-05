@@ -203,10 +203,8 @@ class AgentObserver:
         for owner_id, run_id, state in self.service.agent_repo.interrupted_exchanges():
             if state == "queued":
                 self.service.settle_restarted_before_send(run_id, owner_id=owner_id)
-            elif (
+            else:
                 self.service.mark_exchange_interrupted(run_id, owner_id=owner_id)
-                is not None
-            ):
                 pending.append((owner_id, run_id))
         return pending
 

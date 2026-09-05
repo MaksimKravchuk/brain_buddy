@@ -937,6 +937,35 @@ class TestBootTimeRecoveryIsNotABlockingScan:
         assert resolved.dispatch_state == "sent"
         assert a2a_client.calls_to("SendMessage") == []
 
+    def test_014_FR_006_neither_step_touches_a_run_that_is_no_longer_in_flight(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """Both halves are safe to repeat, which is what makes them separable.
+
+        Boot can run twice — a supervisor restart during startup is exactly
+        that — and the resolver can arrive after the observer has already
+        settled the run. Each step therefore checks the state it acts on.
+        """
+
+        connection_id = connect_ready(service)
+        run_id = dispatched(service, a2a_client, clock)
+        assert repo.get_run(run_id, owner_id=OWNER).exchange_state == "closed"
+        settled = repo.get_run(run_id, owner_id=OWNER)
+        a2a_client.calls.clear()
+
+        service.mark_exchange_interrupted(run_id, owner_id=OWNER)
+        service.resolve_interrupted_exchange(run_id, owner_id=OWNER)
+
+        after = repo.get_run(run_id, owner_id=OWNER)
+        assert after.exchange_state == "closed"
+        assert after.revision == settled.revision
+        assert a2a_client.calls == []
+        assert connection_id
+
     def test_014_FR_006_a_run_purged_between_the_two_steps_is_left_alone(
         self,
         service: AgentRelayService,

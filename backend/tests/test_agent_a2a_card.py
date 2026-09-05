@@ -663,6 +663,56 @@ class TestSecuritySchemes:
         assert result.summary is not None
         assert result.summary.security_required is False
 
+    def test_014_FR_002_the_owners_kind_is_found_past_the_schemes_before_it(
+        self,
+    ) -> None:
+        """A satisfiable requirement does not mean the *first* scheme matches.
+
+        The card lists what it understands in its own order, and the owner's
+        kind may be second. Selection walks past the others rather than taking
+        the first entry as the answer.
+        """
+
+        payload = _card(
+            securitySchemes={
+                "apikey": {"type": "apiKey", "in": "header", "name": "X-Agent-Key"},
+                "bearer": {"type": "http", "scheme": "bearer"},
+            },
+            securityRequirements=[{"bearer": []}],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code is None
+        assert result.auth_header_name is None
+
+    def test_014_FR_002_a_card_requiring_nothing_still_has_to_offer_your_kind(
+        self,
+    ) -> None:
+        """The empty-requirements allowance is about *requirements*, not schemes.
+
+        An agent that asks for no credential but declares only an API key has
+        still said which header it reads. Sending a bearer token would disclose
+        it to an endpoint that will never look at it, so the mismatch is refused
+        and the scheme the owner would have to change to is named.
+        """
+
+        payload = _card(
+            securitySchemes={
+                "apikey": {"type": "apiKey", "in": "header", "name": "X-Agent-Key"}
+            },
+            securityRequirements=[],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code == A2A_AUTH_SCHEME_UNSUPPORTED
+        assert result.failure_detail == {"scheme": "apikey"}
+
     def test_014_FR_002_every_offered_scheme_is_reported_for_the_owner_to_see(
         self,
     ) -> None:
