@@ -9101,3 +9101,340 @@ class TestCancelOverTheA2AWire:
 
         assert replayed.cancel_outcome == "not_cancelable"
         assert len(a2a_client.calls_to("CancelTask")) == before
+
+
+# --- User Story 4: disconnect, and keep only bounded evidence ----------------
+
+
+class TestDisconnectAndBoundedEvidence:
+    def _disconnect(
+        self, observed: ObservedRelay, *, key: str = "idem-disconnect"
+    ) -> Any:
+        service = observed.service
+        return service.disconnect_connection(
+            observed.connection_id,
+            AgentConnectionDisconnectRequest(
+                current_password="correct-horse-battery-staple",
+                expected_revision=service.get_connection(
+                    observed.connection_id, owner_id=OWNER
+                ).revision,
+            ),
+            owner_id=OWNER,
+            idempotency_key=key,
+            reauthenticated=True,
+        )
+
+    def test_014_FR_016_disconnect_erases_the_credential_and_the_card_together(
+        self, observed: ObservedRelay
+    ) -> None:
+        """AC-022, AC-024. A connection that cannot say where it pointed is not
+        a connection anyone can reason about, so the card goes with the key."""
+
+        service = observed.service
+        before = service.agent_repo.get_connection(
+            observed.connection_id, owner_id=OWNER
+        )
+        assert before.credential is not None
+        assert before.card is not None
+        assert before.card_fingerprint is not None
+
+        response = self._disconnect(observed)
+
+        stored = service.agent_repo.get_connection(
+            observed.connection_id, owner_id=OWNER
+        )
+        assert stored.credential is None
+        assert stored.card is None
+        assert stored.card_fingerprint is None
+        assert stored.disconnect_reason == "owner"
+        assert response.status == "disconnected"
+        assert response.card is None
+
+    def test_014_FR_016_disconnect_stops_observation_and_push_for_its_runs(
+        self, observed: ObservedRelay, a2a_client: FakeA2AClient
+    ) -> None:
+        """AC-022. Nothing else will be asked of an agent BrainBuddy cannot reach."""
+
+        observed.observe(observed_task("t1", observed.run_id))
+        service = observed.service
+        assert (
+            service.agent_repo.get_run(
+                observed.run_id, owner_id=OWNER
+            ).next_observation_at
+            is not None
+        )
+        a2a_client.calls.clear()
+
+        self._disconnect(observed)
+
+        run = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        assert run.next_observation_at is None
+        assert run.connection_disconnected_at is not None
+        assert a2a_client.calls_to("CreateTaskPushNotificationConfig") == []
+        assert service.agent_repo.due_observations(now=run.updated_at) == []
+
+    def test_014_FR_016_a_disconnected_run_is_frozen_and_claims_no_cancellation(
+        self, observed: ObservedRelay
+    ) -> None:
+        """AC-022. Disconnecting did not cancel work the agent already accepted."""
+
+        observed.observe(observed_task("t1", observed.run_id))
+        before = observed.projection()
+
+        self._disconnect(observed)
+
+        run = observed.projection()
+        assert run.primary_state_label == "Connection disconnected"
+        assert run.reported_state == before.reported_state
+        assert run.cancel_requested is False
+        assert run.cancel_outcome == "none"
+        assert run.capabilities.reply is False
+        assert run.capabilities.cancel is False
+        assert [event.type for event in run.events] == [
+            event.type for event in before.events
+        ]
+
+    def test_014_FR_016_the_credential_appears_in_no_view_after_a_disconnect(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """AC-023. Not in a connection, a run, an audit row or an export."""
+
+        service = observed.service
+        self._disconnect(observed)
+
+        rendered = json.dumps(
+            {
+                "connections": [
+                    connection.model_dump(mode="json")
+                    for connection in service.list_connections(owner_id=OWNER)
+                ],
+                "runs": [
+                    run.model_dump(mode="json")
+                    for run in service.list_runs_for_task("task_1", owner_id=OWNER)
+                ],
+                "audit": [
+                    entry.model_dump(mode="json")
+                    for entry in service.list_audit(owner_id=OWNER)
+                ],
+                "export": service.agent_repo.export_owner_data(
+                    owner_id=OWNER, now=clock.now
+                ),
+            },
+            default=str,
+        )
+
+        assert "super-secret-token" not in rendered
+
+    def test_run_id_is_retained_with_the_run_row_until_purge_and_identifiers_expire_at_90_days(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """014-SC-007, stated honestly.
+
+        The conversation identifier *is* the run id, and it is embedded in a
+        callback URL the agent keeps and in a run row no sweep deletes. Nulling
+        it at ninety days would erase nothing anyone actually holds, so the
+        promise made is the one that can be kept: the identifiers the agent
+        could act on go, and the run id stays until the account is purged.
+        """
+
+        service = observed.service
+        run_id = observed.run_id
+        clock.advance(timedelta(days=91))
+
+        service.run_retention_sweep()
+
+        run = service.agent_repo.get_run(run_id, owner_id=OWNER)
+        assert run.id == run_id
+        assert run.context_id == run_id
+        assert run.identifiers_expired is True
+        assert run.message_id is None
+        assert run.agent_task_id is None
+        assert run.interface_url is None
+        assert run.card_fingerprint is None
+        assert run.push_token_fingerprint is None
+        assert service.agent_repo.list_events(run_id, owner_id=OWNER) == []
+        assert "identifiers_expired" in observed.audit_actions()
+
+    def test_expired_but_unswept_run_reads_with_no_agent_text(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """014-SC-007. Read-time projection, so the sweep's timing is not a promise."""
+
+        observed.observe(
+            observed_task(
+                "t1",
+                observed.run_id,
+                "TASK_STATE_INPUT_REQUIRED",
+                text="What is the password?",
+            )
+        )
+        clock.advance(timedelta(days=31))
+        # The sweep is deliberately not run.
+
+        run = observed.projection()
+
+        assert run.content_expired is True
+        assert run.question_text is None
+        assert run.blocked_reason is None
+        assert run.result_availability is None
+        assert run.artifacts_summary == []
+        assert run.primary_state_label == "Content expired under retention policy"
+
+    def test_014_SC_007_content_written_after_expiry_is_re_erased_next_pass(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """A partial expiry must not survive: the predicate re-detects text."""
+
+        service = observed.service
+        clock.advance(timedelta(days=31))
+        service.run_retention_sweep()
+        run = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        assert run.content_expired is True
+        service.agent_repo.save_run(
+            run.model_copy(
+                update={
+                    "question_text": "Snuck back in",
+                    "blocked_reason": "And so did this",
+                    "result_availability": "too_large",
+                }
+            )
+        )
+
+        service.run_retention_sweep()
+
+        after = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        assert after.question_text is None
+        assert after.blocked_reason is None
+        assert after.result_availability is None
+
+    def test_expire_due_content_skips_and_logs_an_unparseable_row(
+        self,
+        observed: ObservedRelay,
+        service: AgentRelayService,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """One broken row must not deny every other owner their retention.
+
+        Aborting the transaction would make one unparseable payload a permanent
+        retention failure for the whole instance — the strongest possible form
+        of the bug, and the hardest to notice.
+        """
+
+        import logging
+
+        other = ObservedRelay(service, clock, a2a_client, key="idem-other-owner")
+        with sqlite3.connect(service.agent_repo.root / "agents.sqlite3") as raw:
+            raw.execute(
+                "UPDATE agent_runs SET payload = ? WHERE id = ?",
+                ('{"not": "a run"}', observed.run_id),
+            )
+        clock.advance(timedelta(days=31))
+
+        with caplog.at_level(logging.WARNING):
+            service.run_retention_sweep()
+
+        healthy = service.agent_repo.get_run(other.run_id, owner_id=OWNER)
+        assert healthy.content_expired is True
+        assert healthy.manifest is None
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("unparseable" in message for message in messages)
+        assert not any("Draft the plan" in message for message in messages)
+
+    def test_014_SC_007_a_live_connections_card_survives_every_sweep(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """AC-024. The card is connection configuration, not run content."""
+
+        service = observed.service
+        clock.advance(timedelta(days=200))
+
+        service.run_retention_sweep()
+
+        connection = service.agent_repo.get_connection(
+            observed.connection_id, owner_id=OWNER
+        )
+        assert connection.card is not None
+        assert connection.card_fingerprint is not None
+
+    def test_014_SC_007_audit_rows_are_gone_at_ninety_days(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        service = observed.service
+        assert service.list_audit(owner_id=OWNER)
+        clock.advance(timedelta(days=91))
+
+        service.run_retention_sweep()
+
+        assert [
+            entry
+            for entry in service.list_audit(owner_id=OWNER)
+            if entry.created_at < clock.now - timedelta(days=90)
+        ] == []
+
+    def test_014_FR_016_purge_leaves_no_row_for_the_owner_and_every_row_for_another(
+        self,
+        observed: ObservedRelay,
+        service: AgentRelayService,
+        clock: Clock,
+        a2a_client: FakeA2AClient,
+    ) -> None:
+        """AC-025. Purge is complete, and it is scoped."""
+
+        stranger = ObservedRelay(
+            service, clock, a2a_client, key="idem-stranger", task_id="task_2"
+        )
+        assert stranger.run_id
+
+        service.delete_all_for_owner(owner_id=OWNER)
+
+        assert service.agent_repo.list_runs_for_owner(owner_id=OWNER) == []
+        assert service.list_connections(owner_id=OWNER) == []
+        assert service.list_audit(owner_id=OWNER) == []
+        export = service.agent_repo.export_owner_data(owner_id=OWNER, now=clock.now)
+        assert all(rows == [] for rows in export.values())
+
+    def test_014_SC_007_the_relay_export_carries_the_run_but_never_a_verifier(
+        self, observed: ObservedRelay, clock: Clock
+    ) -> None:
+        """AC-025. A fingerprint is a verifier, and none of them is user content."""
+
+        export = observed.service.agent_repo.export_owner_data(
+            owner_id=OWNER, now=clock.now
+        )
+
+        assert [run["id"] for run in export["runs"]] == [observed.run_id]
+        rendered = json.dumps(export)
+        for excluded in (
+            "credential",
+            "push_token_fingerprint",
+            "card_fingerprint",
+            "inbound_secret",
+        ):
+            assert excluded not in rendered, f"{excluded} must not leave"
+
+    def test_014_SC_007_data_retention_doc_names_the_relay_tiers_and_sweeps(
+        self,
+    ) -> None:
+        """T124's assertion: the promise a user can read matches the code.
+
+        A retention tier that exists only in the sweep is a promise nobody was
+        made. This is the one place the two are compared, so the document has
+        to name each tier, each sweep step and the one thing that survives.
+        """
+
+        doc = (
+            Path(__file__).resolve().parents[2] / "docs" / "data-retention.md"
+        ).read_text(encoding="utf-8")
+
+        assert "expire_due_content" in doc
+        assert "expire_due_identifiers" in doc
+        assert "purge_expired_audit" in doc
+        assert "30" in doc and "90" in doc
+        assert "relay/relay.json" in doc
+        assert "disconnect_connection" in doc
+        lowered = doc.lower()
+        assert "card" in lowered and "fingerprint" in lowered
+        assert "run id" in lowered or "run identifier" in lowered
+        assert "purge" in lowered

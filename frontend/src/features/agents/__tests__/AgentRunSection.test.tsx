@@ -4,7 +4,11 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentManifestResponse, AgentRunResponse } from "../../../api/agentTypes";
+import type {
+  AgentManifestResponse,
+  AgentRunEvent,
+  AgentRunResponse
+} from "../../../api/agentTypes";
 import { ApiError, apiClient } from "../../../api/client";
 import { AgentRunSection } from "../AgentRunSection";
 
@@ -43,11 +47,34 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     exchange_state: "none",
     exchange_kind: null,
     push_registration: "unregistered",
+    agent_task_missing: false,
+    cancel_outcome: "none",
+    blocked_reason: null,
+    artifacts_summary: [],
+    result_availability: null,
+    last_observed_at: null,
+    observation_interval_seconds: 60,
+    identifiers_expired: false,
     manifest: null,
     events: [],
     commands: [],
     created_at: "2026-08-09T12:00:00Z",
     revision: 1,
+    ...overrides
+  };
+}
+
+/** One timeline row with the 014 fields at their "ordinary observation" values. */
+function makeEvent(
+  overrides: Partial<AgentRunEvent> & Pick<AgentRunEvent, "id" | "type" | "run_version">
+): AgentRunEvent {
+  return {
+    received_at: "2026-08-09T12:00:00Z",
+    summary: null,
+    trigger: "schedule",
+    kind: "observation",
+    previous_agent_task_id: null,
+    new_agent_task_id: null,
     ...overrides
   };
 }
@@ -162,7 +189,11 @@ describe("AgentRunSection", () => {
     expect(screen.queryByRole("button", { name: "Request cancellation" })).not.toBeInTheDocument();
   });
 
-  it("links a result only when the server marked it safe", () => {
+  it("014-SC-004 keeps every reported address inert beside Copy link", () => {
+    // Product decision, 2026-09-04 (D-03-S11): even a well-formed HTTPS
+    // address the server marked interactive stays text. A link the product
+    // renders as navigable is a link the product is vouching for, and
+    // BrainBuddy verified nothing about where it leads.
     renderSection([
       makeRun({
         reported_state: "completed",
@@ -173,9 +204,9 @@ describe("AgentRunSection", () => {
       })
     ]);
 
-    const link = screen.getByRole("link", { name: /results\.example\.com/ });
-    expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
-    expect(link).toHaveAttribute("target", "_blank");
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByText("https://results.example.com/1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
   });
 
   it("renders an unsafe result link as inert text", () => {
@@ -232,7 +263,7 @@ describe("AgentRunSection", () => {
       failure_reason: "Sensitive failure",
       content_expires_at: "2026-08-09T12:00:01Z",
       events: [
-        { id: "evt-sensitive", type: "blocked", run_version: 1, received_at: "2026-08-09T12:00:00Z", summary: "Sensitive summary" }
+        makeEvent({ id: "evt-sensitive", type: "blocked", run_version: 1, received_at: "2026-08-09T12:00:00Z", summary: "Sensitive summary" })
       ]
     });
     const { container } = renderSection([cached]);
@@ -259,8 +290,8 @@ describe("AgentRunSection", () => {
         reported_state: "running",
         primary_state_label: "Running",
         events: [
-          { id: "evt_1", type: "accepted", run_version: 1, received_at: "2026-08-09T12:00:00Z", summary: null },
-          { id: "evt_2", type: "running", run_version: 2, received_at: "2026-08-09T12:05:00Z", summary: "Cloning" }
+          makeEvent({ id: "evt_1", type: "accepted", run_version: 1, received_at: "2026-08-09T12:00:00Z", summary: null }),
+          makeEvent({ id: "evt_2", type: "running", run_version: 2, received_at: "2026-08-09T12:05:00Z", summary: "Cloning" })
         ]
       })
     ]);
@@ -283,10 +314,10 @@ describe("AgentRunSection", () => {
           stopped_reporting: true,
           connection_disconnected: true,
           events: [
-            { id: "evt_blocked", type: "blocked", run_version: 1, received_at: "2026-08-09T12:01:00Z", summary: null },
-            { id: "evt_complete", type: "completed", run_version: 2, received_at: "2026-08-09T12:02:00Z", summary: null },
-            { id: "evt_failed", type: "failed", run_version: 3, received_at: "2026-08-09T12:03:00Z", summary: null },
-            { id: "evt_cancelled", type: "cancelled", run_version: 4, received_at: "2026-08-09T12:04:00Z", summary: null }
+            makeEvent({ id: "evt_blocked", type: "blocked", run_version: 1, received_at: "2026-08-09T12:01:00Z", summary: null }),
+            makeEvent({ id: "evt_complete", type: "completed", run_version: 2, received_at: "2026-08-09T12:02:00Z", summary: null }),
+            makeEvent({ id: "evt_failed", type: "failed", run_version: 3, received_at: "2026-08-09T12:03:00Z", summary: null }),
+            makeEvent({ id: "evt_cancelled", type: "cancelled", run_version: 4, received_at: "2026-08-09T12:04:00Z", summary: null })
           ]
         }),
         makeRun({ id: "agentrun_second", agent_name: "Claude", capabilities: { reply: true, cancel: false } })
@@ -304,10 +335,10 @@ describe("AgentRunSection", () => {
             stopped_reporting: true,
             connection_disconnected: true,
             events: [
-              { id: "evt_blocked", type: "blocked", run_version: 1, received_at: "2026-08-09T12:01:00Z", summary: null },
-              { id: "evt_complete", type: "completed", run_version: 2, received_at: "2026-08-09T12:02:00Z", summary: null },
-              { id: "evt_failed", type: "failed", run_version: 3, received_at: "2026-08-09T12:03:00Z", summary: null },
-              { id: "evt_cancelled", type: "cancelled", run_version: 4, received_at: "2026-08-09T12:04:00Z", summary: null }
+              makeEvent({ id: "evt_blocked", type: "blocked", run_version: 1, received_at: "2026-08-09T12:01:00Z", summary: null }),
+              makeEvent({ id: "evt_complete", type: "completed", run_version: 2, received_at: "2026-08-09T12:02:00Z", summary: null }),
+              makeEvent({ id: "evt_failed", type: "failed", run_version: 3, received_at: "2026-08-09T12:03:00Z", summary: null }),
+              makeEvent({ id: "evt_cancelled", type: "cancelled", run_version: 4, received_at: "2026-08-09T12:04:00Z", summary: null })
             ]
           }),
           makeRun({ id: "agentrun_second", agent_name: "Claude", capabilities: { reply: true, cancel: false } })
@@ -824,5 +855,209 @@ describe("AgentRunSection dispatch states", () => {
     expect(check).not.toHaveBeenCalled();
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: true });
     onlineManager.setOnline(true);
+  });
+});
+
+
+describe("014-SC-004 every run state reads as itself", () => {
+  /**
+   * D-03-S06..S20. One projection in, one label out, rendered verbatim.
+   *
+   * `it.each` over the whole vocabulary rather than a handful of samples,
+   * because the requirement is exhaustive: an operator must be able to tell any
+   * two of these apart on sight, and a suite that checked five of fifteen would
+   * pass while three of them rendered identically.
+   */
+  it.each([
+    ["Accepted", { reported_state: "accepted" as const }],
+    ["Running", { reported_state: "running" as const }],
+    ["Needs you", { reported_state: "blocked" as const, needs_user: true }],
+    ["Cancellation requested", { cancel_requested: true }],
+    ["Agent reported complete", { reported_state: "completed" as const }],
+    ["Failed", { reported_state: "failed" as const }],
+    ["Cancelled", { reported_state: "cancelled" as const }],
+    ["Stopped reporting", { stopped_reporting: true }],
+    ["Agent no longer reports this run", { agent_task_missing: true }],
+    ["Connection disconnected", { connection_disconnected: true }],
+    ["Queued", { exchange_state: "queued" as const, exchange_open: true }],
+    ["Sent", {}],
+    ["Delivery unconfirmed", { dispatch_state: "delivery_unconfirmed" as const }],
+    ["Not sent", { dispatch_state: "not_sent" as const }]
+  ])("renders %s verbatim from the projection", (label, overrides) => {
+    renderSection([makeRun({ ...overrides, primary_state_label: label })]);
+
+    expect(screen.getByText(label)).toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S07 attributes the agent's own status text", () => {
+    renderSection([
+      makeRun({
+        reported_state: "running",
+        primary_state_label: "Running",
+        progress_text: "Cloning the repository"
+      })
+    ]);
+
+    expect(screen.getByText("Cloning the repository")).toBeInTheDocument();
+    // AC-013: never a percentage, a stage or an ETA BrainBuddy invented.
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/step \d+ of \d+/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ETA/i)).not.toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S10 offers no reply control for an authentication block", () => {
+    renderSection([
+      makeRun({
+        reported_state: "blocked",
+        primary_state_label: "Needs you",
+        needs_user: true,
+        blocked_reason: "Agent needs additional authentication",
+        question_text: null
+      })
+    ]);
+
+    // A reply box here would invite the user to type a secret to a third party.
+    expect(screen.queryByLabelText("Your answer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send answer" })).not.toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S11 names artifact content types and never a download", () => {
+    renderSection([
+      makeRun({
+        reported_state: "completed",
+        primary_state_label: "Agent reported complete",
+        result_text: "Done.",
+        artifacts_summary: [
+          { name: "report.pdf", media_type: "application/pdf", kind: "file" }
+        ]
+      })
+    ]);
+
+    expect(screen.getByText("report.pdf · application/pdf")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S11 marks a too-large result and never calls it silence", () => {
+    renderSection([
+      makeRun({
+        reported_state: "completed",
+        primary_state_label: "Agent reported complete",
+        result_availability: "too_large",
+        result_text: null
+      })
+    ]);
+
+    expect(screen.getByText("Result too large to store.")).toBeInTheDocument();
+    expect(screen.queryByText("Stopped reporting")).not.toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S16 withdraws cancel on a refusal and keeps it on silence", () => {
+    const { unmount } = renderSection([
+      makeRun({
+        reported_state: "running",
+        primary_state_label: "Running",
+        cancel_outcome: "unsupported"
+      })
+    ]);
+
+    expect(screen.getByText("Cancellation not supported by this agent.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request cancellation" })).not.toBeInTheDocument();
+    unmount();
+
+    renderSection([
+      makeRun({
+        reported_state: "running",
+        primary_state_label: "Running",
+        cancel_outcome: "unconfirmed",
+        cancel_requested: true
+      })
+    ]);
+
+    expect(
+      screen.getByText("Cancellation request unconfirmed — you can try again.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request cancellation" })).toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S18 withdraws both controls when the agent forgot the run", () => {
+    renderSection([
+      makeRun({
+        reported_state: "blocked",
+        needs_user: true,
+        question_text: "Which environment?",
+        primary_state_label: "Agent no longer reports this run",
+        agent_task_missing: true
+      })
+    ]);
+
+    expect(screen.getByText("Agent no longer reports this run")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send answer" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request cancellation" })).not.toBeInTheDocument();
+    // Not a failure claim: BrainBuddy lost sight of the work, which is a
+    // different thing from the work having gone wrong.
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S27 shows the succession row with both task identifiers", () => {
+    renderSection([
+      makeRun({
+        reported_state: "running",
+        primary_state_label: "Running",
+        agent_task_id: "task-b2",
+        events: [
+          makeEvent({
+            id: "evt-1",
+            type: "running",
+            run_version: 4,
+            summary: "The agent continued this run in a new task",
+            trigger: "command",
+            kind: "task_succession",
+            previous_agent_task_id: "task-a1",
+            new_agent_task_id: "task-b2"
+          })
+        ]
+      })
+    ]);
+
+    expect(screen.getByText("The agent continued this run in a new task")).toBeInTheDocument();
+    expect(screen.getByText("task-a1 → task-b2")).toBeInTheDocument();
+    // The projection is unchanged by the succession itself.
+    expect(screen.getByText("Running")).toBeInTheDocument();
+  });
+
+  it("014-SC-004 AC-031 renders an agent name carrying markup as plain text", () => {
+    renderSection([
+      makeRun({
+        agent_name: '<img src=x onerror=alert(1)> javascript:alert(2)',
+        reported_state: "running",
+        primary_state_label: "Running"
+      })
+    ]);
+
+    expect(
+      screen.getByText('<img src=x onerror=alert(1)> javascript:alert(2)')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("014-SC-004 D-03-S26 shows two runs on one task with their own frozen content", () => {
+    renderSection([
+      makeRun({
+        id: "agentrun_1",
+        reported_state: "completed",
+        primary_state_label: "Agent reported complete",
+        result_text: "First result"
+      }),
+      makeRun({
+        id: "agentrun_2",
+        reported_state: "running",
+        primary_state_label: "Running",
+        progress_text: "Second attempt"
+      })
+    ]);
+
+    expect(screen.getByText("First result")).toBeInTheDocument();
+    expect(screen.getByText("Second attempt")).toBeInTheDocument();
   });
 });

@@ -9,6 +9,7 @@ content, and a second plaintext-path copy would widen both the retention surface
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from collections.abc import Iterator, Mapping, Sequence
@@ -21,6 +22,7 @@ from weakref import WeakValueDictionary
 
 from pydantic import BaseModel, ValidationError
 
+from app.core.logging import get_correlation_id
 from app.exceptions import (
     ConflictError,
     NotFoundError,
@@ -68,6 +70,80 @@ A2A_WIRE_MIGRATION = "a2a_wire_contract_v1"
 """Ledger name of the one-way migration off the bespoke relay wire (SC-010)."""
 
 DUE_OBSERVATION_BATCH = 200
+
+logger = logging.getLogger(__name__)
+
+#: Every column of the content tier (data-model.md §8). The sweep's
+#: selection predicate re-derives from these rather than trusting
+#: `content_expired`, so a value written *after* an expiry — by a late
+#: observation, or by a partial pass — is picked up and erased on the next
+#: run instead of surviving because a flag already says it is gone.
+CONTENT_TIER_RUN_FIELDS: tuple[str, ...] = (
+    "manifest",
+    "progress_text",
+    "question_text",
+    "result_text",
+    "result_link",
+    "failure_reason",
+    "blocked_reason",
+    "result_availability",
+)
+
+#: SQL that is true when any content column still holds a value. Built
+#: from the tuple above so the two cannot drift apart.
+_CONTENT_PRESENT_SQL = " OR ".join(
+    (
+        *(
+            f"json_extract(runs.payload, '$.{field}') IS NOT NULL"
+            for field in CONTENT_TIER_RUN_FIELDS
+        ),
+        "json_array_length("
+        "coalesce(json_extract(runs.payload, '$.artifacts_summary'), '[]')"
+        ") > 0",
+    )
+)
+
+#: The one query that selects a run whose content tier is due. Assembled from
+#: the constants above rather than written out, so adding a content column
+#: cannot leave the predicate behind and quietly stop erasing it.
+_DUE_CONTENT_QUERY = f"""
+    SELECT owner_id, id, payload FROM agent_runs AS runs
+    WHERE dispatched_at IS NOT NULL
+        AND content_expires_at <= ?
+        AND (
+            content_expired = 0
+            OR ({_CONTENT_PRESENT_SQL})
+            OR EXISTS (
+                SELECT 1 FROM agent_run_events AS events
+                WHERE events.owner_id = runs.owner_id
+                    AND events.run_id = runs.id
+                    AND json_extract(events.payload, '$.summary') IS NOT NULL
+            )
+            OR EXISTS (
+                SELECT 1 FROM agent_run_commands AS commands
+                WHERE commands.owner_id = runs.owner_id
+                    AND commands.run_id = runs.id
+                    AND json_extract(commands.payload, '$.body') IS NOT NULL
+            )
+        )
+"""  # noqa: S608 - interpolates module constants only, never a caller's value
+
+
+#: Every identifier-tier column (data-model.md §8). Not the run id: the
+#: conversation identifier *is* the run id, it lives in a callback URL the
+#: agent keeps and in a row no sweep deletes, so nulling it would erase
+#: nothing anyone holds. `docs/data-retention.md` says so rather than
+#: implying otherwise.
+IDENTIFIER_TIER_RUN_FIELDS: tuple[str, ...] = (
+    "message_id",
+    "agent_task_id",
+    "interface_url",
+    "card_fingerprint",
+    "push_token_fingerprint",
+)
+
+#: How long a dispatched run keeps the identifiers an agent could act on.
+IDENTIFIER_RETENTION = timedelta(days=90)
 """Upper bound on the runs one scheduler pass may claim.
 
 A backlog — an outage, a restart, a clock jump — must not turn into one
@@ -1692,7 +1768,20 @@ class AgentRepository(BaseRepository):
         """Deterministic failure-injection seam for atomicity tests."""
 
     def expire_due_content(self, *, now: datetime) -> int:
-        """Atomically erase expired run, event, and command content."""
+        """Atomically erase expired run, event, and command content.
+
+        The selection predicate re-derives from the content columns themselves
+        rather than trusting ``content_expired``: a value written after an
+        expiry — by a late observation, or by a pass that was interrupted — is
+        picked up on the next run instead of surviving because a flag already
+        claims it is gone.
+
+        A row whose payload cannot be parsed is skipped and logged rather than
+        aborting the transaction. Aborting would make one broken row a
+        permanent retention failure for every other owner on the instance,
+        which is both the worst outcome available here and the hardest to
+        notice.
+        """
 
         stamp = now.isoformat()
         with self._process_lock, self._owned_connection() as conn:
@@ -1700,28 +1789,7 @@ class AgentRepository(BaseRepository):
                 with _sqlite_guard("Agent run", "retention"):
                     conn.execute("BEGIN IMMEDIATE")
                     rows = conn.execute(
-                        """
-                        SELECT payload FROM agent_runs AS runs
-                        WHERE dispatched_at IS NOT NULL
-                            AND content_expires_at <= ?
-                            AND (
-                                content_expired = 0
-                                OR EXISTS (
-                                    SELECT 1 FROM agent_run_events AS events
-                                    WHERE events.owner_id = runs.owner_id
-                                        AND events.run_id = runs.id
-                                        AND json_extract(events.payload, '$.summary')
-                                            IS NOT NULL
-                                )
-                                OR EXISTS (
-                                    SELECT 1 FROM agent_run_commands AS commands
-                                    WHERE commands.owner_id = runs.owner_id
-                                        AND commands.run_id = runs.id
-                                        AND json_extract(commands.payload, '$.body')
-                                            IS NOT NULL
-                                )
-                            )
-                        """,
+                        _DUE_CONTENT_QUERY,  # noqa: S608 - built from constants
                         (stamp,),
                     ).fetchall()
                     if not rows:
@@ -1729,16 +1797,14 @@ class AgentRepository(BaseRepository):
                         return 0
                     expired = 0
                     for row in rows:
-                        run = self._model(row, AgentRunDocument)
-                        if not run.content_expired:
+                        run = self._parsed_run_or_skipped(row)
+                        if run is None:
+                            continue
+                        if not run.content_expired or self._holds_content(run):
                             redacted = run.model_copy(
                                 update={
-                                    "manifest": None,
-                                    "progress_text": None,
-                                    "question_text": None,
-                                    "result_text": None,
-                                    "result_link": None,
-                                    "failure_reason": None,
+                                    **dict.fromkeys(CONTENT_TIER_RUN_FIELDS),
+                                    "artifacts_summary": [],
                                     "content_expired": True,
                                     "updated_at": now,
                                     "revision": run.revision + 1,
@@ -1806,6 +1872,119 @@ class AgentRepository(BaseRepository):
             except BaseException:
                 conn.rollback()
                 raise
+
+    def _parsed_run_or_skipped(self, row: sqlite3.Row) -> AgentRunDocument | None:
+        """One run document, or ``None`` with a coarse warning.
+
+        The sweep must never abort on a row it cannot read: one unparseable
+        payload would otherwise become a permanent retention failure for every
+        other owner on the instance. The log line names the ids and the
+        correlation id and carries no content — a retention failure that leaked
+        the very text it failed to erase would be the worst possible version of
+        this bug.
+        """
+
+        try:
+            return self._model(row, AgentRunDocument)
+        except (ValidationError, RepositoryError):
+            logger.warning(
+                "agent_retention_skipped_unparseable_row owner_id=%s run_id=%s "
+                "correlation_id=%s",
+                row["owner_id"],
+                row["id"],
+                get_correlation_id(),
+            )
+            return None
+
+    @staticmethod
+    def _holds_content(run: AgentRunDocument) -> bool:
+        """Whether an already-expired run still has content to erase."""
+
+        return bool(run.artifacts_summary) or any(
+            getattr(run, field) is not None for field in CONTENT_TIER_RUN_FIELDS
+        )
+
+    def expire_due_identifier_runs(
+        self, *, now: datetime
+    ) -> list[tuple[str, str]]:
+        """The runs this pass expired, as (run id, owner id).
+
+        Returned rather than counted so the caller can write one audit row per
+        run: "the identifiers were erased" is a fact about a *run*, and an
+        aggregate would leave the owner's trail unable to say which.
+        """
+
+        return self._expire_due_identifiers(now=now)
+
+    def expire_due_identifiers(self, *, now: datetime) -> int:
+        """Null the identifiers an agent could still act on, and drop the events.
+
+        Ninety days from dispatch, and deliberately *not* the run id: the
+        conversation identifier is the run's own id, it is embedded in a
+        callback URL the agent keeps and in a row no sweep deletes, so nulling
+        it here would erase nothing anyone holds while implying it had. The run
+        row and its id stay until the account is purged, and
+        `docs/data-retention.md` says exactly that.
+        """
+
+        return len(self._expire_due_identifiers(now=now))
+
+    def _expire_due_identifiers(self, *, now: datetime) -> list[tuple[str, str]]:
+        cutoff = (now - IDENTIFIER_RETENTION).isoformat()
+        expired: list[tuple[str, str]] = []
+        with self._process_lock, self._owned_connection() as conn:
+            try:
+                with _sqlite_guard("Agent run", "retention"):
+                    conn.execute("BEGIN IMMEDIATE")
+                    rows = conn.execute(
+                        """
+                        SELECT owner_id, id, payload FROM agent_runs
+                        WHERE dispatched_at IS NOT NULL
+                            AND dispatched_at <= ?
+                            AND json_extract(payload, '$.identifiers_expired') IS NOT 1
+                        """,
+                        (cutoff,),
+                    ).fetchall()
+                    for row in rows:
+                        run = self._parsed_run_or_skipped(row)
+                        if run is None:
+                            continue
+                        self._upsert_run(
+                            conn,
+                            run.model_copy(
+                                update={
+                                    **dict.fromkeys(IDENTIFIER_TIER_RUN_FIELDS),
+                                    "identifiers_expired": True,
+                                    "identifiers_expire_at": run.identifiers_expire_at
+                                    or now,
+                                    # Nothing left to observe with.
+                                    "next_observation_at": None,
+                                    "updated_at": now,
+                                    "revision": run.revision + 1,
+                                }
+                            ),
+                        )
+                        conn.execute(
+                            "DELETE FROM agent_run_events "
+                            "WHERE owner_id = ? AND run_id = ?",
+                            (run.owner_id, run.id),
+                        )
+                        conn.execute(
+                            """
+                            UPDATE agent_run_commands
+                            SET payload = json_set(
+                                payload, '$.agent_task_id_after', json('null')
+                            )
+                            WHERE owner_id = ? AND run_id = ?
+                            """,
+                            (run.owner_id, run.id),
+                        )
+                        expired.append((run.id, run.owner_id))
+                    conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+        return expired
 
     def purge_expired_event_ids(self, *, now: datetime) -> int:
         cutoff = (now - EVENT_ID_RETENTION).isoformat()

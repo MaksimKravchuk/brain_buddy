@@ -128,6 +128,8 @@ type RunGuardInput = Pick<
   | "reported_state"
   | "cancel_requested"
   | "capabilities"
+  | "agent_task_missing"
+  | "cancel_outcome"
 >;
 
 /** The server's `_require_commandable`: sent, still connected, not finished. */
@@ -135,6 +137,10 @@ function isCommandable(run: RunGuardInput): boolean {
   return (
     run.dispatch_state !== "not_sent" &&
     !run.connection_disconnected &&
+    // AC-020: the agent answered that this task does not exist, so there is
+    // nothing left for a command to reach. Not a failure, and not a refusal —
+    // simply nowhere to send.
+    !run.agent_task_missing &&
     run.reported_state !== "completed" &&
     run.reported_state !== "failed" &&
     run.reported_state !== "cancelled"
@@ -163,10 +169,73 @@ export function canReplyToRun(run: RunGuardInput & { needs_user: boolean }): boo
   );
 }
 
-/** A second request while the first is unconfirmed would say nothing new. */
+/**
+ * Whether cancelling is still something that could work (AC-018, AC-029).
+ *
+ * The two withdrawn outcomes are the ones the agent itself stated. An
+ * `unconfirmed` outcome deliberately keeps the control, and keeps it even
+ * though a request was already made: BrainBuddy does not know whether that
+ * request landed, and hiding the control would turn its own uncertainty into a
+ * refusal the agent never gave.
+ */
 export function canCancelRun(run: RunGuardInput): boolean {
-  return isCommandable(run) && !run.cancel_requested && run.capabilities.cancel;
+  if (!isCommandable(run) || !run.capabilities.cancel) {
+    return false;
+  }
+  if (run.cancel_outcome === "unsupported" || run.cancel_outcome === "not_cancelable") {
+    return false;
+  }
+  if (run.cancel_outcome === "unconfirmed") {
+    return true;
+  }
+  return !run.cancel_requested;
 }
+
+/** The secondary sentence a cancel outcome earns, if any. Never the label. */
+export function cancelOutcomeCopy(
+  run: Pick<AgentRunResponse, "cancel_outcome">
+): string | null {
+  if (run.cancel_outcome === "unsupported" || run.cancel_outcome === "not_cancelable") {
+    return "Cancellation not supported by this agent.";
+  }
+  if (run.cancel_outcome === "unconfirmed") {
+    return "Cancellation request unconfirmed — you can try again.";
+  }
+  return null;
+}
+
+/**
+ * The marker shown in place of a result BrainBuddy could not store.
+ *
+ * The state was observed and is true; only the result exceeded what the relay
+ * keeps. Saying so is the difference between an honest marker and rendering a
+ * healthy agent as having stopped reporting (D-03-S11, too-large variant).
+ */
+export function resultAvailabilityCopy(
+  run: Pick<AgentRunResponse, "result_availability">
+): string | null {
+  return run.result_availability === "too_large"
+    ? "Result too large to store."
+    : null;
+}
+
+/**
+ * What one artifact placeholder reads as.
+ *
+ * Names the content type, never a download: BrainBuddy never fetched the
+ * artifact and has nothing to hand over.
+ */
+export function artifactPlaceholderCopy(artifact: {
+  name: string | null;
+  media_type: string | null;
+  kind: string;
+}): string {
+  const name = artifact.name?.trim() || `Untitled ${artifact.kind}`;
+  return artifact.media_type ? `${name} · ${artifact.media_type}` : name;
+}
+
+/** The timeline wording for a task succession row (D-03-S27). */
+export const TASK_SUCCESSION_COPY = "The agent continued this run in a new task";
 
 type DispatchShape = Pick<
   AgentRunResponse,

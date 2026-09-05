@@ -691,7 +691,15 @@ class AgentRunDocument(StorageBaseModel):
 
 
 def project_run_for_access(run: AgentRunDocument, *, now: datetime) -> AgentRunDocument:
-    """Pure authoritative projection: due content is inaccessible before sweep."""
+    """Pure authoritative projection: due content is inaccessible before sweep.
+
+    Read-time rather than sweep-time, because the sweep's schedule is not a
+    promise anyone was made: a run whose thirty days have passed must read as
+    expired on the very next request, whether or not a sweep has run since.
+    The 014 fields join the 007 ones for the same reason — an artifact
+    placeholder and a "too large to store" marker both describe content that is
+    no longer there to describe.
+    """
 
     if run.content_expired or run.content_expires_at <= now:
         return run.model_copy(
@@ -702,6 +710,9 @@ def project_run_for_access(run: AgentRunDocument, *, now: datetime) -> AgentRunD
                 "result_text": None,
                 "result_link": None,
                 "failure_reason": None,
+                "blocked_reason": None,
+                "artifacts_summary": [],
+                "result_availability": None,
                 "reply_pending_command_id": None,
                 "content_expired": True,
             }

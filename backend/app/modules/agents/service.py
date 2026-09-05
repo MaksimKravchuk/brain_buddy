@@ -521,6 +521,10 @@ class AgentRelayService:
         # rather than waiting out the interval. Narrow on purpose: a push may
         # only *accelerate* an observation, never supply one.
         self.observer_wake: Callable[[str], None] | None = None
+        # Set by the route that owns the limiter, so the service can drop a
+        # bucket for a run that can never be pushed for again without knowing
+        # anything about how the limiter works.
+        self.evict_push_limiter: Callable[[str], bool] | None = None
         self.secret_box = secret_box
         self.task_snapshot = task_snapshot
         self.callback_url = callback_url
@@ -1843,11 +1847,20 @@ class AgentRelayService:
                     run.model_copy(
                         update={
                             "connection_disconnected_at": now,
+                            # Nothing left to observe or register with: the
+                            # credential this run's schedule depended on has
+                            # just been destroyed (AC-022).
+                            "next_observation_at": None,
+                            "observation_trigger_pending": None,
                             "updated_at": now,
                             "revision": run.revision + 1,
                         }
                     )
                 )
+                if self.evict_push_limiter is not None:
+                    # A run that can never be pushed for again has no use for a
+                    # limiter bucket, and keeping one is pure retention.
+                    self.evict_push_limiter(run.id)
             self._remember(
                 owner_id=owner_id,
                 key_hash=key_hash,
@@ -4797,11 +4810,24 @@ class AgentRelayService:
     # --- maintenance --------------------------------------------------------
 
     def run_retention_sweep(self) -> int:
-        """Expire relayed content, prune reservations, and bound the audit log."""
+        """Expire relayed content and identifiers, and bound the audit log.
+
+        Two tiers, thirty days apart, because they answer different questions:
+        the content tier is what the agent *said*, and the identifier tier is
+        what someone could still use to reach the work. Only the second is
+        worth keeping for the ninety days the audit trail runs to.
+        """
 
         now = self._now()
         self.agent_repo.prune_undispatched_runs(before=now - RESERVATION_TTL)
         expired = self.agent_repo.expire_due_content(now=now)
+        for run_id, owner_id in self.agent_repo.expire_due_identifier_runs(now=now):
+            self._audit(
+                owner_id=owner_id,
+                action="identifiers_expired",
+                outcome="swept",
+                run_id=run_id,
+            )
         self.agent_repo.purge_expired_audit(now=now)
         self.agent_repo.purge_expired_event_ids(now=now)
         # Owner-scoped purges only fire when that owner calls; retention is a

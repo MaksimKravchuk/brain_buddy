@@ -224,7 +224,10 @@ describe("TaskListPage projections", () => {
         primary_state_label: "Running",
         needs_user: false,
         stopped_reporting: false,
-        last_contact_at: "2026-08-11T12:00:00Z"
+        last_contact_at: "2026-08-11T12:00:00Z",
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "none",
+        agent_task_missing: false
       },
       "task-2": {
         id: "agentrun-2",
@@ -233,7 +236,10 @@ describe("TaskListPage projections", () => {
         primary_state_label: "Needs you",
         needs_user: true,
         stopped_reporting: false,
-        last_contact_at: "2026-08-11T12:01:00Z"
+        last_contact_at: "2026-08-11T12:01:00Z",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "not_cancelable",
+        agent_task_missing: false
       }
     });
 
