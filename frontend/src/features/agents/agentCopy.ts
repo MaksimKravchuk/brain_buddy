@@ -1,7 +1,9 @@
 import type {
   AgentCapabilities,
   AgentConnectionResponse,
-  AgentRunResponse
+  AgentGuaranteeTier,
+  AgentRunResponse,
+  AgentRunSummaryResponse
 } from "../../api/agentTypes";
 
 /**
@@ -19,15 +21,26 @@ import type {
  * which is not a claim that it is reachable now.
  */
 export function connectionStatusLabel(connection: AgentConnectionResponse): string {
+  // Checked before `status`, because a changed agent's stored status is
+  // `untested` and "Not tested" would hide the thing the user has to look at
+  // (FR-002, D-01-S20).
+  if (connection.agent_changed) {
+    return "Agent changed";
+  }
+  if (connection.last_test_error_code === "a2a_rate_limited") {
+    return "Rate limited";
+  }
   switch (connection.status) {
     case "disconnected":
-      return "Disconnected";
+      return connection.disconnect_reason === "superseded_wire_contract"
+        ? "Superseded wire contract"
+        : "Disconnected";
     case "invalid_credentials":
       return "Invalid credentials";
     case "unreachable":
       return "Unreachable";
     case "unsupported":
-      return "Unsupported connector";
+      return "Unsupported";
     case "untested":
       return "Not tested";
     default:
@@ -35,16 +48,65 @@ export function connectionStatusLabel(connection: AgentConnectionResponse): stri
   }
 }
 
+/**
+ * The four `unsupported` categories are four different sentences.
+ *
+ * Collapsing them into one would leave the owner with the least actionable
+ * message the product has: "no card at the well-known location" and "this card
+ * requires OAuth2" call for entirely different next steps (D-01-S14..S17).
+ */
+function unsupportedDetail(connection: AgentConnectionResponse): string {
+  const detail = connection.last_test_error_detail;
+  switch (connection.last_test_error_code) {
+    case "a2a_not_an_agent":
+      return "There is no agent card at its well-known location. Check the address you entered, then test again.";
+    case "a2a_protocol_version_unsupported": {
+      const found = detail && "found_version" in detail ? detail.found_version : null;
+      return found
+        ? `The card declares A2A ${found}. BrainBuddy speaks protocol version 1.0.x only.`
+        : "The card declares a protocol version outside 1.0.x. BrainBuddy speaks protocol version 1.0.x only.";
+    }
+    case "a2a_auth_scheme_unsupported": {
+      const scheme = detail && "scheme" in detail ? detail.scheme : null;
+      return scheme
+        ? `This card requires ${scheme}. BrainBuddy supports a bearer token or an API key named by the card, and nothing else.`
+        : "This card requires an authentication scheme BrainBuddy does not support. BrainBuddy supports a bearer token or an API key named by the card.";
+    }
+    default:
+      return "No JSON-RPC interface BrainBuddy can use over HTTPS.";
+  }
+}
+
+/** "Test again in about N seconds." — the agent's own number, or nothing. */
+export function rateLimitRetryCopy(connection: AgentConnectionResponse): string {
+  const detail = connection.last_test_error_detail;
+  const seconds =
+    detail && "retry_after_seconds" in detail ? detail.retry_after_seconds : null;
+  // CHK051: an agent that gave no hint gets no invented countdown. A fabricated
+  // number would send the user back at exactly the wrong moment.
+  return seconds === null || seconds === undefined
+    ? "Test again shortly."
+    : `Test again in about ${seconds} ${seconds === 1 ? "second" : "seconds"}.`;
+}
+
 export function connectionStatusDetail(connection: AgentConnectionResponse): string {
+  if (connection.agent_changed) {
+    return "This agent's card now advertises a different interface address or different authentication requirements than the one you tested. BrainBuddy will not send task content to a destination you have not tested. Test the connection again — you will be asked for your password, because a new destination is a new content-bearing send.";
+  }
+  if (connection.last_test_error_code === "a2a_rate_limited") {
+    return "The agent is rate limiting. It answered the test by refusing it, so BrainBuddy learned nothing about the connection and nothing was sent.";
+  }
   switch (connection.status) {
     case "disconnected":
-      return "The stored credential was destroyed. New hand-offs and replies through this agent are blocked.";
+      return connection.disconnect_reason === "superseded_wire_contract"
+        ? "Superseded wire contract. This connection was made under BrainBuddy's previous agent wire, which no longer exists. Add the agent again by its address to use it."
+        : "The stored credential and the agent-card summary BrainBuddy discovered were destroyed. New hand-offs and replies through this agent are blocked.";
     case "invalid_credentials":
-      return "The agent rejected the credential. Replace it below, then test again.";
+      return "The agent answered and rejected the credential. Rotate it below, then test again.";
     case "unreachable":
-      return "BrainBuddy could not reach this endpoint. Nothing was sent. Check the address and test again.";
+      return "BrainBuddy could not reach this address before the test timeout. Nothing was sent.";
     case "unsupported":
-      return "The agent answered but does not speak a protocol version BrainBuddy supports.";
+      return unsupportedDetail(connection);
     case "untested":
       return "BrainBuddy has not contacted this agent yet. Test it before handing over a task.";
     default:
@@ -54,6 +116,13 @@ export function connectionStatusDetail(connection: AgentConnectionResponse): str
   }
 }
 
+/** The label beside the credential scheme. Never the credential itself. */
+export function authSchemeLabel(connection: AgentConnectionResponse): string {
+  return connection.auth_scheme === "bearer"
+    ? "Bearer token · stored sealed"
+    : `API key${connection.auth_header_name ? ` in ${connection.auth_header_name}` : ""} · stored sealed`;
+}
+
 type RunGuardInput = Pick<
   AgentRunResponse,
   | "dispatch_state"
@@ -61,6 +130,8 @@ type RunGuardInput = Pick<
   | "reported_state"
   | "cancel_requested"
   | "capabilities"
+  | "agent_task_missing"
+  | "cancel_outcome"
 >;
 
 /** The server's `_require_commandable`: sent, still connected, not finished. */
@@ -68,6 +139,10 @@ function isCommandable(run: RunGuardInput): boolean {
   return (
     run.dispatch_state !== "not_sent" &&
     !run.connection_disconnected &&
+    // AC-020: the agent answered that this task does not exist, so there is
+    // nothing left for a command to reach. Not a failure, and not a refusal —
+    // simply nowhere to send.
+    !run.agent_task_missing &&
     run.reported_state !== "completed" &&
     run.reported_state !== "failed" &&
     run.reported_state !== "cancelled"
@@ -96,19 +171,192 @@ export function canReplyToRun(run: RunGuardInput & { needs_user: boolean }): boo
   );
 }
 
-/** A second request while the first is unconfirmed would say nothing new. */
+/**
+ * Whether cancelling is still something that could work (AC-018, AC-029).
+ *
+ * The two withdrawn outcomes are the ones the agent itself stated. An
+ * `unconfirmed` outcome deliberately keeps the control, and keeps it even
+ * though a request was already made: BrainBuddy does not know whether that
+ * request landed, and hiding the control would turn its own uncertainty into a
+ * refusal the agent never gave.
+ */
 export function canCancelRun(run: RunGuardInput): boolean {
-  return isCommandable(run) && !run.cancel_requested && run.capabilities.cancel;
+  if (!isCommandable(run) || !run.capabilities.cancel) {
+    return false;
+  }
+  if (run.cancel_outcome === "unsupported" || run.cancel_outcome === "not_cancelable") {
+    return false;
+  }
+  if (run.cancel_outcome === "unconfirmed") {
+    return true;
+  }
+  return !run.cancel_requested;
 }
 
-/** Fixed order so a missing capability is a visible "not supported", never a gap. */
+/** The secondary sentence a cancel outcome earns, if any. Never the label. */
+export function cancelOutcomeCopy(
+  run: Pick<AgentRunResponse, "cancel_outcome">
+): string | null {
+  if (run.cancel_outcome === "unsupported" || run.cancel_outcome === "not_cancelable") {
+    return "Cancellation not supported by this agent.";
+  }
+  if (run.cancel_outcome === "unconfirmed") {
+    return "Cancellation request unconfirmed — you can try again.";
+  }
+  return null;
+}
+
+/**
+ * The marker shown in place of a result BrainBuddy could not store.
+ *
+ * The state was observed and is true; only the result exceeded what the relay
+ * keeps. Saying so is the difference between an honest marker and rendering a
+ * healthy agent as having stopped reporting (D-03-S11, too-large variant).
+ */
+export function resultAvailabilityCopy(
+  run: Pick<AgentRunResponse, "result_availability">
+): string | null {
+  return run.result_availability === "too_large"
+    ? "Result too large to store."
+    : null;
+}
+
+/**
+ * What one artifact placeholder reads as.
+ *
+ * Names the content type, never a download: BrainBuddy never fetched the
+ * artifact and has nothing to hand over.
+ */
+export function artifactPlaceholderCopy(artifact: {
+  name: string | null;
+  media_type: string | null;
+  kind: string;
+}): string {
+  const name = artifact.name?.trim() || `Untitled ${artifact.kind}`;
+  return artifact.media_type ? `${name} · ${artifact.media_type}` : name;
+}
+
+/** The timeline wording for a task succession row (D-03-S27). */
+export const TASK_SUCCESSION_COPY = "The agent continued this run in a new task";
+
+/** The guarantee tier, spelled out. Never an abbreviation (FR-013, FR-003). */
+export function guaranteeTierLabel(tier: AgentGuaranteeTier | null): string | null {
+  if (tier === "guaranteed") {
+    return "Guaranteed single start";
+  }
+  if (tier === "best_effort") {
+    return "Best-effort single start";
+  }
+  return null;
+}
+
+/**
+ * The compact Task-list row (D-03-S21).
+ *
+ * The tier is spelled out in full rather than abbreviated: it is a statement
+ * about duplicate risk, and a code the user has to learn is a warning nobody
+ * reads. A withdrawn cancellation is stated on the same row, so the list and
+ * the detail view cannot disagree about what the user may still do.
+ */
+export function compactRunLabel(
+  summary: Pick<
+    AgentRunSummaryResponse,
+    "primary_state_label" | "guarantee_tier" | "cancel_outcome"
+  >
+): string {
+  const parts = [summary.primary_state_label];
+  const tier = guaranteeTierLabel(summary.guarantee_tier);
+  if (tier) {
+    parts.push(tier);
+  }
+  if (
+    summary.cancel_outcome === "unsupported" ||
+    summary.cancel_outcome === "not_cancelable"
+  ) {
+    parts.push("Cancellation not supported");
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * The run a compact line is about.
+ *
+ * Derived from the runs rather than read off the response order. The API
+ * answers a task's runs newest first, so `runs[runs.length - 1]` picked the
+ * *oldest* one: a failed attempt from last week described as the state of the
+ * run that is working right now. Ties keep the server's order.
+ */
+export function newestRun<Run extends Pick<AgentRunResponse, "created_at">>(
+  runs: readonly Run[]
+): Run | null {
+  let newest: Run | null = null;
+  for (const run of runs) {
+    if (newest === null || Date.parse(run.created_at) > Date.parse(newest.created_at)) {
+      newest = run;
+    }
+  }
+  return newest;
+}
+
+type DispatchShape = Pick<
+  AgentRunResponse,
+  "dispatch_state" | "dispatch_error_code" | "exchange_state" | "exchange_open" | "reported_state"
+>;
+
+/**
+ * What BrainBuddy knows about its *own* outbound request — and nothing else.
+ *
+ * Four states that are routinely collapsed into one are kept apart here, because
+ * each one licenses a different next step:
+ *
+ * - **Queued**: the run's identifiers are reserved and its content frozen, but
+ *   no byte has left. Calling this "Sent" is the single dishonest claim this
+ *   whole projection exists to prevent.
+ * - **Sent**: the message went out, or is going out inside an open exchange.
+ * - **Not sent**: it provably did not go out, so the same hand-off — the same
+ *   run ID, the same message ID — can simply be offered again.
+ * - **Delivery unconfirmed**: BrainBuddy does not know. Nothing is re-sent on
+ *   its own; the user asks for a lookup.
+ *
+ * Once the agent itself has reported, its state is the authority and this says
+ * nothing at all rather than competing with it.
+ */
+export function dispatchStateDetail(run: DispatchShape): string | null {
+  if (run.reported_state !== null) {
+    return null;
+  }
+  if (run.exchange_state === "queued") {
+    return "Waiting for a free connection slot; nothing has been sent yet";
+  }
+  if (run.dispatch_state === "not_sent") {
+    if (run.dispatch_error_code === "restarted_before_send") {
+      return "BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.";
+    }
+    if (run.dispatch_error_code === "a2a_rate_limited") {
+      return "The agent is rate limiting.";
+    }
+    return null;
+  }
+  if (run.dispatch_state === "sent" || run.exchange_state === "open") {
+    return "Some agents answer only when the work is finished.";
+  }
+  return "BrainBuddy could not confirm the agent received this hand-off. It was not re-sent.";
+}
+
+/**
+ * What the *card* declared, in a fixed order.
+ *
+ * Only the two booleans an A2A card actually carries. Reply and cancellation are
+ * deliberately absent: no card advertises either, so listing them here would
+ * turn a BrainBuddy product decision into something that reads as an agent
+ * promise (FR-002, FR-010).
+ */
 export function capabilityDisclosure(
   capabilities: AgentCapabilities
 ): Array<{ label: string; supported: boolean }> {
   return [
-    { label: "Progress updates", supported: capabilities.progress },
-    { label: "Replies to questions", supported: capabilities.reply },
-    { label: "Cancellation", supported: capabilities.cancel }
+    { label: "Streaming updates", supported: capabilities.streaming },
+    { label: "Push notifications", supported: capabilities.push_notifications }
   ];
 }
 

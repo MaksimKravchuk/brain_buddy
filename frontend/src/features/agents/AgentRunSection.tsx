@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bot, ExternalLink } from "lucide-react";
+import { Bot } from "lucide-react";
 
 import { useAgentKeys } from "../../api/agentHooks";
 import { useRelayMutation, useRelayOnline } from "../../api/agentLifecycle";
@@ -9,7 +9,18 @@ import { apiClient } from "../../api/client";
 import { Button } from "../../components/ui/Button";
 import { getErrorMessage } from "../../utils/error";
 import { definitivelyRejected, useIntentKey } from "../../utils/idempotency";
-import { awaitsAnswer, canCancelRun, canReplyToRun, formatTimestamp } from "./agentCopy";
+import { AgentHandoffOverlay } from "./AgentHandoffOverlay";
+import {
+  TASK_SUCCESSION_COPY,
+  artifactPlaceholderCopy,
+  awaitsAnswer,
+  cancelOutcomeCopy,
+  canCancelRun,
+  canReplyToRun,
+  dispatchStateDetail,
+  formatTimestamp,
+  resultAvailabilityCopy
+} from "./agentCopy";
 
 const EXPIRED_NOTICE = "Content expired under retention policy";
 
@@ -98,13 +109,24 @@ function questionIdentity(run: AgentRunResponse): string {
  * disclosed capabilities: an unsupported reply or cancel is stated as
  * unsupported rather than rendered as a button that would fail.
  */
-function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): React.JSX.Element {
+function RunCard({
+  taskId,
+  run,
+  handoffEnabled
+}: {
+  taskId: string;
+  run: AgentRunResponse;
+  handoffEnabled: boolean;
+}): React.JSX.Element {
   const queryClient = useQueryClient();
   const keys = useAgentKeys();
   const online = useRelayOnline();
   const contentExpired = useAgentRunContentExpired(run);
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Re-review of a hand-off that never left. It is the same review, reopened —
+  // not a new one — so it is seeded from the run's own frozen manifest.
+  const [retrying, setRetrying] = useState(false);
 
   const invalidate = (updated: AgentRunResponse) => {
     setError(null);
@@ -117,6 +139,7 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
   // turn that ambiguity into a second command.
   const replyKey = useIntentKey(`agent-reply-${run.id}`);
   const cancelKey = useIntentKey(`agent-cancel-${run.id}`);
+  const checkKey = useIntentKey(`agent-check-delivery-${run.id}`);
   const replyIntent = useRef<ReplyIntentSnapshot | null>(null);
   const displayedQuestionIdentity = questionIdentity(run);
 
@@ -161,12 +184,60 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
     }
   });
 
+  const checkMutation = useRelayMutation({
+    mutationKey: keys.mutation("check-delivery", run.id),
+    // No identifiers of its own: the correlation ID and the message ID are on
+    // the run, so this can only ever repeat the same check. The key is held
+    // across retries for the same reason a reply's is — an ambiguous check that
+    // is retried under a fresh key would stop being the same check. The
+    // revision is the run this control was rendered from: the check can end in
+    // a send, so it names the state the user was actually looking at.
+    mutationFn: (input: { idempotencyKey: string; expectedRevision: number }) =>
+      apiClient.checkAgentRunDelivery(
+        run.id,
+        { current_password: null, expected_revision: input.expectedRevision },
+        input.idempotencyKey
+      ),
+    onSuccess: (updated) => {
+      checkKey.settle();
+      invalidate(updated);
+    },
+    onError: (caught: unknown) => {
+      if (definitivelyRejected(caught)) {
+        checkKey.settle();
+      }
+      setError(getErrorMessage(caught));
+    }
+  });
+
   // The question is only live while the run is blocked, so a finished run never
   // shows an answer box — nor the "replies unsupported" note, which for an old
   // question would only imply an answer was still expected somewhere.
   const showQuestion = !contentExpired && awaitsAnswer(run);
   const canReply = online && !contentExpired && canReplyToRun(run);
   const canCancel = online && !contentExpired && canCancelRun(run);
+
+  const dispatchDetail = contentExpired ? null : dispatchStateDetail(run);
+  // Secondary lines, never the primary label: what the agent said about
+  // cancellation, and whether the result fitted, are separate facts from what
+  // the run is doing.
+  const cancelOutcome = cancelOutcomeCopy(run);
+  const tooLarge = contentExpired ? null : resultAvailabilityCopy(run);
+  // Offered only where BrainBuddy genuinely does not know: a queued exchange
+  // has provably not been sent, so there is nothing at the agent to look up.
+  const canCheckDelivery =
+    !contentExpired &&
+    run.dispatch_state === "delivery_unconfirmed" &&
+    run.exchange_state !== "queued" &&
+    run.reported_state === null &&
+    !run.connection_disconnected;
+  // A hand-off that never left can be re-offered exactly as it was reviewed —
+  // but only while BrainBuddy still holds what was reviewed, and only while the
+  // rollout allows a hand-off at all. Nothing reached the agent, so re-sending
+  // is a fresh content-bearing send rather than acting on work already out
+  // there, and rollout OFF withholds exactly that (FR-016, 007 FR-019).
+  const frozenManifest =
+    handoffEnabled && !contentExpired && run.dispatch_state === "not_sent" ? run.manifest : null;
 
   useEffect(() => {
     const held = replyIntent.current;
@@ -252,29 +323,56 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
             </div>
           ) : null}
 
+          {run.blocked_reason ? (
+            // D-03-S10. The run needs the user and the agent named why, so the
+            // reason is stated verbatim — and stated *without* a control. What
+            // blocks an agent here is a credential problem at the agent, which
+            // no answer typed into BrainBuddy can solve; a reply box beside
+            // this sentence is how a secret gets forwarded to a third party.
+            <p className="mt-2 whitespace-pre-wrap rounded-lg border border-needs-you-border bg-needs-you-bg px-2.5 py-2 text-[12.5px] text-needs-you-fg">
+              {run.blocked_reason}
+            </p>
+          ) : null}
+
           {run.result_text ? (
             <p className="mt-2 whitespace-pre-wrap text-[12.5px] text-slate-700">{run.result_text}</p>
           ) : null}
 
-          {run.result_link ? (
-            run.result_link_interactive ? (
-              <p className="mt-1.5 text-[12px]">
-                <a
-                  href={run.result_link}
-                  target="_blank"
-                  rel="noopener noreferrer nofollow"
-                  className="inline-flex items-center gap-1 font-medium text-brand-primary underline"
+          {tooLarge ? (
+            <p className="mt-2 text-[12.5px] font-medium text-slate-700">{tooLarge}</p>
+          ) : null}
+
+          {run.artifacts_summary.length ? (
+            <ul className="mt-1.5 flex flex-col gap-0.5">
+              {run.artifacts_summary.map((artifact, index) => (
+                <li
+                  key={`${artifact.name ?? artifact.kind}-${index}`}
+                  className="text-[11.5px] text-slate-500"
                 >
-                  {run.result_link}
-                  <ExternalLink className="h-[11px] w-[11px]" aria-hidden />
-                </a>
-                <span className="ml-1 text-slate-500">Opens a site outside BrainBuddy.</span>
-              </p>
-            ) : (
-              // Not a safe HTTPS destination, so it stays text and is never
-              // fetched or made clickable (FR-014).
-              <p className="mt-1.5 break-all text-[12px] text-slate-500">{run.result_link}</p>
-            )
+                  {artifactPlaceholderCopy(artifact)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {run.result_link ? (
+            // Inert text beside a copy control, whatever the scheme. BrainBuddy
+            // never opens or fetches an address an agent reported, and it never
+            // makes one clickable — a link the product renders as navigable is
+            // a link the product is vouching for (D-03-S11, FR-014).
+            <div className="mt-1.5 flex flex-wrap items-baseline gap-2">
+              <span className="break-all text-[12px] text-slate-500">{run.result_link}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(run.result_link ?? "");
+                }}
+              >
+                Copy link
+              </Button>
+            </div>
           ) : null}
 
           {run.failure_reason ? (
@@ -288,9 +386,18 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
           Your answer was sent but the agent has not acknowledged it yet.
         </p>
       ) : null}
-      {run.cancel_requested ? (
+      {cancelOutcome ? (
+        <p className="mt-1.5 text-[11px] text-slate-500">{cancelOutcome}</p>
+      ) : null}
+      {run.cancel_requested && !cancelOutcome ? (
         <p className="mt-1.5 text-[11px] text-slate-500">
           Cancellation was requested. The agent has not confirmed it, so the work may still be running.
+        </p>
+      ) : null}
+      {run.agent_task_missing ? (
+        <p className="mt-1.5 text-[11px] text-slate-500">
+          The agent no longer reports this run. BrainBuddy kept everything it had already observed and
+          is not claiming the work failed.
         </p>
       ) : null}
       {run.stopped_reporting ? (
@@ -304,19 +411,59 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
           This agent was disconnected. Disconnecting did not cancel any work it had already accepted.
         </p>
       ) : null}
-      {run.dispatch_state === "delivery_unconfirmed" ? (
-        <p className="mt-1.5 text-[11px] text-slate-500">
-          BrainBuddy could not confirm the agent received this hand-off. It was not re-sent.
-        </p>
+      {dispatchDetail ? (
+        <p className="mt-1.5 text-[11px] text-slate-500">{dispatchDetail}</p>
+      ) : null}
+      {canCheckDelivery ? (
+        <div className="mt-1.5">
+          <p className="m-0 text-[11px] text-slate-500">
+            Runs the same check again with the same correlation ID and the same message ID. It is
+            never a new send.
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="mt-1"
+            disabled={!online}
+            isLoading={checkMutation.isPending}
+            onClick={() =>
+              checkMutation.mutate({
+                idempotencyKey: checkKey.current(),
+                expectedRevision: run.revision
+              })
+            }
+          >
+            Check again
+          </Button>
+        </div>
+      ) : null}
+      {frozenManifest ? (
+        <div className="mt-1.5">
+          <Button type="button" variant="ghost" size="sm" onClick={() => setRetrying(true)}>
+            Try this hand-off again
+          </Button>
+        </div>
       ) : null}
 
       {run.events.length ? (
         <ol className="mt-2 flex flex-col gap-1 border-t border-ai-border pt-2">
           {run.events.map((event) => (
             <li key={event.id} className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-slate-600">
-              <span className="font-medium text-slate-700">{eventLabel(event.type)}</span>
+              <span className="font-medium text-slate-700">
+                {event.kind === "task_succession" ? TASK_SUCCESSION_COPY : eventLabel(event.type)}
+              </span>
               <span className="text-slate-400">{formatTimestamp(event.received_at)}</span>
-              {!contentExpired && event.summary ? <span className="basis-full text-slate-500">{event.summary}</span> : null}
+              {event.kind === "task_succession" && event.previous_agent_task_id ? (
+                // Both identifiers, because the point of the row is that the
+                // one the user saw yesterday is not the one being observed now.
+                <span className="text-slate-400">
+                  {event.previous_agent_task_id} → {event.new_agent_task_id}
+                </span>
+              ) : null}
+              {!contentExpired && event.summary && event.kind !== "task_succession" ? (
+                <span className="basis-full text-slate-500">{event.summary}</span>
+              ) : null}
             </li>
           ))}
         </ol>
@@ -341,6 +488,27 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
           {error}
         </p>
       ) : null}
+
+      {retrying && frozenManifest ? (
+        <AgentHandoffOverlay
+          taskId={taskId}
+          taskTitle={frozenManifest.title}
+          // What was frozen is what will be re-sent. The server rebuilds the
+          // identical manifest from these three values, so the token — and with
+          // it the idempotency key, the run ID and the message ID — is the same
+          // one exactly as long as the user changes nothing.
+          seed={{
+            connectionId: frozenManifest.connection_id,
+            includeDetails: frozenManifest.details !== null,
+            supportingItems: frozenManifest.supporting_items
+          }}
+          onClose={() => setRetrying(false)}
+          onDispatched={(updated) => {
+            setRetrying(false);
+            invalidate(updated);
+          }}
+        />
+      ) : null}
     </article>
   );
 }
@@ -349,12 +517,15 @@ export function AgentRunSection({
   taskId,
   runs,
   isLoading,
-  error
+  error,
+  handoffEnabled
 }: {
   taskId: string;
   runs: AgentRunResponse[];
   isLoading: boolean;
   error: unknown;
+  /** The account's `external_agent_relay` flag. Gates the retry, not the view. */
+  handoffEnabled: boolean;
 }): React.JSX.Element | null {
   if (error && runs.length === 0) {
     return (
@@ -384,7 +555,7 @@ export function AgentRunSection({
       ) : null}
       <div className="flex flex-col gap-2">
         {runs.map((run) => (
-          <RunCard key={run.id} taskId={taskId} run={run} />
+          <RunCard key={run.id} taskId={taskId} run={run} handoffEnabled={handoffEnabled} />
         ))}
       </div>
     </div>

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 // Update these two constants when the policy text changes or the contact moves.
 const CONTACT_EMAIL = "maksim.v.kravchuk@gmail.com";
-const LAST_UPDATED = "August 25, 2026";
+const LAST_UPDATED = "September 4, 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -103,6 +103,33 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             To turn a feature on or off for particular accounts we keep one SQLite store
             covering four managed flags: it holds only your account id per flag, it is
             scrubbed when your account is purged, and it is excluded from your data export.
+          </p>
+          <p>
+            If you connect an external agent and hand a task to it, what you send and what it
+            reports back — the task title and details, the supporting items you kept in the
+            review, and the agent's questions, progress and result — is deleted after 30
+            days. For up to 90 days we then keep only coarse bookkeeping about that run: the
+            agent's task and message identifiers, fingerprints of its agent card and of
+            the notification token we issued for the run, and the record of when we checked on
+            it.
+          </p>
+          <p>
+            The run's own id is its correlation ID — the identifier that names that one
+            conversation on the wire, and part of the callback address the agent holds — so it
+            stays with the run record until you delete your account. We would rather say that
+            than claim an erasure that does not happen. Records of what happened on a
+            connection (connected, tested, handed off, checked, disconnected: outcomes only,
+            never your content) are kept for 90 days.
+          </p>
+          <p>
+            What an agent says about itself — its name, version, description, skills and
+            address, as we discovered them — is the connection's own setup rather than
+            content of yours, so it is kept for as long as the connection exists and is erased
+            the moment you disconnect, together with the credential you gave us. The one thing
+            we cannot take back is the callback address we registered with the agent for each
+            run: the agent keeps its own copy. It stops working the moment the run ends, you
+            disconnect, or your account is deleted — but only the agent can delete its copy, so
+            we tell you rather than imply otherwise.
           </p>
         </Section>
 

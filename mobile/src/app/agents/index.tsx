@@ -2,11 +2,7 @@ import { useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, View } from "react-native";
 
 import { useAgentConnections, useTestAgentConnection } from "@/api/hooks";
-import type {
-  AgentConnectionCreatedResponse,
-  AgentConnectionResponse,
-  AgentConnectionSigningSecretResponse,
-} from "@/api/types";
+import type { AgentConnectionResponse } from "@/api/types";
 import { isOfflineError } from "@/agents/machine";
 import { useSession } from "@/auth/SessionProvider";
 import { BBText } from "@/components/BBText";
@@ -19,8 +15,6 @@ import { AddConnectionSheet } from "@/features/agents/AddConnectionSheet";
 import { ConnectionCard } from "@/features/agents/ConnectionCard";
 import { DisconnectSheet } from "@/features/agents/DisconnectSheet";
 import { RotateCredentialSheet } from "@/features/agents/RotateCredentialSheet";
-import { ReplaceSigningSecretSheet } from "@/features/agents/ReplaceSigningSecretSheet";
-import { SigningSecretSheet } from "@/features/agents/SigningSecretSheet";
 import { colors, radii, space } from "@/theme/tokens";
 
 export default function ConnectedAgentsScreen() {
@@ -30,12 +24,7 @@ export default function ConnectedAgentsScreen() {
   const test = useTestAgentConnection();
 
   const [addVisible, setAddVisible] = useState(false);
-  const [createdSecret, setCreatedSecret] = useState<AgentConnectionCreatedResponse | null>(null);
   const [rotating, setRotating] = useState<AgentConnectionResponse | null>(null);
-  const [replacingSigningSecret, setReplacingSigningSecret] =
-    useState<AgentConnectionResponse | null>(null);
-  const [replacementSecret, setReplacementSecret] =
-    useState<AgentConnectionSigningSecretResponse | null>(null);
   const [disconnecting, setDisconnecting] = useState<AgentConnectionResponse | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
 
@@ -101,7 +90,6 @@ export default function ConnectedAgentsScreen() {
               test.mutate(connection.id, { onSettled: () => setTestingId(null) });
             }}
             onRotate={() => setRotating(connection)}
-            onReplaceSigningSecret={() => setReplacingSigningSecret(connection)}
             onDisconnect={() => setDisconnecting(connection)}
           />
         ))}
@@ -114,43 +102,13 @@ export default function ConnectedAgentsScreen() {
       <AddConnectionSheet
         visible={addVisible}
         onClose={() => setAddVisible(false)}
-        onCreated={(connection) => {
-          setAddVisible(false);
-          setCreatedSecret(connection);
-        }}
-      />
-
-      <SigningSecretSheet
-        connection={createdSecret}
-        onDismiss={() => setCreatedSecret(null)}
-        onReplace={(connection) => {
-          setCreatedSecret(null);
-          setReplacingSigningSecret(connection);
-        }}
+        onCreated={() => setAddVisible(false)}
       />
 
       <RotateCredentialSheet
         connection={rotating}
         onClose={() => setRotating(null)}
         onRotated={() => setRotating(null)}
-      />
-
-      <ReplaceSigningSecretSheet
-        connection={replacingSigningSecret}
-        onClose={() => setReplacingSigningSecret(null)}
-        onReplaced={(connection) => {
-          setReplacingSigningSecret(null);
-          setReplacementSecret(connection);
-        }}
-      />
-
-      <SigningSecretSheet
-        connection={replacementSecret}
-        onDismiss={() => setReplacementSecret(null)}
-        onReplace={(connection) => {
-          setReplacementSecret(null);
-          setReplacingSigningSecret(connection);
-        }}
       />
 
       <DisconnectSheet

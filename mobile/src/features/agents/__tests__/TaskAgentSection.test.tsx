@@ -286,6 +286,89 @@ function FeedExpiryProbe({ runtime }: { runtime: AgentRunsPollRuntime }) {
   return <Text>{run ? `${run.content_expired}:${run.progress_text ?? "redacted"}` : "empty"}</Text>;
 }
 
+describe("014-SC-004 the compact task line agrees with the run monitor", () => {
+  it("014-FR-013 states the tier in full and repeats a withdrawn cancellation", async () => {
+    // M-03-S24. The line and the monitor below it are two views of one run, so
+    // a control the agent withdrew must not be offered by one and denied by
+    // the other.
+    mockListConnections.mockResolvedValue([makeConnection()]);
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        primary_state_label: "Running",
+        reported_state: "running",
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "not_cancelable",
+      }),
+    ]);
+
+    const { renderer, unmount } = await renderWithProviders(<TaskAgentSection {...props()} />);
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Running · Guaranteed single start · Cancellation not supported");
+    expect(text).toContain("Cancellation not supported by this agent.");
+    expect(queryByText(renderer, "Request cancellation")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-FR-013 describes the newest run when a task has more than one", async () => {
+    // The API answers a task's runs newest first (repository.py orders by
+    // created_at DESC, id DESC), so reading the last element described the
+    // *oldest* hand-off — a failed attempt from yesterday shown as the state of
+    // the run that is running right now.
+    mockListConnections.mockResolvedValue([makeConnection()]);
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        id: "run_new",
+        primary_state_label: "Running",
+        reported_state: "running",
+        guarantee_tier: "guaranteed",
+        created_at: "2026-08-09T12:00:00Z",
+      }),
+      makeRun({
+        id: "run_old",
+        primary_state_label: "Failed",
+        reported_state: "failed",
+        guarantee_tier: "best_effort",
+        created_at: "2026-08-08T09:00:00Z",
+      }),
+    ]);
+
+    const { renderer, unmount } = await renderWithProviders(<TaskAgentSection {...props()} />);
+    await settle();
+
+    expect(visibleText(renderer)).toContain("Running · Guaranteed single start");
+    expect(visibleText(renderer)).not.toContain("Failed · Best-effort single start");
+
+    await unmount();
+  });
+
+  it("014-FR-013 shows the missing-task label and withdraws both controls", async () => {
+    mockListConnections.mockResolvedValue([makeConnection()]);
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        primary_state_label: "Agent no longer reports this run",
+        reported_state: "blocked",
+        needs_user: true,
+        question_text: "Which repo?",
+        guarantee_tier: "best_effort",
+        agent_task_missing: true,
+      }),
+    ]);
+
+    const { renderer, unmount } = await renderWithProviders(<TaskAgentSection {...props()} />);
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Agent no longer reports this run · Best-effort single start");
+    expect(queryByText(renderer, "Send answer")).toBeNull();
+    expect(queryByText(renderer, "Request cancellation")).toBeNull();
+
+    await unmount();
+  });
+});
+
 describe("useAgentRunsFeed absorb polling", () => {
   it("clears task A immediately and ignores its delayed response after switching to task B", async () => {
     let resolveA!: (runs: ReturnType<typeof makeRun>[]) => void;
@@ -589,6 +672,81 @@ describe("useAgentRunsFeed absorb polling", () => {
     expect(visibleText(renderer)).toBe("true:redacted");
     expect(armed()).toHaveLength(0);
     expect(scheduled).toHaveLength(0);
+    await unmount();
+  });
+});
+
+describe("TaskAgentSection retry of a hand-off that never left", () => {
+  it("014-FR-012 withholds the retry while rollout is off and still shows the run", async () => {
+    // The sheet that serves a retry is mounted only while the flag is on, so an
+    // offered control here would flip a state nothing reads. It is also the
+    // right answer on its own terms: nothing reached the agent, so re-sending
+    // is a fresh content-bearing send, which rollout OFF withholds (FR-016,
+    // 007 FR-019) while leaving already-dispatched work observable.
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        dispatch_state: "not_sent",
+        dispatch_error_code: "restarted_before_send",
+        reported_state: null,
+        primary_state_label: "Not sent",
+        manifest: makeManifest({ connection_id: "conn_1" }),
+      }),
+    ]);
+
+    const { renderer, unmount } = await renderWithProviders(
+      <TaskAgentSection {...props({ enabled: false })} />,
+    );
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Not sent");
+    expect(text).toContain("Nothing left Brain Buddy");
+    expect(queryByText(renderer, "Try this hand-off again")).toBeNull();
+    expect(queryByText(renderer, "Hand to agent")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-SC-004 reopens the review seeded from the run's frozen manifest", async () => {
+    const frozen = makeManifest({
+      connection_id: "conn_1",
+      details: null,
+      supporting_items: [{ label: "Classification", body: "Project: Launch" }],
+    });
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        dispatch_state: "not_sent",
+        dispatch_error_code: "restarted_before_send",
+        reported_state: null,
+        primary_state_label: "Not sent",
+        manifest: frozen,
+      }),
+    ]);
+    mockPreview.mockResolvedValue(frozen);
+    mockListConnections.mockResolvedValue([makeConnection()]);
+
+    const { renderer, unmount } = await renderWithProviders(
+      <TaskAgentSection
+        task={makeTask()}
+        projectName="Launch"
+        tagNames={["Writing"]}
+        enabled
+      />,
+    );
+    await settle();
+    expect(visibleText(renderer)).toContain("Nothing left Brain Buddy");
+
+    await pressText(renderer, "Try this hand-off again");
+    await settle();
+
+    // Seeded, so the server rebuilds the identical manifest: the same
+    // connection, the same details decision, the same supporting items.
+    expect(mockPreview).toHaveBeenCalledWith("task_1", {
+      connection_id: "conn_1",
+      include_details: false,
+      supporting_items: [{ label: "Classification", body: "Project: Launch" }],
+    });
+
     await unmount();
   });
 });

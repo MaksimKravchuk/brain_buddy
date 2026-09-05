@@ -1,12 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import { Linking, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import { isDefinitiveMutationFailure } from "@/api/client";
-import { useCancelAgentRun, useReplyToAgentRun } from "@/api/hooks";
+import {
+  useCancelAgentRun,
+  useCheckAgentRunDelivery,
+  useReplyToAgentRun,
+} from "@/api/hooks";
 import type { AgentRunResponse } from "@/api/types";
 import {
   EXPIRED_CONTENT_NOTICE,
-  eventLabel,
+  canCheckDelivery,
+  canRetryHandoff,
+  dispatchStateDetail,
+  artifactPlaceholderCopy,
+  cancelOutcomeCopy,
+  resultAvailabilityCopy,
+  timelineRowLabel,
   lastContactLabel,
   runsNewestFirst,
   sortedEvents,
@@ -16,6 +26,7 @@ import { Button } from "@/components/Button";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { awaitsAnswer, canCancel, canOpenResultLink, canReply } from "@/lifecycle/agentGuards";
 import { colors, fonts, radii, space, type as typeScale } from "@/theme/tokens";
+import { copyToClipboard } from "@/utils/clipboard";
 import { useIntentKey } from "@/utils/ids";
 
 const STALE_NOTICE =
@@ -29,6 +40,8 @@ interface AgentRunSectionProps {
   online: boolean;
   /** Hand a run a command just returned straight back to the feed. */
   onRunUpdated: (run: AgentRunResponse) => void;
+  /** Reopen the review for a hand-off that never left, seeded from its manifest. */
+  onRetryHandoff?: (run: AgentRunResponse) => void;
   onRetry?: () => void;
 }
 
@@ -65,6 +78,7 @@ export function AgentRunSection({
   error,
   online,
   onRunUpdated,
+  onRetryHandoff,
   onRetry,
 }: AgentRunSectionProps) {
 
@@ -113,7 +127,13 @@ export function AgentRunSection({
         </BBText>
       ) : null}
       {runsNewestFirst(runs).map((run) => (
-        <RunCard key={run.id} run={run} online={online} onRunUpdated={onRunUpdated} />
+        <RunCard
+            key={run.id}
+            run={run}
+            online={online}
+            onRunUpdated={onRunUpdated}
+            onRetryHandoff={onRetryHandoff}
+          />
       ))}
     </View>
   );
@@ -123,19 +143,27 @@ function RunCard({
   run,
   online,
   onRunUpdated,
+  onRetryHandoff,
 }: {
   run: AgentRunResponse;
   online: boolean;
   onRunUpdated: (run: AgentRunResponse) => void;
+  onRetryHandoff?: (run: AgentRunResponse) => void;
 }) {
+  // Held as a const so the guard below narrows it inside the press handler: the
+  // retry is drawn only when there is a review for it to open. Without a
+  // handler the control would flip a state nothing reads.
+  const retryHandoff = onRetryHandoff;
   const reply = useReplyToAgentRun();
   const cancel = useCancelAgentRun();
+  const checkDelivery = useCheckAgentRunDelivery();
 
   // One key per user intent, held across retries: a reply that never got an
   // answer may still have reached the server, and a fresh key would turn that
   // ambiguity into a second command.
   const replyKey = useIntentKey();
   const cancelKey = useIntentKey();
+  const checkKey = useIntentKey();
   const replyIntent = useRef<ReplyIntentSnapshot | null>(null);
   const [replyIntentConflict, setReplyIntentConflict] = useState(false);
 
@@ -170,7 +198,13 @@ function RunCard({
   const replyGuard = canReply(run, run.capabilities, { online });
   const cancelGuard = canCancel(run, run.capabilities, { online });
   const linkGuard = run.result_link ? canOpenResultLink(run) : null;
+  // Secondary lines, never the primary label: what the agent said about
+  // cancellation, and whether the result fitted, are separate facts from what
+  // the run is doing.
+  const cancelOutcome = cancelOutcomeCopy(run);
+  const tooLarge = resultAvailabilityCopy(run);
   const events = sortedEvents(run);
+  const dispatchDetail = run.content_expired ? null : dispatchStateDetail(run);
 
   useEffect(() => {
     const held = replyIntent.current;
@@ -221,6 +255,35 @@ function RunCard({
           if (isDefinitiveMutationFailure(error)) {
             replyKey.settle();
             replyIntent.current = null;
+          }
+        },
+      },
+    );
+  };
+
+  const runCheckAgain = () => {
+    if (!online) {
+      return;
+    }
+    checkDelivery.mutate(
+      // No identifiers of its own: the correlation ID and the message ID are on
+      // the run, so this can only ever repeat the same check. The key is held
+      // across retries for the same reason a reply's is. The revision is the
+      // run this control was rendered from: the check can end in a send, so it
+      // names the state the user was actually looking at (`mobile/AGENTS.md`).
+      {
+        runId: run.id,
+        payload: { current_password: null, expected_revision: run.revision },
+        idempotencyKey: checkKey.current(),
+      },
+      {
+        onSuccess: (updated) => {
+          checkKey.settle();
+          onRunUpdated(updated);
+        },
+        onError: (error) => {
+          if (isDefinitiveMutationFailure(error)) {
+            checkKey.settle();
           }
         },
       },
@@ -312,46 +375,68 @@ function RunCard({
             </View>
           ) : null}
 
+          {run.blocked_reason ? (
+            // M-03-S09. The run needs the user and the agent named why, so the
+            // reason is stated verbatim — and stated *without* a control. What
+            // blocks an agent here is a credential problem at the agent, which
+            // no answer typed into Brain Buddy can solve; a reply field beside
+            // this sentence is how a secret gets forwarded to a third party.
+            <View style={styles.question}>
+              <BBText variant="caption" color={colors.warningFg}>
+                {run.blocked_reason}
+              </BBText>
+            </View>
+          ) : null}
+
           {run.result_text ? (
             <BBText variant="caption" color={colors.fg3}>
               {run.result_text}
             </BBText>
           ) : null}
 
+          {tooLarge ? (
+            <BBText variant="caption" weight="medium" color={colors.fg3}>
+              {tooLarge}
+            </BBText>
+          ) : null}
+
+          {run.artifacts_summary.map((artifact, index) => (
+            <BBText
+              key={`${artifact.name ?? artifact.kind}-${index}`}
+              variant="micro"
+              color={colors.fg5}
+            >
+              {artifactPlaceholderCopy(artifact)}
+            </BBText>
+          ))}
+
           {run.result_link && linkGuard ? (
-            linkGuard.ok ? (
-              <View style={styles.field}>
-                <BBText variant="caption" color={colors.fg4} selectable>
-                  {run.result_link}
+            // Inert text beside a 44pt copy control, whatever the scheme
+            // (M-03-S10). Nothing is tappable, opened or fetched: a link the
+            // product makes tappable is a link the product is vouching for, and
+            // Brain Buddy verified nothing about where it leads.
+            <View style={styles.field}>
+              <BBText variant="caption" color={colors.fg5} selectable style={styles.mono}>
+                {run.result_link}
+              </BBText>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Copy link for ${run.agent_name}`}
+                onPress={() => {
+                  void copyToClipboard(run.result_link as string);
+                }}
+                style={styles.rowAction}
+              >
+                <BBText variant="caption" weight="medium" color={colors.infoFg}>
+                  Copy link
                 </BBText>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open result for ${run.agent_name}`}
-                  onPress={() => {
-                    void Linking.openURL(run.result_link as string);
-                  }}
-                  style={styles.linkAction}
-                >
-                  <BBText variant="caption" weight="medium" color={colors.infoFg}>
-                    Open result
-                  </BBText>
-                </Pressable>
-                <BBText variant="micro" color={colors.fg6}>
-                  Opens a site outside Brain Buddy.
-                </BBText>
-              </View>
-            ) : (
-              // Only the server decides a link is a safe HTTPS destination
-              // (FR-014); anything else stays text and is never opened.
-              <View style={styles.field}>
-                <BBText variant="caption" color={colors.fg5} selectable style={styles.mono}>
-                  {run.result_link}
-                </BBText>
+              </Pressable>
+              {linkGuard.ok ? null : (
                 <BBText variant="micro" color={colors.fg6}>
                   {linkGuard.reason}
                 </BBText>
-              </View>
-            )
+              )}
+            </View>
           ) : null}
 
           {run.failure_reason ? (
@@ -367,10 +452,21 @@ function RunCard({
           Your answer was sent but the agent has not acknowledged it yet.
         </BBText>
       ) : null}
-      {run.cancel_requested ? (
+      {cancelOutcome ? (
+        <BBText variant="micro" color={colors.fg5}>
+          {cancelOutcome}
+        </BBText>
+      ) : null}
+      {run.cancel_requested && !cancelOutcome ? (
         <BBText variant="micro" color={colors.fg5}>
           Cancellation was requested. The agent has not confirmed it, so the work may still be
           running.
+        </BBText>
+      ) : null}
+      {run.agent_task_missing ? (
+        <BBText variant="micro" color={colors.fg5}>
+          The agent no longer reports this run. Brain Buddy kept everything it had already
+          observed and is not claiming the work failed.
         </BBText>
       ) : null}
       {run.stopped_reporting ? (
@@ -385,10 +481,46 @@ function RunCard({
           accepted.
         </BBText>
       ) : null}
-      {run.dispatch_state === "delivery_unconfirmed" ? (
+      {dispatchDetail ? (
         <BBText variant="micro" color={colors.fg5}>
-          Brain Buddy could not confirm the agent received this hand-off. It was not re-sent.
+          {dispatchDetail}
         </BBText>
+      ) : null}
+      {canCheckDelivery(run) ? (
+        <>
+          <BBText variant="micro" color={colors.fg5}>
+            Runs the same check again with the same correlation ID and the same message ID. It
+            is never a new send.
+          </BBText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Check again"
+            accessibilityState={{ disabled: !online }}
+            disabled={!online}
+            onPress={runCheckAgain}
+            style={styles.rowAction}
+          >
+            <BBText variant="caption" weight="medium" color={colors.infoFg}>
+              Check again
+            </BBText>
+          </Pressable>
+          {/* A refused or failed check must not look like a check that found
+              nothing: the reason and its correlation reference belong beside
+              the control that produced them, exactly as reply and cancel do. */}
+          {checkDelivery.isError ? <ErrorBanner error={checkDelivery.error} /> : null}
+        </>
+      ) : null}
+      {retryHandoff && canRetryHandoff(run) ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Try this hand-off again"
+          onPress={() => retryHandoff(run)}
+          style={styles.rowAction}
+        >
+          <BBText variant="caption" weight="medium" color={colors.infoFg}>
+            Try this hand-off again
+          </BBText>
+        </Pressable>
       ) : null}
 
       {events.length > 0 ? (
@@ -396,9 +528,16 @@ function RunCard({
           {events.map((event) => (
             <View key={event.id} style={styles.event}>
               <BBText variant="micro" weight="medium" color={colors.fg4}>
-                {eventLabel(event.type)}
+                {timelineRowLabel(event)}
               </BBText>
-              {event.summary ? (
+              {event.kind === "task_succession" && event.previous_agent_task_id ? (
+                // Both identifiers, because the point of the row is that the
+                // one the user saw yesterday is not the one being observed now.
+                <BBText variant="micro" color={colors.fg6}>
+                  {event.previous_agent_task_id} → {event.new_agent_task_id}
+                </BBText>
+              ) : null}
+              {event.summary && event.kind !== "task_succession" ? (
                 <BBText variant="micro" color={colors.fg5}>
                   {event.summary}
                 </BBText>
@@ -419,6 +558,11 @@ function RunCard({
 }
 
 const styles = StyleSheet.create({
+  // 44pt: a real decision, tappable like one.
+  rowAction: {
+    minHeight: 44,
+    justifyContent: "center",
+  },
   section: {
     gap: space.s2,
   },

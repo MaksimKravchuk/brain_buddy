@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { BBText } from "@/components/BBText";
 import { PriorityDot, TagPill } from "@/components/Chip";
 import type { AgentRunSummaryResponse, TaskResponse } from "@/api/types";
-import { lastContactLabel } from "@/agents/machine";
+import { compactRunLabel, lastContactLabel } from "@/agents/machine";
 import { colors, fonts, minHitTarget, radii, shadows, space } from "@/theme/tokens";
 
 interface TaskRowProps {
@@ -132,7 +132,7 @@ export function TaskRow({
                     color={agentRun.needs_user ? colors.warningFg : colors.infoFg}
                     numberOfLines={1}
                   >
-                    {`${agentRun.agent_name} · ${agentRun.primary_state_label}`}
+                    {`${agentRun.agent_name} · ${compactRunLabel(agentRun)}`}
                   </BBText>
                 </View>
                 <BBText variant="micro" color={colors.fg6} numberOfLines={1}>

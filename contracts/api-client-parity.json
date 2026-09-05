@@ -35,7 +35,6 @@
     "updateAgentConnection": {"family":"Agent Relay","method":"PUT","path":"/agent-connections/connection-1","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
     "testAgentConnection": {"family":"Agent Relay","method":"POST","path":"/agent-connections/connection-1/test","body":"none","idempotency":false,"headers":[],"notes":"server contract has no idempotency key"},
     "rotateAgentCredential": {"family":"Agent Relay","method":"POST","path":"/agent-connections/connection-1/credential","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
-    "rotateAgentSigningSecret": {"family":"Agent Relay","method":"POST","path":"/agent-connections/connection-1/signing-secret","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
     "disconnectAgentConnection": {"family":"Agent Relay","method":"POST","path":"/agent-connections/connection-1/disconnect","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
     "previewAgentHandoff": {"family":"Agent Relay","method":"POST","path":"/tasks/task-1/agent-runs/preview","body":"json","idempotency":false,"headers":[],"notes":"preview reserves nothing"},
     "confirmAgentHandoff": {"family":"Agent Relay","method":"POST","path":"/tasks/task-1/agent-runs","body":"json","idempotency":true,"headers":[],"notes":"confirmation is durable"},
@@ -43,6 +42,7 @@
     "getAgentRun": {"family":"Agent Relay","method":"GET","path":"/agent-runs/run-1","body":"none","idempotency":false,"headers":[],"notes":"read"},
     "listAgentRunSummaries": {"family":"Agent Relay","method":"GET","path":"/agent-run-summaries?task_id=task-1&task_id=task-2","body":"none","idempotency":false,"headers":[],"notes":"repeated task_id query inputs"},
     "replyToAgentRun": {"family":"Agent Relay","method":"POST","path":"/agent-runs/run-1/reply","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
+    "checkAgentRunDelivery": {"family":"Agent Relay","method":"POST","path":"/agent-runs/run-1/check-delivery","body":"json","idempotency":true,"headers":[],"notes":"repeats one check; body carries expected_revision and current_password only"},
     "cancelAgentRun": {"family":"Agent Relay","method":"POST","path":"/agent-runs/run-1/cancel","body":"none","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"}
   }
 }

@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { useAgentRunSummaries } from "../../api/agentHooks";
+import { compactRunLabel } from "../agents/agentCopy";
 import type { AgentRunSummaryResponse } from "../../api/agentTypes";
 
 import { apiClient, getApiBaseUrl } from "../../api/client";
@@ -863,10 +864,12 @@ function TaskRow({
         ) : null}
         {agentRun ? (
           // The server's own label, verbatim: the card can never describe a run
-          // more confidently than the detail view does.
+          // more confidently than the detail view does. The tier is spelled out
+          // in full beside it (D-03-S21) — an abbreviation would be a promise
+          // about duplicate risk written in a code the user has to learn.
           <Chip variant={agentRun.needs_user ? "needs-you" : "agent"}>
             <Bot className="h-[11px] w-[11px]" aria-hidden />
-            {agentRun.primary_state_label}
+            {compactRunLabel(agentRun)}
           </Chip>
         ) : null}
         {subtasks.length ? (
