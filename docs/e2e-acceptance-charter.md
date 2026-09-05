@@ -148,12 +148,13 @@ operator API for the duration of the run. All four stories live in
 | 014-SC-005 — the user can identify exactly what will be sent, the guarantee tier and the cancellation disclosure, and remove optional supporting items before confirming, at desktop width; 014-SC-001 — the hand-off completes through **Agent reported complete** against an unmodified runtime. | `A2A hand-off to the helloworld sample` | `a2a-helloworld` | Active Playwright Allure result with epic `External agent relay` |
 | 014-SC-004 — working, input-required, completed, failed and canceled are each distinguishable on the Task detail and compact surfaces from one projection, with no fabricated progress; 014-SC-006 — a delayed agent shows **Sent** with no fabricated failure and the true terminal state within one observation interval. | `A2A hand-off to the Hermes stub` | `hermes-a2a` | Same active Allure epic |
 | 014-SC-002 — three identical confirmations of one review produce exactly one task at the agent and one Task-linked run. | `A2A replay creates one task` | `hermes-a2a` (the stub's `ListTasks(contextId)`, called through the fixture's JSON-RPC endpoint, is the agent-side assertion) | Same active Allure epic |
-| 014-SC-003 — invalid credentials, a private destination, a forged push notification and agent-card drift are each rejected with zero accepted state change and zero secret disclosure. | `A2A security rejections` | `hermes-a2a` | Same active Allure epic |
+| 014-SC-003 — invalid credentials, a private destination and a forged push notification are each rejected with zero accepted state change and zero secret disclosure. Agent-card drift is the one rejection this story does not carry: proving it requires *restarting the agent* with a different card, which no browser journey can do, so it is proved against the same unmodified runtime in `backend/tests/test_agent_a2a_reference_hermes.py::TestHermesCardAndCredential::test_014_FR_002_a_stub_that_lost_its_token_reads_as_agent_changed`. | `A2A security rejections` | `hermes-a2a` | Same active Allure epic |
 
 The CI `e2e` job builds both fixture images through the same buildx cache as
 the app images before `make test-e2e`. As with every scenario in this charter,
-these stories assert user-visible behavior through `data-testid` selectors
-against the Compose stack; the wire-level matrices (identifier reservation,
+these stories assert user-visible behavior against the Compose stack through
+the accessible roles and labels the component suites already prove exist —
+a `data-testid` would be a second, unverified name for the same control; the wire-level matrices (identifier reservation,
 the push-callback check order, the retention tiers) stay in the backend
 suites. The attended live run against a real Hermes installation is **not**
 part of this charter or of CI: it spends provider money, requires explicit
