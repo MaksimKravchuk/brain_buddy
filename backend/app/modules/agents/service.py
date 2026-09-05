@@ -2648,6 +2648,7 @@ class AgentRelayService:
         based_on: int,
         extra: dict[str, Any] | None = None,
         superseded: dict[str, Any] | None = None,
+        superseded_unless_terminal: bool = False,
         trigger: AgentRunEventTrigger = "schedule",
     ) -> AgentRunDocument | None:
         """Write one observation, or lose the race and change nothing.
@@ -2681,7 +2682,17 @@ class AgentRelayService:
             if not self._observable(current):
                 return current
             if current.run_version != based_on:
-                if not superseded:
+                # A newer report landed while this call was at the agent. Two
+                # callers want opposite things here, and the difference is real:
+                # an exchange still knows its message *arrived*, whatever state
+                # the winning report carried, while a cancellation the user
+                # asked for is not worth stamping onto a run that has already
+                # finished — the overlay would say "cancelling" about work that
+                # is over.
+                if not superseded or (
+                    superseded_unless_terminal
+                    and current.reported_state in TERMINAL_REPORTED_STATES
+                ):
                     return current
                 now = self._now()
                 overtaken = current.model_copy(
@@ -3545,19 +3556,24 @@ class AgentRelayService:
         on runtimes that serve no history at all.
         """
 
-        return {
+        payload: dict[str, Any] = {
             "messageId": command_id,
             "contextId": run.context_id,
-            "taskId": run.agent_task_id,
             "role": "ROLE_USER",
             "parts": [{"text": message}],
-            "referenceTaskIds": [run.agent_task_id],
             "metadata": {
                 "brainbuddy.task_id": run.task_id,
                 "brainbuddy.run_id": run.id,
                 "brainbuddy.command_id": command_id,
             },
         }
+        if run.agent_task_id is not None:
+            # Omitted rather than sent as null when no task is known yet: the
+            # SDK server rejects params it does not recognise, and a null task
+            # id is a claim about a task BrainBuddy has never seen.
+            payload["taskId"] = run.agent_task_id
+            payload["referenceTaskIds"] = [run.agent_task_id]
+        return payload
 
     def push_token_for(self, run: AgentRunDocument) -> str | None:
         """This run's push token, or nothing when it never registered one.
@@ -3934,6 +3950,14 @@ class AgentRelayService:
             observation=observation,
             based_on=run.run_version,
             extra=run_updates,
+            # Whether the agent acknowledged the user's answer is a fact about
+            # *this* command, so a report that overtook it does not erase it.
+            superseded={
+                "exchange_state": "closed",
+                "reply_pending_command_id": run_updates[
+                    "reply_pending_command_id"
+                ],
+            },
             trigger="command",
         )
         with self.agent_repo.command_lock(owner_id):
@@ -4029,6 +4053,7 @@ class AgentRelayService:
                 result,
                 command_id=command_id,
                 reserved_at=reserved_at,
+                attempted_at=now,
             )
             with self.agent_repo.command_lock(owner_id):
                 self._remember(
@@ -4074,12 +4099,30 @@ class AgentRelayService:
         *,
         command_id: str,
         reserved_at: datetime,
+        attempted_at: datetime,
     ) -> None:
-        """Settle one cancel: outcome, command row, and the audit fact."""
+        """Settle one cancel: outcome, command row, and the audit fact.
+
+        ``attempted_at`` is when the *user* asked, captured before the call
+        left. The overlay is about their request, not about how long the agent
+        took to answer it, so a slow agent must not move the timestamp.
+        """
 
         owner_id = run.owner_id
         now = self._now()
         outcome, outcome_code = self._cancel_outcome_for(result)
+        current_connection = self.agent_repo.get_connection(
+            connection.id, owner_id=owner_id
+        )
+        # A credential rotation or a disconnect while the cancel was in flight
+        # means the request no longer describes the connection it was made
+        # against. The command row still records what happened; the *run* keeps
+        # no cancellation overlay, because BrainBuddy would be claiming to have
+        # cancelled work through a connection it no longer has.
+        scope_intact = (
+            current_connection.revision == connection.revision
+            and current_connection.status != "disconnected"
+        )
         observation = (
             project_observation(result.task, now=now, limits=self.observation_limits)
             if result.ok and result.task is not None
@@ -4090,19 +4133,24 @@ class AgentRelayService:
             "cancel_command_id": None if outcome != "unconfirmed" else command_id,
         }
         if outcome == "accepted":
-            updates["cancel_requested_at"] = now
+            updates["cancel_requested_at"] = attempted_at
             updates["last_contact_at"] = now
         elif outcome == "task_missing":
             updates["agent_task_missing_at"] = now
             updates["next_observation_at"] = None
-        self.apply_observation(
-            run.id,
-            owner_id=owner_id,
-            observation=observation,
-            based_on=run.run_version,
-            extra=updates,
-            trigger="command",
-        )
+        if scope_intact:
+            self.apply_observation(
+                run.id,
+                owner_id=owner_id,
+                observation=observation,
+                based_on=run.run_version,
+                extra=updates,
+                # The outcome of the user's own request is worth recording even
+                # if a report overtook it — but not onto a run that has ended.
+                superseded=updates,
+                superseded_unless_terminal=True,
+                trigger="command",
+            )
         with self.agent_repo.command_lock(owner_id):
             self.agent_repo.save_command(
                 AgentRunCommandDocument(

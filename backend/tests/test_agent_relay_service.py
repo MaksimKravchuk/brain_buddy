@@ -207,10 +207,27 @@ class BlockingA2AClient(FakeA2AClient):
 
     def send_message(self, target: Any, **kwargs: Any) -> A2AResult:
         result = super().send_message(target, **kwargs)
-        if self.block_kind == "start":
+        # A reply is a `SendMessage` too, so the two are told apart by what
+        # only a reply carries: its own command id. The task id will not do —
+        # a run whose start exchange never returned a task has none to name.
+        message = kwargs.get("message", {})
+        kind = (
+            "reply"
+            if message.get("metadata", {}).get("brainbuddy.command_id")
+            else "start"
+        )
+        self._block(kind)
+        return result
+
+    def cancel_task(self, target: Any, **kwargs: Any) -> A2AResult:
+        result = super().cancel_task(target, **kwargs)
+        self._block("cancel")
+        return result
+
+    def _block(self, kind: str) -> None:
+        if self.block_kind == kind:
             self.entered.set()
             assert self.release.wait(timeout=5)
-        return result
 
 
 class BlockingIoConnector(FakeConnector):
@@ -445,6 +462,63 @@ def sends(a2a_client: FakeA2AClient) -> list[dict[str, Any]]:
         kwargs["message"]
         for _method, _target, kwargs in a2a_client.calls_to("SendMessage")
     ]
+
+
+def replies(a2a_client: FakeA2AClient) -> list[dict[str, Any]]:
+    """Only the follow-up messages: a reply carries its own command id.
+
+    Selected by the command id rather than by `taskId`, because a run whose
+    start exchange never returned a task has no task id to name and the reply
+    still has to be tellable from the start.
+    """
+
+    return [
+        message
+        for message in sends(a2a_client)
+        if message.get("metadata", {}).get("brainbuddy.command_id")
+    ]
+
+
+def cancels(a2a_client: FakeA2AClient) -> list[dict[str, Any]]:
+    return [kwargs for _m, _t, kwargs in a2a_client.calls_to("CancelTask")]
+
+
+def wire_commands(service: AgentRelayService) -> list[dict[str, Any]]:
+    """Every reply and cancel this service actually put on the A2A wire.
+
+    The 014 replacement for the bespoke connector's `commands`, and the shape
+    the at-most-once suites assert on: one entry per delivery, each naming its
+    kind and the command id that makes a retry the *same* request rather than a
+    second one the agent could act on.
+    """
+
+    client = service.a2a_client
+    assert client is not None
+    return wire_commands_of(client)  # type: ignore[arg-type]
+
+
+def wire_commands_of(client: FakeA2AClient) -> list[dict[str, Any]]:
+    """The same list, for a client shared by several service generations."""
+
+    delivered: list[dict[str, Any]] = []
+    for method, _target, kwargs in client.calls:
+        if method == "CancelTask":
+            delivered.append({"type": "cancel", "command_id": kwargs["command_id"]})
+            continue
+        if method != "SendMessage":
+            continue
+        command_id = kwargs["message"].get("metadata", {}).get(
+            "brainbuddy.command_id"
+        )
+        if command_id is not None:
+            delivered.append({"type": "reply", "command_id": command_id})
+    return delivered
+
+
+def clear_wire(service: AgentRelayService) -> None:
+    client = service.a2a_client
+    assert client is not None
+    client.calls.clear()  # type: ignore[attr-defined]
 
 
 def review(
@@ -1654,9 +1728,9 @@ class TestExternalIoLockScope:
                         idempotency_key="idem-slow-cancel",
                     )
 
-        # The start's content-bearing call is the A2A send; reply and cancel
-        # still travel the bespoke wire until T110-T114 retire it.
-        blocker: Any = a2a_client if operation == "start" else connector
+        # Every one of the three now travels the A2A wire, so the same client
+        # is the slow agent in all three cases.
+        blocker: Any = a2a_client
         blocker.block_kind = operation
         worker_errors: list[BaseException] = []
 
@@ -4525,9 +4599,9 @@ class TestReplyAndCancel:
         assert run.result_text == "Done, see the PR."
 
     def test_a_reply_is_routed_once_and_does_not_clear_blocked(
-        self, relay: Relay, service: AgentRelayService
+        self, relay: Relay, service: AgentRelayService, a2a_client: FakeA2AClient
     ) -> None:
-        """AC-012 / FR-008: only a later authenticated event moves the state."""
+        """AC-012 / FR-008: only a later observation moves the state."""
 
         relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
 
@@ -4542,26 +4616,27 @@ class TestReplyAndCancel:
 
         assert run.reported_state == "blocked"
         assert [command.kind for command in run.commands if command.kind == "reply"]
-        assert len(relay.service.connector.commands) == 1  # type: ignore[attr-defined]
+        assert len(replies(a2a_client)) == 1
 
     def test_a_synchronous_callback_during_reply_wins_over_transport_merge(
         self,
         relay: Relay,
         service: AgentRelayService,
-        connector: FakeConnector,
+        a2a_client: FakeA2AClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """A report that lands mid-reply is newer than the reply's own answer."""
+
         relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
         expected_revision = relay.projection().revision
+        sent: list[dict[str, Any]] = []
 
-        def command_with_callback(
-            target: ConnectorTarget, *, envelope: dict[str, Any]
-        ) -> ConnectorCommandOutcome:
-            connector.commands.append(envelope)
+        def send_with_callback(target: Any, **kwargs: Any) -> A2AResult:
+            sent.append(kwargs["message"])
             relay.emit(relay.event("evt_2", "running", 2, progress="Continuing"))
-            return ConnectorCommandOutcome("confirmed")
+            return A2AResult(ok=True, correlation_id="c")
 
-        monkeypatch.setattr(connector, "command", command_with_callback)
+        monkeypatch.setattr(a2a_client, "send_message", send_with_callback)
 
         run = service.reply_to_run(
             relay.run.id,
@@ -4575,24 +4650,25 @@ class TestReplyAndCancel:
         assert run.reported_state == "running"
         assert run.run_version == 2
         assert run.progress_text == "Continuing"
-        assert run.reply_pending is False
-        assert len(connector.commands) == 1
+        assert len(sent) == 1
 
     def test_a_synchronous_callback_during_cancel_wins_over_transport_merge(
         self,
         relay: Relay,
         service: AgentRelayService,
-        connector: FakeConnector,
+        a2a_client: FakeA2AClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        def command_with_callback(
-            target: ConnectorTarget, *, envelope: dict[str, Any]
-        ) -> ConnectorCommandOutcome:
-            connector.commands.append(envelope)
-            relay.emit(relay.event("evt_1", "completed", 1, result="Already done"))
-            return ConnectorCommandOutcome("confirmed")
+        """A run that finished while the cancel was in flight is not un-finished."""
 
-        monkeypatch.setattr(connector, "command", command_with_callback)
+        attempts: list[dict[str, Any]] = []
+
+        def cancel_with_callback(target: Any, **kwargs: Any) -> A2AResult:
+            attempts.append(kwargs)
+            relay.emit(relay.event("evt_1", "completed", 1, result="Already done"))
+            return A2AResult(ok=True, correlation_id="c")
+
+        monkeypatch.setattr(a2a_client, "cancel_task", cancel_with_callback)
 
         run = service.cancel_run(
             relay.run.id,
@@ -4603,13 +4679,13 @@ class TestReplyAndCancel:
         assert run.reported_state == "completed"
         assert run.result_text == "Already done"
         assert run.cancel_requested is False
-        assert len(connector.commands) == 1
+        assert len(attempts) == 1
 
     def test_a_synchronous_nonterminal_callback_during_cancel_preserves_cancellation_overlay(
         self,
         relay: Relay,
         service: AgentRelayService,
-        connector: FakeConnector,
+        a2a_client: FakeA2AClient,
         clock: Clock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -4618,18 +4694,15 @@ class TestReplyAndCancel:
         callback_at = attempted_at + timedelta(minutes=1)
         mutation_at = attempted_at + timedelta(minutes=2)
 
-        def command_with_callback(
-            target: ConnectorTarget, *, envelope: dict[str, Any]
-        ) -> ConnectorCommandOutcome:
-            connector.commands.append(envelope)
+        def cancel_with_callback(target: Any, **kwargs: Any) -> A2AResult:
             clock.advance(timedelta(minutes=1))
             relay.emit(
                 relay.event("evt_running", "running", 1, progress="Still working")
             )
             clock.advance(timedelta(minutes=1))
-            return ConnectorCommandOutcome("confirmed")
+            return A2AResult(ok=True, correlation_id="c")
 
-        monkeypatch.setattr(connector, "command", command_with_callback)
+        monkeypatch.setattr(a2a_client, "cancel_task", cancel_with_callback)
 
         run = service.cancel_run(
             relay.run.id,
@@ -4666,11 +4739,11 @@ class TestReplyAndCancel:
                 idempotency_key="idem-stale-reply",
             )
 
-        assert connector.commands == []
+        assert wire_commands(service) == []
         assert [c for c in relay.projection().commands if c.kind == "reply"] == []
 
-    def test_replaying_a_reply_causes_at_most_one_connector_action(
-        self, relay: Relay, service: AgentRelayService, connector: FakeConnector
+    def test_replaying_a_reply_causes_at_most_one_send(
+        self, relay: Relay, service: AgentRelayService, a2a_client: FakeA2AClient
     ) -> None:
         """FR-007: a duplicate submission returns the same command."""
 
@@ -4686,7 +4759,7 @@ class TestReplyAndCancel:
                 idempotency_key="idem-reply",
             )
 
-        assert len(connector.commands) == 1
+        assert len(replies(a2a_client)) == 1
 
     def test_an_unconfirmed_reply_stays_visibly_unconfirmed(
         self, relay: Relay, service: AgentRelayService, connector: FakeConnector
@@ -4818,10 +4891,17 @@ class TestExternalIoMergeRaces:
         bypass_operation_lock: bool,
     ) -> None:
         connector = BlockingIoConnector()
+        a2a_client = BlockingA2AClient()
         repo = AgentRepository(tmp_path)
-        service = build_service(repo, connector, clock)
+        service = build_service(
+            repo,
+            connector,
+            clock,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
         relay = Relay(service, clock)
-        connector.commands.clear()
+        clear_wire(service)
         idempotency_key = f"idem-concurrent-{operation}"
         if operation == "reply":
             relay.emit(relay.event("evt_blocked", "blocked", 1))
@@ -4846,7 +4926,7 @@ class TestExternalIoMergeRaces:
                     idempotency_key=idempotency_key,
                 )
 
-        connector.block_kind = operation
+        a2a_client.block_kind = operation
         results: list[Any] = []
         errors: list[BaseException] = []
         attempts: list[tuple[str, str]] = []
@@ -4886,7 +4966,7 @@ class TestExternalIoMergeRaces:
         first = Thread(target=invoke)
         second = Thread(target=lambda: invoke(second=True))
         first.start()
-        assert connector.entered.wait(timeout=5)
+        assert a2a_client.entered.wait(timeout=5)
         second.start()
         assert second_attempted.wait(timeout=5)
         assert attempts == [
@@ -4899,14 +4979,14 @@ class TestExternalIoMergeRaces:
         else:
             assert second_acquired.is_set() is False
             assert second_finished.is_set() is False
-        connector.release.set()
+        a2a_client.release.set()
         first.join(timeout=5)
         second.join(timeout=5)
 
         assert errors == []
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
         assert len(results) == 2
-        command_id = connector.commands[0]["command_id"]
+        command_id = wire_commands(service)[0]["command_id"]
         assert results[0].id == results[1].id == relay.run.id
         assert [item.id for item in results[0].commands if item.kind == operation] == [
             command_id
@@ -4926,11 +5006,25 @@ class TestExternalIoMergeRaces:
     def test_cancel_transport_merge_cannot_revive_or_overwrite_newer_state(
         self, tmp_path: Path, clock: Clock, race: str
     ) -> None:
-        connector = BlockingIoConnector()
-        service = build_service(AgentRepository(tmp_path), connector, clock)
+        a2a_client = BlockingA2AClient()
+        service = build_service(
+            AgentRepository(tmp_path),
+            FakeConnector(),
+            clock,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
         relay = Relay(service, clock)
-        connector.commands.clear()
-        connector.block_kind = "cancel"
+        clear_wire(service)
+        a2a_client.script(
+            "CancelTask",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task("t1", relay.run.id, "TASK_STATE_CANCELED"),
+            ),
+        )
+        a2a_client.block_kind = "cancel"
         errors: list[BaseException] = []
 
         def invoke() -> None:
@@ -4945,7 +5039,7 @@ class TestExternalIoMergeRaces:
 
         worker = Thread(target=invoke)
         worker.start()
-        assert connector.entered.wait(timeout=5)
+        assert a2a_client.entered.wait(timeout=5)
         if race == "terminal":
             relay.emit(relay.event("evt_cancel_done", "completed", 1, result="Done"))
         elif race == "retention":
@@ -4976,12 +5070,12 @@ class TestExternalIoMergeRaces:
                 idempotency_key="idem-cancel-race-disconnect-connection",
                 reauthenticated=True,
             )
-        connector.release.set()
+        a2a_client.release.set()
         worker.join(timeout=5)
 
         assert errors == []
         run = service.agent_repo.get_run(relay.run.id, owner_id=OWNER)
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
         if race == "terminal":
             assert run.reported_state == "completed"
             assert run.cancel_requested_at is None
@@ -5144,14 +5238,30 @@ class TestExternalIoMergeRaces:
     def test_reply_transport_merge_cannot_overwrite_newer_state(
         self, tmp_path: Path, clock: Clock, race: str
     ) -> None:
-        connector = BlockingIoConnector()
-        service = build_service(AgentRepository(tmp_path), connector, clock)
+        a2a_client = BlockingA2AClient()
+        service = build_service(
+            AgentRepository(tmp_path),
+            FakeConnector(),
+            clock,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
         relay = Relay(service, clock)
         relay.emit(relay.event("evt_1", "blocked", 1, question="Which environment?"))
         payload = AgentReplyRequest(
             message="Use staging.", expected_revision=relay.projection().revision
         )
-        connector.block_kind = "reply"
+        # Scripted only now, so the dispatch above kept the default answer and
+        # only the reply is acknowledged with a task.
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(
+                ok=True,
+                correlation_id="c",
+                task=observed_task("t1", relay.run.id),
+            ),
+        )
+        a2a_client.block_kind = "reply"
         results: list[Any] = []
         errors: list[BaseException] = []
 
@@ -5170,7 +5280,7 @@ class TestExternalIoMergeRaces:
 
         worker = Thread(target=invoke)
         worker.start()
-        assert connector.entered.wait(timeout=5)
+        assert a2a_client.entered.wait(timeout=5)
 
         if race == "terminal":
             relay.emit(relay.event("evt_2", "completed", 2, result="Finished"))
@@ -5203,7 +5313,7 @@ class TestExternalIoMergeRaces:
                 reauthenticated=True,
             )
 
-        connector.release.set()
+        a2a_client.release.set()
         worker.join(timeout=5)
 
         assert errors == []
@@ -5298,7 +5408,7 @@ class TestCommandReplayAfterTheWorldMoved:
             "Use staging."
         ]
         assert replay.reported_state == "completed"
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
 
     def test_a_completed_reply_replay_precedes_the_live_revision_check(
         self, relay: Relay, service: AgentRelayService, connector: FakeConnector
@@ -5323,7 +5433,7 @@ class TestCommandReplayAfterTheWorldMoved:
 
         assert replay.reported_state == "completed"
         assert replay.revision > revision
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
 
     def test_a_reply_replayed_after_a_disconnect_returns_its_outcome(
         self, relay: Relay, service: AgentRelayService, connector: FakeConnector
@@ -5340,7 +5450,7 @@ class TestCommandReplayAfterTheWorldMoved:
             "Use staging."
         ]
         assert replay.connection_disconnected is True
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
 
     def test_a_cancel_replayed_after_the_run_finished_returns_its_outcome(
         self, relay: Relay, service: AgentRelayService, connector: FakeConnector
@@ -5358,7 +5468,7 @@ class TestCommandReplayAfterTheWorldMoved:
         assert replay.cancel_requested is False
         assert replay.reported_state == "cancelled"
         assert [c.kind for c in replay.commands if c.kind == "cancel"] == ["cancel"]
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
 
     def test_a_cancel_replayed_after_a_disconnect_returns_its_outcome(
         self, relay: Relay, service: AgentRelayService, connector: FakeConnector
@@ -5375,7 +5485,7 @@ class TestCommandReplayAfterTheWorldMoved:
 
         assert replay.cancel_requested is True
         assert [c.kind for c in replay.commands if c.kind == "cancel"] == ["cancel"]
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
 
     def test_another_owner_cannot_replay_a_settled_command(
         self, relay: Relay, service: AgentRelayService
@@ -5408,7 +5518,7 @@ class TestCommandReplayAfterTheWorldMoved:
         with pytest.raises(ConflictError):
             self.reply(service, relay, message="Actually production.")
 
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
 
     def test_a_fresh_key_on_a_finished_run_is_still_refused(
         self, relay: Relay, service: AgentRelayService, connector: FakeConnector
@@ -5423,7 +5533,7 @@ class TestCommandReplayAfterTheWorldMoved:
             self.reply(service, relay, key="idem-reply-2")
 
         assert refused.value.detail == {"reason": "run_terminal"}
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
 
 
 # --- User Story 4: disconnect and bounded retention --------------------------
@@ -5630,7 +5740,7 @@ class TestDisconnectAndRetention:
         )
 
         assert refused.value.detail == {"reason": "run_content_expired"}
-        assert [command["type"] for command in connector.commands] == ["cancel"]
+        assert [command["type"] for command in wire_commands(service)] == ["cancel"]
         assert cancelled.content_expired is True
         assert all(command.body is None for command in cancelled.commands)
 
@@ -5655,7 +5765,7 @@ class TestDisconnectAndRetention:
             )
 
         assert refused.value.detail == {"reason": "run_content_expired"}
-        assert connector.commands == []
+        assert wire_commands(service) == []
         assert all(command.body is None for command in relay.projection().commands)
 
     def test_a_completed_same_key_reply_replays_after_content_expiry(
@@ -5691,7 +5801,7 @@ class TestDisconnectAndRetention:
 
         assert replay.id == first.id
         assert replay.content_expired is True
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
         assert all(command.body is None for command in replay.commands)
 
     def test_event_at_exact_retention_boundary_advances_only_coarse_state(
@@ -6633,7 +6743,7 @@ class TestRelayFailureRecoveryEdges:
             # That start is setup, not the call under test.
             a2a_client.calls.clear()
             connector.starts.clear()
-            connector.commands.clear()
+            clear_wire(service)
             if operation == "reply":
                 relay.emit(relay.event("evt_window_blocked", "blocked", 1))
                 payload = AgentReplyRequest(
@@ -6688,7 +6798,7 @@ class TestRelayFailureRecoveryEdges:
         with pytest.raises(RuntimeError, match=expected):
             invoke()
         assert sends(a2a_client) == []
-        assert connector.commands == []
+        assert wire_commands(service) == []
 
         key_hash = service._key_fingerprint(OWNER, key)
         with sqlite3.connect(tmp_path / "agents.sqlite3") as database:
@@ -6718,7 +6828,7 @@ class TestRelayFailureRecoveryEdges:
         recovered = invoke()
 
         external_calls: list[dict[str, Any]] = (
-            sends(a2a_client) if operation == "start" else connector.commands
+            sends(a2a_client) if operation == "start" else wire_commands(service)
         )
         if window == "marker_before_connector":
             assert external_calls == []
@@ -6867,13 +6977,13 @@ class TestRelayFailureRecoveryEdges:
             )
 
         connector.starts.clear()
-        connector.commands.clear()
+        clear_wire(service)
         restarted = build_service(AgentRepository(tmp_path), connector, clock)
         service = restarted
         recovered = retry()
 
         assert connector.starts == []
-        assert connector.commands == []
+        assert wire_commands(service) == []
         assert [item.id for item in recovered.commands if item.id == command_id] == [
             command_id
         ]
@@ -7044,8 +7154,8 @@ class TestRelayFailureRecoveryEdges:
             idempotency_key="idem-crash-reply",
         )
 
-        assert len(connector.commands) == 1
-        command_id = connector.commands[0]["command_id"]
+        assert len(wire_commands(service)) == 1
+        command_id = wire_commands(service)[0]["command_id"]
         command = next(item for item in recovered.commands if item.id == command_id)
         assert command.delivery == "unconfirmed"
         assert [
@@ -7081,7 +7191,7 @@ class TestRelayFailureRecoveryEdges:
                 owner_id=OWNER,
                 idempotency_key="idem-terminal-crash-reply",
             )
-        original_command_id = connector.commands[0]["command_id"]
+        original_command_id = wire_commands(service)[0]["command_id"]
         relay.emit(relay.event("evt_2", "completed", 2, result="Already done"))
 
         recovered = service.reply_to_run(
@@ -7097,7 +7207,7 @@ class TestRelayFailureRecoveryEdges:
             idempotency_key="idem-terminal-crash-reply",
         )
 
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
         assert recovered == replayed
         assert recovered.reported_state == "completed"
         assert recovered.result_text == "Already done"
@@ -7131,7 +7241,7 @@ class TestRelayFailureRecoveryEdges:
                 owner_id=OWNER,
                 idempotency_key="idem-terminal-crash-cancel",
             )
-        original_command_id = connector.commands[0]["command_id"]
+        original_command_id = wire_commands(service)[0]["command_id"]
         relay.emit(relay.event("evt_done", "completed", 1, result="Finished"))
 
         recovered = service.cancel_run(
@@ -7140,7 +7250,7 @@ class TestRelayFailureRecoveryEdges:
             idempotency_key="idem-terminal-crash-cancel",
         )
 
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
         assert recovered.reported_state == "completed"
         assert recovered.cancel_requested is False
         command = next(
@@ -7189,7 +7299,7 @@ class TestRelayFailureRecoveryEdges:
             idempotency_key="idem-active-crash-cancel",
         )
 
-        assert len(connector.commands) == 1
+        assert len(wire_commands(service)) == 1
         assert recovered.reported_state == "running"
         assert recovered.progress_text == "Still working"
         assert recovered.cancel_requested is True
@@ -7813,7 +7923,7 @@ class RotationScenario:
 
         if self.operation == "start":
             return sends(self._a2a)
-        return self._connector.commands
+        return wire_commands_of(self._a2a)
 
 
 class TestKeyRotationPreservesAtMostOnce:
