@@ -532,6 +532,7 @@ Hard boundaries:
 - Spec Kit tasks are planning input. Do not assume any particular execution runtime, and do not require one: implementation may proceed directly from tasks.md in an isolated worktree.
 - Technical decisions belong to the implementing agent. Do not escalate database, framework, API shape, module boundary, testing strategy, migration mechanics, or implementation choices to the product owner.
 - Product decisions are allowed only for: {allowed_categories}.
+- Verdict rule: set verdict to 'product-decision-required' if and only if product_decisions is non-empty. When every open point can be settled by the implementing agent, leave product_decisions empty and choose 'pass' or 'changes-required'; a mismatch is rejected and the whole review is discarded.
 - Cite concrete file paths/symbols/sections in every finding's evidence.
 - Return only JSON matching the supplied schema, with role exactly {role!r}.
 """
@@ -560,7 +561,11 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
         env=env,
         text=True,
         capture_output=True,
-        timeout=900,
+        # A maximum-effort lens over a feature with a dozen artifacts and a
+        # 125-state design took 10-15 minutes on the two runs that finished
+        # and timed out twice at 900 s; the cap bounds a hung runtime, not a
+        # slow honest review.
+        timeout=1800,
     )
     if result.returncode != 0:
         # Deliberately not routed to the fallback. A reviewer that ran and
