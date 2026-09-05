@@ -21,6 +21,19 @@
  * card echoes its new status into a "Test finished: …" confirmation, so the
  * status assertions are `exact` — otherwise the case-insensitive substring
  * would match the confirmation sentence too.
+ *
+ * `expect` here is only ever applied to a **locator**. Every other spec in this
+ * suite does the same, and the reason is mechanical: Playwright records each
+ * `expect` as its own Allure step, and a comparison of two values already in
+ * memory finishes inside the same millisecond, which
+ * `scripts/validate_allure_taxonomy.py` indexes as a zero-duration no-op with
+ * no evidence and rejects. A locator assertion auto-waits, so it carries
+ * duration. `expect.poll` is *not* an escape: it nests that same instantaneous
+ * matcher inside its wrapper, and the inner step measured 0 ms in 5 of 12 local
+ * runs — a coin flip per assertion. So the facts these stories read back from
+ * the API are compared and thrown, the way `gtdHelpers.requireOk` already
+ * reports a bad status; the awaited read is what gives the surrounding step its
+ * duration and its evidence.
  */
 import { expect, test } from "../allure.fixtures";
 
@@ -69,6 +82,75 @@ interface AgentRun {
   reported_state: string | null;
   primary_state_label: string;
   agent_task_id: string | null;
+}
+
+/** Comparison that does not care what order an object's keys were built in. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) =>
+    inner !== null && typeof inner === "object" && !Array.isArray(inner)
+      ? Object.fromEntries(
+          Object.entries(inner as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
+        )
+      : inner
+  );
+}
+
+function same(actual: unknown, expected: unknown): boolean {
+  return canonical(actual) === canonical(expected);
+}
+
+/** State a mismatch the way `expect` would, without emitting an `expect` step. */
+function refuse(what: string, actual: unknown, expected: unknown): never {
+  throw new Error(`${what}: expected ${canonical(expected)}, got ${canonical(actual)}`);
+}
+
+const RETRY_MS = 500;
+
+async function readUntil<T>(
+  what: string,
+  read: () => Promise<T>,
+  holds: (value: T) => boolean,
+  expected: unknown,
+  timeout: number
+): Promise<T> {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const actual = await read();
+    if (holds(actual)) {
+      return actual;
+    }
+    if (Date.now() >= deadline) {
+      refuse(what, actual, expected);
+    }
+    await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+  }
+}
+
+/**
+ * Read the API until it says what the story claims.
+ *
+ * Waiting rather than reading once, because the relay settles a run out of
+ * band: the exchange leaves on a worker and the observer is what learns the
+ * agent's answer, so a read taken the instant a request returns is a race and
+ * not a fact.
+ */
+async function settles<T>(
+  what: string,
+  read: () => Promise<T>,
+  expected: T,
+  timeout = 60_000
+): Promise<T> {
+  return readUntil(what, read, (value) => same(value, expected), expected, timeout);
+}
+
+/** Read the API until it produces a value at all, then hand that value back. */
+async function settlesToValue<T>(
+  what: string,
+  read: () => Promise<T | null>,
+  timeout = 60_000
+): Promise<T> {
+  const value = await readUntil(what, read, (candidate) => candidate !== null, "a value", timeout);
+  return value as T;
 }
 
 async function connectAgent(
@@ -168,7 +250,9 @@ async function agentRpc(
     },
     data: { jsonrpc: "2.0", id: "e2e", method, params }
   });
-  expect(response.ok()).toBeTruthy();
+  if (!response.ok()) {
+    throw new Error(`${method} at ${url} answered ${response.status()}: ${await response.text()}`);
+  }
   return (await response.json()) as Record<string, unknown>;
 }
 
@@ -219,13 +303,20 @@ test.describe("external agent relay over the A2A wire", () => {
     });
 
     await test.step("the run is one task at the agent", async () => {
-      const runs = await runsForTask(page, task.id);
-      expect(runs).toHaveLength(1);
-      expect(runs[0].reported_state).toBe("completed");
-      expect(runs[0].agent_task_id).toBeTruthy();
+      await settles(
+        "the runs BrainBuddy holds for this task",
+        async () =>
+          (await runsForTask(page, task.id)).map((run) => ({
+            reported_state: run.reported_state,
+            started_a_task_at_the_agent: run.agent_task_id !== null
+          })),
+        [{ reported_state: "completed", started_a_task_at_the_agent: true }]
+      );
       // The 201 that registered this connection claimed nothing about it: only
       // a test can say an agent is reachable, and none had run yet.
-      expect(connection.status).toBe("untested");
+      if (connection.status !== "untested") {
+        refuse("the status a freshly registered connection reports", connection.status, "untested");
+      }
     });
   });
 
@@ -265,10 +356,21 @@ test.describe("external agent relay over the A2A wire", () => {
     });
 
     await test.step("the run kept one correlation ID across the succession (S27)", async () => {
-      const runs = await runsForTask(page, task.id);
-      expect(runs).toHaveLength(1);
-      const run = await apiGet<Record<string, unknown>>(page, `/api/agent-runs/${runs[0].id}`);
-      expect(run.correlation_id).toBe(runs[0].id);
+      // One run, even though the reply started a second task at the agent: the
+      // succession is recorded inside this run, never as another one.
+      await settles(
+        "how many runs answering the question left behind",
+        async () => (await runsForTask(page, task.id)).length,
+        1
+      );
+      const [run] = await runsForTask(page, task.id);
+      await settles(
+        "the correlation ID the run kept",
+        async () =>
+          (await apiGet<{ correlation_id: string | null }>(page, `/api/agent-runs/${run.id}`))
+            .correlation_id,
+        run.id
+      );
     });
   });
 
@@ -298,7 +400,7 @@ test.describe("external agent relay over the A2A wire", () => {
 
     await test.step("confirm it three times with one idempotency key", async () => {
       const key = uniqueKey("relay-replay");
-      for (let attempt = 0; attempt < 3; attempt += 1) {
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
         const response = await page.request.post(`${backendUrl}/api/tasks/${task.id}/agent-runs`, {
           headers: { "Idempotency-Key": key },
           data: {
@@ -307,22 +409,28 @@ test.describe("external agent relay over the A2A wire", () => {
             acknowledge_duplicate_risk: true
           }
         });
-        expect(response.status()).toBe(201);
+        // Checked per attempt rather than polled: each confirmation is a single
+        // answer to a single request, and retrying one would be a fourth
+        // confirmation rather than a re-read of the third.
+        if (response.status() !== 201) {
+          refuse(`confirmation ${attempt} of 3`, response.status(), 201);
+        }
       }
     });
 
     await test.step("BrainBuddy shows one run, and the agent holds one task", async () => {
+      await settles(
+        "the runs the three confirmations left behind",
+        async () => (await runsForTask(page, task.id)).map((run) => run.id),
+        [runId]
+      );
       // The confirmation answers as soon as the run is durable; the message
       // itself leaves on an exchange worker, so the agent's task id is what has
       // to be waited for rather than the run row.
-      await expect
-        .poll(async () => (await runsForTask(page, task.id))[0]?.agent_task_id, {
-          timeout: 60_000
-        })
-        .toBeTruthy();
-      const runs = await runsForTask(page, task.id);
-      expect(runs).toHaveLength(1);
-      expect(runs[0].id).toBe(runId);
+      const agentTaskId = await settlesToValue(
+        "the id of the task this run started at the agent",
+        async () => (await runsForTask(page, task.id))[0]?.agent_task_id ?? null
+      );
 
       // The claim is about the *agent*, so the agent is what gets asked.
       const listed = await agentRpc(
@@ -333,8 +441,10 @@ test.describe("external agent relay over the A2A wire", () => {
         HERMES_TOKEN
       );
       const result = listed.result as { tasks?: Array<{ id: string }> };
-      expect(result.tasks ?? []).toHaveLength(1);
-      expect((result.tasks ?? [])[0].id).toBe(runs[0].agent_task_id);
+      const heldByTheAgent = (result.tasks ?? []).map((agentTask) => agentTask.id);
+      if (!same(heldByTheAgent, [agentTaskId])) {
+        refuse("the tasks the agent holds in this conversation", heldByTheAgent, [agentTaskId]);
+      }
     });
   });
 
@@ -366,19 +476,33 @@ test.describe("external agent relay over the A2A wire", () => {
           current_password: password
         }
       });
-      expect([400, 422]).toContain(response.status());
-      expect(await response.text()).not.toContain("must-not-leave");
+      // 400, not 422: the address is a well-formed URL, so it clears the
+      // request schema and is refused by the destination check, which
+      // `app/api/errors.py` maps to a domain-validation 400.
+      const refusal = {
+        status: response.status(),
+        leaks_the_credential: (await response.text()).includes("must-not-leave")
+      };
+      const expected = { status: 400, leaks_the_credential: false };
+      if (!same(refusal, expected)) {
+        refuse("how the metadata address is refused", refusal, expected);
+      }
     });
 
     await test.step("a forged push token changes nothing", async () => {
-      const connections = await apiGet<AgentConnection[]>(page, "/api/agent-connections");
+      const before = (await apiGet<AgentConnection[]>(page, "/api/agent-connections")).length;
       const forged = await page.request.post(
         `${backendUrl}/api/a2a/push/agentrun_does_not_exist/forged-token`,
         { data: {} }
       );
-      expect(forged.status()).toBe(403);
-      const after = await apiGet<AgentConnection[]>(page, "/api/agent-connections");
-      expect(after).toHaveLength(connections.length);
+      if (forged.status() !== 403) {
+        refuse("the answer to a forged push token", forged.status(), 403);
+      }
+      await settles(
+        "how many connections the account has after the forged push",
+        async () => (await apiGet<AgentConnection[]>(page, "/api/agent-connections")).length,
+        before
+      );
     });
   });
 });
