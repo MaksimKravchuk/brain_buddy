@@ -572,11 +572,22 @@ test("Voice Brain Dump shows a live transcript, reviews the reconciled task and 
     await allowSecureCloudTranscription(page);
     await page.getByRole("button", { name: "Record" }).click();
     await waitForStartedOperation(page);
-    await emitSpeech(page, "buy oat milk", false);
     const transcript = page.getByRole("region", { name: "What you've said · browser preview" });
-    await expect(transcript).toContainText("buy oat milk");
+    await expect(transcript).toContainText("Your words appear here as you speak");
+    // A still-forming hypothesis is the live tail beside the microphone, not a
+    // settled line of the record. Wait for its upload so the final result for the
+    // same sequence cannot overtake it on the server (a stable segment rejects a
+    // later differing write at its sequence).
+    const interimUpload = page.waitForResponse(
+      (response) => response.url().endsWith("/transcript") && response.request().method() === "POST"
+    );
+    await emitSpeech(page, "buy oat milk", false);
+    await interimUpload;
+    await expect(page.getByText("buy oat milk", { exact: true })).toBeVisible();
+    await expect(transcript).not.toContainText("buy oat milk");
     await emitSpeech(page, "buy oat milk. call dentist", true);
     await expect(transcript).toContainText("buy oat milk. call dentist");
+    await expect(transcript.getByRole("listitem")).toHaveCount(1);
     // Raw preview text is a status readout: no draft task card is ever minted from it.
     await expect(page.getByRole("article")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Stop & review" })).toBeVisible();
