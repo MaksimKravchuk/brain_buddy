@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M-02 Mobile review — 015 transcript-first brain dump</title>
+<style>
+:root{
+  --bb-brand-primary:#0ea5e9;--bb-brand-primary-hover:#38bdf8;
+  --bb-surface-base:#f8fafc;--bb-surface-sunken:#f1f5f9;--bb-surface-raised:#ffffff;
+  --bb-fg-1:#0f172a;--bb-fg-2:#1e293b;--bb-fg-3:#334155;--bb-fg-4:#475569;
+  --bb-fg-5:#64748b;--bb-fg-6:#94a3b8;--bb-fg-7:#cbd5e1;
+  --bb-border:#e2e8f0;--bb-border-hover:#cbd5e1;
+  --bb-warning:#d97706;--bb-warning-bg:#fffbeb;--bb-warning-border:#fde68a;--bb-warning-fg:#92400e;
+  --bb-danger:#e11d48;--bb-danger-bg:#fff1f2;--bb-danger-border:#fecdd3;--bb-danger-fg:#9f1239;
+  --bb-info-bg:#f0f9ff;--bb-info-border:#bae6fd;--bb-info-fg:#0369a1;
+  --bb-shadow-soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);
+  --bb-shadow-raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);
+  --bb-shadow-floating:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18);
+  --bb-shadow-glow:0 16px 32px rgba(14,165,233,.18);
+  --bb-ring:0 0 0 2px #ffffff,0 0 0 4px rgba(14,165,233,.5);
+  --bb-ease:cubic-bezier(.22,1,.36,1);
+  --bb-font:"Inter",ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--bb-font);font-feature-settings:"cv11","ss01","ss03";
+  -webkit-font-smoothing:antialiased;color:var(--bb-fg-1);
+  background:var(--bb-surface-sunken);padding:28px 24px 56px;
+}
+.sheet-head{max-width:1240px;margin:0 auto 26px}
+.kicker{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--bb-fg-5);margin:0 0 6px}
+.sheet-head h1{font-size:28px;line-height:1.15;letter-spacing:-.02em;font-weight:600;margin:0 0 8px}
+.sheet-head .lede{font-size:15px;line-height:1.5;color:var(--bb-fg-4);margin:0 0 10px;max-width:74ch}
+.sheet-head .meta{font-size:12px;line-height:1.6;color:var(--bb-fg-5);margin:0;max-width:88ch}
+.sheet-head .meta b{color:var(--bb-fg-3);font-weight:600}
+.gallery{display:flex;flex-wrap:wrap;gap:28px;max-width:1240px;margin:0 auto;align-items:flex-start}
+figure.state{margin:0;width:390px}
+figure.state figcaption{display:block;margin:0 0 8px}
+.sid{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:#fff;background:var(--bb-fg-3);border-radius:999px;padding:3px 8px;margin-right:8px}
+.sname{font-size:14px;font-weight:600;color:var(--bb-fg-1)}
+.strigger{font-size:12px;line-height:1.5;color:var(--bb-fg-5);margin:8px 2px 0}
+.strigger b{color:var(--bb-fg-3);font-weight:600}
+.gapnote{margin:8px 2px 0;font-size:12px;line-height:1.5;border-left:3px solid var(--bb-warning-border);
+  background:var(--bb-warning-bg);color:var(--bb-warning-fg);padding:6px 10px;border-radius:0 8px 8px 0}
+.frame{width:390px;height:851px;overflow:hidden;position:relative;background:var(--bb-surface-base);
+  border:1px solid var(--bb-border);border-radius:20px;box-shadow:var(--bb-shadow-floating)}
+.frame.short{height:auto;min-height:360px}
+
+/* --- overlay panel (web brain dump is a full-bleed overlay at 390px) --- */
+.panel{position:absolute;inset:0;display:flex;flex-direction:column;background:#fff;overflow:hidden}
+.ohead{display:flex;align-items:flex-start;gap:12px;flex:none;border-bottom:1px solid #f1f5f9;padding:16px 20px 12px}
+.ohead .otext{min-width:0;flex:1}
+.eyebrow{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--bb-fg-5);margin:0}
+h2.otitle{font-size:20px;line-height:1.3;letter-spacing:-.015em;font-weight:600;color:var(--bb-fg-1);margin:0}
+.ometa{font-size:12px;line-height:1.4;color:var(--bb-fg-5);margin:2px 0 0}
+.iconbtn{flex:none;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:8px;border:0;background:transparent;color:var(--bb-fg-5)}
+.roundbtn{flex:none;width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:999px;border:1px solid var(--bb-border);background:#fff;color:var(--bb-fg-4)}
+
+/* --- buttons --- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;border:0;
+  font-family:inherit;font-size:14px;font-weight:600;height:40px;border-radius:8px;cursor:default;padding:0 16px}
+.btn.primary{background:var(--bb-brand-primary);color:#fff;box-shadow:var(--bb-shadow-soft)}
+.btn.sm{height:36px;font-size:12px;font-weight:500}
+.btn.outline{background:#fff;border:1px solid var(--bb-border);color:var(--bb-fg-3)}
+.btn.amber{background:#fff;border:1px solid var(--bb-warning-border);color:var(--bb-warning-fg)}
+.btn.ghost{background:transparent;color:var(--bb-fg-5)}
+.btn.tall{height:44px;border-radius:20px}
+.btn.rose{background:#fff;border:1px solid var(--bb-danger-border);color:#be123c;font-weight:500}
+.btn.wrap{height:auto;min-height:44px;padding:8px 16px;line-height:1.375;text-align:center;white-space:normal}
+.btn.send{height:44px;max-width:320px;border-radius:20px;background:var(--bb-brand-primary);color:#fff;
+  font-size:15px;font-weight:600;box-shadow:var(--bb-shadow-glow)}
+.btn[disabled],.btn.off{opacity:.5}
+.btn.focused{box-shadow:var(--bb-ring)}
+.chip-static{display:inline-flex;align-items:center;justify-content:center;height:36px;flex:1;border-radius:8px;
+  border:1px solid var(--bb-warning-border);background:var(--bb-warning-bg);color:var(--bb-warning-fg);
+  font-size:12px;font-weight:500}
+
+/* --- recording status pane --- */
+.statuspane{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;flex:none;
+  border-bottom:1px solid var(--bb-border);background:var(--bb-surface-base);padding:28px 24px 20px}
+.mic{position:relative;width:56px;height:56px;flex:none;margin-bottom:6px}
+.mic .ring{position:absolute;inset:0;border-radius:999px;background:rgba(125,211,252,.4)}
+.mic.live .ring{animation:bbPulse 1.8s var(--bb-ease) infinite}
+.mic .core{position:absolute;inset:0;border-radius:999px;background:var(--bb-brand-primary);color:#fff;
+  display:flex;align-items:center;justify-content:center}
+@keyframes bbPulse{0%{transform:scale(1);opacity:.55}100%{transform:scale(2);opacity:0}}
+@keyframes bbBlink{0%,55%{opacity:1}56%,100%{opacity:0}}
+@keyframes bbBar{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+h1.dumptitle{font-size:20px;line-height:1.3;letter-spacing:-.015em;font-weight:600;margin:0}
+.dumpsub{font-size:12px;line-height:1.4;color:var(--bb-fg-5);margin:2px 0 0}
+.recstate{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+  font-variant-numeric:tabular-nums;color:var(--bb-fg-5)}
+.recstate.live{color:var(--bb-danger)}
+.recstate .dot{width:7px;height:7px;border-radius:999px;background:var(--bb-fg-6)}
+.recstate.live .dot{background:var(--bb-danger)}
+.grow{flex:1;min-height:8px}
+.tail{min-height:38px;max-width:280px;font-size:13px;line-height:1.45;color:var(--bb-fg-6)}
+.tail b{color:var(--bb-fg-4);font-weight:400}
+.caret{display:inline-block;width:2px;height:13px;background:var(--bb-brand-primary);
+  margin-left:3px;vertical-align:middle;animation:bbBlink 1.1s step-end infinite}
+.previewlabel{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#b45309}
+.wave{display:flex;align-items:center;justify-content:center;gap:3px;height:26px}
+.wave i{width:4px;border-radius:2px;background:var(--bb-brand-primary);transform-origin:center}
+.wave.live i{animation:bbBar 1s var(--bb-ease) infinite}
+.wave.idle i{opacity:.4}
+.ctrls{display:flex;flex-direction:column;gap:8px;width:100%;padding-top:4px}
+.ctrlrow{display:flex;flex-wrap:wrap;gap:8px;width:100%}
+.ctrlrow>.btn{flex:1 1 0;width:auto}
+.hint{font-size:12px;line-height:1.4;color:var(--bb-fg-5)}
+
+/* --- transcript readout --- */
+.readpane{display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;overflow-y:auto;
+  background:#fff;padding:18px 24px 16px}
+.rlabel{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--bb-fg-5);margin:0}
+.rgroup{display:flex;flex-direction:column;gap:6px}
+ul.rlist{list-style:none;margin:0;padding:12px 14px;display:flex;flex-direction:column;gap:6px;
+  border:1px solid var(--bb-border);border-radius:12px;background:#fff;box-shadow:var(--bb-shadow-soft)}
+ul.rlist li{font-size:14px;line-height:1.375;color:var(--bb-fg-3)}
+p.rempty{margin:0;border:1.5px dashed var(--bb-fg-7);border-radius:12px;padding:12px 14px;
+  font-size:13px;line-height:1.45;color:var(--bb-fg-6)}
+
+/* --- pre-flight form --- */
+.form{display:grid;gap:12px;border:1px solid var(--bb-border);border-radius:12px;background:#fff;
+  padding:12px;box-shadow:var(--bb-shadow-soft)}
+.form .field{display:grid;gap:4px}
+.form .flabel{font-size:12px;font-weight:600;color:var(--bb-fg-3)}
+.form .control{height:40px;display:flex;align-items:center;border:1px solid var(--bb-border);
+  border-radius:8px;background:#fff;padding:0 12px;font-size:14px;color:var(--bb-fg-2)}
+.form .control.select::after{content:"";margin-left:auto;width:8px;height:8px;border-right:1.5px solid var(--bb-fg-5);
+  border-bottom:1.5px solid var(--bb-fg-5);transform:rotate(45deg) translateY(-2px)}
+.consent{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.45;color:var(--bb-fg-4)}
+.consent .box{flex:none;width:14px;height:14px;margin-top:2px;border:1px solid var(--bb-border-hover);
+  border-radius:3px;background:#fff}
+.consent .box.on{background:var(--bb-brand-primary);border-color:var(--bb-brand-primary);
+  display:flex;align-items:center;justify-content:center}
+.consent .box.on::after{content:"";width:4px;height:8px;border-right:2px solid #fff;border-bottom:2px solid #fff;
+  transform:rotate(45deg) translate(-1px,-1px)}
+
+/* --- banners --- */
+.alert{border:1px solid var(--bb-danger-border);background:var(--bb-danger-bg);color:#be123c;
+  border-radius:20px;padding:8px 12px;font-size:14px;line-height:1.45;margin:0}
+.warn{border:1px solid var(--bb-warning-border);background:var(--bb-warning-bg);color:#78350f;
+  border-radius:20px;padding:8px 12px;font-size:14px;line-height:1.45;margin:0}
+.neutral{border:1px solid var(--bb-border);background:var(--bb-surface-base);color:var(--bb-fg-4);
+  border-radius:20px;padding:8px 12px;font-size:14px;line-height:1.45;margin:0}
+.audiorow{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--bb-border);
+  background:#fff;border-radius:20px;padding:8px 12px;font-size:12px;line-height:1.4;color:var(--bb-fg-4)}
+.audiorow .kill{flex:none;font-weight:600;color:#be123c}
+.ref{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--bb-fg-5)}
+
+/* --- inline destructive confirmation --- */
+.confirm{display:flex;flex-direction:column;gap:8px;width:100%;border:1px solid var(--bb-danger-border);
+  background:var(--bb-danger-bg);border-radius:20px;padding:12px}
+.confirm p{margin:0;font-size:13px;line-height:1.375;color:#881337}
+.confirm .btn{height:40px}
+
+/* --- review --- */
+.rvhead{display:flex;align-items:center;gap:12px;flex:none;border-bottom:1px solid #f1f5f9;padding:16px 16px 12px}
+.rvmain{flex:1;min-height:0;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:12px}
+.cards{display:grid;grid-template-columns:1fr;gap:10px;align-items:start}
+article.pcard{border:1px solid var(--bb-border);border-radius:12px;background:#fff;box-shadow:var(--bb-shadow-soft);
+  padding:10px 10px 10px 14px}
+article.pcard.conflicted{border-color:var(--bb-warning-border)}
+.prow{display:flex;align-items:flex-start;gap:10px}
+.pord{flex:none;margin-top:6px;font-size:12px;font-weight:600;color:var(--bb-fg-5)}
+.pbody{min-width:0;flex:1}
+.ptitle{width:100%;border:1.5px solid transparent;border-radius:6px;background:transparent;padding:2px 6px;
+  margin-left:-6px;font-size:14px;font-weight:500;line-height:1.4;color:var(--bb-fg-1)}
+.ptitle.editing{border-color:var(--bb-brand-primary);background:#fff}
+.pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.pill{border-radius:999px;padding:4px 10px;font-size:12px;line-height:1.2}
+.pill.inbox{border:1px solid #bae6fd;background:var(--bb-info-bg);color:var(--bb-info-fg);font-weight:500}
+.pill.status{background:var(--bb-info-bg);color:var(--bb-info-fg)}
+.pill.locked{background:var(--bb-warning-bg);color:#b45309}
+.cite{margin-top:8px;border:1px solid #f1f5f9;background:var(--bb-surface-base);border-radius:8px;padding:8px 10px}
+.cite .clabel{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--bb-fg-6);margin:0}
+.cite ul{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
+.cite li{font-size:12px;line-height:1.375;color:var(--bb-fg-4)}
+.conflict{margin-top:8px;border:1px solid var(--bb-warning-border);background:var(--bb-warning-bg);
+  border-radius:8px;padding:8px;font-size:12px;line-height:1.4;color:var(--bb-warning-fg)}
+.conflict .ctitle{font-weight:600}
+.conflict .cbtns{display:flex;gap:8px;margin-top:8px}
+.conflict .cbtns span{border-radius:6px;padding:4px 8px;font-weight:600;font-size:12px}
+.conflict .keepmine{border:1px solid #fcd34d;background:#fff;color:var(--bb-warning-fg)}
+.conflict .usesug{background:#b45309;color:#fff}
+.pdel{flex:none;width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:8px;border:0;background:transparent;color:var(--bb-fg-6)}
+.rvfoot{flex:none;display:flex;flex-direction:column;align-items:center;gap:10px;border-top:1px solid var(--bb-border);
+  background:var(--bb-surface-base);padding:16px 24px}
+.discardall{font-size:13px;font-weight:500;color:var(--bb-fg-5)}
+
+/* --- generic body for narrow panels --- */
+.pbody-pad{flex:1;min-height:0;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:16px}
+.pbody-pad.tight{gap:12px}
+.statusline{font-size:14px;line-height:1.5;color:var(--bb-fg-5);margin:0}
+.helper{font-size:12px;line-height:1.375;color:var(--bb-fg-5);margin:0;padding:0 4px}
+.stack{display:flex;flex-direction:column;gap:8px}
+
+/* --- mobile (Expo) --- */
+.mscreen{position:absolute;inset:0;background:var(--bb-surface-base);display:flex;flex-direction:column}
+.mcenter{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:20px}
+.mhead{display:flex;align-items:center;padding:59px 16px 8px}
+.mhead .spacer{flex:1}
+.mtap{width:44px;height:44px;margin:-8px;display:inline-flex;align-items:center;justify-content:center;color:var(--bb-fg-4)}
+.mscroll{flex:1;min-height:0;overflow-y:auto;padding:18px 16px 16px;display:flex;flex-direction:column;gap:16px}
+.mpanehead{display:flex;flex-direction:column;gap:4px;margin-bottom:0}
+.mpanehead .t{font-size:22px;line-height:28px;letter-spacing:-.33px;font-weight:600;color:var(--bb-fg-1);margin:0}
+.mpanehead .m{font-size:12px;line-height:1.4;color:var(--bb-fg-5);margin:0}
+.mcard{border:1px solid var(--bb-border);background:#fff;border-radius:14px;padding:14px;
+  display:flex;flex-direction:column;gap:8px;box-shadow:var(--bb-shadow-soft)}
+.mcard.conflicted{border-color:var(--bb-warning-border);background:var(--bb-warning-bg)}
+.mwarn{border:1px solid var(--bb-warning-border);background:var(--bb-warning-bg);border-radius:14px;padding:16px}
+.mwarn p{margin:0;font-size:14px;line-height:1.4;color:var(--bb-warning-fg)}
+.merror{align-self:stretch;border:1px solid var(--bb-danger-border);background:var(--bb-danger-bg);
+  border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.merror .et{font-size:20px;line-height:1.3;letter-spacing:-.015em;font-weight:600;color:var(--bb-danger-fg);margin:0}
+.merror .eb{font-size:14px;line-height:1.4;color:var(--bb-fg-4);margin:0}
+.mbtn{min-height:44px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  padding:0 16px;font-size:14px;font-weight:500;text-align:center}
+.mbtn.primary{background:var(--bb-brand-primary);color:#fff}
+.mbtn.secondary{background:#fff;border:1px solid var(--bb-border);color:var(--bb-fg-2)}
+.mbtn.ghost{color:var(--bb-fg-4)}
+.mbtn.destructive{background:var(--bb-danger-bg);border:1px solid var(--bb-danger-border);color:var(--bb-danger-fg);
+  align-self:flex-start;padding:0 16px}
+.mbtn.wrap{min-height:44px;height:auto;padding:10px 16px;line-height:1.35;white-space:normal}
+.mbtn.off{opacity:.5}
+.mactions{align-self:stretch;display:flex;flex-direction:column;gap:8px}
+.mhelper{font-size:12px;line-height:1.4;color:var(--bb-fg-5);text-align:center;padding:0 8px;margin:0}
+.msheet{flex:none;display:flex;flex-direction:column;align-items:center;gap:12px;padding:14px 16px 54px;
+  background:rgba(255,255,255,.9);border-top:1px solid var(--bb-border)}
+.msheet .mbtn{align-self:stretch;min-height:46px}
+.mghost{min-height:32px;display:flex;align-items:center;font-size:12px;font-weight:500;color:var(--bb-fg-5)}
+.mprow{display:flex;align-items:flex-start;gap:8px}
+.mptitle{flex:1;font-size:14px;line-height:20px;font-weight:500;color:var(--bb-fg-1);margin:0}
+.mmeta{font-size:11px;line-height:1.35;color:var(--bb-fg-5);margin:0}
+.maudio{display:flex;align-items:center;gap:12px}
+.maudio .mtext{flex:1;font-size:12px;line-height:1.4;color:var(--bb-fg-5)}
+.maudio .mdel{min-height:44px;display:flex;align-items:center;gap:4px;padding:0 8px;font-size:12px;color:var(--bb-danger-fg)}
+.mcaption{font-size:12px;line-height:1.4;color:var(--bb-fg-5);margin:0}
+.mcaption.warn{color:var(--bb-warning-fg)}
+.mdisplay{font-size:28px;line-height:1.15;letter-spacing:-.02em;font-weight:600;text-align:center;margin:0}
+.mtitle{font-size:20px;line-height:1.3;letter-spacing:-.015em;font-weight:600;margin:0}
+.msubtitle{font-size:15px;line-height:1.4;letter-spacing:-.005em;font-weight:500;color:var(--bb-fg-2);margin:0}
+.mbody{font-size:14px;line-height:1.5;color:var(--bb-fg-5);margin:0;text-align:center}
+.spinner{width:36px;height:36px;border-radius:999px;border:3px solid rgba(14,165,233,.25);
+  border-top-color:var(--bb-brand-primary);animation:bbSpin 900ms linear infinite}
+@keyframes bbSpin{to{transform:rotate(360deg)}}
+
+/* --- platform confirmation dialog (RN Alert.alert; chrome is the OS's, not ours) --- */
+.mscrim{position:absolute;inset:0;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:0 24px}
+.osdlg{width:270px;border-radius:14px;overflow:hidden;background:rgba(250,250,250,.96);
+  box-shadow:0 24px 60px -12px rgba(15,23,42,.45);font-family:-apple-system,BlinkMacSystemFont,var(--bb-font)}
+.osdlg .dtext{padding:19px 16px 16px;text-align:center}
+.osdlg .dtitle{margin:0;font-size:17px;line-height:1.28;font-weight:600;color:#000}
+.osdlg .dmsg{margin:3px 0 0;font-size:13px;line-height:1.32;color:#000}
+.osdlg .drow{display:flex;border-top:.5px solid rgba(60,60,67,.29)}
+.osdlg .dcol{display:flex;flex-direction:column;border-top:.5px solid rgba(60,60,67,.29)}
+.osdlg .dcol .dbtn+.dbtn{border-top:.5px solid rgba(60,60,67,.29)}
+.osdlg .dbtn{flex:1;min-height:44px;display:flex;align-items:center;justify-content:center;
+  padding:0 10px;font-size:17px;line-height:1.2;color:#007aff;text-align:center}
+.osdlg .drow .dbtn+.dbtn{border-left:.5px solid rgba(60,60,67,.29)}
+.osdlg .dbtn.cancel{font-weight:600}
+.osdlg .dbtn.destructive{color:#ff3b30}
+@media (prefers-reduced-motion:reduce){*{animation:none !important}}
+svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+svg.i.lg{width:22px;height:22px}
+svg.i.sm{width:16px;height:16px}
+svg.i.xs{width:14px;height:14px}
+</style>
+</head>
+<body>
+<header class="sheet-head">
+  <p class="kicker">specs/015-transcript-first-brain-dump &middot; design</p>
+  <h1>M-02 &mdash; Mobile review</h1>
+  <p class="lede">The Expo review screen. Its job in this feature is the provisional badge: a provisional result is labelled wherever it is shown, on mobile as on the web, whether or not it can be saved.</p>
+  <p class="meta"><b>Source:</b> mobile/src/app/brain-dump/[operationId].tsx (the awaiting_confirmation, completed and cancelled branches, <code>confirmDiscard</code>, <code>heardTranscript</code>, ProposalCard). <b>Requirements:</b> FR-005, FR-007, FR-010, FR-011; evidence for SC-004 (mobile 2 of 3) and SC-007. Both discard paths &mdash; the sheet&rsquo;s &ldquo;Discard all&rdquo; and the header control &mdash; raise the same platform confirmation (M-02.i). The header control is named for what it does, <b>Discard recording</b> with a Trash2 icon, never &ldquo;Close&rdquo;; the retained-audio control is named <b>Delete retained audio</b> so it cannot be read as deleting the recording.</p>
+</header>
+<div class="gallery">
+<figure class="state">
+  <figcaption><span class="sid">M-02.a</span><span class="sname">Default &mdash; accurate result, committable</span></figcaption>
+  <div class="frame"><div class="mscreen"><div class="mhead"><span class="spacer"></span><span class="mtap" aria-label="Discard recording"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></span></div><div class="mscroll"><div class="mpanehead"><p class="t">Review 3 tasks</p><p class="m">Edit before they land in your inbox. Nothing is saved until you confirm.</p></div><div style="display:flex;flex-direction:column;gap:10px"><div class="mcard"><div class="mprow"><p class="mptitle">Купить молоко</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Сходить в магазин</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Покрасить комнату</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div></div><div class="maudio"><span class="mtext">Recording kept until 06/09/2026, 19:04</span><span class="mdel" aria-label="Delete retained audio"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Delete now</span></div></div><div class="msheet"><div class="mbtn primary">Confirm 3 additions</div><div class="mghost">Discard all</div></div></div></div>
+  <p class="strigger">Trigger: a recording reconciled from the accurate transcript, opened on the phone. Titles are editable in place and commit when the field is left; the same three next actions as D-03.a.</p>
+</figure>
+<figure class="state">
+  <figcaption><span class="sid">M-02.b</span><span class="sname">Provisional only &mdash; the badge FR-010 requires</span></figcaption>
+  <div class="frame"><div class="mscreen"><div class="mhead"><span class="spacer"></span><span class="mtap" aria-label="Discard recording"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></span></div><div class="mscroll"><div class="mpanehead"><p class="t">Review 3 tasks</p><p class="m">Edit before they land in your inbox. Nothing is saved until you confirm.</p></div><div class="mwarn"><p>Provisional only &mdash; the accurate transcript wasn&rsquo;t available, so these come from the live preview. Review them carefully.</p></div><div style="display:flex;flex-direction:column;gap:10px"><div class="mcard"><div class="mprow"><p class="mptitle">Купить молоко</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Сходить в магазин</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Покрасить комнату</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div></div></div><div class="msheet"><div class="mbtn primary">Confirm 3 additions</div><div class="mghost">Discard all</div></div></div></div>
+  <p class="strigger">Trigger: <code>reconciliation_quality = provisional_only</code> &mdash; either the browser-transcript recovery ran, or the accurate lane never produced a transcript. The badge is present whether or not the result can be saved. Evidence surface for SC-007 on mobile.</p>
+</figure>
+<figure class="state">
+  <figcaption><span class="sid">M-02.c</span><span class="sname">Provisional and not saveable</span></figcaption>
+  <div class="frame"><div class="mscreen"><div class="mhead"><span class="spacer"></span><span class="mtap" aria-label="Discard recording"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></span></div><div class="mscroll"><div class="mpanehead"><p class="t">Review 3 tasks</p><p class="m">Edit before they land in your inbox. Nothing is saved until you confirm.</p></div><div class="mwarn"><p>Provisional only &mdash; the accurate transcript wasn&rsquo;t available, so these come from the live preview. Review them carefully.</p></div><div style="display:flex;flex-direction:column;gap:10px"><div class="mcard"><div class="mprow"><p class="mptitle">Купить молоко</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Сходить в магазин</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Покрасить комнату</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div></div></div><div class="msheet"><div class="mbtn primary off">Confirm 3 additions</div><div class="mghost">Discard all</div></div></div></div>
+  <p class="strigger">Trigger: the server has not cleared these drafts for commit. The badge still shows &mdash; a provisional result is never presented as accurate, saveable or not.</p>
+</figure>
+<figure class="state">
+  <figcaption><span class="sid">M-02.d</span><span class="sname">Partial failure &mdash; an unresolved conflict blocks Confirm</span></figcaption>
+  <div class="frame"><div class="mscreen"><div class="mhead"><span class="spacer"></span><span class="mtap" aria-label="Discard recording"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></span></div><div class="mscroll"><div class="mpanehead"><p class="t">Review 3 tasks</p><p class="m">Edit before they land in your inbox. Nothing is saved until you confirm.</p></div><div style="display:flex;flex-direction:column;gap:10px"><div class="mcard conflicted"><div class="mprow"><p class="mptitle">Купить молоко</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div><p class="mmeta">Needs a decision</p><div style="border-top:1px solid var(--bb-warning-border);padding-top:8px;display:flex;flex-direction:column;gap:8px"><p class="mcaption warn">Suggested title: Купить молоко 2 л</p><div style="display:flex;gap:8px"><div class="mbtn secondary" style="flex:1;min-height:36px">Keep mine</div><div class="mbtn secondary" style="flex:1;min-height:36px">Use suggestion</div></div></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Сходить в магазин</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Покрасить комнату</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div></div><p class="mcaption warn">Resolve 1 conflict before confirming.</p></div><div class="msheet"><div class="mbtn primary off">Confirm 3 additions</div><div class="mghost">Discard all</div></div></div></div>
+  <p class="strigger">Trigger: a re-proposed title clashes with one the owner had edited. The count line names how many decisions are outstanding; the other two tasks are untouched. The web now carries the same line under its Send button (D-03.g) &mdash; worded &ldquo;&hellip; before <b>sending</b>.&rdquo; there against &ldquo;&hellip; before <b>confirming</b>.&rdquo; here, because each client names its own commit control. The one-word difference is the last wording split between the two reviews and is left for a person.</p>
+</figure>
+<figure class="state">
+  <figcaption><span class="sid">M-02.e</span><span class="sname">Empty &mdash; nothing was proposed, and what was heard</span></figcaption>
+  <div class="frame"><div class="mscreen"><div class="mhead"><span class="spacer"></span><span class="mtap" aria-label="Discard recording"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></span></div><div class="mscroll"><div class="mpanehead"><p class="t">No tasks to review</p><p class="m">Nothing actionable came out of this dump</p></div><div style="display:flex;flex-direction:column;gap:10px"><div class="mcard"><p style="margin:0;font-size:14px;line-height:1.5;color:var(--bb-fg-5)">No tasks were proposed from this dump. Discard it to record again.</p></div><div style="display:flex;flex-direction:column;gap:8px;padding:0 4px"><p class="rlabel">What was heard</p><p style="margin:0;font-size:14px;line-height:1.5;color:var(--bb-fg-1)">Так&hellip;</p><p style="margin:0;font-size:14px;line-height:1.5;color:var(--bb-fg-1)">Ну&hellip;</p><p style="margin:0;font-size:14px;line-height:1.5;color:var(--bb-fg-1)">Надо&hellip;</p></div></div></div><div class="msheet"><div class="mghost">Discard all</div></div></div></div>
+  <p class="strigger">Trigger: a filler-only dump, or every proposal deleted &mdash; <code>awaiting_confirmation</code> with zero active proposals. It stops counting tasks it does not have: the heading is <b>No tasks to review</b>, the meta line is <b>Nothing actionable came out of this dump</b>, and <b>Confirm is absent, not disabled</b>. This is the mobile half of FR-005 and it now matches D-03.h/D-03.i on every point but the last clause of the sentence.</p>
+  <p class="strigger"><b>What was heard</b> lists the stable segments no later segment supersedes (<code>heardTranscript</code>) &mdash; the same projection the web readout uses, so an interim hypothesis and a preview line the accurate transcript replaced are both left out. With no such segment the list holds one line in place of the utterances &mdash; &ldquo;No transcript was captured for this recording.&rdquo; &mdash; and the rest of the frame is unchanged, so it is the same state rather than a second one. The one exit left, <b>Discard all</b>, still asks first (M-02.i).</p>
+</figure>
+<figure class="state">
+  <figcaption><span class="sid">M-02.f</span><span class="sname">Saving</span></figcaption>
+  <div class="frame"><div class="mscreen"><div class="mhead"><span class="spacer"></span><span class="mtap" aria-label="Discard recording"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></span></div><div class="mscroll"><div class="mpanehead"><p class="t">Review 3 tasks</p><p class="m">Edit before they land in your inbox. Nothing is saved until you confirm.</p></div><div style="display:flex;flex-direction:column;gap:10px"><div class="mcard"><div class="mprow"><p class="mptitle">Купить молоко</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Сходить в магазин</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Покрасить комнату</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div></div></div><div class="msheet"><div class="mbtn primary off"><span class="spinner" style="width:18px;height:18px;border-width:2px;border-color:rgba(255,255,255,.45);border-top-color:#fff"></span></div><div class="mghost">Discard all</div></div></div></div>
+  <p class="strigger">Trigger: Confirm pressed. The button shows a spinner and all three controls are inert while the commit is in flight &mdash; Confirm, the sheet&rsquo;s Discard all and the header&rsquo;s Discard recording, so a destructive tap cannot race a commit that is already on the wire.</p>
+</figure>
+<figure class="state">
+  <figcaption><span class="sid">M-02.g</span><span class="sname">Settled &mdash; saved</span></figcaption>
+  <div class="frame"><div class="mscreen"><div class="mcenter"><p class="mdisplay">Saved 3 to inbox</p><p class="mbody">Clarify them into next actions when you&rsquo;re ready.</p><div class="mbtn primary" style="align-self:stretch">Done</div></div></div></div>
+  <p class="strigger">Trigger: the commit succeeded, or an already-completed recording was opened. Saving normally leaves the screen with a toast; this frame is what a cold open of a completed recording shows.</p>
+</figure>
+<figure class="state">
+  <figcaption><span class="sid">M-02.h</span><span class="sname">Settled &mdash; discarded</span></figcaption>
+  <div class="frame"><div class="mscreen"><div class="mcenter"><p class="mtitle">Dump discarded</p><p class="mbody">Nothing was saved and the recording was deleted.</p><div class="mbtn primary" style="align-self:stretch">Done</div></div></div></div>
+  <p class="strigger">Trigger: a cold open of an already-cancelled recording. Confirms the outcome rather than reporting an error.</p>
+</figure>
+<figure class="state">
+  <figcaption><span class="sid">M-02.i</span><span class="sname">Destructive confirmation &mdash; the platform dialog</span></figcaption>
+  <div class="frame"><div class="mscreen"><div class="mhead"><span class="spacer"></span><span class="mtap" aria-label="Discard recording"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></span></div><div class="mscroll"><div class="mpanehead"><p class="t">Review 3 tasks</p><p class="m">Edit before they land in your inbox. Nothing is saved until you confirm.</p></div><div style="display:flex;flex-direction:column;gap:10px"><div class="mcard"><div class="mprow"><p class="mptitle">Купить молоко</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Сходить в магазин</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div><div class="mcard"><div class="mprow"><p class="mptitle">Покрасить комнату</p><span style="color:var(--bb-fg-6)" aria-label="Remove proposal"><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div></div></div></div><div class="msheet"><div class="mbtn primary">Confirm 3 additions</div><div class="mghost">Discard all</div></div><div class="mscrim"><div class="osdlg" role="alertdialog" aria-labelledby="m02i-t" aria-describedby="m02i-m"><div class="dtext"><p class="dtitle" id="m02i-t">Discard all tasks?</p><p class="dmsg" id="m02i-m">Nothing is saved to Inbox and the recording is deleted.</p></div><div class="dcol"><span class="dbtn destructive">Discard all tasks</span><span class="dbtn cancel">Keep reviewing</span></div></div></div></div></div>
+  <p class="strigger">Trigger: either discard path in the review &mdash; the sheet&rsquo;s <b>Discard all</b> or the header&rsquo;s <b>Discard recording</b>. Both raise this one question, because both run the same <code>cancel</code> and the review&rsquo;s tasks go with the recording. The review underneath is untouched while the question is open, and nothing is posted until the destructive answer is chosen; <b>Keep reviewing</b>, the Android back gesture and a tap outside all return to the review with every edit intact.</p>
+  <p class="strigger"><b>Whose chrome this is:</b> the platform&rsquo;s <code>Alert.alert</code>, drawn as iOS renders two answers whose labels are too long to sit side by side &mdash; it stacks them and keeps the cancel answer in its platform position, last. The app supplies the title, the message and the two labels with their roles (<code>cancel</code>, <code>destructive</code>); it does not place them. Compare M-01.f, where the shorter labels fit across.</p>
+</figure>
+</div>
+</body>
+</html>
