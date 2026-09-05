@@ -241,9 +241,9 @@ describe("task detail autosave contract UI", () => {
     expect(transition).not.toHaveBeenCalled();
   });
 
-  it("uses full viewport width below desktop and reserves keyboard scroll margin", () => {
+  it("fills the containing sheet and reserves keyboard scroll margin", () => {
     renderAutosave();
-    expect(screen.getByRole("complementary")).toHaveClass("w-full", "min-[1100px]:w-[380px]");
+    expect(screen.getByRole("complementary")).toHaveClass("h-full", "w-full", "overflow-y-auto");
     expect(screen.getByLabelText("Waiting for")).toHaveClass("scroll-mb-[88px]");
   });
 

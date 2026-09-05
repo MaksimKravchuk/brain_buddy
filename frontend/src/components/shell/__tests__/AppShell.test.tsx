@@ -331,6 +331,20 @@ describe("AppShell canonical sidebar", () => {
 });
 
 describe("AppShell top bar", () => {
+  it("dismisses mobile navigation when browser history changes the task route, while search typing keeps it open", async () => {
+    const user = userEvent.setup();
+    renderShell({}, ["/tasks/next/task-1", "/tasks/next"]);
+    await user.click(screen.getByRole("button", { name: "Open task navigation" }));
+    const drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    await user.type(within(drawer).getByRole("searchbox", { name: "Search tasks" }), "draft");
+    expect(drawer).toBeInTheDocument();
+    // Programmatic history movement models browser Back without clicking the
+    // inert task workspace underneath the drawer.
+    fireEvent.click(screen.getByRole("button", { name: "Previous test view" }));
+    await waitFor(() => expect(currentLocation()).toBe("/tasks/next/task-1"));
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+  });
+
   it("synchronizes a focused search with Back and Forward history", async () => {
     const user = userEvent.setup();
     renderShell({}, ["/tasks/next?q=earlier", "/tasks/next?q=latest"]);
