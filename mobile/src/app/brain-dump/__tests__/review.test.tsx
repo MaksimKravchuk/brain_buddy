@@ -333,6 +333,23 @@ describe("brain dump review — proposals", () => {
     expect(await screen.findByText(/Provisional only/)).toBeOnTheScreen();
   });
 
+  it("keeps the provisional warning up while the dump is not yet committable", async () => {
+    await review({
+      "GET /brain-dump-operations/op-1": () => ({
+        ...AWAITING,
+        committable: false,
+        reconciliation_quality: "provisional_only" as const,
+      }),
+    });
+
+    expect(await screen.findByText(/Provisional only/)).toBeOnTheScreen();
+
+    // The warning is about wording quality, not commit readiness: confirm
+    // stays blocked until the server says otherwise.
+    await fireEvent.press(screen.getByText("Confirm 2 additions"));
+    expect(backend.callsTo("POST", "/brain-dump-operations/op-1/commit")).toHaveLength(0);
+  });
+
   it("offers to delete the kept recording, naming when it expires", async () => {
     await review({
       "GET /brain-dump-operations/op-1": () => ({
@@ -513,6 +530,8 @@ describe("brain dump review — terminal states", () => {
 
     expect(await screen.findByText("Processing hit a snag")).toBeOnTheScreen();
     expect(screen.getByText("The transcription provider timed out.")).toBeOnTheScreen();
+    // Gated on the server naming it, not on any recovery being offered.
+    expect(screen.queryByText("Extract tasks from the browser transcript")).toBeNull();
 
     await fireEvent.press(screen.getByText("Try again"));
     await waitFor(() =>
@@ -529,6 +548,7 @@ describe("brain dump review — terminal states", () => {
     expect(await screen.findByText("Couldn't finish")).toBeOnTheScreen();
     expect(screen.queryByText("Try again")).toBeNull();
     expect(screen.queryByText("Review provisional tasks")).toBeNull();
+    expect(screen.queryByText("Extract tasks from the browser transcript")).toBeNull();
     // Discarding is always available.
     expect(screen.getByText("Discard everything")).toBeOnTheScreen();
   });
@@ -560,7 +580,7 @@ describe("brain dump review — terminal states", () => {
     });
     expect(
       await screen.findByText(
-        "The audio was kept — you can retry, review the provisional tasks, or discard.",
+        "The audio was kept — choose one of the options below, or discard everything.",
       ),
     ).toBeOnTheScreen();
   });
@@ -583,5 +603,66 @@ describe("brain dump review — terminal states", () => {
         backend.callsTo("POST", "/brain-dump-operations/op-1/review_provisional"),
       ).toHaveLength(1),
     );
+  });
+
+  it("offers to extract tasks from the browser transcript when the server advertises it", async () => {
+    await review({
+      "GET /brain-dump-operations/op-1": () =>
+        makeOperation({
+          status: "terminal_error",
+          available_recovery_actions: ["reconcile_preview", "cancel"],
+        }),
+    });
+    await screen.findByText("Couldn't finish");
+
+    expect(screen.getByText("Extract tasks from the browser transcript")).toBeOnTheScreen();
+    expect(
+      screen.getByText(
+        "Sends the browser transcript to the consented task-extraction provider. The result is provisional and is reviewed before anything is saved.",
+      ),
+    ).toBeOnTheScreen();
+    // Only the advertised recoveries show; discarding always does.
+    expect(screen.queryByText("Try again")).toBeNull();
+    expect(screen.queryByText("Review provisional tasks")).toBeNull();
+    expect(screen.getByText("Discard everything")).toBeOnTheScreen();
+  });
+
+  it("posts reconcile_preview with the current revision, waits out reconciling, and reviews the provisional tasks", async () => {
+    let calls = 0;
+    await review({
+      "GET /brain-dump-operations/op-1": () => {
+        calls += 1;
+        return calls <= 1
+          ? makeOperation({
+              status: "terminal_error",
+              revision: 3,
+              available_recovery_actions: ["reconcile_preview", "cancel"],
+            })
+          : {
+              ...AWAITING,
+              revision: 5,
+              committable: false,
+              reconciliation_quality: "provisional_only" as const,
+            };
+      },
+      "POST /brain-dump-operations/op-1/reconcile_preview": () =>
+        makeOperation({ status: "reconciling", revision: 4 }),
+    });
+    await screen.findByText("Couldn't finish");
+
+    await fireEvent.press(screen.getByText("Extract tasks from the browser transcript"));
+
+    // The command left the operation reconciling; the screen shows that stage
+    // and polls it out, exactly as it does after retry or commit.
+    expect(await screen.findByText("Reconciling tasks…")).toBeOnTheScreen();
+    const posted = backend.callsTo("POST", "/brain-dump-operations/op-1/reconcile_preview");
+    expect(posted).toHaveLength(1);
+    expect(posted[0].body).toEqual({ expected_revision: 3 });
+    expect(posted[0].headers["Idempotency-Key"]).toBe(uuidNumber(1));
+
+    await advancePoll(2000);
+
+    expect(await screen.findByText("Review 2 tasks")).toBeOnTheScreen();
+    expect(screen.getByText(/Provisional only/)).toBeOnTheScreen();
   });
 });

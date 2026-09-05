@@ -166,7 +166,15 @@ export default function BrainDumpOperationScreen() {
   );
 
   const runCommand = useCallback(
-    async (action: "commit" | "retry" | "review_provisional" | "cancel" | "delete_raw_audio") => {
+    async (
+      action:
+        | "commit"
+        | "retry"
+        | "review_provisional"
+        | "reconcile_preview"
+        | "cancel"
+        | "delete_raw_audio",
+    ) => {
       const current = operationRef.current;
       if (!current) {
         return;
@@ -413,6 +421,23 @@ export default function BrainDumpOperationScreen() {
                 Review provisional tasks
               </Button>
             ) : null}
+            {recoveryActions.includes("reconcile_preview") ? (
+              // Offered only when the server still holds a browser-preview
+              // transcript — a dump started on the web and resumed here.
+              <View style={styles.recoveryOption}>
+                <Button
+                  variant="secondary"
+                  onPress={() => runCommand("reconcile_preview")}
+                  disabled={actionPending}
+                >
+                  Extract tasks from the browser transcript
+                </Button>
+                <BBText variant="caption" color={colors.fg5} style={styles.recoveryHint}>
+                  Sends the browser transcript to the consented task-extraction provider. The result
+                  is provisional and is reviewed before anything is saved.
+                </BBText>
+              </View>
+            ) : null}
             <Button variant="ghost" onPress={() => runCommand("cancel")} disabled={actionPending}>
               Discard everything
             </Button>
@@ -433,7 +458,9 @@ function describeFailure(operation: BrainDumpOperationResponse): string {
   if (failed?.error_code) {
     return failed.error_code;
   }
-  return "The audio was kept — you can retry, review the provisional tasks, or discard.";
+  // Which recoveries apply is the server's call (`available_recovery_actions`),
+  // so this line points at the buttons instead of enumerating them.
+  return "The audio was kept — choose one of the options below, or discard everything.";
 }
 
 function ProposalCard({
@@ -624,6 +651,13 @@ const styles = StyleSheet.create({
   recoveryActions: {
     alignSelf: "stretch",
     gap: space.s2,
+  },
+  recoveryOption: {
+    gap: space.s2,
+  },
+  recoveryHint: {
+    textAlign: "center",
+    paddingHorizontal: space.s2,
   },
   sheet: {
     alignItems: "center",

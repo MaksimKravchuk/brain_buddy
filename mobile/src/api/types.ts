@@ -290,7 +290,19 @@ export interface BrainDumpOperationResponse {
   working_artifacts_expires_at?: string | null;
   reconciliation_quality?: "none" | "provisional_only" | "accurate" | "conflicted";
   committable?: boolean;
-  available_recovery_actions?: ("retry" | "review_provisional" | "cancel")[];
+  /**
+   * Owner-initiated recovery commands the server will accept right now, in
+   * the order it advertises them. `reconcile_preview` extracts tasks from the
+   * browser-preview transcript when the accurate one never arrived; mobile
+   * has no preview lane of its own, so it shows up only for dumps that were
+   * started on the web and resumed here.
+   */
+  available_recovery_actions?: (
+    | "retry"
+    | "review_provisional"
+    | "reconcile_preview"
+    | "cancel"
+  )[];
   provider_runs?: {
     id: string;
     role: "accurate_stt" | "reconciler";
@@ -342,6 +354,7 @@ export type BrainDumpAction =
   | "commit"
   | "retry"
   | "review_provisional"
+  | "reconcile_preview"
   | "withdraw_consent"
   | "delete_raw_audio";
 
