@@ -949,6 +949,41 @@ describe("014-SC-004 every run state reads as itself", () => {
     expect(screen.queryByRole("button", { name: "Send answer" })).not.toBeInTheDocument();
   });
 
+  it("014-FR-009 D-03-S10 states the block reason as inert text with no reply control", () => {
+    renderSection([
+      makeRun({
+        reported_state: "blocked",
+        primary_state_label: "Needs you",
+        needs_user: true,
+        blocked_reason: "Agent needs additional authentication",
+        question_text: null
+      })
+    ]);
+
+    // "Needs you" with nothing else on the card is a dead end: the user is told
+    // they are needed and never told what for.
+    expect(screen.getByText("Agent needs additional authentication")).toBeInTheDocument();
+    // Inert. A control here would invite typing a credential to a third party.
+    expect(screen.queryByLabelText("Your answer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send answer" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("014-FR-009 hides the block reason once retention has expired the content", () => {
+    renderSection([
+      makeRun({
+        reported_state: "blocked",
+        primary_state_label: "Needs you",
+        needs_user: true,
+        blocked_reason: "Agent needs additional authentication",
+        content_expired: true
+      })
+    ]);
+
+    expect(screen.queryByText("Agent needs additional authentication")).not.toBeInTheDocument();
+    expect(screen.getByText("Content expired under retention policy")).toBeInTheDocument();
+  });
+
   it("014-SC-004 D-03-S11 names artifact content types and never a download", () => {
     renderSection([
       makeRun({

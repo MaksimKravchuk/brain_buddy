@@ -10,6 +10,7 @@ import { makeManifest, makeRun, makeRunEvent } from "@/test/agentFixtures";
 import {
   getByLabel,
   pressText,
+  queryByLabel,
   queryByText,
   renderWithProviders,
   typeInto,
@@ -578,6 +579,57 @@ describe("014-SC-004 every run state reads as itself on iOS", () => {
     );
 
     expect(visibleText(renderer)).toContain(label);
+
+    await unmount();
+  });
+
+  it("014-FR-009 M-03-S09 states the block reason as inert text with no reply control", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "blocked",
+              needs_user: true,
+              primary_state_label: "Needs you",
+              blocked_reason: "Agent needs additional authentication",
+              question_text: null,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    // "Needs you" alone is a dead end: the user is told they are needed and
+    // never told what for.
+    expect(visibleText(renderer)).toContain("Agent needs additional authentication");
+    // Inert. A field here would invite typing a credential to a third party.
+    expect(queryByLabel(renderer, "Your answer")).toBeNull();
+    expect(queryByText(renderer, "Send answer")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-FR-009 hides the block reason once retention has expired the content", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "blocked",
+              needs_user: true,
+              primary_state_label: "Needs you",
+              blocked_reason: "Agent needs additional authentication",
+              content_expired: true,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const text = visibleText(renderer);
+    expect(text).not.toContain("Agent needs additional authentication");
+    expect(text).toContain("Content expired under retention policy");
 
     await unmount();
   });

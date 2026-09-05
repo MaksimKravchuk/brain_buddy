@@ -312,6 +312,17 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
             </div>
           ) : null}
 
+          {run.blocked_reason ? (
+            // D-03-S10. The run needs the user and the agent named why, so the
+            // reason is stated verbatim — and stated *without* a control. What
+            // blocks an agent here is a credential problem at the agent, which
+            // no answer typed into BrainBuddy can solve; a reply box beside
+            // this sentence is how a secret gets forwarded to a third party.
+            <p className="mt-2 whitespace-pre-wrap rounded-lg border border-needs-you-border bg-needs-you-bg px-2.5 py-2 text-[12.5px] text-needs-you-fg">
+              {run.blocked_reason}
+            </p>
+          ) : null}
+
           {run.result_text ? (
             <p className="mt-2 whitespace-pre-wrap text-[12.5px] text-slate-700">{run.result_text}</p>
           ) : null}

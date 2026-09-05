@@ -371,6 +371,19 @@ function RunCard({
             </View>
           ) : null}
 
+          {run.blocked_reason ? (
+            // M-03-S09. The run needs the user and the agent named why, so the
+            // reason is stated verbatim — and stated *without* a control. What
+            // blocks an agent here is a credential problem at the agent, which
+            // no answer typed into Brain Buddy can solve; a reply field beside
+            // this sentence is how a secret gets forwarded to a third party.
+            <View style={styles.question}>
+              <BBText variant="caption" color={colors.warningFg}>
+                {run.blocked_reason}
+              </BBText>
+            </View>
+          ) : null}
+
           {run.result_text ? (
             <BBText variant="caption" color={colors.fg3}>
               {run.result_text}
