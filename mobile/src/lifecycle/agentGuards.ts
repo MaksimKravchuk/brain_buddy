@@ -78,7 +78,14 @@ type RunGuardInput = Pick<
   | "cancel_requested"
   | "content_expired"
   | "content_expires_at"
-> & { needs_user?: boolean };
+> & {
+  needs_user?: boolean;
+  // Optional so a caller holding only the compact summary can still ask, and
+  // so a run written before the observation lane existed reads as "nothing
+  // observed" rather than as a withdrawal.
+  agent_task_missing?: boolean;
+  cancel_outcome?: AgentRunResponse["cancel_outcome"];
+};
 
 /**
  * Whether the run is waiting on the user *now*.
@@ -100,6 +107,11 @@ function commandableGuard(run: RunGuardInput): AgentGuard {
   }
   if (run.connection_disconnected) {
     return refuse("This agent is disconnected, so Brain Buddy can no longer reach this run.");
+  }
+  if (run.agent_task_missing === true) {
+    // AC-020. Not a failure and not a refusal by the agent: there is simply
+    // nothing left at the agent for a command to reach.
+    return refuse("This agent no longer reports this run, so there is nothing left to send it.");
   }
   if (run.content_expired) {
     return refuse("This run's content has expired, so Brain Buddy cannot send another command.");
@@ -159,6 +171,18 @@ export function canCancel(
   }
   if (!capabilities.cancel) {
     return refuse("This agent does not support cancellation.");
+  }
+  if (run.cancel_outcome === "unsupported" || run.cancel_outcome === "not_cancelable") {
+    // The agent itself answered. Offering the control again would invite a
+    // request that cannot work, and would keep asking a question already
+    // answered (AC-018).
+    return refuse("Cancellation not supported by this agent.");
+  }
+  if (run.cancel_outcome === "unconfirmed") {
+    // Deliberately still offered: Brain Buddy does not know whether the request
+    // landed, and hiding the control would present its own uncertainty as the
+    // agent's refusal. The server reuses the same command id (AC-029).
+    return ALLOWED;
   }
   if (run.cancel_requested) {
     return refuse("Cancellation was already requested.");
@@ -223,8 +247,13 @@ export function canDisconnect(
 }
 
 /**
- * Only the server decides a result link is a safe HTTPS destination
- * (FR-014). Everything else stays inert text.
+ * No address an agent reports is ever opened (product decision, 2026-09-04).
+ *
+ * `result_link_interactive` is always false now, and this guard refuses even if
+ * it were not: a link the product makes tappable is a link the product is
+ * vouching for, and Brain Buddy verified nothing about where it leads. The
+ * address is shown as inert text beside a **Copy link** control instead
+ * (M-03-S10, FR-014, AC-031).
  */
 export function canOpenResultLink(
   run: Pick<AgentRunResponse, "result_link" | "result_link_interactive">,
@@ -232,10 +261,7 @@ export function canOpenResultLink(
   if (!run.result_link) {
     return refuse("This run has no result link.");
   }
-  if (!run.result_link_interactive) {
-    return refuse(
-      "This destination is not a safe HTTPS link, so Brain Buddy shows it as plain text only.",
-    );
-  }
-  return ALLOWED;
+  return refuse(
+    "Brain Buddy never opens an address an agent reported. Copy it if you want to go there yourself.",
+  );
 }

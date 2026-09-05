@@ -10,7 +10,9 @@
 import type {
   AgentConnectionResponse,
   AgentManifestResponse,
+  AgentRunEvent,
   AgentRunResponse,
+  AgentRunSummaryResponse,
   TaskResponse,
 } from "@/api/types";
 
@@ -159,11 +161,54 @@ export function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResp
     exchange_state: "closed",
     exchange_kind: "start",
     push_registration: "unregistered",
+    agent_task_missing: false,
+    cancel_outcome: "none",
+    blocked_reason: null,
+    artifacts_summary: [],
+    result_availability: null,
+    last_observed_at: null,
+    observation_interval_seconds: 60,
+    identifiers_expired: false,
     manifest: null,
     events: [],
     commands: [],
     created_at: "2026-08-09T09:00:00Z",
     revision: 2,
+    ...overrides,
+  };
+}
+
+/** One timeline row with the 014 fields at their ordinary-observation values. */
+export function makeRunEvent(
+  overrides: Partial<AgentRunEvent> &
+    Pick<AgentRunEvent, "id" | "type" | "run_version">,
+): AgentRunEvent {
+  return {
+    received_at: "2026-08-09T09:05:00Z",
+    summary: null,
+    trigger: "schedule",
+    kind: "observation",
+    previous_agent_task_id: null,
+    new_agent_task_id: null,
+    ...overrides,
+  };
+}
+
+/** One compact task-row summary, carrying the tier and the withdrawals. */
+export function makeRunSummary(
+  overrides: Partial<AgentRunSummaryResponse> = {},
+): AgentRunSummaryResponse {
+  return {
+    id: "run_1",
+    task_id: "task_1",
+    agent_name: "My Claude Code box",
+    primary_state_label: "Running",
+    needs_user: false,
+    stopped_reporting: false,
+    last_contact_at: "2026-08-09T09:05:00Z",
+    guarantee_tier: "best_effort",
+    cancel_outcome: "none",
+    agent_task_missing: false,
     ...overrides,
   };
 }

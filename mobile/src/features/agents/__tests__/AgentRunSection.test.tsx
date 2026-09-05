@@ -6,7 +6,7 @@
  */
 
 import { AgentRunSection } from "@/features/agents/AgentRunSection";
-import { makeManifest, makeRun } from "@/test/agentFixtures";
+import { makeManifest, makeRun, makeRunEvent } from "@/test/agentFixtures";
 import {
   getByLabel,
   pressText,
@@ -264,7 +264,7 @@ describe("AgentRunSection", () => {
 
     const text = visibleText(renderer);
     expect(text).toContain("http://agent.example.test/result");
-    expect(text).toContain("plain text only");
+    expect(text).toContain("Copy link");
     expect(queryByText(renderer, "Open result")).toBeNull();
 
     await unmount();
@@ -543,6 +543,243 @@ describe("AgentRunSection dispatch states", () => {
     expect(again.props.accessibilityState?.disabled).toBe(true);
     await pressText(renderer, "Check again");
     expect(mockCheckDelivery).not.toHaveBeenCalled();
+
+    await unmount();
+  });
+});
+
+describe("014-SC-004 every run state reads as itself on iOS", () => {
+  /**
+   * M-03-S05..S19. One projection in, one label out, rendered verbatim and
+   * identically to web.
+   *
+   * The whole vocabulary rather than a sample, because the requirement is
+   * exhaustive: an operator must be able to tell any two of these apart on
+   * sight, and a suite checking five of fifteen would pass while three of them
+   * rendered the same.
+   */
+  it.each([
+    ["Accepted", { reported_state: "accepted" as const }],
+    ["Running", { reported_state: "running" as const }],
+    ["Needs you", { reported_state: "blocked" as const, needs_user: true }],
+    ["Cancellation requested", { cancel_requested: true }],
+    ["Agent reported complete", { reported_state: "completed" as const }],
+    ["Failed", { reported_state: "failed" as const }],
+    ["Cancelled", { reported_state: "cancelled" as const }],
+    ["Stopped reporting", { stopped_reporting: true }],
+    ["Agent no longer reports this run", { agent_task_missing: true }],
+    ["Connection disconnected", { connection_disconnected: true }],
+    ["Queued", { exchange_state: "queued" as const, exchange_open: true }],
+    ["Sent", {}],
+    ["Delivery unconfirmed", { dispatch_state: "delivery_unconfirmed" as const }],
+    ["Not sent", { dispatch_state: "not_sent" as const }],
+  ])("renders %s verbatim from the projection", async (label, overrides) => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({ runs: [makeRun({ ...overrides, primary_state_label: label })] })}
+      />,
+    );
+
+    expect(visibleText(renderer)).toContain(label);
+
+    await unmount();
+  });
+
+  it("014-SC-004 M-03-S10 offers a 44pt Copy link beside the inert address", async () => {
+    const run = makeRun({
+      reported_state: "completed",
+      primary_state_label: "Agent reported complete",
+      result_link: "https://results.example.test/1",
+      // Even marked interactive: no address an agent reported is ever opened.
+      result_link_interactive: true,
+    });
+
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection {...props({ runs: [run] })} />,
+    );
+
+    expect(visibleText(renderer)).toContain("https://results.example.test/1");
+    const copy = getByLabel(renderer, `Copy link for ${run.agent_name}`);
+    expect(copy.props.style).toEqual(
+      expect.objectContaining({ minHeight: 44 }),
+    );
+    expect(queryByText(renderer, "Open result")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-SC-004 M-03-S10 marks a too-large result and never calls it silence", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "completed",
+              primary_state_label: "Agent reported complete",
+              result_availability: "too_large",
+              result_text: null,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Result too large to store.");
+    expect(text).not.toContain("Stopped reporting");
+
+    await unmount();
+  });
+
+  it("014-SC-004 M-03-S15 withdraws cancel on a refusal and keeps it on silence", async () => {
+    const refused = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "running",
+              primary_state_label: "Running",
+              cancel_outcome: "not_cancelable",
+            }),
+          ],
+        })}
+      />,
+    );
+    expect(visibleText(refused.renderer)).toContain(
+      "Cancellation not supported by this agent.",
+    );
+    expect(queryByText(refused.renderer, "Request cancellation")).toBeNull();
+    await refused.unmount();
+
+    const unconfirmed = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "running",
+              primary_state_label: "Running",
+              cancel_outcome: "unconfirmed",
+              cancel_requested: true,
+            }),
+          ],
+        })}
+      />,
+    );
+    expect(visibleText(unconfirmed.renderer)).toContain(
+      "Cancellation request unconfirmed — you can try again.",
+    );
+    expect(queryByText(unconfirmed.renderer, "Request cancellation")).not.toBeNull();
+    await unconfirmed.unmount();
+  });
+
+  it("014-SC-004 M-03-S17 withdraws both controls when the agent forgot the run", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "blocked",
+              needs_user: true,
+              question_text: "Which environment?",
+              primary_state_label: "Agent no longer reports this run",
+              agent_task_missing: true,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Agent no longer reports this run");
+    expect(text).not.toContain("Failed");
+    expect(queryByText(renderer, "Send answer")).toBeNull();
+    expect(queryByText(renderer, "Request cancellation")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-SC-004 M-03-S26 shows the succession row with both task identifiers", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "running",
+              primary_state_label: "Running",
+              agent_task_id: "task-b2",
+              events: [
+                makeRunEvent({
+                  id: "ev-succession",
+                  type: "running",
+                  run_version: 4,
+                  summary: "The agent continued this run in a new task",
+                  trigger: "command",
+                  kind: "task_succession",
+                  previous_agent_task_id: "task-a1",
+                  new_agent_task_id: "task-b2",
+                }),
+              ],
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const text = visibleText(renderer);
+    expect(text).toContain("The agent continued this run in a new task");
+    expect(text).toContain("task-a1");
+    expect(text).toContain("task-b2");
+    // The projection is unchanged by the succession itself.
+    expect(text).toContain("Running");
+
+    await unmount();
+  });
+
+  it("014-SC-004 AC-031 renders an agent name carrying markup as plain text", async () => {
+    const hostile = "<img src=x onerror=alert(1)> javascript:alert(2)";
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              agent_name: hostile,
+              reported_state: "running",
+              primary_state_label: "Running",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(visibleText(renderer)).toContain(hostile);
+    // No `Linking` target exists for it: the only tappable things on this run
+    // are the controls the product itself offers.
+    expect(queryByText(renderer, "Open result")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-SC-004 M-03-S22 disables reply and cancel offline and queues nothing", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          online: false,
+          runs: [
+            makeRun({
+              reported_state: "blocked",
+              needs_user: true,
+              question_text: "Which environment?",
+              primary_state_label: "Needs you",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(queryByText(renderer, "Send answer")).toBeNull();
+    expect(queryByText(renderer, "Request cancellation")).toBeNull();
+    expect(mockReply).not.toHaveBeenCalled();
+    expect(mockCancel).not.toHaveBeenCalled();
 
     await unmount();
   });

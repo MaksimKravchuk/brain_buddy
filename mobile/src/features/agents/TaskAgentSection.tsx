@@ -5,8 +5,10 @@ import type { AgentRunResponse, TaskResponse } from "@/api/types";
 import { useAgentRunsFeed } from "@/features/agents/useAgentRunsFeed";
 import { AgentRunSection } from "@/features/agents/AgentRunSection";
 import { HandoffSheet, type AgentHandoffSeed } from "@/features/agents/HandoffSheet";
+import { BBText } from "@/components/BBText";
 import { Button } from "@/components/Button";
-import { space } from "@/theme/tokens";
+import { compactRunLabel } from "@/agents/machine";
+import { colors, space } from "@/theme/tokens";
 
 interface TaskAgentSectionProps {
   task: TaskResponse;
@@ -56,8 +58,22 @@ export function TaskAgentSection({
     setSheetVisible(true);
   };
 
+  const latestRun = feed.runs.length ? feed.runs[feed.runs.length - 1] : null;
+
   return (
     <View style={styles.section}>
+      {latestRun ? (
+        // The same compact line the task list shows (M-03-S24), so the two
+        // surfaces cannot disagree about the tier or about a control the agent
+        // has already withdrawn.
+        <BBText variant="micro" color={colors.fg5}>
+          {compactRunLabel({
+            primary_state_label: latestRun.primary_state_label,
+            guarantee_tier: latestRun.guarantee_tier,
+            cancel_outcome: latestRun.cancel_outcome,
+          })}
+        </BBText>
+      ) : null}
       <AgentRunSection
         runs={feed.runs}
         loading={feed.loading}

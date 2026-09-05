@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Linking, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, TextInput, View } from "react-native";
 
 import { isDefinitiveMutationFailure } from "@/api/client";
 import {
@@ -13,7 +13,10 @@ import {
   canCheckDelivery,
   canRetryHandoff,
   dispatchStateDetail,
-  eventLabel,
+  artifactPlaceholderCopy,
+  cancelOutcomeCopy,
+  resultAvailabilityCopy,
+  timelineRowLabel,
   lastContactLabel,
   runsNewestFirst,
   sortedEvents,
@@ -23,6 +26,7 @@ import { Button } from "@/components/Button";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { awaitsAnswer, canCancel, canOpenResultLink, canReply } from "@/lifecycle/agentGuards";
 import { colors, fonts, radii, space, type as typeScale } from "@/theme/tokens";
+import { copyToClipboard } from "@/utils/clipboard";
 import { useIntentKey } from "@/utils/ids";
 
 const STALE_NOTICE =
@@ -190,6 +194,11 @@ function RunCard({
   const replyGuard = canReply(run, run.capabilities, { online });
   const cancelGuard = canCancel(run, run.capabilities, { online });
   const linkGuard = run.result_link ? canOpenResultLink(run) : null;
+  // Secondary lines, never the primary label: what the agent said about
+  // cancellation, and whether the result fitted, are separate facts from what
+  // the run is doing.
+  const cancelOutcome = cancelOutcomeCopy(run);
+  const tooLarge = resultAvailabilityCopy(run);
   const events = sortedEvents(run);
   const dispatchDetail = run.content_expired ? null : dispatchStateDetail(run);
 
@@ -362,40 +371,49 @@ function RunCard({
             </BBText>
           ) : null}
 
+          {tooLarge ? (
+            <BBText variant="caption" weight="medium" color={colors.fg3}>
+              {tooLarge}
+            </BBText>
+          ) : null}
+
+          {run.artifacts_summary.map((artifact, index) => (
+            <BBText
+              key={`${artifact.name ?? artifact.kind}-${index}`}
+              variant="micro"
+              color={colors.fg5}
+            >
+              {artifactPlaceholderCopy(artifact)}
+            </BBText>
+          ))}
+
           {run.result_link && linkGuard ? (
-            linkGuard.ok ? (
-              <View style={styles.field}>
-                <BBText variant="caption" color={colors.fg4} selectable>
-                  {run.result_link}
+            // Inert text beside a 44pt copy control, whatever the scheme
+            // (M-03-S10). Nothing is tappable, opened or fetched: a link the
+            // product makes tappable is a link the product is vouching for, and
+            // Brain Buddy verified nothing about where it leads.
+            <View style={styles.field}>
+              <BBText variant="caption" color={colors.fg5} selectable style={styles.mono}>
+                {run.result_link}
+              </BBText>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Copy link for ${run.agent_name}`}
+                onPress={() => {
+                  void copyToClipboard(run.result_link as string);
+                }}
+                style={styles.rowAction}
+              >
+                <BBText variant="caption" weight="medium" color={colors.infoFg}>
+                  Copy link
                 </BBText>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open result for ${run.agent_name}`}
-                  onPress={() => {
-                    void Linking.openURL(run.result_link as string);
-                  }}
-                  style={styles.linkAction}
-                >
-                  <BBText variant="caption" weight="medium" color={colors.infoFg}>
-                    Open result
-                  </BBText>
-                </Pressable>
-                <BBText variant="micro" color={colors.fg6}>
-                  Opens a site outside Brain Buddy.
-                </BBText>
-              </View>
-            ) : (
-              // Only the server decides a link is a safe HTTPS destination
-              // (FR-014); anything else stays text and is never opened.
-              <View style={styles.field}>
-                <BBText variant="caption" color={colors.fg5} selectable style={styles.mono}>
-                  {run.result_link}
-                </BBText>
+              </Pressable>
+              {linkGuard.ok ? null : (
                 <BBText variant="micro" color={colors.fg6}>
                   {linkGuard.reason}
                 </BBText>
-              </View>
-            )
+              )}
+            </View>
           ) : null}
 
           {run.failure_reason ? (
@@ -411,10 +429,21 @@ function RunCard({
           Your answer was sent but the agent has not acknowledged it yet.
         </BBText>
       ) : null}
-      {run.cancel_requested ? (
+      {cancelOutcome ? (
+        <BBText variant="micro" color={colors.fg5}>
+          {cancelOutcome}
+        </BBText>
+      ) : null}
+      {run.cancel_requested && !cancelOutcome ? (
         <BBText variant="micro" color={colors.fg5}>
           Cancellation was requested. The agent has not confirmed it, so the work may still be
           running.
+        </BBText>
+      ) : null}
+      {run.agent_task_missing ? (
+        <BBText variant="micro" color={colors.fg5}>
+          The agent no longer reports this run. Brain Buddy kept everything it had already
+          observed and is not claiming the work failed.
         </BBText>
       ) : null}
       {run.stopped_reporting ? (
@@ -472,9 +501,16 @@ function RunCard({
           {events.map((event) => (
             <View key={event.id} style={styles.event}>
               <BBText variant="micro" weight="medium" color={colors.fg4}>
-                {eventLabel(event.type)}
+                {timelineRowLabel(event)}
               </BBText>
-              {event.summary ? (
+              {event.kind === "task_succession" && event.previous_agent_task_id ? (
+                // Both identifiers, because the point of the row is that the
+                // one the user saw yesterday is not the one being observed now.
+                <BBText variant="micro" color={colors.fg6}>
+                  {event.previous_agent_task_id} → {event.new_agent_task_id}
+                </BBText>
+              ) : null}
+              {event.summary && event.kind !== "task_succession" ? (
                 <BBText variant="micro" color={colors.fg5}>
                   {event.summary}
                 </BBText>

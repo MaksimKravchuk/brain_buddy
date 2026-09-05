@@ -286,6 +286,57 @@ function FeedExpiryProbe({ runtime }: { runtime: AgentRunsPollRuntime }) {
   return <Text>{run ? `${run.content_expired}:${run.progress_text ?? "redacted"}` : "empty"}</Text>;
 }
 
+describe("014-SC-004 the compact task line agrees with the run monitor", () => {
+  it("014-FR-013 states the tier in full and repeats a withdrawn cancellation", async () => {
+    // M-03-S24. The line and the monitor below it are two views of one run, so
+    // a control the agent withdrew must not be offered by one and denied by
+    // the other.
+    mockListConnections.mockResolvedValue([makeConnection()]);
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        primary_state_label: "Running",
+        reported_state: "running",
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "not_cancelable",
+      }),
+    ]);
+
+    const { renderer, unmount } = await renderWithProviders(<TaskAgentSection {...props()} />);
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Running · Guaranteed single start · Cancellation not supported");
+    expect(text).toContain("Cancellation not supported by this agent.");
+    expect(queryByText(renderer, "Request cancellation")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-FR-013 shows the missing-task label and withdraws both controls", async () => {
+    mockListConnections.mockResolvedValue([makeConnection()]);
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        primary_state_label: "Agent no longer reports this run",
+        reported_state: "blocked",
+        needs_user: true,
+        question_text: "Which repo?",
+        guarantee_tier: "best_effort",
+        agent_task_missing: true,
+      }),
+    ]);
+
+    const { renderer, unmount } = await renderWithProviders(<TaskAgentSection {...props()} />);
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Agent no longer reports this run · Best-effort single start");
+    expect(queryByText(renderer, "Send answer")).toBeNull();
+    expect(queryByText(renderer, "Request cancellation")).toBeNull();
+
+    await unmount();
+  });
+});
+
 describe("useAgentRunsFeed absorb polling", () => {
   it("clears task A immediately and ignores its delayed response after switching to task B", async () => {
     let resolveA!: (runs: ReturnType<typeof makeRun>[]) => void;
