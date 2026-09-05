@@ -79,12 +79,20 @@ function makeEvent(
   };
 }
 
-function renderSection(runs: AgentRunResponse[], node?: ReactElement) {
+function renderSection(runs: AgentRunResponse[], node?: ReactElement, handoffEnabled = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return {
     ...render(
       <QueryClientProvider client={client}>
-        {node ?? <AgentRunSection taskId="task_1" runs={runs} isLoading={false} error={null} />}
+        {node ?? (
+          <AgentRunSection
+            taskId="task_1"
+            runs={runs}
+            isLoading={false}
+            error={null}
+            handoffEnabled={handoffEnabled}
+          />
+        )}
       </QueryClientProvider>
     ),
     client
@@ -368,6 +376,7 @@ describe("AgentRunSection", () => {
         ]}
         isLoading
         error={null}
+        handoffEnabled
       />
     );
 
@@ -406,6 +415,7 @@ describe("AgentRunSection", () => {
         runs={[cached]}
         isLoading={false}
         error={new Error("network unreachable")}
+        handoffEnabled
       />
     );
 
@@ -416,7 +426,7 @@ describe("AgentRunSection", () => {
   });
 
   it("surfaces a load error with its correlation id when no cached run exists", () => {
-    renderSection([], <AgentRunSection taskId="task_1" runs={[]} isLoading={false} error={new Error("boom")} />);
+    renderSection([], <AgentRunSection taskId="task_1" runs={[]} isLoading={false} error={new Error("boom")} handoffEnabled />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(/boom/);
   });
@@ -496,6 +506,7 @@ describe("AgentRunSection idempotency across retries", () => {
           runs={[{ ...firstRun, revision: firstRun.revision + 1 }]}
           isLoading={false}
           error={null}
+          handoffEnabled
         />
       </QueryClientProvider>
     );
@@ -527,7 +538,7 @@ describe("AgentRunSection idempotency across retries", () => {
     };
     rerender(
       <QueryClientProvider client={client}>
-        <AgentRunSection taskId="task_1" runs={[changedRun]} isLoading={false} error={null} />
+        <AgentRunSection taskId="task_1" runs={[changedRun]} isLoading={false} error={null} handoffEnabled />
       </QueryClientProvider>
     );
     await user.click(screen.getByRole("button", { name: "Send answer" }));
@@ -706,6 +717,21 @@ describe("AgentRunSection dispatch states", () => {
       screen.getByText("BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.")
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try this hand-off again" })).toBeEnabled();
+  });
+
+  it("014-FR-012 withholds the retry while rollout is off and still shows the run", () => {
+    // FR-016 / 007 FR-019: rollout OFF keeps already-dispatched work observable
+    // and actionable. A hand-off that never left has nothing at the agent, so
+    // retrying it is a fresh content-bearing send — exactly what rollout OFF
+    // withholds — and offering the control anyway either sends behind the
+    // rollout gate or does nothing at all.
+    renderSection([restartedRun], undefined, false);
+
+    expect(screen.getByText("Not sent")).toBeInTheDocument();
+    expect(
+      screen.getByText("BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try this hand-off again" })).toBeNull();
   });
 
   it("014-FR-006 names the rate-limited category on a hand-off that was refused", () => {

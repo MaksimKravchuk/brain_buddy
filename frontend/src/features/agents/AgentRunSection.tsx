@@ -109,7 +109,15 @@ function questionIdentity(run: AgentRunResponse): string {
  * disclosed capabilities: an unsupported reply or cancel is stated as
  * unsupported rather than rendered as a button that would fail.
  */
-function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): React.JSX.Element {
+function RunCard({
+  taskId,
+  run,
+  handoffEnabled
+}: {
+  taskId: string;
+  run: AgentRunResponse;
+  handoffEnabled: boolean;
+}): React.JSX.Element {
   const queryClient = useQueryClient();
   const keys = useAgentKeys();
   const online = useRelayOnline();
@@ -224,9 +232,12 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
     run.reported_state === null &&
     !run.connection_disconnected;
   // A hand-off that never left can be re-offered exactly as it was reviewed —
-  // but only while BrainBuddy still holds what was reviewed.
+  // but only while BrainBuddy still holds what was reviewed, and only while the
+  // rollout allows a hand-off at all. Nothing reached the agent, so re-sending
+  // is a fresh content-bearing send rather than acting on work already out
+  // there, and rollout OFF withholds exactly that (FR-016, 007 FR-019).
   const frozenManifest =
-    !contentExpired && run.dispatch_state === "not_sent" ? run.manifest : null;
+    handoffEnabled && !contentExpired && run.dispatch_state === "not_sent" ? run.manifest : null;
 
   useEffect(() => {
     const held = replyIntent.current;
@@ -506,12 +517,15 @@ export function AgentRunSection({
   taskId,
   runs,
   isLoading,
-  error
+  error,
+  handoffEnabled
 }: {
   taskId: string;
   runs: AgentRunResponse[];
   isLoading: boolean;
   error: unknown;
+  /** The account's `external_agent_relay` flag. Gates the retry, not the view. */
+  handoffEnabled: boolean;
 }): React.JSX.Element | null {
   if (error && runs.length === 0) {
     return (
@@ -541,7 +555,7 @@ export function AgentRunSection({
       ) : null}
       <div className="flex flex-col gap-2">
         {runs.map((run) => (
-          <RunCard key={run.id} taskId={taskId} run={run} />
+          <RunCard key={run.id} taskId={taskId} run={run} handoffEnabled={handoffEnabled} />
         ))}
       </div>
     </div>

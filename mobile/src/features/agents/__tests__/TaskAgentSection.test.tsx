@@ -645,6 +645,36 @@ describe("useAgentRunsFeed absorb polling", () => {
 });
 
 describe("TaskAgentSection retry of a hand-off that never left", () => {
+  it("014-FR-012 withholds the retry while rollout is off and still shows the run", async () => {
+    // The sheet that serves a retry is mounted only while the flag is on, so an
+    // offered control here would flip a state nothing reads. It is also the
+    // right answer on its own terms: nothing reached the agent, so re-sending
+    // is a fresh content-bearing send, which rollout OFF withholds (FR-016,
+    // 007 FR-019) while leaving already-dispatched work observable.
+    mockListRuns.mockResolvedValue([
+      makeRun({
+        dispatch_state: "not_sent",
+        dispatch_error_code: "restarted_before_send",
+        reported_state: null,
+        primary_state_label: "Not sent",
+        manifest: makeManifest({ connection_id: "conn_1" }),
+      }),
+    ]);
+
+    const { renderer, unmount } = await renderWithProviders(
+      <TaskAgentSection {...props({ enabled: false })} />,
+    );
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Not sent");
+    expect(text).toContain("Nothing left Brain Buddy");
+    expect(queryByText(renderer, "Try this hand-off again")).toBeNull();
+    expect(queryByText(renderer, "Hand to agent")).toBeNull();
+
+    await unmount();
+  });
+
   it("014-SC-004 reopens the review seeded from the run's frozen manifest", async () => {
     const frozen = makeManifest({
       connection_id: "conn_1",

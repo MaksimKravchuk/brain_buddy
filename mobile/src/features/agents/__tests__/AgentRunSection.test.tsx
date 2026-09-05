@@ -50,6 +50,10 @@ function props(overrides: Partial<Parameters<typeof AgentRunSection>[0]> = {}) {
     error: null,
     online: true,
     onRunUpdated: jest.fn(),
+    // The task screen supplies this only while the rollout allows a hand-off.
+    // Here it is always present, so these tests read the run monitor's own rule
+    // for the retry rather than the rollout gate above it.
+    onRetryHandoff: jest.fn(),
     ...overrides,
   };
 }
@@ -461,6 +465,33 @@ describe("AgentRunSection dispatch states", () => {
       "Brain Buddy restarted before this hand-off was sent. Nothing left Brain Buddy.",
     );
     expect(queryByText(renderer, "Try this hand-off again")).toBeTruthy();
+
+    await unmount();
+  });
+
+  it("014-FR-012 draws no retry when the screen offers nowhere for it to go", async () => {
+    // The task screen withholds the handler while rollout is off, and a control
+    // whose press flips a state nothing reads is worse than no control at all.
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          onRetryHandoff: undefined,
+          runs: [
+            makeRun({
+              dispatch_state: "not_sent",
+              dispatch_error_code: "restarted_before_send",
+              reported_state: null,
+              primary_state_label: "Not sent",
+              manifest: makeManifest(),
+            }),
+          ],
+        })}
+      />,
+    );
+
+    // The run itself is unchanged: rollout gates new work, not visibility.
+    expect(visibleText(renderer)).toContain("Nothing left Brain Buddy");
+    expect(queryByText(renderer, "Try this hand-off again")).toBeNull();
 
     await unmount();
   });

@@ -677,7 +677,13 @@ function AgentTaskRelay({ task, isTerminal }: { task: TaskResponse; isTerminal: 
         </div>
       ) : null}
 
-      <AgentRunSection taskId={task.id} runs={runs} isLoading={runsQuery.isLoading} error={runsQuery.error} />
+      <AgentRunSection
+        taskId={task.id}
+        runs={runs}
+        isLoading={runsQuery.isLoading}
+        error={runsQuery.error}
+        handoffEnabled={handoffEnabled}
+      />
 
       {reviewing && canStartHandoff ? (
         <AgentHandoffOverlay

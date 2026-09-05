@@ -150,6 +150,10 @@ function RunCard({
   onRunUpdated: (run: AgentRunResponse) => void;
   onRetryHandoff?: (run: AgentRunResponse) => void;
 }) {
+  // Held as a const so the guard below narrows it inside the press handler: the
+  // retry is drawn only when there is a review for it to open. Without a
+  // handler the control would flip a state nothing reads.
+  const retryHandoff = onRetryHandoff;
   const reply = useReplyToAgentRun();
   const cancel = useCancelAgentRun();
   const checkDelivery = useCheckAgentRunDelivery();
@@ -506,11 +510,11 @@ function RunCard({
           {checkDelivery.isError ? <ErrorBanner error={checkDelivery.error} /> : null}
         </>
       ) : null}
-      {canRetryHandoff(run) ? (
+      {retryHandoff && canRetryHandoff(run) ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Try this hand-off again"
-          onPress={() => onRetryHandoff?.(run)}
+          onPress={() => retryHandoff(run)}
           style={styles.rowAction}
         >
           <BBText variant="caption" weight="medium" color={colors.infoFg}>

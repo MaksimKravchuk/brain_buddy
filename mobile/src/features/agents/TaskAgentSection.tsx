@@ -80,7 +80,11 @@ export function TaskAgentSection({
         error={feed.error}
         online={feed.online}
         onRunUpdated={feed.absorb}
-        onRetryHandoff={retryHandoff}
+        // Only while the rollout allows a hand-off: the review sheet below is
+        // mounted only then, and re-sending a hand-off that never left is a
+        // fresh content-bearing send rather than acting on work already at the
+        // agent (FR-016, 007 FR-019).
+        onRetryHandoff={enabled ? retryHandoff : undefined}
         onRetry={feed.refresh}
       />
       {enabled ? (
