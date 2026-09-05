@@ -439,7 +439,6 @@ class AgentRelayService:
         *,
         secret_box: SecretBox,
         task_snapshot: TaskSnapshotPort,
-        callback_url: str,
         # The origin the per-run push callback lives under. Part of the manifest
         # token, so a deployment that moved cannot let a stale confirmation hand
         # the agent an address BrainBuddy no longer answers on.
@@ -491,7 +490,6 @@ class AgentRelayService:
         self.evict_push_limiter: Callable[[str], bool] | None = None
         self.secret_box = secret_box
         self.task_snapshot = task_snapshot
-        self.callback_url = callback_url
         self.push_base_url = push_base_url
         self.tier_disclosure_url = tier_disclosure_url
         self.stale_after = stale_after

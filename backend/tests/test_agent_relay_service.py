@@ -78,7 +78,6 @@ from .a2a_fakes import (
 
 OWNER = "user_a"
 OTHER_OWNER = "user_b"
-CALLBACK = "https://brainbuddy.example/api/agent-events"
 PUSH_BASE = "https://brainbuddy.example/api/a2a/push"
 
 
@@ -281,7 +280,6 @@ def build_service(
         repo,
         secret_box=SecretBox(keys if keys is not None else OrderedDict({"v1": key})),
         task_snapshot=task_snapshot,
-        callback_url=CALLBACK,
         push_base_url=PUSH_BASE,
         card_fetcher=card_fetcher if card_fetcher is not None else FakeCardFetcher(),
         a2a_client=a2a_client if a2a_client is not None else FakeA2AClient(),
@@ -1550,7 +1548,6 @@ class TestConnectByAgentCard:
             repo,
             secret_box=SecretBox(OrderedDict({"v1": b"\x07" * 32})),
             task_snapshot=task_snapshot,
-            callback_url=CALLBACK,
             a2a_client=FakeA2AClient(),
             resolver=rebinding_resolver,
             now=clock,
@@ -3139,7 +3136,6 @@ class TestExchangeEdges:
             repo,
             secret_box=SecretBox(OrderedDict({"v1": b"\x07" * 32})),
             task_snapshot=task_snapshot,
-            callback_url=CALLBACK,
             push_base_url=PUSH_BASE,
             card_fetcher=card_fetcher,
             a2a_client=a2a_client,

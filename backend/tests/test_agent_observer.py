@@ -33,7 +33,6 @@ from .a2a_fakes import FakeA2AClient, FakeCardFetcher, card_summary, ready_disco
 
 OWNER = "user_a"
 OTHER_OWNER = "user_b"
-CALLBACK = "https://brainbuddy.example/api/agent-events"
 PUSH_BASE = "https://brainbuddy.example/api/a2a/push"
 
 
@@ -125,7 +124,6 @@ def service(
         repo,
         secret_box=SecretBox(OrderedDict({"v1": b"\x07" * 32})),
         task_snapshot=task_snapshot,
-        callback_url=CALLBACK,
         push_base_url=PUSH_BASE,
         card_fetcher=FakeCardFetcher(),
         a2a_client=a2a_client,

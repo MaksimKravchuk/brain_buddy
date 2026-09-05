@@ -478,8 +478,8 @@ class TestAgentRelayCallbackOrigin:
             config.agent_relay.public_base_url == "https://brain-buddy-backend.fly.dev"
         )
         assert (
-            config.agent_relay_callback_url
-            == "https://brain-buddy-backend.fly.dev/api/agent-events"
+            config.agent_relay_push_base_url
+            == "https://brain-buddy-backend.fly.dev/api/a2a/push"
         )
 
     def test_a_trailing_slash_still_yields_exactly_one_callback_path(
@@ -496,16 +496,16 @@ class TestAgentRelayCallbackOrigin:
         config = get_config()
 
         assert (
-            config.agent_relay_callback_url
-            == "https://brain-buddy-backend.fly.dev/api/agent-events"
+            config.agent_relay_push_base_url
+            == "https://brain-buddy-backend.fly.dev/api/a2a/push"
         )
 
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            ("http://localhost:8000", "http://localhost:8000/api/agent-events"),
-            ("http://127.0.0.1:8000", "http://127.0.0.1:8000/api/agent-events"),
-            ("https://dev.example.test", "https://dev.example.test/api/agent-events"),
+            ("http://localhost:8000", "http://localhost:8000/api/a2a/push"),
+            ("http://127.0.0.1:8000", "http://127.0.0.1:8000/api/a2a/push"),
+            ("https://dev.example.test", "https://dev.example.test/api/a2a/push"),
         ],
     )
     def test_development_still_allows_a_local_origin(
@@ -521,7 +521,7 @@ class TestAgentRelayCallbackOrigin:
         monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
         monkeypatch.setenv("BRAIN_BUDDY_PUBLIC_BASE_URL", raw)
 
-        assert get_config().agent_relay_callback_url == expected
+        assert get_config().agent_relay_push_base_url == expected
 
     @pytest.mark.parametrize(
         "raw",
@@ -895,7 +895,7 @@ class TestAgentRelayCallbackStartup:
         config = get_config()
 
         assert config.agent_relay.public_base_url == deployed
-        assert config.agent_relay_callback_url == f"{deployed}/api/agent-events"
+        assert config.agent_relay_push_base_url == f"{deployed}/api/a2a/push"
 
     def test_production_resolves_a_non_allowlisted_origin_before_accepting_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -917,8 +917,7 @@ class TestAgentRelayCallbackStartup:
 
         assert asked == ["relay.example.com"]
         assert (
-            config.agent_relay_callback_url
-            == "https://relay.example.com/api/agent-events"
+            config.agent_relay_push_base_url == "https://relay.example.com/api/a2a/push"
         )
 
     def test_production_refuses_an_origin_whose_name_does_not_resolve(

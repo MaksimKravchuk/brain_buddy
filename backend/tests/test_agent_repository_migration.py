@@ -302,7 +302,6 @@ def build_service(repo: AgentRepository) -> AgentRelayService:
         repo,
         secret_box=SecretBox(OrderedDict({"v1": b"\x07" * 32})),
         task_snapshot=refuse_snapshot,
-        callback_url="https://brainbuddy.example.com/api/agent-events",
         now=lambda: NOW,
     )
 
@@ -863,11 +862,9 @@ class TestHandOffOnASupersededConnection:
 class TestTheBespokeWireIsGone:
     """The removal itself, asserted from outside.
 
-    The route case is live: T114 deleted both routes, so FastAPI now answers
-    404 for them. The module case is still `xfail(strict=True)` until T115
-    deletes `connector.py`. Strict is what makes it useful: on the day the file
-    goes, it stops being an expected failure, this suite goes red, and whoever
-    landed the removal has to come here and say so.
+    Both cases are live: T114 deleted the routes, so FastAPI answers 404 for
+    them, and T115 deleted `connector.py`, so importing it raises. They stay
+    here as the standing proof that neither can come back unnoticed.
 
     014-FR-012, 014-SC-010.
     """
@@ -889,11 +886,6 @@ class TestTheBespokeWireIsGone:
         )
         assert rotated.status_code == 404
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="connector.py is deleted by T115; strict, so the removal must "
-        "un-mark this",
-    )
     def test_014_FR_012_the_bespoke_connector_module_no_longer_exists(self) -> None:
         """Deleted, not merely unused.
 

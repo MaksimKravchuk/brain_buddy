@@ -449,7 +449,6 @@ def build_container(config: AppConfig) -> Container:
         ),
         secret_box=agent_secret_box,
         task_snapshot=_task_snapshot,
-        callback_url=config.agent_relay_callback_url,
         push_base_url=config.agent_relay_push_base_url,
         # Deployment policy for discovery is bound here, once, rather than held
         # by the service: the service's job is to decide what a card *means*,
