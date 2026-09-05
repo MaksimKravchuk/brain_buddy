@@ -31,6 +31,16 @@ const PATH_RULES: Array<{ match: RegExp } & EpicFeatureStory> = [
     story: "Connect an agent and gate the hand-off honestly",
   },
   {
+    // Spec 014, quickstart.md §7. The `e2e/agents` rule above does not match
+    // `agent-relay`, so without this line the compose spec would fall through
+    // to the generic application-shell fallback and leave the A2A stories
+    // outside their own epic in the aggregate report.
+    match: /e2e\/agent-relay/,
+    epic: "External agent relay",
+    feature: "A2A wire contract",
+    story: "Hand off to a real A2A agent end to end",
+  },
+  {
     match: /e2e\/auth/,
     epic: "End-to-end journeys",
     feature: "Authentication & access",

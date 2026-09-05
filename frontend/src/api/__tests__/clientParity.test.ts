@@ -30,7 +30,7 @@ type OperationName =
   | "appendBrainDumpTranscript" | "uploadBrainDumpAudio" | "sealBrainDump"
   | "updateBrainDumpProposal" | "commandBrainDump" | "listAgentConnections"
   | "createAgentConnection" | "getAgentConnection" | "updateAgentConnection"
-  | "testAgentConnection" | "rotateAgentCredential" | "rotateAgentSigningSecret"
+  | "testAgentConnection" | "rotateAgentCredential"
   | "disconnectAgentConnection" | "previewAgentHandoff" | "confirmAgentHandoff"
   | "listAgentRuns" | "getAgentRun" | "listAgentRunSummaries" | "replyToAgentRun"
   | "cancelAgentRun";
@@ -72,12 +72,11 @@ const adapters = {
   updateBrainDumpProposal: (c) => c.updateBrainDumpProposal("op-1", "proposal-1", { expected_revision: 1 }, "key-dump-proposal"),
   commandBrainDump: (c) => c.commandBrainDump("op-1", "finish", 1, "key-dump-command"),
   listAgentConnections: (c) => c.listAgentConnections(),
-  createAgentConnection: (c) => c.createAgentConnection({ name: "agent", endpoint_url: "https://agent.test", credential: "credential", current_password: "password" }, "key-agent-create"),
+  createAgentConnection: (c) => c.createAgentConnection({ name: "agent", agent_address: "https://agent.test", credential: "credential", current_password: "password" }, "key-agent-create"),
   getAgentConnection: (c) => c.getAgentConnection("connection-1"),
   updateAgentConnection: (c) => c.updateAgentConnection("connection-1", { expected_revision: 1 }, "key-agent-update"),
   testAgentConnection: (c) => c.testAgentConnection("connection-1"),
   rotateAgentCredential: (c) => c.rotateAgentCredential("connection-1", { credential: "credential", current_password: "password", expected_revision: 1 }, "key-agent-credential"),
-  rotateAgentSigningSecret: (c) => c.rotateAgentSigningSecret("connection-1", { current_password: "password", expected_revision: 1 }, "key-agent-secret"),
   disconnectAgentConnection: (c) => c.disconnectAgentConnection("connection-1", { current_password: "password", expected_revision: 1 }, "key-agent-disconnect"),
   previewAgentHandoff: (c) => c.previewAgentHandoff("task-1", { connection_id: "connection-1" }),
   confirmAgentHandoff: (c) => c.confirmAgentHandoff("task-1", { connection_id: "connection-1", manifest_token: "token" }, "key-agent-confirm"),
@@ -93,14 +92,14 @@ function jsonResponse(): Response {
 }
 
 describe("common client wire parity inventory", () => {
-  it("covers exactly 42 common operations with typed adapters", async () => {
+  it("covers exactly 41 common operations with typed adapters", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => jsonResponse());
     vi.stubGlobal("fetch", fetchMock);
     const names = Object.keys(manifest.operations) as OperationName[];
-    expect(names).toHaveLength(42);
+    expect(names).toHaveLength(41);
     expect(Object.keys(adapters).sort()).toEqual(names.sort());
     for (const name of names) await adapters[name](apiClient);
-    expect(fetchMock).toHaveBeenCalledTimes(42);
+    expect(fetchMock).toHaveBeenCalledTimes(41);
     fetchMock.mock.calls.forEach(([url, init], index) => {
       const operation = manifest.operations[names[index]];
       expect(String(url)).toBe(`/api${operation.path}`);

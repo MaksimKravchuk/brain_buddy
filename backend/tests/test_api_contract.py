@@ -127,15 +127,6 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
             "422",
             "429",
         },
-        ("/api/agent-connections/{connection_id}/signing-secret", "post"): {
-            "400",
-            "401",
-            "403",
-            "404",
-            "409",
-            "422",
-            "429",
-        },
         ("/api/agent-connections/{connection_id}/disconnect", "post"): {
             "400",
             "401",
@@ -155,7 +146,21 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
             "409",
             "422",
         },
-        ("/api/agent-events", "post"): {"400", "403", "413", "422"},
+        # Ungated on the rollout flag on purpose (014 AC-036): the lookup must
+        # still run for an already-dispatched hand-off, and 429 is the
+        # re-authentication rate limit the resend branch may consume.
+        ("/api/agent-runs/{run_id}/check-delivery", "post"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+            "429",
+        },
+        # The A2A push callback (014-FR-008). No `401`: it is called by the
+        # user's own agent, which has no session, and every refusal it can make
+        # is the same opaque `403` (`contracts/push-callback.md`).
+        ("/api/a2a/push/{run_id}/{token}", "post"): {"403", "413", "422", "429"},
         ("/api/brain-dump-operations", "post"): {"400", "401", "409", "422"},
         ("/api/brain-dump-providers", "get"): {"401"},
         ("/api/brain-dump-operations/{operation_id}", "get"): {"401", "404", "422"},

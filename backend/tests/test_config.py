@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -82,38 +83,6 @@ def test_production_rejects_deterministic_title_completion(
 
     with pytest.raises(ValueError, match="Production cannot use deterministic"):
         get_config()
-
-
-def test_relay_manifest_callback_uses_the_configured_api_prefix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
-    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BRAIN_BUDDY_PUBLIC_BASE_URL", "https://relay.example.test")
-    monkeypatch.setenv("BRAIN_BUDDY_API_PREFIX", "/custom")
-
-    config = get_config()
-    container = build_container(config)
-
-    assert config.agent_relay.public_base_url == "https://relay.example.test"
-    assert container.agent_relay_service.callback_url == (
-        "https://relay.example.test/custom/agent-events"
-    )
-
-
-def test_relay_manifest_callback_defaults_to_api_prefix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
-    monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BRAIN_BUDDY_PUBLIC_BASE_URL", "https://relay.example.test")
-    monkeypatch.delenv("BRAIN_BUDDY_API_PREFIX", raising=False)
-
-    container = build_container(get_config())
-
-    assert container.agent_relay_service.callback_url == (
-        "https://relay.example.test/api/agent-events"
-    )
 
 
 def test_get_config_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -509,8 +478,8 @@ class TestAgentRelayCallbackOrigin:
             config.agent_relay.public_base_url == "https://brain-buddy-backend.fly.dev"
         )
         assert (
-            config.agent_relay_callback_url
-            == "https://brain-buddy-backend.fly.dev/api/agent-events"
+            config.agent_relay_push_base_url
+            == "https://brain-buddy-backend.fly.dev/api/a2a/push"
         )
 
     def test_a_trailing_slash_still_yields_exactly_one_callback_path(
@@ -527,16 +496,16 @@ class TestAgentRelayCallbackOrigin:
         config = get_config()
 
         assert (
-            config.agent_relay_callback_url
-            == "https://brain-buddy-backend.fly.dev/api/agent-events"
+            config.agent_relay_push_base_url
+            == "https://brain-buddy-backend.fly.dev/api/a2a/push"
         )
 
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            ("http://localhost:8000", "http://localhost:8000/api/agent-events"),
-            ("http://127.0.0.1:8000", "http://127.0.0.1:8000/api/agent-events"),
-            ("https://dev.example.test", "https://dev.example.test/api/agent-events"),
+            ("http://localhost:8000", "http://localhost:8000/api/a2a/push"),
+            ("http://127.0.0.1:8000", "http://127.0.0.1:8000/api/a2a/push"),
+            ("https://dev.example.test", "https://dev.example.test/api/a2a/push"),
         ],
     )
     def test_development_still_allows_a_local_origin(
@@ -552,7 +521,7 @@ class TestAgentRelayCallbackOrigin:
         monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
         monkeypatch.setenv("BRAIN_BUDDY_PUBLIC_BASE_URL", raw)
 
-        assert get_config().agent_relay_callback_url == expected
+        assert get_config().agent_relay_push_base_url == expected
 
     @pytest.mark.parametrize(
         "raw",
@@ -926,7 +895,7 @@ class TestAgentRelayCallbackStartup:
         config = get_config()
 
         assert config.agent_relay.public_base_url == deployed
-        assert config.agent_relay_callback_url == f"{deployed}/api/agent-events"
+        assert config.agent_relay_push_base_url == f"{deployed}/api/a2a/push"
 
     def test_production_resolves_a_non_allowlisted_origin_before_accepting_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -948,8 +917,7 @@ class TestAgentRelayCallbackStartup:
 
         assert asked == ["relay.example.com"]
         assert (
-            config.agent_relay_callback_url
-            == "https://relay.example.com/api/agent-events"
+            config.agent_relay_push_base_url == "https://relay.example.com/api/a2a/push"
         )
 
     def test_production_refuses_an_origin_whose_name_does_not_resolve(
@@ -984,3 +952,153 @@ class TestAgentRelayCallbackStartup:
 
         with pytest.raises(ValueError, match="public base URL"):
             get_config()
+
+
+class TestAgentRelayWireSettings:
+    """The 014 wire contract's deployment knobs, and the honesty of `.env.example`.
+
+    Three properties that a reader of `config.py` alone cannot check:
+
+    1. the eight new pool/window settings exist with the bounds `data-model.md`
+       §9 fixes, including the two cross-field rules (`max_exchanges_per_connection`
+       may never exceed `exchange_workers`, and the task read cap has a hard 1 MiB
+       ceiling) — bounds are what keep one hostile agent from exhausting the
+       shared pools for every owner;
+    2. the push callback is derived from the *same* prefix FastAPI mounts, so
+       what BrainBuddy tells an agent to call and what BrainBuddy serves cannot
+       drift apart — an agent given a wrong callback simply never arrives, and
+       no later fix reaches it;
+    3. `.env.example` is documented as the authoritative environment reference
+       (CLAUDE.md), which is only true if every relay variable `config.py`
+       actually reads appears in it.
+    """
+
+    def test_014_FR_008_agent_relay_settings_expose_observer_pools_and_bounds(
+        self,
+    ) -> None:
+        """The eight new settings carry the defaults and bounds of data-model.md §9.
+
+        AC-034, AC-035: the absolute deadline and the per-connection exchange
+        bound are both derived from these values, so a silently-widened bound
+        would weaken a safety property rather than a preference.
+        """
+
+        from pydantic import ValidationError
+
+        from app.core.config import AgentRelaySettings
+
+        settings = AgentRelaySettings()
+
+        assert settings.observation_interval_seconds == 60
+        assert settings.reply_window_seconds == 300
+        assert settings.dispatch_wait_seconds == 5
+        assert settings.exchange_workers == 8
+        assert settings.max_exchanges_per_connection == 2
+        assert settings.observer_workers == 4
+        assert settings.control_workers == 2
+        assert settings.a2a_task_max_response_bytes == 262_144
+
+        # Bounds, each named by the failure it prevents.
+        for field, bad in [
+            ("observation_interval_seconds", 4),
+            ("observation_interval_seconds", 3_601),
+            # Never below 300 s: FR-007 promises the agent a five-minute reply
+            # window, and a shorter one would make BrainBuddy the party that
+            # gave up first while telling the user the agent did.
+            ("reply_window_seconds", 299),
+            ("reply_window_seconds", 3_601),
+            ("dispatch_wait_seconds", -1),
+            ("dispatch_wait_seconds", 31),
+            ("exchange_workers", 0),
+            ("exchange_workers", 65),
+            ("max_exchanges_per_connection", 0),
+            ("observer_workers", 0),
+            ("observer_workers", 65),
+            ("control_workers", 0),
+            ("control_workers", 17),
+            ("a2a_task_max_response_bytes", 1_023),
+        ]:
+            with pytest.raises(ValidationError):
+                AgentRelaySettings(**{field: bad})
+
+        # One connection may never be allowed more exchange workers than exist.
+        with pytest.raises(ValidationError):
+            AgentRelaySettings(exchange_workers=2, max_exchanges_per_connection=3)
+        assert (
+            AgentRelaySettings(
+                exchange_workers=2, max_exchanges_per_connection=2
+            ).max_exchanges_per_connection
+            == 2
+        )
+
+        # 1 MiB is a hard maximum, not a default that operators may raise: an
+        # unbounded task read is an unbounded allocation from an agent BrainBuddy
+        # does not control.
+        assert (
+            AgentRelaySettings(
+                a2a_task_max_response_bytes=1_048_576
+            ).a2a_task_max_response_bytes
+            == 1_048_576
+        )
+        with pytest.raises(ValidationError):
+            AgentRelaySettings(a2a_task_max_response_bytes=1_048_577)
+
+    def test_014_FR_007_push_base_url_is_public_base_url_plus_api_prefix_and_a2a_push(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The push callback is built from the prefix FastAPI actually mounts.
+
+        AC-021: a callback origin travels into a third-party system and cannot
+        be recalled, so it is derived, never restated.
+        """
+
+        from app.core.config import AGENT_PUSH_PATH
+
+        assert AGENT_PUSH_PATH == "/a2a/push"
+
+        monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
+        monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("BRAIN_BUDDY_PUBLIC_BASE_URL", "https://relay.example.test")
+        monkeypatch.setenv("BRAIN_BUDDY_API_PREFIX", "/custom")
+
+        assert (
+            get_config().agent_relay_push_base_url
+            == "https://relay.example.test/custom/a2a/push"
+        )
+
+        get_config.cache_clear()  # type: ignore[attr-defined]
+        monkeypatch.delenv("BRAIN_BUDDY_API_PREFIX", raising=False)
+        monkeypatch.setenv("BRAIN_BUDDY_PUBLIC_BASE_URL", "https://relay.example.test/")
+
+        assert (
+            get_config().agent_relay_push_base_url
+            == "https://relay.example.test/api/a2a/push"
+        )
+
+    def test_014_FR_008_env_example_documents_every_agent_relay_variable(self) -> None:
+        """`.env.example` is the authoritative environment reference, or it is not.
+
+        AC-035: an operator tuning the relay reads that file. A variable
+        `config.py` reads but the file omits is a knob nobody knows exists —
+        which for the retention and destination-policy variables means a
+        privacy or egress setting left at a default by accident rather than by
+        decision. Read from source rather than restated, so a new
+        `BRAIN_BUDDY_AGENT_*` lookup fails this test until it is documented.
+        """
+
+        repo_root = Path(__file__).resolve().parents[2]
+        env_example = (repo_root / ".env.example").read_text(encoding="utf-8")
+        config_source = (
+            repo_root / "backend" / "app" / "core" / "config.py"
+        ).read_text(encoding="utf-8")
+
+        referenced = set(re.findall(r'"(BRAIN_BUDDY_AGENT_[A-Z0-9_]+)"', config_source))
+        assert referenced, "expected config.py to read BRAIN_BUDDY_AGENT_* variables"
+        referenced.add("BRAIN_BUDDY_PUBLIC_BASE_URL")
+
+        undocumented = sorted(name for name in referenced if name not in env_example)
+        assert not undocumented, (
+            ".env.example is the authoritative environment reference, so every "
+            "relay variable config.py reads must appear in it; missing: "
+            f"{undocumented}"
+        )

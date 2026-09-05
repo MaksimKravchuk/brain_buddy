@@ -1,12 +1,18 @@
 import { StyleSheet, View } from "react-native";
 
 import type { AgentConnectionResponse } from "@/api/types";
-import { capabilityDisclosure, connectionStatusLabel, lastContactLabel } from "@/agents/machine";
+import {
+  authSchemeLabel,
+  capabilityDisclosure,
+  connectionStatusDetail,
+  connectionStatusLabel,
+  lastContactLabel,
+  rateLimitRetryCopy,
+} from "@/agents/machine";
 import { BBText } from "@/components/BBText";
 import { Button } from "@/components/Button";
 import {
   canDisconnect,
-  canReplaceSigningSecret,
   canRotateCredential,
   canTestConnection,
   type AgentGuardOptions,
@@ -19,7 +25,6 @@ interface ConnectionCardProps {
   testing?: boolean;
   onTest: () => void;
   onRotate: () => void;
-  onReplaceSigningSecret: () => void;
   onDisconnect: () => void;
 }
 
@@ -31,6 +36,9 @@ const WARN: Tone = { bg: colors.warningBg, border: colors.warningBorder, fg: col
 const BAD: Tone = { bg: colors.dangerBg, border: colors.dangerBorder, fg: colors.dangerFg };
 
 function toneFor(connection: AgentConnectionResponse): Tone {
+  if (connection.agent_changed || connection.last_test_error_code === "a2a_rate_limited") {
+    return WARN;
+  }
   switch (connection.status) {
     case "ready":
       return connection.stale ? WARN : OK;
@@ -54,7 +62,6 @@ export function ConnectionCard({
   testing = false,
   onTest,
   onRotate,
-  onReplaceSigningSecret,
   onDisconnect,
 }: ConnectionCardProps) {
   const guardOptions: AgentGuardOptions = { online };
@@ -62,8 +69,8 @@ export function ConnectionCard({
   const { supported, unsupported } = capabilityDisclosure(connection.capabilities);
   const testGuard = canTestConnection(connection, guardOptions);
   const rotateGuard = canRotateCredential(connection, guardOptions);
-  const signingSecretGuard = canReplaceSigningSecret(connection, guardOptions);
   const disconnectGuard = canDisconnect(connection, guardOptions);
+  const card = connection.card;
 
   return (
     <View style={styles.card}>
@@ -79,24 +86,88 @@ export function ConnectionCard({
       </View>
 
       <BBText variant="micro" color={colors.fg5} numberOfLines={2}>
-        {connection.endpoint_url}
+        {connection.agent_address}
       </BBText>
       <BBText variant="micro" color={colors.fg6}>
-        {`Auth header: ${connection.auth_header_name}`}
+        {`Credential: ${authSchemeLabel(connection)}`}
       </BBText>
       <BBText variant="micro" color={colors.fg5}>
         {lastContactLabel(connection.last_contact_at)}
       </BBText>
 
-      {connection.last_test_error_code ===
-      "legacy_invalid_auth_header_requires_reconfiguration" ? (
+      <BBText variant="caption" color={colors.fg4}>
+        {connectionStatusDetail(connection)}
+      </BBText>
+
+      {connection.last_test_error_code === "a2a_rate_limited" ? (
         <BBText variant="caption" color={colors.warningFg}>
-          {`Enter a replacement credential for ${connection.auth_header_name}, then test the connection.`}
+          {rateLimitRetryCopy(connection)}
         </BBText>
-      ) : connection.last_test_error_code ? (
-        <BBText variant="caption" color={colors.dangerFg}>
-          The last connection test failed. Test again after correcting the connection settings.
-        </BBText>
+      ) : null}
+
+      {connection.agent_changed ? (
+        <View style={styles.kv} accessibilityLabel="Interface comparison">
+          <BBText variant="micro" color={colors.warningFg}>
+            {`Tested interface: ${card?.interface_url ?? "Unknown"}`}
+          </BBText>
+          <BBText variant="micro" color={colors.warningFg}>
+            {`Card now says: ${
+              connection.last_test_error_detail &&
+              "interface_url" in connection.last_test_error_detail
+                ? (connection.last_test_error_detail.interface_url ?? "Unknown")
+                : "Unknown"
+            }`}
+          </BBText>
+        </View>
+      ) : null}
+
+      {card ? (
+        <View style={styles.kv} accessibilityLabel="Discovery result">
+          <BBText variant="micro" color={colors.fg5}>{`Name: ${card.name ?? "Not stated"}`}</BBText>
+          <BBText variant="micro" color={colors.fg5}>
+            {`Version: ${card.version ?? "Not stated"}`}
+          </BBText>
+          <BBText variant="micro" color={colors.fg5}>
+            {`Protocol version: ${card.protocol_version ?? "Not stated"}`}
+          </BBText>
+          <BBText variant="micro" color={colors.fg5} numberOfLines={2}>
+            {`Interface: ${card.interface_url ?? "Not stated"}`}
+          </BBText>
+          {card.description ? (
+            <BBText variant="micro" color={colors.fg5}>
+              {card.description}
+            </BBText>
+          ) : null}
+          {card.skills.length > 0 ? (
+            <View style={styles.skills} accessibilityLabel="Skills">
+              {card.skills.map((skill, index) => (
+                <View key={`${skill.id ?? "skill"}-${index}`} style={styles.skill}>
+                  <BBText variant="micro" color={colors.fg4}>
+                    {skill.name ?? skill.id ?? "Unnamed skill"}
+                  </BBText>
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {connection.tier_disclosure ? (
+        <View style={styles.kv} accessibilityLabel="Guarantee">
+          <BBText variant="caption" color={colors.fg4}>
+            {connection.tier_disclosure}
+          </BBText>
+          {connection.guarantee_tier === "best_effort" && connection.tier_disclosure_url ? (
+            <BBText variant="micro" color={colors.fg5}>
+              {`Read the single-start extension specification: ${connection.tier_disclosure_url}`}
+            </BBText>
+          ) : null}
+          {connection.cancellation_disclosure ? (
+            <BBText variant="micro" color={colors.fg5}>
+              {connection.cancellation_disclosure}
+            </BBText>
+          ) : null}
+        </View>
       ) : null}
 
       <View style={styles.capabilities}>
@@ -135,14 +206,6 @@ export function ConnectionCard({
           onPress={onRotate}
         >
           Rotate credential
-        </Button>
-        <Button
-          variant="secondary"
-          style={styles.action}
-          disabled={!signingSecretGuard.ok}
-          onPress={onReplaceSigningSecret}
-        >
-          Replace signing secret
         </Button>
         <Button
           variant="destructive"
@@ -195,6 +258,23 @@ const styles = StyleSheet.create({
   capabilities: {
     gap: 2,
     marginTop: space.s1,
+  },
+  kv: {
+    gap: 2,
+    marginTop: space.s1,
+  },
+  skills: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: space.s2,
+    marginTop: space.s1,
+  },
+  skill: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.full,
+    paddingHorizontal: space.s2,
+    paddingVertical: 2,
   },
   actions: {
     flexDirection: "row",
