@@ -3,20 +3,24 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_NAME="${BRAIN_BUDDY_E2E_PROJECT:-brainbuddy-e2e-${GITHUB_RUN_ID:-local}-$(date +%s)-$$}"
-BACKEND_PORT="${BRAIN_BUDDY_E2E_BACKEND_PORT:-$(python3 - <<'PY'
+# Two distinct free ports, chosen while both sockets are still held. Picking
+# them one process at a time let the kernel hand the same ephemeral port out
+# twice — the first socket was already closed when the second asked — and
+# Compose then failed to publish the frontend on the port the backend held.
+read -r DEFAULT_BACKEND_PORT DEFAULT_FRONTEND_PORT < <(python3 - <<'PY'
 import socket
-with socket.socket() as s:
-    s.bind(("127.0.0.1", 0))
-    print(s.getsockname()[1])
+with socket.socket() as backend, socket.socket() as frontend:
+    backend.bind(("127.0.0.1", 0))
+    frontend.bind(("127.0.0.1", 0))
+    print(backend.getsockname()[1], frontend.getsockname()[1])
 PY
-)}"
-FRONTEND_PORT="${BRAIN_BUDDY_E2E_FRONTEND_PORT:-$(python3 - <<'PY'
-import socket
-with socket.socket() as s:
-    s.bind(("127.0.0.1", 0))
-    print(s.getsockname()[1])
-PY
-)}"
+)
+BACKEND_PORT="${BRAIN_BUDDY_E2E_BACKEND_PORT:-${DEFAULT_BACKEND_PORT}}"
+FRONTEND_PORT="${BRAIN_BUDDY_E2E_FRONTEND_PORT:-${DEFAULT_FRONTEND_PORT}}"
+if [ "${BACKEND_PORT}" = "${FRONTEND_PORT}" ]; then
+  echo "[e2e] The backend and frontend ports must differ (both are ${BACKEND_PORT})." >&2
+  exit 1
+fi
 
 # Compose starts exactly these tags (see compose.yaml). Defaulting them per
 # project keeps concurrent local runs from racing on a shared tag; CI overrides
