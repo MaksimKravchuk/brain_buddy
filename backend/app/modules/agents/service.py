@@ -143,6 +143,7 @@ from .secrets import (
     SecretDecryptionFailed,
     derive_push_token,
     push_token_fingerprint,
+    push_token_matches,
     secret_aad,
 )
 
@@ -166,6 +167,26 @@ _MAX_BACKOFF_DOUBLINGS = 16
 TEXT_BEARING_TASK_STATES: frozenset[TaskState] = frozenset(
     {TaskState.INPUT_REQUIRED, *TERMINAL_TASK_STATES}
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PushOutcome:
+    """What one inbound push turned out to be.
+
+    Deliberately not a run and not a reason string. The route answers one
+    opaque refusal for every failure, so anything richer crossing this
+    boundary would be a fact waiting to leak into a response header, a
+    timing difference or a log line.
+    """
+
+    owner_id: str | None
+    verified: bool
+    closed: bool
+
+
+#: The answer for a run that does not exist, was never dispatched, or whose
+#: identifiers have expired. No owner, so no row and no limiter key.
+PUSH_UNKNOWN = PushOutcome(owner_id=None, verified=False, closed=False)
 
 #: The only agent answers that may reject a *reply* outright: an explicit
 #: statement that the task will not take one. Everything else leaves the
@@ -2846,6 +2867,104 @@ class AgentRelayService:
             )
 
 
+
+    # --- the push callback (FR-008, contracts/push-callback.md) -------------
+
+    def verify_push(self, run_id: str, token: str) -> PushOutcome:
+        """Decide what one inbound push is, in the order the contract fixes.
+
+        Returns a classification, never a run: the route answers one opaque
+        `403` for every refusal, so what it needs from here is which bounded
+        audit row to write and whether to wake the observer — not anything a
+        caller could read back out of a response.
+
+        The fingerprint is deliberately still present on a closed run, so a
+        valid push racing BrainBuddy's own terminal observation — the common
+        Hermes case — is classified `push_after_close` rather than reported to
+        the owner as a forged token (data-model.md §7, SC-003).
+        """
+
+        owner_id = self.agent_repo.owner_of_run(run_id)
+        if owner_id is None:
+            return PUSH_UNKNOWN
+        with self.agent_repo.command_lock(owner_id):
+            try:
+                run = self.agent_repo.get_run(run_id, owner_id=owner_id)
+            except NotFoundError:  # pragma: no cover - purged between the two reads
+                return PUSH_UNKNOWN
+            if (
+                run.dispatched_at is None
+                or run.identifiers_expired
+                or run.push_token_fingerprint is None
+            ):
+                # Nothing to compare against, so there is nothing this caller
+                # could be right about — and no row worth keeping about them.
+                return PUSH_UNKNOWN
+            if not push_token_matches(
+                self.secret_box, run.push_token_fingerprint, token
+            ):
+                self._bounded_audit(
+                    owner_id=owner_id,
+                    action="push_token_rejected",
+                    outcome="fingerprint_mismatch",
+                    bucket=run.connection_id,
+                    connection_id=run.connection_id,
+                    run_id=run.id,
+                )
+                return PushOutcome(owner_id=owner_id, verified=False, closed=False)
+            if not self._push_is_still_honoured(run, owner_id=owner_id):
+                self._bounded_audit(
+                    owner_id=owner_id,
+                    action="push_after_close",
+                    outcome="run_closed",
+                    bucket=run.connection_id,
+                    connection_id=run.connection_id,
+                    run_id=run.id,
+                )
+                return PushOutcome(owner_id=owner_id, verified=False, closed=True)
+            now = self._now()
+            self.agent_repo.save_run(
+                run.model_copy(
+                    update={
+                        "observation_trigger_pending": "push",
+                        # A verified push resets the backoff: the agent is
+                        # telling BrainBuddy there is something to see.
+                        "next_observation_at": min(
+                            run.next_observation_at or now, now
+                        ),
+                        "updated_at": max(run.updated_at, now),
+                        "revision": run.revision + 1,
+                    }
+                )
+            )
+            self._audit(
+                owner_id=owner_id,
+                action="push_verified",
+                outcome="accepted",
+                connection_id=run.connection_id,
+                run_id=run.id,
+            )
+        return PushOutcome(owner_id=owner_id, verified=True, closed=False)
+
+    def _push_is_still_honoured(
+        self, run: AgentRunDocument, *, owner_id: str
+    ) -> bool:
+        """Whether an observation this push asked for could still mean anything."""
+
+        if (
+            run.reported_state in TERMINAL_REPORTED_STATES
+            or run.agent_task_missing_at is not None
+            or run.connection_disconnected_at is not None
+        ):
+            return False
+        try:
+            connection = self.agent_repo.get_connection(
+                run.connection_id, owner_id=owner_id
+            )
+        except NotFoundError:  # pragma: no cover - connection rows outlive runs
+            return False
+        return connection.status != "disconnected"
+
     # --- the observation lane's service side (FR-008) -----------------------
 
     def observation_backoff(
@@ -3756,6 +3875,15 @@ class AgentRelayService:
             raise ValidationFailure(
                 "This run has already finished.",
                 detail={"reason": "run_terminal"},
+            )
+        if run.agent_task_missing_at is not None:
+            # AC-020. Not a failure and not a refusal by the agent — there is
+            # simply nothing left at the agent for a command to reach, and
+            # sending one would be a request made to hear the same answer.
+            raise ValidationFailure(
+                "This agent no longer reports this run, so BrainBuddy can no "
+                "longer send it anything.",
+                detail={"reason": "agent_task_missing"},
             )
         return run, connection
 

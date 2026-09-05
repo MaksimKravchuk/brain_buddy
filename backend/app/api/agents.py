@@ -11,6 +11,8 @@ runs by reading error messages.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -25,13 +27,18 @@ from fastapi import (
 from app.api.contracts import error_responses
 from app.api.dependencies import (
     external_agent_relay_enabled,
+    get_agent_observer_wake,
     get_agent_relay_service,
     get_auth_service,
     get_current_user,
     get_feature_flag_service,
     require_external_agent_relay_enabled,
 )
-from app.core.rate_limit import sensitive_action_rate_limiter
+from app.core.rate_limit import (
+    BoundedKeyRateLimiter,
+    FixedWindowCounter,
+    sensitive_action_rate_limiter,
+)
 from app.exceptions import ReauthFailedError, ValidationFailure
 from app.modules.agents.service import AgentRelayService, EventRejected
 from app.schemas.agents import (
@@ -57,6 +64,43 @@ from app.services import AuthService, FeatureFlagService
 router = APIRouter(tags=["agents"])
 
 MAX_EVENT_BODY_BYTES = 64_000
+
+#: Process-wide budget consulted *before* any database read, so a flood costs
+#: one integer comparison rather than a lookup per request
+#: (`contracts/push-callback.md`, step 2).
+PUSH_GLOBAL_MAX_PER_MINUTE = 600
+#: Per-run budget, reachable only once a run has actually been found. The
+#: existence signal that follows from it is deliberate and is recorded in
+#: `docs/auth.md`: run ids are unguessable, and the token authorises only an
+#: observation BrainBuddy would perform anyway.
+PUSH_RUN_MAX_PER_MINUTE = 30
+#: Keys are minted only for known, dispatched runs, and dropped when a run can
+#: never be pushed for again — so this cap is a second line, not the first.
+PUSH_LIMITER_MAX_KEYS = 1024
+
+push_global_limiter = FixedWindowCounter(
+    max_events=PUSH_GLOBAL_MAX_PER_MINUTE, window_seconds=60.0
+)
+push_run_limiter = BoundedKeyRateLimiter(
+    max_attempts=PUSH_RUN_MAX_PER_MINUTE,
+    window_seconds=60.0,
+    max_keys=PUSH_LIMITER_MAX_KEYS,
+)
+
+
+def _push_rejected() -> HTTPException:
+    """The one refusal this route can make.
+
+    Byte-identical for an unknown run, a forged token and a run that has
+    closed, with no distinguishing header and no ``Retry-After``: the caller is
+    an agent with no session, and any difference between the three would let a
+    prober map runs by reading error shapes. The distinction is recorded, once
+    per class per day, in the owner's own audit.
+    """
+
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail="Notification rejected."
+    )
 
 
 def _require_idempotency_key(idempotency_key: str | None) -> str:
@@ -493,6 +537,82 @@ def cancel_agent_run(
         owner_id=current_user.id,
         idempotency_key=_require_idempotency_key(idempotency_key),
     )
+
+
+# --- the A2A push callback --------------------------------------------------
+
+
+@router.post(
+    "/a2a/push/{run_id}/{token}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(403, 413, 422, 429),
+)
+async def receive_agent_push(
+    run_id: str,
+    token: str,
+    request: Request,
+    service: AgentRelayService = Depends(get_agent_relay_service),
+    wake: Callable[[str], None] = Depends(get_agent_observer_wake),
+) -> Response:
+    """Accept one push notification from a user's agent, and only look sooner.
+
+    No session, because the caller is the agent; not flag-gated, because a run
+    that was already dispatched must keep being observed whatever the owner's
+    rollout state later becomes. The body is never parsed for state — the
+    authenticated `GetTask` that follows is the only thing that may change what
+    a run says — so the whole route is: bound the body, bound the route, find
+    the run, compare the token in constant time, and wake the observer.
+
+    The order below is the contract's, and each step earns its place: the body
+    cap runs before anything is read, the process-wide limiter before any
+    database read, and the per-run limiter only once a run is known — so an
+    unknown id can never mint a limiter key or a durable row.
+    """
+
+    await _bounded_push_body(request)
+    if not push_global_limiter.check():
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many notifications.",
+        )
+    outcome = service.verify_push(run_id, token)
+    if outcome.owner_id is None or not outcome.verified:
+        if outcome.closed:
+            # The run can never be pushed for again, so its bucket is retention
+            # of something with no use.
+            push_run_limiter.evict(run_id)
+        raise _push_rejected()
+    if not push_run_limiter.check(run_id):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many notifications.",
+        )
+    wake(run_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def _bounded_push_body(request: Request) -> None:
+    """Read and discard the push body without ever buffering past the cap.
+
+    Discarded rather than returned, because nothing may read it: the body is an
+    agent's claim about a run, and the whole design of this route is that only
+    BrainBuddy's own authenticated read decides what a run says.
+    """
+
+    declared = _declared_body_length(request)
+    if declared is not None and declared > MAX_EVENT_BODY_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Notification payload is too large.",
+        )
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_EVENT_BODY_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Notification payload is too large.",
+            )
 
 
 # --- inbound connector events -----------------------------------------------

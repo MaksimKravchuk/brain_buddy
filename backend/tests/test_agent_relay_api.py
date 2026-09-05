@@ -2749,3 +2749,515 @@ class TestHandOffContractOverHttp:
         assert recovered["dispatch_error_code"] == "restarted_before_send"
         assert recovered["primary_state_label"] == "Not sent"
         assert recovered["message_id"] == f"{run['id']}:start"
+
+
+class TestPushCallbackRoute:
+    """`POST /api/a2a/push/{run_id}/{token}`, in the order the contract fixes.
+
+    The route has no session by design — the caller is the user's agent — so
+    every refusal it can make has to be indistinguishable from every other, and
+    the only place the difference is recorded is the owner's own bounded audit.
+
+    014-FR-008, 014-FR-010, 014-SC-003, 014-SC-009.
+    """
+
+    def _pushable(
+        self, client: TestClient, container: Container, *, key: str = "k-push"
+    ) -> tuple[str, str]:
+        """One dispatched run whose card supports push, and its token."""
+
+        service = container.agent_relay_service
+        service._card_fetcher.discovery = ready_discovery(  # type: ignore[attr-defined]
+            summary=card_summary(push_notifications=True)
+        )
+        connection = register_connection(client, key=key)
+        assert (
+            client.post(
+                f"/api/agent-connections/{connection['id']}/test",
+                headers={"Idempotency-Key": f"{key}-test"},
+            ).status_code
+            == 200
+        )
+        task_id = create_task(client, title=f"Push {key}")
+        run = hand_off(client, connection["id"], task_id, key=f"{key}-dispatch")
+        stored = service.agent_repo.get_run(
+            run["id"], owner_id=service.agent_repo.owner_of_run(run["id"]) or ""
+        )
+        assert stored.push_token_fingerprint is not None
+        return run["id"], service.push_token_for(stored) or ""
+
+    def _push(
+        self, client: TestClient, run_id: str, token: str
+    ) -> Any:
+        return client.post(f"/api/a2a/push/{run_id}/{token}", content=b"{}")
+
+    def test_014_FR_008_a_verified_push_is_accepted_and_schedules_an_observation(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-021. The push does not carry state; it only asks BrainBuddy to look."""
+
+        run_id, token = self._pushable(client, container)
+        woken: list[str] = []
+        container.agent_observer.wake = woken.append  # type: ignore[method-assign]
+
+        response = self._push(client, run_id, token)
+
+        assert response.status_code == 204
+        assert response.content == b""
+        service = container.agent_relay_service
+        owner_id = service.agent_repo.owner_of_run(run_id) or ""
+        stored = service.agent_repo.get_run(run_id, owner_id=owner_id)
+        assert stored.observation_trigger_pending == "push"
+        assert woken == [run_id]
+        assert "push_verified" in [
+            entry.action for entry in service.list_audit(owner_id=owner_id)
+        ]
+
+    def test_014_FR_008_a_verified_push_resets_the_observation_backoff(
+        self, client: TestClient, container: Container
+    ) -> None:
+        run_id, token = self._pushable(client, container, key="k-push-backoff")
+        service = container.agent_relay_service
+        owner_id = service.agent_repo.owner_of_run(run_id) or ""
+        run = service.agent_repo.get_run(run_id, owner_id=owner_id)
+        far_off = utcnow() + timedelta(hours=6)
+        service.agent_repo.save_run(run.model_copy(update={"next_observation_at": far_off}))
+
+        assert self._push(client, run_id, token).status_code == 204
+
+        after = service.agent_repo.get_run(run_id, owner_id=owner_id)
+        assert after.next_observation_at is not None
+        assert after.next_observation_at < far_off
+
+    def test_push_rejections_are_indistinguishable_to_the_caller(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """SC-003. Steps 3, 4 and 5 differ only in BrainBuddy's own audit.
+
+        Compared against each other rather than against a literal, because the
+        property is that a prober cannot tell them apart — not that the body
+        happens to read a particular way today. Only the per-request
+        correlation id, which every error on every route carries, may differ.
+        """
+
+        run_id, token = self._pushable(client, container, key="k-push-same")
+        _other_run, other_token = self._pushable(
+            client, container, key="k-push-same-other"
+        )
+        service = container.agent_relay_service
+        owner_id = service.agent_repo.owner_of_run(run_id) or ""
+
+        unknown = self._push(client, "agentrun_does_not_exist", token)
+        forged = self._push(client, run_id, "forged-" + token)
+        wrong_run = self._push(client, run_id, other_token)
+
+        connection_id = service.agent_repo.get_run(
+            run_id, owner_id=owner_id
+        ).connection_id
+        connection = service.get_connection(connection_id, owner_id=owner_id)
+        assert (
+            client.post(
+                f"/api/agent-connections/{connection_id}/disconnect",
+                headers={"Idempotency-Key": "k-disc-same"},
+                json={
+                    "current_password": TEST_USER_PASSWORD,
+                    "expected_revision": connection.revision,
+                },
+            ).status_code
+            == 200
+        )
+        disconnected = self._push(client, run_id, token)
+
+        responses = [unknown, forged, wrong_run, disconnected]
+        assert [response.status_code for response in responses] == [403] * 4
+        bodies = [
+            {
+                key: value
+                for key, value in response.json().items()
+                if key != "reference_id"
+            }
+            for response in responses
+        ]
+        assert bodies[1:] == bodies[:-1], "the four refusals must read alike"
+        for response in responses:
+            assert "Retry-After" not in response.headers
+            assert response.headers.get("WWW-Authenticate") is None
+        # The distinction exists, but only where the owner can see it.
+        actions = [entry.action for entry in service.list_audit(owner_id=owner_id)]
+        assert "push_token_rejected" in actions
+        assert "push_after_close" in actions
+
+    def test_014_SC_003_an_unknown_run_leaves_no_row_and_no_limiter_key(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """Step 3. A stranger's guess must cost nothing durable."""
+
+        from app.api.agents import push_run_limiter
+
+        run_id, _token = self._pushable(client, container, key="k-push-unknown")
+        service = container.agent_relay_service
+        owner_id = service.agent_repo.owner_of_run(run_id) or ""
+        before = len(service.list_audit(owner_id=owner_id))
+        push_run_limiter.reset()
+
+        for index in range(50):
+            assert (
+                self._push(client, f"agentrun_guess_{index}", "whatever").status_code
+                == 403
+            )
+
+        assert push_run_limiter.key_count == 0
+        assert len(service.list_audit(owner_id=owner_id)) == before
+
+    def test_unknown_run_flood_leaves_limiter_memory_bounded_and_no_rows(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """The same property under volume, which is when it matters."""
+
+        from app.api.agents import push_run_limiter
+
+        push_run_limiter.reset()
+        for index in range(200):
+            self._push(client, f"agentrun_flood_{index}", "t")
+
+        assert push_run_limiter.key_count == 0
+
+    def test_014_SC_003_a_forged_token_writes_one_bounded_row_per_day(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """Step 4. Accountability without a row per attempt."""
+
+        run_id, token = self._pushable(client, container, key="k-push-forged")
+        service = container.agent_relay_service
+        owner_id = service.agent_repo.owner_of_run(run_id) or ""
+
+        for index in range(5):
+            assert self._push(client, run_id, f"forged-{index}").status_code == 403
+
+        actions = [entry.action for entry in service.list_audit(owner_id=owner_id)]
+        assert actions.count("push_token_rejected") == 1
+        assert token
+
+    def test_valid_push_after_terminal_is_classified_push_after_close(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """Step 5, and the common Hermes race: a terminal push is not a forgery."""
+
+        run_id, token = self._pushable(client, container, key="k-push-late")
+        service = container.agent_relay_service
+        owner_id = service.agent_repo.owner_of_run(run_id) or ""
+        run = service.agent_repo.get_run(run_id, owner_id=owner_id)
+        service.agent_repo.save_run(
+            run.model_copy(
+                update={"reported_state": "completed", "next_observation_at": None}
+            )
+        )
+
+        assert self._push(client, run_id, token).status_code == 403
+
+        actions = [entry.action for entry in service.list_audit(owner_id=owner_id)]
+        assert "push_after_close" in actions
+        assert "push_token_rejected" not in actions
+
+    @pytest.mark.parametrize("declared", [True, False])
+    def test_014_FR_008_an_oversize_body_is_refused_at_the_cap(
+        self, client: TestClient, container: Container, declared: bool
+    ) -> None:
+        """Step 1, on the header alone and again while reading."""
+
+        run_id, token = self._pushable(
+            client, container, key=f"k-push-big-{int(declared)}"
+        )
+        body = b"x" * (MAX_EVENT_BODY_BYTES + 1)
+        headers = {} if declared else {"Transfer-Encoding": "chunked"}
+
+        response = client.post(
+            f"/api/a2a/push/{run_id}/{token}", content=body, headers=headers
+        )
+
+        assert response.status_code == 413
+
+    def test_global_push_limiter_trips_before_the_run_lookup(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """Step 2. A flood costs one integer comparison, not a database read."""
+
+        from app.api.agents import PUSH_GLOBAL_MAX_PER_MINUTE, push_global_limiter
+
+        run_id, token = self._pushable(client, container, key="k-push-global")
+        reads: list[str] = []
+        service = container.agent_relay_service
+        original = service.agent_repo.owner_of_run
+
+        def counting_lookup(lookup_run_id: str) -> str | None:
+            reads.append(lookup_run_id)
+            return original(lookup_run_id)
+
+        service.agent_repo.owner_of_run = counting_lookup  # type: ignore[method-assign]
+        push_global_limiter.reset()
+        attempts = PUSH_GLOBAL_MAX_PER_MINUTE + 100
+        try:
+            statuses = [
+                self._push(client, run_id, token).status_code
+                for _ in range(attempts)
+            ]
+        finally:
+            service.agent_repo.owner_of_run = original  # type: ignore[method-assign]
+            push_global_limiter.reset()
+
+        assert 429 in statuses, "the global limiter must trip"
+        assert len(reads) == PUSH_GLOBAL_MAX_PER_MINUTE, (
+            "everything past the process-wide budget was refused before the "
+            "database was touched"
+        )
+
+    def test_014_FR_008_the_per_run_limiter_is_reachable_only_for_known_runs(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """The one deliberate existence signal, gated by an unguessable id."""
+
+        from app.api.agents import PUSH_RUN_MAX_PER_MINUTE, push_run_limiter
+
+        run_id, token = self._pushable(client, container, key="k-push-run-limit")
+        push_run_limiter.reset()
+
+        statuses = [
+            self._push(client, run_id, token).status_code
+            for _ in range(PUSH_RUN_MAX_PER_MINUTE + 2)
+        ]
+
+        assert 429 in statuses
+        assert push_run_limiter.key_count == 1
+
+    def test_014_FR_008_the_push_route_needs_no_session_and_no_rollout_flag(
+        self,
+        client: TestClient,
+        container: Container,
+        anonymous_api_client: TestClient,
+    ) -> None:
+        """A run already dispatched must keep reporting whatever the flag says."""
+
+        run_id, token = self._pushable(client, container, key="k-push-flag")
+        set_relay_flag(client, FeatureFlagState.OFF)
+
+        response = client.post(f"/api/a2a/push/{run_id}/{token}", content=b"{}")
+
+        assert response.status_code == 204
+        assert anonymous_api_client is not None
+
+    def test_014_FR_016_rollout_off_keeps_observation_push_and_commands_alive(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-036. The flag protects "no task content leaves", not "no run moves".
+
+        A run that was already handed over must be able to reach a terminal
+        state whatever the owner's rollout state later becomes; freezing it
+        would leave someone with work in flight and no way to learn its
+        outcome.
+        """
+
+        run_id, token = self._pushable(client, container, key="k-push-off")
+        service = container.agent_relay_service
+        owner_id = service.agent_repo.owner_of_run(run_id) or ""
+        set_relay_flag(client, FeatureFlagState.OFF)
+
+        assert self._push(client, run_id, token).status_code == 204
+        assert client.get(f"/api/agent-runs/{run_id}").status_code == 200
+        assert (
+            client.post(
+                f"/api/agent-runs/{run_id}/cancel",
+                headers={"Idempotency-Key": "k-off-cancel"},
+            ).status_code
+            == 200
+        )
+        # And a new hand-off is still refused, which is what the flag is for.
+        task_id = create_task(client, title="Blocked by the rollout flag")
+        connection_id = service.agent_repo.get_run(
+            run_id, owner_id=owner_id
+        ).connection_id
+        assert (
+            client.post(
+                f"/api/tasks/{task_id}/agent-runs/preview",
+                json={"connection_id": connection_id},
+            ).status_code
+            == 404
+        )
+
+    def test_014_SC_009_auth_docs_record_the_push_callback_as_the_403_exception(
+        self,
+    ) -> None:
+        """T126's assertion: the one deviation from 404-for-wrong-owner is written down.
+
+        A security decision that lives only in a contract file is one nobody
+        reviewing `docs/auth.md` will ever meet. The push route answers 403
+        rather than 404, and its per-run 429 is a deliberate existence signal;
+        both belong where the repository's auth conventions are stated.
+        """
+
+        auth_docs = (
+            Path(__file__).resolve().parents[2] / "docs" / "auth.md"
+        ).read_text(encoding="utf-8")
+
+        assert "403" in auth_docs and "404" in auth_docs
+        assert "/a2a/push/" in auth_docs
+        assert "429" in auth_docs
+        push_lines = [
+            line for line in auth_docs.splitlines() if "a2a/push" in line
+        ]
+        assert any(
+            "403" in line and "404" in line for line in push_lines
+        ), "docs/auth.md must say the push callback answers 403 rather than 404"
+        assert any(
+            "429" in line for line in push_lines
+        ), "docs/auth.md must record the per-run 429 existence signal"
+
+    def test_014_FR_008_the_body_is_never_parsed_for_state(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-021. The observation is authoritative; the body is only a nudge."""
+
+        run_id, token = self._pushable(client, container, key="k-push-body")
+        service = container.agent_relay_service
+        owner_id = service.agent_repo.owner_of_run(run_id) or ""
+        before = service.agent_repo.get_run(run_id, owner_id=owner_id)
+
+        response = client.post(
+            f"/api/a2a/push/{run_id}/{token}",
+            content=b'{"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}',
+        )
+
+        assert response.status_code == 204
+        after = service.agent_repo.get_run(run_id, owner_id=owner_id)
+        assert after.reported_state == before.reported_state
+        assert after.run_version == before.run_version
+
+    def test_014_FR_008_a_malformed_body_still_only_schedules_an_observation(
+        self, client: TestClient, container: Container
+    ) -> None:
+        run_id, token = self._pushable(client, container, key="k-push-malformed")
+
+        response = client.post(
+            f"/api/a2a/push/{run_id}/{token}", content=b"\x00not json at all"
+        )
+
+        assert response.status_code == 204
+
+    def test_push_token_never_appears_in_logs(
+        self,
+        client: TestClient,
+        container: Container,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """014-SC-009. The verified, the rejected, and the exception path."""
+
+        import logging
+
+        run_id, token = self._pushable(client, container, key="k-push-logs")
+        service = container.agent_relay_service
+
+        def explode(*_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError("the push handler exploded")
+
+        with caplog.at_level(logging.DEBUG):
+            self._push(client, run_id, token)
+            self._push(client, run_id, "forged-" + token)
+            original = service.verify_push
+            service.verify_push = explode  # type: ignore[method-assign]
+            try:
+                client.post(
+                    f"/api/a2a/push/{run_id}/{token}",
+                    content=b"{}",
+                )
+            except RuntimeError:
+                pass
+            finally:
+                service.verify_push = original  # type: ignore[method-assign]
+
+        messages = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name.startswith("app.") or record.name.startswith("uvicorn")
+        ]
+        assert messages, "the request must have been logged at all"
+        assert not any(token in message for message in messages)
+
+
+class TestRunRouteObservationDeltas:
+    """What the run routes say once observation, not a callback, drives them."""
+
+    def _blocked_run(
+        self, client: TestClient, container: Container, *, key: str = "k-obs"
+    ) -> dict[str, Any]:
+        service = container.agent_relay_service
+        connection = register_connection(client, key=key)
+        client.post(
+            f"/api/agent-connections/{connection['id']}/test",
+            headers={"Idempotency-Key": f"{key}-test"},
+        )
+        task_id = create_task(client, title=f"Observed {key}")
+        run = hand_off(client, connection["id"], task_id, key=f"{key}-dispatch")
+        owner_id = service.agent_repo.owner_of_run(run["id"]) or ""
+        stored = service.agent_repo.get_run(run["id"], owner_id=owner_id)
+        service.agent_repo.save_run(
+            stored.model_copy(
+                update={
+                    "agent_task_id": "t1",
+                    "reported_state": "blocked",
+                    "question_text": "Which environment?",
+                    "run_version": 1,
+                }
+            )
+        )
+        return dict(client.get(f"/api/agent-runs/{run['id']}").json())
+
+    def test_014_FR_013_the_run_response_carries_the_observation_fields(
+        self, client: TestClient, container: Container
+    ) -> None:
+        run = self._blocked_run(client, container)
+
+        assert run["agent_task_missing"] is False
+        assert run["cancel_outcome"] == "none"
+        assert run["identifiers_expired"] is False
+        assert run["observation_interval_seconds"] >= 5
+        assert run["artifacts_summary"] == []
+        assert run["result_availability"] is None
+        assert run["primary_state_label"] == "Needs you"
+
+    def test_014_FR_010_reply_and_cancel_refuse_a_run_the_agent_forgot(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-020. Both controls are withdrawn, with the reason named."""
+
+        run = self._blocked_run(client, container, key="k-missing")
+        service = container.agent_relay_service
+        owner_id = service.agent_repo.owner_of_run(run["id"]) or ""
+        service.record_task_missing(run["id"], owner_id=owner_id)
+
+        reply = client.post(
+            f"/api/agent-runs/{run['id']}/reply",
+            headers={"Idempotency-Key": "k-missing-reply"},
+            json={"message": "Use staging.", "expected_revision": run["revision"] + 1},
+        )
+        cancel = client.post(
+            f"/api/agent-runs/{run['id']}/cancel",
+            headers={"Idempotency-Key": "k-missing-cancel"},
+        )
+
+        for response in (reply, cancel):
+            assert response.status_code == 400, response.text
+            assert response.json()["detail"]["reason"] == "agent_task_missing"
+
+    def test_014_FR_013_the_summary_route_carries_the_tier_and_the_withdrawals(
+        self, client: TestClient, container: Container
+    ) -> None:
+        run = self._blocked_run(client, container, key="k-summary")
+
+        response = client.get(
+            "/api/agent-run-summaries", params={"task_id": run["task_id"]}
+        )
+
+        assert response.status_code == 200, response.text
+        summary = response.json()[run["task_id"]]
+        assert summary["guarantee_tier"] in {"guaranteed", "best_effort"}
+        assert summary["cancel_outcome"] == "none"
+        assert summary["agent_task_missing"] is False
