@@ -20,6 +20,7 @@ import type { SmartAddDraft, SmartAddSuggestion } from "./smartAdd";
 import { SmartAddSuggestions } from "./SmartAddSuggestions";
 import { TaskTitleAutocompleteSuggestions } from "./TaskTitleAutocompleteSuggestions";
 import { TaskDetailPanel } from "./TaskDetailPanel";
+import { TaskSideSheet } from "./TaskSideSheet";
 import { getTaskDetailAutosaveController } from "./taskDetailAutosave";
 import type { AutosaveResult } from "./taskDetailAutosave";
 import { useTaskTitleAutocomplete } from "./useTaskTitleAutocomplete";
@@ -81,6 +82,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const [newWaitingFor, setNewWaitingFor] = useState("");
   const [showCompleted, setShowCompleted] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [sheetPresent, setSheetPresent] = useState(Boolean(taskId));
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [autosaveConflict, setAutosaveConflict] = useState<Extract<AutosaveResult, { status: "conflict" }> | null>(null);
   const [recoveryAvailable, setRecoveryAvailable] = useState(false);
@@ -103,7 +105,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const rowLinkRefs = useRef<Map<string, HTMLAnchorElement>>(new Map());
   const detailHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const listHeadingRef = useRef<HTMLHeadingElement | null>(null);
-  const previousTaskIdRef = useRef<string | undefined>(undefined);
+  const openingTaskIdRef = useRef<string | undefined>(undefined);
+  const sheetWasOpenRef = useRef(false);
+  const navigationControlRef = useRef<HTMLButtonElement | null>(null);
   const registerRowLink = (rowTaskId: string, el: HTMLAnchorElement | null) => {
     if (el) {
       rowLinkRefs.current.set(rowTaskId, el);
@@ -141,19 +145,32 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const tagsQuery = useTags();
 
   useEffect(() => {
-    if (taskId) {
-      setPanelOpen(true);
-      detailHeadingRef.current?.focus();
-    } else if (previousTaskIdRef.current) {
-      const originLink = rowLinkRefs.current.get(previousTaskIdRef.current);
-      if (originLink && document.contains(originLink)) {
-        originLink.focus();
-      } else {
-        listHeadingRef.current?.focus();
-      }
-    }
-    previousTaskIdRef.current = taskId;
+    if (taskId) setPanelOpen(true);
   }, [taskId]);
+
+  useEffect(() => {
+    if (taskId && panelOpen) {
+      if (!sheetWasOpenRef.current) openingTaskIdRef.current = taskId;
+      sheetWasOpenRef.current = true;
+      if (navigationControlRef.current) {
+        const control = navigationControlRef.current;
+        navigationControlRef.current = null;
+        // Preserve the navigation control's focus; at a disabled boundary move
+        // to the remaining direction rather than dropping focus into the body.
+        if (control.disabled) {
+          detailHeadingRef.current?.parentElement?.querySelector<HTMLButtonElement>("[data-task-navigation]:not(:disabled)")?.focus({ preventScroll: true });
+        }
+      } else detailHeadingRef.current?.focus({ preventScroll: true });
+    } else if (!sheetPresent && sheetWasOpenRef.current) {
+      const originLink = rowLinkRefs.current.get(openingTaskIdRef.current ?? "");
+      if (originLink && document.contains(originLink)) {
+        originLink.focus({ preventScroll: true });
+      } else {
+        listHeadingRef.current?.focus({ preventScroll: true });
+      }
+      sheetWasOpenRef.current = false;
+    }
+  }, [taskId, panelOpen, sheetPresent]);
 
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
@@ -263,24 +280,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       : `/tasks/${params.state ?? "next"}`;
   const closeTarget = { pathname: listPath, search: searchParams.toString() };
 
-  // Prototype keyboard model: Escape deselects the task, ⌘\ toggles the panel.
+  // Escape/focus are owned by the modal sheet; keep the existing panel shortcut.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "\\" && (event.metaKey || event.ctrlKey)) {
+        if (Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]:not(.task-side-sheet-panel)')).some((modal) => !modal.closest('[inert], [aria-hidden="true"]'))) return;
         event.preventDefault();
         setPanelOpen((open) => !open);
-        return;
       }
-      if (event.key !== "Escape" || !taskId) {
-        return;
-      }
-      const target = event.target as HTMLElement | null;
-      // A modal surface (brain dump, mobile drawer) or a focused field owns
-      // Escape; deselecting underneath it would yank the view away.
-      if (target?.closest("input, textarea, select, [role=dialog]") || document.querySelector('[role="dialog"][aria-modal="true"]')) {
-        return;
-      }
-      navigate(closeTarget);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -448,6 +455,20 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     agentRuns: agentRunSummaries
   };
 
+  const mutationNotice = mutationError ? (
+    <div role="alert" className="relative mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+      <span>{mutationError}</span>
+      {autosaveConflict ? <Button size="sm" variant="secondary" onClick={() => void autosaveConflict.retry().then(handleAutosaveResult).catch((caught: unknown) => setMutationError(getErrorMessage(caught)))}>Retry</Button> : recoveryAvailable ? <Button size="sm" variant="secondary" onClick={recoverAutosave}>Retry</Button> : null}
+      {(autosaveConflict || recoveryAvailable) ? <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={discardAutosave}>Discard</Button> : null}
+    </div>
+  ) : null;
+
+  const displayedTasks = groupByProject ? groupTasksByProject(tasks, projects).flatMap((group) => group.tasks) : tasks;
+  const taskPosition = displayedTasks.findIndex((task) => task.id === taskId);
+  const navigateTask = (id: string) => {
+    navigationControlRef.current = document.activeElement?.matches("[data-task-navigation]") ? document.activeElement as HTMLButtonElement : null;
+    navigate({ pathname: `${listPath}/${id}`, search: searchParams.toString() });
+  };
   const panel = panelOpen && taskId ? (
     <TaskDetailPanel
       task={detailQuery.data}
@@ -459,6 +480,13 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       error={detailQuery.error}
       headingRef={detailHeadingRef}
       onClose={() => navigate(closeTarget)}
+      notice={mutationNotice}
+      navigation={{
+        position: taskPosition + 1,
+        total: displayedTasks.length,
+        onPrevious: taskPosition > 0 ? () => navigateTask(displayedTasks[taskPosition - 1].id) : undefined,
+        onNext: taskPosition >= 0 && taskPosition < displayedTasks.length - 1 ? () => navigateTask(displayedTasks[taskPosition + 1].id) : undefined
+      }}
       // Autosave owns every mutation when a controller exists; these fallbacks
       // are only reached with no account (and thus no controller), where there
       // is nothing to save, so they stay no-ops rather than dead `.save()` calls.
@@ -478,7 +506,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       activeState={state}
       activeProjectId={projectId}
       activeTagId={tagId}
-      panel={panel}
+      panel={<TaskSideSheet onClose={() => navigate(closeTarget)} onPresenceChange={setSheetPresent}>{panel}</TaskSideSheet>}
+      panelModal={Boolean(panel) || sheetPresent}
       onCreateProject={(name) => projectMutation.mutate({ action: "create", name })}
       onRenameProject={(project, name) => projectMutation.mutate({ action: "rename", project, name })}
       onArchiveProject={(project) => projectMutation.mutate({ action: "archive", project })}
@@ -494,7 +523,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             </h1>
             <p className="m-0 mt-1 text-xs text-slate-500">{meta}</p>
           </div>
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-1.5 max-[359px]:w-full max-[359px]:flex-wrap max-[359px]:justify-end">
             {canGroupByProject ? (
               <Button
                 variant={groupByProject ? "secondary" : "ghost"}
@@ -552,13 +581,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           </div>
         </div>
 
-        {mutationError ? (
-          <div role="alert" className="relative z-50 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-            <span>{mutationError}</span>
-            {autosaveConflict ? <Button size="sm" variant="secondary" onClick={() => void autosaveConflict.retry().then(handleAutosaveResult).catch((caught: unknown) => setMutationError(getErrorMessage(caught)))}>Retry</Button> : recoveryAvailable ? <Button size="sm" variant="secondary" onClick={recoverAutosave}>Retry</Button> : null}
-            {(autosaveConflict || recoveryAvailable) ? <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={discardAutosave}>Discard</Button> : null}
-          </div>
-        ) : null}
+        {!panel ? mutationNotice : null}
 
         {hasFrameError ? (
           <ErrorState

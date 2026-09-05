@@ -1148,6 +1148,49 @@ describe("TaskListPage detail wiring", () => {
     await waitFor(() => expect(screen.getByText("Comment rejected.")).toBeInTheDocument());
   });
 
+  it("navigates the displayed grouped tasks in a stationary modal and returns to the opening row", async () => {
+    const user = userEvent.setup();
+    const items = [
+      taskFixture(),
+      taskFixture({ id: "task-unassigned", title: "Unassigned last", project_id: null }),
+      taskFixture({ id: "task-2", title: "Second in launch" }),
+      taskFixture({ id: "task-3", title: "Other project", project_id: "project-onboarding" })
+    ];
+    mocked.listTasks.mockImplementation(async () => listResponse(items));
+    mocked.getTask.mockImplementation(async (id) => items.find((task) => task.id === id) as TaskResponse);
+    renderPage("/tasks/next?sort=priority&q=launch");
+    const origin = await screen.findByRole("link", { name: items[0].title });
+    await user.click(origin);
+    const sheet = screen.getByRole("dialog", { name: "Task detail" });
+    expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Previous task" })).toBeDisabled();
+    expect(screen.getByText("1 of 4")).toBeInTheDocument();
+    const next = screen.getByRole("button", { name: "Next task" });
+    await user.click(next);
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(items[2].title));
+    expect(currentLocation()).toBe("/tasks/next/task-2?sort=priority&q=launch");
+    expect(screen.getByRole("dialog", { name: "Task detail" })).toBe(sheet);
+    expect(next).toHaveFocus();
+    await user.click(next);
+    await user.click(next);
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(items[1].title));
+    expect(screen.getByText("4 of 4")).toBeInTheDocument();
+    expect(next).toBeDisabled();
+    const previous = screen.getByRole("button", { name: "Previous task" });
+    expect(previous).toHaveFocus();
+    await user.click(previous);
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(items[3].title));
+    // Assistive activation and some pointer browsers do not focus a clicked
+    // button. In that case the new task gets heading focus, not a stale field.
+    screen.getByLabelText("Title").focus();
+    fireEvent.click(next);
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(items[1].title));
+    expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Close task" }));
+    expect(currentLocation()).toBe("/tasks/next?sort=priority&q=launch");
+    await waitFor(() => expect(origin).toHaveFocus());
+  });
+
   it("reserves the detail panel for selected tasks and releases it after closing", async () => {
     const user = userEvent.setup();
     const { unmount } = renderPage("/tasks/next");
@@ -1156,7 +1199,7 @@ describe("TaskListPage detail wiring", () => {
     unmount();
 
     renderPage("/tasks/next/task-1");
-    await user.click(await screen.findByRole("button", { name: "Close" }));
+    await user.click(await screen.findByRole("button", { name: "Close task" }));
     expect(currentLocation()).toBe("/tasks/next");
     expect(screen.queryByRole("complementary", { name: "Task detail" })).not.toBeInTheDocument();
   });
@@ -1167,7 +1210,7 @@ describe("TaskListPage detail wiring", () => {
 
     await user.click(await screen.findByRole("link", { name: "Fix onboarding drop-off" }));
     expect(currentLocation()).toBe("/tasks/next/task-1");
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Close task" }));
     await waitFor(() => expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toHaveFocus());
     unmount();
 
@@ -1177,7 +1220,7 @@ describe("TaskListPage detail wiring", () => {
       listResponse([taskFixture({ id: "task-other", title: "Some other task" })])
     );
     renderPage("/tasks/next/task-1");
-    await user.click(await screen.findByRole("button", { name: "Close" }));
+    await user.click(await screen.findByRole("button", { name: "Close task" }));
 
     await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Next actions" })).toHaveFocus());
   });
@@ -1195,18 +1238,19 @@ describe("TaskListPage detail wiring", () => {
     expect(await screen.findByLabelText("Title")).toBeInTheDocument();
   });
 
-  it("deselects the task on Escape unless a field or a modal owns the key", async () => {
+  it("closes on Escape from a plain details field and flushes its pending edit", async () => {
     const user = userEvent.setup();
+    let release: (task: TaskResponse) => void = () => undefined;
+    mocked.updateTask.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
     renderPage("/tasks/next/task-1");
 
-    await user.click(await screen.findByLabelText("Details"));
+    const details = await screen.findByLabelText("Details");
+    await user.type(details, "Preserve this pending draft");
     await user.keyboard("{Escape}");
-    expect(currentLocation()).toBe("/tasks/next/task-1");
-
-    await user.click(screen.getByRole("heading", { level: 1, name: "Next actions" }));
-    await user.keyboard("{Escape}");
-    await waitFor(() => expect(currentLocation()).toBe("/tasks/next"));
-
+    expect(currentLocation()).toBe("/tasks/next");
+    await waitFor(() => expect(mocked.updateTask).toHaveBeenCalledWith("task-1", { details: "Preserve this pending draft", expected_revision: 4 }, expect.any(String)));
+    await act(async () => release(taskFixture({ details: "Preserve this pending draft", revision: 5 })));
+    await waitFor(() => expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toHaveFocus());
     // With nothing selected the key is inert rather than navigating again.
     await user.keyboard("{Escape}");
     expect(currentLocation()).toBe("/tasks/next");
@@ -1222,6 +1266,8 @@ describe("TaskListPage detail wiring", () => {
     modal.setAttribute("aria-modal", "true");
     document.body.append(modal);
     try {
+      await user.keyboard("{Control>}\\{/Control}");
+      expect(screen.getByRole("dialog", { name: "Task detail" })).toBeInTheDocument();
       await user.keyboard("{Escape}");
       expect(currentLocation()).toBe("/tasks/next/task-1");
     } finally {

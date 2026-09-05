@@ -24,7 +24,7 @@ export function AppRoutes(): React.JSX.Element {
 
   return (
     <>
-      <Routes location={backgroundLocation ?? location}>{workspaceRoutes()}</Routes>
+      <Routes location={backgroundLocation}>{workspaceRoutes()}</Routes>
       <Routes>
         <Route
           path="/brain-dump/:operationId"

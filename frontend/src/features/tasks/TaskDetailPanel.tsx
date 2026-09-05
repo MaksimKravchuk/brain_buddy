@@ -1,6 +1,7 @@
-import { ArrowRight, Bot, Check, ChevronRight, CircleAlert, LoaderCircle, MoreHorizontal, X } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, MoreHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
+import { createPortal } from "react-dom";
 
 import { useAgentRuns } from "../../api/agentHooks";
 import { hasFeatureFlag } from "../../api/auth";
@@ -32,13 +33,11 @@ const stateLabels: Record<OpenTaskState, string> = {
 
 const openStateOptions: OpenTaskState[] = ["inbox", "next", "waiting", "someday"];
 
-// Give task content a readable docked column on desktop and the full viewport
-// below that breakpoint. Unselected lists do not reserve a detail column.
 const activePanelClass =
-  "fixed bottom-0 right-0 top-14 z-40 flex w-full max-w-none flex-col overflow-x-hidden overflow-y-auto border-l border-slate-200 bg-white shadow-floating motion-safe:animate-slide-in-right min-[1100px]:static min-[1100px]:z-auto min-[1100px]:w-[380px] min-[1100px]:max-w-none min-[1100px]:shrink-0 min-[1100px]:animate-none min-[1100px]:shadow-none min-[1400px]:w-[420px]";
+  "flex h-full w-full min-w-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-l border-slate-200 bg-white";
 
 const iconButtonClass =
-  "inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-soft transition-colors duration-200 ease-smooth hover:border-slate-300 hover:text-slate-800";
+  "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-600 transition-colors duration-200 ease-smooth hover:bg-slate-100 hover:text-slate-800 disabled:cursor-default disabled:text-slate-300 disabled:hover:bg-transparent";
 
 const propLabelClass = "text-slate-600";
 
@@ -49,6 +48,7 @@ const dashedInputClass =
   "w-full rounded-lg border-[1.5px] border-dashed border-slate-300 bg-transparent px-2.5 py-1.5 text-[13px] text-slate-900 outline-none transition-colors duration-200 ease-smooth placeholder:text-slate-500 focus:border-solid focus:border-brand-primary";
 
 export function TaskDetailPanel({
+  active = true,
   task,
   autosave,
   resetKey,
@@ -58,12 +58,15 @@ export function TaskDetailPanel({
   error,
   headingRef,
   onClose,
+  navigation,
+  notice,
   onSave,
   onTransition,
   onCreateSubtask,
   onTransitionSubtask,
   onCreateComment
 }: {
+  active?: boolean;
   task?: TaskResponse;
   autosave?: TaskDetailAutosaveController;
   resetKey?: number;
@@ -73,6 +76,8 @@ export function TaskDetailPanel({
   error: unknown;
   headingRef: RefObject<HTMLHeadingElement | null>;
   onClose: () => void;
+  navigation?: { position: number; total: number; onPrevious?: () => void; onNext?: () => void };
+  notice?: ReactNode;
   onSave: (task: TaskResponse, payload: TaskDetailSavePayload) => void;
   onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
   onCreateSubtask: (task: TaskResponse, title: string) => void;
@@ -80,6 +85,7 @@ export function TaskDetailPanel({
   onCreateComment: (task: TaskResponse, body: string) => void;
 }): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLButtonElement>(null);
   const isTerminal = Boolean(task && (task.state === "completed" || task.state === "cancelled"));
   const autosaveSnapshot = useSyncExternalStore(
     autosave?.subscribe ?? (() => () => undefined),
@@ -92,47 +98,62 @@ export function TaskDetailPanel({
   }, [task?.id]);
 
   return (
-    <aside aria-labelledby="task-detail-title" className={activePanelClass}>
+    <aside aria-labelledby="task-detail-title" className={activePanelClass} onKeyDown={(event) => {
+      const target = event.target as HTMLElement;
+      if (event.key === "Escape" && menuOpen && !event.defaultPrevented && !event.nativeEvent.isComposing && !target.closest('select, [role="combobox"], [role="listbox"]') && target.closest('[role="dialog"]') === event.currentTarget.closest('[role="dialog"]')) {
+        event.preventDefault();
+        event.stopPropagation();
+        setMenuOpen(false);
+        menuRef.current?.focus();
+      }
+    }}>
       <h2 id="task-detail-title" ref={headingRef} tabIndex={-1} className="sr-only">
         Task detail
       </h2>
-      <div className="flex items-center px-3 pb-1.5 pt-2.5">
-        <button type="button" aria-label="Close" className={iconButtonClass} onClick={onClose}>
-          <ChevronRight className="h-[15px] w-[15px]" aria-hidden />
-        </button>
-        <span className="relative ml-auto flex min-w-0 items-center gap-1">
-          <AutosaveStatus snapshot={autosaveSnapshot} />
-          {task && !isTerminal ? (
-            <>
-              <button
-                type="button"
-                aria-label="Task menu"
-                aria-expanded={menuOpen}
-                className={iconButtonClass}
-                onClick={() => setMenuOpen((open) => !open)}
-              >
-                <MoreHorizontal className="h-[15px] w-[15px]" aria-hidden />
-              </button>
-              {menuOpen ? (
-                <div className="absolute right-0 top-8 z-50 w-40 rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating">
-                  <button
-                    type="button"
-                    className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-rose-600 transition-colors duration-200 ease-smooth hover:bg-rose-50"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      if (autosave) autosave.barrier("cancel");
-                      else onTransition(task, "cancel");
-                    }}
-                  >
-                    Cancel task
-                  </button>
-                </div>
-              ) : null}
-            </>
-          ) : null}
-        </span>
+      <div className="sticky top-0 z-10 border-b border-slate-200 bg-white">
+        <div className="flex items-center gap-1 px-2 py-1">
+          {navigation ? <>
+            <button type="button" aria-label="Previous task" data-task-navigation className={iconButtonClass} disabled={!navigation.onPrevious} onClick={navigation.onPrevious}><ChevronLeft className="h-4 w-4" aria-hidden /></button>
+            <button type="button" aria-label="Next task" data-task-navigation className={iconButtonClass} disabled={!navigation.onNext} onClick={navigation.onNext}><ChevronRight className="h-4 w-4" aria-hidden /></button>
+            <span className="min-w-0 text-xs text-slate-600" aria-live="polite" aria-atomic="true">{navigation.position > 0 ? `${navigation.position} of ${navigation.total}` : "Outside this list"}</span>
+          </> : null}
+          <span className="relative ml-auto flex min-w-0 items-center gap-1">
+            {task && !isTerminal ? (
+              <>
+                <button
+                  type="button"
+                  aria-label="Task menu"
+                  ref={menuRef}
+                  aria-expanded={menuOpen}
+                  className={iconButtonClass}
+                  onClick={() => setMenuOpen((open) => !open)}
+                >
+                  <MoreHorizontal className="h-[15px] w-[15px]" aria-hidden />
+                </button>
+                {menuOpen ? (
+                  <div className="absolute right-0 top-12 z-50 w-40 rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating">
+                    <button
+                      type="button"
+                      className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-rose-600 transition-colors duration-200 ease-smooth hover:bg-rose-50"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        if (autosave) autosave.barrier("cancel");
+                        else onTransition(task, "cancel");
+                      }}
+                    >
+                      Cancel task
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </span>
+          <button type="button" aria-label="Close task" className={iconButtonClass} onClick={onClose}><X className="h-4 w-4" aria-hidden /></button>
+        </div>
+        {autosaveSnapshot && autosaveSnapshot.status !== "clean" ? <div className="px-4 pb-2"><AutosaveStatus snapshot={autosaveSnapshot} /></div> : null}
       </div>
 
+      {notice}
       {isLoading ? <p className="px-4 pb-4 text-sm text-slate-600">Loading task detail…</p> : null}
       {error ? (
         <p role="alert" className="px-4 pb-4 text-sm text-rose-700">
@@ -141,6 +162,7 @@ export function TaskDetailPanel({
       ) : null}
       {task ? (
         <TaskDetailBody
+          active={active}
           task={task}
           autosave={autosave}
           autosaveSnapshot={autosaveSnapshot}
@@ -240,6 +262,7 @@ function AutosaveRecovery({ snapshot, controller }: { snapshot?: AutosaveSnapsho
 }
 
 function TaskDetailBody({
+  active,
   task,
   autosave,
   autosaveSnapshot,
@@ -253,6 +276,7 @@ function TaskDetailBody({
   onTransitionSubtask,
   onCreateComment
 }: {
+  active: boolean;
   task: TaskResponse;
   autosave?: TaskDetailAutosaveController;
   autosaveSnapshot?: AutosaveSnapshot;
@@ -531,7 +555,7 @@ function TaskDetailBody({
         {waitingRequired ? <span className="col-start-2 text-xs text-[#92400e]">Add who or what you’re waiting for</span> : null}
       </section>
 
-      <AgentTaskRelay task={task} isTerminal={isTerminal} />
+      <AgentTaskRelay task={task} isTerminal={isTerminal} active={active} />
 
       <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
         <div className="flex items-center gap-2">
@@ -561,7 +585,7 @@ function TaskDetailBody({
             }
           }}
         >
-          <input name="subtask_title" aria-label="New subtask title" placeholder="Add a subtask" className={dashedInputClass} />
+          <input name="subtask_title" aria-label="New subtask title" data-escape-keeps-draft placeholder="Add a subtask" className={dashedInputClass} />
         </form>
         {subtasks.map((subtask) => {
           const done = subtask.state !== "open";
@@ -600,7 +624,7 @@ function TaskDetailBody({
             }
           }}
         >
-          <input name="comment_body" aria-label="New comment" placeholder="Add a comment" className={dashedInputClass} />
+          <input name="comment_body" aria-label="New comment" data-escape-keeps-draft placeholder="Add a comment" className={dashedInputClass} />
         </form>
         {comments.map((comment) => (
           <div key={comment.id} className="text-[12.5px] leading-normal text-slate-700">
@@ -620,15 +644,23 @@ function TaskDetailBody({
  * The flag gates only creation of new hand-offs; it must not strand work that
  * already left BrainBuddy.
  */
-function AgentTaskRelay({ task, isTerminal }: { task: TaskResponse; isTerminal: boolean }): React.JSX.Element | null {
+function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTerminal: boolean; active: boolean }): React.JSX.Element | null {
   const user = useAuthStore((state) => state.user);
   const handoffEnabled = hasFeatureFlag(user, "external_agent_relay");
   const [reviewing, setReviewing] = useState(false);
+  const handoffTriggerRef = useRef<HTMLButtonElement>(null);
+  const closeHandoff = () => {
+    const trigger = handoffTriggerRef.current;
+    setReviewing(false);
+    queueMicrotask(() => {
+      if (trigger?.isConnected && !trigger.closest("[inert]")) trigger.focus({ preventScroll: true });
+    });
+  };
   const runsQuery = useAgentRuns(task.id, Boolean(user));
 
   useEffect(() => {
     setReviewing(false);
-  }, [task.id, handoffEnabled]);
+  }, [task.id, handoffEnabled, active]);
 
   // Some older deployments/tests may answer a non-list projection while this
   // read is rolling out independently. Fail closed to an empty monitor rather
@@ -647,6 +679,7 @@ function AgentTaskRelay({ task, isTerminal }: { task: TaskResponse; isTerminal: 
             </h3>
             {canStartHandoff ? (
               <Button
+                ref={handoffTriggerRef}
                 type="button"
                 variant="secondary"
                 size="sm"
@@ -685,13 +718,13 @@ function AgentTaskRelay({ task, isTerminal }: { task: TaskResponse; isTerminal: 
         handoffEnabled={handoffEnabled}
       />
 
-      {reviewing && canStartHandoff ? (
+      {active && reviewing && canStartHandoff ? createPortal(
         <AgentHandoffOverlay
           taskId={task.id}
           taskTitle={task.title}
-          onClose={() => setReviewing(false)}
-          onDispatched={() => setReviewing(false)}
-        />
+          onClose={closeHandoff}
+          onDispatched={closeHandoff}
+        />, document.body
       ) : null}
     </>
   );

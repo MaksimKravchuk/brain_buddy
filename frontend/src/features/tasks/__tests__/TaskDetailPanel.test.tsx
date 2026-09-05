@@ -40,7 +40,7 @@ vi.mock("../../agents/AgentHandoffOverlay", () => ({
     onClose: () => void;
     onDispatched: (run: never) => void;
   }) => (
-    <div>
+    <div role="dialog" aria-modal="true" aria-label="Agent handoff">
       <h2>Hand this task to an agent</h2>
       <button type="button" onClick={onClose}>
         Close handoff
@@ -117,7 +117,7 @@ function renderPanel(overrides: Partial<PanelProps> = {}) {
   const notify = vi.fn();
   const headingRef = createRef<HTMLHeadingElement>();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = render(
+  const tree = (nextOverrides = overrides) => (
     <QueryClientProvider client={queryClient}>
       <ShellToastContext.Provider value={notify}>
         <TaskDetailPanel
@@ -128,12 +128,13 @@ function renderPanel(overrides: Partial<PanelProps> = {}) {
           error={null}
           headingRef={headingRef}
           {...handlers}
-          {...overrides}
+          {...nextOverrides}
         />
       </ShellToastContext.Provider>
     </QueryClientProvider>
   );
-  return { ...view, ...handlers, notify, headingRef };
+  const view = render(tree());
+  return { ...view, ...handlers, notify, headingRef, rerenderPanel: (nextOverrides: Partial<PanelProps>) => view.rerender(tree({ ...overrides, ...nextOverrides })) };
 }
 
 afterEach(() => {
@@ -235,13 +236,25 @@ describe("TaskDetailPanel chrome", () => {
     expect(
       screen.getByText("Review exactly what would be sent before anything leaves BrainBuddy.")
     ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Task menu" }));
     await user.click(handoff);
     expect(await screen.findByRole("heading", { name: "Hand this task to an agent" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Agent handoff" }).parentElement).toBe(document.body);
+    expect(fireEvent.keyDown(screen.getByRole("button", { name: "Close handoff" }), { key: "Escape" })).toBe(true);
+    expect(screen.getByRole("button", { name: "Task menu" })).toHaveAttribute("aria-expanded", "true");
     await user.click(screen.getByRole("button", { name: "Close handoff" }));
     expect(screen.queryByRole("heading", { name: "Hand this task to an agent" })).not.toBeInTheDocument();
+    expect(handoff).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Hand to agent" }));
     await user.click(screen.getByRole("button", { name: "Simulate dispatch" }));
     expect(screen.queryByRole("heading", { name: "Hand this task to an agent" })).not.toBeInTheDocument();
+    await user.click(handoff);
+    const titleNode = screen.getByLabelText("Title");
+    open.rerenderPanel({ active: false });
+    expect(screen.queryByRole("dialog", { name: "Agent handoff" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Title")).toBe(titleNode);
+    open.rerenderPanel({ active: true });
+    expect(screen.queryByRole("dialog", { name: "Agent handoff" })).not.toBeInTheDocument();
 
     open.unmount();
     const terminalEmpty = renderPanel({
@@ -321,11 +334,11 @@ describe("TaskDetailPanel chrome", () => {
     expect(screen.getByTestId("agent-run-count")).toHaveTextContent("0");
   });
 
-  it("closes on the chevron without exposing placeholder thinking actions", async () => {
+  it("closes on the X without exposing placeholder thinking actions", async () => {
     const user = userEvent.setup();
     const { onClose } = renderPanel();
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Close task" }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Thinking canvas" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Think" })).not.toBeInTheDocument();
@@ -385,6 +398,20 @@ describe("TaskDetailPanel chrome", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Task detail is unavailable.");
     expect(screen.queryByText("Loading task detail…")).not.toBeInTheDocument();
+  });
+
+  it("lets native selection and composition own Escape before dismissing the task menu", async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderPanel();
+    const menu = screen.getByRole("button", { name: "Task menu" });
+    await user.click(menu);
+    fireEvent.keyDown(screen.getByLabelText("List"), { key: "Escape" });
+    fireEvent.keyDown(menu, { key: "Escape", isComposing: true });
+    expect(menu).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{Escape}");
+    expect(menu).toHaveAttribute("aria-expanded", "false");
+    expect(menu).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("closes an open menu when the panel switches to another task", async () => {

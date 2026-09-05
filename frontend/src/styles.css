@@ -62,6 +62,24 @@ body {
   }
 }
 
+/* Animate the overlay, never the task list's width or scroll container. */
+.task-side-sheet-panel { transform: translateX(100%); }
+.task-side-sheet-scrim { opacity: 0; }
+.task-side-sheet[data-state="open"] .task-side-sheet-panel { transform: none; }
+.task-side-sheet[data-state="open"] .task-side-sheet-scrim { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .task-side-sheet-panel {
+    transition: transform 160ms ease-in;
+  }
+  .task-side-sheet-scrim { transition: opacity 160ms ease-in; }
+  .task-side-sheet[data-state="open"] .task-side-sheet-panel {
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .task-side-sheet[data-state="open"] .task-side-sheet-scrim {
+    transition-duration: 220ms;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
