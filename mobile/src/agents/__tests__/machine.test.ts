@@ -251,6 +251,36 @@ describe("applyRun / applyRuns", () => {
     expect(expired.commands[0].body).toBeNull();
   });
 
+  it("014-FR-015 redacts the 014 content-tier fields at the same deadline", () => {
+    // data-model.md §8 puts blocked_reason, artifacts_summary and
+    // result_availability in the 30-day content tier. The projection feeds the
+    // cached snapshot as well as the network answer, so leaving them behind
+    // keeps an agent's words and the names of its private artifacts on the
+    // device past the bound the product promises.
+    const run = makeRun({
+      content_expires_at: "2026-08-09T12:00:00Z",
+      content_expired: false,
+      blocked_reason: "Agent needs additional authentication",
+      artifacts_summary: [
+        { name: "private-report.pdf", media_type: "application/pdf", kind: "file" },
+      ],
+      result_availability: "too_large",
+    });
+
+    expect(projectRunAt(run, Date.parse("2026-08-09T11:59:59.999Z"))).toBe(run);
+    const expired = projectRunAt(run, Date.parse("2026-08-09T12:00:00Z"));
+    expect(expired).toMatchObject({
+      content_expired: true,
+      blocked_reason: null,
+      artifacts_summary: [],
+      result_availability: null,
+    });
+    // Nothing an agent said survives anywhere in the snapshot, not merely in
+    // the fields the run card happens to read.
+    expect(JSON.stringify(expired)).not.toContain("private-report.pdf");
+    expect(JSON.stringify(expired)).not.toContain("Agent needs additional authentication");
+  });
+
   it("never rolls the projection back to a stale revision", () => {
     const current = makeRun({ revision: 5, run_version: 4 });
     const stale = makeRun({ revision: 3, run_version: 4 });
