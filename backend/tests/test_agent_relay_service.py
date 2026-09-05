@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.modules.agents.a2a.card import (
+    CARD_DEADLINE_MARGIN_SECONDS,
     SINGLE_START_EXTENSION_URI,
     AgentAuthSchemeOffer,
     CardDiscovery,
@@ -81,12 +83,17 @@ PUSH_BASE = "https://brainbuddy.example/api/a2a/push"
 
 def mock_transport_card_fetcher(
     handler: Callable[[httpx.Request], httpx.Response],
+    *,
+    timeout_seconds: float = 5.0,
+    deadline_margin_seconds: float = CARD_DEADLINE_MARGIN_SECONDS,
 ) -> Callable[..., CardDiscovery]:
     """The *real* discovery path over a scripted transport.
 
-    Two cases cannot be expressed as a `CardDiscovery` double, because they are
-    about what the fetch itself refuses: a body that is not JSON and a body over
-    the response cap. Both have to run `fetch_card` for real.
+    Three cases cannot be expressed as a `CardDiscovery` double, because they
+    are about what the fetch itself refuses: a body that is not JSON, a body
+    over the response cap, and a body that arrives for ever. All three have to
+    run `fetch_card` for real; the last one shortens the deadline so it is
+    decided in tenths of a second rather than by waiting the margin out.
     """
 
     def client_factory(**kwargs: Any) -> httpx.Client:
@@ -99,11 +106,12 @@ def mock_transport_card_fetcher(
         return fetch_card(
             address,
             auth_scheme=auth_scheme,  # type: ignore[arg-type]
-            timeout_seconds=5.0,
+            timeout_seconds=timeout_seconds,
             max_response_bytes=64_000,
             resolver=fake_resolver,
             client_factory=client_factory,
             now=now,
+            deadline_margin_seconds=deadline_margin_seconds,
         )
 
     return fetch
@@ -172,6 +180,23 @@ class BlockingA2AClient(FakeA2AClient):
         if self.block_kind == kind:
             self.entered.set()
             assert self.release.wait(timeout=5)
+
+
+class TricklingCardStream(httpx.SyncByteStream):
+    """A card body that never ends, a byte at a time.
+
+    The shape no configured limit catches: each chunk restarts httpx's read
+    timeout and the total stays far under the byte cap, so only the absolute
+    wall-clock deadline ever closes it.
+    """
+
+    def __init__(self, interval_seconds: float) -> None:
+        self.interval_seconds = interval_seconds
+
+    def __iter__(self) -> Iterator[bytes]:
+        while True:  # pragma: no branch - closed by the deadline, never by us
+            time.sleep(self.interval_seconds)
+            yield b"{"
 
 
 class Clock:
@@ -1537,6 +1562,35 @@ class TestConnectByAgentCard:
 
         assert tested.status == "unsupported"
         assert tested.last_test_error_code == "a2a_not_an_agent"
+        assert tested.card is None
+
+    def test_014_FR_002_a_card_that_trickles_past_the_deadline_reads_as_unreachable(
+        self, tmp_path: Path, clock: Clock
+    ) -> None:
+        """AC-003. A slow-for-ever agent is a bad agent, not a broken BrainBuddy.
+
+        Every chunk restarts the read timeout and the body stays far under the
+        cap, so the absolute deadline is the only thing that closes the fetch.
+        The owner is told the agent could not be reached and given the same
+        **Test connection** they get for any other unreachable address.
+        """
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, stream=TricklingCardStream(0.02))
+
+        service = build_service(
+            AgentRepository(tmp_path),
+            clock,
+            card_fetcher=mock_transport_card_fetcher(
+                handler, timeout_seconds=0.2, deadline_margin_seconds=0.0
+            ),
+        )
+        connection_id = connect(service)
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.status == "unreachable"
+        assert tested.last_test_error_code == "a2a_unreachable"
         assert tested.card is None
 
     def test_014_SC_003_an_oversized_card_body_is_refused_whole(

@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Generator
+import time
+from collections.abc import Generator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -27,6 +29,7 @@ from app.main import _run_privacy_maintenance_sweep, create_app
 from app.modules.agents.a2a.card import (
     MAX_CARD_DESCRIPTION_CHARS,
     CardDiscovery,
+    fetch_card,
 )
 from app.modules.agents.a2a.mapping import ObservationLimits, project_observation
 from app.modules.agents.a2a.types import Task
@@ -91,6 +94,22 @@ def test_sensitive_reauthentication_reports_rate_limit_before_password_verificat
 
     assert excinfo.value.status_code == 429
     assert excinfo.value.detail == "Too many attempts. Try again later."
+
+
+class TricklingCardStream(httpx.SyncByteStream):
+    """A card body that never ends, a byte at a time.
+
+    Each chunk restarts httpx's read timeout and the total stays far under the
+    byte cap, so only the absolute wall-clock deadline ever closes the fetch.
+    """
+
+    def __init__(self, interval_seconds: float) -> None:
+        self.interval_seconds = interval_seconds
+
+    def __iter__(self) -> Iterator[bytes]:
+        while True:  # pragma: no branch - closed by the deadline, never by us
+            time.sleep(self.interval_seconds)
+            yield b"{"
 
 
 def _resolver(host: str, port: int) -> list[str]:
@@ -800,6 +819,53 @@ class TestConnectionRoutes:
         assert response.status_code == 422, response.text
         assert "auth_header_name" in response.text
         assert client.get("/api/agent-connections").json() == []
+
+    def test_014_FR_002_a_card_that_trickles_past_the_deadline_is_a_200_not_a_500(
+        self,
+        client: TestClient,
+        relay_app: tuple[TestClient, TestClient, Container],
+    ) -> None:
+        """AC-003 over HTTP. A slow-for-ever agent is the agent's problem.
+
+        The connection succeeds and bytes keep arriving, so the read timeout
+        and the byte cap are both satisfied and only the absolute deadline
+        fires. That is a discovery failure with a corrective action, not a
+        BrainBuddy server error the owner can do nothing about.
+        """
+
+        container = relay_app[2]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, stream=TricklingCardStream(0.02))
+
+        def client_factory(**kwargs: Any) -> httpx.Client:
+            kwargs.pop("transport", None)
+            return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+        def trickling_fetch(
+            address: str, *, auth_scheme: str, now: datetime | None = None
+        ) -> CardDiscovery:
+            return fetch_card(
+                address,
+                auth_scheme=auth_scheme,  # type: ignore[arg-type]
+                timeout_seconds=0.2,
+                max_response_bytes=64_000,
+                resolver=_resolver,
+                client_factory=client_factory,
+                now=now,
+                deadline_margin_seconds=0.0,
+            )
+
+        container.agent_relay_service._card_fetcher = trickling_fetch  # type: ignore[assignment]
+        created = register_connection(client, key="k-trickle")
+
+        response = client.post(f"/api/agent-connections/{created['id']}/test")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == "unreachable"
+        assert body["last_test_error_code"] == "a2a_unreachable"
+        assert response.headers["X-Correlation-ID"]
 
     def test_card_text_is_returned_verbatim_and_bounded(
         self,
