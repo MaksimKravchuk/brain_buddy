@@ -3,22 +3,32 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_NAME="${BRAIN_BUDDY_E2E_PROJECT:-brainbuddy-e2e-${GITHUB_RUN_ID:-local}-$(date +%s)-$$}"
-# Two distinct free ports, chosen while both sockets are still held. Picking
-# them one process at a time let the kernel hand the same ephemeral port out
-# twice — the first socket was already closed when the second asked — and
-# Compose then failed to publish the frontend on the port the backend held.
-read -r DEFAULT_BACKEND_PORT DEFAULT_FRONTEND_PORT < <(python3 - <<'PY'
+# Three distinct free ports, chosen while all three sockets are still held.
+# Picking them one process at a time let the kernel hand the same ephemeral
+# port out twice — the first socket was already closed when the second asked —
+# and Compose then failed to publish the frontend on the port the backend held.
+read -r DEFAULT_BACKEND_PORT DEFAULT_FRONTEND_PORT DEFAULT_HERMES_PORT < <(python3 - <<'PY'
 import socket
-with socket.socket() as backend, socket.socket() as frontend:
+with socket.socket() as backend, socket.socket() as frontend, socket.socket() as hermes:
     backend.bind(("127.0.0.1", 0))
     frontend.bind(("127.0.0.1", 0))
-    print(backend.getsockname()[1], frontend.getsockname()[1])
+    hermes.bind(("127.0.0.1", 0))
+    print(
+        backend.getsockname()[1],
+        frontend.getsockname()[1],
+        hermes.getsockname()[1],
+    )
 PY
 )
 BACKEND_PORT="${BRAIN_BUDDY_E2E_BACKEND_PORT:-${DEFAULT_BACKEND_PORT}}"
 FRONTEND_PORT="${BRAIN_BUDDY_E2E_FRONTEND_PORT:-${DEFAULT_FRONTEND_PORT}}"
-if [ "${BACKEND_PORT}" = "${FRONTEND_PORT}" ]; then
-  echo "[e2e] The backend and frontend ports must differ (both are ${BACKEND_PORT})." >&2
+# The Hermes fixture's *host* port. It exists only so Playwright — which runs
+# on the host, outside the Compose network — can ask the agent directly what it
+# holds. The card the backend reads still advertises `hermes-a2a:9900`.
+HERMES_PORT="${BRAIN_BUDDY_E2E_HERMES_PORT:-${DEFAULT_HERMES_PORT}}"
+if [ "$(printf '%s\n' "${BACKEND_PORT}" "${FRONTEND_PORT}" "${HERMES_PORT}" | sort -u | wc -l)" != "3" ]; then
+  echo "[e2e] The backend, frontend and Hermes ports must all differ" \
+    "(got ${BACKEND_PORT}, ${FRONTEND_PORT}, ${HERMES_PORT})." >&2
   exit 1
 fi
 
@@ -47,6 +57,8 @@ fi
 
 BACKEND_URL="http://127.0.0.1:${BACKEND_PORT}"
 FRONTEND_URL="http://127.0.0.1:${FRONTEND_PORT}"
+# Trailing slash on purpose: the vendored Hermes adapter serves JSON-RPC at `/`.
+HERMES_HOST_URL="http://127.0.0.1:${HERMES_PORT}/"
 COMPOSE_LOG_DIR="${ROOT_DIR}/frontend/test-results/compose"
 PLAYWRIGHT_ALLURE_DIR="${ROOT_DIR}/frontend/allure-results/playwright"
 PLAYWRIGHT_REPORT_DIR="${ROOT_DIR}/frontend/playwright-report"
@@ -82,6 +94,7 @@ cd "${ROOT_DIR}"
 echo "[e2e] Starting isolated Compose project ${PROJECT_NAME}"
 echo "[e2e] Backend: ${BACKEND_URL} (${BRAIN_BUDDY_BACKEND_IMAGE})"
 echo "[e2e] Frontend: ${FRONTEND_URL} (${BRAIN_BUDDY_FRONTEND_IMAGE})"
+echo "[e2e] Hermes A2A fixture (host side): ${HERMES_HOST_URL} (${BRAIN_BUDDY_HERMES_A2A_IMAGE})"
 echo "[e2e] Image mode: ${COMPOSE_BUILD_MODE}"
 
 COMPOSE_PROJECT_NAME="${PROJECT_NAME}" \
@@ -94,9 +107,11 @@ BRAIN_BUDDY_VOICE_SWEEP_INTERVAL_SECONDS=1 \
 BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER=openai \
 BRAIN_BUDDY_FEATURE_FLAGS=voice_brain_dump=on \
 BRAIN_BUDDY_AGENT_ALLOW_PRIVATE_DESTINATIONS=1 \
+BRAIN_BUDDY_AGENT_OBSERVATION_INTERVAL_SECONDS="${BRAIN_BUDDY_E2E_OBSERVATION_INTERVAL_SECONDS:-5}" \
 BRAIN_BUDDY_PUBLIC_BASE_URL="http://backend:8000" \
 BRAIN_BUDDY_PORT="${BACKEND_PORT}" \
 FRONTEND_PORT="${FRONTEND_PORT}" \
+BRAIN_BUDDY_HERMES_A2A_PORT="${HERMES_PORT}" \
 VITE_API_BASE_URL=/api \
 docker compose up -d "${COMPOSE_BUILD_MODE}"
 
@@ -151,5 +166,6 @@ cd "${ROOT_DIR}/frontend"
 BRAIN_BUDDY_E2E_COMPOSE_PROJECT="${PROJECT_NAME}" \
 BRAIN_BUDDY_E2E_BACKEND_URL="${BACKEND_URL}" \
 BRAIN_BUDDY_E2E_HERMES_TOKEN="${BRAIN_BUDDY_HERMES_A2A_TOKEN}" \
+BRAIN_BUDDY_E2E_HERMES_HOST_URL="${HERMES_HOST_URL}" \
 PLAYWRIGHT_BASE_URL="${FRONTEND_URL}" \
 npx playwright test --config playwright.config.ts "$@"

@@ -18,6 +18,12 @@ services:
       BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST: ${BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST:-0}
       BRAIN_BUDDY_VOICE_SWEEP_INTERVAL_SECONDS: ${BRAIN_BUDDY_VOICE_SWEEP_INTERVAL_SECONDS:-60}
       BRAIN_BUDDY_AGENT_RETENTION_SWEEP_INTERVAL_SECONDS: ${BRAIN_BUDDY_AGENT_RETENTION_SWEEP_INTERVAL_SECONDS:-60}
+      # How often the observer asks a dispatched run's agent what it is doing.
+      # Hermes refuses to push to a private callback origin, so on this stack
+      # the schedule is the *only* thing that ever advances a run past **Sent**
+      # — the E2E runner turns it down so a story does not wait a minute for a
+      # state the agent already holds.
+      BRAIN_BUDDY_AGENT_OBSERVATION_INTERVAL_SECONDS: ${BRAIN_BUDDY_AGENT_OBSERVATION_INTERVAL_SECONDS:-60}
       BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER: ${BRAIN_BUDDY_VOICE_RECONCILER_PROVIDER:-disabled}
       BRAIN_BUDDY_FEATURE_FLAGS: ${BRAIN_BUDDY_FEATURE_FLAGS:-}
       BRAIN_BUDDY_ADMIN_EMAIL: ${BRAIN_BUDDY_ADMIN_EMAIL:-}
@@ -97,8 +103,14 @@ services:
       # service name — not this container's bind host.
       A2A_PUBLIC_URL: http://hermes-a2a:9900/
       STUB_REPLY_DELAY_SECONDS: ${BRAIN_BUDDY_HERMES_A2A_DELAY_SECONDS:-0}
-    expose:
-      - "9900"
+    # Published, not merely exposed. Playwright runs on the *host*, not on this
+    # network, so a story that wants to ask the agent directly how many tasks it
+    # holds — the only question that can catch a duplicate BrainBuddy would
+    # never see — has no way to reach `hermes-a2a:9900`. The card still
+    # advertises the service name above, because that is the address the
+    # backend uses; this port is for the test runner alone.
+    ports:
+      - "${BRAIN_BUDDY_HERMES_A2A_PORT:-9900}:9900"
 
 volumes:
   backend-data:
