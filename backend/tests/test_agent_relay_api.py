@@ -1108,7 +1108,7 @@ class TestHandOffRoutes:
     def test_an_untested_connection_refuses_the_hand_off(
         self, client: TestClient, container: Container
     ) -> None:
-        """AC-010 over HTTP."""
+        """AC-011 over HTTP: an untested connection is refused before any content leaves."""
 
         created = register_connection(client)
         task_id = create_task(client)
