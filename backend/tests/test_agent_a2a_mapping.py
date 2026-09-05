@@ -337,6 +337,8 @@ class TestTruncation:
             (TaskState.WORKING, "progress_text", "max_progress_chars"),
             (TaskState.INPUT_REQUIRED, "question_text", "max_question_chars"),
             (TaskState.COMPLETED, "result_text", "max_result_chars"),
+            (TaskState.FAILED, "failure_reason", "max_result_chars"),
+            (TaskState.REJECTED, "failure_reason", "max_result_chars"),
         ],
     )
     def test_014_FR_009_text_over_the_limit_is_truncated_visibly_and_still_accepted(
@@ -345,7 +347,12 @@ class TestTruncation:
         """AC-013: dropping the observation would strand the run in its previous
         state, which reads as "the agent went quiet" — a false claim about the
         agent caused by BrainBuddy's own storage limit. The marker keeps the
-        state true and the omission visible."""
+        state true and the omission visible.
+
+        The limit is the limit of the *stored* value, marker included: it is
+        the `max_length` of the field the observation is written to, so a
+        projection that overshoots it by the marker's own length produces a
+        document the next validated read refuses."""
 
         limit = getattr(LIMITS, limit_name)
         observation = project_observation(
@@ -355,7 +362,7 @@ class TestTruncation:
         value = getattr(observation, field)
         assert value is not None
         assert value.endswith(TRUNCATION_MARKER)
-        assert len(value) == limit + len(TRUNCATION_MARKER)
+        assert len(value) <= limit
         assert observation.truncated is True
         assert observation.reported_state is not None
 

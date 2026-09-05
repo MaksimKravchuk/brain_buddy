@@ -148,7 +148,13 @@ class _Truncator:
         if len(value) <= limit:
             return value
         self.truncated = True
-        return value[:limit] + TRUNCATION_MARKER
+        # The marker comes out of the budget rather than being added on top of
+        # it. `limit` is the `max_length` of the field this value is written
+        # to, and an observation is written through `model_copy`, which
+        # validates nothing — so a value one marker over the limit is stored
+        # happily and then refused by the *next* validated read, which turns
+        # the whole run into an unreadable relay payload.
+        return value[: max(limit - len(TRUNCATION_MARKER), 0)] + TRUNCATION_MARKER
 
 
 def _artifact_summaries(task: Task, *, limit: int) -> tuple[ArtifactSummary, ...]:
@@ -320,9 +326,11 @@ def project_observation(
     elif state is TaskState.REJECTED:
         # A refusal is a different fact from a breakage, and the surfaces show
         # this string verbatim, so the distinction is made here rather than
-        # left to each client to infer.
-        detail = truncate(status_text, limits.max_result_chars)
-        failure = f"{REJECTED_PREFIX}: {detail}" if detail else REJECTED_PREFIX
+        # left to each client to infer. BrainBuddy's own prefix is part of the
+        # stored value, so it comes out of the same budget the agent's words do.
+        rejected_prefix = f"{REJECTED_PREFIX}: "
+        detail = truncate(status_text, limits.max_result_chars - len(rejected_prefix))
+        failure = f"{rejected_prefix}{detail}" if detail else REJECTED_PREFIX
 
     return Observation(
         observed_at=observation.observed_at,

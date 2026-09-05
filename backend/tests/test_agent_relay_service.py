@@ -6924,6 +6924,47 @@ class TestApplyObservation:
         assert TASKS["task_1"] == before
         assert TASKS["task_1"].title == "Draft the migration plan"
 
+    @pytest.mark.parametrize(
+        ("state", "field", "limit_name"),
+        [
+            ("running", "progress_text", "max_progress_chars"),
+            ("blocked", "question_text", "max_question_chars"),
+            ("completed", "result_text", "max_result_chars"),
+            ("failed", "failure_reason", "max_result_chars"),
+        ],
+    )
+    def test_014_FR_009_an_over_limit_observation_survives_the_validated_read(
+        self,
+        observed: ObservedRelay,
+        state: str,
+        field: str,
+        limit_name: str,
+    ) -> None:
+        """AC-013. The run is written unvalidated and read validated.
+
+        `apply_observation` writes through `model_copy`, which validates
+        nothing, so a projection that overshoots a field's `max_length` lands in
+        storage and is only refused later — by the next validated read, which
+        turns the whole run into an unreadable relay payload, and by the event
+        row built in the same transaction, whose failure rolls the observation
+        back. Both are silent at the moment the mistake is made, so the bound
+        is asserted here as well as in the projection's own suite.
+        """
+
+        limit = getattr(observed.service.observation_limits, limit_name)
+
+        observed.report(state, text="x" * (limit + 500))
+
+        stored = observed.service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        value = getattr(stored, field)
+        assert value is not None
+        assert len(value) <= limit
+        # And the timeline row the same transaction wrote is readable too: its
+        # summary is the same agent text under the widest of the limits.
+        projection = observed.projection()
+        assert getattr(projection, field) == value
+        assert [event.summary for event in projection.events] == [value]
+
     def test_014_FR_008_an_identical_observation_only_refreshes_contact(
         self, observed: ObservedRelay, clock: Clock
     ) -> None:
