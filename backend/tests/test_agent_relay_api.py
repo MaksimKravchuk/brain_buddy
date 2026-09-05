@@ -1839,6 +1839,44 @@ class TestCheckDeliveryRoute:
         assert body["agent_task_id"] == "t-found"
         assert a2a.calls_to("SendMessage") == []
 
+    def test_014_SC_008_a_check_retried_under_one_key_sends_exactly_once(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-027, SC-008. The lost-response case, over HTTP.
+
+        The resend is itself ambiguous, so the run is still
+        **Delivery unconfirmed** when the client — which never saw the first
+        answer — asks again under the key it spent. Looking again would find
+        nothing (the agent's new task is not visible yet) and send a second
+        copy of the same message.
+        """
+
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        _connection_id, run = self._unconfirmed(client, container, key="k-replay")
+        a2a.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+        a2a.script(
+            "SendMessage",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+
+        first = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": "k-check-replay"},
+            json={},
+        )
+        second = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": "k-check-replay"},
+            json={},
+        )
+
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        assert first.json()["dispatch_state"] == "delivery_unconfirmed"
+        assert second.json() == first.json()
+        assert len(a2a.calls_to("SendMessage")) == 1
+        assert len(a2a.calls_to("ListTasks")) == 1
+
     def test_014_FR_006_a_check_from_a_stale_revision_is_refused_with_409(
         self, client: TestClient, container: Container
     ) -> None:

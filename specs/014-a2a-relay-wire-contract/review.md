@@ -282,3 +282,23 @@ that suddenly *required* it would break a client mid-rollout; both shipped
 clients send it, web for parity with iOS. The body stays `extra="forbid"` and
 gains no other key. `contracts/api-deltas.md` §check-delivery is corrected in
 the same commit.
+
+**(j) `check-delivery` reserves its `Idempotency-Key` rather than only
+requiring one.**
+The route demanded the header from the start and passed it to the service,
+which never spent it. That is worse than not asking: the client is told its
+retry is deduplicated and it is not. The dangerous case is the one the key
+exists for — the resend goes out, its own answer is ambiguous, and the HTTP
+response is lost. The run is still **Delivery unconfirmed**, the agent's new
+task is not visible yet, so the retry's lookup comes back empty and licenses a
+second copy of the same message.
+
+The key now goes through the same `AgentIdempotencyRecord` machinery the
+connection commands use: the call is serialised per key on `operation_lock`,
+the first outcome is stored as the response body, a retry replays it verbatim
+with no lookup and no send, and the same key against a different run is refused
+with the `ConflictError` every other keyed path raises. Refusals are
+deliberately not stored — each one names something the owner can put right, and
+a retry after they have is a different world, not a replay. The record is
+ordinary internal storage under the shape `data-model.md` §5 already describes;
+only the `command` value (`check_delivery`) is new.

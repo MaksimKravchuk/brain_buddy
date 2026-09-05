@@ -3460,6 +3460,67 @@ class AgentRelayService:
         It can never mint a second run: every identifier it uses is already on
         the run, and the resend wins the same single-writer transition a first
         send does, so concurrent checks converge on one message.
+
+        The `Idempotency-Key` the route requires is honoured here rather than
+        merely demanded. A check that resent and then lost its HTTP answer is
+        the dangerous case: the agent's new task is not visible yet, so a
+        retried *lookup* comes back empty and licenses a second send of the same
+        message. The first call's outcome is therefore stored under the key and
+        replayed verbatim, with no lookup and no send, exactly as the other
+        keyed commands replay theirs.
+        """
+
+        command = "check_delivery"
+        canonical = self._canonical_request(command, payload, target=run_id)
+        # Serialised per key, not per owner: two retries of one intent must not
+        # both get past the replay check, and holding a database writer across
+        # a send an agent may sit on for the reply window would stop every
+        # other owner's commands (the `reply_to_run` pattern).
+        with self.agent_repo.operation_lock(
+            owner_id, self._key_fingerprint(owner_id, idempotency_key)
+        ):
+            with self.agent_repo.command_lock(owner_id):
+                key_hash, record = self._replayed(
+                    owner_id=owner_id,
+                    key=idempotency_key,
+                    command=command,
+                    canonical=canonical,
+                )
+                if record is not None:
+                    return AgentRunResponse.model_validate(record.response_body)
+            response = self._check_delivery(
+                run_id,
+                payload,
+                owner_id=owner_id,
+                reauthenticated=reauthenticated,
+                resend_allowed=resend_allowed,
+            )
+            with self.agent_repo.command_lock(owner_id):
+                self._remember(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command,
+                    canonical=canonical,
+                    resource_id=run_id,
+                    response_body=response.model_dump(mode="json"),
+                )
+            return response
+
+    def _check_delivery(
+        self,
+        run_id: str,
+        payload: AgentCheckDeliveryRequest,
+        *,
+        owner_id: str,
+        reauthenticated: bool,
+        resend_allowed: bool,
+    ) -> AgentRunResponse:
+        """One check, from the run as it stands. Reserved by the caller.
+
+        A refusal raised here is deliberately *not* remembered: every one of
+        them names something the owner can put right, and a retry after they
+        have is a different world, not a replay. Only an outcome the check
+        actually reached is stored.
         """
 
         run = self.agent_repo.get_run(run_id, owner_id=owner_id)

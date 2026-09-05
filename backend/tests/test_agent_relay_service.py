@@ -3872,6 +3872,77 @@ class TestCheckDelivery:
 
         assert len(sends(a2a_client)) == 1
 
+    def test_014_SC_008_a_retried_check_replays_its_outcome_without_a_second_send(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """AC-027, SC-008. A lost response must not become a second message.
+
+        The route already requires an `Idempotency-Key`, and the whole point of
+        one on this path is that a check which resent and then lost its answer
+        is retried without looking again — the agent's new task may not be
+        visible yet, and a second empty lookup would license a second send.
+        """
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+        # The resend is itself ambiguous, so the run is still
+        # **Delivery unconfirmed** afterwards — which is exactly the state a
+        # retry would look up again, find empty, and send into.
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+
+        first = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-lost",
+        )
+        assert first.dispatch_state == "delivery_unconfirmed"
+        # The client never saw that answer, so it asks again with the key it
+        # spent — the same intent, not a new one.
+        second = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-lost",
+        )
+
+        assert len(sends(a2a_client)) == 1
+        assert len(a2a_client.calls_to("ListTasks")) == 1
+        assert second == first
+
+    def test_014_FR_006_one_check_key_cannot_serve_a_different_check(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """Refused exactly as every other keyed command refuses it.
+
+        A key that answered for a *different* run would return a
+        success-shaped run the caller never asked about, while the check they
+        did ask for never ran.
+        """
+
+        _connection_id, first_run = self._unconfirmed(service, a2a_client)
+        _connection_id_2, second_run = self._unconfirmed(
+            service, a2a_client, key="idem-unconfirmed-2"
+        )
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+        service.check_delivery(
+            first_run,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-shared",
+        )
+
+        with pytest.raises(ConflictError):
+            service.check_delivery(
+                second_run,
+                AgentCheckDeliveryRequest(),
+                owner_id=OWNER,
+                idempotency_key="idem-check-shared",
+            )
+
     def test_014_FR_006_a_check_against_a_stale_revision_is_refused_before_the_lookup(
         self, service: AgentRelayService, a2a_client: FakeA2AClient, clock: Clock
     ) -> None:

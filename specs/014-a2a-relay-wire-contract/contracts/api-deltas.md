@@ -184,7 +184,14 @@ AC-036). Concurrent checks are
 serialised per run: the `interrupted|delivery_unconfirmed → open` transition is a
 compare-and-set on `run_version` under the process-wide command lock, so a second check, a
 replayed confirmation or the observer's restart-recovery lookup returns the winner without a
-second send (SC-008). Returns `AgentRunResponse`; on a run that is already `sent` it returns
+second send (SC-008). The `Idempotency-Key` is reserved, not merely required: the first call's
+`AgentRunResponse` is stored under it and a retry with the same key replays that body verbatim
+— no lookup, no send — while the same key against a different run is refused `409` exactly as
+the other keyed commands refuse it. This is what makes a resend whose HTTP answer was lost
+safe to retry: the run is still `delivery_unconfirmed`, the agent's new task is not visible
+yet, and a second lookup would come back empty and license a duplicate. Refusals are not
+stored: each names something the owner can put right, and a retry after they have is a new
+check rather than a replay. Returns `AgentRunResponse`; on a run that is already `sent` it returns
 the run unchanged. Refused outright — before any lookup — with `400 {reason: "run_terminal"}`,
 `"agent_task_missing"` or `"connection_disconnected"` (a disconnected connection has no
 credential left to look up with). That is the complete list, one reason per condition —
