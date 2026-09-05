@@ -173,10 +173,14 @@ describe("apiClient external agent relay contract", () => {
   it("014-FR-006 checks delivery under an idempotency key and carries the password when asked", async () => {
     fetchMock.mockImplementation(() => Promise.resolve(response({ id: "run-1" })));
 
-    await apiClient.checkAgentRunDelivery("run-1", { current_password: null }, "check-key");
     await apiClient.checkAgentRunDelivery(
       "run-1",
-      { current_password: "hunter2hunter2" },
+      { current_password: null, expected_revision: 3 },
+      "check-key"
+    );
+    await apiClient.checkAgentRunDelivery(
+      "run-1",
+      { current_password: "hunter2hunter2", expected_revision: 3 },
       "check-key"
     );
 
@@ -191,8 +195,16 @@ describe("apiClient external agent relay contract", () => {
       "check-key",
       "check-key"
     ]);
-    expect(JSON.parse(String(inits[0].body))).toEqual({ current_password: null });
-    expect(JSON.parse(String(inits[1].body))).toEqual({ current_password: "hunter2hunter2" });
+    // The revision the user was looking at travels with it: the check can end
+    // in a message on the wire, so it names the state it was composed against.
+    expect(JSON.parse(String(inits[0].body))).toEqual({
+      current_password: null,
+      expected_revision: 3
+    });
+    expect(JSON.parse(String(inits[1].body))).toEqual({
+      current_password: "hunter2hunter2",
+      expected_revision: 3
+    });
   });
 
   it("lists, reads, replies to, and requests cancellation of runs", async () => {

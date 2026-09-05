@@ -3872,6 +3872,55 @@ class TestCheckDelivery:
 
         assert len(sends(a2a_client)) == 1
 
+    def test_014_FR_006_a_check_against_a_stale_revision_is_refused_before_the_lookup(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient, clock: Clock
+    ) -> None:
+        """**Check again** acts on the run the user was looking at, or on none.
+
+        `mobile/AGENTS.md` requires every mutation to name the revision it was
+        composed against, and a resend is a mutation with a message on the wire
+        at the end of it: a check sent from a cached run that has since moved
+        would be answering a question the user is no longer being asked.
+        """
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        seen = service.get_run(run_id, owner_id=OWNER).revision
+        report(service, run_id, "running", text="Working on it", now=clock.now)
+        assert service.get_run(run_id, owner_id=OWNER).revision != seen
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        with pytest.raises(ConflictError):
+            service.check_delivery(
+                run_id,
+                AgentCheckDeliveryRequest(expected_revision=seen),
+                owner_id=OWNER,
+                idempotency_key="idem-check-stale",
+            )
+
+        # Before the lookup, so a stale client cannot even spend a request at
+        # the agent — and certainly not a send.
+        assert a2a_client.calls_to("ListTasks") == []
+        assert sends(a2a_client) == []
+
+    def test_014_FR_006_a_check_naming_the_current_revision_proceeds(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """The guard is a staleness check, not a second refusal to send."""
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        current = service.get_run(run_id, owner_id=OWNER).revision
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        checked = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(expected_revision=current),
+            owner_id=OWNER,
+            idempotency_key="idem-check-fresh",
+        )
+
+        assert checked.dispatch_state == "sent"
+        assert len(sends(a2a_client)) == 1
+
     @pytest.mark.parametrize(
         "error_code",
         ["a2a_timeout", "a2a_request_rejected", "a2a_response_invalid"],

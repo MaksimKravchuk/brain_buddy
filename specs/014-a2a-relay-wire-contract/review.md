@@ -262,3 +262,23 @@ outcome is the allowlisted transport code (`a2a_timeout`, `a2a_response_invalid`
 …) and never agent text. It is written per user-triggered check rather than
 bounded per day, like the `task_adopted` row beside it: a check is a tap, not a
 poll.
+
+**(i) `check-delivery` takes an `expected_revision`.**
+The plan gave the request body nothing but `current_password`, on the reasoning
+that every identifier the check needs is already on the run. That is true of
+*identifiers* and false of *concurrency*: the check can end in a message on the
+wire, which makes it a mutation, and `mobile/AGENTS.md` requires every mobile
+mutation to send `Idempotency-Key` **and** `expected_revision`. Without it a
+**Check again** tapped on a cached run that had moved underneath — a run the
+observer had already settled, or that a parallel check had resent for — was
+carried out against a state the user was no longer being shown.
+
+`AgentCheckDeliveryRequest` therefore gains `expected_revision: int | None`
+(`ge=1`, default `None`). When it is sent and differs from `run.revision` the
+call raises the same `ConflictError` the reply path raises, before the lookup
+and so before any resend; a stale client cannot even spend a request at the
+agent. It is optional because the guard is the client's to adopt and a body
+that suddenly *required* it would break a client mid-rollout; both shipped
+clients send it, web for parity with iOS. The body stays `extra="forbid"` and
+gains no other key. `contracts/api-deltas.md` §check-delivery is corrected in
+the same commit.

@@ -488,20 +488,15 @@ describe("AgentRunSection dispatch states", () => {
       makeRun({ dispatch_state: "sent", primary_state_label: "Sent" }),
     );
     const onRunUpdated = jest.fn();
+    const unconfirmed = makeRun({
+      dispatch_state: "delivery_unconfirmed",
+      exchange_state: "closed",
+      reported_state: null,
+      primary_state_label: "Delivery unconfirmed",
+      revision: 6,
+    });
     const { renderer, unmount } = await renderWithProviders(
-      <AgentRunSection
-        {...props({
-          onRunUpdated,
-          runs: [
-            makeRun({
-              dispatch_state: "delivery_unconfirmed",
-              exchange_state: "closed",
-              reported_state: null,
-              primary_state_label: "Delivery unconfirmed",
-            }),
-          ],
-        })}
-      />,
+      <AgentRunSection {...props({ onRunUpdated, runs: [unconfirmed] })} />,
     );
 
     expect(visibleText(renderer)).toContain(
@@ -513,9 +508,11 @@ describe("AgentRunSection dispatch states", () => {
 
     await pressText(renderer, "Check again");
 
+    // Tied to the revision the user was looking at (`mobile/AGENTS.md`): a
+    // check from a stale cached run must not resend for a state that moved.
     expect(mockCheckDelivery).toHaveBeenCalledWith(
       "run_1",
-      { current_password: null },
+      { current_password: null, expected_revision: unconfirmed.revision },
       "idem_key_test",
     );
 

@@ -181,9 +181,15 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
     // No identifiers of its own: the correlation ID and the message ID are on
     // the run, so this can only ever repeat the same check. The key is held
     // across retries for the same reason a reply's is — an ambiguous check that
-    // is retried under a fresh key would stop being the same check.
-    mutationFn: (input: { idempotencyKey: string }) =>
-      apiClient.checkAgentRunDelivery(run.id, { current_password: null }, input.idempotencyKey),
+    // is retried under a fresh key would stop being the same check. The
+    // revision is the run this control was rendered from: the check can end in
+    // a send, so it names the state the user was actually looking at.
+    mutationFn: (input: { idempotencyKey: string; expectedRevision: number }) =>
+      apiClient.checkAgentRunDelivery(
+        run.id,
+        { current_password: null, expected_revision: input.expectedRevision },
+        input.idempotencyKey
+      ),
     onSuccess: (updated) => {
       checkKey.settle();
       invalidate(updated);
@@ -399,7 +405,12 @@ function RunCard({ taskId, run }: { taskId: string; run: AgentRunResponse }): Re
             className="mt-1"
             disabled={!online}
             isLoading={checkMutation.isPending}
-            onClick={() => checkMutation.mutate({ idempotencyKey: checkKey.current() })}
+            onClick={() =>
+              checkMutation.mutate({
+                idempotencyKey: checkKey.current(),
+                expectedRevision: run.revision
+              })
+            }
           >
             Check again
           </Button>

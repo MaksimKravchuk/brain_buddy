@@ -3465,6 +3465,19 @@ class AgentRelayService:
         run = self.agent_repo.get_run(run_id, owner_id=owner_id)
         if run.dispatched_at is None:
             raise NotFoundError("Agent run", run_id)
+        if (
+            payload.expected_revision is not None
+            and payload.expected_revision != run.revision
+        ):
+            # The same refusal a reply gets, and for the same reason: this call
+            # can end in a message on the wire, so it acts on the run the owner
+            # was actually looking at or on none at all. Before the lookup, so
+            # a stale client cannot even spend a request at the agent.
+            raise ConflictError(
+                "Agent run",
+                run_id,
+                "This run changed elsewhere; reload and try again.",
+            )
         if run.dispatch_state != "delivery_unconfirmed":
             # There is no ambiguity to resolve. A `sent` run's delivery is
             # already established and a `not_sent` one provably never left, so

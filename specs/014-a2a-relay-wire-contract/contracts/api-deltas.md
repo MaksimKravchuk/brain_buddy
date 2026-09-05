@@ -149,9 +149,16 @@ stamped only when an exchange starts, such a retry is a first dispatch under
 has passed (FR-004).
 
 `POST /agent-runs/{id}/check-delivery` (Idempotency-Key; the **Check again** control on
-D-03-S05 / M-03-S04) — body `{ "current_password": null | "…" }`, needed only when the resend
+D-03-S05 / M-03-S04) — body `{ "current_password": null | "…", "expected_revision": null | int }`
+(`extra="forbid"`; no other key is accepted). `current_password` is needed only when the resend
 branch runs and the dispatch reauthentication rule (`requires_dispatch_reauthentication`,
-FR-004) applies to the connection; the lookup never needs it. Performs the same
+FR-004) applies to the connection; the lookup never needs it. `expected_revision` is the run
+`revision` the control was rendered from: the check can end in a message on the wire, so it is
+a mutation like any other and names the state it was composed against. When it is sent and
+differs from `run.revision` the call is refused with `409` — the same `ConflictError` the reply
+path raises — **before the lookup** and therefore before any resend, so a stale cached run
+cannot even spend a request at the agent. It is optional (`null` or absent) so a client that
+has not adopted it behaves exactly as before; both shipped clients send it. Performs the same
 lookup-before-resend once with the run's own correlation ID and message ID: a found task is
 adopted and the run becomes `sent`; when the agent *answers* and reports no task the identical
 start message is resent once with the same message ID to the interface recorded at dispatch —

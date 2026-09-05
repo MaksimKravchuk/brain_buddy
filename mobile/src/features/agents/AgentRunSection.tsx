@@ -264,8 +264,14 @@ function RunCard({
     checkDelivery.mutate(
       // No identifiers of its own: the correlation ID and the message ID are on
       // the run, so this can only ever repeat the same check. The key is held
-      // across retries for the same reason a reply's is.
-      { runId: run.id, payload: { current_password: null }, idempotencyKey: checkKey.current() },
+      // across retries for the same reason a reply's is. The revision is the
+      // run this control was rendered from: the check can end in a send, so it
+      // names the state the user was actually looking at (`mobile/AGENTS.md`).
+      {
+        runId: run.id,
+        payload: { current_password: null, expected_revision: run.revision },
+        idempotencyKey: checkKey.current(),
+      },
       {
         onSuccess: (updated) => {
           checkKey.settle();

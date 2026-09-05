@@ -1839,6 +1839,40 @@ class TestCheckDeliveryRoute:
         assert body["agent_task_id"] == "t-found"
         assert a2a.calls_to("SendMessage") == []
 
+    def test_014_FR_006_a_check_from_a_stale_revision_is_refused_with_409(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """The run the user tapped on is the run the check acts on.
+
+        Both clients send `expected_revision`, so a **Check again** composed
+        against a cached run that has since moved is refused here rather than
+        resending a message for a state nobody is looking at any more.
+        """
+
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        _connection_id, run = self._unconfirmed(client, container, key="k-stale")
+        a2a.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        response = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": "k-check-stale"},
+            json={"current_password": None, "expected_revision": run["revision"] + 1},
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.headers["X-Correlation-ID"]
+        assert a2a.calls_to("ListTasks") == []
+        assert a2a.calls_to("SendMessage") == []
+
+        # And the same check naming the revision the client actually holds runs.
+        fresh = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": "k-check-fresh"},
+            json={"current_password": None, "expected_revision": run["revision"]},
+        )
+        assert fresh.status_code == 200, fresh.text
+        assert a2a.calls_to("ListTasks")
+
     def test_014_FR_016_a_check_without_an_idempotency_key_is_refused(
         self, client: TestClient, container: Container
     ) -> None:

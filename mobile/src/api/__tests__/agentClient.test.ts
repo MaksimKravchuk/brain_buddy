@@ -528,7 +528,7 @@ describe("014-FR-006 check delivery", () => {
 
     await client.checkAgentRunDelivery(
       "run1",
-      { current_password: "correct-horse" },
+      { current_password: "correct-horse", expected_revision: 5 },
       "key-check",
     );
 
@@ -537,7 +537,11 @@ describe("014-FR-006 check delivery", () => {
     expect(headersOf(calls[0])["Idempotency-Key"]).toBe("key-check");
     // Everything the check needs is on the run, so a body that could name a
     // different one would make "check again" capable of being a second send.
-    expect(bodyOf(calls[0])).toEqual({ current_password: "correct-horse" });
+    // The one thing it does carry is the revision it was composed against.
+    expect(bodyOf(calls[0])).toEqual({
+      current_password: "correct-horse",
+      expected_revision: 5,
+    });
   });
 });
 
