@@ -300,7 +300,6 @@ def refuse_snapshot(task_id: str, *, owner_id: str) -> Any:  # pragma: no cover 
 def build_service(repo: AgentRepository) -> AgentRelayService:
     return AgentRelayService(
         repo,
-        connector=object(),  # type: ignore[arg-type] - never reached; see below
         secret_box=SecretBox(OrderedDict({"v1": b"\x07" * 32})),
         task_snapshot=refuse_snapshot,
         callback_url="https://brainbuddy.example.com/api/agent-events",
@@ -864,19 +863,15 @@ class TestHandOffOnASupersededConnection:
 class TestTheBespokeWireIsGone:
     """The removal itself, asserted from outside.
 
-    Both cases are `xfail(strict=True)` until T110-T115 land. Strict is what
-    makes them useful: on the day the bespoke wire is deleted they stop being
-    expected failures, this suite goes red, and whoever landed the removal has
-    to come here and say so.
+    The route case is live: T114 deleted both routes, so FastAPI now answers
+    404 for them. The module case is still `xfail(strict=True)` until T115
+    deletes `connector.py`. Strict is what makes it useful: on the day the file
+    goes, it stops being an expected failure, this suite goes red, and whoever
+    landed the removal has to come here and say so.
 
     014-FR-012, 014-SC-010.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the bespoke routes are deleted by T110-T114; strict, so the "
-        "removal must un-mark this",
-    )
     def test_014_SC_010_the_bespoke_event_and_signing_secret_routes_answer_404(
         self, api_client: TestClient
     ) -> None:

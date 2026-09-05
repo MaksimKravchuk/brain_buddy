@@ -127,15 +127,6 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
             "422",
             "429",
         },
-        ("/api/agent-connections/{connection_id}/signing-secret", "post"): {
-            "400",
-            "401",
-            "403",
-            "404",
-            "409",
-            "422",
-            "429",
-        },
         ("/api/agent-connections/{connection_id}/disconnect", "post"): {
             "400",
             "401",
@@ -166,7 +157,6 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
             "422",
             "429",
         },
-        ("/api/agent-events", "post"): {"400", "403", "413", "422"},
         # The A2A push callback (014-FR-008). No `401`: it is called by the
         # user's own agent, which has no session, and every refusal it can make
         # is the same opaque `403` (`contracts/push-callback.md`).

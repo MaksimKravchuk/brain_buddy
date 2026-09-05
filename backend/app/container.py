@@ -18,7 +18,6 @@ from app.core.config import (
 )
 from app.modules.agents.a2a.card import fetch_card
 from app.modules.agents.a2a.client import A2AClient
-from app.modules.agents.connector import GenericHttpConnector
 from app.modules.agents.observer import AgentObserver
 from app.modules.agents.repository import AgentRepository
 from app.modules.agents.secrets import (
@@ -441,11 +440,6 @@ def build_container(config: AppConfig) -> Container:
     )
     agent_relay_service = AgentRelayService(
         agent_repo,
-        connector=GenericHttpConnector(
-            timeout_seconds=relay_settings.connector_timeout_seconds,
-            max_response_bytes=relay_settings.connector_max_response_bytes,
-            allow_private_destinations=relay_settings.allow_private_destinations,
-        ),
         a2a_client=A2AClient(
             timeout_seconds=relay_settings.connector_timeout_seconds,
             reply_window_seconds=relay_settings.reply_window_seconds,

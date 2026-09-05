@@ -123,7 +123,6 @@ def service(
 ) -> AgentRelayService:
     return AgentRelayService(
         repo,
-        connector=object(),  # type: ignore[arg-type]
         secret_box=SecretBox(OrderedDict({"v1": b"\x07" * 32})),
         task_snapshot=task_snapshot,
         callback_url=CALLBACK,

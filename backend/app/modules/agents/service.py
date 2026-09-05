@@ -3,7 +3,7 @@
 The organising rule of this module is that BrainBuddy only ever states what it
 actually knows. There are three independent sources of truth about a run and
 they are never blended: what BrainBuddy did (``dispatch_state``), what the
-connector authenticated (``reported_state`` at ``run_version``), and what the
+the agent's own Task says (``reported_state`` at ``run_version``), and what the
 clock implies (``Stopped reporting``). A user request that has not been
 acknowledged is a fourth, separate thing. Nothing here computes a percentage, an
 ETA, or a completion BrainBuddy did not witness.
@@ -14,7 +14,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import secrets
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -24,7 +23,6 @@ from functools import partial
 from typing import Any, Protocol
 
 from pydantic import BaseModel
-from pydantic import ValidationError as PydanticValidationError
 
 from app.exceptions import (
     BrainBuddyError,
@@ -41,12 +39,9 @@ from app.schemas.agents import (
     AgentConnectionDisconnectRequest,
     AgentConnectionResponse,
     AgentConnectionRotateRequest,
-    AgentConnectionRotateSigningSecretRequest,
-    AgentConnectionSigningSecretResponse,
     AgentConnectionUpdateRequest,
     AgentContextItemResponse,
     AgentControlsResponse,
-    AgentEventIngestResponse,
     AgentHandoffConfirmRequest,
     AgentHandoffPreviewRequest,
     AgentManifestResponse,
@@ -90,13 +85,10 @@ from .a2a.client import (
 )
 from .a2a.mapping import Observation, ObservationLimits, project_observation
 from .a2a.types import TERMINAL_TASK_STATES, Task, TaskState
-from .connector import ConnectorPort, ConnectorTarget
 from .domain import (
     A2A_PROTOCOL_VERSION,
-    AGENT_EVENT_ENVELOPE_ADAPTER,
     CANCEL_OUTCOMES_WITHDRAWING_THE_CONTROL,
     MAX_CONTEXT_ITEMS,
-    PROTOCOL_VERSION,
     TASK_SUCCESSION_SUMMARY,
     TERMINAL_REPORTED_STATES,
     AgentArtifactSummary,
@@ -106,7 +98,6 @@ from .domain import (
     AgentCommandDelivery,
     AgentCommandKind,
     AgentConnectionDocument,
-    AgentEventEnvelope,
     AgentIdempotencyRecord,
     AgentManifestContextItem,
     AgentPrimaryStateLabel,
@@ -135,10 +126,7 @@ from .egress import (
 from .headers import usable_auth_header_name
 from .repository import AgentRepository
 from .secrets import (
-    AAD_PURPOSE_INBOUND_SIGNING,
     AAD_PURPOSE_OUTBOUND_CREDENTIAL,
-    AAD_PURPOSE_SIGNING_RECEIPT,
-    SealedSecret,
     SecretBox,
     SecretDecryptionFailed,
     derive_push_token,
@@ -218,7 +206,6 @@ The server may observe *less* often after the reporting window (the FR-008
 backoff); it never observes more often on the schedule, so telling a client
 this number is a promise the server can keep."""
 DEFAULT_CONTENT_RETENTION = timedelta(days=30)
-EVENT_FRESHNESS_WINDOW = timedelta(minutes=5)
 SCOPE_REAUTH_WINDOW = timedelta(minutes=15)
 RESERVATION_TTL = timedelta(hours=1)
 DEFAULT_REPLY_WINDOW = timedelta(minutes=5)
@@ -242,8 +229,6 @@ NOT_SENT_ERROR_CODES = frozenset(
         A2A_VERSION_NOT_SUPPORTED,
     }
 )
-MAX_EVENT_BYTES = 64_000
-INBOUND_SECRET_BYTES = 32
 
 EXTERNAL_COPY_NOTICE = (
     "Your agent receives its own copy of everything listed here. BrainBuddy "
@@ -326,14 +311,6 @@ _UNSUPPORTED_DISCOVERY_CODES = frozenset(
         A2A_AUTH_SCHEME_UNSUPPORTED,
     }
 )
-
-
-class EventRejected(BrainBuddyError):
-    """An inbound connector report was refused; nothing was changed."""
-
-    def __init__(self, code: str) -> None:
-        super().__init__("Event rejected.")
-        self.code = code
 
 
 class RelayKeyRotationUnsafe(BrainBuddyError):
@@ -453,24 +430,6 @@ class CardFetcherPort(Protocol):
     ) -> CardDiscovery: ...
 
 
-def _reporting_instructions(callback_url: str, connection_id: str) -> str:
-    """The versioned template shown verbatim in the hand-off review."""
-
-    return (
-        "Report progress by POSTing signed events to "
-        f"{callback_url} using X-BrainBuddy-Connection: {connection_id}. Include "
-        "X-BrainBuddy-Timestamp as canonical ASCII base-10 Unix seconds and "
-        "X-BrainBuddy-Signature as v1=<lowercase hex HMAC-SHA256>. Sign "
-        "timestamp_bytes + b'.' + raw_body with the connection signing secret. "
-        "The raw JSON body uses protocol_version "
-        f"{PROTOCOL_VERSION} and includes event_id, run_id, type (accepted, running, "
-        "blocked, completed, failed, or cancelled), and a strictly increasing "
-        "run_version. Sign each request with the connection's signing secret. "
-        "BrainBuddy will not verify your result and will show it as reported by "
-        "you."
-    )
-
-
 class AgentRelayService:
     """Owns connections, runs, and the honest projection of both."""
 
@@ -478,7 +437,6 @@ class AgentRelayService:
         self,
         agent_repo: AgentRepository,
         *,
-        connector: ConnectorPort,
         secret_box: SecretBox,
         task_snapshot: TaskSnapshotPort,
         callback_url: str,
@@ -508,7 +466,6 @@ class AgentRelayService:
         now: Callable[[], datetime] = utcnow,
     ) -> None:
         self.agent_repo = agent_repo
-        self.connector = connector
         self.a2a_client = a2a_client
         self.exchange_executor = exchange.executor
         self.dispatch_wait_seconds = exchange.dispatch_wait_seconds
@@ -938,13 +895,6 @@ class AgentRelayService:
         except DestinationRejected as exc:
             raise ValidationFailure(exc.message, detail={"reason": exc.code}) from exc
 
-    def _target(self, connection: AgentConnectionDocument) -> ConnectorTarget:
-        return ConnectorTarget(
-            endpoint_url=connection.endpoint_url,
-            auth_header_name=connection.auth_header_name or "X-Agent-Key",
-            credential=self._open_credential(connection),
-        )
-
     def _a2a_target(
         self,
         connection: AgentConnectionDocument,
@@ -1094,7 +1044,6 @@ class AgentRelayService:
 
             now = self._now()
             connection_id = generate_id("agentconn")
-            inbound_secret = secrets.token_urlsafe(INBOUND_SECRET_BYTES)
             connection = AgentConnectionDocument(
                 id=connection_id,
                 owner_id=owner_id,
@@ -1106,14 +1055,6 @@ class AgentRelayService:
                     payload.credential,
                     aad=secret_aad(
                         AAD_PURPOSE_OUTBOUND_CREDENTIAL,
-                        owner_id=owner_id,
-                        connection_id=connection_id,
-                    ),
-                ),
-                inbound_secret=self.secret_box.seal(
-                    inbound_secret,
-                    aad=secret_aad(
-                        AAD_PURPOSE_INBOUND_SIGNING,
                         owner_id=owner_id,
                         connection_id=connection_id,
                     ),
@@ -1595,187 +1536,6 @@ class AgentRelayService:
                 connection_id=connection_id,
             )
         return self._connection_response(updated)
-
-    def rotate_signing_secret(
-        self,
-        connection_id: str,
-        payload: AgentConnectionRotateSigningSecretRequest,
-        *,
-        owner_id: str,
-        idempotency_key: str,
-        reauthenticated: bool,
-    ) -> AgentConnectionSigningSecretResponse:
-        """Issue a replacement inbound signing secret, recoverably.
-
-        This exists because the create response carries the secret exactly once:
-        lose it and the owner holds a connection they cannot configure. The
-        replacement takes effect immediately — the previous secret stops
-        verifying the moment this returns — so it is guarded like registration:
-        recent re-authentication, the revision the owner last saw, and a
-        connection that is still connected.
-
-        The retry story is the delicate part. If the response is lost the caller
-        must be able to ask again and *get the secret*, because answering a
-        replay with a blank success would leave them with a dead old secret and
-        nothing to replace it with. The replacement is therefore sealed a second
-        time, under its own purpose, into the idempotency record — encrypted
-        under the same out-of-directory key ring, unreadable anywhere else, and
-        dropped with that record after its 24-hour window. Nothing here is ever
-        written or logged in plaintext.
-        """
-
-        command = "rotate_signing_secret"
-        canonical = self._canonical_request(command, payload, target=connection_id)
-        receipt_aad = secret_aad(
-            AAD_PURPOSE_SIGNING_RECEIPT,
-            owner_id=owner_id,
-            connection_id=connection_id,
-        )
-        with self.agent_repo.command_lock(owner_id):
-            key_hash, record = self._replayed(
-                owner_id=owner_id,
-                key=idempotency_key,
-                command=command,
-                canonical=canonical,
-            )
-            connection = self.agent_repo.get_connection(
-                connection_id, owner_id=owner_id
-            )
-            if not reauthenticated:
-                raise ValidationFailure(
-                    "Confirm your password to replace this agent's signing secret.",
-                    detail={"reason": "reauthentication_required"},
-                )
-            if record is not None:
-                return self._replayed_signing_secret(
-                    record, connection, aad=receipt_aad
-                )
-            if connection.status == "disconnected":
-                raise ValidationFailure(
-                    "This agent is disconnected.",
-                    detail={"reason": "connection_disconnected"},
-                )
-            if connection.revision != payload.expected_revision:
-                raise ConflictError(
-                    "Agent connection",
-                    connection_id,
-                    "This agent changed elsewhere; reload and try again.",
-                )
-
-            now = self._now()
-            replacement = secrets.token_urlsafe(INBOUND_SECRET_BYTES)
-            installed = self.secret_box.seal(
-                replacement,
-                aad=secret_aad(
-                    AAD_PURPOSE_INBOUND_SIGNING,
-                    owner_id=owner_id,
-                    connection_id=connection_id,
-                ),
-            )
-            updated = connection.model_copy(
-                update={
-                    "inbound_secret": installed,
-                    "updated_at": now,
-                    "revision": connection.revision + 1,
-                }
-            )
-            self.agent_repo.save_connection(updated)
-            self._remember(
-                owner_id=owner_id,
-                key_hash=key_hash,
-                command=command,
-                canonical=canonical,
-                resource_id=connection_id,
-                response_body={
-                    "id": connection_id,
-                    "sealed_signing_secret": self.secret_box.seal(
-                        replacement, aad=receipt_aad
-                    ).model_dump(mode="json"),
-                    # What this receipt is a receipt *for*. Fingerprinting the
-                    # sealed blob rather than the secret means a later replay
-                    # can ask "is this still the live one?" without opening
-                    # either copy.
-                    "installed_secret_fingerprint": self.secret_box.fingerprint(
-                        installed.ciphertext
-                    ),
-                },
-            )
-            self._audit(
-                owner_id=owner_id,
-                action="signing_secret_rotated",
-                outcome="ok",
-                connection_id=connection_id,
-            )
-        return self._signing_secret_response(updated, replacement)
-
-    def _signing_secret_response(
-        self, connection: AgentConnectionDocument, secret: str
-    ) -> AgentConnectionSigningSecretResponse:
-        return AgentConnectionSigningSecretResponse(
-            **self._connection_response(connection).model_dump(),
-            inbound_signing_secret=secret,
-        )
-
-    def _replayed_signing_secret(
-        self,
-        record: AgentIdempotencyRecord,
-        connection: AgentConnectionDocument,
-        *,
-        aad: str,
-    ) -> AgentConnectionSigningSecretResponse:
-        """Answer a rotation replay only while its receipt is still current.
-
-        A receipt outlives the rotation that wrote it, so a *later* rotation
-        under a different key leaves this one describing a secret that no
-        longer verifies anything. Returning it would be the worst available
-        answer: a success carrying a dead secret, which the owner would then
-        configure their agent with and watch every report be refused.
-
-        Currency is decided by comparing the fingerprint of the sealed blob
-        this rotation installed against the one the connection holds now.
-        Both sides are ciphertext, so nothing is opened to make the comparison,
-        and a receipt whose provenance cannot be established fails closed.
-        """
-
-        fingerprint = record.response_body.get("installed_secret_fingerprint")
-        superseded = (
-            connection.inbound_secret is None
-            or not isinstance(fingerprint, str)
-            or not self.secret_box.fingerprint_matches(
-                fingerprint, connection.inbound_secret.ciphertext
-            )
-        )
-        if superseded:
-            raise ConflictError(
-                "Agent connection",
-                connection.id,
-                "This agent's signing secret has been replaced since that "
-                "request. Replace it again to get a secret you can use.",
-            )
-        return self._signing_secret_response(
-            connection, self._open_receipt(record, aad=aad)
-        )
-
-    def _open_receipt(self, record: AgentIdempotencyRecord, *, aad: str) -> str:
-        """Recover the replacement a lost response never delivered."""
-
-        sealed = record.response_body.get("sealed_signing_secret")
-        if not isinstance(sealed, dict):
-            # The record exists but carries no receipt: nothing honest is left
-            # to return, so say so rather than answering with a blank secret.
-            raise ValidationFailure(
-                "This signing-secret replacement can no longer be recovered. "
-                "Replace the signing secret again.",
-                detail={"reason": "signing_secret_unrecoverable"},
-            )
-        try:
-            return self.secret_box.open(SealedSecret.model_validate(sealed), aad=aad)
-        except (SecretDecryptionFailed, PydanticValidationError) as exc:
-            raise ValidationFailure(
-                "This signing-secret replacement can no longer be recovered. "
-                "Replace the signing secret again.",
-                detail={"reason": "signing_secret_unrecoverable"},
-            ) from exc
 
     def disconnect_connection(
         self,
@@ -4589,263 +4349,6 @@ class AgentRelayService:
                 run_id=run.id,
             )
 
-    # --- inbound events -----------------------------------------------------
-
-    def _authenticate_event_request(
-        self,
-        *,
-        raw_body: bytes,
-        connection_id: str,
-        timestamp: str,
-        signature: str,
-    ) -> AgentConnectionDocument:
-        """Authenticate the exact wire bytes without recording probe evidence."""
-
-        connection = self.agent_repo.find_connection_anywhere(connection_id)
-        if connection is None:
-            raise EventRejected("unknown_connection")
-        if len(raw_body) > MAX_EVENT_BYTES:
-            raise EventRejected("event_too_large")
-        if connection.status == "disconnected" or connection.inbound_secret is None:
-            raise EventRejected("connection_disconnected")
-        try:
-            secret = self.secret_box.open(
-                connection.inbound_secret,
-                aad=secret_aad(
-                    AAD_PURPOSE_INBOUND_SIGNING,
-                    owner_id=connection.owner_id,
-                    connection_id=connection.id,
-                ),
-            )
-        except SecretDecryptionFailed as exc:
-            raise EventRejected("signing_secret_unreadable") from exc
-        if not (
-            timestamp.isascii()
-            and timestamp.isdecimal()
-            and (timestamp == "0" or not timestamp.startswith("0"))
-        ):
-            raise EventRejected("timestamp_invalid")
-        try:
-            sent_at = datetime.fromtimestamp(int(timestamp), tz=UTC)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise EventRejected("timestamp_invalid") from exc
-        if abs(self._now() - sent_at) > EVENT_FRESHNESS_WINDOW:
-            raise EventRejected("timestamp_stale")
-
-        expected = hmac.new(
-            secret.encode("utf-8"),
-            timestamp.encode("ascii") + b"." + raw_body,
-            hashlib.sha256,
-        ).hexdigest()
-        valid_signature_format = (
-            len(signature) == 67
-            and signature.startswith("v1=")
-            and all(character in "0123456789abcdef" for character in signature[3:])
-        )
-        if not valid_signature_format or not hmac.compare_digest(
-            expected, signature[3:]
-        ):
-            raise EventRejected("signature_invalid")
-        return connection
-
-    def _authenticated_event_rejection(
-        self, connection: AgentConnectionDocument, code: str
-    ) -> EventRejected:
-        """Retain only bounded coarse evidence after the complete body authenticates."""
-
-        self._audit_authenticated_event_rejection(
-            owner_id=connection.owner_id,
-            connection_id=connection.id,
-            rejection_class=code,
-        )
-        return EventRejected(code)
-
-    def _validate_authenticated_event(
-        self,
-        *,
-        raw_body: bytes,
-        connection: AgentConnectionDocument,
-    ) -> AgentEventEnvelope:
-        try:
-            payload = json.loads(raw_body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise self._authenticated_event_rejection(
-                connection, "body_invalid"
-            ) from exc
-        if not isinstance(payload, dict):
-            raise self._authenticated_event_rejection(connection, "body_invalid")
-
-        # Strict validation turns an authentic body into a valid protocol event.
-        try:
-            event = AGENT_EVENT_ENVELOPE_ADAPTER.validate_python(payload)
-        except PydanticValidationError as exc:
-            raise self._authenticated_event_rejection(
-                connection, "envelope_invalid"
-            ) from exc
-        if event.protocol_version != PROTOCOL_VERSION:
-            raise self._authenticated_event_rejection(
-                connection, "protocol_version_unsupported"
-            )
-        if event.connection_id != connection.id:
-            raise self._authenticated_event_rejection(connection, "connection_mismatch")
-        return event
-
-    def _event_run(
-        self, connection: AgentConnectionDocument, event: AgentEventEnvelope
-    ) -> AgentRunDocument:
-        try:
-            run = self.agent_repo.get_run(event.run_id, owner_id=connection.owner_id)
-        except NotFoundError as exc:
-            raise self._authenticated_event_rejection(
-                connection, "unknown_run"
-            ) from exc
-        if run.dispatched_at is None or run.connection_id != connection.id:
-            raise self._authenticated_event_rejection(
-                connection, "run_not_for_connection"
-            )
-        if run.connection_disconnected_at is not None:
-            raise self._authenticated_event_rejection(
-                connection, "connection_disconnected"
-            )
-        if event.run_version <= run.run_version:
-            raise self._authenticated_event_rejection(
-                connection, "run_version_not_newer"
-            )
-        if run.reported_state in TERMINAL_REPORTED_STATES:
-            raise self._authenticated_event_rejection(connection, "run_terminal")
-        return run
-
-    @staticmethod
-    def _event_updates(
-        run: AgentRunDocument, event: AgentEventEnvelope, *, now: datetime
-    ) -> dict[str, Any]:
-        progress = getattr(event, "progress", None)
-        updates: dict[str, Any] = {
-            "reported_state": event.type,
-            "run_version": event.run_version,
-            "last_contact_at": now,
-            "updated_at": now,
-            "revision": run.revision + 1,
-        }
-        if run.content_expired:
-            # Retention is irreversible: higher versions advance state/contact,
-            # but a late event can never recreate expired content.
-            updates.update(
-                progress_text=None,
-                question_text=None,
-                result_text=None,
-                result_link=None,
-                failure_reason=None,
-            )
-        else:
-            if progress is not None:
-                updates["progress_text"] = progress
-            updates["question_text"] = (
-                getattr(event, "question", None) if event.type == "blocked" else None
-            )
-            if event.type == "completed":
-                updates["result_text"] = getattr(event, "result", None)
-                updates["result_link"] = getattr(event, "result_link", None)
-            if event.type == "failed":
-                updates["failure_reason"] = getattr(event, "reason", None)
-        if event.type in TERMINAL_REPORTED_STATES:
-            updates["cancel_requested_at"] = None
-        return updates
-
-    @staticmethod
-    def _event_summary(run: AgentRunDocument, event: AgentEventEnvelope) -> str | None:
-        if run.content_expired:
-            return None
-        return (
-            getattr(event, "progress", None)
-            or getattr(event, "question", None)
-            or getattr(event, "result", None)
-            or getattr(event, "reason", None)
-        )
-
-    def _apply_authenticated_event(
-        self, connection: AgentConnectionDocument, event: AgentEventEnvelope
-    ) -> None:
-        owner_id = connection.owner_id
-        with self.agent_repo.command_lock(owner_id):
-            try:
-                active_connection = self.agent_repo.get_connection(
-                    connection.id, owner_id=owner_id
-                )
-            except NotFoundError as exc:
-                # Account purge is a terminal deletion boundary. The body was
-                # authenticated before the purge, but no relay or audit row may
-                # be recreated after the owner-scoped records are gone.
-                raise EventRejected("connection_scope_changed") from exc
-            if (
-                active_connection.status == "disconnected"
-                or active_connection.revision != connection.revision
-                or active_connection.inbound_secret != connection.inbound_secret
-            ):
-                raise self._authenticated_event_rejection(
-                    active_connection, "connection_scope_changed"
-                )
-
-            now = self._now()
-            run = project_run_for_access(
-                self._event_run(active_connection, event), now=now
-            )
-            # Consume only after every projection check, so rejection cannot burn
-            # an identifier. The repository claim remains the atomic replay gate.
-            if not self.agent_repo.consume_event_id(
-                owner_id=owner_id,
-                connection_id=connection.id,
-                event_id=event.event_id,
-                now=now,
-            ):
-                raise self._authenticated_event_rejection(connection, "event_replayed")
-
-            self.agent_repo.save_run(
-                run.model_copy(update=self._event_updates(run, event, now=now))
-            )
-            self.agent_repo.append_event(
-                AgentRunEventDocument(
-                    id=event.event_id,
-                    owner_id=owner_id,
-                    run_id=run.id,
-                    connection_id=connection.id,
-                    type=event.type,
-                    run_version=event.run_version,
-                    received_at=now,
-                    summary=self._event_summary(run, event),
-                )
-            )
-            self._audit(
-                owner_id=owner_id,
-                action="event_accepted",
-                outcome=event.type,
-                connection_id=connection.id,
-                run_id=run.id,
-            )
-
-    def ingest_event(
-        self,
-        *,
-        raw_body: bytes,
-        connection_id: str,
-        timestamp: str,
-        signature: str,
-    ) -> AgentEventIngestResponse:
-        """Authenticate, validate, then apply one connector report."""
-
-        connection = self._authenticate_event_request(
-            raw_body=raw_body,
-            connection_id=connection_id,
-            timestamp=timestamp,
-            signature=signature,
-        )
-        event = self._validate_authenticated_event(
-            raw_body=raw_body,
-            connection=connection,
-        )
-        self._apply_authenticated_event(connection, event)
-        return AgentEventIngestResponse(accepted=True, run_version=event.run_version)
-
     # --- maintenance --------------------------------------------------------
 
     def run_retention_sweep(self) -> int:
@@ -4888,7 +4391,6 @@ __all__ = [
     "EXTERNAL_COPY_NOTICE",
     "SCOPE_REAUTH_WINDOW",
     "AgentRelayService",
-    "EventRejected",
     "TaskSnapshot",
     "TaskSnapshotPort",
 ]

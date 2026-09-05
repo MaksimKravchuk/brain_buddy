@@ -238,13 +238,6 @@ class AgentConnectionDisconnectRequest(StrictBaseModel):
     expected_revision: int = Field(ge=1)
 
 
-class AgentConnectionRotateSigningSecretRequest(StrictBaseModel):
-    """Replace the inbound signing secret, e.g. after a lost create response."""
-
-    current_password: str = Field(min_length=1, max_length=512)
-    expected_revision: int = Field(ge=1)
-
-
 class AgentConnectionResponse(StrictBaseModel):
     """A saved connection. Structurally incapable of carrying its secret."""
 
@@ -293,25 +286,6 @@ class AgentConnectionResponse(StrictBaseModel):
     revision: int
 
 
-class AgentConnectionSecretResponse(AgentConnectionResponse):
-    """A connection plus a signing secret, shown for this response only.
-
-    BrainBuddy generates the secret so the owner can configure their agent to
-    sign its reports. It is stored sealed and never appears in an ordinary read
-    — a lost secret is replaced, not recovered.
-    """
-
-    inbound_signing_secret: str
-
-
-class AgentConnectionCreatedResponse(AgentConnectionSecretResponse):
-    """Registration: the first and, absent a rotation, only issue of a secret."""
-
-
-class AgentConnectionSigningSecretResponse(AgentConnectionSecretResponse):
-    """Rotation: the replacement secret, and the retired connection revision."""
-
-
 class AgentContextItemRequest(StrictBaseModel):
     """One supporting item the owner chose to include (ADR-0006 vocabulary)."""
 
@@ -336,21 +310,6 @@ class AgentPushCallbackResponse(StrictBaseModel):
     registered: bool = False
     url_preview: str | None = None
     disclosure: str | None = None
-
-
-class AgentReportingContractResponse(StrictBaseModel):
-    callback_url: str
-    connection_id: str
-    connection_header: Literal["X-BrainBuddy-Connection"]
-    timestamp_header: Literal["X-BrainBuddy-Timestamp"]
-    signature_header: Literal["X-BrainBuddy-Signature"]
-    timestamp_format: Literal[
-        "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero"
-    ]
-    signature_algorithm: Literal["hmac-sha256"]
-    signing_bytes: Literal["timestamp_bytes + b'.' + raw_body"]
-    signature_format: Literal["v1=<lowercase hex>"]
-    body_envelope_version: str
 
 
 class AgentHandoffPreviewRequest(StrictBaseModel):
@@ -573,11 +532,6 @@ class AgentRunSummaryResponse(StrictBaseModel):
     agent_task_missing: bool = False
 
 
-class AgentEventIngestResponse(StrictBaseModel):
-    accepted: bool
-    run_version: int
-
-
 __all__ = [
     "AGENT_PRIMARY_STATE_LABELS",
     "AgentArtifactKind",
@@ -603,25 +557,19 @@ __all__ = [
     "AgentGuaranteeTier",
     "AgentSkillResponse",
     "AgentConnectionCreateRequest",
-    "AgentConnectionCreatedResponse",
     "AgentConnectionDisconnectRequest",
     "AgentConnectionResponse",
     "AgentConnectionRotateRequest",
-    "AgentConnectionRotateSigningSecretRequest",
-    "AgentConnectionSecretResponse",
-    "AgentConnectionSigningSecretResponse",
     "AgentConnectionStatus",
     "AgentConnectionUpdateRequest",
     "AgentContextItemRequest",
     "AgentContextItemResponse",
     "AgentDispatchState",
-    "AgentEventIngestResponse",
     "AgentHandoffConfirmRequest",
     "AgentHandoffPreviewRequest",
     "AgentManifestResponse",
     "AgentReplyRequest",
     "AgentReportedState",
-    "AgentReportingContractResponse",
     "AgentRunCommandResponse",
     "AgentRunEventResponse",
     "AgentRunResponse",

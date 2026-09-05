@@ -1,8 +1,8 @@
 """Behaviour of the external-agent relay service.
 
 Every acceptance scenario in ``specs/006-external-agent-relay/spec.md`` that does
-not need HTTP plumbing lives here, driven through a fake connector so no test
-ever touches a network or a paid provider.
+not need HTTP plumbing lives here, driven through a scripted A2A client so no
+test ever touches a network or a paid provider.
 """
 
 from __future__ import annotations
@@ -33,12 +33,6 @@ from app.modules.agents.a2a.card import (
 from app.modules.agents.a2a.client import A2AResult
 from app.modules.agents.a2a.mapping import ObservationLimits, project_observation
 from app.modules.agents.a2a.types import Message, Task
-from app.modules.agents.connector import (
-    ConnectorCommandOutcome,
-    ConnectorStartOutcome,
-    ConnectorTarget,
-    ConnectorTestOutcome,
-)
 from app.modules.agents.domain import (
     PROTOCOL_VERSION,
     REPORTING_INSTRUCTIONS_VERSION,
@@ -56,7 +50,6 @@ from app.modules.agents.secrets import SealedSecret, SecretBox
 from app.modules.agents.service import (
     SCOPE_REAUTH_WINDOW,
     AgentRelayService,
-    EventRejected,
     ExchangePolicy,
     RelayFingerprintUnreadable,
     RelayKeyRotationUnsafe,
@@ -87,36 +80,6 @@ OWNER = "user_a"
 OTHER_OWNER = "user_b"
 CALLBACK = "https://brainbuddy.example/api/agent-events"
 PUSH_BASE = "https://brainbuddy.example/api/a2a/push"
-
-
-class FakeConnector:
-    """A scriptable stand-in for a user's agent."""
-
-    def __init__(self) -> None:
-        self.test_outcome = ConnectorTestOutcome(
-            "ready", AgentCapabilities(streaming=True, push_notifications=True)
-        )
-        self.start_outcome = ConnectorStartOutcome("sent")
-        self.command_outcome = ConnectorCommandOutcome("confirmed")
-        self.starts: list[dict[str, Any]] = []
-        self.commands: list[dict[str, Any]] = []
-        self.tests: list[ConnectorTarget] = []
-
-    def test(self, target: ConnectorTarget) -> ConnectorTestOutcome:
-        self.tests.append(target)
-        return self.test_outcome
-
-    def start(
-        self, target: ConnectorTarget, *, envelope: dict[str, Any]
-    ) -> ConnectorStartOutcome:
-        self.starts.append(envelope)
-        return self.start_outcome
-
-    def command(
-        self, target: ConnectorTarget, *, envelope: dict[str, Any]
-    ) -> ConnectorCommandOutcome:
-        self.commands.append(envelope)
-        return self.command_outcome
 
 
 def mock_transport_card_fetcher(
@@ -175,19 +138,6 @@ class BlockingCardFetcher(FakeCardFetcher):
         return self.discovery
 
 
-class BlockingTestConnector(FakeConnector):
-    def __init__(self) -> None:
-        super().__init__()
-        self.entered = Event()
-        self.release = Event()
-
-    def test(self, target: ConnectorTarget) -> ConnectorTestOutcome:
-        self.tests.append(target)
-        self.entered.set()
-        assert self.release.wait(timeout=5)
-        return self.test_outcome
-
-
 class BlockingA2AClient(FakeA2AClient):
     """A scripted A2A client whose send waits for the test to release it.
 
@@ -225,33 +175,6 @@ class BlockingA2AClient(FakeA2AClient):
         if self.block_kind == kind:
             self.entered.set()
             assert self.release.wait(timeout=5)
-
-
-class BlockingIoConnector(FakeConnector):
-    def __init__(self) -> None:
-        super().__init__()
-        self.block_kind: str | None = None
-        self.entered = Event()
-        self.release = Event()
-
-    def _block(self, kind: str) -> None:
-        if self.block_kind == kind:
-            self.entered.set()
-            assert self.release.wait(timeout=5)
-
-    def start(
-        self, target: ConnectorTarget, *, envelope: dict[str, Any]
-    ) -> ConnectorStartOutcome:
-        self.starts.append(envelope)
-        self._block("start")
-        return self.start_outcome
-
-    def command(
-        self, target: ConnectorTarget, *, envelope: dict[str, Any]
-    ) -> ConnectorCommandOutcome:
-        self.commands.append(envelope)
-        self._block(str(envelope["type"]))
-        return self.command_outcome
 
 
 class Clock:
@@ -326,11 +249,6 @@ def clock() -> Clock:
 
 
 @pytest.fixture
-def connector() -> FakeConnector:
-    return FakeConnector()
-
-
-@pytest.fixture
 def card_fetcher() -> FakeCardFetcher:
     return FakeCardFetcher()
 
@@ -351,7 +269,6 @@ def fake_resolver(host: str, port: int) -> list[str]:
 
 def build_service(
     repo: AgentRepository,
-    connector: FakeConnector,
     clock: Clock,
     *,
     key: bytes = b"\x07" * 32,
@@ -362,7 +279,6 @@ def build_service(
 ) -> AgentRelayService:
     return AgentRelayService(
         repo,
-        connector=connector,
         secret_box=SecretBox(keys if keys is not None else OrderedDict({"v1": key})),
         task_snapshot=task_snapshot,
         callback_url=CALLBACK,
@@ -378,14 +294,12 @@ def build_service(
 @pytest.fixture
 def service(
     tmp_path: Path,
-    connector: FakeConnector,
     clock: Clock,
     card_fetcher: FakeCardFetcher,
     a2a_client: FakeA2AClient,
 ) -> AgentRelayService:
     return build_service(
         AgentRepository(tmp_path),
-        connector,
         clock,
         card_fetcher=card_fetcher,
         a2a_client=a2a_client,
@@ -812,7 +726,7 @@ class TestConnectAnAgent:
         assert len(service.list_connections(owner_id=OWNER)) == 1
 
     def test_014_FR_002_the_bespoke_connector_probe_is_no_longer_the_test_path(
-        self, service: AgentRelayService, connector: FakeConnector
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
     ) -> None:
         """The four 007 connector outcomes are gone, not merely unused.
 
@@ -820,16 +734,20 @@ class TestConnectAnAgent:
         from the agent's published card plus an authenticated A2A call, and the
         cases that used to live here are re-expressed against that path in
         `TestConnectByAgentCard`. This case is what keeps the old path from
-        quietly coming back: a connection test must reach the wire, and the
-        bespoke connector must see nothing (014-FR-002, 014-FR-012).
+        quietly coming back: the service holds no connector port at all, so a
+        connection test can only reach the wire (014-FR-002, 014-FR-012).
         """
+
+        assert not hasattr(service, "connector")
 
         connection_id = connect(service)
 
         tested = service.test_connection(connection_id, owner_id=OWNER)
 
         assert tested.status == "ready"
-        assert connector.tests == []
+        assert [method for method, _target, _kwargs in a2a_client.calls] == [
+            "ListTasks"
+        ]
 
     def test_a_ready_connection_goes_stale_once_contact_ages_out(
         self, service: AgentRelayService, clock: Clock
@@ -1254,7 +1172,7 @@ class TestConnectByAgentCard:
         assert a2a_client.calls_to("ListTasks") == []
 
     def test_014_FR_004_a_private_destination_is_refused_before_a_credential_leaves(
-        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+        self, tmp_path: Path, clock: Clock
     ) -> None:
         """AC-006, D-01-S18. Nothing left BrainBuddy."""
 
@@ -1262,7 +1180,6 @@ class TestConnectByAgentCard:
         a2a_client = FakeA2AClient()
         service = build_service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             card_fetcher=card_fetcher,
             a2a_client=a2a_client,
@@ -1576,7 +1493,7 @@ class TestConnectByAgentCard:
 
     @pytest.mark.parametrize("body", [b"not json at all", b'{"name": "x"'])
     def test_014_SC_003_a_malformed_card_body_changes_nothing(
-        self, tmp_path: Path, connector: FakeConnector, clock: Clock, body: bytes
+        self, tmp_path: Path, clock: Clock, body: bytes
     ) -> None:
         """014-SC-003. A truncated card is not a card; parsing a prefix is worse."""
 
@@ -1585,7 +1502,6 @@ class TestConnectByAgentCard:
 
         service = build_service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             card_fetcher=mock_transport_card_fetcher(handler),
         )
@@ -1598,7 +1514,7 @@ class TestConnectByAgentCard:
         assert tested.card is None
 
     def test_014_SC_003_an_oversized_card_body_is_refused_whole(
-        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+        self, tmp_path: Path, clock: Clock
     ) -> None:
         """014-SC-003. The cap is enforced on the stream, not after the fact."""
 
@@ -1607,7 +1523,6 @@ class TestConnectByAgentCard:
 
         service = build_service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             card_fetcher=mock_transport_card_fetcher(handler),
         )
@@ -1619,7 +1534,7 @@ class TestConnectByAgentCard:
         assert tested.last_test_error_code == "a2a_not_an_agent"
 
     def test_014_SC_003_a_rebinding_answer_is_refused_by_the_pinned_resolver(
-        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+        self, tmp_path: Path, clock: Clock
     ) -> None:
         """014-SC-003. The network class is decided before the socket, once."""
 
@@ -1627,15 +1542,12 @@ class TestConnectByAgentCard:
             return ["127.0.0.1"]
 
         repo = AgentRepository(tmp_path)
-        connection_id = connect(
-            build_service(repo, connector, clock, a2a_client=FakeA2AClient())
-        )
+        connection_id = connect(build_service(repo, clock, a2a_client=FakeA2AClient()))
         # The host resolved publicly when the connection was saved and resolves
         # inward now. Discovery is the *real* one here: the point is that the
         # network class is decided from this resolver, before the socket.
         rebound = AgentRelayService(
             repo,
-            connector=connector,
             secret_box=SecretBox(OrderedDict({"v1": b"\x07" * 32})),
             task_snapshot=task_snapshot,
             callback_url=CALLBACK,
@@ -1674,7 +1586,7 @@ class TestConnectionTestConcurrency:
         self, tmp_path: Path, clock: Clock
     ) -> None:
         blocking = BlockingCardFetcher()
-        service = build_service(AgentRepository(tmp_path), FakeConnector(), clock)
+        service = build_service(AgentRepository(tmp_path), clock)
         connection_id = connect(service)
         make_ready(service, connection_id)
         service._card_fetcher = blocking
@@ -1711,9 +1623,7 @@ class TestConnectionTestConcurrency:
         self, tmp_path: Path, clock: Clock
     ) -> None:
         blocking = BlockingCardFetcher()
-        service = build_service(
-            AgentRepository(tmp_path), FakeConnector(), clock, card_fetcher=blocking
-        )
+        service = build_service(AgentRepository(tmp_path), clock, card_fetcher=blocking)
         connection_id = connect(service)
         tested: list[Any] = []
         worker = Thread(
@@ -1749,9 +1659,7 @@ class TestConnectionTestConcurrency:
         self, tmp_path: Path, clock: Clock
     ) -> None:
         blocking = BlockingCardFetcher()
-        service = build_service(
-            AgentRepository(tmp_path), FakeConnector(), clock, card_fetcher=blocking
-        )
+        service = build_service(AgentRepository(tmp_path), clock, card_fetcher=blocking)
         connection_id = connect(service)
         tested: list[Any] = []
         worker = Thread(
@@ -1779,7 +1687,7 @@ class TestConnectionTestConcurrency:
 
         persisted = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
         assert persisted.status == "untested"
-        assert service._target(persisted).credential == "Bearer rotated-token"
+        assert service._open_credential(persisted) == "Bearer rotated-token"
         assert persisted.last_tested_at is None
         assert tested and tested[0].status == "untested"
 
@@ -1789,12 +1697,10 @@ class TestExternalIoLockScope:
     def test_slow_external_io_releases_global_and_sqlite_writer_locks(
         self, tmp_path: Path, clock: Clock, operation: str
     ) -> None:
-        connector = BlockingIoConnector()
         a2a_client = BlockingA2AClient()
         repo = AgentRepository(tmp_path)
         service = build_service(
             repo,
-            connector,
             clock,
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
@@ -1894,17 +1800,16 @@ class TestExternalIoLockScope:
         self,
         tmp_path: Path,
         clock: Clock,
+        a2a_client: FakeA2AClient,
         monkeypatch: pytest.MonkeyPatch,
         transport_status: Any,
         callback_type: str,
         callback_fields: dict[str, str],
         expire_content: bool,
     ) -> None:
-        connector = FakeConnector()
         a2a_client = FakeA2AClient()
         service = build_service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
@@ -1985,15 +1890,14 @@ class TestExternalIoLockScope:
         self,
         tmp_path: Path,
         clock: Clock,
+        a2a_client: FakeA2AClient,
         monkeypatch: pytest.MonkeyPatch,
         bypass_operation_lock: bool,
     ) -> None:
-        connector = BlockingIoConnector()
         a2a_client = BlockingA2AClient()
         repo = AgentRepository(tmp_path)
         service = build_service(
             repo,
-            connector,
             clock,
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
@@ -2146,7 +2050,9 @@ class TestHandOffReview:
         assert without_details.token != with_details.token
 
     def test_confirming_a_token_that_no_longer_matches_is_refused(
-        self, service: AgentRelayService, connector: FakeConnector
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
     ) -> None:
         """FR-005: a changed payload invalidates the confirmation."""
 
@@ -2172,10 +2078,12 @@ class TestHandOffReview:
                 idempotency_key="idem-dispatch",
             )
 
-        assert connector.starts == []
+        assert sends(a2a_client) == []
 
     def test_cancelling_the_review_creates_no_run(
-        self, service: AgentRelayService, connector: FakeConnector
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
     ) -> None:
         """AC-007: a preview alone never becomes an external run."""
 
@@ -2188,7 +2096,7 @@ class TestHandOffReview:
         )
 
         assert service.list_runs_for_task("task_1", owner_id=OWNER) == []
-        assert connector.starts == []
+        assert sends(a2a_client) == []
 
     def test_one_confirmation_produces_exactly_one_run_and_one_start(
         self, service: AgentRelayService, a2a_client: FakeA2AClient
@@ -2341,7 +2249,6 @@ class TestHandOffReview:
     def test_a_connection_that_is_not_ready_refuses_before_sending_content(
         self,
         service: AgentRelayService,
-        connector: FakeConnector,
         a2a_client: FakeA2AClient,
         probe_error: str | None,
     ) -> None:
@@ -2358,11 +2265,11 @@ class TestHandOffReview:
         with pytest.raises(ValidationFailure):
             dispatch(service, connection_id)
 
-        assert connector.starts == []
+        assert sends(a2a_client) == []
         assert a2a_client.calls_to("SendMessage") == []
 
     def test_a_stale_connection_refuses_the_hand_off(
-        self, service: AgentRelayService, connector: FakeConnector, clock: Clock
+        self, service: AgentRelayService, a2a_client: FakeA2AClient, clock: Clock
     ) -> None:
         """AC-010: silence past the stale threshold blocks a new hand-off."""
 
@@ -2373,10 +2280,12 @@ class TestHandOffReview:
         with pytest.raises(ValidationFailure):
             dispatch(service, connection_id)
 
-        assert connector.starts == []
+        assert sends(a2a_client) == []
 
     def test_another_owners_connection_cannot_be_used(
-        self, service: AgentRelayService, connector: FakeConnector
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
     ) -> None:
         """AC-010: cross-owner hand-off fails closed."""
 
@@ -2389,7 +2298,7 @@ class TestHandOffReview:
                 AgentHandoffPreviewRequest(connection_id=connection_id),
                 owner_id=OTHER_OWNER,
             )
-        assert connector.starts == []
+        assert sends(a2a_client) == []
 
     def test_a_later_hand_off_creates_a_distinct_run(
         self, service: AgentRelayService
@@ -2531,7 +2440,6 @@ class TestHandOffManifestAndAcknowledgement:
     def test_014_FR_005_a_moved_callback_origin_invalidates_the_confirmation(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         card_fetcher: FakeCardFetcher,
     ) -> None:
@@ -2545,13 +2453,13 @@ class TestHandOffManifestAndAcknowledgement:
         card_fetcher.discovery = ready_discovery(
             summary=card_summary(push_notifications=True)
         )
-        first = build_service(repo, connector, clock, card_fetcher=card_fetcher)
+        first = build_service(repo, clock, card_fetcher=card_fetcher)
         first.push_base_url = "https://one.example/api/a2a/push"
         connection_id = connect(first)
         make_ready(first, connection_id)
         confirmation = review(first, connection_id)
 
-        moved = build_service(repo, connector, clock, card_fetcher=card_fetcher)
+        moved = build_service(repo, clock, card_fetcher=card_fetcher)
         moved.push_base_url = "https://two.example/api/a2a/push"
 
         with pytest.raises(ValidationFailure) as caught:
@@ -2758,7 +2666,6 @@ class TestHandOffExchange:
     def _service(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -2766,7 +2673,6 @@ class TestHandOffExchange:
     ) -> AgentRelayService:
         return build_service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             card_fetcher=card_fetcher,
             a2a_client=a2a_client,
@@ -2776,7 +2682,6 @@ class TestHandOffExchange:
     def test_014_FR_006_the_reservation_pins_every_identifier_before_any_io(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -2784,9 +2689,7 @@ class TestHandOffExchange:
         """AC-009. The ids exist durably before the first byte leaves."""
 
         executor = SaturatedExecutor()
-        service = self._service(
-            tmp_path, connector, clock, a2a_client, card_fetcher, executor
-        )
+        service = self._service(tmp_path, clock, a2a_client, card_fetcher, executor)
         connection_id = connect(service)
         make_ready(service, connection_id)
 
@@ -2810,7 +2713,6 @@ class TestHandOffExchange:
     def test_014_FR_006_a_queued_exchange_reads_as_queued_and_runs_no_probe(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -2818,9 +2720,7 @@ class TestHandOffExchange:
         """AC-034, D-03-S04 queued variant. Queued is not Sent."""
 
         executor = SaturatedExecutor()
-        service = self._service(
-            tmp_path, connector, clock, a2a_client, card_fetcher, executor
-        )
+        service = self._service(tmp_path, clock, a2a_client, card_fetcher, executor)
         connection_id = connect(service)
         make_ready(service, connection_id)
 
@@ -2842,7 +2742,6 @@ class TestHandOffExchange:
     def test_014_FR_006_starting_the_exchange_stamps_both_sides_at_once(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -2850,9 +2749,7 @@ class TestHandOffExchange:
         """The one write that says content has left for this destination."""
 
         executor = SaturatedExecutor()
-        service = self._service(
-            tmp_path, connector, clock, a2a_client, card_fetcher, executor
-        )
+        service = self._service(tmp_path, clock, a2a_client, card_fetcher, executor)
         connection_id = connect(service)
         make_ready(service, connection_id)
         run = dispatch(service, connection_id)
@@ -2878,7 +2775,6 @@ class TestHandOffExchange:
     def test_014_FR_006_the_start_message_carries_the_wire_shape_the_contract_names(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -2889,7 +2785,7 @@ class TestHandOffExchange:
             summary=card_summary(push_notifications=True)
         )
         service = self._service(
-            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+            tmp_path, clock, a2a_client, card_fetcher, SynchronousExecutor()
         )
         connection_id = connect(service)
         make_ready(service, connection_id)
@@ -2925,7 +2821,6 @@ class TestHandOffExchange:
     def test_014_FR_006_a_guaranteed_tier_send_activates_the_extension(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -2936,7 +2831,7 @@ class TestHandOffExchange:
             summary=card_summary(extension_uris=[SINGLE_START_EXTENSION_URI])
         )
         service = self._service(
-            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+            tmp_path, clock, a2a_client, card_fetcher, SynchronousExecutor()
         )
         connection_id = connect(service)
         make_ready(service, connection_id)
@@ -3003,7 +2898,6 @@ class TestHandOffExchange:
     def test_014_FR_006_every_failed_exchange_lands_in_the_state_it_can_prove(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3014,7 +2908,7 @@ class TestHandOffExchange:
         """A refusal is **Not sent**; an ambiguity is never demoted to one."""
 
         service = self._service(
-            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+            tmp_path, clock, a2a_client, card_fetcher, SynchronousExecutor()
         )
         connection_id = connect(service)
         make_ready(service, connection_id)
@@ -3030,7 +2924,6 @@ class TestHandOffExchange:
     def test_014_FR_006_an_answered_exchange_adopts_the_task_it_names(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3038,7 +2931,7 @@ class TestHandOffExchange:
         """AC-009. The agent answered, so the run is **Sent** and adopted."""
 
         service = self._service(
-            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+            tmp_path, clock, a2a_client, card_fetcher, SynchronousExecutor()
         )
         connection_id = connect(service)
         make_ready(service, connection_id)
@@ -3079,7 +2972,6 @@ class TestHandOffExchange:
     def test_014_FR_007_a_task_in_a_foreign_conversation_is_never_adopted(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3092,7 +2984,7 @@ class TestHandOffExchange:
         """
 
         service = self._service(
-            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+            tmp_path, clock, a2a_client, card_fetcher, SynchronousExecutor()
         )
         connection_id = connect(service)
         make_ready(service, connection_id)
@@ -3117,7 +3009,6 @@ class TestHandOffExchange:
     def test_014_FR_006_a_direct_message_answer_completes_the_run(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3125,7 +3016,7 @@ class TestHandOffExchange:
         """Some agents answer with a message and never create a task at all."""
 
         service = self._service(
-            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+            tmp_path, clock, a2a_client, card_fetcher, SynchronousExecutor()
         )
         connection_id = connect(service)
         make_ready(service, connection_id)
@@ -3154,7 +3045,6 @@ class TestHandOffExchange:
     def test_014_SC_002_three_replays_create_one_task_and_one_exchange(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3162,7 +3052,7 @@ class TestHandOffExchange:
         """SC-002. The key is spent once; the wire is touched once."""
 
         service = self._service(
-            tmp_path, connector, clock, a2a_client, card_fetcher, SynchronousExecutor()
+            tmp_path, clock, a2a_client, card_fetcher, SynchronousExecutor()
         )
         connection_id = connect(service)
         make_ready(service, connection_id)
@@ -3239,7 +3129,6 @@ class TestExchangeEdges:
     def _service(
         self,
         repo: AgentRepository,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3248,7 +3137,6 @@ class TestExchangeEdges:
     ) -> AgentRelayService:
         return AgentRelayService(
             repo,
-            connector=connector,
             secret_box=SecretBox(OrderedDict({"v1": b"\x07" * 32})),
             task_snapshot=task_snapshot,
             callback_url=CALLBACK,
@@ -3263,7 +3151,6 @@ class TestExchangeEdges:
     def test_014_FR_006_an_open_exchange_is_probed_once_before_the_request_answers(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3273,7 +3160,6 @@ class TestExchangeEdges:
         repo = AgentRepository(tmp_path)
         service = self._service(
             repo,
-            connector,
             clock,
             a2a_client,
             card_fetcher,
@@ -3314,7 +3200,6 @@ class TestExchangeEdges:
     def test_014_FR_006_a_probe_that_finds_nothing_leaves_the_exchange_alone(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3324,7 +3209,6 @@ class TestExchangeEdges:
         repo = AgentRepository(tmp_path)
         service = self._service(
             repo,
-            connector,
             clock,
             a2a_client,
             card_fetcher,
@@ -3343,7 +3227,6 @@ class TestExchangeEdges:
     def test_014_FR_006_the_request_stops_waiting_and_still_answers_honestly(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3352,7 +3235,6 @@ class TestExchangeEdges:
 
         service = self._service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             a2a_client,
             card_fetcher,
@@ -3370,15 +3252,14 @@ class TestExchangeEdges:
     def test_014_FR_006_a_deployment_with_no_wire_leaves_the_hand_off_queued(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
+        a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
     ) -> None:
         """Nothing can leave, so nothing is claimed to have."""
 
         service = self._service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             FakeA2AClient(),
             card_fetcher,
@@ -3403,7 +3284,6 @@ class TestExchangeEdges:
     def test_014_FR_006_a_second_worker_on_one_exchange_sends_nothing(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3412,7 +3292,6 @@ class TestExchangeEdges:
 
         service = self._service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             a2a_client,
             card_fetcher,
@@ -3431,7 +3310,6 @@ class TestExchangeEdges:
     def test_014_FR_006_an_unspecified_task_state_refreshes_contact_and_claims_nothing(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3440,7 +3318,6 @@ class TestExchangeEdges:
 
         service = self._service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             a2a_client,
             card_fetcher,
@@ -3486,7 +3363,6 @@ class TestExchangeEdges:
     def test_014_FR_006_a_late_answer_never_recreates_expired_content(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3495,7 +3371,6 @@ class TestExchangeEdges:
 
         service = self._service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             a2a_client,
             card_fetcher,
@@ -3526,7 +3401,6 @@ class TestExchangeEdges:
     def test_014_FR_006_an_observation_that_lost_the_race_changes_nothing(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3535,7 +3409,6 @@ class TestExchangeEdges:
 
         service = self._service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             a2a_client,
             card_fetcher,
@@ -3563,7 +3436,6 @@ class TestExchangeEdges:
     def test_014_FR_006_a_lookup_prefers_the_newest_task_in_this_conversation(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         a2a_client: FakeA2AClient,
         card_fetcher: FakeCardFetcher,
@@ -3572,7 +3444,6 @@ class TestExchangeEdges:
 
         service = self._service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             a2a_client,
             card_fetcher,
@@ -3975,7 +3846,7 @@ class TestCheckDelivery:
         assert len(sends(a2a_client)) == 1
 
     def test_014_SC_008_concurrent_checks_converge_on_one_resend(
-        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+        self, tmp_path: Path, clock: Clock
     ) -> None:
         """One durable winner; the loser returns without touching the network."""
 
@@ -3983,7 +3854,6 @@ class TestCheckDelivery:
         repo = AgentRepository(tmp_path)
         service = build_service(
             repo,
-            connector,
             clock,
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
@@ -4033,16 +3903,15 @@ class TestExternalIoMergeRaces:
         self,
         tmp_path: Path,
         clock: Clock,
+        a2a_client: FakeA2AClient,
         monkeypatch: pytest.MonkeyPatch,
         operation: str,
         bypass_operation_lock: bool,
     ) -> None:
-        connector = BlockingIoConnector()
         a2a_client = BlockingA2AClient()
         repo = AgentRepository(tmp_path)
         service = build_service(
             repo,
-            connector,
             clock,
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
@@ -4156,7 +4025,6 @@ class TestExternalIoMergeRaces:
         a2a_client = BlockingA2AClient()
         service = build_service(
             AgentRepository(tmp_path),
-            FakeConnector(),
             clock,
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
@@ -4245,7 +4113,6 @@ class TestExternalIoMergeRaces:
         a2a_client = BlockingA2AClient()
         service = build_service(
             AgentRepository(tmp_path),
-            FakeConnector(),
             clock,
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
@@ -4288,7 +4155,6 @@ class TestExternalIoMergeRaces:
         a2a_client = BlockingA2AClient()
         service = build_service(
             AgentRepository(tmp_path),
-            FakeConnector(),
             clock,
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
@@ -4365,7 +4231,7 @@ class TestExternalIoMergeRaces:
         elif race == "rotation":
             connection = service.agent_repo.get_connection(created.id, owner_id=OWNER)
             assert connection.status == "untested"
-            assert service._target(connection).credential == "Bearer rotated-token"
+            assert service._open_credential(connection) == "Bearer rotated-token"
         else:
             assert current_run.connection_disconnected_at is not None
 
@@ -4378,7 +4244,6 @@ class TestExternalIoMergeRaces:
         a2a_client = BlockingA2AClient()
         service = build_service(
             AgentRepository(tmp_path),
-            FakeConnector(),
             clock,
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
@@ -4473,7 +4338,7 @@ class TestExternalIoMergeRaces:
                 observed.connection_id, owner_id=OWNER
             )
             assert connection.status == "untested"
-            assert service._target(connection).credential == "Bearer rotated-token"
+            assert service._open_credential(connection) == "Bearer rotated-token"
         else:
             connection = service.agent_repo.get_connection(
                 observed.connection_id, owner_id=OWNER
@@ -4533,7 +4398,6 @@ class TestCommandReplayAfterTheWorldMoved:
         self,
         observed: ObservedRelay,
         service: AgentRelayService,
-        connector: FakeConnector,
     ) -> None:
         """The lost response is recovered even though the run has since ended."""
 
@@ -4554,7 +4418,6 @@ class TestCommandReplayAfterTheWorldMoved:
         self,
         observed: ObservedRelay,
         service: AgentRelayService,
-        connector: FakeConnector,
     ) -> None:
         observed.report("blocked", text="Which environment?")
         revision = observed.projection().revision
@@ -4582,7 +4445,6 @@ class TestCommandReplayAfterTheWorldMoved:
         self,
         observed: ObservedRelay,
         service: AgentRelayService,
-        connector: FakeConnector,
     ) -> None:
         """A pulled connection cannot retroactively un-send a delivered reply."""
 
@@ -4602,7 +4464,6 @@ class TestCommandReplayAfterTheWorldMoved:
         self,
         observed: ObservedRelay,
         service: AgentRelayService,
-        connector: FakeConnector,
     ) -> None:
         """The request was really made, so the retry says so rather than 'too late'."""
 
@@ -4625,7 +4486,6 @@ class TestCommandReplayAfterTheWorldMoved:
         self,
         observed: ObservedRelay,
         service: AgentRelayService,
-        connector: FakeConnector,
     ) -> None:
         """Same for the connection going away between attempt and retry."""
 
@@ -4666,7 +4526,6 @@ class TestCommandReplayAfterTheWorldMoved:
         self,
         observed: ObservedRelay,
         service: AgentRelayService,
-        connector: FakeConnector,
     ) -> None:
         """Replay is for the *same* request; a new one must not ride the record."""
 
@@ -4683,7 +4542,6 @@ class TestCommandReplayAfterTheWorldMoved:
         self,
         observed: ObservedRelay,
         service: AgentRelayService,
-        connector: FakeConnector,
     ) -> None:
         """Nothing above weakens the live guard for a genuinely new command."""
 
@@ -4886,7 +4744,6 @@ class TestDisconnectAndRetention:
         observed: ObservedRelay,
         clock: Clock,
         service: AgentRelayService,
-        connector: FakeConnector,
     ) -> None:
         observed.report("blocked", text="Secret question?")
         persisted = service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
@@ -4917,7 +4774,6 @@ class TestDisconnectAndRetention:
         observed: ObservedRelay,
         clock: Clock,
         service: AgentRelayService,
-        connector: FakeConnector,
     ) -> None:
         observed.report("blocked", text="Which environment?")
         clock.advance(service.content_retention + timedelta(seconds=1))
@@ -4941,7 +4797,6 @@ class TestDisconnectAndRetention:
         observed: ObservedRelay,
         clock: Clock,
         service: AgentRelayService,
-        connector: FakeConnector,
     ) -> None:
         observed.report("blocked", text="Which environment?")
         payload = AgentReplyRequest(
@@ -5237,7 +5092,7 @@ class TestSecretHandling:
         assert b"super-secret-token" not in database
 
     def test_a_connection_row_copied_to_another_owner_cannot_be_used(
-        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+        self, tmp_path: Path, clock: Clock
     ) -> None:
         """The credential's AAD names the owner, so a copied row is inert.
 
@@ -5247,7 +5102,7 @@ class TestSecretHandling:
         """
 
         repo = AgentRepository(tmp_path)
-        service = build_service(repo, connector, clock)
+        service = build_service(repo, clock)
         connection_id = connect(service)
         stolen = repo.get_connection(connection_id, owner_id=OWNER)
 
@@ -5256,18 +5111,18 @@ class TestSecretHandling:
         with pytest.raises(ValidationFailure) as rejected:
             service.test_connection(connection_id, owner_id=OTHER_OWNER)
         assert rejected.value.detail == {"reason": "credential_unreadable"}
-        assert connector.tests == []
+        assert service.a2a_client.calls == []  # type: ignore[union-attr]
 
     def test_a_ciphertext_that_cannot_be_opened_fails_closed(
-        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+        self, tmp_path: Path, clock: Clock
     ) -> None:
         """Losing key material blocks use rather than sending an empty header."""
 
         repo = AgentRepository(tmp_path)
-        original = build_service(repo, connector, clock)
+        original = build_service(repo, clock)
         connection_id = connect(original)
 
-        rekeyed = build_service(repo, connector, clock, key=b"\x09" * 32)
+        rekeyed = build_service(repo, clock, key=b"\x09" * 32)
 
         with pytest.raises(ValidationFailure):
             rekeyed.test_connection(connection_id, owner_id=OWNER)
@@ -5309,15 +5164,14 @@ class TestRelayFailureRecoveryEdges:
         self,
         tmp_path: Path,
         clock: Clock,
+        a2a_client: FakeA2AClient,
         monkeypatch: pytest.MonkeyPatch,
         operation: str,
         window: str,
     ) -> None:
-        connector = FakeConnector()
         a2a_client = FakeA2AClient()
         service = build_service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
@@ -5338,7 +5192,6 @@ class TestRelayFailureRecoveryEdges:
             # The bundle dispatched a run to have something to command.
             # That start is setup, not the call under test.
             a2a_client.calls.clear()
-            connector.starts.clear()
             clear_wire(service)
             if operation == "reply":
                 observed.report("blocked", text="Which environment?")
@@ -5416,7 +5269,6 @@ class TestRelayFailureRecoveryEdges:
 
         service = build_service(
             AgentRepository(tmp_path),
-            connector,
             clock,
             a2a_client=a2a_client,
             exchange_executor=SynchronousExecutor(),
@@ -5456,11 +5308,11 @@ class TestRelayFailureRecoveryEdges:
         self,
         tmp_path: Path,
         clock: Clock,
+        a2a_client: FakeA2AClient,
         operation: str,
         delivery_column_exists: bool,
     ) -> None:
-        connector = FakeConnector()
-        service = build_service(AgentRepository(tmp_path), connector, clock)
+        service = build_service(AgentRepository(tmp_path), clock)
         key = f"idem-legacy-incomplete-{operation}"
         if operation == "start":
             connection_id = connect(service)
@@ -5565,13 +5417,12 @@ class TestRelayFailureRecoveryEdges:
                 ),
             )
 
-        connector.starts.clear()
         clear_wire(service)
-        restarted = build_service(AgentRepository(tmp_path), connector, clock)
+        restarted = build_service(AgentRepository(tmp_path), clock)
         service = restarted
         recovered = retry()
 
-        assert connector.starts == []
+        assert sends(a2a_client) == []
         assert wire_commands(service) == []
         assert [item.id for item in recovered.commands if item.id == command_id] == [
             command_id
@@ -5606,7 +5457,7 @@ class TestRelayFailureRecoveryEdges:
                 (json.dumps(legacy_payload), OWNER, observed.connection_id),
             )
 
-        restarted = build_service(AgentRepository(tmp_path), FakeConnector(), clock)
+        restarted = build_service(AgentRepository(tmp_path), clock)
         migrated = restarted.agent_repo.get_connection(
             observed.connection_id, owner_id=OWNER
         )
@@ -5616,9 +5467,7 @@ class TestRelayFailureRecoveryEdges:
         assert migrated.revision == 2
         assert migrated.updated_at >= connection.updated_at
 
-        restarted_again = build_service(
-            AgentRepository(tmp_path), FakeConnector(), clock
-        )
+        restarted_again = build_service(AgentRepository(tmp_path), clock)
         persisted = restarted_again.agent_repo.get_connection(
             observed.connection_id, owner_id=OWNER
         )
@@ -5649,6 +5498,7 @@ class TestRelayFailureRecoveryEdges:
         observed: ObservedRelay,
         tmp_path: Path,
         clock: Clock,
+        a2a_client: FakeA2AClient,
         legacy_header: object,
     ) -> None:
         connection = observed.service.agent_repo.get_connection(
@@ -5662,8 +5512,7 @@ class TestRelayFailureRecoveryEdges:
                 (json.dumps(legacy_payload), OWNER, observed.connection_id),
             )
 
-        connector = FakeConnector()
-        restarted = build_service(AgentRepository(tmp_path), connector, clock)
+        restarted = build_service(AgentRepository(tmp_path), clock)
         listed = restarted.list_connections(owner_id=OWNER)
         run = restarted.get_run(observed.run_id, owner_id=OWNER)
         migrated = restarted.agent_repo.get_connection(
@@ -5694,12 +5543,10 @@ class TestRelayFailureRecoveryEdges:
                 task_id="task_2",
                 key=f"idem-legacy-invalid-header-{legacy_header}",
             )
-        assert connector.tests == []
-        assert connector.starts == []
+        assert a2a_client.calls == []
+        assert sends(a2a_client) == []
 
-        restarted_again = build_service(
-            AgentRepository(tmp_path), FakeConnector(), clock
-        )
+        restarted_again = build_service(AgentRepository(tmp_path), clock)
         persisted = restarted_again.get_connection(
             observed.connection_id, owner_id=OWNER
         )
@@ -5712,7 +5559,6 @@ class TestRelayFailureRecoveryEdges:
         self,
         observed: ObservedRelay,
         service: AgentRelayService,
-        connector: FakeConnector,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         observed.report("blocked", text="Which environment?")
@@ -5757,7 +5603,6 @@ class TestRelayFailureRecoveryEdges:
         self,
         observed: ObservedRelay,
         service: AgentRelayService,
-        connector: FakeConnector,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         observed.report("blocked", text="Which environment?")
@@ -5812,7 +5657,6 @@ class TestRelayFailureRecoveryEdges:
         self,
         observed: ObservedRelay,
         service: AgentRelayService,
-        connector: FakeConnector,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         save_command = service.agent_repo.save_command
@@ -5854,7 +5698,6 @@ class TestRelayFailureRecoveryEdges:
         self,
         observed: ObservedRelay,
         service: AgentRelayService,
-        connector: FakeConnector,
         clock: Clock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -5964,7 +5807,9 @@ class TestRelayFailureRecoveryEdges:
         )
 
     def test_missing_stored_credential_refuses_network_use(
-        self, service: AgentRelayService, connector: FakeConnector
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
     ) -> None:
         connection_id = connect(service)
         connection = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
@@ -5976,10 +5821,12 @@ class TestRelayFailureRecoveryEdges:
             service.test_connection(connection_id, owner_id=OWNER)
 
         assert refused.value.detail == {"reason": "credential_missing"}
-        assert connector.tests == []
+        assert a2a_client.calls == []
 
     def test_disconnected_connection_cannot_be_tested(
-        self, service: AgentRelayService, connector: FakeConnector
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
     ) -> None:
         connection_id = connect(service)
         current = service.get_connection(connection_id, owner_id=OWNER)
@@ -5998,7 +5845,7 @@ class TestRelayFailureRecoveryEdges:
             service.test_connection(connection_id, owner_id=OWNER)
 
         assert refused.value.detail == {"reason": "connection_disconnected"}
-        assert connector.tests == []
+        assert a2a_client.calls == []
 
     def test_credential_rotation_guards_and_replay_are_stable(
         self, service: AgentRelayService
@@ -6170,7 +6017,9 @@ class TestRelayFailureRecoveryEdges:
         assert service.list_runs_for_task("task_1", owner_id=OWNER) == []
 
     def test_unreserved_manifest_and_preview_run_are_not_actionable(
-        self, service: AgentRelayService, connector: FakeConnector
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
     ) -> None:
         connection_id = connect(service)
         make_ready(service, connection_id)
@@ -6200,7 +6049,7 @@ class TestRelayFailureRecoveryEdges:
             )
 
         assert refused.value.detail == {"reason": "manifest_not_reserved"}
-        assert connector.starts == []
+        assert sends(a2a_client) == []
 
     def test_014_FR_012_a_disconnected_run_ignores_a_late_observation(
         self, observed: ObservedRelay
@@ -6246,7 +6095,10 @@ class TestDispatchScopeReauthentication:
         assert preview.reauthentication_required is False
 
     def test_a_stale_scope_requires_the_password_for_the_first_dispatch(
-        self, service: AgentRelayService, clock: Clock, connector: FakeConnector
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
+        clock: Clock,
     ) -> None:
         """FR-003: first content-bearing dispatch in an old scope re-verifies."""
 
@@ -6277,7 +6129,7 @@ class TestDispatchScopeReauthentication:
                 idempotency_key="idem-dispatch",
             )
         assert refused.value.detail == {"reason": "reauthentication_required"}
-        assert connector.starts == []
+        assert sends(a2a_client) == []
 
     def test_once_content_has_been_sent_the_scope_no_longer_re_prompts(
         self, service: AgentRelayService, clock: Clock
@@ -6344,7 +6196,7 @@ def stored_idempotency(tmp_path: Path, command: str) -> tuple[str, str]:
 class RotationScenario:
     """One start, reply, or cancel, replayable on any key-ring generation.
 
-    Every instance it builds shares one database and one connector, which is
+    Every instance it builds shares one database and one A2A client, which is
     what a rolling deploy actually looks like: the same records, read and
     written by processes whose relay key rings differ.
     """
@@ -6352,16 +6204,14 @@ class RotationScenario:
     def __init__(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         *,
         operation: str,
         setup_ring: OrderedDict[str, bytes],
     ) -> None:
         self._tmp_path = tmp_path
-        self._connector = connector
         self._clock = clock
-        # Shared across every generation, like the database and the connector:
+        # Shared across every generation, like the database:
         # a rolling deploy is many processes over one set of records and one
         # agent, and a per-instance client would hide a second delivery.
         self._a2a = FakeA2AClient()
@@ -6384,7 +6234,6 @@ class RotationScenario:
     def instance(self, ring: OrderedDict[str, bytes]) -> AgentRelayService:
         return build_service(
             AgentRepository(self._tmp_path),
-            self._connector,
             self._clock,
             keys=ring,
             a2a_client=self._a2a,
@@ -6453,14 +6302,13 @@ class TestKeyRotationPreservesAtMostOnce:
     def test_a_rotated_instance_write_is_replayed_by_a_stale_instance(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         operation: str,
     ) -> None:
         """Mid-deploy, the new instance takes the command and the old one retries."""
 
         scenario = RotationScenario(
-            tmp_path, connector, clock, operation=operation, setup_ring=old_ring()
+            tmp_path, clock, operation=operation, setup_ring=old_ring()
         )
         rotated = scenario.instance(rotated_ring())
         first = scenario.invoke(rotated, key="idem-rotation")
@@ -6478,14 +6326,13 @@ class TestKeyRotationPreservesAtMostOnce:
     def test_a_stale_instance_write_is_replayed_by_a_rotated_instance(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         operation: str,
     ) -> None:
         """The other direction of the same overlap: old writes, new retries."""
 
         scenario = RotationScenario(
-            tmp_path, connector, clock, operation=operation, setup_ring=old_ring()
+            tmp_path, clock, operation=operation, setup_ring=old_ring()
         )
         stale = scenario.instance(old_ring())
         first = scenario.invoke(stale, key="idem-rotation")
@@ -6503,7 +6350,6 @@ class TestKeyRotationPreservesAtMostOnce:
     def test_the_replay_identity_is_anchored_to_the_oldest_configured_key(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         monkeypatch: pytest.MonkeyPatch,
         operation: str,
@@ -6511,7 +6357,7 @@ class TestKeyRotationPreservesAtMostOnce:
         """Anchoring to the newest key would strand the record on the next rotation."""
 
         scenario = RotationScenario(
-            tmp_path, connector, clock, operation=operation, setup_ring=old_ring()
+            tmp_path, clock, operation=operation, setup_ring=old_ring()
         )
         rotated = scenario.instance(rotated_ring())
         locked: list[str] = []
@@ -6539,14 +6385,13 @@ class TestKeyRotationPreservesAtMostOnce:
     def test_retiring_a_key_while_its_records_live_fails_closed(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         operation: str,
     ) -> None:
         """An unfindable record must refuse the retry, never re-deliver it."""
 
         scenario = RotationScenario(
-            tmp_path, connector, clock, operation=operation, setup_ring=rotated_ring()
+            tmp_path, clock, operation=operation, setup_ring=rotated_ring()
         )
         rotated = scenario.instance(rotated_ring())
         scenario.invoke(rotated, key="idem-retire")
@@ -6563,14 +6408,13 @@ class TestKeyRotationPreservesAtMostOnce:
     def test_expired_idempotency_does_not_release_a_still_sealed_connection(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         operation: str,
     ) -> None:
         """A live credential is independently enough to keep its key configured."""
 
         scenario = RotationScenario(
-            tmp_path, connector, clock, operation=operation, setup_ring=old_ring()
+            tmp_path, clock, operation=operation, setup_ring=old_ring()
         )
         rotated = scenario.instance(rotated_ring())
         scenario.invoke(rotated, key="idem-expiring-connection-live")
@@ -6587,14 +6431,13 @@ class TestKeyRotationPreservesAtMostOnce:
     def test_a_key_may_be_retired_once_every_reference_is_gone(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         operation: str,
     ) -> None:
         """Retirement becomes safe only after retained receipts and secrets are gone."""
 
         scenario = RotationScenario(
-            tmp_path, connector, clock, operation=operation, setup_ring=rotated_ring()
+            tmp_path, clock, operation=operation, setup_ring=rotated_ring()
         )
         rotated = scenario.instance(rotated_ring())
         scenario.invoke(rotated, key="idem-expiring")
@@ -6654,15 +6497,14 @@ class TestMalformedStoredFingerprintsFailClosed:
     def test_a_malformed_live_record_refuses_the_command(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         operation: str,
         key_hash: str,
     ) -> None:
-        """Nothing reaches the connector while a live record is unreadable."""
+        """Nothing reaches the agent while a live record is unreadable."""
 
         scenario = RotationScenario(
-            tmp_path, connector, clock, operation=operation, setup_ring=rotated_ring()
+            tmp_path, clock, operation=operation, setup_ring=rotated_ring()
         )
         rotated = scenario.instance(rotated_ring())
         scenario.invoke(rotated, key="idem-corrupt")
@@ -6679,14 +6521,13 @@ class TestMalformedStoredFingerprintsFailClosed:
     def test_a_malformed_record_also_refuses_an_unrelated_command(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         operation: str,
     ) -> None:
         """The doubt is about the owner's records, not about this one key."""
 
         scenario = RotationScenario(
-            tmp_path, connector, clock, operation=operation, setup_ring=rotated_ring()
+            tmp_path, clock, operation=operation, setup_ring=rotated_ring()
         )
         rotated = scenario.instance(rotated_ring())
         scenario.invoke(rotated, key="idem-corrupt-other")
@@ -6698,12 +6539,12 @@ class TestMalformedStoredFingerprintsFailClosed:
         assert len(scenario.deliveries) == 1
 
     def test_the_refusal_never_carries_the_stored_fingerprint(
-        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+        self, tmp_path: Path, clock: Clock
     ) -> None:
         """The message reaches the user, so it may name neither hash nor key."""
 
         scenario = RotationScenario(
-            tmp_path, connector, clock, operation="start", setup_ring=rotated_ring()
+            tmp_path, clock, operation="start", setup_ring=rotated_ring()
         )
         rotated = scenario.instance(rotated_ring())
         scenario.invoke(rotated, key="idem-quiet")
@@ -6723,14 +6564,13 @@ class TestMalformedStoredFingerprintsFailClosed:
     def test_an_expired_malformed_record_stops_blocking_new_commands(
         self,
         tmp_path: Path,
-        connector: FakeConnector,
         clock: Clock,
         operation: str,
     ) -> None:
         """Retention releases an unreadable row exactly as it releases any other."""
 
         scenario = RotationScenario(
-            tmp_path, connector, clock, operation=operation, setup_ring=rotated_ring()
+            tmp_path, clock, operation=operation, setup_ring=rotated_ring()
         )
         rotated = scenario.instance(rotated_ring())
         scenario.invoke(rotated, key="idem-corrupt-expiring")
@@ -6820,7 +6660,7 @@ class TestRollbackBoundary:
         protocol_version: str = "2026-08-09"
 
     def test_014_FR_012_frozen_007_connection_document_validates_a_014_payload(
-        self, tmp_path: Path, connector: FakeConnector, clock: Clock
+        self, tmp_path: Path, clock: Clock
     ) -> None:
         """AC-023: a rolled-back image can still read a connection 014 wrote.
 
@@ -6837,7 +6677,7 @@ class TestRollbackBoundary:
           `wire` and `disconnect_reason` without 007 choking on them.
         """
 
-        service = build_service(AgentRepository(tmp_path), connector, clock)
+        service = build_service(AgentRepository(tmp_path), clock)
         connection_id = connect(service)
 
         # Read the row as it sits on disk. Going through the live model would

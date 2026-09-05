@@ -30,15 +30,6 @@ from app.modules.agents.a2a.card import (
 )
 from app.modules.agents.a2a.mapping import ObservationLimits, project_observation
 from app.modules.agents.a2a.types import Task
-from app.modules.agents.connector import (
-    ConnectorCommandOutcome,
-    ConnectorStartOutcome,
-    ConnectorTarget,
-    ConnectorTestOutcome,
-)
-from app.modules.agents.domain import (
-    AgentCapabilities,
-)
 from app.repositories.feature_flag import FlagMode
 from app.schemas.auth import Invite, User
 from app.services.auth_service import AuthService
@@ -102,32 +93,6 @@ def test_sensitive_reauthentication_reports_rate_limit_before_password_verificat
     assert excinfo.value.detail == "Too many attempts. Try again later."
 
 
-class FakeConnector:
-    def __init__(self) -> None:
-        self.test_outcome = ConnectorTestOutcome(
-            "ready", AgentCapabilities(progress=True, reply=True, cancel=True)
-        )
-        self.start_outcome = ConnectorStartOutcome("sent")
-        self.command_outcome = ConnectorCommandOutcome("confirmed")
-        self.starts: list[dict[str, Any]] = []
-        self.commands: list[dict[str, Any]] = []
-
-    def test(self, target: ConnectorTarget) -> ConnectorTestOutcome:
-        return self.test_outcome
-
-    def start(
-        self, target: ConnectorTarget, *, envelope: dict[str, Any]
-    ) -> ConnectorStartOutcome:
-        self.starts.append(envelope)
-        return self.start_outcome
-
-    def command(
-        self, target: ConnectorTarget, *, envelope: dict[str, Any]
-    ) -> ConnectorCommandOutcome:
-        self.commands.append(envelope)
-        return self.command_outcome
-
-
 def _resolver(host: str, port: int) -> list[str]:
     return {
         "agent.example.com": ["93.184.216.34"],
@@ -138,7 +103,7 @@ def _resolver(host: str, port: int) -> list[str]:
 @pytest.fixture
 def relay_app(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[tuple[TestClient, TestClient, FakeConnector, Container], None, None]:
+) -> Generator[tuple[TestClient, TestClient, Container], None, None]:
     """Two signed-in clients on one app, with the relay flag on and no network."""
 
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path / "relay-data"))
@@ -150,8 +115,6 @@ def relay_app(
     app = create_app()
     container: Container = app.state.container
 
-    connector = FakeConnector()
-    container.agent_relay_service.connector = connector
     container.agent_relay_service._resolver = _resolver
     # Discovery and the A2A wire are scripted in-process: the HTTP contract is
     # what these tests are about, and a real socket would make them a network
@@ -187,7 +150,7 @@ def relay_app(
         == 201
     )
 
-    yield first, second, connector, container
+    yield first, second, container
     first.close()
     second.close()
     get_config.cache_clear()
@@ -195,30 +158,23 @@ def relay_app(
 
 @pytest.fixture
 def client(
-    relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+    relay_app: tuple[TestClient, TestClient, Container],
 ) -> TestClient:
     return relay_app[0]
 
 
 @pytest.fixture
 def other_client(
-    relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+    relay_app: tuple[TestClient, TestClient, Container],
 ) -> TestClient:
     return relay_app[1]
 
 
 @pytest.fixture
-def connector(
-    relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
-) -> FakeConnector:
-    return relay_app[2]
-
-
-@pytest.fixture
 def container(
-    relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+    relay_app: tuple[TestClient, TestClient, Container],
 ) -> Container:
-    return relay_app[3]
+    return relay_app[2]
 
 
 def register_connection(client: TestClient, *, key: str = "k-create") -> dict[str, Any]:
@@ -413,7 +369,7 @@ class TestAuthAndRollout:
     def test_rollout_off_allows_owner_to_disconnect_and_destroy_secrets(
         self,
         client: TestClient,
-        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+        relay_app: tuple[TestClient, TestClient, Container],
     ) -> None:
         created = register_connection(client)
         set_relay_flag(client, FeatureFlagState.OFF)
@@ -439,7 +395,7 @@ class TestAuthAndRollout:
         )
         assert replay.status_code == 200, replay.text
         assert replay.json()["revision"] == response.json()["revision"]
-        stored = relay_app[3].agent_repo.get_connection(
+        stored = relay_app[2].agent_repo.get_connection(
             created["id"], owner_id=client.get("/api/account").json()["id"]
         )
         assert stored.credential is None
@@ -650,7 +606,7 @@ class TestConnectionRoutes:
         assert client.get("/api/agent-connections").json() == []
 
     def test_creating_with_a_whitespace_only_name_is_rejected_before_action(
-        self, client: TestClient, connector: FakeConnector
+        self, client: TestClient, container: Container
     ) -> None:
         response = client.post(
             "/api/agent-connections",
@@ -665,8 +621,8 @@ class TestConnectionRoutes:
 
         assert response.status_code == 422
         assert client.get("/api/agent-connections").json() == []
-        assert connector.starts == []
-        assert connector.commands == []
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        assert a2a.calls_to("SendMessage") == []
 
     @pytest.mark.parametrize(
         "auth_header_name",
@@ -675,7 +631,7 @@ class TestConnectionRoutes:
     def test_creating_with_an_owned_or_malformed_auth_header_is_rejected_before_action(
         self,
         client: TestClient,
-        connector: FakeConnector,
+        container: Container,
         auth_header_name: str,
     ) -> None:
         response = client.post(
@@ -692,8 +648,8 @@ class TestConnectionRoutes:
 
         assert response.status_code == 422
         assert client.get("/api/agent-connections").json() == []
-        assert connector.starts == []
-        assert connector.commands == []
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        assert a2a.calls_to("SendMessage") == []
 
     def test_creating_without_an_idempotency_key_is_rejected(
         self, client: TestClient
@@ -797,7 +753,7 @@ class TestConnectionRoutes:
     def test_card_text_is_returned_verbatim_and_bounded(
         self,
         client: TestClient,
-        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+        relay_app: tuple[TestClient, TestClient, Container],
     ) -> None:
         """AC-031. Card text is returned exactly as the agent wrote it.
 
@@ -806,7 +762,7 @@ class TestConnectionRoutes:
         inertly. The bound is the only processing it receives.
         """
 
-        container = relay_app[3]
+        container = relay_app[2]
         hostile = "<script>alert(1)</script> **not markdown** [x](javascript:alert(2))"
         fetcher = FakeCardFetcher()
         fetcher.discovery = ready_discovery(
@@ -830,11 +786,11 @@ class TestConnectionRoutes:
     def test_014_FR_002_a_rate_limited_test_stays_untested_with_its_retry_hint(
         self,
         client: TestClient,
-        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+        relay_app: tuple[TestClient, TestClient, Container],
     ) -> None:
         """AC-037, D-01-S25 over HTTP: never `ready`, and never a hand-off."""
 
-        container = relay_app[3]
+        container = relay_app[2]
         a2a_client = FakeA2AClient()
         a2a_client.script(
             "ListTasks",
@@ -868,11 +824,11 @@ class TestConnectionRoutes:
     def test_014_FR_002_a_changed_agent_refuses_the_hand_off_by_name(
         self,
         client: TestClient,
-        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+        relay_app: tuple[TestClient, TestClient, Container],
     ) -> None:
         """AC-012, D-01-S20 over HTTP."""
 
-        container = relay_app[3]
+        container = relay_app[2]
         fetcher = FakeCardFetcher()
         container.agent_relay_service._card_fetcher = fetcher
         created = register_connection(client)
@@ -905,11 +861,11 @@ class TestConnectionRoutes:
     def test_014_FR_001_an_unsupported_card_scheme_is_named_on_the_refusal(
         self,
         client: TestClient,
-        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+        relay_app: tuple[TestClient, TestClient, Container],
     ) -> None:
         """AC-004. The owner is told which scheme their card demands."""
 
-        container = relay_app[3]
+        container = relay_app[2]
         fetcher = FakeCardFetcher()
         fetcher.discovery = CardDiscovery(
             failure_code="a2a_auth_scheme_unsupported",
@@ -1081,7 +1037,7 @@ class TestHandOffRoutes:
         assert preview["external_copy_notice"]
 
     def test_handing_off_another_owners_task_is_refused(
-        self, client: TestClient, other_client: TestClient, connector: FakeConnector
+        self, client: TestClient, other_client: TestClient, container: Container
     ) -> None:
         """Cross-owner hand-off fails before any content is sent."""
 
@@ -1095,10 +1051,11 @@ class TestHandOffRoutes:
         )
 
         assert response.status_code == 404
-        assert connector.starts == []
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        assert a2a.calls_to("SendMessage") == []
 
     def test_an_untested_connection_refuses_the_hand_off(
-        self, client: TestClient, connector: FakeConnector
+        self, client: TestClient, container: Container
     ) -> None:
         """AC-010 over HTTP."""
 
@@ -1111,7 +1068,8 @@ class TestHandOffRoutes:
         )
 
         assert response.status_code == 400
-        assert connector.starts == []
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        assert a2a.calls_to("SendMessage") == []
 
 
 class TestRunControlRoutes:
@@ -1119,11 +1077,11 @@ class TestRunControlRoutes:
 
     def test_rollout_off_preserves_existing_run_control_and_reporting(
         self,
-        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+        relay_app: tuple[TestClient, TestClient, Container],
     ) -> None:
         """FR-019 blocks new work without abandoning an already-dispatched run."""
 
-        client, _, _, container = relay_app
+        client, _, container = relay_app
         created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
@@ -1173,11 +1131,11 @@ class TestRunControlRoutes:
 
     def test_rollout_off_keeps_retention_maintenance_active_without_resurrection(
         self,
-        relay_app: tuple[TestClient, TestClient, FakeConnector, Container],
+        relay_app: tuple[TestClient, TestClient, Container],
     ) -> None:
         """FR-019: OFF cannot suspend expiry of already-relayed content."""
 
-        client, _, _, container = relay_app
+        client, _, container = relay_app
         created = register_connection(client, key="retention-off-create")
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client, "Retention while rollout is off")
@@ -1355,7 +1313,7 @@ class TestAccountPurge:
     ) -> None:
         """AC-021: the existing purge contract covers relay data."""
 
-        container: Container = relay_app[3]
+        container: Container = relay_app[2]
         created = register_connection(client)
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client)
@@ -1373,7 +1331,7 @@ class TestAccountPurge:
     ) -> None:
         """FR-019: OFF cannot strand any owner relay or credential material."""
 
-        container: Container = relay_app[3]
+        container: Container = relay_app[2]
         created = register_connection(client, key="purge-off-create")
         client.post(f"/api/agent-connections/{created['id']}/test")
         task_id = create_task(client, "Purge relay data while rollout is off")
