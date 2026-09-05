@@ -597,7 +597,15 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             <TaskList {...taskListProps} tasks={tasks} />
           )
         ) : (
-          <EmptyState state={state} />
+          <EmptyState
+            state={state}
+            onClearSearch={searchQuery.trim() ? () => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("q");
+              setSearchParams(next, { replace: true });
+              listHeadingRef.current?.focus();
+            } : undefined}
+          />
         )}
 
         {taskQuery.hasNextPage ? (
@@ -1151,12 +1159,16 @@ function LoadingState({ label }: { label: string }): React.JSX.Element {
   );
 }
 
-function EmptyState({ state }: { state?: OpenTaskState }): React.JSX.Element {
+function EmptyState({ state, onClearSearch }: { state?: OpenTaskState; onClearSearch?: () => void }): React.JSX.Element {
   const label = state ? stateLabels[state] : "This view";
   return (
     <div className="rounded-xl border border-dashed border-slate-200 bg-white/70 px-5 py-8 text-center text-sm text-slate-600">
-      <p className="font-medium text-slate-900">{label} is clear</p>
-      <p className="mt-1">Use Brain dump when you are ready to capture what's on your mind.</p>
+      <p className="font-medium text-slate-900">{onClearSearch ? "No tasks match your search" : `${label} is clear`}</p>
+      {onClearSearch ? (
+        <Button variant="secondary" className="mt-3" onClick={onClearSearch}>Clear search</Button>
+      ) : (
+        <p className="mt-1">Use Brain dump when you are ready to capture what's on your mind.</p>
+      )}
     </div>
   );
 }
