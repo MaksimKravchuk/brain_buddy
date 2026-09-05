@@ -1106,15 +1106,17 @@ describe("TaskListPage detail wiring", () => {
     await waitFor(() => expect(screen.getByText("Comment rejected.")).toBeInTheDocument());
   });
 
-  it("shows the empty panel with no task selected and closes the open one back to the list", async () => {
+  it("reserves the detail panel for selected tasks and releases it after closing", async () => {
     const user = userEvent.setup();
     const { unmount } = renderPage("/tasks/next");
-    expect(await screen.findByRole("complementary", { name: "Task detail" })).toBeInTheDocument();
+    await screen.findByRole("link", { name: "Fix onboarding drop-off" });
+    expect(screen.queryByRole("complementary", { name: "Task detail" })).not.toBeInTheDocument();
     unmount();
 
     renderPage("/tasks/next/task-1");
     await user.click(await screen.findByRole("button", { name: "Close" }));
     expect(currentLocation()).toBe("/tasks/next");
+    expect(screen.queryByRole("complementary", { name: "Task detail" })).not.toBeInTheDocument();
   });
 
   it("returns focus to the row that opened the panel, or to the heading when that row is gone", async () => {
