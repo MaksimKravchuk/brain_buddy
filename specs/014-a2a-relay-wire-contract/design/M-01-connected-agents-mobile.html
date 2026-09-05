@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M-01 · Connected agents (iOS, 390×851)</title>
+<style>
+:root{
+  --brand:#0EA5E9; --brand-hover:#38BDF8; --brand-soft:rgba(14,165,233,.10);
+  --base:#F8FAFC; --sunken:#F1F5F9; --raised:#FFFFFF;
+  --fg1:#0F172A; --fg2:#1E293B; --fg3:#334155; --fg4:#475569;
+  --fg5:#64748B; --fg6:#94A3B8; --fg7:#CBD5E1;
+  --bd:#E2E8F0; --bd-hover:#CBD5E1;
+  --ok:#10B981; --ok-bg:#ECFDF5; --ok-bd:#A7F3D0; --ok-fg:#065F46; --ai-fg:#047857;
+  --warn:#D97706; --warn-bg:#FFFBEB; --warn-bd:#FDE68A; --warn-fg:#92400E;
+  --bad:#E11D48; --bad-bg:#FFF1F2; --bad-bd:#FECDD3; --bad-fg:#9F1239;
+  --info:#0EA5E9; --info-bg:#F0F9FF; --info-bd:#BAE6FD; --info-fg:#0369A1;
+  --tag-bg:#F1F5F9; --tag-fg:#475569; --due-bg:#FFF1F2; --due-bd:#FECDD3; --due-fg:#BE123C;
+  --r-sm:6px; --r-md:8px; --r-row:12px; --r-card:14px; --r-lg:16px; --r-xl:20px; --r-full:999px;
+  --sh-soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);
+  --sh-raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);
+  --sh-float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18);
+  --ease:cubic-bezier(0.22,1,0.36,1);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  font-feature-settings:"cv11","ss01","ss03";
+  background:var(--base); color:var(--fg1);
+  -webkit-font-smoothing:antialiased; font-size:14px; line-height:1.5;
+}
+.page{max-width:1360px;margin:0 auto;padding:28px 24px 72px}
+.pagehead{margin-bottom:24px}
+.pagehead h1{font-size:28px;line-height:1.15;letter-spacing:-.02em;font-weight:600;margin:0 0 6px}
+.pagehead p{margin:0;color:var(--fg5);font-size:14px;max-width:78ch}
+.pagehead .crumb{font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--fg5);margin-bottom:8px}
+.grid{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.panel{background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-xl);box-shadow:var(--sh-soft);overflow:hidden;flex:1 1 420px;min-width:380px;max-width:660px}
+.panel.wide{flex:1 1 660px;max-width:980px}
+.panel.full{flex:1 1 100%;max-width:100%}
+.panel-h{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--sunken);border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.sid{font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:#fff;background:var(--fg4);border-radius:var(--r-full);padding:3px 8px}
+.pname{font-size:12px;color:var(--fg4);font-weight:500}
+.pnote{font-size:11px;color:var(--fg5);flex-basis:100%;margin:0}
+.panel-b{padding:16px}
+.panel-b.sunk{background:var(--base)}
+
+h2.sec{font-size:20px;line-height:1.3;letter-spacing:-.015em;font-weight:600;margin:34px 0 14px}
+h2.sec:first-of-type{margin-top:6px}
+.label{font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--fg5);margin:0 0 6px}
+.micro{font-size:11px;line-height:1.35;color:var(--fg5);margin:0}
+.caption{font-size:12px;line-height:1.4;color:var(--fg5);margin:0}
+.body{font-size:14px;line-height:1.5;color:var(--fg2);margin:0}
+.subtitle{font-size:15px;line-height:1.4;letter-spacing:-.005em;font-weight:500;color:var(--fg2);margin:0}
+.title{font-size:20px;line-height:1.3;letter-spacing:-.015em;font-weight:600;margin:0}
+.display{font-size:28px;line-height:1.15;letter-spacing:-.02em;font-weight:600;margin:0}
+.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12px;color:var(--fg3)}
+.stack{display:flex;flex-direction:column}
+.g1{gap:4px}.g2{gap:8px}.g3{gap:12px}.g4{gap:16px}.g5{gap:20px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rowt{display:flex;align-items:flex-start;gap:8px}
+.spacer{margin-left:auto}
+.dim{color:var(--fg5)}
+.strong{font-weight:600;color:var(--fg1)}
+hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
+
+.card{background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-row);padding:14px;box-shadow:var(--sh-soft)}
+.card.flat{box-shadow:none}
+.card.tint-ok{background:var(--ok-bg);border-color:var(--ok-bd)}
+.card.tint-warn{background:var(--warn-bg);border-color:var(--warn-bd)}
+.card.tint-bad{background:var(--bad-bg);border-color:var(--bad-bd)}
+.card.tint-info{background:var(--info-bg);border-color:var(--info-bd)}
+.card.tint-sunk{background:var(--sunken)}
+.card.dashed{border-style:dashed;background:transparent;box-shadow:none}
+
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:var(--r-full);border:1px solid var(--bd);background:var(--raised);padding:2px 9px;font-size:11px;font-weight:500;color:var(--fg4);white-space:nowrap}
+.pill.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-fg)}
+.pill.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-fg)}
+.pill.bad{background:var(--bad-bg);border-color:var(--bad-bd);color:var(--bad-fg)}
+.pill.info{background:var(--info-bg);border-color:var(--info-bd);color:var(--info-fg)}
+.pill.mute{background:var(--sunken);border-color:var(--bd);color:var(--fg4)}
+.tag{display:inline-flex;align-items:center;border-radius:var(--r-full);background:var(--tag-bg);border:1px solid var(--bd);color:var(--tag-fg);font-size:11px;padding:2px 8px}
+.due{display:inline-flex;align-items:center;border-radius:var(--r-full);background:var(--due-bg);border:1px solid var(--due-bd);color:var(--due-fg);font-size:11px;padding:2px 8px}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--r-md);border:1px solid var(--bd);background:var(--raised);color:var(--fg2);font:inherit;font-size:13px;font-weight:500;padding:8px 12px;box-shadow:var(--sh-soft);cursor:default;transition:background 150ms var(--ease)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.danger{background:var(--raised);border-color:var(--bad-bd);color:var(--bad-fg)}
+.btn.ghost{background:transparent;border-color:transparent;box-shadow:none;color:var(--fg4)}
+.btn.sm{padding:6px 10px;font-size:12px}
+.btn[aria-disabled="true"]{opacity:.45}
+.btn.primary:hover{background:var(--brand-hover);border-color:var(--brand-hover)}
+.btn:active{transform:scale(.98)}
+
+.field{display:flex;flex-direction:column;gap:4px}
+.input{border:1px solid var(--bd);border-radius:var(--r-sm);background:var(--raised);padding:8px 10px;font-size:13px;color:var(--fg1);box-shadow:var(--sh-soft)}
+.input.ph{color:var(--fg6)}
+.input.focus{border-color:var(--brand);box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5)}
+.hint{font-size:11px;color:var(--fg5)}
+.radio{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--fg2)}
+.dot{width:14px;height:14px;border-radius:var(--r-full);border:1px solid var(--bd-hover);background:#fff;display:inline-block;flex:0 0 auto}
+.dot.on{border:4px solid var(--brand)}
+.box{width:14px;height:14px;border-radius:3px;border:1px solid var(--bd-hover);background:#fff;display:inline-block;flex:0 0 auto}
+.box.on{background:var(--brand);border-color:var(--brand)}
+.check{width:18px;height:18px;border-radius:var(--r-full);border:1.5px solid var(--fg7);flex:0 0 auto}
+
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12px}
+.kv dt{color:var(--fg5)}
+.kv dd{margin:0;color:var(--fg3)}
+
+.avatar{width:22px;height:22px;border-radius:8px;background:var(--ok-bg);color:var(--ai-fg);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex:0 0 auto}
+
+.runcard{border:1px solid var(--ok-bd);background:var(--ok-bg);border-radius:var(--r-row);padding:12px}
+.runcard.neutral{border-color:var(--bd);background:var(--sunken)}
+.runcard.needs{border-color:var(--warn-bd);background:var(--warn-bg)}
+.runcard.bad{border-color:var(--bad-bd);background:var(--bad-bg)}
+.runcard .head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.runcard .note{font-size:11px;color:var(--fg5);margin:6px 0 0}
+.timeline{list-style:none;margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--bd);display:flex;flex-direction:column;gap:5px}
+.timeline li{font-size:11px;color:var(--fg4);display:flex;gap:8px;flex-wrap:wrap}
+.timeline .when{color:var(--fg6)}
+.timeline .what{font-weight:500;color:var(--fg3)}
+.timeline .sum{flex-basis:100%;color:var(--fg5)}
+.artifact{border:1px dashed var(--bd-hover);border-radius:var(--r-md);background:var(--raised);padding:8px 10px;font-size:12px;color:var(--fg4)}
+.link{color:var(--brand);text-decoration:underline;font-size:12px;word-break:break-all}
+
+.taskrow{display:flex;align-items:center;gap:10px;background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-row);padding:10px 12px;box-shadow:var(--sh-soft)}
+.taskrow .t{font-size:14px;font-weight:500;color:var(--fg1)}
+.taskrow .meta{margin-left:auto;display:flex;align-items:center;gap:8px}
+.taskrow .proj{font-size:11px;color:var(--fg6);min-width:96px;text-align:right}
+
+.shell{display:flex;border:1px solid var(--bd);border-radius:var(--r-lg);overflow:hidden;background:var(--base)}
+.side{width:248px;flex:0 0 248px;background:var(--raised);border-right:1px solid var(--bd);padding:14px 12px;display:flex;flex-direction:column;gap:14px}
+.navitem{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--fg3);padding:7px 9px;border-radius:var(--r-sm)}
+.navitem.on{background:var(--brand-soft);color:var(--fg1);font-weight:500}
+.navitem .n{margin-left:auto;font-size:11px;color:var(--fg6)}
+.navitem .badge{margin-left:auto;background:var(--brand);color:#fff;font-size:10px;font-weight:600;border-radius:var(--r-full);padding:1px 7px}
+.navitem.deferred{color:var(--fg6)}
+.main{flex:1 1 auto;padding:18px;min-width:0}
+
+.phone{width:390px;height:851px;flex:0 0 auto;border:1px solid var(--bd-hover);border-radius:var(--r-xl);background:var(--base);overflow:hidden;box-shadow:var(--sh-raised);display:flex;flex-direction:column}
+.phone .status{height:34px;flex:0 0 auto;background:var(--raised);border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11px;color:var(--fg5)}
+.phone .navbar{flex:0 0 auto;background:var(--raised);border-bottom:1px solid var(--bd);padding:10px 16px;display:flex;align-items:center;gap:10px}
+.phone .navbar .t{font-size:15px;font-weight:600;letter-spacing:-.005em}
+.phone .content{flex:1 1 auto;overflow:hidden;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.phone .tabbar{flex:0 0 auto;height:66px;background:var(--raised);border-top:1px solid var(--bd);display:flex;align-items:center;justify-content:space-around;padding-bottom:10px;font-size:10px;color:var(--fg5)}
+.sheet{margin-top:auto;background:var(--raised);border:1px solid var(--bd);border-top-left-radius:var(--r-xl);border-top-right-radius:var(--r-xl);box-shadow:var(--sh-float);padding:16px;display:flex;flex-direction:column;gap:12px}
+.grabber{width:36px;height:4px;border-radius:var(--r-full);background:var(--fg7);margin:0 auto 4px}
+.scrim{position:relative;flex:1 1 auto;background:rgba(248,250,252,.8);display:flex;flex-direction:column}
+.tap44{min-height:44px}
+.phonewrap{display:flex;flex-direction:column;gap:8px;flex:0 0 auto}
+.phonecap{font-size:11px;color:var(--fg5);max-width:390px}
+.phonecap .sid{margin-right:6px}
+
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 22px}
+.legend .pill{font-size:11px}
+.dlg{background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-xl);box-shadow:var(--sh-float);padding:18px;display:flex;flex-direction:column;gap:12px}
+.overlay-head{display:flex;align-items:flex-start;gap:12px;border-bottom:1px solid var(--bd);padding-bottom:12px;margin-bottom:4px}
+.skel{background:var(--sunken);border-radius:var(--r-sm);height:12px}
+.skel.w60{width:60%}.skel.w40{width:40%}.skel.w80{width:80%}.skel.w30{width:30%}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="pagehead">
+    <p class="crumb">Feature 014 · A2A relay wire contract · design</p>
+    <h1>M-01 · Connected agents (iOS, 390×851)</h1>
+    <p>The same connection contract as D-01 at iPhone width. Forms are sheets, destructive actions confirm in a sheet, and every action target is at least 44pt. Static and non-interactive.</p>
+  </div>
+
+<h2 class="sec">List states</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><p class="caption">BrainBuddy relays one task at a time to an agent you operate. It sends only what you review
+  and shows only what the agent reports back.</p>
+  <span class="btn primary tap44" style="padding:12px">Add an agent</span>
+  <p class="label">Your agents</p>
+  <article class="card stack g2" style="border-radius:14px">
+  <div class="row"><span class="subtitle" style="min-width:0">Hermes planner</span><span class="spacer"></span><span class="pill ok">Tested ready</span></div>
+  <p class="micro mono" style="word-break:break-all">https://hermes.example.com</p>
+  <p class="caption" style="color:var(--fg3)">The last test reached this agent and it authenticated.</p>
+  <p class="caption" style="color:var(--fg3)"><strong>Guaranteed single start.</strong> This agent declares BrainBuddy's single-start extension: it deduplicates by message ID inside one conversation and returns the original task on a replay.</p>
+  <p class="micro">Last contact Sep 3, 21:58 · goes stale after 24 hours</p>
+  <div class="row" style="gap:8px"><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Test connection</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Rotate credential</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px;border-color:var(--bad-bd);color:var(--bad-fg)">Disconnect…</span></div>
+</article>
+  <article class="card stack g2" style="border-radius:14px">
+  <div class="row"><span class="subtitle" style="min-width:0">Drafting sample agent</span><span class="spacer"></span><span class="pill ok">Tested ready</span></div>
+  <p class="micro mono" style="word-break:break-all">https://sample-agent.example.com</p>
+  <p class="caption" style="color:var(--fg3)">The last test reached this agent and it authenticated.</p>
+  <p class="caption" style="color:var(--fg3)"><strong>Best-effort single start.</strong> This agent does not declare BrainBuddy's single-start extension. Before any retry BrainBuddy checks the agent for an existing task and adopts it. A duplicate remains possible if the agent forgets its tasks.<span class="caption"> <a class="link" href="docs/a2a-extensions/single-start/v1.md" rel="noopener noreferrer">Read the single-start extension specification</a> Opens the published specification outside BrainBuddy, so you can ask your agent's operator to declare it.</span></p>
+  <p class="micro">Last contact Sep 3, 20:12 · API key in X-API-Key</p>
+  <div class="row" style="gap:8px"><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Test connection</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Rotate credential</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px;border-color:var(--bad-bd);color:var(--bad-fg)">Disconnect…</span></div>
+</article></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S01</span>default — saved connections</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><p class="label">Your agents</p><p class="caption">Loading connections…</p>
+  <div class="card stack g2" style="border-radius:14px"><div class="skel w40"></div><div class="skel w80"></div>
+  <div class="skel w60"></div></div>
+  <div class="card stack g2" style="border-radius:14px"><div class="skel w30"></div><div class="skel w80"></div>
+  <div class="skel w60"></div></div></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S02</span>loading</p>
+  <p class="phonecap">Skeletons appear after about 250 ms, so a fast response does not flicker one on and off. Nothing has failed, so no correlation ID is shown.</p>
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><div class="stack g3" style="margin-top:40px">
+    <p class="display" style="font-size:24px">Connect an agent you operate</p>
+    <p class="body">Give BrainBuddy the agent's address and one credential. BrainBuddy reads the agent's published
+    card, tests it, and tells you what it supports before any task can leave.</p>
+    <span class="btn primary tap44" style="padding:12px">Add an agent</span>
+  </div></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S03</span>empty (first run)</p>
+  
+</div></div>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><div class="card dashed stack g2" style="border-radius:14px;margin-top:24px">
+    <p class="label">No filter, no search, no sort</p>
+    <p class="caption">Every row here is safety-relevant, so nothing can hide one. The real filtered-to-nothing case in
+    this feature is M-02-S03: connections exist, none is eligible for a hand-off.</p>
+  </div></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S04</span>empty (filtered to nothing) — deliberately absent</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><div class="card tint-bad stack g2" style="border-radius:14px">
+    <p class="subtitle" style="color:var(--bad-fg)">We couldn't load your connections</p>
+    <p class="caption" style="color:var(--bad-fg)">The server did not answer. Nothing was changed and no credential
+    was sent anywhere.</p>
+    <p class="micro mono">Correlation ID c2f1-9a44-8e10</p>
+    <span class="btn sm tap44" style="padding:12px">Retry</span>
+  </div></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S05</span>error</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><div class="card tint-warn stack g1" style="border-radius:14px">
+    <p class="caption" style="color:var(--warn-fg)">Showing potentially stale saved data. The refresh failed, so these
+    rows are what BrainBuddy last knew.</p>
+    <p class="micro mono" style="color:var(--warn-fg)">Correlation ID 6b70-1cd2-4fa8</p>
+  </div>
+  <article class="card stack g2" style="border-radius:14px">
+  <div class="row"><span class="subtitle" style="min-width:0">Hermes planner</span><span class="spacer"></span><span class="pill mute">As of 21:58</span></div>
+  <p class="micro mono" style="word-break:break-all">https://hermes.example.com</p>
+  <p class="caption" style="color:var(--fg3)">This is the last status BrainBuddy read successfully. It is not a claim about the agent right now.</p>
+  
+  
+  <div class="row" style="gap:8px"><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Test connection</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Rotate credential</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px;border-color:var(--bad-bd);color:var(--bad-fg)">Disconnect…</span></div>
+</article></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S06</span>partial failure — cached rows, refresh failed</p>
+  
+</div></div>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><div class="card tint-warn stack g1" style="border-radius:14px">
+    <p class="caption" style="color:var(--warn-fg)">Offline — reconnect to manage agents. Nothing is queued. Reopening
+    the app loads the server projection rather than replaying anything you started here.</p>
+  </div>
+  <article class="card stack g2" style="border-radius:14px">
+  <div class="row"><span class="subtitle" style="min-width:0">Hermes planner</span><span class="spacer"></span><span class="pill mute">As of 21:58</span></div>
+  <p class="micro mono" style="word-break:break-all">https://hermes.example.com</p>
+  <p class="caption" style="color:var(--fg3)">Testing, rotating and disconnecting are unavailable while offline.</p>
+  
+  
+  
+</article>
+  <div class="row" style="gap:8px">
+    <span class="btn sm tap44" aria-disabled="true" style="flex:1 1 46%;padding:12px">Test connection</span>
+    <span class="btn sm tap44" aria-disabled="true" style="flex:1 1 46%;padding:12px">Rotate credential</span>
+  </div></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S07</span>offline / interrupted</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"><p class="caption">Your agents</p></div><div class="sheet">
+    <div class="grabber"></div>
+    <p class="title" style="font-size:17px">Add an agent</p>
+    <p class="caption">BrainBuddy reads the agent's published card, then stores your credential sealed and never shows
+    it again.</p>
+    <div class="field"><p class="label">Agent name</p><div class="input ph">What you call this agent</div></div>
+    <div class="field"><p class="label">Agent address</p><div class="input focus mono">https://hermes.example.com</div>
+      <p class="hint">Public HTTPS only. Loopback, link-local, metadata and private-network destinations are refused
+      unless your deployment governs that network class.</p></div>
+    <div class="field"><p class="label">Credential scheme</p>
+      <label class="radio tap44"><span class="dot on"></span>Bearer token</label>
+      <label class="radio tap44"><span class="dot"></span>API key in a header the card names</label>
+      <p class="hint">Only these two are supported. OAuth2 and mutual TLS are not available yet.</p></div>
+    <div class="field"><p class="label">Credential</p><div class="input ph">••••••••••••••••</div></div>
+    <div class="field"><p class="label">Your Brain Buddy password</p><div class="input ph">Confirm it is you</div></div>
+    <span class="btn primary tap44" style="padding:12px">Add agent</span>
+  </div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S08</span>add an agent — sheet</p>
+  <p class="phonecap">There is no signing-secret step and no secret to copy. Push notifications use a per-run token BrainBuddy registers with the agent automatically.</p>
+  <p class="phonecap">Swiping the sheet away or leaving the screen discards this form silently — nothing is stored and nothing is sent, and the fields are cheap to re-enter, so no warning is shown.</p>
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><article class="card stack g2" style="border-radius:14px">
+  <div class="row"><span class="subtitle" style="min-width:0">Hermes planner</span><span class="spacer"></span><span class="pill ok">Tested ready</span></div>
+  <p class="micro mono" style="word-break:break-all">https://hermes.example.com</p>
+  <p class="caption" style="color:var(--fg3)">The last test reached this agent's task interface and it authenticated.</p>
+  <p class="caption" style="color:var(--fg3)"><strong>Guaranteed single start.</strong> This agent declares BrainBuddy's single-start extension: it deduplicates by message ID inside one conversation and returns the original task on a replay.</p>
+  <dl class="kv"><dt>Agent</dt><dd>Hermes A2A plugin</dd><dt>Version</dt><dd>1.4.0</dd>
+    <dt>Description</dt><dd>Plans and drafts work items for its operator.</dd>
+    <dt>Protocol</dt><dd>1.0.2</dd><dt>Interface</dt><dd class="mono">JSON-RPC over HTTPS</dd>
+    <dt>Streaming</dt><dd>Supported</dd><dt>Push</dt><dd>Supported</dd></dl>
+    <div class="row"><span class="tag">planning</span><span class="tag">drafting</span><span class="tag">summarise</span></div>
+    <p class="caption" style="color:var(--ok-fg)">Ready to receive a hand-off.</p>
+  <div class="row" style="gap:8px"><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Test connection</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Rotate credential</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px;border-color:var(--bad-bd);color:var(--bad-fg)">Disconnect…</span></div>
+</article></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S09</span>discovery result after a successful test</p>
+  
+</div></div>
+<h2 class="sec">Test outcomes and connection conditions</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><p class="label">Every outcome is its own sentence</p>
+  <div class="card stack g1" style="border-radius:14px"><div class="row"><span class="subtitle" style="font-size:13px">Hermes planner</span><span class="spacer"></span><span class="pill bad">Invalid credentials</span></div>
+    <p class="caption">The agent answered and rejected the credential. Rotate it, then test again. <span class="mono">a10c-77bd</span></p></div>
+  <div class="card stack g1" style="border-radius:14px"><div class="row"><span class="subtitle" style="font-size:13px">Research runner</span><span class="spacer"></span><span class="pill bad">Unreachable</span></div>
+    <p class="caption">Not reached before the test timeout. Nothing was sent. <span class="mono">4d92-0ab7</span></p></div>
+  <div class="card stack g1" style="border-radius:14px"><div class="row"><span class="subtitle" style="font-size:13px">Internal wiki</span><span class="spacer"></span><span class="pill bad">Not an A2A agent</span></div>
+    <p class="caption">No agent card at its well-known location.</p></div>
+  <div class="card stack g1" style="border-radius:14px"><div class="row"><span class="subtitle" style="font-size:13px">Legacy agent</span><span class="spacer"></span><span class="pill bad">Unsupported protocol version</span></div>
+    <p class="caption">The card declares A2A 0.9.4. BrainBuddy speaks 1.0.x only.</p></div>
+  <div class="card stack g1" style="border-radius:14px"><div class="row"><span class="subtitle" style="font-size:13px">Streaming-only agent</span><span class="spacer"></span><span class="pill bad">No supported interface</span></div>
+    <p class="caption">No JSON-RPC interface BrainBuddy can use over HTTPS.</p></div>
+  <div class="card stack g1" style="border-radius:14px"><div class="row"><span class="subtitle" style="font-size:13px">Vendor cloud agent</span><span class="spacer"></span><span class="pill bad">Unsupported authentication scheme</span></div>
+    <p class="caption">Requires OAuth2. BrainBuddy supports a bearer token or an API key in a header the card names.</p></div>
+  <div class="card stack g1" style="border-radius:14px"><div class="row"><span class="subtitle" style="font-size:13px">Laptop agent</span><span class="spacer"></span><span class="pill bad">Destination refused</span></div>
+    <p class="caption">Loopback, link-local, metadata and private-network addresses are refused. Nothing left BrainBuddy.</p></div></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S10 – S16</span>test outcomes and connection conditions</p>
+  <p class="phonecap">M-01-S10 invalid credentials · S11 unreachable · S12 not an A2A agent · S13 unsupported protocol version · S14 no supported interface · S15 unsupported authentication scheme · S16 private destination refused.</p>
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><div class="card stack g1" style="border-radius:14px"><div class="row"><span class="subtitle" style="font-size:13px">Research runner</span><span class="spacer"></span><span class="pill warn">Stale</span></div>
+    <p class="caption">Last contact is older than the 24 hours staleness threshold. Test it again before a hand-off.</p></div>
+  <div class="card stack g1" style="border-radius:14px"><div class="row"><span class="subtitle" style="font-size:13px">Hermes planner</span><span class="spacer"></span><span class="pill warn">Agent changed</span></div>
+    <p class="caption">Its card now advertises a different interface address or different authentication requirements
+    than the one you tested. Test it again — you will be asked for your password.</p></div>
+  <div class="card stack g1" style="border-radius:14px"><div class="row"><span class="subtitle" style="font-size:13px">Old relay connector</span><span class="spacer"></span><span class="pill mute">Disconnected</span></div>
+    <p class="caption">Superseded wire contract. Saved for a relay protocol BrainBuddy no longer speaks, so it was
+    disconnected rather than migrated and its credential was destroyed. Add the agent again by its address.</p></div>
+  <div class="card tint-warn stack g1" style="border-radius:14px">
+    <p class="caption" style="color:var(--warn-fg)">Rollout off: adding, editing, testing and rotating are
+    unavailable. Existing connections stay visible and can be disconnected; runs already dispatched keep reporting.</p></div></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S17 – S20</span>stale, agent changed, superseded wire contract</p>
+  <p class="phonecap">M-01-S17 stale · S18 Agent changed (named in FR-002) · S19 disconnected, superseded wire contract · S20 rollout OFF.</p>
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"><p class="caption">Your agents</p></div><div class="sheet">
+    <div class="grabber"></div>
+    <p class="title" style="font-size:17px">Disconnect Hermes planner</p>
+    <p class="body">BrainBuddy destroys the stored credential, stops observing this agent's runs, stops registering
+    push notifications for them, and refuses new hand-offs and replies. Active runs become
+    <strong>Connection disconnected</strong>. Disconnecting does not cancel work the agent already accepted.</p>
+    <p class="body">The discovered agent-card summary — name, version, description, skills and interface — is erased
+    with the credential, along with the card fingerprint.</p>
+    <p class="body">Existing run history stays, redacted, until it expires.</p>
+    <div class="field"><p class="label">Your Brain Buddy password</p><div class="input ph">Confirm it is you</div></div>
+    <span class="btn tap44" style="padding:12px">Keep it connected</span>
+    <span class="btn tap44" style="padding:12px;border-color:var(--bad-bd);color:var(--bad-fg)">Disconnect</span>
+  </div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S21</span>disconnect — destructive sheet</p>
+  <p class="phonecap">The safe option sits above the destructive one, so the thumb rests on <strong>Keep it
+  connected</strong> and <strong>Disconnect</strong> has to be reached for.</p>
+
+</div></div>
+
+<h2 class="sec">Rate-limited connection test</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="content"><article class="card stack g2" style="border-radius:14px">
+  <div class="row"><span class="subtitle" style="min-width:0">Hermes planner</span><span class="spacer"></span><span class="pill bad">Rate limited</span></div>
+  <p class="micro mono" style="word-break:break-all">https://hermes.example.com</p>
+  <p class="caption" style="color:var(--fg3)">The agent is rate limiting. It refused the test rather than answering it,
+  so BrainBuddy could not read its card or check the credential. Nothing was sent.</p>
+  <p class="caption" style="color:var(--fg3)">The agent asked to be left alone for 60 seconds. Test again after that.</p>
+  <p class="micro mono">Correlation ID 8e41-b30c-77a2</p>
+  <p class="caption" style="color:var(--warn-fg)">Still untested — cannot receive a hand-off yet.</p>
+  <div class="row" style="gap:8px"><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Test connection</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px">Rotate credential</span><span class="btn sm tap44" style="flex:1 1 46%;padding:12px 10px;border-color:var(--bad-bd);color:var(--bad-fg)">Disconnect…</span></div>
+</article>
+  <p class="micro">Testing again re-uses the credential already stored, sealed. Nothing secret is shown and nothing has
+  to be typed again. When the agent gives no retry-after, the waiting line is dropped and the retry is offered at
+  once.</p></div>
+    <div class="tabbar"><span>Inbox</span><span>Next actions</span><span>Waiting for</span><span>Someday / maybe</span></div>
+  </div>
+  <p class="phonecap"><span class="sid">M-01-S22</span>rate limited — the agent refused the connection test</p>
+  <p class="phonecap">FR-002 / SC-009, the same outcome as D-01-S25 and the same shape as the dispatch-side D-03-S03.
+  The category is its own sentence, the connection stays <strong>untested</strong> rather than sliding to ready or to
+  unreachable, and <strong>Test connection</strong> stays a 44pt target. Appended after review campaign 2; no existing
+  id moved.</p>
+</div></div>
+
+</div>
+</body>
+</html>
