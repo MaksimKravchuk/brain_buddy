@@ -65,6 +65,32 @@ class SynchronousExecutor:
         self.shutdowns.append({"wait": wait, "cancel_futures": cancel_futures})
 
 
+class HeldSendA2AClient(FakeA2AClient):
+    """A wire that holds its first send open while the test moves the world.
+
+    A real exchange worker sits inside `SendMessage` for as long as the agent
+    takes to answer, and that window is the only moment when a *second*
+    submission can observe the connection's slot count. Re-entering here rather
+    than racing threads keeps the assertion deterministic without a sleep.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        #: Called once, from inside the first send, then discarded.
+        self.during_send: Any = None
+        #: The connection's open-exchange count as each send saw it.
+        self.open_counts: list[int] = []
+        self.probe: Any = None
+
+    def send_message(self, target: Any, **kwargs: Any) -> A2AResult:
+        if self.probe is not None:
+            self.open_counts.append(self.probe())
+        during, self.during_send = self.during_send, None
+        if during is not None:
+            during()
+        return super().send_message(target, **kwargs)
+
+
 class DeferredExecutor:
     """A pool that accepts work and runs it only when the test says so."""
 
@@ -88,6 +114,8 @@ class DeferredExecutor:
 TASKS = {
     "task_1": TaskSnapshot(id="task_1", title="Draft the plan", details=None),
     "task_2": TaskSnapshot(id="task_2", title="Second task", details=None),
+    "task_3": TaskSnapshot(id="task_3", title="Third task", details=None),
+    "task_4": TaskSnapshot(id="task_4", title="Fourth task", details=None),
 }
 
 
@@ -382,6 +410,78 @@ class TestExchangePool:
 
         assert executor.pending == []
         assert repo.get_run(waiting, owner_id=OWNER).exchange_state == "queued"
+
+    def test_014_SC_008_the_bound_is_re_checked_where_the_slot_is_actually_taken(
+        self,
+        service: AgentRelayService,
+        repo: AgentRepository,
+        clock: Clock,
+    ) -> None:
+        """AC-034. `open_exchange_count` is the truth, and it moves at start.
+
+        `_slot_available` counts *open* exchanges, and a run that has been
+        submitted but not started is still `queued`. Three submissions made
+        before any of them starts therefore all see the same free slot, and
+        without a second check at the `queued → open` transition every one of
+        them would open — one connection holding the whole pool despite
+        `max_exchanges_per_connection`.
+        """
+
+        executor = DeferredExecutor()
+        wire = HeldSendA2AClient()
+        service.a2a_client = wire
+        observer = AgentObserver(
+            service,
+            exchange_executor=executor,
+            clock=clock,
+            max_exchanges_per_connection=1,
+        )
+        busy = connect_ready(service)
+        other = connect_ready(
+            service, address="https://second.example.com", key="idem-2"
+        )
+        wire.probe = lambda: repo.open_exchange_count(busy, owner_id=OWNER)
+        first = queue_handoff(service, busy, key="idem-d1")
+        second = queue_handoff(service, busy, task_id="task_2", key="idem-d2")
+        third = queue_handoff(service, busy, task_id="task_3", key="idem-d3")
+        elsewhere = queue_handoff(service, other, task_id="task_4", key="idem-d4")
+
+        for run_id in (first, second, third, elsewhere):
+            assert observer.submit_exchange(OWNER, run_id) is not None
+        # The cheap pre-check admitted all four: none of them is open yet, so
+        # each one saw an idle connection. That is the race being closed.
+        admitted, executor.pending = executor.pending, []
+
+        seen: dict[str, str] = {}
+
+        def while_the_first_is_held() -> None:
+            for fn, args, kwargs in admitted[1:]:
+                fn(*args, **kwargs)
+            for run_id in (first, second, third, elsewhere):
+                seen[run_id] = repo.get_run(run_id, owner_id=OWNER).exchange_state
+
+        wire.during_send = while_the_first_is_held
+        held_fn, held_args, held_kwargs = admitted[0]
+        held_fn(*held_args, **held_kwargs)
+
+        # One open exchange on the busy connection at every moment a message
+        # was on the wire, and the other connection was never made to wait.
+        assert max(wire.open_counts) == 1
+        assert seen[first] == "open"
+        assert seen[second] == "queued"
+        assert seen[third] == "queued"
+        assert seen[elsewhere] == "closed"
+
+        # The slot freed by the first exchange is what starts the next one, and
+        # the drain each finishing worker runs is what notices.
+        for _ in range(4):
+            pending, executor.pending = executor.pending, []
+            for fn, args, kwargs in pending:
+                fn(*args, **kwargs)
+        assert repo.get_run(second, owner_id=OWNER).exchange_state == "closed"
+        assert repo.get_run(third, owner_id=OWNER).exchange_state == "closed"
+        # Exactly one message per run: nothing was skipped and nothing doubled.
+        assert len(wire.calls_to("SendMessage")) == 4
 
     def test_014_FR_008_shutdown_cancels_the_work_that_never_started(
         self, service: AgentRelayService, clock: Clock

@@ -358,6 +358,33 @@ class TaskSnapshot:
     details: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class _LookupOutcome:
+    """What one correlation-ID lookup actually established.
+
+    Three answers, not two. "The agent holds no task for this run" and
+    "BrainBuddy could not find out" are both *no task in hand*, and collapsing
+    them into a bare ``None`` is how a timed-out lookup licenses a resend of a
+    message the agent may already be working on — the duplicate SC-008 forbids.
+    Only :attr:`confirmed_empty` is evidence, and only evidence may be acted on.
+    """
+
+    #: The newest task in this run's own conversation, when the agent named one.
+    task: Task | None = None
+    #: Whether the agent answered at all. False for a timeout, a JSON-RPC error,
+    #: an unusable payload, or a deployment with no wire to look with.
+    answered: bool = False
+    #: The allowlisted transport code behind an unanswered lookup, for the audit
+    #: row. Never agent text.
+    error_code: str | None = None
+
+    @property
+    def confirmed_empty(self) -> bool:
+        """The agent answered, and its answer named no task for this run."""
+
+        return self.answered and self.task is None
+
+
 class TaskSnapshotPort(Protocol):
     def __call__(self, task_id: str, *, owner_id: str) -> TaskSnapshot: ...
 
@@ -497,6 +524,12 @@ class AgentRelayService:
         # Set by the container once the observer exists, so the service never
         # needs to know how exchanges are scheduled — only that they are.
         self.exchange_pump: Callable[[str, str], Future[Any] | None] | None = None
+        # Published by the same observer, for the same reason: the bound is a
+        # property of the pool, and the pool's cheap pre-check counts *open*
+        # exchanges — so the queued → open transition has to be able to check
+        # it again, where the slot is actually taken (AC-034). `None` means no
+        # pool has claimed this service, and an unpooled service bounds nothing.
+        self.max_exchanges_per_connection: int | None = None
         # The dedicated control lane. A cancel is what *resolves* a blocked
         # exchange on some runtimes, so it must never queue behind the very
         # exchanges it ends (AC-035). `None` means "run it here", which is the
@@ -2224,6 +2257,25 @@ class AgentRelayService:
             },
         }
 
+    def _connection_is_full(self, connection: AgentConnectionDocument) -> bool:
+        """Whether this connection already holds every exchange it may.
+
+        The bound belongs to the pool, so it is published here by whoever owns
+        the pool (`AgentObserver.__init__`, beside `exchange_pump`) rather than
+        configured twice. A service with no pool bound to it has no pool to
+        protect and imposes none — the same thing it does today.
+        """
+
+        limit = self.max_exchanges_per_connection
+        if limit is None:
+            return False
+        return (
+            self.agent_repo.open_exchange_count(
+                connection.id, owner_id=connection.owner_id
+            )
+            >= limit
+        )
+
     def _submit_exchange(self, *, owner_id: str, run_id: str) -> Future[Any] | None:
         """Hand one queued exchange to whoever runs exchanges here.
 
@@ -2282,6 +2334,16 @@ class AgentRelayService:
             }
         )
         with self.agent_repo.command_lock(owner_id):
+            if self._connection_is_full(connection):
+                # The pool's pre-check counted *open* exchanges, and this one
+                # was still queued when it was admitted — as were every other
+                # submission made in the same window. The bound is therefore
+                # decided again here, where the slot is actually taken and
+                # under the lock that serialises the taking. Nothing is
+                # touched: the run stays **Queued**, which is still exactly
+                # what has happened to it, and the next worker to finish
+                # drains it (AC-034).
+                return
             opened = self.agent_repo.start_exchange(
                 prepared,
                 expected_version=run.run_version,
@@ -3155,7 +3217,7 @@ class AgentRelayService:
         request made to answer a question nobody asked.
         """
 
-        adopted = self._lookup_task(run, connection)
+        adopted = self._lookup_task(run, connection).task
         if adopted is None:
             return run
         now = self._now()
@@ -3234,7 +3296,7 @@ class AgentRelayService:
         connection = self.agent_repo.get_connection(
             run.connection_id, owner_id=owner_id
         )
-        adopted = self._lookup_task(run, connection)
+        adopted = self._lookup_task(run, connection).task
         if adopted is None:
             return
         self.apply_observation(
@@ -3253,13 +3315,13 @@ class AgentRelayService:
 
     def _lookup_task(
         self, run: AgentRunDocument, connection: AgentConnectionDocument
-    ) -> Task | None:
+    ) -> _LookupOutcome:
         """The correlation-ID lookup: one `ListTasks`, never a send."""
 
         if self.a2a_client is None:
             # Nothing to look with. An absent answer is not an empty one, so
             # the caller is told nothing rather than "no task exists".
-            return None
+            return _LookupOutcome(error_code=A2A_UNREACHABLE)
         result = self.a2a_client.list_tasks(
             self._a2a_target(
                 connection,
@@ -3270,7 +3332,11 @@ class AgentRelayService:
             page_size=5,
             run_id=run.id,
         )
-        return self._newest_adoptable(run, result)
+        return _LookupOutcome(
+            task=self._newest_adoptable(run, result),
+            answered=result.ok,
+            error_code=result.error_code,
+        )
 
     def _newest_adoptable(
         self, run: AgentRunDocument, result: A2AResult
@@ -3381,18 +3447,98 @@ class AgentRelayService:
         Ordered deliberately. The lookup is safe — it reads, it carries no task
         content, and a task it finds settles the run without any send at all —
         so it runs first and runs even while rollout is OFF. Only after it comes
-        back empty do the *send* preconditions apply, and each of those refuses
-        with its own reason rather than a generic failure, because each one asks
-        the owner for a different next step.
+        back *confirmed* empty do the *send* preconditions apply, and each of
+        those refuses with its own reason rather than a generic failure, because
+        each one asks the owner for a different next step.
+
+        The lookup has three outcomes, not two, and the third is the one that
+        matters: a lookup that did not come back establishes nothing, so it
+        licenses nothing. The run stays exactly as it was — **Delivery
+        unconfirmed**, with **Check again** still offered — and the failure is
+        audited rather than turned into a second message (SC-008).
 
         It can never mint a second run: every identifier it uses is already on
         the run, and the resend wins the same single-writer transition a first
         send does, so concurrent checks converge on one message.
+
+        The `Idempotency-Key` the route requires is honoured here rather than
+        merely demanded. A check that resent and then lost its HTTP answer is
+        the dangerous case: the agent's new task is not visible yet, so a
+        retried *lookup* comes back empty and licenses a second send of the same
+        message. The first call's outcome is therefore stored under the key and
+        replayed verbatim, with no lookup and no send, exactly as the other
+        keyed commands replay theirs.
+        """
+
+        command = "check_delivery"
+        canonical = self._canonical_request(command, payload, target=run_id)
+        # Serialised per key, not per owner: two retries of one intent must not
+        # both get past the replay check, and holding a database writer across
+        # a send an agent may sit on for the reply window would stop every
+        # other owner's commands (the `reply_to_run` pattern).
+        with self.agent_repo.operation_lock(
+            owner_id, self._key_fingerprint(owner_id, idempotency_key)
+        ):
+            with self.agent_repo.command_lock(owner_id):
+                key_hash, record = self._replayed(
+                    owner_id=owner_id,
+                    key=idempotency_key,
+                    command=command,
+                    canonical=canonical,
+                )
+                if record is not None:
+                    return AgentRunResponse.model_validate(record.response_body)
+            response = self._check_delivery(
+                run_id,
+                payload,
+                owner_id=owner_id,
+                reauthenticated=reauthenticated,
+                resend_allowed=resend_allowed,
+            )
+            with self.agent_repo.command_lock(owner_id):
+                self._remember(
+                    owner_id=owner_id,
+                    key_hash=key_hash,
+                    command=command,
+                    canonical=canonical,
+                    resource_id=run_id,
+                    response_body=response.model_dump(mode="json"),
+                )
+            return response
+
+    def _check_delivery(
+        self,
+        run_id: str,
+        payload: AgentCheckDeliveryRequest,
+        *,
+        owner_id: str,
+        reauthenticated: bool,
+        resend_allowed: bool,
+    ) -> AgentRunResponse:
+        """One check, from the run as it stands. Reserved by the caller.
+
+        A refusal raised here is deliberately *not* remembered: every one of
+        them names something the owner can put right, and a retry after they
+        have is a different world, not a replay. Only an outcome the check
+        actually reached is stored.
         """
 
         run = self.agent_repo.get_run(run_id, owner_id=owner_id)
         if run.dispatched_at is None:
             raise NotFoundError("Agent run", run_id)
+        if (
+            payload.expected_revision is not None
+            and payload.expected_revision != run.revision
+        ):
+            # The same refusal a reply gets, and for the same reason: this call
+            # can end in a message on the wire, so it acts on the run the owner
+            # was actually looking at or on none at all. Before the lookup, so
+            # a stale client cannot even spend a request at the agent.
+            raise ConflictError(
+                "Agent run",
+                run_id,
+                "This run changed elsewhere; reload and try again.",
+            )
         if run.dispatch_state != "delivery_unconfirmed":
             # There is no ambiguity to resolve. A `sent` run's delivery is
             # already established and a `not_sent` one provably never left, so
@@ -3404,8 +3550,8 @@ class AgentRelayService:
         )
         self._refuse_before_the_lookup(run, connection)
 
-        adopted = self._lookup_task(run, connection)
-        if adopted is not None:
+        outcome = self._lookup_task(run, connection)
+        if outcome.task is not None:
             # `or run` for the purge race, exactly as the probe above: a run
             # that no longer exists cannot be described by what it used to be.
             run = (
@@ -3413,7 +3559,9 @@ class AgentRelayService:
                     run.id,
                     owner_id=owner_id,
                     observation=project_observation(
-                        adopted, now=self._now(), limits=self.observation_limits
+                        outcome.task,
+                        now=self._now(),
+                        limits=self.observation_limits,
                     ),
                     based_on=run.run_version,
                     extra={
@@ -3427,7 +3575,21 @@ class AgentRelayService:
             self._audit(
                 owner_id=owner_id,
                 action="task_adopted",
-                outcome=adopted.id,
+                outcome=outcome.task.id,
+                connection_id=connection.id,
+                run_id=run.id,
+            )
+            return self._run_response(run)
+
+        if not outcome.confirmed_empty:
+            # The lookup did not come back. That is not evidence that nothing
+            # exists, and only evidence licenses a send: the run stays
+            # **Delivery unconfirmed**, exactly as it was, and the user's own
+            # **Check again** is still the honest next step (SC-008).
+            self._audit(
+                owner_id=owner_id,
+                action="delivery_lookup_failed",
+                outcome=outcome.error_code or "unknown",
                 connection_id=connection.id,
                 run_id=run.id,
             )

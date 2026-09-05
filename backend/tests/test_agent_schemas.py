@@ -736,7 +736,10 @@ def test_014_FR_006_check_delivery_asks_for_nothing_but_the_password() -> None:
 
     The request carries no ids and no content: everything it needs is already on
     the run. A body that could name a different run, or carry new content, would
-    make "check again" capable of being a second send.
+    make "check again" capable of being a second send. The one thing it does
+    carry beyond the password is the revision the user was looking at — a
+    resend is a mutation, and every mutation names the state it was composed
+    against.
     """
 
     assert AgentCheckDeliveryRequest().current_password is None
@@ -746,8 +749,16 @@ def test_014_FR_006_check_delivery_asks_for_nothing_but_the_password() -> None:
     )
 
     assert set(AgentCheckDeliveryRequest.model_json_schema()["properties"]) == {
-        "current_password"
+        "current_password",
+        "expected_revision",
     }
+
+    # Optional, so a client that has not adopted it yet still checks; never
+    # zero or negative, because no run was ever at that revision.
+    assert AgentCheckDeliveryRequest().expected_revision is None
+    assert AgentCheckDeliveryRequest(expected_revision=4).expected_revision == 4
+    with pytest.raises(ValidationError):
+        AgentCheckDeliveryRequest(expected_revision=0)
 
     with pytest.raises(ValidationError):
         AgentCheckDeliveryRequest.model_validate({"run_id": "agentrun_2"})

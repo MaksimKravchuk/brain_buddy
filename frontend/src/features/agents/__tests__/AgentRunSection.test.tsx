@@ -834,15 +834,15 @@ describe("AgentRunSection dispatch states", () => {
     );
     const confirm = vi.spyOn(apiClient, "confirmAgentHandoff");
     const user = userEvent.setup();
-    renderSection([
-      makeRun({
-        dispatch_state: "delivery_unconfirmed",
-        exchange_state: "closed",
-        primary_state_label: "Delivery unconfirmed",
-        message_id: "agentrun_1:start",
-        correlation_id: "agentrun_1"
-      })
-    ]);
+    const unconfirmed = makeRun({
+      dispatch_state: "delivery_unconfirmed",
+      exchange_state: "closed",
+      primary_state_label: "Delivery unconfirmed",
+      message_id: "agentrun_1:start",
+      correlation_id: "agentrun_1",
+      revision: 4
+    });
+    renderSection([unconfirmed]);
 
     expect(
       screen.getByText(
@@ -855,7 +855,12 @@ describe("AgentRunSection dispatch states", () => {
 
     await waitFor(() => expect(check).toHaveBeenCalledTimes(1));
     expect(check.mock.calls[0][0]).toBe("agentrun_1");
-    expect(check.mock.calls[0][1]).toEqual({ current_password: null });
+    // Tied to the revision the user was looking at: a check composed against a
+    // stale cached run must not resend for a state nobody is being shown.
+    expect(check.mock.calls[0][1]).toEqual({
+      current_password: null,
+      expected_revision: unconfirmed.revision
+    });
     expect(check.mock.calls[0][2]).toMatch(/^agent-check-delivery-agentrun_1/);
     expect(confirm).not.toHaveBeenCalled();
   });

@@ -204,9 +204,17 @@ export interface AgentHandoffConfirmRequest extends AgentHandoffPreviewRequest {
   acknowledge_duplicate_risk?: boolean;
 }
 
-/** **Check again** carries nothing but the password: every id is on the run. */
+/**
+ * **Check again** carries no identifiers of its own: every id is on the run.
+ *
+ * It does carry the revision the user was looking at. The check can end in a
+ * message on the wire, so it is a mutation like any other and names the state
+ * it was composed against; a check replayed from a stale cached run would
+ * resend for a state nobody is being shown any more.
+ */
 export interface AgentCheckDeliveryRequest {
   current_password?: string | null;
+  expected_revision?: number | null;
 }
 
 /**

@@ -149,14 +149,26 @@ stamped only when an exchange starts, such a retry is a first dispatch under
 has passed (FR-004).
 
 `POST /agent-runs/{id}/check-delivery` (Idempotency-Key; the **Check again** control on
-D-03-S05 / M-03-S04) — body `{ "current_password": null | "…" }`, needed only when the resend
+D-03-S05 / M-03-S04) — body `{ "current_password": null | "…", "expected_revision": null | int }`
+(`extra="forbid"`; no other key is accepted). `current_password` is needed only when the resend
 branch runs and the dispatch reauthentication rule (`requires_dispatch_reauthentication`,
-FR-004) applies to the connection; the lookup never needs it. Performs the same
+FR-004) applies to the connection; the lookup never needs it. `expected_revision` is the run
+`revision` the control was rendered from: the check can end in a message on the wire, so it is
+a mutation like any other and names the state it was composed against. When it is sent and
+differs from `run.revision` the call is refused with `409` — the same `ConflictError` the reply
+path raises — **before the lookup** and therefore before any resend, so a stale cached run
+cannot even spend a request at the agent. It is optional (`null` or absent) so a client that
+has not adopted it behaves exactly as before; both shipped clients send it. Performs the same
 lookup-before-resend once with the run's own correlation ID and message ID: a found task is
-adopted and the run becomes `sent`; when the agent reports no task the identical start
-message is resent once with the same message ID to the interface recorded at dispatch —
-unless the connection has `correlation_id_honoured: false`, in which case nothing is resent;
-an ambiguous answer leaves the run `delivery_unconfirmed`. The resend branch — never the
+adopted and the run becomes `sent`; when the agent *answers* and reports no task the identical
+start message is resent once with the same message ID to the interface recorded at dispatch —
+unless the connection has `correlation_id_honoured: false`, in which case nothing is resent.
+A lookup that never came back — a timeout, a JSON-RPC error, an unusable payload, or a
+deployment with no wire to look with — establishes nothing and therefore licenses nothing: the
+run is returned unchanged as `delivery_unconfirmed` (200, and no refusal `reason` — the eight
+below are all conditions on the *send*, and this is the absence of evidence for one), the
+**Check again** control stays offered, and one `delivery_lookup_failed` audit row records the
+allowlisted transport code. The resend branch — never the
 lookup — is refused, leaving the run `delivery_unconfirmed`, with `400 {reason:
 "connection_not_ready"}` when the connection is not `ready`, is stale, or its verified scope
 was reset since the run was dispatched (an agent-address, authentication-scheme, credential or
@@ -172,7 +184,14 @@ AC-036). Concurrent checks are
 serialised per run: the `interrupted|delivery_unconfirmed → open` transition is a
 compare-and-set on `run_version` under the process-wide command lock, so a second check, a
 replayed confirmation or the observer's restart-recovery lookup returns the winner without a
-second send (SC-008). Returns `AgentRunResponse`; on a run that is already `sent` it returns
+second send (SC-008). The `Idempotency-Key` is reserved, not merely required: the first call's
+`AgentRunResponse` is stored under it and a retry with the same key replays that body verbatim
+— no lookup, no send — while the same key against a different run is refused `409` exactly as
+the other keyed commands refuse it. This is what makes a resend whose HTTP answer was lost
+safe to retry: the run is still `delivery_unconfirmed`, the agent's new task is not visible
+yet, and a second lookup would come back empty and license a duplicate. Refusals are not
+stored: each names something the owner can put right, and a retry after they have is a new
+check rather than a replay. Returns `AgentRunResponse`; on a run that is already `sent` it returns
 the run unchanged. Refused outright — before any lookup — with `400 {reason: "run_terminal"}`,
 `"agent_task_missing"` or `"connection_disconnected"` (a disconnected connection has no
 credential left to look up with). That is the complete list, one reason per condition —

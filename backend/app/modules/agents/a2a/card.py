@@ -43,6 +43,7 @@ from pydantic import Field, ValidationError
 from app.modules.agents.a2a.types import AgentCard, CardInterface, CardSecurityScheme
 from app.modules.agents.egress import (
     DestinationRejected,
+    EgressDeadlineExceeded,
     PinnedResponse,
     Resolver,
     pinned_request,
@@ -65,6 +66,16 @@ v1's promise, so matching is exact rather than by prefix."""
 SUPPORTED_EXTENSION_URIS: frozenset[str] = frozenset({SINGLE_START_EXTENSION_URI})
 
 JSONRPC_BINDING = "JSONRPC"
+
+CARD_DEADLINE_MARGIN_SECONDS = 5.0
+"""How much longer than its read timeout one card fetch may take in total.
+
+The read timeout is per *chunk*, so a server that trickles bytes satisfies it
+for ever; the absolute deadline is the only bound that closes such a fetch.
+Named and injectable rather than a literal so the trickling case is testable in
+tenths of a second instead of by waiting the margin out — the same reason
+`client.py` names `SHORT_CALL_DEADLINE_MARGIN_SECONDS`.
+"""
 
 # --- failure categories (contracts/a2a-wire.md, FR-002) ---------------------
 
@@ -549,6 +560,7 @@ def fetch_card(
     resolver: Resolver | None = None,
     client_factory: Callable[..., httpx.Client] | None = None,
     now: datetime | None = None,
+    deadline_margin_seconds: float = CARD_DEADLINE_MARGIN_SECONDS,
 ) -> CardDiscovery:
     """Fetch and interpret an agent card. No credential is ever sent.
 
@@ -577,7 +589,7 @@ def fetch_card(
             timeout_seconds=timeout_seconds,
             max_response_bytes=max_response_bytes,
             client_factory=client_factory,
-            deadline_seconds=timeout_seconds + 5,
+            deadline_seconds=timeout_seconds + deadline_margin_seconds,
         )
     except DestinationRejected as exc:
         # An over-cap or malformed body is "not an agent": a truncated card is
@@ -586,6 +598,13 @@ def fetch_card(
         return _failure(
             A2A_NOT_AN_AGENT if exc.code == "destination_invalid" else exc.code
         )
+    except EgressDeadlineExceeded:
+        # The connection succeeded and bytes were arriving, so neither the read
+        # timeout nor the byte cap fires — only the absolute deadline does. It
+        # is a discovery failure like any other unreachable agent, and letting
+        # it escape would turn an ordinary bad agent into a BrainBuddy server
+        # error the owner has no corrective action for.
+        return _failure(A2A_UNREACHABLE)
     except httpx.HTTPError:
         return _failure(A2A_UNREACHABLE)
 
@@ -622,6 +641,7 @@ __all__ = [
     "A2A_PROTOCOL_VERSION_UNSUPPORTED",
     "A2A_UNREACHABLE",
     "AGENT_CARD_CHANGED",
+    "CARD_DEADLINE_MARGIN_SECONDS",
     "CARD_PATH",
     "MAX_CARD_DESCRIPTION_CHARS",
     "MAX_EXTENSIONS",

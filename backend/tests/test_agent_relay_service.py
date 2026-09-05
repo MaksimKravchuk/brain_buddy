@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.modules.agents.a2a.card import (
+    CARD_DEADLINE_MARGIN_SECONDS,
     SINGLE_START_EXTENSION_URI,
     AgentAuthSchemeOffer,
     CardDiscovery,
@@ -81,12 +83,17 @@ PUSH_BASE = "https://brainbuddy.example/api/a2a/push"
 
 def mock_transport_card_fetcher(
     handler: Callable[[httpx.Request], httpx.Response],
+    *,
+    timeout_seconds: float = 5.0,
+    deadline_margin_seconds: float = CARD_DEADLINE_MARGIN_SECONDS,
 ) -> Callable[..., CardDiscovery]:
     """The *real* discovery path over a scripted transport.
 
-    Two cases cannot be expressed as a `CardDiscovery` double, because they are
-    about what the fetch itself refuses: a body that is not JSON and a body over
-    the response cap. Both have to run `fetch_card` for real.
+    Three cases cannot be expressed as a `CardDiscovery` double, because they
+    are about what the fetch itself refuses: a body that is not JSON, a body
+    over the response cap, and a body that arrives for ever. All three have to
+    run `fetch_card` for real; the last one shortens the deadline so it is
+    decided in tenths of a second rather than by waiting the margin out.
     """
 
     def client_factory(**kwargs: Any) -> httpx.Client:
@@ -99,11 +106,12 @@ def mock_transport_card_fetcher(
         return fetch_card(
             address,
             auth_scheme=auth_scheme,  # type: ignore[arg-type]
-            timeout_seconds=5.0,
+            timeout_seconds=timeout_seconds,
             max_response_bytes=64_000,
             resolver=fake_resolver,
             client_factory=client_factory,
             now=now,
+            deadline_margin_seconds=deadline_margin_seconds,
         )
 
     return fetch
@@ -172,6 +180,23 @@ class BlockingA2AClient(FakeA2AClient):
         if self.block_kind == kind:
             self.entered.set()
             assert self.release.wait(timeout=5)
+
+
+class TricklingCardStream(httpx.SyncByteStream):
+    """A card body that never ends, a byte at a time.
+
+    The shape no configured limit catches: each chunk restarts httpx's read
+    timeout and the total stays far under the byte cap, so only the absolute
+    wall-clock deadline ever closes it.
+    """
+
+    def __init__(self, interval_seconds: float) -> None:
+        self.interval_seconds = interval_seconds
+
+    def __iter__(self) -> Iterator[bytes]:
+        while True:  # pragma: no branch - closed by the deadline, never by us
+            time.sleep(self.interval_seconds)
+            yield b"{"
 
 
 class Clock:
@@ -1537,6 +1562,35 @@ class TestConnectByAgentCard:
 
         assert tested.status == "unsupported"
         assert tested.last_test_error_code == "a2a_not_an_agent"
+        assert tested.card is None
+
+    def test_014_FR_002_a_card_that_trickles_past_the_deadline_reads_as_unreachable(
+        self, tmp_path: Path, clock: Clock
+    ) -> None:
+        """AC-003. A slow-for-ever agent is a bad agent, not a broken BrainBuddy.
+
+        Every chunk restarts the read timeout and the body stays far under the
+        cap, so the absolute deadline is the only thing that closes the fetch.
+        The owner is told the agent could not be reached and given the same
+        **Test connection** they get for any other unreachable address.
+        """
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, stream=TricklingCardStream(0.02))
+
+        service = build_service(
+            AgentRepository(tmp_path),
+            clock,
+            card_fetcher=mock_transport_card_fetcher(
+                handler, timeout_seconds=0.2, deadline_margin_seconds=0.0
+            ),
+        )
+        connection_id = connect(service)
+
+        tested = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert tested.status == "unreachable"
+        assert tested.last_test_error_code == "a2a_unreachable"
         assert tested.card is None
 
     def test_014_SC_003_an_oversized_card_body_is_refused_whole(
@@ -3299,10 +3353,14 @@ class TestExchangeEdges:
             service.agent_repo.get_run(run_id, owner_id=OWNER).exchange_state
             == "closed"
         )
-        # And a lookup with no wire reports nothing rather than "nothing found".
+        # And a lookup with no wire reports nothing rather than "nothing found":
+        # unanswered, so never `confirmed_empty`, so it licenses no resend.
         run = service.agent_repo.get_run(run_id, owner_id=OWNER)
         connection = service.agent_repo.get_connection(connection_id, owner_id=OWNER)
-        assert service._lookup_task(run, connection) is None
+        outcome = service._lookup_task(run, connection)
+        assert outcome.task is None
+        assert outcome.answered is False
+        assert outcome.confirmed_empty is False
 
     def test_014_FR_006_a_second_worker_on_one_exchange_sends_nothing(
         self,
@@ -3866,6 +3924,201 @@ class TestCheckDelivery:
             idempotency_key="idem-check-spent",
         )
 
+        assert len(sends(a2a_client)) == 1
+
+    def test_014_SC_008_a_retried_check_replays_its_outcome_without_a_second_send(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """AC-027, SC-008. A lost response must not become a second message.
+
+        The route already requires an `Idempotency-Key`, and the whole point of
+        one on this path is that a check which resent and then lost its answer
+        is retried without looking again — the agent's new task may not be
+        visible yet, and a second empty lookup would license a second send.
+        """
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+        # The resend is itself ambiguous, so the run is still
+        # **Delivery unconfirmed** afterwards — which is exactly the state a
+        # retry would look up again, find empty, and send into.
+        a2a_client.script(
+            "SendMessage",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+
+        first = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-lost",
+        )
+        assert first.dispatch_state == "delivery_unconfirmed"
+        # The client never saw that answer, so it asks again with the key it
+        # spent — the same intent, not a new one.
+        second = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-lost",
+        )
+
+        assert len(sends(a2a_client)) == 1
+        assert len(a2a_client.calls_to("ListTasks")) == 1
+        assert second == first
+
+    def test_014_FR_006_one_check_key_cannot_serve_a_different_check(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """Refused exactly as every other keyed command refuses it.
+
+        A key that answered for a *different* run would return a
+        success-shaped run the caller never asked about, while the check they
+        did ask for never ran.
+        """
+
+        _connection_id, first_run = self._unconfirmed(service, a2a_client)
+        _connection_id_2, second_run = self._unconfirmed(
+            service, a2a_client, key="idem-unconfirmed-2"
+        )
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+        service.check_delivery(
+            first_run,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-shared",
+        )
+
+        with pytest.raises(ConflictError):
+            service.check_delivery(
+                second_run,
+                AgentCheckDeliveryRequest(),
+                owner_id=OWNER,
+                idempotency_key="idem-check-shared",
+            )
+
+    def test_014_FR_006_a_check_against_a_stale_revision_is_refused_before_the_lookup(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient, clock: Clock
+    ) -> None:
+        """**Check again** acts on the run the user was looking at, or on none.
+
+        `mobile/AGENTS.md` requires every mutation to name the revision it was
+        composed against, and a resend is a mutation with a message on the wire
+        at the end of it: a check sent from a cached run that has since moved
+        would be answering a question the user is no longer being asked.
+        """
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        seen = service.get_run(run_id, owner_id=OWNER).revision
+        report(service, run_id, "running", text="Working on it", now=clock.now)
+        assert service.get_run(run_id, owner_id=OWNER).revision != seen
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        with pytest.raises(ConflictError):
+            service.check_delivery(
+                run_id,
+                AgentCheckDeliveryRequest(expected_revision=seen),
+                owner_id=OWNER,
+                idempotency_key="idem-check-stale",
+            )
+
+        # Before the lookup, so a stale client cannot even spend a request at
+        # the agent — and certainly not a send.
+        assert a2a_client.calls_to("ListTasks") == []
+        assert sends(a2a_client) == []
+
+    def test_014_FR_006_a_check_naming_the_current_revision_proceeds(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """The guard is a staleness check, not a second refusal to send."""
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        current = service.get_run(run_id, owner_id=OWNER).revision
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        checked = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(expected_revision=current),
+            owner_id=OWNER,
+            idempotency_key="idem-check-fresh",
+        )
+
+        assert checked.dispatch_state == "sent"
+        assert len(sends(a2a_client)) == 1
+
+    @pytest.mark.parametrize(
+        "error_code",
+        ["a2a_timeout", "a2a_request_rejected", "a2a_response_invalid"],
+    )
+    def test_014_SC_008_a_failed_lookup_never_licenses_a_resend(
+        self,
+        service: AgentRelayService,
+        a2a_client: FakeA2AClient,
+        error_code: str,
+    ) -> None:
+        """SC-008. "I could not find out" is not "nothing exists".
+
+        A timeout, a JSON-RPC error and an unusable payload all leave
+        BrainBuddy without an answer. Sending again on that basis is exactly
+        the duplicate the correlation-ID lookup exists to prevent.
+        """
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(ok=False, correlation_id="c", error_code=error_code),
+        )
+
+        checked = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-failed-lookup",
+        )
+
+        assert sends(a2a_client) == []
+        assert checked.dispatch_state == "delivery_unconfirmed"
+        assert checked.primary_state_label == "Delivery unconfirmed"
+
+    def test_014_FR_006_a_failed_lookup_is_audited_and_keeps_check_again_offered(
+        self, service: AgentRelayService, a2a_client: FakeA2AClient
+    ) -> None:
+        """The run is untouched, so the user's own **Check again** still stands."""
+
+        _connection_id, run_id = self._unconfirmed(service, a2a_client)
+        before = service.agent_repo.get_run(run_id, owner_id=OWNER)
+        a2a_client.script(
+            "ListTasks",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+
+        service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-audited",
+        )
+
+        after = service.agent_repo.get_run(run_id, owner_id=OWNER)
+        assert after.dispatch_state == before.dispatch_state
+        assert after.exchange_state == before.exchange_state
+        assert after.revision == before.revision
+        failures = [
+            entry
+            for entry in service.list_audit(owner_id=OWNER)
+            if entry.action == "delivery_lookup_failed"
+        ]
+        assert [entry.outcome for entry in failures] == ["a2a_timeout"]
+        assert failures[0].run_id == run_id
+        # A second check is still the honest next step, and it still works.
+        a2a_client.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+        again = service.check_delivery(
+            run_id,
+            AgentCheckDeliveryRequest(),
+            owner_id=OWNER,
+            idempotency_key="idem-check-audited-2",
+        )
+        assert again.dispatch_state == "sent"
         assert len(sends(a2a_client)) == 1
 
     def test_014_SC_008_concurrent_checks_converge_on_one_resend(
@@ -6844,6 +7097,47 @@ class TestApplyObservation:
         assert observed.projection().task_id == "task_1"
         assert TASKS["task_1"] == before
         assert TASKS["task_1"].title == "Draft the migration plan"
+
+    @pytest.mark.parametrize(
+        ("state", "field", "limit_name"),
+        [
+            ("running", "progress_text", "max_progress_chars"),
+            ("blocked", "question_text", "max_question_chars"),
+            ("completed", "result_text", "max_result_chars"),
+            ("failed", "failure_reason", "max_result_chars"),
+        ],
+    )
+    def test_014_FR_009_an_over_limit_observation_survives_the_validated_read(
+        self,
+        observed: ObservedRelay,
+        state: str,
+        field: str,
+        limit_name: str,
+    ) -> None:
+        """AC-013. The run is written unvalidated and read validated.
+
+        `apply_observation` writes through `model_copy`, which validates
+        nothing, so a projection that overshoots a field's `max_length` lands in
+        storage and is only refused later — by the next validated read, which
+        turns the whole run into an unreadable relay payload, and by the event
+        row built in the same transaction, whose failure rolls the observation
+        back. Both are silent at the moment the mistake is made, so the bound
+        is asserted here as well as in the projection's own suite.
+        """
+
+        limit = getattr(observed.service.observation_limits, limit_name)
+
+        observed.report(state, text="x" * (limit + 500))
+
+        stored = observed.service.agent_repo.get_run(observed.run_id, owner_id=OWNER)
+        value = getattr(stored, field)
+        assert value is not None
+        assert len(value) <= limit
+        # And the timeline row the same transaction wrote is readable too: its
+        # summary is the same agent text under the widest of the limits.
+        projection = observed.projection()
+        assert getattr(projection, field) == value
+        assert [event.summary for event in projection.events] == [value]
 
     def test_014_FR_008_an_identical_observation_only_refreshes_contact(
         self, observed: ObservedRelay, clock: Clock

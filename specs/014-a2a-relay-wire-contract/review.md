@@ -140,7 +140,7 @@ D1–D3 (duplication) were left as they are: the restated text is consistent.
 
 ## Implementation deviations (recorded by the implementer)
 
-The planning artifacts were reviewed and accepted before any code existed. Seven
+The planning artifacts were reviewed and accepted before any code existed. The
 places where the implementation departed from them are recorded here, with the
 reason, so the reviewers grade what was built rather than what was drawn. Where
 a contract stated the superseded shape, the contract has been corrected in the
@@ -236,3 +236,69 @@ matches `json_extract(payload, '$.run_version')` (`repository.py` lines 1078 and
 `command_lock` — so a write that does not bump it is safe. No request or
 response shape changed, so `contracts/api-deltas.md` line 246 ("unchanged
 requests") stays true.
+
+**(h) A delivery-check lookup has three outcomes, and only one of them
+licenses a resend.**
+The plan and `contracts/api-deltas.md` said "an ambiguous answer leaves the run
+`delivery_unconfirmed`"; the implementation could not tell an ambiguous answer
+from an empty one, because `_lookup_task` returned `None` both when the agent
+answered "no task in this conversation" and when there was no answer at all — a
+timeout, a JSON-RPC error, an unusable payload. **Check again** then resent on
+the strength of a lookup that had established nothing, which is precisely the
+duplicate the lookup exists to prevent (SC-008).
+
+The lookup now returns an explicit outcome — adopted task, confirmed empty, or
+unanswered — and only a *confirmed* empty answer reaches the resend branch. An
+unanswered lookup leaves the run byte-for-byte as it was (`dispatch_state`,
+`exchange_state` and `revision` all unchanged), answers 200 with the same
+**Delivery unconfirmed** projection and the **Check again** control still
+offered, and writes one audit row. No new refusal `reason` was invented: the
+eight in FR-006 are conditions on the *send*, and this is the absence of the
+evidence a send needs, not a ninth condition — so the "complete list" in FR-006
+and in `contracts/api-deltas.md` still holds exactly as ratified.
+
+`data-model.md` §6 gains one audit action, `delivery_lookup_failed`, whose
+outcome is the allowlisted transport code (`a2a_timeout`, `a2a_response_invalid`
+…) and never agent text. It is written per user-triggered check rather than
+bounded per day, like the `task_adopted` row beside it: a check is a tap, not a
+poll.
+
+**(i) `check-delivery` takes an `expected_revision`.**
+The plan gave the request body nothing but `current_password`, on the reasoning
+that every identifier the check needs is already on the run. That is true of
+*identifiers* and false of *concurrency*: the check can end in a message on the
+wire, which makes it a mutation, and `mobile/AGENTS.md` requires every mobile
+mutation to send `Idempotency-Key` **and** `expected_revision`. Without it a
+**Check again** tapped on a cached run that had moved underneath — a run the
+observer had already settled, or that a parallel check had resent for — was
+carried out against a state the user was no longer being shown.
+
+`AgentCheckDeliveryRequest` therefore gains `expected_revision: int | None`
+(`ge=1`, default `None`). When it is sent and differs from `run.revision` the
+call raises the same `ConflictError` the reply path raises, before the lookup
+and so before any resend; a stale client cannot even spend a request at the
+agent. It is optional because the guard is the client's to adopt and a body
+that suddenly *required* it would break a client mid-rollout; both shipped
+clients send it, web for parity with iOS. The body stays `extra="forbid"` and
+gains no other key. `contracts/api-deltas.md` §check-delivery is corrected in
+the same commit.
+
+**(j) `check-delivery` reserves its `Idempotency-Key` rather than only
+requiring one.**
+The route demanded the header from the start and passed it to the service,
+which never spent it. That is worse than not asking: the client is told its
+retry is deduplicated and it is not. The dangerous case is the one the key
+exists for — the resend goes out, its own answer is ambiguous, and the HTTP
+response is lost. The run is still **Delivery unconfirmed**, the agent's new
+task is not visible yet, so the retry's lookup comes back empty and licenses a
+second copy of the same message.
+
+The key now goes through the same `AgentIdempotencyRecord` machinery the
+connection commands use: the call is serialised per key on `operation_lock`,
+the first outcome is stored as the response body, a retry replays it verbatim
+with no lookup and no send, and the same key against a different run is refused
+with the `ConflictError` every other keyed path raises. Refusals are
+deliberately not stored — each one names something the owner can put right, and
+a retry after they have is a different world, not a replay. The record is
+ordinary internal storage under the shape `data-model.md` §5 already describes;
+only the `command` value (`check_delivery`) is new.

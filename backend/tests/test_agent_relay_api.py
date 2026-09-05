@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Generator
+import time
+from collections.abc import Generator, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -27,6 +29,7 @@ from app.main import _run_privacy_maintenance_sweep, create_app
 from app.modules.agents.a2a.card import (
     MAX_CARD_DESCRIPTION_CHARS,
     CardDiscovery,
+    fetch_card,
 )
 from app.modules.agents.a2a.mapping import ObservationLimits, project_observation
 from app.modules.agents.a2a.types import Task
@@ -91,6 +94,22 @@ def test_sensitive_reauthentication_reports_rate_limit_before_password_verificat
 
     assert excinfo.value.status_code == 429
     assert excinfo.value.detail == "Too many attempts. Try again later."
+
+
+class TricklingCardStream(httpx.SyncByteStream):
+    """A card body that never ends, a byte at a time.
+
+    Each chunk restarts httpx's read timeout and the total stays far under the
+    byte cap, so only the absolute wall-clock deadline ever closes the fetch.
+    """
+
+    def __init__(self, interval_seconds: float) -> None:
+        self.interval_seconds = interval_seconds
+
+    def __iter__(self) -> Iterator[bytes]:
+        while True:  # pragma: no branch - closed by the deadline, never by us
+            time.sleep(self.interval_seconds)
+            yield b"{"
 
 
 def _resolver(host: str, port: int) -> list[str]:
@@ -800,6 +819,53 @@ class TestConnectionRoutes:
         assert response.status_code == 422, response.text
         assert "auth_header_name" in response.text
         assert client.get("/api/agent-connections").json() == []
+
+    def test_014_FR_002_a_card_that_trickles_past_the_deadline_is_a_200_not_a_500(
+        self,
+        client: TestClient,
+        relay_app: tuple[TestClient, TestClient, Container],
+    ) -> None:
+        """AC-003 over HTTP. A slow-for-ever agent is the agent's problem.
+
+        The connection succeeds and bytes keep arriving, so the read timeout
+        and the byte cap are both satisfied and only the absolute deadline
+        fires. That is a discovery failure with a corrective action, not a
+        BrainBuddy server error the owner can do nothing about.
+        """
+
+        container = relay_app[2]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, stream=TricklingCardStream(0.02))
+
+        def client_factory(**kwargs: Any) -> httpx.Client:
+            kwargs.pop("transport", None)
+            return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+        def trickling_fetch(
+            address: str, *, auth_scheme: str, now: datetime | None = None
+        ) -> CardDiscovery:
+            return fetch_card(
+                address,
+                auth_scheme=auth_scheme,  # type: ignore[arg-type]
+                timeout_seconds=0.2,
+                max_response_bytes=64_000,
+                resolver=_resolver,
+                client_factory=client_factory,
+                now=now,
+                deadline_margin_seconds=0.0,
+            )
+
+        container.agent_relay_service._card_fetcher = trickling_fetch  # type: ignore[assignment]
+        created = register_connection(client, key="k-trickle")
+
+        response = client.post(f"/api/agent-connections/{created['id']}/test")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == "unreachable"
+        assert body["last_test_error_code"] == "a2a_unreachable"
+        assert response.headers["X-Correlation-ID"]
 
     def test_card_text_is_returned_verbatim_and_bounded(
         self,
@@ -1838,6 +1904,78 @@ class TestCheckDeliveryRoute:
         assert body["dispatch_state"] == "sent"
         assert body["agent_task_id"] == "t-found"
         assert a2a.calls_to("SendMessage") == []
+
+    def test_014_SC_008_a_check_retried_under_one_key_sends_exactly_once(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """AC-027, SC-008. The lost-response case, over HTTP.
+
+        The resend is itself ambiguous, so the run is still
+        **Delivery unconfirmed** when the client — which never saw the first
+        answer — asks again under the key it spent. Looking again would find
+        nothing (the agent's new task is not visible yet) and send a second
+        copy of the same message.
+        """
+
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        _connection_id, run = self._unconfirmed(client, container, key="k-replay")
+        a2a.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+        a2a.script(
+            "SendMessage",
+            A2AResult(ok=False, correlation_id="c", error_code="a2a_timeout"),
+        )
+
+        first = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": "k-check-replay"},
+            json={},
+        )
+        second = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": "k-check-replay"},
+            json={},
+        )
+
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        assert first.json()["dispatch_state"] == "delivery_unconfirmed"
+        assert second.json() == first.json()
+        assert len(a2a.calls_to("SendMessage")) == 1
+        assert len(a2a.calls_to("ListTasks")) == 1
+
+    def test_014_FR_006_a_check_from_a_stale_revision_is_refused_with_409(
+        self, client: TestClient, container: Container
+    ) -> None:
+        """The run the user tapped on is the run the check acts on.
+
+        Both clients send `expected_revision`, so a **Check again** composed
+        against a cached run that has since moved is refused here rather than
+        resending a message for a state nobody is looking at any more.
+        """
+
+        a2a = cast(FakeA2AClient, container.agent_relay_service.a2a_client)
+        _connection_id, run = self._unconfirmed(client, container, key="k-stale")
+        a2a.script("ListTasks", A2AResult(ok=True, correlation_id="c"))
+
+        response = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": "k-check-stale"},
+            json={"current_password": None, "expected_revision": run["revision"] + 1},
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.headers["X-Correlation-ID"]
+        assert a2a.calls_to("ListTasks") == []
+        assert a2a.calls_to("SendMessage") == []
+
+        # And the same check naming the revision the client actually holds runs.
+        fresh = client.post(
+            f"/api/agent-runs/{run['id']}/check-delivery",
+            headers={"Idempotency-Key": "k-check-fresh"},
+            json={"current_password": None, "expected_revision": run["revision"]},
+        )
+        assert fresh.status_code == 200, fresh.text
+        assert a2a.calls_to("ListTasks")
 
     def test_014_FR_016_a_check_without_an_idempotency_key_is_refused(
         self, client: TestClient, container: Container

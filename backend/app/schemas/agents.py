@@ -334,12 +334,20 @@ class AgentHandoffConfirmRequest(AgentHandoffPreviewRequest):
 class AgentCheckDeliveryRequest(StrictBaseModel):
     """**Check again**: re-run *this* run's own lookup-before-resend (AC-027).
 
-    Deliberately carries nothing but the password. Every identifier the check
+    Deliberately carries no identifiers and no content. Everything the check
     needs is already on the run, and a body that could name a different run — or
     carry new content — would make "check again" capable of being a second send.
+
+    What it does carry is the revision the user was looking at when they asked.
+    The check can end in a message on the wire, so it is a mutation like any
+    other, and every mutation names the state it was composed against
+    (`mobile/AGENTS.md`): a check replayed from a stale cached run would resend
+    for a state nobody is being shown any more. Optional, so a client that has
+    not adopted it yet still checks exactly as before.
     """
 
     current_password: str | None = Field(default=None, max_length=512)
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class AgentManifestResponse(StrictBaseModel):

@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import copy
 import json
+import time
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -35,6 +37,7 @@ from app.modules.agents.a2a.card import (
     A2A_NOT_AN_AGENT,
     A2A_PROTOCOL_VERSION_UNSUPPORTED,
     A2A_UNREACHABLE,
+    CARD_DEADLINE_MARGIN_SECONDS,
     CARD_PATH,
     MAX_CARD_DESCRIPTION_CHARS,
     MAX_EXTENSIONS,
@@ -781,22 +784,66 @@ class TestSummaryBounds:
         assert result.summary.name == markup[:200]
 
 
+class TricklingStream(httpx.SyncByteStream):
+    """A card body that never ends, a byte at a time.
+
+    The shape no configured limit catches: each chunk restarts httpx's read
+    timeout and the total stays far under the byte cap, so nothing but the
+    absolute wall-clock deadline ever closes it.
+    """
+
+    def __init__(self, interval_seconds: float) -> None:
+        self.interval_seconds = interval_seconds
+
+    def __iter__(self) -> Iterator[bytes]:
+        while True:  # pragma: no branch - closed by the deadline, never by us
+            time.sleep(self.interval_seconds)
+            yield b"{"
+
+
 class TestFetchFailures:
     """What a failed discovery tells the user, and what it never tells them."""
 
     @staticmethod
-    def _fetch(handler: Any, address: str = "https://agent.example.com") -> Any:
+    def _fetch(
+        handler: Any,
+        address: str = "https://agent.example.com",
+        *,
+        timeout_seconds: float = 5.0,
+        deadline_margin_seconds: float = CARD_DEADLINE_MARGIN_SECONDS,
+    ) -> Any:
         def client_factory(**kwargs: Any) -> httpx.Client:
             return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
 
         return fetch_card(
             address,
             auth_scheme="bearer",
-            timeout_seconds=5.0,
+            timeout_seconds=timeout_seconds,
             max_response_bytes=64_000,
             resolver=lambda host, port: ["93.184.216.34"],
             client_factory=client_factory,
+            deadline_margin_seconds=deadline_margin_seconds,
         )
+
+    def test_014_FR_002_a_card_that_trickles_past_the_deadline_is_unreachable(
+        self,
+    ) -> None:
+        """AC-003. A server that answers slowly for ever is not a 500.
+
+        The connection succeeded and the bytes are arriving, so neither the
+        read timeout nor the byte cap fires; only the absolute deadline does.
+        Letting that escape `fetch_card` turns an ordinary bad agent into a
+        BrainBuddy server error with no corrective action for the owner.
+        """
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, stream=TricklingStream(0.02))
+
+        result = self._fetch(handler, timeout_seconds=0.2, deadline_margin_seconds=0.0)
+
+        assert result.failure_code == A2A_UNREACHABLE
+        assert result.failure_detail is None
+        assert result.summary is None
 
     @pytest.mark.parametrize(
         ("address", "expected"),
