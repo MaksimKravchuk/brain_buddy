@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import Future
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol
@@ -179,29 +179,69 @@ class AgentObserver:
 
     # --- restart recovery ---------------------------------------------------
 
-    def recover_interrupted_exchanges(self) -> int:
-        """Settle every exchange a restart left mid-flight. Called once, at boot.
+    def mark_interrupted_exchanges(self) -> list[tuple[str, str]]:
+        """Settle what a restart can settle by itself. Called once, at boot.
 
-        A queued exchange and an open one get opposite treatment, and the whole
-        point of keeping the two states apart is that this is decidable at all:
+        Pure state and no network, which is what makes it safe to run before the
+        app serves its first request. A queued exchange and an open one get
+        opposite treatment, and the whole point of keeping the two states apart
+        is that this is decidable at all:
 
         - **queued** — the worker never started, so nothing left BrainBuddy. The
           run is **Not sent** and the hand-off is offered again with the same
           run ID and message ID. Calling it **Delivery unconfirmed** would ask
           the user to worry about a message that provably does not exist.
-        - **open** — the send may already be at the agent. BrainBuddy looks the
-          run up by its correlation ID and adopts what it finds; it never
-          resends here, because no background thread ever resends (AC-032).
+        - **open** — the send may already be at the agent, so the run is marked
+          `interrupted`, which is the honest thing to say about it without
+          asking anyone. What it *means* still has to be looked up, and that is
+          `resolve_interrupted_exchanges`.
+
+        Returns the `(owner_id, run_id)` pairs still owing a lookup.
         """
 
-        recovered = 0
+        pending: list[tuple[str, str]] = []
         for owner_id, run_id, state in self.service.agent_repo.interrupted_exchanges():
             if state == "queued":
                 self.service.settle_restarted_before_send(run_id, owner_id=owner_id)
             else:
-                self.service.recover_open_exchange(run_id, owner_id=owner_id)
-            recovered += 1
-        return recovered
+                self.service.mark_exchange_interrupted(run_id, owner_id=owner_id)
+                pending.append((owner_id, run_id))
+        return pending
+
+    def resolve_interrupted_exchanges(self, pending: Iterable[tuple[str, str]]) -> int:
+        """Look up what the marked exchanges became, on a pool, off the boot path.
+
+        One `ListTasks` per open exchange under the short-call deadline. Doing
+        that at boot means an unreachable agent holds the process closed for the
+        deadline times the backlog, while the platform's health check gives up
+        in five seconds and restarts the machine that is trying to recover — so
+        it is submitted after the app is serving instead.
+
+        The control lane by preference: it is the one that is never held open,
+        and these calls are short by construction. "No send is ever initiated
+        without a user action" is untouched, because the resolver only looks.
+        """
+
+        pool = self.control_executor or self.observation_executor
+        submitted = 0
+        for owner_id, run_id in pending:
+            pool.submit(
+                self.service.resolve_interrupted_exchange, run_id, owner_id=owner_id
+            )
+            submitted += 1
+        return submitted
+
+    def recover_interrupted_exchanges(self) -> int:
+        """Both halves of restart recovery, in one synchronous call.
+
+        Kept for callers that want the whole thing to have happened by the time
+        it returns. Boot is deliberately not one of them (`main.py`).
+        """
+
+        pending = self.mark_interrupted_exchanges()
+        for owner_id, run_id in pending:
+            self.service.resolve_interrupted_exchange(run_id, owner_id=owner_id)
+        return len(pending)
 
     # --- the observation lane -----------------------------------------------
 

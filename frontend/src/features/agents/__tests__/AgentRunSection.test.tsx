@@ -79,12 +79,20 @@ function makeEvent(
   };
 }
 
-function renderSection(runs: AgentRunResponse[], node?: ReactElement) {
+function renderSection(runs: AgentRunResponse[], node?: ReactElement, handoffEnabled = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return {
     ...render(
       <QueryClientProvider client={client}>
-        {node ?? <AgentRunSection taskId="task_1" runs={runs} isLoading={false} error={null} />}
+        {node ?? (
+          <AgentRunSection
+            taskId="task_1"
+            runs={runs}
+            isLoading={false}
+            error={null}
+            handoffEnabled={handoffEnabled}
+          />
+        )}
       </QueryClientProvider>
     ),
     client
@@ -368,6 +376,7 @@ describe("AgentRunSection", () => {
         ]}
         isLoading
         error={null}
+        handoffEnabled
       />
     );
 
@@ -406,6 +415,7 @@ describe("AgentRunSection", () => {
         runs={[cached]}
         isLoading={false}
         error={new Error("network unreachable")}
+        handoffEnabled
       />
     );
 
@@ -416,7 +426,7 @@ describe("AgentRunSection", () => {
   });
 
   it("surfaces a load error with its correlation id when no cached run exists", () => {
-    renderSection([], <AgentRunSection taskId="task_1" runs={[]} isLoading={false} error={new Error("boom")} />);
+    renderSection([], <AgentRunSection taskId="task_1" runs={[]} isLoading={false} error={new Error("boom")} handoffEnabled />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(/boom/);
   });
@@ -496,6 +506,7 @@ describe("AgentRunSection idempotency across retries", () => {
           runs={[{ ...firstRun, revision: firstRun.revision + 1 }]}
           isLoading={false}
           error={null}
+          handoffEnabled
         />
       </QueryClientProvider>
     );
@@ -527,7 +538,7 @@ describe("AgentRunSection idempotency across retries", () => {
     };
     rerender(
       <QueryClientProvider client={client}>
-        <AgentRunSection taskId="task_1" runs={[changedRun]} isLoading={false} error={null} />
+        <AgentRunSection taskId="task_1" runs={[changedRun]} isLoading={false} error={null} handoffEnabled />
       </QueryClientProvider>
     );
     await user.click(screen.getByRole("button", { name: "Send answer" }));
@@ -708,6 +719,21 @@ describe("AgentRunSection dispatch states", () => {
     expect(screen.getByRole("button", { name: "Try this hand-off again" })).toBeEnabled();
   });
 
+  it("014-FR-012 withholds the retry while rollout is off and still shows the run", () => {
+    // FR-016 / 007 FR-019: rollout OFF keeps already-dispatched work observable
+    // and actionable. A hand-off that never left has nothing at the agent, so
+    // retrying it is a fresh content-bearing send — exactly what rollout OFF
+    // withholds — and offering the control anyway either sends behind the
+    // rollout gate or does nothing at all.
+    renderSection([restartedRun], undefined, false);
+
+    expect(screen.getByText("Not sent")).toBeInTheDocument();
+    expect(
+      screen.getByText("BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try this hand-off again" })).toBeNull();
+  });
+
   it("014-FR-006 names the rate-limited category on a hand-off that was refused", () => {
     renderSection([
       makeRun({
@@ -865,6 +891,41 @@ describe("AgentRunSection dispatch states", () => {
     expect(confirm).not.toHaveBeenCalled();
   });
 
+  it("014-FR-006 surfaces a refused delivery check with its correlation reference", async () => {
+    // Parity with iOS. A refusal (rollout_disabled, connection_not_ready,
+    // agent_card_changed, a 409 on expected_revision) or a transport failure
+    // must never look like a check that ran and found nothing.
+    vi.spyOn(apiClient, "checkAgentRunDelivery").mockRejectedValue(
+      new ApiError(
+        "Bad Request",
+        400,
+        {
+          message: "This agent is not part of the current rollout.",
+          detail: { reason: "rollout_disabled" }
+        },
+        "corr-check-refused"
+      )
+    );
+    const user = userEvent.setup();
+    renderSection([
+      makeRun({
+        dispatch_state: "delivery_unconfirmed",
+        exchange_state: "closed",
+        primary_state_label: "Delivery unconfirmed"
+      })
+    ]);
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Check again" }));
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This agent is not part of the current rollout.");
+    expect(alert).toHaveTextContent("corr-check-refused");
+    // The run is unchanged, so the check stays on offer.
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
+  });
+
   it("014-FR-006 never offers Check again while the browser is offline", async () => {
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
     onlineManager.setOnline(false);
@@ -947,6 +1008,41 @@ describe("014-SC-004 every run state reads as itself", () => {
     // A reply box here would invite the user to type a secret to a third party.
     expect(screen.queryByLabelText("Your answer")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send answer" })).not.toBeInTheDocument();
+  });
+
+  it("014-FR-009 D-03-S10 states the block reason as inert text with no reply control", () => {
+    renderSection([
+      makeRun({
+        reported_state: "blocked",
+        primary_state_label: "Needs you",
+        needs_user: true,
+        blocked_reason: "Agent needs additional authentication",
+        question_text: null
+      })
+    ]);
+
+    // "Needs you" with nothing else on the card is a dead end: the user is told
+    // they are needed and never told what for.
+    expect(screen.getByText("Agent needs additional authentication")).toBeInTheDocument();
+    // Inert. A control here would invite typing a credential to a third party.
+    expect(screen.queryByLabelText("Your answer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send answer" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("014-FR-009 hides the block reason once retention has expired the content", () => {
+    renderSection([
+      makeRun({
+        reported_state: "blocked",
+        primary_state_label: "Needs you",
+        needs_user: true,
+        blocked_reason: "Agent needs additional authentication",
+        content_expired: true
+      })
+    ]);
+
+    expect(screen.queryByText("Agent needs additional authentication")).not.toBeInTheDocument();
+    expect(screen.getByText("Content expired under retention policy")).toBeInTheDocument();
   });
 
   it("014-SC-004 D-03-S11 names artifact content types and never a download", () => {

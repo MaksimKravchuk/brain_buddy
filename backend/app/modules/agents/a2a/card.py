@@ -323,6 +323,32 @@ def _usable_header_name(raw: str | None) -> str | None:
     return usable_auth_header_name(raw)
 
 
+def _requirements_allow(
+    requirements: list[list[str]],
+    declared: dict[str, SchemeKind],
+    auth_scheme: AuthScheme,
+) -> bool:
+    """Whether one credential of the owner's kind can satisfy any alternative.
+
+    ``securityRequirements`` is a list of alternatives; the names *within* one
+    alternative are conjoined. A connection holds exactly one credential under
+    exactly one ``auth_scheme``, so an alternative is satisfiable only when
+    every scheme it names is of that kind — two schemes of the same kind are
+    met by the same header, two of different kinds are met by neither.
+
+    A name the card never declared is dropped rather than refused: there is no
+    scheme behind it, so it states nothing BrainBuddy could check, and turning
+    an agent's own bookkeeping error into an unusable connection would help
+    nobody. An alternative left empty by that (or empty to begin with) requires
+    nothing and is therefore satisfiable.
+    """
+
+    return any(
+        all(declared[name] == auth_scheme for name in alternative if name in declared)
+        for alternative in requirements
+    )
+
+
 def _select_scheme(
     card: AgentCard, auth_scheme: AuthScheme
 ) -> tuple[str | None, str | None, bool]:
@@ -334,7 +360,18 @@ def _select_scheme(
 
     Sending a bearer token to an agent that only accepts an API key would leak
     the credential to an endpoint certain to reject it, so a mismatch is refused
-    before the disclosure rather than after.
+    before the disclosure rather than after. ``securitySchemes`` alone does not
+    establish a match: it is the catalogue of what the agent *understands*,
+    while ``securityRequirements`` (legacy ``security``) is what it will accept
+    on a call, and an agent that declares bearer for another audience while
+    requiring an API key from this one would reject every request BrainBuddy
+    made — after the token had already been disclosed to it. So the requirements
+    are consulted first, and the refusal names the scheme the first alternative
+    asks for, which is the one the owner would have to change to.
+
+    An empty requirement list is not a refusal: `contracts/a2a-wire.md` reads it
+    as an agent needing no credential, and the credential the owner stored for
+    this agent is still sent — an agent that asks for none will not read it.
 
     A card that declares *no* scheme is the one case that is not a mismatch. It
     is an agent asking for no authentication — the official a2a-sdk sample is
@@ -347,6 +384,12 @@ def _select_scheme(
     offered = _offered_schemes(card)
     if not offered:
         return None, None, False
+    requirements = _requirement_names(card)
+    declared = {name: kind for name, kind, _ in offered}
+    if requirements and not _requirements_allow(requirements, declared, auth_scheme):
+        # Every alternative is unsatisfiable, and an alternative naming nothing
+        # is always satisfiable — so the first one names at least one scheme.
+        return None, requirements[0][0], True
     for name, kind, header in offered:
         if kind != auth_scheme:
             continue

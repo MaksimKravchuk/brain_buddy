@@ -2,8 +2,8 @@
 
 **VERDICT**: accept
 **Feature**: `specs/014-a2a-relay-wire-contract/`
-**Graded**: 2026-09-05  **Implementation SHA**: `c14b32debe778d643d1c9de4a0e5cb8efe2300d5` (`c14b32d`; tree identical to PR #192 head `e5603d7`)
-**Re-checked**: 2026-09-05, after three documentation-only fixes to first-pass findings (see "Re-check" below)
+**Graded**: 2026-09-05  **Implementation SHA**: `91b26b6e78c410c12762cf79415061ca77f1c874` (`91b26b6`, worktree `014-codex-fixes`; the PR carries it as merge `43e180e`). First graded at `c14b32d`.
+**Re-checked**: 2026-09-05, twice — once after three documentation-only fixes (see "Re-check"), then again after six Codex review fixes that change product code (see "Second re-grade")
 **Auditor**: `acceptance-auditor` (did not write the code under grade)
 
 Writer-owned pre-freeze evidence is a separate artifact validated by
@@ -102,6 +102,98 @@ Two things this re-check did **not** soften, and one error of my own:
   `test_agent_relay_api.py::TestHandOffRoutes::test_an_untested_connection_refuses_the_hand_off`
   still reads `AC-010 over HTTP` while asserting AC-011 behaviour.
 
+## Second re-grade at `91b26b6`
+
+Six Codex review findings were fixed on top of the tree I accepted. Unlike the
+first re-check this is **not** documentation: `service.py` grows 186 lines and
+`card.py`, `mapping.py`, `observer.py`, `schemas/agents.py` and the web and iOS
+`AgentRunSection` all change. Every criterion the fixes touch was re-read and
+re-run.
+
+**Two of the six were live violations of requirements this audit had already
+marked `covered`.** A second reviewer found them after my verdict, and the
+honest thing is to say what my spot-checks missed rather than to present the
+fixes as enhancements:
+
+1. **FR-006 / SC-008 / AC-027 — an unanswered lookup licensed a resend.**
+   `_lookup_task` returned `Task | None`, collapsing "the agent answered and
+   holds no task" into the same value as "BrainBuddy never got an answer". FR-006
+   permits a resend *only when no task exists*, so a timed-out, rejected or
+   unparseable lookup produced exactly the duplicate the correlation-ID lookup
+   exists to prevent. I read the eight-reason refusal matrix and the concurrency
+   barrier in the first pass and did not read the two-way return underneath
+   them. Now `_LookupOutcome` distinguishes three answers, only
+   `confirmed_empty` reaches the resend branch, and the failure is audited as
+   `delivery_lookup_failed`. Tests:
+   `TestCheckDelivery::test_014_SC_008_a_failed_lookup_never_licenses_a_resend`
+   (timeout / rejected / invalid answer) and
+   `::test_014_FR_006_a_failed_lookup_is_audited_and_keeps_check_again_offered`,
+   which asserts the run is byte-for-byte unchanged and that a later check still
+   settles it.
+2. **FR-002 — a slow card fetch was a 500, not `unreachable`.** FR-002 requires
+   **unreachable** on "expiry of the configured test timeout"; a server
+   trickling bytes satisfies the per-chunk read timeout for ever, so only the
+   absolute deadline fires, and `EgressDeadlineExceeded` escaped `fetch_card`
+   as a server error the owner had no corrective action for. I graded the four
+   discovery failure categories and did not probe the deadline's escape path.
+   Fixed, with an injectable margin so the case is testable in tenths of a
+   second: `TestFetchFailures::test_014_FR_002_a_card_that_trickles_past_the_deadline_is_unreachable`.
+
+The other four harden criteria that were already correct: the per-connection
+exchange bound is now re-checked at the `queued → open` transition where the
+count is authoritative (SC-008/AC-034); the truncation marker and the
+`Rejected by agent: ` prefix come out of the field's budget instead of being
+added on top of it, so an over-limit observation no longer lands unvalidated and
+then fails the next validated read (FR-009/AC-013); `check-delivery` takes an
+optional `expected_revision` and answers 409 before the lookup (deviation (i));
+and it reserves and replays its `Idempotency-Key` instead of merely demanding it
+(deviation (j)). All three deviations are recorded in `review.md` and in
+`contracts/api-deltas.md`.
+
+The `expected_revision` guard adds a refusal that is not one of FR-006's eight.
+It does not narrow the requirement: the field is optional, the eight reasons are
+unchanged conditions on the *send*, it mirrors the token FR-010 already requires
+of a reply, and the `c3d0cb5` correction means a quiet observation cannot bump
+`revision` and spuriously block **Check again**.
+
+**Re-runs on this tree** (the store could not settle these — see below): the six
+fixes' named tests, 64 passed; the eight first-pass spot-checked tests plus
+`TestReplyAcrossTheObservationSchedule`, 25 passed; web
+`AgentRunSection.test.tsx` + `agentClient.test.ts`, 79 passed; iOS the same two,
+100 passed.
+
+## Evidence-store finding (read before trusting the numbers)
+
+I was told the stores hold "backend 2955 passed, web 930, iOS 1534". Backend
+matches. **The web and iOS stores do not, and each contains a failing result.**
+
+| store | files | distinct test names | statuses |
+|---|---|---|---|
+| `backend/allure-results` | 2955 | 2955 | 2955 passed — clean, all written 18:14–18:20 UTC, after the head commit at 18:05:23 UTC |
+| `frontend/allure-results/vitest` | 1186 | 929 | **1 failed**, rest passed; union of four runs, never cleaned |
+| `mobile/allure-results` | 1915 | 1533 | **1 failed**, 140 skipped, rest passed; same pattern |
+
+Both failures are the same test on each platform
+(`AgentRunSection … 014-FR-006 checks delivery with the run's own ids …`) and both
+are **stale mid-edit artifacts**: they were written at 17:51:58 and 17:52:30 UTC,
+before `ae0e346` (17:54:21 UTC) — the commit that makes them pass. Passing
+results for the same test exist later in both stores, and I re-ran both files on
+this tree: 79 and 100 passed. So the *code* is green; the *evidence bundle* is
+not.
+
+This is worth stating precisely because the validator does not catch it:
+`validate_ci_artifacts.py results` passes a directory as long as **one** fresh
+executed result exists — it neither fails on stale entries nor on `failed`
+status. The gate that would catch it is `allure quality-gate` at
+`maxFailures: 0` in the `allure-report` job, and CI regenerates these stores from
+scratch rather than consuming a local one, so nothing here reaches CI. It does
+mean the local bundle must be regenerated clean before it is presented as
+delivery evidence for this head.
+
+(My own re-runs appended to the web and iOS stores — that is why their file
+counts exceed a single run's by more than the stale entries alone. The stores are
+gitignored; the tracked tree is clean.)
+
 ## Tally
 
 | | count |
@@ -111,6 +203,7 @@ Two things this re-check did **not** soften, and one error of my own:
 | weak (test exists but does not exercise it) | 0 (3 at first pass: SC-004, SC-005, SC-006) |
 | missing | 0 |
 | hollow tests found | 0 |
+| requirement violations found after the verdict, by a second reviewer | 2 (FR-006/SC-008/AC-027 and FR-002 — both fixed at `91b26b6`, both recorded above) |
 
 Full matrix: `traceability.md`
 
@@ -119,10 +212,22 @@ Full matrix: `traceability.md`
 None. No criterion is `missing`, no result predates the implementation commit,
 and none of the eight tests read in full is hollow.
 
-Three design states remain unasserted and are recorded below for a human
-waiver. No criterion is weak after the re-check; the caveats behind the three
-re-graded criteria are kept in the `traceability.md` evidence column rather than
-dropped.
+No criterion is missing or weak, at `c14b32d` or at `91b26b6`, and the six
+Codex fixes strengthen four criteria without moving any status.
+
+Two conditions stand alongside the verdict rather than blocking it:
+
+1. **Regenerate the web and iOS Allure stores before presenting them as this
+   head's evidence.** Both currently contain a stale `failed` result from a
+   mid-edit run and are unions of several runs. The code is green — I re-ran
+   both affected files — but a bundle carrying a `failed` result would fail
+   `allure quality-gate` (`maxFailures: 0`), and the answer to that is never to
+   raise the number.
+2. Three design states remain unasserted and are recorded below for a human
+   waiver, unchanged.
+
+The caveats behind the three re-graded criteria stay in the `traceability.md`
+evidence column rather than being dropped.
 
 ## Evidence
 
@@ -132,9 +237,10 @@ dropped.
 | relay product matrix | `docs/e2e-acceptance-charter.md` → External agent relay; 4 stories under epic `External agent relay` | pass (CI run 875; all four passed first attempt) |
 | result freshness | `validate_ci_artifacts.py results --path <store> --label <label> --since-file <marker at 2026-09-05T14:08:51Z = commit c14b32d>` | pass — backend 2800 executed, frontend-vitest 918 executed, mobile-jest 1534 executed, every result file written 14:33–14:38 UTC, after the implementation commit at 14:08:51 UTC |
 | allure taxonomy | `validate_allure_taxonomy.py --path backend/allure-results --label backend-pytest` (and vitest / mobile-jest) | pass — 2935 / 930 / 1534 files, taxonomy OK on all three; `--label playwright-e2e` passed in CI on the 39 executed results |
-| result statuses | direct read of every `*-result.json` | backend 2935 passed / 0 failed / 0 broken; vitest 930 passed; mobile 1534 passed |
+| result statuses | direct read of every `*-result.json` at `91b26b6` | backend **2955 passed / 0 failed**; vitest **1186 files, 1 failed** (stale, pre-`ae0e346`); mobile **1915 files, 1 failed** (same), 140 skipped — see the evidence-store finding |
+| affected tests re-run | `pytest` (backend), `npx vitest`, `npx jest` on this tree | pass — 64 (the six fixes' named tests), 25 (first-pass spot-checks), 79 (web), 100 (iOS) |
 | requirement coverage | `check_requirement_coverage.py specs/014-a2a-relay-wire-contract` | pass — 27/27 traced |
-| backend coverage | `validate_coverage_floor.py --stack backend` → line 98.57% / branch 95.62% (floor 98.47 / 95.61) | pass |
+| backend coverage | `validate_coverage_floor.py --stack backend` → line 98.57% / branch 95.63% at `91b26b6` (floor 98.47 / 95.61) | pass |
 | frontend coverage | line 99.12 / stmt 98.93 / branch 97.84 / func 98.71 (floor 98.84 / 98.76 / 97.77 / 98.64) | pass |
 | mobile coverage | line 95.71 / stmt 95.68 / branch 90.88 / func 96.40 (floor 94 / 94 / 88 / 95) | pass |
 | review gate | `.specify/workflows/runs/014-campaign-2/planning-review-summary.json` | `founder-accepted`, recorded in `review.md` |
@@ -142,6 +248,7 @@ dropped.
 | bespoke-wire residue | auditor's own `grep -rn "signing_secret\|agent-events" backend/app frontend/src mobile/src` | one prose comment and one unrelated `idx_agent_events_run` index name; no code path, no fixture |
 | cited-test existence | auditor's own sweep of every name in `traceability.md` against `def <name>(` and against the Vitest/Jest sources | pass — 152/152 Python names, 24/24 component titles (one bad citation in the first pass was the auditor's and is corrected) |
 | re-check re-runs | `pytest` on the 4 edited-docstring tests from `backend/.venv` | pass — 8 passed (1.56 s) and 1 passed (10.83 s, real Hermes process) |
+| freshness at `91b26b6` | `validate_ci_artifacts.py results --since-file <marker at 18:05:23Z>` | passes on all three stores — but note the validator requires only **one** fresh executed result and ignores stale and failed entries, which is why the store finding above is stated separately |
 
 ### Feature-qualified id sweep
 
@@ -277,3 +384,28 @@ An auditor cannot waive its own finding. These need a human.
   FR-006, FR-010 and FR-016. Every test it names exists and asserts what the
   clause says. The one thing it promised that had not landed — `AC-011` in the
   T051 docstrings — landed during the re-check.
+
+## Second review round: verified, not re-graded
+
+After this grade, Codex reviewed the five stacked pull requests (#203–#207) and
+returned fourteen findings; the orchestrator verified each against the code
+(all fourteen real, two of them wording and test-shape defects in the planning
+artifacts) and two implementer lanes fixed them test-first — commits `12fc101`
+… `a3ad09f` (backend and planning) and `74babcf` … `a80e985` (web, iOS, e2e),
+merged at `8ec4f94`, with `review.md` deviations (k)–(s) and their contract and
+data-model corrections. `delivery-verifier` then ran the full chain on the merged
+tree `5958a4b`: backend 2977 passed (line 98.59 %, branch 95.69 %), web 956
+passed (99.00 / 97.91 / 98.72 / 99.20), iOS 1542 passed plus 32 integration
+checks (95.73 / 90.96 / 96.50 / 95.76), taxonomy OK on all three stores, 27/27
+requirements traced, each store one clean run. The stores were regenerated once
+more on `5d9ed3a` after `main` was merged in.
+
+**This round was not re-graded by the acceptance-auditor**: the product owner
+asked to release without spending another audit run. The verdict above therefore
+stands at `91b26b6`, with the second round's changes covered by the verifier and
+by the tests named in `review.md` (k)–(s) rather than by a criterion-by-criterion
+re-read. The criteria the round touched — FR-002, FR-003, FR-006, FR-009, FR-010,
+FR-012, FR-013, FR-015, FR-016, SC-003, SC-007, SC-008 — each gained tests that
+fail if the fix is reverted; none of the six fixes of the first round was undone.
+An auditor re-grade remains available as a post-freeze step if the reviewer wants
+one.

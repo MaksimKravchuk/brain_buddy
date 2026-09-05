@@ -12,6 +12,19 @@ vi.mock("../pages/TreeWorkspace", () => ({
   default: () => <div>legacy CRT workspace</div>
 }));
 
+// Observe router action at the actual workspace boundary while rendering the
+// real task page; shell-only tests cannot catch a Routes location override.
+vi.mock("../features/tasks/TaskListPage", async () => {
+  const actual = await vi.importActual<typeof import("../features/tasks/TaskListPage")>("../features/tasks/TaskListPage");
+  const { useNavigationType } = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return {
+    TaskListPage: (props: Parameters<typeof actual.TaskListPage>[0]) => <>
+      <span data-testid="workspace-navigation-type">{useNavigationType()}</span>
+      <actual.TaskListPage {...props} />
+    </>
+  };
+});
+
 const taskResponse = {
   items: [
     {
@@ -153,7 +166,7 @@ describe("AppRoutes", () => {
 
     expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
     expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
-    expect(screen.getByText("Brain Buddy")).toBeInTheDocument();
+    expect(screen.getByText("BrainBuddy")).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Search tasks" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Brain dump" })).toBeEnabled();
     expect(await screen.findByText("Fix onboarding drop-off")).toBeInTheDocument();
@@ -208,7 +221,7 @@ describe("AppRoutes", () => {
     const rowTitle = await screen.findByText("Fix onboarding drop-off");
     const row = rowTitle.closest("article");
     expect(row).not.toBeNull();
-    expect(row).toHaveClass("rounded-[12px]", "px-3.5", "py-[7px]", "shadow-soft", "transition-all", "duration-200", "ease-smooth");
+    expect(row).toHaveClass("rounded-[12px]", "px-3.5", "py-[7px]", "transition-colors", "duration-200", "ease-smooth");
 
     // The per-row project column is gone (prototype default); the group heading
     // carries the project name instead.
@@ -304,7 +317,7 @@ describe("AppRoutes", () => {
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("due_on="), expect.anything());
-      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("q=invoicereview"), expect.anything());
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("q=invoice+review"), expect.anything());
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("sort=due"), expect.anything());
     });
     expect(screen.queryByRole("button", { name: /Sort by tag/i })).not.toBeInTheDocument();
@@ -830,6 +843,24 @@ describe("AppRoutes", () => {
     expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
   });
 
+  it("preserves the active search draft through normalized URL replacements in the real route tree", async () => {
+    const user = userEvent.setup();
+    renderRoutes("/tasks/next?sort=due");
+    await screen.findByRole("link", { name: "Fix onboarding drop-off" });
+    await user.click(screen.getByRole("button", { name: "Open task navigation" }));
+    const drawer = screen.getByRole("dialog", { name: "Task navigation" });
+    const search = within(drawer).getByRole("searchbox", { name: "Search tasks" });
+    await user.type(search, "review homepage ");
+    expect(screen.getByTestId("workspace-navigation-type")).toHaveTextContent("REPLACE");
+    // The URL is normalized, but an in-progress trailing space belongs to the
+    // focused draft and must survive before the next word is typed.
+    expect(search).toHaveValue("review homepage ");
+    await user.type(search, "copy{Enter}");
+    expect(screen.queryByRole("dialog", { name: "Task navigation" })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("review homepage copy");
+    expect(screen.getByLabelText("Sort tasks")).toHaveValue("due");
+  });
+
   it("preserves filtered task routes while focusing detail and restoring the originating row link", async () => {
     const user = userEvent.setup();
     renderRoutes("/tasks/next?sort=priority&q=Persisted");
@@ -841,11 +872,11 @@ describe("AppRoutes", () => {
     const heading = await screen.findByRole("heading", { name: "Task detail" });
     await waitFor(() => expect(heading).toHaveFocus());
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Close task" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
     expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("Persisted");
     expect(screen.getByLabelText("Sort tasks")).toHaveValue("priority");
-    expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toHaveFocus());
   });
 
   it("focuses the Task detail heading immediately on a direct task detail URL and preserves query params on close", async () => {
@@ -856,7 +887,7 @@ describe("AppRoutes", () => {
     await waitFor(() => expect(heading).toHaveFocus());
     expect(screen.getByLabelText("Sort tasks")).toHaveValue("due");
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Close task" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
     expect(screen.getByLabelText("Sort tasks")).toHaveValue("due");
   });
@@ -889,20 +920,17 @@ describe("AppRoutes", () => {
     renderRoutes("/tasks/next/task-direct");
     await screen.findByRole("heading", { name: "Task detail" });
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Close task" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
-    expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus());
   });
 
-  it("keeps the panel's unbuilt Think affordance honest via the placeholder toast", async () => {
-    const user = userEvent.setup();
+  it("keeps unbuilt task-bound thinking actions out of the task workspace", async () => {
     renderRoutes("/tasks/next/task-1");
     await screen.findByRole("heading", { name: "Task detail" });
 
-    // The prototype panel has no agent zone; its Think action is present but
-    // announces itself as a placeholder instead of pretending to work.
-    await user.click(await screen.findByRole("button", { name: "Think" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Thinking canvas isn't built yet — placeholder");
+    expect(screen.queryByRole("button", { name: "Think" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thinking canvas" })).not.toBeInTheDocument();
   });
 });
 

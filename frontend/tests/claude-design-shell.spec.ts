@@ -187,7 +187,7 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
     await page.goto("/tasks/next");
 
     await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
-    await expect(page.getByText("Brain Buddy")).toBeVisible();
+    await expect(page.getByText("BrainBuddy")).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Task navigation" })).toBeVisible();
     await expect(page.getByText("Tags", { exact: true })).toBeVisible();
     await expect(page.getByText("Contexts", { exact: true })).toHaveCount(0);
@@ -208,6 +208,36 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
       await expect(page.getByRole("link", { name: "Someday / maybe 0" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Weekly review" })).toBeEnabled();
       await expect(page.getByRole("button", { name: "Thinking Mode — Coming soon" })).toBeDisabled();
+    });
+
+    await test.step("keep enabled primary and secondary actions readable at rest, on hover, and while pressed", async () => {
+      for (const name of ["Brain dump", "New project", "New tag"]) {
+        const button = page.getByRole("button", { name, exact: true });
+        for (const state of ["rest", "hover", "pressed"]) {
+          if (state === "hover") await button.hover();
+          if (state === "pressed") await page.mouse.down();
+          await button.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+          const contrast = await button.evaluate((element) => {
+            const style = getComputedStyle(element);
+            const background = style.backgroundColor === "rgba(0, 0, 0, 0)"
+              ? getComputedStyle(element.closest(".bg-surface-base")!).backgroundColor
+              : style.backgroundColor;
+            const luminance = (color: string) => {
+              const channels = color.match(/[\d.]+/g)!.slice(0, 3).map((value) => {
+                const channel = Number(value) / 255;
+                return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+              });
+              return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+            };
+            const values = [luminance(style.color), luminance(background)].sort((a, b) => a - b);
+            return (values[1] + 0.05) / (values[0] + 0.05);
+          });
+          await attachment(`${name}: ${state} contrast`, `${contrast.toFixed(2)}:1`, ContentType.TEXT);
+          if (contrast < 4.5) throw new Error(`${name} contrast in ${state} was ${contrast}:1; expected at least 4.5:1`);
+        }
+        await page.locator("header").first().hover();
+        await page.mouse.up();
+      }
     });
 
     await test.step("keep wrapped desktop tag actions inside the sidebar", async () => {
@@ -249,14 +279,23 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
   });
 });
 
-test("clicking a task opens the docked right-side detail panel", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 780 });
+test("task side sheet preserves desktop list geometry and scroll through open and close", async ({ page }) => {
+  await page.setViewportSize({ width: 1117, height: 780 });
+  await page.route(/\/api\/tasks\?/, async (route) => route.fulfill({ json: {
+    ...taskResponse,
+    items: [...taskResponse.items, ...Array.from({ length: 20 }, (_, index) => ({ ...taskResponse.items[0], id: `extra-${index}`, project_id: null, title: `Extra task ${index}` }))]
+  } }));
   await page.goto("/tasks/next");
 
   await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
-  // With no selection the panel shows the prototype's empty state.
-  await expect(page.getByText("Nothing selected")).toBeVisible();
+  // Unselected lists keep the workspace width instead of reserving an empty column.
+  await expect(page.getByRole("complementary", { name: "Task detail" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Fix onboarding drop-off" })).toBeVisible();
+  const list = page.locator('section[aria-labelledby="task-list-title"]');
+  await page.locator("main").evaluate((main) => { main.scrollTop = 80; });
+  const before = await list.boundingBox();
+  const scrollBefore = await page.locator("main").evaluate((main) => main.scrollTop);
 
   await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
   await expect(page.getByRole("heading", { name: "Task detail" })).toBeVisible();
@@ -264,13 +303,37 @@ test("clicking a task opens the docked right-side detail panel", async ({ page }
   await expect(page.getByLabel("New subtask title")).toBeVisible();
   await expect(page.getByLabel("New comment")).toBeVisible();
 
-  await test.step("keep the canonical task-row link addressable while the panel is open", async () => {
-    await expect(page.getByRole("link", { name: "Fix onboarding drop-off" })).toBeVisible();
+  await test.step("keep the list stationary and make the background inert while the sheet owns focus", async () => {
+    const during = await list.boundingBox();
+    const scrollDuring = await page.locator("main").evaluate((main) => main.scrollTop);
+    await attachment("List geometry during task opening", JSON.stringify({ before, during, scrollBefore, scrollDuring }), ContentType.JSON);
+    if (!before || !during || before.x !== during.x || before.width !== during.width || scrollBefore !== scrollDuring) throw new Error("Opening the sheet moved or resized the list");
+    await expect(page.locator("main").locator("xpath=../..")).toHaveAttribute("inert", "");
+    await expect(page.getByRole("dialog", { name: "Task detail" })).toHaveAttribute("aria-modal", "true");
   });
 
-  await page.getByRole("button", { name: "Close" }).click();
+  await test.step("give task content room before secondary properties without overflowing the workspace", async () => {
+    const panel = await page.getByRole("complementary", { name: "Task detail" }).boundingBox();
+    const details = await page.getByRole("textbox", { name: "Details", exact: true }).boundingBox();
+    const properties = await page.getByRole("region", { name: "Task properties" }).boundingBox();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    await attachment("Task content geometry", JSON.stringify({ panel, details, properties, overflow }), ContentType.JSON);
+    if (!panel || !details || !properties) throw new Error("Expected visible task content and property geometry");
+    if (panel.width < 380) throw new Error(`Expected a detail panel at least 380px wide, received ${panel.width}px`);
+    if (details.y + details.height > properties.y) throw new Error("Expected task details before secondary properties");
+    if (overflow !== 0) throw new Error(`Expected no workspace horizontal overflow, received ${overflow}px`);
+  });
+
+  await page.getByRole("button", { name: "Close task" }).click();
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
-  await expect(page.getByText("Nothing selected")).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Task detail" })).toHaveCount(0);
+  await test.step("restore the opening row after exit without moving the list", async () => {
+    await expect(page.getByRole("link", { name: "Fix onboarding drop-off" })).toBeFocused();
+    const after = await list.boundingBox();
+    const scrollAfter = await page.locator("main").evaluate((main) => main.scrollTop);
+    await attachment("List geometry after task closing", JSON.stringify({ before, after, scrollBefore, scrollAfter }), ContentType.JSON);
+    if (!before || !after || before.x !== after.x || before.width !== after.width || scrollBefore !== scrollAfter) throw new Error("Closing the sheet moved or resized the list");
+  });
 });
 
 test("task detail preserves the filtered route, focus, and Back history after detail whitespace clicks", async ({ page }) => {
@@ -313,31 +376,50 @@ test("mobile task detail slides over the list and browser back restores it", asy
   await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
 });
 
-test("mobile task detail wraps a long task title without horizontal overflow", async ({ page }) => {
-  const longTitle = "Prepare a comprehensive accessibility and route-history regression evidence package for the task-detail workflow";
-  await page.route("**/api/tasks/task-2", async (route) => {
-    await route.fulfill({ json: { ...taskResponse.items[1], title: longTitle } });
-  });
-  await page.setViewportSize({ width: 402, height: 874 });
-  await page.goto("/tasks/next");
-  await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
+for (const width of [320, 402]) {
+  test(`mobile task detail wraps a long task title without horizontal overflow at ${width}px`, async ({ page }) => {
+    const longTitle = "Prepare a comprehensive accessibility and route-history regression evidence package for the task-detail workflow";
+    await page.route("**/api/tasks/task-2", async (route) => {
+      await route.fulfill({ json: { ...taskResponse.items[1], title: longTitle } });
+    });
+    await page.setViewportSize({ width, height: 874 });
+    await page.goto("/tasks/next");
+    await expect(page.getByRole("link", { name: "Fix onboarding drop-off" })).toBeVisible();
+    await test.step("keep the header and task filters within the narrow viewport", async () => {
+      const header = await page.locator("header").evaluate((element) => Array.from(element.querySelectorAll("button, a")).map((control) => ({ label: control.textContent, left: control.getBoundingClientRect().left, right: control.getBoundingClientRect().right })));
+      const sort = await page.getByLabel("Sort tasks").boundingBox();
+      const completed = await page.getByLabel("Show completed").locator("..").boundingBox();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      await attachment("Narrow workspace geometry", JSON.stringify({ width, header, sort, completed, overflow }), ContentType.JSON);
+      if (header.some((control) => control.left < 0 || control.right > width) || !sort || sort.x + sort.width > width || !completed || completed.x + completed.width > width || overflow > 0) throw new Error("Header or task filters exceed the mobile viewport");
+    });
+    await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
 
-  const mobileTitle = page.getByRole("textbox", { name: "Title", exact: true });
-  await expect(mobileTitle).toHaveValue(longTitle);
-  await test.step("keep the full mobile detail title readable inside the viewport", async () => {
-    // The title textarea auto-grows to its content, so the full title must fit
-    // without horizontal or vertical clipping.
-    const titleMetrics = await mobileTitle.evaluate((element) => ({
-      clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
-      clientHeight: element.clientHeight,
-      scrollHeight: element.scrollHeight
-    }));
-    if (titleMetrics.scrollWidth > titleMetrics.clientWidth || titleMetrics.scrollHeight > titleMetrics.clientHeight + 1) {
-      throw new Error(`Expected a fully visible wrapped mobile title, received ${JSON.stringify(titleMetrics)}`);
-    }
+    const mobileTitle = page.getByRole("textbox", { name: "Title", exact: true });
+    await expect(mobileTitle).toHaveValue(longTitle);
+    await test.step("keep the full mobile detail title readable inside the viewport", async () => {
+      // The title textarea auto-grows to its content, so the full title must fit
+      // without horizontal or vertical clipping.
+      const titleMetrics = await mobileTitle.evaluate((element) => ({
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight
+      }));
+      if (titleMetrics.scrollWidth > titleMetrics.clientWidth || titleMetrics.scrollHeight > titleMetrics.clientHeight + 1) {
+        throw new Error(`Expected a fully visible wrapped mobile title, received ${JSON.stringify(titleMetrics)}`);
+      }
+      const completionTarget = await page.getByRole("button", { name: "Complete task", exact: true }).boundingBox();
+      await attachment("Mobile detail geometry", JSON.stringify({ titleMetrics, completionTarget }), ContentType.JSON);
+      // Transform matrices can report a 44px target as 43.999999px. Allow only
+      // 0.01 CSS pixel of measurement rounding, not an undersized touch control.
+      const measurementTolerance = 0.01;
+      if (!completionTarget || completionTarget.width < 44 - measurementTolerance || completionTarget.height < 44 - measurementTolerance) {
+        throw new Error(`Expected a completion target of at least 44×44 CSS pixels, received ${JSON.stringify(completionTarget)}`);
+      }
+    });
   });
-});
+}
 
 test.describe("mobile task shell at the canonical 375x812 viewport", () => {
   test.use({ viewport: { width: 375, height: 812 } });
@@ -346,6 +428,37 @@ test.describe("mobile task shell at the canonical 375x812 viewport", () => {
     await page.goto("/tasks/next");
 
     await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+    await test.step("make completion touchable and keep capture guidance within the field", async () => {
+      const complete = page.getByRole("button", { name: "Complete Fix onboarding drop-off" });
+      const box = await complete.boundingBox();
+      await attachment("Completion target", JSON.stringify(box), ContentType.JSON);
+      if (!box || box.width < 44 || box.height < 44) throw new Error("Expected a completion target of at least 44×44 CSS pixels");
+      const capture = page.getByRole("combobox", { name: "New task title" });
+      const fits = await capture.evaluate((element: HTMLInputElement) => {
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d")!;
+        context.font = getComputedStyle(element).font;
+        return context.measureText(element.placeholder).width <= element.clientWidth;
+      });
+      await attachment("Capture placeholder fits", String(fits), ContentType.TEXT);
+      if (!fits) throw new Error("The capture placeholder exceeds the visible input width");
+    });
+    await test.step("search from the mobile drawer and return to the filtered list", async () => {
+      await page.goto("/tasks/next?sort=due");
+      await page.getByRole("button", { name: "Open task navigation" }).click();
+      const drawer = page.getByRole("dialog", { name: "Task navigation" });
+      const search = drawer.getByRole("searchbox", { name: "Search tasks" });
+      await search.pressSequentially("review homepage");
+      await search.press("Enter");
+      await expect(drawer).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Open task navigation" })).toBeFocused();
+      await expect(page).toHaveURL(/\/tasks\/next\?sort=due&q=review\+homepage$/);
+      await page.getByRole("button", { name: "Open task navigation" }).click();
+      await drawer.getByRole("searchbox", { name: "Search tasks" }).fill("");
+      await drawer.getByRole("button", { name: "Search", exact: true }).click();
+      await expect(page).toHaveURL(/\/tasks\/next\?sort=due$/);
+      await page.goto("/tasks/next");
+    });
     await page.getByRole("button", { name: "Open task navigation" }).click();
     await expect(page.getByRole("dialog", { name: "Task navigation" })).toBeVisible();
     await test.step("Verify the mobile task drawer fits inside the viewport", async () => {

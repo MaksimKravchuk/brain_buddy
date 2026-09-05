@@ -45,7 +45,11 @@ from app.modules.agents.headers import (
     RESERVED_AUTH_HEADER_NAMES,
     validate_auth_header_name,
 )
-from app.modules.agents.repository import IDEMPOTENCY_RETENTION, AgentRepository
+from app.modules.agents.repository import (
+    IDEMPOTENCY_RETENTION,
+    IDENTIFIER_RETENTION,
+    AgentRepository,
+)
 from app.modules.agents.secrets import SealedSecret, SecretBox
 from app.modules.agents.service import (
     SCOPE_REAUTH_WINDOW,
@@ -115,6 +119,26 @@ def mock_transport_card_fetcher(
         )
 
     return fetch
+
+
+#: The a2a-sdk 1.0 card shape, served whole so a test can move one field of it
+#: and watch what discovery does with the change.
+_CARD_BODY: dict[str, Any] = {
+    "name": "Hermes",
+    "version": "1.2.3",
+    "description": "A research agent.",
+    "supportedInterfaces": [
+        {
+            "url": "https://agent.example.com/rpc",
+            "protocolBinding": "JSONRPC",
+            "protocolVersion": "1.0",
+        }
+    ],
+    "capabilities": {"streaming": True, "pushNotifications": False},
+    "securitySchemes": {"bearer": {"httpAuthSecurityScheme": {"scheme": "bearer"}}},
+    "securityRequirements": [{"bearer": []}],
+    "skills": [{"id": "research", "name": "Research"}],
+}
 
 
 class BlockingCardFetcher(FakeCardFetcher):
@@ -1563,6 +1587,53 @@ class TestConnectByAgentCard:
         assert tested.status == "unsupported"
         assert tested.last_test_error_code == "a2a_not_an_agent"
         assert tested.card is None
+
+    def test_014_FR_002_a_rejected_interface_leaves_the_stored_card_alone(
+        self, tmp_path: Path, clock: Clock, a2a_client: FakeA2AClient
+    ) -> None:
+        """`card.interface_url` is the dispatch target, so it stays trustworthy.
+
+        A card that starts naming an address BrainBuddy refuses to dial is a
+        discovery *failure*: the connection records the code and drops to
+        **unsupported**, and the card the owner can still read is the one the
+        last successful test recorded — with the validated interface it had.
+        The refused address is written nowhere at all.
+        """
+
+        served: dict[str, Any] = {"card": _CARD_BODY}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=served["card"])
+
+        service = build_service(
+            AgentRepository(tmp_path),
+            clock,
+            card_fetcher=mock_transport_card_fetcher(handler),
+            a2a_client=a2a_client,
+        )
+        connection_id = connect(service)
+        ready = service.test_connection(connection_id, owner_id=OWNER)
+        assert ready.status == "ready"
+        assert ready.card is not None
+        assert ready.card.interface_url == "https://agent.example.com/rpc"
+
+        hostile = json.loads(json.dumps(_CARD_BODY))
+        hostile["supportedInterfaces"] = [
+            {
+                "url": "javascript:alert(3)",
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "1.0",
+            }
+        ]
+        served["card"] = hostile
+
+        refused = service.test_connection(connection_id, owner_id=OWNER)
+
+        assert refused.status == "unsupported"
+        assert refused.last_test_error_code == "a2a_no_supported_interface"
+        assert refused.card is not None
+        assert refused.card.interface_url == "https://agent.example.com/rpc"
+        assert "javascript:" not in refused.model_dump_json()
 
     def test_014_FR_002_a_card_that_trickles_past_the_deadline_reads_as_unreachable(
         self, tmp_path: Path, clock: Clock
@@ -5842,12 +5913,16 @@ class TestRelayFailureRecoveryEdges:
             message="Use staging.", expected_revision=observed.projection().revision
         )
         save_command = service.agent_repo.save_command
-        failed_once = False
+        # A reply writes its command row twice: once *before* the send, which is
+        # what lets a restart find an answer that may already be at the agent,
+        # and once after, carrying the outcome. The crash being simulated is the
+        # second one — a storage outage that lost the answer, not the request.
+        saves = 0
 
         def fail_after_delivery(command: Any) -> None:
-            nonlocal failed_once
-            if not failed_once:
-                failed_once = True
+            nonlocal saves
+            saves += 1
+            if saves == 2:
                 raise RuntimeError("simulated post-delivery storage outage")
             save_command(command)
 
@@ -5886,12 +5961,14 @@ class TestRelayFailureRecoveryEdges:
             message="Use staging.", expected_revision=observed.projection().revision
         )
         save_command = service.agent_repo.save_command
-        failed_once = False
+        # The second save is the post-delivery one; the first is the pre-send
+        # reservation a restart would recover from (see the test above).
+        saves = 0
 
         def fail_after_delivery(command: Any) -> None:
-            nonlocal failed_once
-            if not failed_once:
-                failed_once = True
+            nonlocal saves
+            saves += 1
+            if saves == 2:
                 raise RuntimeError("simulated post-delivery storage outage")
             save_command(command)
 
@@ -6702,6 +6779,85 @@ class TestKeyRotationPreservesAtMostOnce:
 
         assert refused.value.retired_key_ids == ("v1",)
         assert len(scenario.deliveries) == 1
+
+    def _pushable_service(
+        self,
+        tmp_path: Path,
+        clock: Clock,
+        ring: OrderedDict[str, bytes],
+        a2a_client: FakeA2AClient,
+    ) -> AgentRelayService:
+        """A service whose agent advertises push, so runs mint a push token."""
+
+        fetcher = FakeCardFetcher()
+        fetcher.discovery = ready_discovery(
+            summary=card_summary(push_notifications=True)
+        )
+        return build_service(
+            AgentRepository(tmp_path),
+            clock,
+            keys=ring,
+            card_fetcher=fetcher,
+            a2a_client=a2a_client,
+            exchange_executor=SynchronousExecutor(),
+        )
+
+    def test_014_SC_003_a_live_push_fingerprint_holds_its_key_against_retirement(
+        self, tmp_path: Path, clock: Clock, a2a_client: FakeA2AClient
+    ) -> None:
+        """014-FR-008. Retiring the anchor key silently breaks every live push token.
+
+        `derive_push_token` and `push_token_fingerprint` are both anchored to
+        the oldest configured key, so retiring it invalidates the token the
+        agent already holds *and* the fingerprint a reply would re-derive
+        against: 403 in both directions, with nothing anywhere saying why. The
+        run's fingerprint is a live sealed reference like a credential or a
+        receipt, so it holds its key the same way — the next command is refused
+        naming the key until it is restored.
+        """
+
+        setup = self._pushable_service(tmp_path, clock, rotated_ring(), a2a_client)
+        connection_id = connect(setup)
+        make_ready(setup, connection_id)
+        run = dispatch(setup, connection_id, key="idem-pushable")
+        stored = setup.agent_repo.get_run(run.id, owner_id=OWNER)
+        # The credential seals under the *active* key and every fingerprint is
+        # anchored to the oldest, so v1 is the push token's key and v1 alone.
+        assert stored.push_token_fingerprint is not None
+        assert stored.push_token_fingerprint.startswith("v1:")
+
+        # Everything else that could hold v1 is gone: only the run is left.
+        clock.advance(IDEMPOTENCY_RETENTION + timedelta(hours=1))
+        setup.agent_repo.purge_expired_idempotency(owner_id=OWNER, now=clock())
+
+        retired = self._pushable_service(tmp_path, clock, retired_ring(), a2a_client)
+        with pytest.raises(RelayKeyRotationUnsafe) as refused:
+            retired._require_intact_key_ring(clock())
+
+        assert refused.value.retired_key_ids == ("v1",)
+
+    def test_014_SC_003_a_run_whose_identifiers_expired_holds_no_key(
+        self, tmp_path: Path, clock: Clock, a2a_client: FakeA2AClient
+    ) -> None:
+        """The guard follows the retention promise rather than outliving it.
+
+        Identifier expiry nulls `push_token_fingerprint`, and a token nobody
+        can present is not a reason to keep a key configured for ever.
+        """
+
+        setup = self._pushable_service(tmp_path, clock, rotated_ring(), a2a_client)
+        connection_id = connect(setup)
+        make_ready(setup, connection_id)
+        dispatch(setup, connection_id, key="idem-pushable")
+
+        clock.advance(IDENTIFIER_RETENTION + timedelta(hours=1))
+        setup.agent_repo.purge_expired_idempotency(owner_id=OWNER, now=clock())
+        assert setup.agent_repo.expire_due_identifiers(now=clock()) == 1
+
+        retired = self._pushable_service(tmp_path, clock, retired_ring(), a2a_client)
+
+        retired._require_intact_key_ring(clock())
+        assert retired.agent_repo.live_sealed_key_ids(now=clock()).key_ids == {"v2"}
 
     @pytest.mark.parametrize("operation", ["start", "reply", "cancel"])
     def test_a_key_may_be_retired_once_every_reference_is_gone(

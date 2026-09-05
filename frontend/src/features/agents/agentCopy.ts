@@ -278,6 +278,26 @@ export function compactRunLabel(
   return parts.join(" · ");
 }
 
+/**
+ * The run a compact line is about.
+ *
+ * Derived from the runs rather than read off the response order. The API
+ * answers a task's runs newest first, so `runs[runs.length - 1]` picked the
+ * *oldest* one: a failed attempt from last week described as the state of the
+ * run that is working right now. Ties keep the server's order.
+ */
+export function newestRun<Run extends Pick<AgentRunResponse, "created_at">>(
+  runs: readonly Run[]
+): Run | null {
+  let newest: Run | null = null;
+  for (const run of runs) {
+    if (newest === null || Date.parse(run.created_at) > Date.parse(newest.created_at)) {
+      newest = run;
+    }
+  }
+  return newest;
+}
+
 type DispatchShape = Pick<
   AgentRunResponse,
   "dispatch_state" | "dispatch_error_code" | "exchange_state" | "exchange_open" | "reported_state"

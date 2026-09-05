@@ -40,6 +40,7 @@ from app.utils.time import utcnow
 
 from .a2a_fakes import (
     A2AResult,
+    AgentSkillSummary,
     FakeA2AClient,
     FakeCardFetcher,
     card_summary,
@@ -872,11 +873,18 @@ class TestConnectionRoutes:
         client: TestClient,
         relay_app: tuple[TestClient, TestClient, Container],
     ) -> None:
-        """AC-031. Card text is returned exactly as the agent wrote it.
+        """AC-031. Card *prose* is returned exactly as the agent wrote it.
 
         Not escaped, not stripped, not linkified: escaping here would hide what
         the agent actually claims, and the clients are the layer that renders it
         inertly. The bound is the only processing it receives.
+
+        Prose is the whole of it. `card.interface_url` is not prose — it is the
+        dispatch target (`data-model.md` §1), and discovery only ever copies an
+        interface it already put through the destination check, so the address
+        here is the validated one and never something the agent talked its way
+        past (`test_agent_a2a_card.py::TestInterfaceSelection::
+        test_014_FR_002_a_rejected_interface_never_reaches_the_card_summary`).
         """
 
         container = relay_app[2]
@@ -886,7 +894,10 @@ class TestConnectionRoutes:
             summary=card_summary(
                 name=hostile,
                 description=hostile * 8,
-                interface_url="javascript:alert(3)",
+                skills=[
+                    AgentSkillSummary(id=hostile, name=hostile, description=hostile)
+                ],
+                interface_url="https://agent.example.com/a2a",
             )
         )
         container.agent_relay_service._card_fetcher = fetcher
@@ -898,7 +909,10 @@ class TestConnectionRoutes:
         assert card["name"] == hostile
         assert card["description"] == hostile * 8
         assert len(card["description"]) <= MAX_CARD_DESCRIPTION_CHARS
-        assert card["interface_url"] == "javascript:alert(3)"
+        assert card["skills"] == [
+            {"id": hostile, "name": hostile, "description": hostile}
+        ]
+        assert card["interface_url"] == "https://agent.example.com/a2a"
 
     def test_014_FR_002_a_rate_limited_test_stays_untested_with_its_retry_hint(
         self,

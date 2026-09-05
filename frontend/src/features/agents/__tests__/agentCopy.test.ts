@@ -16,7 +16,8 @@ import {
   connectionStatusDetail,
   connectionStatusLabel,
   formatDuration,
-  formatTimestamp
+  formatTimestamp,
+  newestRun
 } from "../agentCopy";
 
 const base: AgentConnectionResponse = {
@@ -336,5 +337,18 @@ describe("014-FR-013 the observation-side copy", () => {
         cancel_outcome: "unconfirmed"
       })
     ).toBe("Running · Best-effort single start");
+  });
+
+  it("014-FR-013 picks the newest run whatever order the list arrives in", () => {
+    const older = { id: "older", created_at: "2026-08-08T09:00:00Z" };
+    const newer = { id: "newer", created_at: "2026-08-09T12:00:00Z" };
+
+    expect(newestRun([newer, older])?.id).toBe("newer");
+    expect(newestRun([older, newer])?.id).toBe("newer");
+    // A tie keeps the server's order rather than reshuffling it: the API
+    // already breaks ties by id descending.
+    expect(newestRun([{ ...newer, id: "first" }, { ...newer, id: "second" }])?.id).toBe("first");
+    // No runs is not "the oldest run": there is nothing to describe.
+    expect(newestRun([])).toBeNull();
   });
 });

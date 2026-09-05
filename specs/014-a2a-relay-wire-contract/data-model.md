@@ -46,7 +46,13 @@ description ≤500}`), `auth_schemes_offered[]` (`{name, kind: bearer|api_key|oa
 Every one of these strings — and every `last_test_error_detail` value — is untrusted agent text:
 both clients render it as inert plain text, never an anchor or `Linking` target, never
 HTML/markdown-interpreted, never auto-linkified, exactly as `result_link` is treated (FR-016,
-AC-031); the bounds above are the only processing it receives.
+AC-031); the bounds above are the only processing it receives. `interface_url` is the one
+field that is not prose: it is the dispatch target, and discovery only ever copies the
+interface it *selected*, which has already passed the destination check. A rejected address —
+a `javascript:` scheme, a link-local metadata host — is refused at discovery as
+`a2a_no_supported_interface`; there is no summary at all, so it is never copied into
+`card.interface_url`, into a failure detail, or into any other stored field, and a card that
+starts naming one leaves the last successfully tested card exactly as it was.
 
 **State transitions** (connection): `untested → (test) ready | invalid_credentials |
 unreachable | unsupported`; `ready → stale` is derived (`now >= last_contact_at + stale_after`);
@@ -131,10 +137,12 @@ spent trigger, and the reachable case of the rule is the retry of a hand-off tha
 `interface_url`, and is serialised: the `interrupted|delivery_unconfirmed → open` transition is a compare-and-set on
 `run_version` under the process-wide command lock before any I/O, so a concurrent check, a
 replayed confirmation or the observer's restart-recovery lookup re-reads, sees `open` and
-returns the winner without network I/O (SC-008). No background thread — observer scheduler,
-observation pool, exchange pool, control pool, restart recovery or retention sweep — ever
-emits a content-bearing `SendMessage`; the only sends are a confirmed hand-off, its
-user-triggered replay and a user reply. Neither path ever mints a new run or message id.
+returns the winner without network I/O (SC-008). No content-bearing `SendMessage` is ever
+initiated without a user action: the exchange pool *executes* one, because a send an agent
+holds open for the reply window may not sit on the request thread, but the only things that
+start one are a confirmed hand-off, its user-triggered replay and a user reply — the
+observer scheduler, the observation pool, the control pool, restart recovery and the
+retention sweep emit none. Neither path ever mints a new run or message id.
 
 **Observation state machine** (FR-009): `reported_state ∈ {accepted, running, blocked,
 completed, failed, cancelled}`; terminal = `{completed, failed, cancelled}`; a differing
@@ -222,12 +230,19 @@ run's identifier expiry at 90 d.
 | `outcome_code` | str \| None | `a2a_task_not_cancelable`, `a2a_unsupported_operation`, `a2a_task_not_found`, `a2a_internal_error`, `a2a_rate_limited` |
 | `agent_task_id_after` | str \| None | task returned by the reply exchange (identifier tier) |
 
+The row is durable **before** the send, exactly as a hand-off's is (`dispatch_run` writes its
+`start` row at reservation): a reply command row and the run's `reply_pending_command_id` are
+both written when the reply exchange opens, `delivery=unconfirmed`, and rewritten with the
+outcome when it closes. Writing it only afterwards is what used to leave a restart caught
+mid-reply with no record that the owner had answered at all.
+
 Confirmation rules: start → confirmed by `sent`; reply → confirmed only when a Task whose
 `history[]` contains our `messageId` is observed **or** the reply exchange itself returns a
-Task/Message (explicit correlation) **or**, after a restart interrupted the reply exchange
-(`exchange_kind=reply`), by succession evidence — a task in the run's conversation created
-after the command's `created_at`, found by the recovery lookup — because Hermes serves no
-history; a reply exchange is never resent. A reply whose exchange ended ambiguously and is
+Task/Message (explicit correlation). That includes the recovery lookup after a restart
+interrupted the reply exchange (`exchange_kind=reply`): the task it finds confirms the command
+when the task's history names it, and otherwise the command stays `unconfirmed` — the run
+shows the honest "sent, not acknowledged" state and a fresh reply is still offered. A reply
+exchange is never resent. A reply whose exchange ended ambiguously and is
 never acknowledged stays `unconfirmed` and is settled in the timeline when the observation
 suspension ends (§2); a later reply gets a new command id; cancel → confirmed when `CancelTask` returns a Task,
 `rejected` only on an explicit `-32002`/`-32004`/`-32601`/`-32001` answer, and left
@@ -245,7 +260,10 @@ exchange is still open returns the live projection without a second exchange.
 ## 6. Audit entry (`AgentAuditEntryDocument`) — unchanged shape, new actions
 
 Actions: `card_fetched`, `connection_tested`, `card_drift_detected`, `run_dispatched`,
-`exchange_closed`, `task_adopted`, `delivery_lookup_failed` (one row per delivery check whose
+`exchange_closed`, `exchange_interrupted` (one row per reply exchange a restart interrupted
+that recovery could not settle — outcome is the lookup's allowlisted transport code or
+`reply_unacknowledged`; the run keeps `dispatch_state=sent`, because the *start* was
+delivered and only the owner's answer is unresolved), `task_adopted`, `delivery_lookup_failed` (one row per delivery check whose
 correlation-ID lookup did not come back — outcome is the allowlisted transport code, and the
 run is left exactly as it was: an unanswered lookup is not evidence that nothing exists, so it
 licenses no resend, FR-006/SC-008), `task_succession_recorded` (one row per `task_succession`
@@ -281,6 +299,17 @@ control pool (§9). The verified push wakes the observer through the narrow wake
 `api/dependencies.py` exposes to the route.
 The token never appears in a response, error envelope, audit row, timeline event or log line
 (`contracts/push-callback.md`, Redaction).
+
+Both `derive_push_token` and `push_token_fingerprint` are anchored to the *oldest* configured
+relay key (`SecretBox.fingerprint`), so `push_token_fingerprint` is a **live sealed reference**
+and holds that key exactly as a connection credential or an idempotency receipt does: while any
+dispatched run whose identifiers have not expired carries one,
+`AgentRepository.live_sealed_key_ids` reports its key id and `_require_intact_key_ring` refuses
+every relay command with `RelayKeyRotationUnsafe` naming the key until it is restored. Without
+that, retiring the anchor would silently invalidate every live push token — the token the agent
+holds no longer matches, and a reply re-derives a different one that does not match the stored
+fingerprint either, so both directions 403 with no refusal anywhere. Identifier expiry nulls the
+fingerprint (§8) and the run stops holding the key with it.
 
 ## 8. Retention tiers (SC-007)
 

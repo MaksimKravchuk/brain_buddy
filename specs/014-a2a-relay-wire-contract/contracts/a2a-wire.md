@@ -19,7 +19,7 @@ accepts both the 1.0 shape and the legacy shape Hermes serves:
 | `capabilities.streaming`, `.pushNotifications` | bool | recorded; push registration only when true |
 | `capabilities.extensions[]` | `{uri, description?, required?, params?}` | `uri == <single-start URI>` ⇒ guaranteed tier; any `required: true` extension BrainBuddy does not implement ⇒ `a2a_no_supported_interface` |
 | `securitySchemes{}` | 1.0 `{httpAuthSecurityScheme:{scheme}}` / `{apiKeySecurityScheme:{location,name}}`; legacy `{type:"http",scheme}` / `{type:"apiKey",in,name}` | supported: `http`+`bearer` → `Authorization: Bearer <cred>`; `apiKey` with `location/in == "header"` → `<name>: <cred>`; anything else ⇒ `a2a_auth_scheme_unsupported` naming the scheme |
-| `securityRequirements[]` / legacy `security[]` | list of scheme-name maps | the owner's `auth_scheme` must satisfy at least one requirement; an empty list means the agent needs no credential (credential still sent) |
+| `securityRequirements[]` / legacy `security[]` | list of scheme-name maps | the owner's `auth_scheme` must satisfy at least one requirement, and it is consulted *before* the scheme catalogue: `securitySchemes` says what the agent understands, this says what it will accept. The names within one alternative are conjoined and BrainBuddy holds one credential, so an alternative is satisfiable only when every scheme it names is of the owner's kind; a name the card never declared states nothing checkable and is dropped from the alternative. No alternative satisfiable ⇒ `a2a_auth_scheme_unsupported` naming the first scheme of the first alternative — the one the owner would have to change to. An empty list means the agent needs no credential (credential still sent) |
 | `name`, `version`, `description`, `skills[]` | strings | bounded copy into `AgentCardSummary` |
 
 Failure categories (FR-002/SC-009): transport error or timeout → `a2a_unreachable`;
@@ -113,11 +113,14 @@ start exchange that was still queued — never started — settles as **Not sent
 (`restarted_before_send`) and the hand-off is re-offered with the same ids; nothing is
 resent. A start exchange that had started is marked interrupted and resolved by the
 Probe / lookup above: adopt the task if found, else the run stays **Delivery unconfirmed**
-for the user's **Check again**. A reply exchange that had started is likewise resolved by
-lookup only and confirmed by succession evidence — a task in the run's conversation
-(`contextId` = run id) created after the reply command — because Hermes serves no history
-(F5); otherwise the reply stays unconfirmed. No BrainBuddy background thread ever emits
-`SendMessage`.
+for the user's **Check again**. A reply exchange that had started keeps its
+`dispatch_state` — the *start* was delivered, and calling that delivery unconfirmed would
+offer a **Check again** whose resend puts the hand-off at the agent twice — and is resolved by
+lookup only: the task it finds confirms the reply when the task's `history[]` names the reply's
+`messageId`, which is the agent's own record of having received it; otherwise the reply stays
+unconfirmed, the run says so, and a fresh reply is still offered. No BrainBuddy `SendMessage` is ever initiated
+without a user action: an exchange worker executes the send, and recovery only looks a run
+up.
 
 ## Error mapping (JSON-RPC `error.code`, A2A §5.4)
 

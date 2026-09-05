@@ -150,6 +150,10 @@ function RunCard({
   onRunUpdated: (run: AgentRunResponse) => void;
   onRetryHandoff?: (run: AgentRunResponse) => void;
 }) {
+  // Held as a const so the guard below narrows it inside the press handler: the
+  // retry is drawn only when there is a review for it to open. Without a
+  // handler the control would flip a state nothing reads.
+  const retryHandoff = onRetryHandoff;
   const reply = useReplyToAgentRun();
   const cancel = useCancelAgentRun();
   const checkDelivery = useCheckAgentRunDelivery();
@@ -371,6 +375,19 @@ function RunCard({
             </View>
           ) : null}
 
+          {run.blocked_reason ? (
+            // M-03-S09. The run needs the user and the agent named why, so the
+            // reason is stated verbatim — and stated *without* a control. What
+            // blocks an agent here is a credential problem at the agent, which
+            // no answer typed into Brain Buddy can solve; a reply field beside
+            // this sentence is how a secret gets forwarded to a third party.
+            <View style={styles.question}>
+              <BBText variant="caption" color={colors.warningFg}>
+                {run.blocked_reason}
+              </BBText>
+            </View>
+          ) : null}
+
           {run.result_text ? (
             <BBText variant="caption" color={colors.fg3}>
               {run.result_text}
@@ -487,13 +504,17 @@ function RunCard({
               Check again
             </BBText>
           </Pressable>
+          {/* A refused or failed check must not look like a check that found
+              nothing: the reason and its correlation reference belong beside
+              the control that produced them, exactly as reply and cancel do. */}
+          {checkDelivery.isError ? <ErrorBanner error={checkDelivery.error} /> : null}
         </>
       ) : null}
-      {canRetryHandoff(run) ? (
+      {retryHandoff && canRetryHandoff(run) ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Try this hand-off again"
-          onPress={() => onRetryHandoff?.(run)}
+          onPress={() => retryHandoff(run)}
           style={styles.rowAction}
         >
           <BBText variant="caption" weight="medium" color={colors.infoFg}>

@@ -49,7 +49,7 @@ from app.modules.agents.a2a.card import (
     fetch_card,
     interpret_card,
 )
-from app.modules.agents.egress import DestinationRejected
+from app.modules.agents.egress import DestinationRejected, validate_destination
 
 # --- card fixtures ----------------------------------------------------------
 #
@@ -115,6 +115,20 @@ def _refuse_host(url: str) -> None:
     raise DestinationRejected(
         "destination_network_not_allowed", "The agent endpoint must be public."
     )
+
+
+def _real_destination_check(url: str) -> None:
+    """The validator discovery actually runs, with this suite's DNS.
+
+    A stub can only prove that `_select_interface` honours a refusal; this
+    proves the shipped refusal covers the addresses that matter.
+    """
+
+    validate_destination(url, resolver=_only_the_example_hosts)
+
+
+def _only_the_example_hosts(host: str, port: int) -> list[str]:
+    return {"agent.example.com": ["93.184.216.34"]}[host]
 
 
 class TestCardShapes:
@@ -273,6 +287,51 @@ class TestInterfaceSelection:
 
         assert result.failure_code == A2A_NO_SUPPORTED_INTERFACE
         assert result.failure_detail is None
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "javascript:alert(3)",
+            "http://169.254.169.254/latest/meta-data/",
+        ],
+        ids=["javascript-scheme", "link-local-metadata"],
+    )
+    def test_014_FR_002_a_rejected_interface_never_reaches_the_card_summary(
+        self, address: str
+    ) -> None:
+        """`card.interface_url` is the dispatch target, so it is never prose.
+
+        Discovery is the only writer of that field and it copies the interface
+        it *selected* — one that has already been through the real destination
+        check. An address the check refuses therefore cannot appear in the
+        summary, the discovery result or a failure detail: there is no summary
+        at all. Driven through the production `validate_destination` rather than
+        a stub, because the claim is about what the shipped refusal covers.
+        """
+
+        payload = _card(
+            supportedInterfaces=[
+                {
+                    "url": address,
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "1.0",
+                }
+            ]
+        )
+
+        result = interpret_card(
+            payload,
+            auth_scheme="bearer",
+            validate_interface_host=_real_destination_check,
+        )
+
+        assert result.failure_code == A2A_NO_SUPPORTED_INTERFACE
+        assert result.summary is None
+        assert result.interface_url is None
+        assert result.card_fingerprint is None
+        # Not in a detail either: the owner is told the card names no interface
+        # BrainBuddy can use, never handed the address back to render.
+        assert address not in json.dumps(result.failure_detail)
 
     def test_014_FR_001_the_interface_host_is_validated_separately(self) -> None:
         """FR-004: the card may name a *different* host than the one the user
@@ -483,6 +542,176 @@ class TestSecuritySchemes:
 
         assert result.failure_code == A2A_AUTH_SCHEME_UNSUPPORTED
         assert result.authenticated is True
+
+    #: A card that accepts two schemes, so the requirements are the only thing
+    #: deciding whether the owner's credential may be sent.
+    _TWO_SCHEMES = {
+        "bearer": {"type": "http", "scheme": "bearer"},
+        "apikey": {"type": "apiKey", "in": "header", "name": "X-Agent-Key"},
+    }
+
+    def test_014_FR_002_a_requirement_the_owners_scheme_cannot_satisfy_refuses(
+        self,
+    ) -> None:
+        """`contracts/a2a-wire.md`: the owner's scheme must satisfy a requirement.
+
+        `securitySchemes` is a catalogue of what the agent *understands*;
+        `securityRequirements` is what it will actually accept on a call. An
+        agent that declares bearer for another audience and requires an API key
+        from this one will reject every request BrainBuddy makes — after the
+        bearer token has already been disclosed to it. Naming the scheme the
+        first requirement asks for is what turns the refusal into an
+        instruction.
+        """
+
+        payload = _card(
+            securitySchemes=self._TWO_SCHEMES,
+            securityRequirements=[{"apikey": []}],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code == A2A_AUTH_SCHEME_UNSUPPORTED
+        assert result.failure_detail == {"scheme": "apikey"}
+        assert result.summary is None
+
+    def test_014_FR_002_an_alternative_conjoining_two_schemes_is_unsatisfiable(
+        self,
+    ) -> None:
+        """One requirement naming two schemes means *both*, and there is one credential.
+
+        A connection holds a single credential under a single `auth_scheme`, so
+        an agent asking for a bearer token *and* an API key on the same call is
+        asking for something BrainBuddy cannot produce. Sending half of it would
+        disclose the credential to a call certain to fail.
+        """
+
+        payload = _card(
+            securitySchemes=self._TWO_SCHEMES,
+            securityRequirements=[{"bearer": [], "apikey": []}],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code == A2A_AUTH_SCHEME_UNSUPPORTED
+        assert result.failure_detail == {"scheme": "apikey"}
+
+    def test_014_FR_002_one_satisfiable_alternative_is_enough(self) -> None:
+        """The list is alternatives: any one of them being satisfiable is a yes."""
+
+        payload = _card(
+            securitySchemes=self._TWO_SCHEMES,
+            securityRequirements=[{"apikey": []}, {"bearer": []}],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code is None
+        assert result.authenticated is True
+        assert result.auth_header_name is None
+        assert result.summary is not None
+        # The fingerprint subset is untouched by any of this: what the card
+        # declared is still what drift is measured against.
+        assert result.summary.security_requirements == [["apikey"], ["bearer"]]
+
+    def test_014_FR_002_a_requirement_naming_an_undeclared_scheme_is_ignored(
+        self,
+    ) -> None:
+        """A name with no scheme behind it says nothing BrainBuddy can act on.
+
+        Refusing on it would turn an agent's own bookkeeping error into a
+        connection the owner cannot make, and accepting it proves nothing either
+        — so it is dropped from the alternative and what remains decides.
+        """
+
+        payload = _card(
+            securitySchemes=self._TWO_SCHEMES,
+            securityRequirements=[{"bearer": [], "audit-only": []}],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code is None
+        assert result.authenticated is True
+
+    def test_014_FR_002_a_card_requiring_nothing_still_takes_the_credential(
+        self,
+    ) -> None:
+        """An empty requirement list is today's behaviour, deliberately kept.
+
+        `contracts/a2a-wire.md`: it means the agent needs no credential, and the
+        credential is still sent — the owner stored it for this agent, and an
+        agent that asks for none will ignore what it does not read.
+        """
+
+        payload = _card(securitySchemes=self._TWO_SCHEMES, securityRequirements=[])
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code is None
+        assert result.authenticated is True
+        assert result.summary is not None
+        assert result.summary.security_required is False
+
+    def test_014_FR_002_the_owners_kind_is_found_past_the_schemes_before_it(
+        self,
+    ) -> None:
+        """A satisfiable requirement does not mean the *first* scheme matches.
+
+        The card lists what it understands in its own order, and the owner's
+        kind may be second. Selection walks past the others rather than taking
+        the first entry as the answer.
+        """
+
+        payload = _card(
+            securitySchemes={
+                "apikey": {"type": "apiKey", "in": "header", "name": "X-Agent-Key"},
+                "bearer": {"type": "http", "scheme": "bearer"},
+            },
+            securityRequirements=[{"bearer": []}],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code is None
+        assert result.auth_header_name is None
+
+    def test_014_FR_002_a_card_requiring_nothing_still_has_to_offer_your_kind(
+        self,
+    ) -> None:
+        """The empty-requirements allowance is about *requirements*, not schemes.
+
+        An agent that asks for no credential but declares only an API key has
+        still said which header it reads. Sending a bearer token would disclose
+        it to an endpoint that will never look at it, so the mismatch is refused
+        and the scheme the owner would have to change to is named.
+        """
+
+        payload = _card(
+            securitySchemes={
+                "apikey": {"type": "apiKey", "in": "header", "name": "X-Agent-Key"}
+            },
+            securityRequirements=[],
+        )
+
+        result = interpret_card(
+            payload, auth_scheme="bearer", validate_interface_host=_allow_any_host
+        )
+
+        assert result.failure_code == A2A_AUTH_SCHEME_UNSUPPORTED
+        assert result.failure_detail == {"scheme": "apikey"}
 
     def test_014_FR_002_every_offered_scheme_is_reported_for_the_owner_to_see(
         self,

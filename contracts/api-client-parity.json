@@ -42,6 +42,7 @@
     "getAgentRun": {"family":"Agent Relay","method":"GET","path":"/agent-runs/run-1","body":"none","idempotency":false,"headers":[],"notes":"read"},
     "listAgentRunSummaries": {"family":"Agent Relay","method":"GET","path":"/agent-run-summaries?task_id=task-1&task_id=task-2","body":"none","idempotency":false,"headers":[],"notes":"repeated task_id query inputs"},
     "replyToAgentRun": {"family":"Agent Relay","method":"POST","path":"/agent-runs/run-1/reply","body":"json","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"},
+    "checkAgentRunDelivery": {"family":"Agent Relay","method":"POST","path":"/agent-runs/run-1/check-delivery","body":"json","idempotency":true,"headers":[],"notes":"repeats one check; body carries expected_revision and current_password only"},
     "cancelAgentRun": {"family":"Agent Relay","method":"POST","path":"/agent-runs/run-1/cancel","body":"none","idempotency":true,"headers":[],"notes":"caller supplies Idempotency-Key"}
   }
 }
