@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
@@ -94,7 +94,68 @@ by lookup and never by resending (AC-032).
 A2A_SCHEMA_VERSION = 2
 
 AgentCommandKind = Literal["start", "reply", "cancel"]
-AgentCommandDelivery = Literal["unconfirmed", "confirmed"]
+AgentCommandDelivery = Literal["unconfirmed", "confirmed", "rejected"]
+"""How a command ended. ``rejected`` comes only from an explicit agent error
+correlated to *this* command; a timeout is `unconfirmed`, because silence
+proves nothing about whether the agent acted (data-model.md §4)."""
+
+AgentRunEventTrigger = Literal["dispatch", "schedule", "push", "command"]
+"""Why an observation ran. Recorded on the row so a user reading a timeline
+can tell an ordinary poll from one their own push or command caused."""
+
+AgentRunEventKind = Literal["observation", "task_succession"]
+AgentResultAvailability = Literal["available", "too_large"]
+AgentArtifactKind = Literal["text", "file", "data", "link"]
+AgentObservationTrigger = Literal["schedule", "push", "command"]
+"""What the next observation pass is owed. ``None`` means the schedule."""
+
+AgentPrimaryStateLabel = Literal[
+    "Not sent",
+    "Queued",
+    "Sent",
+    "Delivery unconfirmed",
+    "Accepted",
+    "Running",
+    "Needs you",
+    "Cancellation requested",
+    "Agent reported complete",
+    "Failed",
+    "Cancelled",
+    "Stopped reporting",
+    "Agent no longer reports this run",
+    "Connection disconnected",
+    "Content expired under retention policy",
+]
+"""Every label a surface may render verbatim, and nothing else (FR-014).
+
+Declared here, beside the projection that produces it, and re-exported by
+`schemas.agents` — two literal lists would be one careless edit away from
+disagreeing, and the disagreement would surface as a 500 on a run the user is
+already worried about. The one word that must never appear is "Complete":
+BrainBuddy did not verify the work.
+"""
+
+AgentCancelOutcome = Literal[
+    "none",
+    "requested",
+    "unconfirmed",
+    "accepted",
+    "unsupported",
+    "not_cancelable",
+    "task_missing",
+]
+"""What became of a cancellation request (AC-018, AC-029).
+
+Only an explicit agent answer may produce ``unsupported`` or
+``not_cancelable`` — both withdraw the control, and a durable "this agent
+cannot be cancelled" derived from a timeout would be a claim the agent
+never made. ``unconfirmed`` keeps the control and the command id."""
+
+#: The cancel outcomes that withdraw the control, because the agent itself
+#: said the request cannot be honoured.
+CANCEL_OUTCOMES_WITHDRAWING_THE_CONTROL: frozenset[str] = frozenset(
+    {"unsupported", "not_cancelable"}
+)
 
 TERMINAL_REPORTED_STATES: frozenset[str] = frozenset(
     {"completed", "failed", "cancelled"}
@@ -542,6 +603,19 @@ def inert_reporting_contract(connection_id: str) -> AgentReportingContract:
     return AgentReportingContract(callback_url="", connection_id=connection_id)
 
 
+class AgentArtifactSummary(StorageBaseModel):
+    """A stored placeholder for something the agent produced.
+
+    Names the content type and never the content: the relay fetches no
+    attachment, so a row that carried one would be describing a file BrainBuddy
+    does not have.
+    """
+
+    name: str | None = Field(default=None, max_length=200)
+    media_type: str | None = Field(default=None, max_length=128)
+    kind: AgentArtifactKind
+
+
 class AgentRunDocument(StorageBaseModel):
     """One external attempt linked to, but not owned by, a Task."""
 
@@ -612,6 +686,26 @@ class AgentRunDocument(StorageBaseModel):
     #: checked before any lookup: there is nothing left to look for, so looking
     #: again would only be a request made to produce the same answer.
     agent_task_missing_at: datetime | None = None
+    #: What the next observation pass is owed, set by a verified push or a
+    #: command acknowledgement so the pass runs at once instead of waiting out
+    #: the interval. Cleared by the pass that honoured it.
+    observation_trigger_pending: AgentObservationTrigger | None = None
+    #: What became of a cancellation request. Kept apart from
+    #: ``cancel_requested_at`` because "the user asked" and "the agent answered"
+    #: are different facts and the surfaces render them on different lines.
+    cancel_outcome: AgentCancelOutcome = "none"
+    #: The command id the current cancel outcome belongs to. A retry after an
+    #: ambiguous answer reuses it rather than minting a second request the agent
+    #: could act on twice (AC-029).
+    cancel_command_id: str | None = None
+    #: Server-owned text for the one blocked state the user cannot answer.
+    #: Content tier: swept with the rest of the relayed text at 30 days.
+    blocked_reason: str | None = Field(default=None, max_length=MAX_RESULT_CHARS)
+    #: Placeholders for artifacts BrainBuddy never fetched. Content tier.
+    artifacts_summary: list[AgentArtifactSummary] = Field(default_factory=list)
+    #: Whether the terminal result could be stored at all. A coarse marker, but
+    #: content tier all the same: it describes the content it stands in for.
+    result_availability: AgentResultAvailability | None = None
     identifiers_expire_at: datetime | None = None
     identifiers_expired: bool = False
     content_expires_at: datetime
@@ -623,7 +717,15 @@ class AgentRunDocument(StorageBaseModel):
 
 
 def project_run_for_access(run: AgentRunDocument, *, now: datetime) -> AgentRunDocument:
-    """Pure authoritative projection: due content is inaccessible before sweep."""
+    """Pure authoritative projection: due content is inaccessible before sweep.
+
+    Read-time rather than sweep-time, because the sweep's schedule is not a
+    promise anyone was made: a run whose thirty days have passed must read as
+    expired on the very next request, whether or not a sweep has run since.
+    The 014 fields join the 007 ones for the same reason — an artifact
+    placeholder and a "too large to store" marker both describe content that is
+    no longer there to describe.
+    """
 
     if run.content_expired or run.content_expires_at <= now:
         return run.model_copy(
@@ -634,11 +736,174 @@ def project_run_for_access(run: AgentRunDocument, *, now: datetime) -> AgentRunD
                 "result_text": None,
                 "result_link": None,
                 "failure_reason": None,
+                "blocked_reason": None,
+                "artifacts_summary": [],
+                "result_availability": None,
                 "reply_pending_command_id": None,
                 "content_expired": True,
             }
         )
     return run
+
+
+# --- the pure run projection (FR-009, FR-013, FR-014) ------------------------
+#
+# Label precedence lives here rather than in the service because it is a
+# statement about a *document*, not about a request: three surfaces render it
+# and the observer reasons about it, and a second copy anywhere would be one
+# edit away from two answers to "what is this run doing?".
+
+
+CANCEL_UNSUPPORTED_LINE = "Cancellation not supported by this agent."
+CANCEL_UNCONFIRMED_LINE = "Cancellation request unconfirmed — you can try again."
+RESULT_TOO_LARGE_LINE = "Result unavailable (too large to store)."
+
+
+def content_is_due(run: AgentRunDocument, *, now: datetime) -> bool:
+    """Whether the run's relayed content may still be read at all."""
+
+    return run.content_expired or run.content_expires_at <= now
+
+
+def stopped_reporting(
+    run: AgentRunDocument, *, now: datetime, reporting_window: timedelta
+) -> bool:
+    """Whether BrainBuddy has lost track of a run that should still be moving.
+
+    Deliberately not a claim about the agent: it says BrainBuddy does not know,
+    which is why every terminal, disconnected, missing or never-sent run is
+    excluded rather than being reported as silent.
+    """
+
+    if run.reported_state in TERMINAL_REPORTED_STATES:
+        return False
+    if run.connection_disconnected_at is not None:
+        return False
+    if run.agent_task_missing_at is not None:
+        return False
+    if run.dispatch_state == "not_sent":
+        return False
+    if run.last_contact_at is None:
+        return False
+    return now >= run.last_contact_at + reporting_window
+
+
+def primary_state_label(
+    run: AgentRunDocument, *, now: datetime, reporting_window: timedelta
+) -> AgentPrimaryStateLabel:
+    """The single label every surface renders verbatim (FR-014).
+
+    The *order* is the whole content of this rule, so it is written as an
+    ordered table rather than as branching: the precedence is the thing under
+    review, and a table can be read top to bottom without tracing control flow.
+
+    Two entries earn their position explicitly. **Queued** is checked before
+    the dispatch labels because a run's durable `dispatch_state` is already
+    `delivery_unconfirmed` at reservation while nothing has left BrainBuddy.
+    And **Agent no longer reports this run** sits above **Stopped reporting**
+    because "the agent told us the task is gone" is knowledge, while "we have
+    not heard back" is the absence of it.
+    """
+
+    ordered: tuple[tuple[bool, AgentPrimaryStateLabel], ...] = (
+        (run.content_expired, "Content expired under retention policy"),
+        (run.connection_disconnected_at is not None, "Connection disconnected"),
+        # Never "Complete": BrainBuddy did not verify the work (FR-011).
+        (run.reported_state == "completed", "Agent reported complete"),
+        (run.reported_state == "failed", "Failed"),
+        (run.reported_state == "cancelled", "Cancelled"),
+        (run.agent_task_missing_at is not None, "Agent no longer reports this run"),
+        (
+            stopped_reporting(run, now=now, reporting_window=reporting_window),
+            "Stopped reporting",
+        ),
+        (run.reported_state == "blocked", "Needs you"),
+        (run.cancel_requested_at is not None, "Cancellation requested"),
+        (run.reported_state == "running", "Running"),
+        (run.reported_state == "accepted", "Accepted"),
+        (run.exchange_state == "queued", "Queued"),
+        # An exchange a worker is holding may already be at the agent, so
+        # **Sent** is the honest label until it closes without evidence.
+        (
+            run.exchange_state == "open" and run.dispatch_state != "not_sent",
+            "Sent",
+        ),
+        (run.dispatch_state == "delivery_unconfirmed", "Delivery unconfirmed"),
+        (run.dispatch_state == "sent", "Sent"),
+    )
+    for applies, label in ordered:
+        if applies:
+            return label
+    return "Not sent"
+
+
+def cancel_outcome_line(run: AgentRunDocument) -> str | None:
+    """The secondary sentence a cancel outcome earns, if any.
+
+    Never the primary label: what the agent said about cancellation is a
+    different fact from what the run is doing, and collapsing the two would
+    hide a run that is still working behind a refusal notice.
+    """
+
+    if run.cancel_outcome in CANCEL_OUTCOMES_WITHDRAWING_THE_CONTROL:
+        return CANCEL_UNSUPPORTED_LINE
+    if run.cancel_outcome == "unconfirmed":
+        return CANCEL_UNCONFIRMED_LINE
+    return None
+
+
+def reply_control_offered(run: AgentRunDocument) -> bool:
+    """Whether answering this run is still something that could work.
+
+    Withdrawn only by something that made it *impossible* — a disconnected
+    connection, a task the agent no longer reports, a terminal run or expired
+    content — never by an agent's card, which never advertises replies at all.
+    """
+
+    return not (
+        run.connection_disconnected_at is not None
+        or run.agent_task_missing_at is not None
+        or run.reported_state in TERMINAL_REPORTED_STATES
+        or run.content_expired
+    )
+
+
+def cancel_control_offered(run: AgentRunDocument) -> bool:
+    """Whether cancelling is still something that could work (AC-018, AC-029).
+
+    An ambiguous outcome deliberately keeps the control: BrainBuddy does not
+    know whether the request landed, and taking the control away would turn its
+    own uncertainty into a refusal the agent never made.
+    """
+
+    if run.cancel_outcome in CANCEL_OUTCOMES_WITHDRAWING_THE_CONTROL:
+        return False
+    return not (
+        run.connection_disconnected_at is not None
+        or run.agent_task_missing_at is not None
+        or run.reported_state in TERMINAL_REPORTED_STATES
+    )
+
+
+def observation_is_suspended(run: AgentRunDocument, *, now: datetime) -> bool:
+    """Whether scheduled observation of the predecessor task is paused.
+
+    Bounded on purpose (AC-033): a reply exchange may block for the full reply
+    window, and a terminal observation of the *predecessor* arriving in that
+    window would lock a run the agent is about to continue in a new task. The
+    exit is the deadline, so an exchange that ends ambiguously never leaves the
+    run unobserved.
+    """
+
+    if run.exchange_kind != "reply" or run.exchange_state != "open":
+        return False
+    if run.exchange_deadline_at is None:
+        return True
+    return now < run.exchange_deadline_at
+
+
+PREDECESSOR_ENDED_PREFIX = "The previous task ended"
+TASK_SUCCESSION_SUMMARY = "The agent continued this run in a new task"
 
 
 class AgentRunEventDocument(StorageBaseModel):
@@ -653,6 +918,17 @@ class AgentRunEventDocument(StorageBaseModel):
     received_at: datetime
     # Redacted at retention time along with the rest of the relayed content.
     summary: str | None = Field(default=None, max_length=MAX_RESULT_CHARS)
+    trigger: AgentRunEventTrigger = "schedule"
+    #: The agent's own raw state string. Coarse metadata, kept with the row so a
+    #: mapping bug is diagnosable without asking the agent again.
+    agent_state: str | None = Field(default=None, max_length=64)
+    #: The agent's own `status.timestamp`. Informational: BrainBuddy's clock,
+    #: not the agent's, decides what counts as contact.
+    agent_status_at: datetime | None = None
+    kind: AgentRunEventKind = "observation"
+    #: Only on a `task_succession` row, and identifier tier with the rest.
+    previous_agent_task_id: str | None = Field(default=None, max_length=512)
+    new_agent_task_id: str | None = Field(default=None, max_length=512)
 
 
 class AgentRunCommandDocument(StorageBaseModel):
@@ -664,6 +940,12 @@ class AgentRunCommandDocument(StorageBaseModel):
     kind: AgentCommandKind
     body: str | None = Field(default=None, max_length=MAX_REPLY_CHARS)
     delivery: AgentCommandDelivery = "unconfirmed"
+    #: The agent's own answer as a coarse code, or nothing when it never gave
+    #: one. Absent is the honest value for every ambiguous ending.
+    outcome_code: str | None = Field(default=None, max_length=64)
+    #: The task a reply exchange returned, when it differs from the one the
+    #: command named. Identifier tier.
+    agent_task_id_after: str | None = Field(default=None, max_length=512)
     created_at: datetime
     confirmed_at: datetime | None = None
 
@@ -713,6 +995,27 @@ class AgentIdempotencyRecord(StorageBaseModel):
 
 __all__ = [
     "A2A_PROTOCOL_VERSION",
+    "CANCEL_OUTCOMES_WITHDRAWING_THE_CONTROL",
+    "CANCEL_UNCONFIRMED_LINE",
+    "CANCEL_UNSUPPORTED_LINE",
+    "PREDECESSOR_ENDED_PREFIX",
+    "RESULT_TOO_LARGE_LINE",
+    "TASK_SUCCESSION_SUMMARY",
+    "AgentArtifactKind",
+    "AgentArtifactSummary",
+    "AgentCancelOutcome",
+    "AgentObservationTrigger",
+    "AgentPrimaryStateLabel",
+    "AgentResultAvailability",
+    "AgentRunEventKind",
+    "AgentRunEventTrigger",
+    "cancel_control_offered",
+    "cancel_outcome_line",
+    "content_is_due",
+    "observation_is_suspended",
+    "primary_state_label",
+    "reply_control_offered",
+    "stopped_reporting",
     "AGENT_EVENT_ENVELOPE_ADAPTER",
     "AgentExchangeKind",
     "AgentPushCallback",

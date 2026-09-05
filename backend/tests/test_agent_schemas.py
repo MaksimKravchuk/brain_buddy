@@ -894,6 +894,10 @@ def test_run_projection_keeps_reported_derived_and_requested_state_separate() ->
         "primary_state_label": "Stopped reporting",
         "needs_user": True,
         "stopped_reporting": True,
+        # Present with their "nothing happened" defaults: the compact row must
+        # be able to withdraw a control without a second fetch.
+        "cancel_outcome": "none",
+        "agent_task_missing": False,
     }
     assert AgentEventIngestResponse(accepted=True, run_version=3).model_dump() == {
         "accepted": True,
@@ -951,3 +955,231 @@ def test_invalid_resolver_answers_fail_both_network_class_predicates() -> None:
 
     assert _is_publicly_routable("not-an-ip") is False
     assert _is_governed_private("not-an-ip") is False
+
+
+# --- the observation-side run contract (spec 014, US3) ------------------------
+
+
+def test_014_FR_009_the_run_contract_carries_every_observation_side_field() -> None:
+    """AC-016, AC-018, AC-020, AC-028. What BrainBuddy observed, field by field.
+
+    Each name below is a separate claim a surface renders on its own line, so
+    the schema keeps them apart rather than blending them into one status
+    string a client would have to re-parse.
+    """
+
+    run = AgentRunResponse.model_validate(
+        {
+            **_run_payload(),
+            "dispatch_state": "sent",
+            "reported_state": "completed",
+            "exchange_state": "closed",
+            "exchange_open": False,
+            "primary_state_label": "Agent reported complete",
+            "agent_task_id": "task-a1",
+            "agent_task_missing": False,
+            "cancel_outcome": "unsupported",
+            "blocked_reason": None,
+            "artifacts_summary": [
+                {"name": "report.pdf", "media_type": "application/pdf", "kind": "file"}
+            ],
+            "result_link": "https://agent.example.com/r/1",
+            "result_availability": "too_large",
+            "last_observed_at": NOW,
+            "observation_interval_seconds": 60,
+            "identifiers_expired": False,
+        }
+    )
+
+    assert run.agent_task_id == "task-a1"
+    assert run.agent_task_missing is False
+    assert run.cancel_outcome == "unsupported"
+    assert run.artifacts_summary[0].media_type == "application/pdf"
+    assert run.artifacts_summary[0].kind == "file"
+    assert run.result_availability == "too_large"
+    assert run.last_observed_at == NOW
+    assert run.observation_interval_seconds == 60
+    assert run.identifiers_expired is False
+    # Always false, whatever the agent reported: only syntax is knowable
+    # server-side, and syntax cannot answer where a browser lands later.
+    assert run.result_link_interactive is False
+
+    blocked = AgentRunResponse.model_validate(
+        {
+            **_run_payload(),
+            "reported_state": "blocked",
+            "primary_state_label": "Needs you",
+            "blocked_reason": "Agent needs additional authentication",
+        }
+    )
+    assert blocked.blocked_reason == "Agent needs additional authentication"
+
+    for invalid in (
+        {"cancel_outcome": "maybe"},
+        {"result_availability": "smallish"},
+        {"artifacts_summary": [{"name": "a", "media_type": None, "kind": "video"}]},
+    ):
+        with pytest.raises(ValidationError):
+            AgentRunResponse.model_validate({**_run_payload(), **invalid})
+
+
+def test_014_FR_009_defaults_never_claim_an_observation_that_did_not_happen() -> None:
+    """A run nobody has observed says so, rather than defaulting to a state."""
+
+    run = AgentRunResponse.model_validate(_run_payload())
+
+    assert run.agent_task_missing is False
+    assert run.cancel_outcome == "none"
+    assert run.blocked_reason is None
+    assert run.artifacts_summary == []
+    assert run.result_availability is None
+    assert run.last_observed_at is None
+    assert run.identifiers_expired is False
+    assert run.observation_interval_seconds == 60
+
+
+def test_014_FR_013_the_timeline_row_says_why_it_ran_and_what_it_is() -> None:
+    """AC-028. A succession row carries both task ids and is not a state change."""
+
+    payload = {
+        **_run_payload(),
+        "events": [
+            {
+                "id": "event_1",
+                "type": "running",
+                "run_version": 2,
+                "received_at": NOW,
+                "summary": "Working",
+                "trigger": "schedule",
+                "kind": "observation",
+            },
+            {
+                "id": "event_2",
+                "type": "running",
+                "run_version": 4,
+                "received_at": NOW,
+                "summary": "The agent continued this run in a new task",
+                "trigger": "command",
+                "kind": "task_succession",
+                "previous_agent_task_id": "task-a1",
+                "new_agent_task_id": "task-b2",
+            },
+        ],
+        "commands": [
+            {
+                "id": "agentcmd_1",
+                "kind": "cancel",
+                "delivery": "rejected",
+                "outcome_code": "a2a_task_not_cancelable",
+                "created_at": NOW,
+            }
+        ],
+    }
+    run = AgentRunResponse.model_validate(payload)
+
+    scheduled, succession = run.events
+    assert (scheduled.trigger, scheduled.kind) == ("schedule", "observation")
+    assert scheduled.previous_agent_task_id is None
+    assert (succession.trigger, succession.kind) == ("command", "task_succession")
+    assert succession.previous_agent_task_id == "task-a1"
+    assert succession.new_agent_task_id == "task-b2"
+    assert run.commands[0].delivery == "rejected"
+    assert run.commands[0].outcome_code == "a2a_task_not_cancelable"
+
+    default_event = AgentRunEventResponse(
+        id="event_3", type="running", run_version=1, received_at=NOW
+    )
+    assert (default_event.trigger, default_event.kind) == ("schedule", "observation")
+
+    with pytest.raises(ValidationError):
+        AgentRunEventResponse.model_validate(
+            {
+                "id": "event_4",
+                "type": "running",
+                "run_version": 1,
+                "received_at": NOW,
+                "trigger": "telepathy",
+            }
+        )
+
+
+def test_014_FR_014_the_label_vocabulary_is_closed_and_says_no_more() -> None:
+    """FR-014. Every label a surface may render verbatim, and nothing else.
+
+    `Agent no longer reports this run` is in the list and `Complete` is not:
+    BrainBuddy never verified the work, and the vocabulary is where that
+    promise is kept for every client at once.
+    """
+
+    from app.schemas.agents import AGENT_PRIMARY_STATE_LABELS
+
+    assert AGENT_PRIMARY_STATE_LABELS == (
+        "Not sent",
+        "Queued",
+        "Sent",
+        "Delivery unconfirmed",
+        "Accepted",
+        "Running",
+        "Needs you",
+        "Cancellation requested",
+        "Agent reported complete",
+        "Failed",
+        "Cancelled",
+        "Stopped reporting",
+        "Agent no longer reports this run",
+        "Connection disconnected",
+        "Content expired under retention policy",
+    )
+    assert "Complete" not in AGENT_PRIMARY_STATE_LABELS
+
+    for label in AGENT_PRIMARY_STATE_LABELS:
+        run = AgentRunResponse.model_validate(
+            {**_run_payload(), "primary_state_label": label}
+        )
+        assert run.primary_state_label == label
+
+    with pytest.raises(ValidationError):
+        AgentRunResponse.model_validate(
+            {**_run_payload(), "primary_state_label": "Complete"}
+        )
+
+
+def test_014_FR_013_the_compact_summary_carries_the_tier_and_the_withdrawals() -> None:
+    """D-03-S21. The Task list shows the tier in full and the withdrawn control."""
+
+    summary = AgentRunSummaryResponse(
+        id="agentrun_1",
+        task_id="task_1",
+        agent_name="Hermes",
+        primary_state_label="Running",
+        needs_user=False,
+        stopped_reporting=False,
+        guarantee_tier="guaranteed",
+        cancel_outcome="not_cancelable",
+        agent_task_missing=False,
+    )
+
+    assert summary.guarantee_tier == "guaranteed"
+    assert summary.cancel_outcome == "not_cancelable"
+    assert summary.agent_task_missing is False
+
+    bare = AgentRunSummaryResponse(
+        id="agentrun_2",
+        task_id="task_2",
+        agent_name="Hermes",
+        primary_state_label="Queued",
+        needs_user=False,
+        stopped_reporting=False,
+    )
+    assert bare.guarantee_tier is None
+    assert bare.cancel_outcome == "none"
+    assert bare.agent_task_missing is False
+
+
+def test_014_FR_014_no_capability_field_claims_progress_reporting() -> None:
+    """`capabilities.progress` is gone: A2A carries no progress figure at all."""
+
+    from app.schemas.agents import AgentCapabilitiesResponse
+
+    assert "progress" not in AgentCapabilitiesResponse.model_fields
+    assert "progress" not in AgentControlsResponse.model_fields

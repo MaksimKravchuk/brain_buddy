@@ -20,6 +20,7 @@ import { apiClient, setUnauthorizedHandler } from "../client";
 import { bindRelaySession } from "../relaySession";
 import { ProtectedRoute } from "../../components/auth/ProtectedRoute";
 import { useAuthStore } from "../../stores/authStore";
+import { useIntentKey } from "../../utils/idempotency";
 
 const connection: AgentConnectionResponse = {
   id: "conn-1",
@@ -94,6 +95,14 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     exchange_state: "none",
     exchange_kind: null,
     push_registration: "unregistered",
+    agent_task_missing: false,
+    cancel_outcome: "none",
+    blocked_reason: null,
+    artifacts_summary: [],
+    result_availability: null,
+    last_observed_at: null,
+    observation_interval_seconds: 60,
+    identifiers_expired: false,
     manifest: null,
     events: [],
     commands: [],
@@ -633,5 +642,47 @@ describe("run polling", () => {
     expect(result.current.isRefetchError).toBe(false);
 
     unmount();
+  });
+});
+
+describe("014-FR-008 the run client follows the server's own schedule", () => {
+  it("caps the poll ladder at the run's observation interval", () => {
+    // Polling faster than the server observes cannot produce new information,
+    // so a deployment that looks every five seconds is asked every five.
+    expect(runPollDelay(0, 5)).toBe(1500);
+    expect(runPollDelay(1, 5)).toBe(3000);
+    expect(runPollDelay(2, 5)).toBe(5000);
+    expect(runPollDelay(9, 5)).toBe(5000);
+  });
+
+  it("keeps the client cap when the server observes less often than it", () => {
+    // A read also resets the server's backoff, and a reply's own answer can
+    // land between two observations, so the client stays responsive.
+    expect(runPollDelay(9, 60)).toBe(8000);
+    expect(runPollDelay(9)).toBe(8000);
+    expect(runPollDelay(9, 0)).toBe(8000);
+  });
+});
+
+describe("014-FR-010 command keys survive a retry and settle on an answer", () => {
+  it("holds one key across an ambiguous retry and mints a new one after", () => {
+    const key = renderHook(() => useIntentKey("agent-cancel-run-1")).result.current;
+
+    const first = key.current();
+    expect(key.current()).toBe(first);
+
+    // A definitive answer settles the intent; the *next* cancel is a new
+    // request under a new key, while the server reuses its own command id so
+    // the agent can never be asked twice (AC-029).
+    key.settle();
+    expect(key.current()).not.toBe(first);
+  });
+
+  it("treats a different reply message as a different intent", () => {
+    const key = renderHook(() => useIntentKey("agent-reply-run-1")).result.current;
+
+    const staging = key.current("q1:Use staging.");
+    expect(key.current("q1:Use staging.")).toBe(staging);
+    expect(key.current("q1:Use production.")).not.toBe(staging);
   });
 });

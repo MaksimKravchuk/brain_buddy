@@ -2847,3 +2847,256 @@ class TestExchangePersistence:
             ("user_a", "agentrun_queued", "queued"),
             ("user_a", "agentrun_open", "open"),
         ]
+
+
+# --- the two retention tiers (spec 014, US4) ---------------------------------
+
+
+class TestRelayRetentionTiers:
+    """Thirty days for what the agent said; ninety for what could reach it."""
+
+    def test_014_FR_016_expire_due_content_nulls_every_content_column(
+        self, repo: AgentRepository
+    ) -> None:
+        """014-SC-007. The 007 six, plus the three the observation lane added."""
+
+        repo.create_run(
+            make_run(
+                content_expires_at=NOW - timedelta(seconds=1),
+                progress_text="Cloning",
+                question_text="Which environment?",
+                result_text="Shipped",
+                result_link="https://agent.example.com/r/1",
+                failure_reason="Out of credit",
+                blocked_reason="Agent needs additional authentication",
+                result_availability="too_large",
+                artifacts_summary=[
+                    {
+                        "name": "report.pdf",
+                        "media_type": "application/pdf",
+                        "kind": "file",
+                    }
+                ],
+            )
+        )
+
+        assert repo.expire_due_content(now=NOW) == 1
+
+        run = repo.get_run("agentrun_1", owner_id="user_a")
+        assert run.content_expired is True
+        for field in (
+            "progress_text",
+            "question_text",
+            "result_text",
+            "result_link",
+            "failure_reason",
+            "blocked_reason",
+            "result_availability",
+            "manifest",
+        ):
+            assert getattr(run, field) is None, field
+        assert run.artifacts_summary == []
+
+    def test_014_FR_016_content_written_after_expiry_is_re_detected(
+        self, repo: AgentRepository
+    ) -> None:
+        """The predicate reads the columns, not the flag it already set."""
+
+        repo.create_run(
+            make_run(
+                content_expires_at=NOW - timedelta(seconds=1), content_expired=True
+            )
+        )
+        run = repo.get_run("agentrun_1", owner_id="user_a")
+        repo.save_run(run.model_copy(update={"blocked_reason": "Snuck back in"}))
+
+        assert repo.expire_due_content(now=NOW) == 1
+
+        assert repo.get_run("agentrun_1", owner_id="user_a").blocked_reason is None
+
+    def test_expire_due_content_skips_and_logs_an_unparseable_row(
+        self, repo: AgentRepository, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """One broken row costs one skipped run, never every other owner's sweep."""
+
+        import logging
+
+        repo.create_run(
+            make_run(
+                run_id="agentrun_broken",
+                content_expires_at=NOW - timedelta(seconds=1),
+                result_text="Unreadable later",
+            )
+        )
+        repo.create_run(
+            make_run(
+                owner_id="user_b",
+                run_id="agentrun_healthy",
+                content_expires_at=NOW - timedelta(seconds=1),
+                result_text="Still here",
+            )
+        )
+        with sqlite3.connect(repo.root / "agents.sqlite3") as raw:
+            raw.execute(
+                "UPDATE agent_runs SET payload = ? WHERE id = ?",
+                ('{"broken": true}', "agentrun_broken"),
+            )
+
+        with caplog.at_level(logging.WARNING):
+            assert repo.expire_due_content(now=NOW) == 1
+
+        assert repo.get_run("agentrun_healthy", owner_id="user_b").result_text is None
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("agentrun_broken" in message for message in messages)
+        assert not any("Unreadable later" in message for message in messages)
+
+    def test_014_FR_016_expire_due_identifiers_nulls_the_reachable_ids(
+        self, repo: AgentRepository
+    ) -> None:
+        """014-SC-007. Ninety days, and the run row itself stays."""
+
+        repo.create_run(
+            make_run(
+                dispatched_at=NOW - timedelta(days=91),
+                context_id="agentrun_1",
+                message_id="agentrun_1:start",
+                agent_task_id="task-a1",
+                interface_url="https://agent.example.com/a2a",
+                card_fingerprint="f" * 64,
+                push_token_fingerprint="v1:" + "a" * 64,
+                next_observation_at=NOW,
+            )
+        )
+        repo.append_event(
+            AgentRunEventDocument(
+                id="agentevt_1",
+                owner_id="user_a",
+                run_id="agentrun_1",
+                connection_id="agentconn_1",
+                type="running",
+                run_version=1,
+                received_at=NOW,
+            )
+        )
+        repo.save_command(
+            AgentRunCommandDocument(
+                id="agentcmd_1",
+                owner_id="user_a",
+                run_id="agentrun_1",
+                kind="reply",
+                agent_task_id_after="task-b2",
+                created_at=NOW,
+            )
+        )
+
+        assert repo.expire_due_identifiers(now=NOW) == 1
+
+        run = repo.get_run("agentrun_1", owner_id="user_a")
+        assert run.identifiers_expired is True
+        assert run.message_id is None
+        assert run.agent_task_id is None
+        assert run.interface_url is None
+        assert run.card_fingerprint is None
+        assert run.push_token_fingerprint is None
+        assert run.next_observation_at is None
+        # The run and its id stay: the conversation identifier *is* the run id,
+        # and no sweep deletes a dispatched run row (014-SC-007, research H).
+        assert run.id == "agentrun_1"
+        assert run.context_id == "agentrun_1"
+        assert repo.list_events("agentrun_1", owner_id="user_a") == []
+        command = repo.get_command("agentcmd_1", owner_id="user_a")
+        assert command is not None
+        assert command.agent_task_id_after is None
+
+    def test_014_FR_016_identifiers_within_ninety_days_are_left_alone(
+        self, repo: AgentRepository
+    ) -> None:
+        repo.create_run(
+            make_run(dispatched_at=NOW - timedelta(days=89), agent_task_id="task-a1")
+        )
+
+        assert repo.expire_due_identifiers(now=NOW) == 0
+
+        assert repo.get_run("agentrun_1", owner_id="user_a").agent_task_id == "task-a1"
+        # Idempotent: a second pass over an already-expired run does nothing.
+        repo.save_run(
+            repo.get_run("agentrun_1", owner_id="user_a").model_copy(
+                update={"dispatched_at": NOW - timedelta(days=91)}
+            )
+        )
+        assert repo.expire_due_identifiers(now=NOW) == 1
+        assert repo.expire_due_identifiers(now=NOW) == 0
+
+    def test_014_FR_016_the_identifier_sweep_skips_a_row_it_cannot_parse(
+        self, repo: AgentRepository, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """One broken row costs one skipped run, never every other owner's sweep."""
+
+        import logging
+
+        repo.create_run(
+            make_run(
+                run_id="agentrun_broken",
+                dispatched_at=NOW - timedelta(days=91),
+                agent_task_id="task-a1",
+            )
+        )
+        repo.create_run(
+            make_run(
+                owner_id="user_b",
+                run_id="agentrun_healthy",
+                dispatched_at=NOW - timedelta(days=91),
+                agent_task_id="task-b1",
+            )
+        )
+        with sqlite3.connect(repo.root / "agents.sqlite3") as raw:
+            raw.execute(
+                "UPDATE agent_runs SET payload = ? WHERE id = ?",
+                ('{"broken": true}', "agentrun_broken"),
+            )
+
+        with caplog.at_level(logging.WARNING):
+            assert repo.expire_due_identifiers(now=NOW) == 1
+
+        assert repo.get_run("agentrun_healthy", owner_id="user_b").agent_task_id is None
+        assert any(
+            "agentrun_broken" in record.getMessage() for record in caplog.records
+        )
+
+    def test_014_FR_016_delete_all_for_owner_covers_every_table(
+        self, repo: AgentRepository
+    ) -> None:
+        """AC-025. Including the bounded-audit ledger, which is a table too."""
+
+        repo.create_run(make_run())
+        repo.append_audit(
+            AgentAuditEntryDocument(
+                id="agentaudit_1",
+                owner_id="user_a",
+                action="run_dispatched",
+                outcome="ok",
+                created_at=NOW,
+            )
+        )
+        repo.append_bounded_audit(
+            AgentAuditEntryDocument(
+                id="agentaudit_2",
+                owner_id="user_a",
+                action="observation_accepted",
+                outcome="running",
+                created_at=NOW,
+            ),
+            bucket="agentrun_1:running",
+            day="2026-08-12",
+        )
+
+        repo.delete_all_for_owner(owner_id="user_a")
+
+        assert repo.list_runs_for_owner(owner_id="user_a") == []
+        assert repo.list_audit(owner_id="user_a") == []
+        with sqlite3.connect(repo.root / "agents.sqlite3") as raw:
+            remaining = raw.execute(
+                "SELECT COUNT(*) FROM agent_audit_buckets WHERE owner_id = ?",
+                ("user_a",),
+            ).fetchone()[0]
+        assert remaining == 0

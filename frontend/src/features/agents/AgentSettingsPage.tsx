@@ -284,6 +284,14 @@ function ConnectionCard({
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const disconnectKey = useIntentKey(`agent-disconnect-${connection.id}`);
+  // Where focus goes when the confirmation closes: back to the control that
+  // opened it, so a keyboard user is never dropped at the top of the page
+  // wondering what happened to their decision.
+  const disconnectTrigger = useRef<HTMLButtonElement | null>(null);
+  const closeDisconnect = () => {
+    setDisconnectOpen(false);
+    disconnectTrigger.current?.focus();
+  };
 
   const refresh = (message: string) => {
     setError(null);
@@ -401,6 +409,7 @@ function ConnectionCard({
         ) : null}
         <Button
           type="button"
+          ref={disconnectTrigger}
           variant="danger"
           size="sm"
           disabled={isDisconnected || !online}
@@ -430,9 +439,9 @@ function ConnectionCard({
           connection={connection}
           intentKey={disconnectKey}
           online={online}
-          onClose={() => setDisconnectOpen(false)}
+          onClose={closeDisconnect}
           onDisconnected={() => {
-            setDisconnectOpen(false);
+            closeDisconnect();
             refresh("Agent disconnected. Its credential was destroyed.");
           }}
         />
@@ -840,12 +849,15 @@ function DisconnectDialog({
   });
 
   return (
-    <Overlay labelledBy={titleId} onClose={onClose} size="narrow">
+    // Deliberately not dismissible by Escape or by the scrim, and with no close
+    // control in the header: this dialog destroys a credential, and a stray key
+    // or a misplaced click must not be readable as that decision. It is
+    // dismissed by its own **Keep it connected** action (design.md, Escape).
+    <Overlay labelledBy={titleId} size="narrow">
       <OverlayHeader
         titleId={titleId}
         eyebrow="Disconnect"
         title={`Disconnect ${connection.name}?`}
-        onClose={onClose}
       />
       <form
         className="flex flex-col gap-4 px-5 py-5 sm:px-6"
@@ -882,9 +894,12 @@ function DisconnectDialog({
           autoComplete="current-password"
         />
         <Feedback error={error} success={null} />
+        {/* Safe first, destructive last — which is also what makes **Disconnect**
+            the focus trap's wrap boundary, so tabbing to the end of the dialog
+            never lands anywhere but on the decision the user came to make. */}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" size="md" onClick={onClose}>
-            Cancel
+            Keep it connected
           </Button>
           <Button
             type="submit"
@@ -893,7 +908,7 @@ function DisconnectDialog({
             isLoading={mutation.isPending}
             disabled={!online}
           >
-            Disconnect agent
+            Disconnect
           </Button>
         </div>
       </form>

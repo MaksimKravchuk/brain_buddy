@@ -88,6 +88,14 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     exchange_state: "closed",
     exchange_kind: "start",
     push_registration: "unregistered",
+    agent_task_missing: false,
+    cancel_outcome: "none",
+    blocked_reason: null,
+    artifacts_summary: [],
+    result_availability: null,
+    last_observed_at: null,
+    observation_interval_seconds: 60,
+    identifiers_expired: false,
     manifest: null,
     events: [],
     commands: [],
@@ -296,12 +304,16 @@ describe("connection management guards", () => {
 });
 
 describe("canOpenResultLink", () => {
-  it("opens only a link the server marked interactive", () => {
-    expect(
+  it("014-SC-004 opens no address an agent reported, however well formed", () => {
+    // Product decision, 2026-09-04 (M-03-S10). A link the product makes
+    // tappable is a link the product is vouching for, and Brain Buddy verified
+    // nothing about where it leads — so even a well-formed HTTPS address the
+    // server once marked interactive stays inert text beside **Copy link**.
+    expectSentence(
       canOpenResultLink(
         makeRun({ result_link: "https://example.test/r/1", result_link_interactive: true }),
       ),
-    ).toEqual({ ok: true });
+    );
   });
 
   it("keeps a non-interactive link as plain text", () => {
@@ -313,5 +325,76 @@ describe("canOpenResultLink", () => {
 
   it("refuses when there is no link at all", () => {
     expectSentence(canOpenResultLink(makeRun({ result_link: null })));
+  });
+});
+
+describe("014-SC-004 the guards agree with the server on every state", () => {
+  /**
+   * M-03-S22 and the withdrawal rules, over the full enumeration.
+   *
+   * The guards are what decide whether iOS *offers* a control at all, so a gap
+   * here is a control the user can press that the server will refuse — which
+   * reads to them as the product being broken rather than the agent being
+   * unable.
+   */
+  it.each([
+    ["a live blocked run", {}, true],
+    ["a run the agent no longer reports", { agent_task_missing: true }, false],
+    ["a terminal run", { reported_state: "completed" as const }, false],
+    ["a disconnected connection", { connection_disconnected: true }, false],
+    ["a run that never left", { dispatch_state: "not_sent" as const }, false],
+    ["expired content", { content_expired: true }, false],
+  ])("offers reply for %s: %s", (_name, overrides, expected) => {
+    const run = makeRun({
+      reported_state: "blocked",
+      needs_user: true,
+      question_text: "Which environment?",
+      ...overrides,
+    });
+
+    expect(canReply(run).ok).toBe(expected);
+  });
+
+  it.each([
+    ["nothing said yet", { cancel_outcome: "none" as const }, true],
+    ["an ambiguous answer", { cancel_outcome: "unconfirmed" as const }, true],
+    ["an explicit refusal", { cancel_outcome: "unsupported" as const }, false],
+    ["a task that cannot be cancelled", { cancel_outcome: "not_cancelable" as const }, false],
+    ["a task the agent forgot", { agent_task_missing: true }, false],
+  ])("offers cancel for %s: %s", (_name, overrides, expected) => {
+    const run = makeRun({ reported_state: "running", ...overrides });
+
+    expect(canCancel(run).ok).toBe(expected);
+  });
+
+  it("014-SC-004 M-03-S22 refuses both offline and queues nothing", () => {
+    const run = makeRun({
+      reported_state: "blocked",
+      needs_user: true,
+      question_text: "Which environment?",
+    });
+
+    const reply = canReply(run, run.capabilities, { online: false });
+    const cancel = canCancel(run, run.capabilities, { online: false });
+
+    expect(reply.ok).toBe(false);
+    expect(cancel.ok).toBe(false);
+    // A sentence the user can act on, not a silent disabled control — and
+    // deliberately no queue: a reply held until the network returns would be
+    // sent to a question the agent may have moved past.
+    expectSentence(reply);
+    expectSentence(cancel);
+  });
+
+  it("014-SC-004 an ambiguous cancellation keeps the control it already used", () => {
+    // AC-029. Brain Buddy does not know whether the request landed, and hiding
+    // the control would present its own uncertainty as the agent's refusal.
+    const run = makeRun({
+      reported_state: "running",
+      cancel_requested: true,
+      cancel_outcome: "unconfirmed",
+    });
+
+    expect(canCancel(run)).toEqual({ ok: true });
   });
 });

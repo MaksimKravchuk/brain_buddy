@@ -243,7 +243,7 @@ describe("connected agents screen", () => {
     ).toBeOnTheScreen();
     expect(backend.callsTo("POST", "/agent-connections/conn_1/disconnect")).toHaveLength(0);
 
-    await fireEvent.press(screen.getByText("Keep this agent connected"));
+    await fireEvent.press(screen.getByText("Keep it connected"));
     expect(backend.callsTo("POST", "/agent-connections/conn_1/disconnect")).toHaveLength(0);
 
     await fireEvent.press(screen.getByText("Disconnect"));

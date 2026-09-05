@@ -1,7 +1,9 @@
 import type {
   AgentCapabilities,
   AgentConnectionResponse,
-  AgentRunResponse
+  AgentGuaranteeTier,
+  AgentRunResponse,
+  AgentRunSummaryResponse
 } from "../../api/agentTypes";
 
 /**
@@ -128,6 +130,8 @@ type RunGuardInput = Pick<
   | "reported_state"
   | "cancel_requested"
   | "capabilities"
+  | "agent_task_missing"
+  | "cancel_outcome"
 >;
 
 /** The server's `_require_commandable`: sent, still connected, not finished. */
@@ -135,6 +139,10 @@ function isCommandable(run: RunGuardInput): boolean {
   return (
     run.dispatch_state !== "not_sent" &&
     !run.connection_disconnected &&
+    // AC-020: the agent answered that this task does not exist, so there is
+    // nothing left for a command to reach. Not a failure, and not a refusal —
+    // simply nowhere to send.
+    !run.agent_task_missing &&
     run.reported_state !== "completed" &&
     run.reported_state !== "failed" &&
     run.reported_state !== "cancelled"
@@ -163,9 +171,111 @@ export function canReplyToRun(run: RunGuardInput & { needs_user: boolean }): boo
   );
 }
 
-/** A second request while the first is unconfirmed would say nothing new. */
+/**
+ * Whether cancelling is still something that could work (AC-018, AC-029).
+ *
+ * The two withdrawn outcomes are the ones the agent itself stated. An
+ * `unconfirmed` outcome deliberately keeps the control, and keeps it even
+ * though a request was already made: BrainBuddy does not know whether that
+ * request landed, and hiding the control would turn its own uncertainty into a
+ * refusal the agent never gave.
+ */
 export function canCancelRun(run: RunGuardInput): boolean {
-  return isCommandable(run) && !run.cancel_requested && run.capabilities.cancel;
+  if (!isCommandable(run) || !run.capabilities.cancel) {
+    return false;
+  }
+  if (run.cancel_outcome === "unsupported" || run.cancel_outcome === "not_cancelable") {
+    return false;
+  }
+  if (run.cancel_outcome === "unconfirmed") {
+    return true;
+  }
+  return !run.cancel_requested;
+}
+
+/** The secondary sentence a cancel outcome earns, if any. Never the label. */
+export function cancelOutcomeCopy(
+  run: Pick<AgentRunResponse, "cancel_outcome">
+): string | null {
+  if (run.cancel_outcome === "unsupported" || run.cancel_outcome === "not_cancelable") {
+    return "Cancellation not supported by this agent.";
+  }
+  if (run.cancel_outcome === "unconfirmed") {
+    return "Cancellation request unconfirmed — you can try again.";
+  }
+  return null;
+}
+
+/**
+ * The marker shown in place of a result BrainBuddy could not store.
+ *
+ * The state was observed and is true; only the result exceeded what the relay
+ * keeps. Saying so is the difference between an honest marker and rendering a
+ * healthy agent as having stopped reporting (D-03-S11, too-large variant).
+ */
+export function resultAvailabilityCopy(
+  run: Pick<AgentRunResponse, "result_availability">
+): string | null {
+  return run.result_availability === "too_large"
+    ? "Result too large to store."
+    : null;
+}
+
+/**
+ * What one artifact placeholder reads as.
+ *
+ * Names the content type, never a download: BrainBuddy never fetched the
+ * artifact and has nothing to hand over.
+ */
+export function artifactPlaceholderCopy(artifact: {
+  name: string | null;
+  media_type: string | null;
+  kind: string;
+}): string {
+  const name = artifact.name?.trim() || `Untitled ${artifact.kind}`;
+  return artifact.media_type ? `${name} · ${artifact.media_type}` : name;
+}
+
+/** The timeline wording for a task succession row (D-03-S27). */
+export const TASK_SUCCESSION_COPY = "The agent continued this run in a new task";
+
+/** The guarantee tier, spelled out. Never an abbreviation (FR-013, FR-003). */
+export function guaranteeTierLabel(tier: AgentGuaranteeTier | null): string | null {
+  if (tier === "guaranteed") {
+    return "Guaranteed single start";
+  }
+  if (tier === "best_effort") {
+    return "Best-effort single start";
+  }
+  return null;
+}
+
+/**
+ * The compact Task-list row (D-03-S21).
+ *
+ * The tier is spelled out in full rather than abbreviated: it is a statement
+ * about duplicate risk, and a code the user has to learn is a warning nobody
+ * reads. A withdrawn cancellation is stated on the same row, so the list and
+ * the detail view cannot disagree about what the user may still do.
+ */
+export function compactRunLabel(
+  summary: Pick<
+    AgentRunSummaryResponse,
+    "primary_state_label" | "guarantee_tier" | "cancel_outcome"
+  >
+): string {
+  const parts = [summary.primary_state_label];
+  const tier = guaranteeTierLabel(summary.guarantee_tier);
+  if (tier) {
+    parts.push(tier);
+  }
+  if (
+    summary.cancel_outcome === "unsupported" ||
+    summary.cancel_outcome === "not_cancelable"
+  ) {
+    parts.push("Cancellation not supported");
+  }
+  return parts.join(" · ");
 }
 
 type DispatchShape = Pick<

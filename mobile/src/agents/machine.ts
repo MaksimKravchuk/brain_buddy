@@ -20,6 +20,7 @@ import type {
   AgentReportedState,
   AgentRunEvent,
   AgentRunResponse,
+  AgentRunSummaryResponse,
   TaskCommentResponse,
   TaskSubtaskResponse,
 } from "../api/types";
@@ -277,6 +278,97 @@ const EVENT_LABELS: Record<AgentReportedState, string> = {
 
 export function eventLabel(type: AgentReportedState): string {
   return EVENT_LABELS[type];
+}
+
+/** The timeline wording for a task succession row (M-03-S26). */
+export const TASK_SUCCESSION_COPY = "The agent continued this run in a new task";
+
+/**
+ * What one timeline row reads as.
+ *
+ * A succession row is not a state change: the agent moved the work into a new
+ * task inside the same conversation, and the row exists so the identifier the
+ * user saw yesterday is not silently replaced.
+ */
+export function timelineRowLabel(event: AgentRunEvent): string {
+  return event.kind === "task_succession" ? TASK_SUCCESSION_COPY : eventLabel(event.type);
+}
+
+/** The secondary sentence a cancel outcome earns, if any. Never the label. */
+export function cancelOutcomeCopy(
+  run: Pick<AgentRunResponse, "cancel_outcome">,
+): string | null {
+  if (run.cancel_outcome === "unsupported" || run.cancel_outcome === "not_cancelable") {
+    return "Cancellation not supported by this agent.";
+  }
+  if (run.cancel_outcome === "unconfirmed") {
+    return "Cancellation request unconfirmed — you can try again.";
+  }
+  return null;
+}
+
+/**
+ * The marker shown in place of a result Brain Buddy could not store.
+ *
+ * The state was observed and is true; only the result exceeded what the relay
+ * keeps. Saying so is the difference between an honest marker and rendering a
+ * healthy agent as having stopped reporting (M-03-S10, too-large variant).
+ */
+export function resultAvailabilityCopy(
+  run: Pick<AgentRunResponse, "result_availability">,
+): string | null {
+  return run.result_availability === "too_large" ? "Result too large to store." : null;
+}
+
+/** One artifact placeholder: the content type, never a download. */
+export function artifactPlaceholderCopy(artifact: {
+  name: string | null;
+  media_type: string | null;
+  kind: string;
+}): string {
+  const name = artifact.name?.trim() || `Untitled ${artifact.kind}`;
+  return artifact.media_type ? `${name} · ${artifact.media_type}` : name;
+}
+
+/** The guarantee tier, spelled out. Never an abbreviation (FR-013, FR-003). */
+export function guaranteeTierLabel(
+  tier: AgentRunSummaryResponse["guarantee_tier"],
+): string | null {
+  if (tier === "guaranteed") {
+    return "Guaranteed single start";
+  }
+  if (tier === "best_effort") {
+    return "Best-effort single start";
+  }
+  return null;
+}
+
+/**
+ * The compact task-row line (M-03-S24).
+ *
+ * The tier is spelled out rather than abbreviated: it is a statement about
+ * duplicate risk, and a code the user has to learn is a warning nobody reads.
+ * A withdrawn cancellation is repeated here so the row and the detail screen
+ * cannot disagree about what the user may still do.
+ */
+export function compactRunLabel(
+  summary: Pick<
+    AgentRunSummaryResponse,
+    "primary_state_label" | "guarantee_tier" | "cancel_outcome"
+  >,
+): string {
+  const parts = [summary.primary_state_label];
+  const tier = guaranteeTierLabel(summary.guarantee_tier);
+  if (tier) {
+    parts.push(tier);
+  }
+  if (
+    summary.cancel_outcome === "unsupported" ||
+    summary.cancel_outcome === "not_cancelable"
+  ) {
+    parts.push("Cancellation not supported");
+  }
+  return parts.join(" · ");
 }
 
 type ConnectionConditionInput = Pick<

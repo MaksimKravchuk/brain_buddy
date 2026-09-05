@@ -148,7 +148,7 @@ describe("AgentSettingsPage", () => {
     await user.click(within(card).getByRole("button", { name: /disconnect/i }));
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText("Confirm with your password"), "hunter2hunter2");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect agent" }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     await waitFor(() => expect(disconnect).toHaveBeenCalledTimes(1));
   });
 
@@ -1027,7 +1027,7 @@ describe("AgentSettingsPage", () => {
 
     await act(async () => {
       await user.type(within(dialog).getByLabelText("Confirm with your password"), "hunter2hunter2");
-      await user.click(within(dialog).getByRole("button", { name: "Disconnect agent" }));
+      await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     });
 
     await waitFor(() =>
@@ -1049,7 +1049,7 @@ describe("AgentSettingsPage", () => {
     const user = userEvent.setup();
     await user.click(within(card).getByRole("button", { name: /disconnect/i }));
     const dialog = screen.getByRole("dialog");
-    const confirm = within(dialog).getByRole("button", { name: "Disconnect agent" });
+    const confirm = within(dialog).getByRole("button", { name: /^Disconnect$/ });
     expect(confirm).toBeEnabled();
 
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
@@ -1074,9 +1074,9 @@ describe("AgentSettingsPage", () => {
     await user.click(within(card).getByRole("button", { name: /disconnect/i }));
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText("Confirm with your password"), "hunter2hunter2");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect agent" }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     await within(dialog).findByRole("alert");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect agent" }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     await waitFor(() => expect(disconnect).toHaveBeenCalledTimes(2));
 
     expect(disconnect.mock.calls[1][1]).toEqual(disconnect.mock.calls[0][1]);
@@ -1095,11 +1095,11 @@ describe("AgentSettingsPage", () => {
     const dialog = screen.getByRole("dialog");
     const password = within(dialog).getByLabelText("Confirm with your password");
     await user.type(password, "wrong");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect agent" }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     await within(dialog).findByRole("alert");
     await user.clear(password);
     await user.type(password, "correct");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect agent" }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
     await waitFor(() => expect(disconnect).toHaveBeenCalledTimes(2));
 
     expect(disconnect.mock.calls[1][2]).not.toBe(disconnect.mock.calls[0][2]);
@@ -1116,7 +1116,9 @@ describe("AgentSettingsPage", () => {
       await user.click(within(card).getByRole("button", { name: /disconnect/i }));
     });
     await act(async () => {
-      await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Keep it connected" })
+      );
     });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -1154,7 +1156,7 @@ describe("AgentSettingsPage", () => {
     await user.click(within(card).getByRole("button", { name: /disconnect/i }));
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText("Confirm with your password"), "wrong-password");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect agent" }));
+    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
       /current password is incorrect.*corr-disconnect-2/i
@@ -1198,5 +1200,110 @@ describe("AgentSettingsPage", () => {
     );
     expect(within(form).getByLabelText("Agent name")).toHaveValue("Loopback agent");
     expect(screen.queryByRole("region", { name: /inbound signing secret/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("014-FR-016 the disconnect confirmation is a decision, not a keystroke", () => {
+  /**
+   * D-01-S23, AC-022.
+   *
+   * This dialog destroys a credential and the only record of where a
+   * connection pointed. Everything asserted here exists so that outcome can
+   * only follow from someone deliberately choosing it.
+   */
+  beforeEach(() => {
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, value: true });
+    act(() => signIn(true));
+    vi.spyOn(apiClient, "listTasks").mockResolvedValue({
+      items: [],
+      next_cursor: null,
+      has_more: false,
+      counts_by_state: { inbox: 0, next: 0, waiting: 0, someday: 0 }
+    });
+    vi.spyOn(apiClient, "listProjects").mockResolvedValue([]);
+    vi.spyOn(apiClient, "listTags").mockResolvedValue([]);
+    vi.spyOn(apiClient, "listAgentConnections").mockResolvedValue([ready]);
+  });
+
+  afterEach(() => {
+    onlineManager.setOnline(true);
+    vi.restoreAllMocks();
+    act(() => {
+      useAuthStore.setState({ user: null, status: "loading" });
+    });
+  });
+
+  async function openDialog() {
+    renderPage();
+    const card = await screen.findByRole("article", { name: "Hermes" });
+    const user = userEvent.setup();
+    const trigger = within(card).getByRole("button", { name: "Disconnect…" });
+    await act(async () => {
+      await user.click(trigger);
+    });
+    return { user, trigger, dialog: screen.getByRole("dialog") };
+  }
+
+  it("names the credential, the card summary and the fingerprint as erased together", async () => {
+    const { dialog } = await openDialog();
+
+    const text = dialog.textContent ?? "";
+    expect(text).toContain("The stored credential and the agent-card summary BrainBuddy discovered");
+    expect(text).toContain("card fingerprint");
+    // AC-024: a connection that could no longer say where it pointed would
+    // outlive the decision to stop pointing there.
+    expect(text).toContain("interface");
+    expect(text).toContain("Disconnecting does not cancel work this agent has already accepted.");
+  });
+
+  it("requires the password and reads safe-then-destructive", async () => {
+    const { dialog } = await openDialog();
+
+    expect(within(dialog).getByLabelText("Confirm with your password")).toBeInTheDocument();
+    const actions = within(dialog)
+      .getAllByRole("button")
+      .map((button) => button.textContent?.trim());
+    expect(actions).toEqual(["Keep it connected", "Disconnect"]);
+  });
+
+  it("traps focus with Disconnect as the last control", async () => {
+    const { user, dialog } = await openDialog();
+
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>("button, input, textarea, select, a[href]")
+    );
+    expect(focusable[focusable.length - 1]).toHaveTextContent("Disconnect");
+
+    // Tabbing off the end wraps back inside: the page behind is never
+    // reachable while the confirmation is open.
+    focusable[focusable.length - 1].focus();
+    await act(async () => {
+      await user.tab();
+    });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it("is not dismissed by Escape alone", async () => {
+    const { user } = await openDialog();
+    const disconnect = vi.spyOn(apiClient, "disconnectAgentConnection");
+
+    await act(async () => {
+      await user.keyboard("{Escape}");
+    });
+
+    // A stray key is not a decision — in either direction.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it("restores focus to the invoking Disconnect control", async () => {
+    const { user, trigger, dialog } = await openDialog();
+
+    await act(async () => {
+      await user.click(within(dialog).getByRole("button", { name: "Keep it connected" }));
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(trigger);
   });
 });

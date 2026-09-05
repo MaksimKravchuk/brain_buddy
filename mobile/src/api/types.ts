@@ -449,7 +449,7 @@ export type AgentReportedState =
   | "cancelled";
 
 export type AgentCommandKind = "start" | "reply" | "cancel";
-export type AgentCommandDelivery = "unconfirmed" | "confirmed";
+export type AgentCommandDelivery = "unconfirmed" | "confirmed" | "rejected";
 
 export interface AgentConnectionResponse {
   id: string;
@@ -594,12 +594,63 @@ export interface AgentReplyRequest {
   expected_revision: number;
 }
 
+/** Why an observation ran. Shown as detail on the row it produced. */
+export type AgentRunEventTrigger = "dispatch" | "schedule" | "push" | "command";
+
+/**
+ * What a timeline row *is*.
+ *
+ * `task_succession` is not a state change: the agent moved the work into a new
+ * task inside the same conversation, and the row exists so the identifier the
+ * user saw yesterday is not silently replaced (M-03-S26).
+ */
+export type AgentRunEventKind = "observation" | "task_succession";
+
+/**
+ * What became of a cancellation request (AC-018, AC-029).
+ *
+ * `unsupported` and `not_cancelable` come only from an explicit agent answer
+ * and withdraw the control. `unconfirmed` is the ambiguous ending and keeps it:
+ * Brain Buddy does not know whether the request landed, and hiding the control
+ * would present its own uncertainty as the agent's refusal.
+ */
+export type AgentCancelOutcome =
+  | "none"
+  | "requested"
+  | "unconfirmed"
+  | "accepted"
+  | "unsupported"
+  | "not_cancelable"
+  | "task_missing";
+
+/** Whether the terminal result could be stored at all. */
+export type AgentResultAvailability = "available" | "too_large";
+
+export type AgentArtifactKind = "text" | "file" | "data" | "link";
+
+/**
+ * A placeholder for something the agent produced and Brain Buddy never fetched.
+ *
+ * Names the content type rather than the content: the relay stores no
+ * attachment, so a row implying a download would promise something that does
+ * not exist (M-03-S10).
+ */
+export interface AgentArtifactSummary {
+  name: string | null;
+  media_type: string | null;
+  kind: AgentArtifactKind;
+}
+
 export interface AgentRunEvent {
   id: string;
   type: AgentReportedState;
   run_version: number;
   received_at: string;
   summary: string | null;
+  trigger: AgentRunEventTrigger;
+  kind: AgentRunEventKind;
+  previous_agent_task_id: string | null;
+  new_agent_task_id: string | null;
 }
 
 export interface AgentRunCommand {
@@ -607,6 +658,8 @@ export interface AgentRunCommand {
   kind: AgentCommandKind;
   body: string | null;
   delivery: AgentCommandDelivery;
+  /** The agent's own answer as a coarse code, or null when it never gave one. */
+  outcome_code: string | null;
   created_at: string;
   confirmed_at: string | null;
 }
@@ -659,6 +712,23 @@ export interface AgentRunResponse {
   exchange_kind: AgentExchangeKind | null;
   push_registration: AgentPushRegistration;
 
+  /**
+   * What Brain Buddy's own observation of the agent's task established.
+   *
+   * Every default here is the absence of a claim rather than a neutral-looking
+   * state: a run nobody has observed yet says only that.
+   */
+  agent_task_missing: boolean;
+  cancel_outcome: AgentCancelOutcome;
+  blocked_reason: string | null;
+  artifacts_summary: AgentArtifactSummary[];
+  /** `too_large` is an honest marker, never **Stopped reporting**. */
+  result_availability: AgentResultAvailability | null;
+  last_observed_at: string | null;
+  /** The base poll rate. The server may observe less often after the window. */
+  observation_interval_seconds: number;
+  identifiers_expired: boolean;
+
   manifest: AgentManifestResponse | null;
   events: AgentRunEvent[];
   commands: AgentRunCommand[];
@@ -682,4 +752,12 @@ export interface AgentRunSummaryResponse {
   needs_user: boolean;
   stopped_reporting: boolean;
   last_contact_at: string | null;
+  /**
+   * The compact row states the tier in full and shows the same withdrawals the
+   * full projection does, so the two surfaces cannot disagree about what the
+   * user may still do (M-03-S24).
+   */
+  guarantee_tier: AgentGuaranteeTier | null;
+  cancel_outcome: AgentCancelOutcome;
+  agent_task_missing: boolean;
 }

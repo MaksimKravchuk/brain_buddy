@@ -27,9 +27,14 @@ import {
   MAX_POLL_DELAY_MS,
   nextPollDelay,
   projectRunAt,
+  artifactPlaceholderCopy,
   canCheckDelivery,
   canRetryHandoff,
+  cancelOutcomeCopy,
+  compactRunLabel,
   dispatchStateDetail,
+  resultAvailabilityCopy,
+  timelineRowLabel,
   rateLimitRetryCopy,
   runsNewestFirst,
   sortedEvents,
@@ -73,6 +78,14 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     exchange_state: "closed",
     exchange_kind: "start",
     push_registration: "unregistered",
+    agent_task_missing: false,
+    cancel_outcome: "none",
+    blocked_reason: null,
+    artifacts_summary: [],
+    result_availability: null,
+    last_observed_at: null,
+    observation_interval_seconds: 60,
+    identifiers_expired: false,
     manifest: null,
     events: [],
     commands: [],
@@ -123,6 +136,10 @@ function makeEvent(overrides: Partial<AgentRunEvent> = {}): AgentRunEvent {
     run_version: 1,
     received_at: "2026-08-09T11:00:00Z",
     summary: null,
+    trigger: "schedule",
+    kind: "observation",
+    previous_agent_task_id: null,
+    new_agent_task_id: null,
     ...overrides,
   };
 }
@@ -212,6 +229,7 @@ describe("applyRun / applyRuns", () => {
         kind: "reply",
         body: "Private reply",
         delivery: "confirmed",
+        outcome_code: null,
         created_at: "2026-08-09T11:30:00Z",
         confirmed_at: "2026-08-09T11:31:00Z",
       }],
@@ -677,5 +695,96 @@ describe("dispatch state detail", () => {
     expect(
       canRetryHandoff({ dispatch_state: "sent", manifest: frozen, content_expired: false }),
     ).toBe(false);
+  });
+});
+
+describe("014-SC-004 the compact row says what the detail screen says", () => {
+  it("014-FR-013 spells the guarantee tier out in full", () => {
+    // M-03-S24. A code the user has to learn is a warning nobody reads, and
+    // the tier is a statement about duplicate risk.
+    expect(
+      compactRunLabel({
+        primary_state_label: "Running",
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "none",
+      }),
+    ).toBe("Running · Guaranteed single start");
+    expect(
+      compactRunLabel({
+        primary_state_label: "Needs you",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "none",
+      }),
+    ).toBe("Needs you · Best-effort single start");
+    expect(
+      compactRunLabel({
+        primary_state_label: "Queued",
+        guarantee_tier: null,
+        cancel_outcome: "none",
+      }),
+    ).toBe("Queued");
+  });
+
+  it("014-FR-013 repeats a withdrawn cancellation on the compact row", () => {
+    expect(
+      compactRunLabel({
+        primary_state_label: "Running",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "not_cancelable",
+      }),
+    ).toBe("Running · Best-effort single start · Cancellation not supported");
+    // An ambiguous outcome is not a refusal, so the row does not report one.
+    expect(
+      compactRunLabel({
+        primary_state_label: "Running",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "unconfirmed",
+      }),
+    ).toBe("Running · Best-effort single start");
+  });
+
+  it("014-FR-014 keeps the cancel outcome a secondary line, never the label", () => {
+    expect(cancelOutcomeCopy({ cancel_outcome: "unsupported" })).toBe(
+      "Cancellation not supported by this agent.",
+    );
+    expect(cancelOutcomeCopy({ cancel_outcome: "unconfirmed" })).toBe(
+      "Cancellation request unconfirmed — you can try again.",
+    );
+    expect(cancelOutcomeCopy({ cancel_outcome: "accepted" })).toBeNull();
+    expect(cancelOutcomeCopy({ cancel_outcome: "none" })).toBeNull();
+  });
+
+  it("014-FR-013 marks a too-large result rather than blaming the agent", () => {
+    expect(resultAvailabilityCopy({ result_availability: "too_large" })).toBe(
+      "Result too large to store.",
+    );
+    expect(resultAvailabilityCopy({ result_availability: "available" })).toBeNull();
+    expect(resultAvailabilityCopy({ result_availability: null })).toBeNull();
+  });
+
+  it("014-FR-010 names a succession row for what it is", () => {
+    const succession = makeEvent({
+      kind: "task_succession",
+      trigger: "command",
+      previous_agent_task_id: "task-a1",
+      new_agent_task_id: "task-b2",
+    });
+
+    expect(timelineRowLabel(succession)).toBe("The agent continued this run in a new task");
+    // An ordinary observation still reads as its state.
+    expect(timelineRowLabel(makeEvent({ type: "running" }))).toBe("Running");
+  });
+
+  it("014-FR-013 names an artifact's content type and never a download", () => {
+    expect(
+      artifactPlaceholderCopy({
+        name: "report.pdf",
+        media_type: "application/pdf",
+        kind: "file",
+      }),
+    ).toBe("report.pdf · application/pdf");
+    expect(
+      artifactPlaceholderCopy({ name: null, media_type: null, kind: "data" }),
+    ).toBe("Untitled data");
   });
 });
