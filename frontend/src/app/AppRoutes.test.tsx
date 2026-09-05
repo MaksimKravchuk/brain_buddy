@@ -894,15 +894,12 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus();
   });
 
-  it("keeps the panel's unbuilt Think affordance honest via the placeholder toast", async () => {
-    const user = userEvent.setup();
+  it("keeps unbuilt task-bound thinking actions out of the task workspace", async () => {
     renderRoutes("/tasks/next/task-1");
     await screen.findByRole("heading", { name: "Task detail" });
 
-    // The prototype panel has no agent zone; its Think action is present but
-    // announces itself as a placeholder instead of pretending to work.
-    await user.click(await screen.findByRole("button", { name: "Think" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Thinking canvas isn't built yet — placeholder");
+    expect(screen.queryByRole("button", { name: "Think" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thinking canvas" })).not.toBeInTheDocument();
   });
 });
 

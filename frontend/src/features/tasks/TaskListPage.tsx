@@ -18,7 +18,7 @@ import { applySmartAddSuggestion, parseSmartAdd, smartAddChips, smartAddSuggesti
 import type { SmartAddDraft, SmartAddSuggestion } from "./smartAdd";
 import { SmartAddSuggestions } from "./SmartAddSuggestions";
 import { TaskTitleAutocompleteSuggestions } from "./TaskTitleAutocompleteSuggestions";
-import { TaskDetailEmptyPanel, TaskDetailPanel } from "./TaskDetailPanel";
+import { TaskDetailPanel } from "./TaskDetailPanel";
 import { getTaskDetailAutosaveController } from "./taskDetailAutosave";
 import type { AutosaveResult } from "./taskDetailAutosave";
 import { useTaskTitleAutocomplete } from "./useTaskTitleAutocomplete";
@@ -447,7 +447,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     agentRuns: agentRunSummaries
   };
 
-  const panel = !panelOpen ? null : taskId ? (
+  const panel = panelOpen && taskId ? (
     <TaskDetailPanel
       task={detailQuery.data}
       autosave={detailController ?? undefined}
@@ -467,9 +467,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       onTransitionSubtask={(task, subtask, action) => subtaskTransitionMutation.mutate({ task, subtask, action })}
       onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
     />
-  ) : (
-    <TaskDetailEmptyPanel />
-  );
+  ) : null;
 
   return (
     <AppShell
