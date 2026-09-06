@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M-02 · Hand-off review (iOS, 390×851)</title>
+<style>
+:root{
+  --brand:#0EA5E9; --brand-hover:#38BDF8; --brand-soft:rgba(14,165,233,.10);
+  --base:#F8FAFC; --sunken:#F1F5F9; --raised:#FFFFFF;
+  --fg1:#0F172A; --fg2:#1E293B; --fg3:#334155; --fg4:#475569;
+  --fg5:#64748B; --fg6:#94A3B8; --fg7:#CBD5E1;
+  --bd:#E2E8F0; --bd-hover:#CBD5E1;
+  --ok:#10B981; --ok-bg:#ECFDF5; --ok-bd:#A7F3D0; --ok-fg:#065F46; --ai-fg:#047857;
+  --warn:#D97706; --warn-bg:#FFFBEB; --warn-bd:#FDE68A; --warn-fg:#92400E;
+  --bad:#E11D48; --bad-bg:#FFF1F2; --bad-bd:#FECDD3; --bad-fg:#9F1239;
+  --info:#0EA5E9; --info-bg:#F0F9FF; --info-bd:#BAE6FD; --info-fg:#0369A1;
+  --tag-bg:#F1F5F9; --tag-fg:#475569; --due-bg:#FFF1F2; --due-bd:#FECDD3; --due-fg:#BE123C;
+  --r-sm:6px; --r-md:8px; --r-row:12px; --r-card:14px; --r-lg:16px; --r-xl:20px; --r-full:999px;
+  --sh-soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);
+  --sh-raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);
+  --sh-float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18);
+  --ease:cubic-bezier(0.22,1,0.36,1);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  font-feature-settings:"cv11","ss01","ss03";
+  background:var(--base); color:var(--fg1);
+  -webkit-font-smoothing:antialiased; font-size:14px; line-height:1.5;
+}
+.page{max-width:1360px;margin:0 auto;padding:28px 24px 72px}
+.pagehead{margin-bottom:24px}
+.pagehead h1{font-size:28px;line-height:1.15;letter-spacing:-.02em;font-weight:600;margin:0 0 6px}
+.pagehead p{margin:0;color:var(--fg5);font-size:14px;max-width:78ch}
+.pagehead .crumb{font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--fg5);margin-bottom:8px}
+.grid{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.panel{background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-xl);box-shadow:var(--sh-soft);overflow:hidden;flex:1 1 420px;min-width:380px;max-width:660px}
+.panel.wide{flex:1 1 660px;max-width:980px}
+.panel.full{flex:1 1 100%;max-width:100%}
+.panel-h{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--sunken);border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.sid{font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:#fff;background:var(--fg4);border-radius:var(--r-full);padding:3px 8px}
+.pname{font-size:12px;color:var(--fg4);font-weight:500}
+.pnote{font-size:11px;color:var(--fg5);flex-basis:100%;margin:0}
+.panel-b{padding:16px}
+.panel-b.sunk{background:var(--base)}
+
+h2.sec{font-size:20px;line-height:1.3;letter-spacing:-.015em;font-weight:600;margin:34px 0 14px}
+h2.sec:first-of-type{margin-top:6px}
+.label{font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--fg5);margin:0 0 6px}
+.micro{font-size:11px;line-height:1.35;color:var(--fg5);margin:0}
+.caption{font-size:12px;line-height:1.4;color:var(--fg5);margin:0}
+.body{font-size:14px;line-height:1.5;color:var(--fg2);margin:0}
+.subtitle{font-size:15px;line-height:1.4;letter-spacing:-.005em;font-weight:500;color:var(--fg2);margin:0}
+.title{font-size:20px;line-height:1.3;letter-spacing:-.015em;font-weight:600;margin:0}
+.display{font-size:28px;line-height:1.15;letter-spacing:-.02em;font-weight:600;margin:0}
+.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:12px;color:var(--fg3)}
+.stack{display:flex;flex-direction:column}
+.g1{gap:4px}.g2{gap:8px}.g3{gap:12px}.g4{gap:16px}.g5{gap:20px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rowt{display:flex;align-items:flex-start;gap:8px}
+.spacer{margin-left:auto}
+.dim{color:var(--fg5)}
+.strong{font-weight:600;color:var(--fg1)}
+hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
+
+.card{background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-row);padding:14px;box-shadow:var(--sh-soft)}
+.card.flat{box-shadow:none}
+.card.tint-ok{background:var(--ok-bg);border-color:var(--ok-bd)}
+.card.tint-warn{background:var(--warn-bg);border-color:var(--warn-bd)}
+.card.tint-bad{background:var(--bad-bg);border-color:var(--bad-bd)}
+.card.tint-info{background:var(--info-bg);border-color:var(--info-bd)}
+.card.tint-sunk{background:var(--sunken)}
+.card.dashed{border-style:dashed;background:transparent;box-shadow:none}
+
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:var(--r-full);border:1px solid var(--bd);background:var(--raised);padding:2px 9px;font-size:11px;font-weight:500;color:var(--fg4);white-space:nowrap}
+.pill.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-fg)}
+.pill.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-fg)}
+.pill.bad{background:var(--bad-bg);border-color:var(--bad-bd);color:var(--bad-fg)}
+.pill.info{background:var(--info-bg);border-color:var(--info-bd);color:var(--info-fg)}
+.pill.mute{background:var(--sunken);border-color:var(--bd);color:var(--fg4)}
+.tag{display:inline-flex;align-items:center;border-radius:var(--r-full);background:var(--tag-bg);border:1px solid var(--bd);color:var(--tag-fg);font-size:11px;padding:2px 8px}
+.due{display:inline-flex;align-items:center;border-radius:var(--r-full);background:var(--due-bg);border:1px solid var(--due-bd);color:var(--due-fg);font-size:11px;padding:2px 8px}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--r-md);border:1px solid var(--bd);background:var(--raised);color:var(--fg2);font:inherit;font-size:13px;font-weight:500;padding:8px 12px;box-shadow:var(--sh-soft);cursor:default;transition:background 150ms var(--ease)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.danger{background:var(--raised);border-color:var(--bad-bd);color:var(--bad-fg)}
+.btn.ghost{background:transparent;border-color:transparent;box-shadow:none;color:var(--fg4)}
+.btn.sm{padding:6px 10px;font-size:12px}
+.btn[aria-disabled="true"]{opacity:.45}
+.btn.primary:hover{background:var(--brand-hover);border-color:var(--brand-hover)}
+.btn:active{transform:scale(.98)}
+
+.field{display:flex;flex-direction:column;gap:4px}
+.input{border:1px solid var(--bd);border-radius:var(--r-sm);background:var(--raised);padding:8px 10px;font-size:13px;color:var(--fg1);box-shadow:var(--sh-soft)}
+.input.ph{color:var(--fg6)}
+.input.focus{border-color:var(--brand);box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5)}
+.hint{font-size:11px;color:var(--fg5)}
+.radio{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--fg2)}
+.dot{width:14px;height:14px;border-radius:var(--r-full);border:1px solid var(--bd-hover);background:#fff;display:inline-block;flex:0 0 auto}
+.dot.on{border:4px solid var(--brand)}
+.box{width:14px;height:14px;border-radius:3px;border:1px solid var(--bd-hover);background:#fff;display:inline-block;flex:0 0 auto}
+.box.on{background:var(--brand);border-color:var(--brand)}
+.check{width:18px;height:18px;border-radius:var(--r-full);border:1.5px solid var(--fg7);flex:0 0 auto}
+
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12px}
+.kv dt{color:var(--fg5)}
+.kv dd{margin:0;color:var(--fg3)}
+
+.avatar{width:22px;height:22px;border-radius:8px;background:var(--ok-bg);color:var(--ai-fg);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex:0 0 auto}
+
+.runcard{border:1px solid var(--ok-bd);background:var(--ok-bg);border-radius:var(--r-row);padding:12px}
+.runcard.neutral{border-color:var(--bd);background:var(--sunken)}
+.runcard.needs{border-color:var(--warn-bd);background:var(--warn-bg)}
+.runcard.bad{border-color:var(--bad-bd);background:var(--bad-bg)}
+.runcard .head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.runcard .note{font-size:11px;color:var(--fg5);margin:6px 0 0}
+.timeline{list-style:none;margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--bd);display:flex;flex-direction:column;gap:5px}
+.timeline li{font-size:11px;color:var(--fg4);display:flex;gap:8px;flex-wrap:wrap}
+.timeline .when{color:var(--fg6)}
+.timeline .what{font-weight:500;color:var(--fg3)}
+.timeline .sum{flex-basis:100%;color:var(--fg5)}
+.artifact{border:1px dashed var(--bd-hover);border-radius:var(--r-md);background:var(--raised);padding:8px 10px;font-size:12px;color:var(--fg4)}
+.link{color:var(--brand);text-decoration:underline;font-size:12px;word-break:break-all}
+
+.taskrow{display:flex;align-items:center;gap:10px;background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-row);padding:10px 12px;box-shadow:var(--sh-soft)}
+.taskrow .t{font-size:14px;font-weight:500;color:var(--fg1)}
+.taskrow .meta{margin-left:auto;display:flex;align-items:center;gap:8px}
+.taskrow .proj{font-size:11px;color:var(--fg6);min-width:96px;text-align:right}
+
+.shell{display:flex;border:1px solid var(--bd);border-radius:var(--r-lg);overflow:hidden;background:var(--base)}
+.side{width:248px;flex:0 0 248px;background:var(--raised);border-right:1px solid var(--bd);padding:14px 12px;display:flex;flex-direction:column;gap:14px}
+.navitem{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--fg3);padding:7px 9px;border-radius:var(--r-sm)}
+.navitem.on{background:var(--brand-soft);color:var(--fg1);font-weight:500}
+.navitem .n{margin-left:auto;font-size:11px;color:var(--fg6)}
+.navitem .badge{margin-left:auto;background:var(--brand);color:#fff;font-size:10px;font-weight:600;border-radius:var(--r-full);padding:1px 7px}
+.navitem.deferred{color:var(--fg6)}
+.main{flex:1 1 auto;padding:18px;min-width:0}
+
+.phone{width:390px;height:851px;flex:0 0 auto;border:1px solid var(--bd-hover);border-radius:var(--r-xl);background:var(--base);overflow:hidden;box-shadow:var(--sh-raised);display:flex;flex-direction:column}
+.phone .status{height:34px;flex:0 0 auto;background:var(--raised);border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11px;color:var(--fg5)}
+.phone .navbar{flex:0 0 auto;background:var(--raised);border-bottom:1px solid var(--bd);padding:10px 16px;display:flex;align-items:center;gap:10px}
+.phone .navbar .t{font-size:15px;font-weight:600;letter-spacing:-.005em}
+.phone .content{flex:1 1 auto;overflow:hidden;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.phone .tabbar{flex:0 0 auto;height:66px;background:var(--raised);border-top:1px solid var(--bd);display:flex;align-items:center;justify-content:space-around;padding-bottom:10px;font-size:10px;color:var(--fg5)}
+.sheet{margin-top:auto;background:var(--raised);border:1px solid var(--bd);border-top-left-radius:var(--r-xl);border-top-right-radius:var(--r-xl);box-shadow:var(--sh-float);padding:16px;display:flex;flex-direction:column;gap:12px}
+/* A review sheet is bounded by the 851px frame: the manifest scrolls inside it and the
+   confirm/cancel actions stay pinned at the bottom, inside one-handed reach. */
+.sheet.tall{max-height:720px;min-height:0;overflow:hidden;gap:0;padding:16px 16px 0}
+.sheet.tall .grabber{margin-bottom:12px}
+.sheet-head{flex:0 0 auto;display:flex;flex-direction:column;gap:12px;padding-bottom:12px}
+.sheet-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-bottom:18px;-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 30px),transparent 100%);mask-image:linear-gradient(to bottom,#000 calc(100% - 30px),transparent 100%)}
+.sheet-foot{flex:0 0 auto;display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--bd);padding:12px 0 16px;background:var(--raised)}
+/* Frames whose defining content sits further down the manifest are drawn part-scrolled,
+   faded at both edges, so the affordance the state is named for is actually visible. */
+.sheet-body.scrolled{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 26px,#000 calc(100% - 30px),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 26px,#000 calc(100% - 30px),transparent 100%)}
+.sheet-body.scrolled > :first-child{margin-top:-300px}
+.sheet-body.scrolled.far > :first-child{margin-top:-650px}
+.grabber{width:36px;height:4px;border-radius:var(--r-full);background:var(--fg7);margin:0 auto 4px}
+.scrim{position:relative;flex:1 1 auto;background:rgba(248,250,252,.8);display:flex;flex-direction:column}
+.tap44{min-height:44px}
+.phonewrap{display:flex;flex-direction:column;gap:8px;flex:0 0 auto}
+.phonecap{font-size:11px;color:var(--fg5);max-width:390px}
+.phonecap .sid{margin-right:6px}
+
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 22px}
+.legend .pill{font-size:11px}
+.dlg{background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-xl);box-shadow:var(--sh-float);padding:18px;display:flex;flex-direction:column;gap:12px}
+.overlay-head{display:flex;align-items:flex-start;gap:12px;border-bottom:1px solid var(--bd);padding-bottom:12px;margin-bottom:4px}
+.skel{background:var(--sunken);border-radius:var(--r-sm);height:12px}
+.skel.w60{width:60%}.skel.w40{width:40%}.skel.w80{width:80%}.skel.w30{width:30%}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="pagehead">
+    <p class="crumb">Feature 014 · A2A relay wire contract · design</p>
+    <h1>M-02 · Hand-off review (iOS, 390×851)</h1>
+    <p>The same manifest as D-02 in a bottom sheet. Confirming names the manifest token; changing any value, the destination or the run ID invalidates confirmation and rebuilds the review. Static and non-interactive.</p>
+  </div>
+
+<h2 class="sec">The consent boundary at iPhone width</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+    <p class="label">Review before sending</p>
+    <p class="title" style="font-size:17px">Hand to agent</p>
+    <p class="caption">Write the migration runbook for the relay cutover</p>
+    </div>
+    <div class="sheet-body">
+        <div class="stack g2">
+      <p class="label">Agent</p>
+      <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
+        <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
+        <span class="pill ok">Tested ready</span></div>
+    </div>
+    <div class="card stack g2" style="border-radius:14px">
+      <p class="label">Exactly what will be sent</p>
+      <div><p class="label" style="margin:0">Task title</p>
+        <p class="body">Write the migration runbook for the relay cutover</p></div>
+      <div class="row"><label class="radio"><span class="box on"></span>Include task details</label></div>
+      <p class="body" style="font-size:13px">Cover the pre-flight checks, the cutover order and the rollback trigger.</p>
+      <div><p class="label" style="margin:0">Supporting items</p>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Staging rehearsal notes</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Staging rehearsal notes">Remove</span></div>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Cutover window</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Cutover window">Remove</span></div>
+      </div>
+      <dl class="kv"><dt>Destination</dt><dd class="mono">https://hermes.example.com/a2a/v1</dd>
+        <dt>Task ID</dt><dd class="mono">tsk_8f21c0a4</dd>
+        <dt>Run ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Correlation ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Callback address</dt><dd class="mono">…/a2a/push/run_5b7e19d3/••••••••</dd></dl>
+      <p class="micro">Registered with this agent because it advertises push notifications. Private to this run, secret
+      part never shown, held until the run ends. It can only ask BrainBuddy to check on the run — no task content
+      returns through it.</p>
+    </div><div class="card tint-ok" style="border-radius:14px">
+      <p class="caption" style="color:var(--ok-fg)"><strong>Guaranteed single start.</strong> This agent declares
+      BrainBuddy's single-start extension, so confirming twice cannot start a second run.</p></div><div class="card tint-info" style="border-radius:14px">
+      <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Cards do not
+      advertise it, so BrainBuddy can only find out once you request it.</p></div><div class="card tint-warn" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)">Everything above is copied out of BrainBuddy to an agent you
+      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div>
+  </div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S01</span>default (review) — Guaranteed single start</p>
+  <p class="phonecap">Scrolls within the sheet; the send and cancel actions stay pinned at the bottom, inside one-handed reach.</p>
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+    <p class="label">Review before sending</p>
+    <p class="title" style="font-size:17px">Hand to agent</p>
+    <p class="caption">Write the migration runbook for the relay cutover</p>
+    </div>
+    <div class="sheet-body scrolled">
+        <div class="stack g2">
+      <p class="label">Agent</p>
+      <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
+        <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
+        <span class="pill ok">Tested ready</span></div>
+    </div>
+    <div class="card stack g2" style="border-radius:14px">
+      <p class="label">Exactly what will be sent</p>
+      <div><p class="label" style="margin:0">Task title</p>
+        <p class="body">Write the migration runbook for the relay cutover</p></div>
+      <div class="row"><label class="radio"><span class="box on"></span>Include task details</label></div>
+      <p class="body" style="font-size:13px">Cover the pre-flight checks, the cutover order and the rollback trigger.</p>
+      <div><p class="label" style="margin:0">Supporting items</p>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Staging rehearsal notes</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Staging rehearsal notes">Remove</span></div>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Cutover window</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Cutover window">Remove</span></div>
+      </div>
+      <dl class="kv"><dt>Destination</dt><dd class="mono">https://hermes.example.com/a2a/v1</dd>
+        <dt>Task ID</dt><dd class="mono">tsk_8f21c0a4</dd>
+        <dt>Run ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Correlation ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Callback address</dt><dd class="mono">…/a2a/push/run_5b7e19d3/••••••••</dd></dl>
+      <p class="micro">Registered with this agent because it advertises push notifications. Private to this run, secret
+      part never shown, held until the run ends. It can only ask BrainBuddy to check on the run — no task content
+      returns through it.</p>
+    </div><div class="card tint-warn stack g1" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)"><strong>Best-effort single start.</strong> This agent does not
+      declare the extension. Before any retry BrainBuddy checks the agent for an existing task and adopts it. A
+      duplicate remains possible if the agent forgets its tasks.</p>
+      <p class="caption" style="color:var(--warn-fg)"><a class="link" href="docs/a2a-extensions/single-start/v1.md"
+      rel="noopener noreferrer">Read the single-start extension specification</a> <span class="micro">Opens the
+      published specification outside BrainBuddy.</span></p></div><div class="card tint-info" style="border-radius:14px">
+      <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Cards do not
+      advertise it, so BrainBuddy can only find out once you request it.</p></div><div class="card tint-warn" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)">Everything above is copied out of BrainBuddy to an agent you
+      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div>
+  </div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S02</span>review — Best-effort single start</p>
+  <p class="phonecap">Drawn part-scrolled: the sheet opens at the top of the manifest, and this frame is scrolled to the tier block so the disclosure and the extension link are visible. Send and Cancel stay pinned throughout.</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet">
+    <div class="grabber"></div><p class="title" style="font-size:17px">Hand to agent</p>
+    <p class="subtitle">None of your agents can take this hand-off</p>
+    <p class="body">You have four connections. None is tested and fresh right now.</p>
+    <div class="card flat row" style="padding:10px"><span style="font-size:13px">Research runner</span>
+      <span class="spacer"></span><span class="pill warn">Stale</span></div>
+    <div class="card flat row" style="padding:10px"><span style="font-size:13px">Vendor cloud agent</span>
+      <span class="spacer"></span><span class="pill bad">Unsupported scheme</span></div>
+    <div class="card flat row" style="padding:10px"><span style="font-size:13px">Old relay connector</span>
+      <span class="spacer"></span><span class="pill mute">Disconnected</span></div>
+    <div class="card flat row" style="padding:10px"><span style="font-size:13px">Hermes planner</span>
+      <span class="spacer"></span><span class="pill warn">Agent changed</span></div>
+    <span class="btn primary tap44" style="padding:12px">Open Connected agents</span></div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S03</span>empty (filtered to nothing) — no eligible connection</p>
+  
+</div></div>
+<h2 class="sec">Before the review can be built</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet">
+    <div class="grabber"></div><p class="title" style="font-size:17px">Hand to agent</p>
+    <p class="subtitle">No agents connected yet</p>
+    <p class="body">Add an agent you operate under Connected agents, then test it. A task can only be handed to a
+    connection whose last test succeeded.</p>
+    <span class="btn primary tap44" style="padding:12px">Open Connected agents</span></div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S04</span>empty (first run) — no agent connected</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet">
+    <div class="grabber"></div><p class="title" style="font-size:17px">Hand to agent</p>
+    <p class="caption">Building the hand-off preview…</p>
+    <div class="card stack g2" style="border-radius:14px"><div class="skel w40"></div><div class="skel w80"></div>
+    <div class="skel w60"></div><div class="skel w80"></div></div>
+    <p class="micro">No task content has been sent.</p></div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S05</span>loading — building the review</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet">
+    <div class="grabber"></div><p class="title" style="font-size:17px">Hand to agent</p>
+    <div class="card tint-bad stack g2" style="border-radius:14px">
+      <p class="subtitle" style="color:var(--bad-fg)">We couldn't build this hand-off</p>
+      <p class="caption" style="color:var(--bad-fg)">The server did not answer. Nothing was sent to the agent.</p>
+      <p class="micro mono">Correlation ID 91ac-4de0-77b2</p></div>
+    <span class="btn tap44" style="padding:12px">Retry</span></div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S06</span>error — the review could not be built</p>
+  
+</div></div>
+<h2 class="sec">Re-review, reauthentication, interruption</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+    <p class="label">Review before sending</p>
+    <p class="title" style="font-size:17px">Hand to agent</p>
+    <p class="caption">Write the migration runbook for the relay cutover</p>
+    </div>
+    <div class="sheet-body">
+        <div class="card tint-warn" style="border-radius:14px"><p class="caption" style="color:var(--warn-fg)">
+      <strong>What would be sent changed since you reviewed it.</strong> The review has been refreshed — read it again
+      before sending. Nothing was dispatched.</p></div>
+    <div class="stack g2">
+      <p class="label">Agent</p>
+      <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
+        <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
+        <span class="pill ok">Tested ready</span></div>
+    </div>
+    <div class="card stack g2" style="border-radius:14px">
+      <p class="label">Exactly what will be sent</p>
+      <div><p class="label" style="margin:0">Task title</p>
+        <p class="body">Write the migration runbook for the relay cutover</p></div>
+      <div class="row"><label class="radio"><span class="box on"></span>Include task details</label></div>
+      <p class="body" style="font-size:13px">Cover the pre-flight checks, the cutover order and the rollback trigger.</p>
+      <div><p class="label" style="margin:0">Supporting items</p>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Staging rehearsal notes</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Staging rehearsal notes">Remove</span></div>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Cutover window</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Cutover window">Remove</span></div>
+      </div>
+      <dl class="kv"><dt>Destination</dt><dd class="mono">https://hermes.example.com/a2a/v1</dd>
+        <dt>Task ID</dt><dd class="mono">tsk_8f21c0a4</dd>
+        <dt>Run ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Correlation ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Callback address</dt><dd class="mono">…/a2a/push/run_5b7e19d3/••••••••</dd></dl>
+      <p class="micro">Registered with this agent because it advertises push notifications. Private to this run, secret
+      part never shown, held until the run ends. It can only ask BrainBuddy to check on the run — no task content
+      returns through it.</p>
+    </div><div class="card tint-ok" style="border-radius:14px">
+      <p class="caption" style="color:var(--ok-fg)"><strong>Guaranteed single start.</strong> This agent declares
+      BrainBuddy's single-start extension, so confirming twice cannot start a second run.</p></div><div class="card tint-info" style="border-radius:14px">
+      <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Cards do not
+      advertise it, so BrainBuddy can only find out once you request it.</p></div><div class="card tint-warn" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)">Everything above is copied out of BrainBuddy to an agent you
+      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px">Send to agent</span></div>
+  </div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S07</span>re-review required — what would be sent changed</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet">
+    <div class="grabber"></div><p class="label">Agent</p>
+    <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
+      <span style="font-size:13px">Hermes planner</span><span class="spacer"></span><span class="pill ok">Tested ready</span></div>
+    <div class="card flat stack g1" style="padding:10px;opacity:.6"><div class="row"><span class="dot"></span>
+      <span style="font-size:13px">Drafting sample agent</span><span class="spacer"></span>
+      <span class="pill mute">Status unknown</span></div>
+      <p class="micro">Could not be refreshed just now, so it is not offered. Test it from Connected agents.</p></div>
+    <p class="micro mono">Correlation ID 5f0b-2c74-a913</p></div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S08</span>partial failure — one connection's status is unknown</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet">
+    <div class="grabber"></div><p class="title" style="font-size:17px">Hand to agent</p>
+    <div class="field"><p class="label">Your Brain Buddy password</p><div class="input ph focus">Confirm it is you</div>
+      <p class="hint">This is the first content-bearing send to this destination, so BrainBuddy re-checks your
+      password. It re-checks again whenever the agent's interface address changes.</p></div>
+    <span class="btn primary tap44" style="padding:12px">Send to agent</span></div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S09</span>reauthentication required</p>
+  
+</div></div>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+    <p class="label">Review before sending</p>
+    <p class="title" style="font-size:17px">Hand to agent</p>
+    <p class="caption">Write the migration runbook for the relay cutover</p>
+    </div>
+    <div class="sheet-body">
+        <div class="stack g2">
+      <p class="label">Agent</p>
+      <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
+        <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
+        <span class="pill ok">Tested ready</span></div>
+    </div>
+    <div class="card stack g2" style="border-radius:14px">
+      <p class="label">Exactly what will be sent</p>
+      <div><p class="label" style="margin:0">Task title</p>
+        <p class="body">Write the migration runbook for the relay cutover</p></div>
+      <div class="row"><label class="radio"><span class="box on"></span>Include task details</label></div>
+      <p class="body" style="font-size:13px">Cover the pre-flight checks, the cutover order and the rollback trigger.</p>
+      <div><p class="label" style="margin:0">Supporting items</p>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Staging rehearsal notes</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Staging rehearsal notes">Remove</span></div>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Cutover window</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Cutover window">Remove</span></div>
+      </div>
+      <dl class="kv"><dt>Destination</dt><dd class="mono">https://hermes.example.com/a2a/v1</dd>
+        <dt>Task ID</dt><dd class="mono">tsk_8f21c0a4</dd>
+        <dt>Run ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Correlation ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Callback address</dt><dd class="mono">…/a2a/push/run_5b7e19d3/••••••••</dd></dl>
+      <p class="micro">Registered with this agent because it advertises push notifications. Private to this run, secret
+      part never shown, held until the run ends. It can only ask BrainBuddy to check on the run — no task content
+      returns through it.</p>
+    </div><div class="card tint-warn stack g1" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)"><strong>Best-effort single start.</strong> This agent does not
+      declare the extension. Before any retry BrainBuddy checks the agent for an existing task and adopts it. A
+      duplicate remains possible if the agent forgets its tasks.</p>
+      <p class="caption" style="color:var(--warn-fg)"><a class="link" href="docs/a2a-extensions/single-start/v1.md"
+      rel="noopener noreferrer">Read the single-start extension specification</a> <span class="micro">Opens the
+      published specification outside BrainBuddy.</span></p></div><div class="card tint-info" style="border-radius:14px">
+      <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Cards do not
+      advertise it, so BrainBuddy can only find out once you request it.</p></div><div class="card tint-warn" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)">Everything above is copied out of BrainBuddy to an agent you
+      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div>
+    <div class="card tint-warn" style="border-radius:14px"><p class="caption" style="color:var(--warn-fg)">
+      <strong>Offline.</strong> Sending is unavailable and nothing is queued. If the app closes here, reopening loads
+      the server projection and rebuilds this review before anything can leave.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" aria-disabled="true" style="padding:12px">Send to agent</span></div>
+  </div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S10</span>offline / interrupted — send disabled, nothing queued</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet">
+    <div class="grabber"></div><p class="title" style="font-size:17px">Hand to agent</p>
+    <span class="btn primary tap44" aria-disabled="true" style="padding:12px">Sending…</span>
+    <p class="micro">Confirming again while this is in flight returns the same run. The run ID, message ID and
+    correlation ID were reserved before anything was sent, so a replay cannot become a second task at the agent.</p>
+    <p class="micro">The sheet cannot be swiped away while a confirmation is in flight.</p></div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S11</span>sending — confirmation in flight</p>
+  
+</div></div>
+<h2 class="sec">The one-time best-effort acknowledgement</h2>
+<div class="grid"><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+    <p class="label">Review before sending</p>
+    <p class="title" style="font-size:17px">Hand to agent</p>
+    <p class="caption">Write the migration runbook for the relay cutover</p>
+    </div>
+    <div class="sheet-body scrolled far">
+        <div class="stack g2">
+      <p class="label">Agent</p>
+      <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
+        <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
+        <span class="pill ok">Tested ready</span></div>
+    </div>
+    <div class="card stack g2" style="border-radius:14px">
+      <p class="label">Exactly what will be sent</p>
+      <div><p class="label" style="margin:0">Task title</p>
+        <p class="body">Write the migration runbook for the relay cutover</p></div>
+      <div class="row"><label class="radio"><span class="box on"></span>Include task details</label></div>
+      <p class="body" style="font-size:13px">Cover the pre-flight checks, the cutover order and the rollback trigger.</p>
+      <div><p class="label" style="margin:0">Supporting items</p>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Staging rehearsal notes</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Staging rehearsal notes">Remove</span></div>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Cutover window</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Cutover window">Remove</span></div>
+      </div>
+      <dl class="kv"><dt>Destination</dt><dd class="mono">https://hermes.example.com/a2a/v1</dd>
+        <dt>Task ID</dt><dd class="mono">tsk_8f21c0a4</dd>
+        <dt>Run ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Correlation ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Callback address</dt><dd class="mono">…/a2a/push/run_5b7e19d3/••••••••</dd></dl>
+      <p class="micro">Registered with this agent because it advertises push notifications. Private to this run, secret
+      part never shown, held until the run ends. It can only ask BrainBuddy to check on the run — no task content
+      returns through it.</p>
+    </div><div class="card tint-warn stack g1" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)"><strong>Best-effort single start.</strong> This agent does not
+      declare the extension. Before any retry BrainBuddy checks the agent for an existing task and adopts it. A
+      duplicate remains possible if the agent forgets its tasks.</p>
+      <p class="caption" style="color:var(--warn-fg)"><a class="link" href="docs/a2a-extensions/single-start/v1.md"
+      rel="noopener noreferrer">Read the single-start extension specification</a> <span class="micro">Opens the
+      published specification outside BrainBuddy.</span></p></div><div class="card tint-info" style="border-radius:14px">
+      <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Cards do not
+      advertise it, so BrainBuddy can only find out once you request it.</p></div><div class="card tint-warn" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)">Everything above is copied out of BrainBuddy to an agent you
+      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div><div class="card tint-warn stack g2" style="border-radius:14px">
+      <label class="radio tap44" style="align-items:flex-start"><span class="box"></span>
+      <span style="font-size:13px;color:var(--warn-fg)">I understand that a duplicate task is possible with this
+      agent</span></label>
+      <p class="micro" style="color:var(--warn-fg)">Asked once, on your first hand-off to this agent.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" aria-disabled="true" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div>
+  </div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S12</span>best-effort, first hand-off — not acknowledged, sending disabled</p>
+  <p class="phonecap">Drawn part-scrolled to the acknowledgement row, which is what this state is about. The manifest above it is unchanged and scrolls back into view.</p>
+  <p class="phonecap">AC-026 / FR-003. Send stays disabled until the box is ticked; the checkbox row is a 44pt target.</p>
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+    <p class="label">Review before sending</p>
+    <p class="title" style="font-size:17px">Hand to agent</p>
+    <p class="caption">Write the migration runbook for the relay cutover</p>
+    </div>
+    <div class="sheet-body scrolled far">
+        <div class="stack g2">
+      <p class="label">Agent</p>
+      <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
+        <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
+        <span class="pill ok">Tested ready</span></div>
+    </div>
+    <div class="card stack g2" style="border-radius:14px">
+      <p class="label">Exactly what will be sent</p>
+      <div><p class="label" style="margin:0">Task title</p>
+        <p class="body">Write the migration runbook for the relay cutover</p></div>
+      <div class="row"><label class="radio"><span class="box on"></span>Include task details</label></div>
+      <p class="body" style="font-size:13px">Cover the pre-flight checks, the cutover order and the rollback trigger.</p>
+      <div><p class="label" style="margin:0">Supporting items</p>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Staging rehearsal notes</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Staging rehearsal notes">Remove</span></div>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Cutover window</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Cutover window">Remove</span></div>
+      </div>
+      <dl class="kv"><dt>Destination</dt><dd class="mono">https://hermes.example.com/a2a/v1</dd>
+        <dt>Task ID</dt><dd class="mono">tsk_8f21c0a4</dd>
+        <dt>Run ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Correlation ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Callback address</dt><dd class="mono">…/a2a/push/run_5b7e19d3/••••••••</dd></dl>
+      <p class="micro">Registered with this agent because it advertises push notifications. Private to this run, secret
+      part never shown, held until the run ends. It can only ask BrainBuddy to check on the run — no task content
+      returns through it.</p>
+    </div><div class="card tint-warn stack g1" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)"><strong>Best-effort single start.</strong> This agent does not
+      declare the extension. Before any retry BrainBuddy checks the agent for an existing task and adopts it. A
+      duplicate remains possible if the agent forgets its tasks.</p>
+      <p class="caption" style="color:var(--warn-fg)"><a class="link" href="docs/a2a-extensions/single-start/v1.md"
+      rel="noopener noreferrer">Read the single-start extension specification</a> <span class="micro">Opens the
+      published specification outside BrainBuddy.</span></p></div><div class="card tint-info" style="border-radius:14px">
+      <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Cards do not
+      advertise it, so BrainBuddy can only find out once you request it.</p></div><div class="card tint-warn" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)">Everything above is copied out of BrainBuddy to an agent you
+      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div><div class="card tint-warn stack g2" style="border-radius:14px">
+      <label class="radio tap44" style="align-items:flex-start"><span class="box on"></span>
+      <span style="font-size:13px;color:var(--warn-fg)">I understand that a duplicate task is possible with this
+      agent</span></label>
+      <p class="micro" style="color:var(--warn-fg)">Acknowledged. BrainBuddy will not ask again for this agent.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div>
+  </div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S13</span>best-effort, first hand-off — acknowledged, sending enabled</p>
+  <p class="phonecap">Drawn part-scrolled to the acknowledgement row.</p>
+  
+</div><div class="phonewrap">
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>390 × 851</span></div>
+    <div class="navbar"><span class="btn ghost sm" aria-label="Back">Back</span><span class="t">Connected agents</span></div>
+    <div class="scrim"><div class="content" style="flex:0 0 auto"></div><div class="sheet tall">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+    <p class="label">Review before sending</p>
+    <p class="title" style="font-size:17px">Hand to agent</p>
+    <p class="caption">Write the migration runbook for the relay cutover</p>
+    </div>
+    <div class="sheet-body scrolled far">
+        <div class="stack g2">
+      <p class="label">Agent</p>
+      <div class="card flat row tap44" style="padding:10px"><span class="dot on"></span>
+        <span style="font-size:13px">Hermes planner</span><span class="spacer"></span>
+        <span class="pill ok">Tested ready</span></div>
+    </div>
+    <div class="card stack g2" style="border-radius:14px">
+      <p class="label">Exactly what will be sent</p>
+      <div><p class="label" style="margin:0">Task title</p>
+        <p class="body">Write the migration runbook for the relay cutover</p></div>
+      <div class="row"><label class="radio"><span class="box on"></span>Include task details</label></div>
+      <p class="body" style="font-size:13px">Cover the pre-flight checks, the cutover order and the rollback trigger.</p>
+      <div><p class="label" style="margin:0">Supporting items</p>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Staging rehearsal notes</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Staging rehearsal notes">Remove</span></div>
+        <div class="row tap44" style="padding:6px 0"><span style="font-size:13px">Cutover window</span>
+          <span class="spacer"></span><span class="btn ghost sm" aria-label="Remove Cutover window">Remove</span></div>
+      </div>
+      <dl class="kv"><dt>Destination</dt><dd class="mono">https://hermes.example.com/a2a/v1</dd>
+        <dt>Task ID</dt><dd class="mono">tsk_8f21c0a4</dd>
+        <dt>Run ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Correlation ID</dt><dd class="mono">run_5b7e19d3</dd>
+        <dt>Callback address</dt><dd class="mono">…/a2a/push/run_5b7e19d3/••••••••</dd></dl>
+      <p class="micro">Registered with this agent because it advertises push notifications. Private to this run, secret
+      part never shown, held until the run ends. It can only ask BrainBuddy to check on the run — no task content
+      returns through it.</p>
+    </div><div class="card tint-warn stack g1" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)"><strong>Best-effort single start.</strong> This agent does not
+      declare the extension. Before any retry BrainBuddy checks the agent for an existing task and adopts it. A
+      duplicate remains possible if the agent forgets its tasks.</p>
+      <p class="caption" style="color:var(--warn-fg)"><a class="link" href="docs/a2a-extensions/single-start/v1.md"
+      rel="noopener noreferrer">Read the single-start extension specification</a> <span class="micro">Opens the
+      published specification outside BrainBuddy.</span></p></div><div class="card tint-info" style="border-radius:14px">
+      <p class="caption" style="color:var(--info-fg)"><strong>Cancellation depends on the agent.</strong> Cards do not
+      advertise it, so BrainBuddy can only find out once you request it.</p></div><div class="card tint-warn" style="border-radius:14px">
+      <p class="caption" style="color:var(--warn-fg)">Everything above is copied out of BrainBuddy to an agent you
+      operate. BrainBuddy cannot recall it or verify what the agent does with it.</p></div><div class="card tint-sunk" style="border-radius:14px">
+      <p class="micro">You acknowledged the duplicate risk for this agent on your first hand-off, so there is no
+      acknowledgement step here. The disclosure above still applies to every hand-off.</p></div>
+    </div>
+    <div class="sheet-foot"><span class="btn primary tap44" style="padding:12px">Send to agent</span><span class="btn tap44" style="padding:12px">Cancel</span></div>
+  </div></div>
+    
+  </div>
+  <p class="phonecap"><span class="sid">M-02-S14</span>best-effort, later hand-off — disclosure without the acknowledgement</p>
+  <p class="phonecap">Drawn part-scrolled to where the acknowledgement row would be, showing that it is absent.</p>
+  <p class="phonecap">AC-026. The disclosure and the extension link stay; only the acknowledgement is one-time.</p>
+</div></div>
+
+</div>
+</body>
+</html>
