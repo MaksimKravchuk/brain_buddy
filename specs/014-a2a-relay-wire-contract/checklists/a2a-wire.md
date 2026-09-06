@@ -94,7 +94,7 @@ Focus: (1) wire contract, identifiers and observation honesty; (2) privacy, secu
 <!-- BrainBuddy constitution gates: typed writer receipt is required before freeze. -->
 <!-- BrainBuddy pre-freeze receipt contract: checklist. Preserve this section. -->
 
-- [ ] CHK052 Writer receipt validates with `scripts/validate_pre_freeze_receipt.py` against the full lowercase implementation SHA
+- [x] CHK052 Writer receipt validates with `scripts/validate_pre_freeze_receipt.py` against the full lowercase implementation SHA
 
 ## Notes
 
