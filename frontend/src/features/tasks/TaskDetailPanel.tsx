@@ -8,6 +8,7 @@ import { hasFeatureFlag } from "../../api/auth";
 import { apiClient } from "../../api/client";
 import { AgentHandoffOverlay } from "../agents/AgentHandoffOverlay";
 import { AgentRunSection } from "../agents/AgentRunSection";
+import { compactRunLabel, newestRun } from "../agents/agentCopy";
 import { useAuthStore } from "../../stores/authStore";
 import type {
   OpenTaskState,
@@ -666,6 +667,7 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
   // than crashing the entire task panel.
   const runs = Array.isArray(runsQuery.data) ? runsQuery.data : [];
   const canStartHandoff = handoffEnabled && !isTerminal;
+  const latestRun = newestRun(runs);
 
   return (
     <>
@@ -693,10 +695,28 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
               Review exactly what would be sent before anything leaves BrainBuddy.
             </p>
           ) : null}
+          {latestRun ? (
+            // The same compact line the Task list shows (D-03-S21), so the two
+            // surfaces cannot disagree about the tier or about a control the
+            // agent has already withdrawn.
+            <p className="m-0 text-[11.5px] text-slate-500" data-testid="agent-run-summary-line">
+              {compactRunLabel({
+                primary_state_label: latestRun.primary_state_label,
+                guarantee_tier: latestRun.guarantee_tier,
+                cancel_outcome: latestRun.cancel_outcome
+              })}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
-      <AgentRunSection taskId={task.id} runs={runs} isLoading={runsQuery.isLoading} error={runsQuery.error} />
+      <AgentRunSection
+        taskId={task.id}
+        runs={runs}
+        isLoading={runsQuery.isLoading}
+        error={runsQuery.error}
+        handoffEnabled={handoffEnabled}
+      />
 
       {active && reviewing && canStartHandoff ? createPortal(
         <AgentHandoffOverlay

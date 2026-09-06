@@ -1,10 +1,14 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRunResponse } from "../../../api/agentTypes";
+import type {
+  AgentManifestResponse,
+  AgentRunEvent,
+  AgentRunResponse
+} from "../../../api/agentTypes";
 import { ApiError, apiClient } from "../../../api/client";
 import { AgentRunSection } from "../AgentRunSection";
 
@@ -34,7 +38,23 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     content_expires_at: "2026-09-08T12:00:00Z",
     last_contact_at: "2026-08-09T12:00:00Z",
     reporting_window_seconds: 3600,
-    capabilities: { progress: true, reply: true, cancel: true },
+    capabilities: { reply: true, cancel: true },
+    guarantee_tier: null,
+    message_id: null,
+    correlation_id: null,
+    agent_task_id: null,
+    exchange_open: false,
+    exchange_state: "none",
+    exchange_kind: null,
+    push_registration: "unregistered",
+    agent_task_missing: false,
+    cancel_outcome: "none",
+    blocked_reason: null,
+    artifacts_summary: [],
+    result_availability: null,
+    last_observed_at: null,
+    observation_interval_seconds: 60,
+    identifiers_expired: false,
     manifest: null,
     events: [],
     commands: [],
@@ -44,12 +64,35 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
   };
 }
 
-function renderSection(runs: AgentRunResponse[], node?: ReactElement) {
+/** One timeline row with the 014 fields at their "ordinary observation" values. */
+function makeEvent(
+  overrides: Partial<AgentRunEvent> & Pick<AgentRunEvent, "id" | "type" | "run_version">
+): AgentRunEvent {
+  return {
+    received_at: "2026-08-09T12:00:00Z",
+    summary: null,
+    trigger: "schedule",
+    kind: "observation",
+    previous_agent_task_id: null,
+    new_agent_task_id: null,
+    ...overrides
+  };
+}
+
+function renderSection(runs: AgentRunResponse[], node?: ReactElement, handoffEnabled = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return {
     ...render(
       <QueryClientProvider client={client}>
-        {node ?? <AgentRunSection taskId="task_1" runs={runs} isLoading={false} error={null} />}
+        {node ?? (
+          <AgentRunSection
+            taskId="task_1"
+            runs={runs}
+            isLoading={false}
+            error={null}
+            handoffEnabled={handoffEnabled}
+          />
+        )}
       </QueryClientProvider>
     ),
     client
@@ -110,7 +153,7 @@ describe("AgentRunSection", () => {
         primary_state_label: "Needs you",
         needs_user: true,
         question_text: "Which environment?",
-        capabilities: { progress: true, reply: false, cancel: false }
+        capabilities: { reply: false, cancel: false }
       })
     ]);
 
@@ -147,14 +190,18 @@ describe("AgentRunSection", () => {
       makeRun({
         reported_state: "running",
         primary_state_label: "Running",
-        capabilities: { progress: true, reply: true, cancel: false }
+        capabilities: { reply: true, cancel: false }
       })
     ]);
 
     expect(screen.queryByRole("button", { name: "Request cancellation" })).not.toBeInTheDocument();
   });
 
-  it("links a result only when the server marked it safe", () => {
+  it("014-SC-004 keeps every reported address inert beside Copy link", () => {
+    // Product decision, 2026-09-04 (D-03-S11): even a well-formed HTTPS
+    // address the server marked interactive stays text. A link the product
+    // renders as navigable is a link the product is vouching for, and
+    // BrainBuddy verified nothing about where it leads.
     renderSection([
       makeRun({
         reported_state: "completed",
@@ -165,9 +212,32 @@ describe("AgentRunSection", () => {
       })
     ]);
 
-    const link = screen.getByRole("link", { name: /results\.example\.com/ });
-    expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
-    expect(link).toHaveAttribute("target", "_blank");
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByText("https://results.example.com/1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+  });
+
+  it("014-SC-004 Copy link actually copies the address it is showing", async () => {
+    // A control labelled "Copy link" that quietly did nothing would be exactly
+    // the fabricated affordance this feature's honesty rules exist to prevent.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    renderSection([
+      makeRun({
+        reported_state: "completed",
+        primary_state_label: "Agent reported complete",
+        result_link: "javascript:alert(1)"
+      })
+    ]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Copy link" }));
+
+    // Whatever the scheme: copying is not navigating, and the address is the
+    // user's to inspect.
+    expect(writeText).toHaveBeenCalledWith("javascript:alert(1)");
   });
 
   it("renders an unsafe result link as inert text", () => {
@@ -224,7 +294,7 @@ describe("AgentRunSection", () => {
       failure_reason: "Sensitive failure",
       content_expires_at: "2026-08-09T12:00:01Z",
       events: [
-        { id: "evt-sensitive", type: "blocked", run_version: 1, received_at: "2026-08-09T12:00:00Z", summary: "Sensitive summary" }
+        makeEvent({ id: "evt-sensitive", type: "blocked", run_version: 1, received_at: "2026-08-09T12:00:00Z", summary: "Sensitive summary" })
       ]
     });
     const { container } = renderSection([cached]);
@@ -251,8 +321,8 @@ describe("AgentRunSection", () => {
         reported_state: "running",
         primary_state_label: "Running",
         events: [
-          { id: "evt_1", type: "accepted", run_version: 1, received_at: "2026-08-09T12:00:00Z", summary: null },
-          { id: "evt_2", type: "running", run_version: 2, received_at: "2026-08-09T12:05:00Z", summary: "Cloning" }
+          makeEvent({ id: "evt_1", type: "accepted", run_version: 1, received_at: "2026-08-09T12:00:00Z", summary: null }),
+          makeEvent({ id: "evt_2", type: "running", run_version: 2, received_at: "2026-08-09T12:05:00Z", summary: "Cloning" })
         ]
       })
     ]);
@@ -275,13 +345,13 @@ describe("AgentRunSection", () => {
           stopped_reporting: true,
           connection_disconnected: true,
           events: [
-            { id: "evt_blocked", type: "blocked", run_version: 1, received_at: "2026-08-09T12:01:00Z", summary: null },
-            { id: "evt_complete", type: "completed", run_version: 2, received_at: "2026-08-09T12:02:00Z", summary: null },
-            { id: "evt_failed", type: "failed", run_version: 3, received_at: "2026-08-09T12:03:00Z", summary: null },
-            { id: "evt_cancelled", type: "cancelled", run_version: 4, received_at: "2026-08-09T12:04:00Z", summary: null }
+            makeEvent({ id: "evt_blocked", type: "blocked", run_version: 1, received_at: "2026-08-09T12:01:00Z", summary: null }),
+            makeEvent({ id: "evt_complete", type: "completed", run_version: 2, received_at: "2026-08-09T12:02:00Z", summary: null }),
+            makeEvent({ id: "evt_failed", type: "failed", run_version: 3, received_at: "2026-08-09T12:03:00Z", summary: null }),
+            makeEvent({ id: "evt_cancelled", type: "cancelled", run_version: 4, received_at: "2026-08-09T12:04:00Z", summary: null })
           ]
         }),
-        makeRun({ id: "agentrun_second", agent_name: "Claude", capabilities: { progress: true, reply: true, cancel: false } })
+        makeRun({ id: "agentrun_second", agent_name: "Claude", capabilities: { reply: true, cancel: false } })
       ],
       <AgentRunSection
         taskId="task_1"
@@ -296,16 +366,17 @@ describe("AgentRunSection", () => {
             stopped_reporting: true,
             connection_disconnected: true,
             events: [
-              { id: "evt_blocked", type: "blocked", run_version: 1, received_at: "2026-08-09T12:01:00Z", summary: null },
-              { id: "evt_complete", type: "completed", run_version: 2, received_at: "2026-08-09T12:02:00Z", summary: null },
-              { id: "evt_failed", type: "failed", run_version: 3, received_at: "2026-08-09T12:03:00Z", summary: null },
-              { id: "evt_cancelled", type: "cancelled", run_version: 4, received_at: "2026-08-09T12:04:00Z", summary: null }
+              makeEvent({ id: "evt_blocked", type: "blocked", run_version: 1, received_at: "2026-08-09T12:01:00Z", summary: null }),
+              makeEvent({ id: "evt_complete", type: "completed", run_version: 2, received_at: "2026-08-09T12:02:00Z", summary: null }),
+              makeEvent({ id: "evt_failed", type: "failed", run_version: 3, received_at: "2026-08-09T12:03:00Z", summary: null }),
+              makeEvent({ id: "evt_cancelled", type: "cancelled", run_version: 4, received_at: "2026-08-09T12:04:00Z", summary: null })
             ]
           }),
-          makeRun({ id: "agentrun_second", agent_name: "Claude", capabilities: { progress: true, reply: true, cancel: false } })
+          makeRun({ id: "agentrun_second", agent_name: "Claude", capabilities: { reply: true, cancel: false } })
         ]}
         isLoading
         error={null}
+        handoffEnabled
       />
     );
 
@@ -319,7 +390,10 @@ describe("AgentRunSection", () => {
     expect(screen.getByText(/answer was sent but the agent has not acknowledged/i)).toBeInTheDocument();
     expect(screen.getByText(/does not know whether the agent is still working/i)).toBeInTheDocument();
     expect(screen.getByText(/disconnecting did not cancel/i)).toBeInTheDocument();
-    expect(screen.getByText(/could not confirm the agent received/i)).toBeInTheDocument();
+    // 014-FR-006: the agent reported. That *is* the delivery evidence, so the
+    // ambiguous-delivery sentence is now known to be false and is withdrawn.
+    expect(screen.queryByText(/could not confirm the agent received/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
   });
 
   it("says nothing at all when the task has no runs", () => {
@@ -341,6 +415,7 @@ describe("AgentRunSection", () => {
         runs={[cached]}
         isLoading={false}
         error={new Error("network unreachable")}
+        handoffEnabled
       />
     );
 
@@ -351,7 +426,7 @@ describe("AgentRunSection", () => {
   });
 
   it("surfaces a load error with its correlation id when no cached run exists", () => {
-    renderSection([], <AgentRunSection taskId="task_1" runs={[]} isLoading={false} error={new Error("boom")} />);
+    renderSection([], <AgentRunSection taskId="task_1" runs={[]} isLoading={false} error={new Error("boom")} handoffEnabled />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(/boom/);
   });
@@ -431,6 +506,7 @@ describe("AgentRunSection idempotency across retries", () => {
           runs={[{ ...firstRun, revision: firstRun.revision + 1 }]}
           isLoading={false}
           error={null}
+          handoffEnabled
         />
       </QueryClientProvider>
     );
@@ -462,7 +538,7 @@ describe("AgentRunSection idempotency across retries", () => {
     };
     rerender(
       <QueryClientProvider client={client}>
-        <AgentRunSection taskId="task_1" runs={[changedRun]} isLoading={false} error={null} />
+        <AgentRunSection taskId="task_1" runs={[changedRun]} isLoading={false} error={null} handoffEnabled />
       </QueryClientProvider>
     );
     await user.click(screen.getByRole("button", { name: "Send answer" }));
@@ -568,5 +644,544 @@ describe("AgentRunSection idempotency across retries", () => {
 
     expect(cancel).toHaveBeenCalledTimes(2);
     expect(cancel.mock.calls[1][1]).not.toBe(cancel.mock.calls[0][1]);
+  });
+});
+
+describe("AgentRunSection dispatch states", () => {
+  const frozenManifest: AgentManifestResponse = {
+    token: "f".repeat(64),
+    run_id: "agentrun_1",
+    task_id: "task_1",
+    connection_id: "agentconn_1",
+    agent_name: "Hermes",
+    title: "Write the migration runbook",
+    details: "Cover the cutover window.",
+    supporting_items: [{ label: "Runbook", body: "Deploy notes live in docs/." }],
+    message_id: "agentrun_1:start",
+    correlation_id: "agentrun_1",
+    destination_interface: "https://agent.example.com/a2a",
+    protocol_version: "1.0",
+    guarantee_tier: "guaranteed",
+    tier_disclosure: "Guaranteed single start.",
+    tier_disclosure_url: "https://example.invalid/single-start/v1.md",
+    acknowledgement_required: false,
+    cancellation_disclosure: "Cancellation depends on the agent.",
+    push_callback: null,
+    external_copy_notice: "Your agent keeps its own copy of everything sent here.",
+    reauthentication_required: false,
+    parts_preview: ["Write the migration runbook"]
+  };
+
+  const restartedRun = makeRun({
+    dispatch_state: "not_sent",
+    dispatch_error_code: "restarted_before_send",
+    primary_state_label: "Not sent",
+    message_id: "agentrun_1:start",
+    correlation_id: "agentrun_1",
+    exchange_state: "closed",
+    manifest: frozenManifest
+  });
+
+  async function reopenTheReview(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Try this hand-off again" }));
+    });
+    await screen.findByRole("heading", { name: "What will be sent" });
+  }
+
+  it("014-SC-004 shows a queued exchange as Queued and never as Sent", () => {
+    renderSection([
+      makeRun({
+        dispatch_state: "delivery_unconfirmed",
+        exchange_state: "queued",
+        exchange_open: true,
+        primary_state_label: "Queued"
+      })
+    ]);
+
+    expect(screen.getByText("Queued")).toBeInTheDocument();
+    expect(
+      screen.getByText("Waiting for a free connection slot; nothing has been sent yet")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Sent")).toBeNull();
+    // A queued hand-off has provably not been sent, so the ambiguous-delivery
+    // sentence and its Check again must not appear either.
+    expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
+  });
+
+  it("014-FR-006 states a restart that never sent and re-offers the hand-off", () => {
+    renderSection([restartedRun]);
+
+    expect(screen.getByText("Not sent")).toBeInTheDocument();
+    expect(
+      screen.getByText("BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try this hand-off again" })).toBeEnabled();
+  });
+
+  it("014-FR-012 withholds the retry while rollout is off and still shows the run", () => {
+    // FR-016 / 007 FR-019: rollout OFF keeps already-dispatched work observable
+    // and actionable. A hand-off that never left has nothing at the agent, so
+    // retrying it is a fresh content-bearing send — exactly what rollout OFF
+    // withholds — and offering the control anyway either sends behind the
+    // rollout gate or does nothing at all.
+    renderSection([restartedRun], undefined, false);
+
+    expect(screen.getByText("Not sent")).toBeInTheDocument();
+    expect(
+      screen.getByText("BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.")
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try this hand-off again" })).toBeNull();
+  });
+
+  it("014-FR-006 names the rate-limited category on a hand-off that was refused", () => {
+    renderSection([
+      makeRun({
+        dispatch_state: "not_sent",
+        dispatch_error_code: "a2a_rate_limited",
+        primary_state_label: "Not sent",
+        manifest: frozenManifest
+      })
+    ]);
+
+    expect(screen.getByText("The agent is rate limiting.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try this hand-off again" })).toBeEnabled();
+  });
+
+  it("014-SC-004 retries an unchanged review under the same key, so the run and message ids are reused", async () => {
+    // Nothing left BrainBuddy, so the identifiers are still free to reuse — and
+    // reusing them is what stops a retry from becoming a second task.
+    vi.spyOn(apiClient, "listAgentConnections").mockResolvedValue([]);
+    vi.spyOn(apiClient, "previewAgentHandoff").mockResolvedValue(frozenManifest);
+    const confirm = vi.spyOn(apiClient, "confirmAgentHandoff").mockResolvedValue(
+      makeRun({
+        dispatch_state: "sent",
+        primary_state_label: "Sent",
+        message_id: "agentrun_1:start",
+        correlation_id: "agentrun_1"
+      })
+    );
+    const user = userEvent.setup();
+    renderSection([restartedRun]);
+    await reopenTheReview(user);
+
+    // Seeded from the frozen manifest, so the server rebuilds the identical
+    // review and hands back the identical token.
+    expect(apiClient.previewAgentHandoff).toHaveBeenCalledWith(
+      "task_1",
+      {
+        connection_id: "agentconn_1",
+        include_details: true,
+        supporting_items: [{ label: "Runbook", body: "Deploy notes live in docs/." }]
+      },
+      expect.anything()
+    );
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Send to agent" }));
+    });
+
+    await waitFor(() =>
+      expect(confirm).toHaveBeenCalledWith(
+        "task_1",
+        {
+          connection_id: "agentconn_1",
+          include_details: true,
+          supporting_items: [{ label: "Runbook", body: "Deploy notes live in docs/." }],
+          manifest_token: frozenManifest.token,
+          current_password: null,
+          acknowledge_duplicate_risk: false
+        },
+        `agent-handoff-${frozenManifest.token}`
+      )
+    );
+    await expect(confirm.mock.results[0].value).resolves.toMatchObject({
+      id: "agentrun_1",
+      message_id: "agentrun_1:start"
+    });
+  });
+
+  it("014-FR-006 previews anew and spends a different key once the review changes", async () => {
+    vi.spyOn(apiClient, "listAgentConnections").mockResolvedValue([]);
+    const rebuilt: AgentManifestResponse = {
+      ...frozenManifest,
+      token: "e".repeat(64),
+      run_id: "agentrun_2",
+      message_id: "agentrun_2:start",
+      details: null
+    };
+    vi.spyOn(apiClient, "previewAgentHandoff")
+      .mockResolvedValueOnce(frozenManifest)
+      .mockResolvedValue(rebuilt);
+    const confirm = vi.spyOn(apiClient, "confirmAgentHandoff").mockResolvedValue(
+      makeRun({ id: "agentrun_2", dispatch_state: "sent", primary_state_label: "Sent" })
+    );
+    const user = userEvent.setup();
+    renderSection([restartedRun]);
+    await reopenTheReview(user);
+
+    await act(async () => {
+      await user.click(screen.getByRole("checkbox", { name: "Include task details" }));
+    });
+    await waitFor(() => expect(apiClient.previewAgentHandoff).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Send to agent" }));
+    });
+
+    await waitFor(() =>
+      expect(confirm).toHaveBeenCalledWith(
+        "task_1",
+        expect.objectContaining({ manifest_token: rebuilt.token, include_details: false }),
+        `agent-handoff-${rebuilt.token}`
+      )
+    );
+    // The old run is untouched by the new one: it was never sent, and it still says so.
+    expect(
+      screen.getByText("BrainBuddy restarted before this hand-off was sent. Nothing left BrainBuddy.")
+    ).toBeInTheDocument();
+  });
+
+  it("014-FR-004 asks for the password again when the reopened review demands it", async () => {
+    vi.spyOn(apiClient, "listAgentConnections").mockResolvedValue([]);
+    vi.spyOn(apiClient, "previewAgentHandoff").mockResolvedValue({
+      ...frozenManifest,
+      reauthentication_required: true
+    });
+    const user = userEvent.setup();
+    renderSection([restartedRun]);
+    await reopenTheReview(user);
+
+    expect(screen.getByLabelText("Current password")).toBeInTheDocument();
+  });
+
+  it("014-FR-006 checks delivery with the run's own ids and never mints a second run", async () => {
+    const check = vi.spyOn(apiClient, "checkAgentRunDelivery").mockResolvedValue(
+      makeRun({ dispatch_state: "sent", primary_state_label: "Sent" })
+    );
+    const confirm = vi.spyOn(apiClient, "confirmAgentHandoff");
+    const user = userEvent.setup();
+    const unconfirmed = makeRun({
+      dispatch_state: "delivery_unconfirmed",
+      exchange_state: "closed",
+      primary_state_label: "Delivery unconfirmed",
+      message_id: "agentrun_1:start",
+      correlation_id: "agentrun_1",
+      revision: 4
+    });
+    renderSection([unconfirmed]);
+
+    expect(
+      screen.getByText(
+        "Runs the same check again with the same correlation ID and the same message ID. It is never a new send."
+      )
+    ).toBeInTheDocument();
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Check again" }));
+    });
+
+    await waitFor(() => expect(check).toHaveBeenCalledTimes(1));
+    expect(check.mock.calls[0][0]).toBe("agentrun_1");
+    // Tied to the revision the user was looking at: a check composed against a
+    // stale cached run must not resend for a state nobody is being shown.
+    expect(check.mock.calls[0][1]).toEqual({
+      current_password: null,
+      expected_revision: unconfirmed.revision
+    });
+    expect(check.mock.calls[0][2]).toMatch(/^agent-check-delivery-agentrun_1/);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("014-FR-006 surfaces a refused delivery check with its correlation reference", async () => {
+    // Parity with iOS. A refusal (rollout_disabled, connection_not_ready,
+    // agent_card_changed, a 409 on expected_revision) or a transport failure
+    // must never look like a check that ran and found nothing.
+    vi.spyOn(apiClient, "checkAgentRunDelivery").mockRejectedValue(
+      new ApiError(
+        "Bad Request",
+        400,
+        {
+          message: "This agent is not part of the current rollout.",
+          detail: { reason: "rollout_disabled" }
+        },
+        "corr-check-refused"
+      )
+    );
+    const user = userEvent.setup();
+    renderSection([
+      makeRun({
+        dispatch_state: "delivery_unconfirmed",
+        exchange_state: "closed",
+        primary_state_label: "Delivery unconfirmed"
+      })
+    ]);
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Check again" }));
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This agent is not part of the current rollout.");
+    expect(alert).toHaveTextContent("corr-check-refused");
+    // The run is unchanged, so the check stays on offer.
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
+  });
+
+  it("014-FR-006 never offers Check again while the browser is offline", async () => {
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
+    onlineManager.setOnline(false);
+    const check = vi.spyOn(apiClient, "checkAgentRunDelivery");
+    renderSection([
+      makeRun({
+        dispatch_state: "delivery_unconfirmed",
+        exchange_state: "closed",
+        primary_state_label: "Delivery unconfirmed"
+      })
+    ]);
+
+    const again = screen.getByRole("button", { name: "Check again" });
+    expect(again).toBeDisabled();
+    await userEvent.click(again);
+    expect(check).not.toHaveBeenCalled();
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, value: true });
+    onlineManager.setOnline(true);
+  });
+});
+
+
+describe("014-SC-004 every run state reads as itself", () => {
+  /**
+   * D-03-S06..S20. One projection in, one label out, rendered verbatim.
+   *
+   * `it.each` over the whole vocabulary rather than a handful of samples,
+   * because the requirement is exhaustive: an operator must be able to tell any
+   * two of these apart on sight, and a suite that checked five of fifteen would
+   * pass while three of them rendered identically.
+   */
+  it.each([
+    ["Accepted", { reported_state: "accepted" as const }],
+    ["Running", { reported_state: "running" as const }],
+    ["Needs you", { reported_state: "blocked" as const, needs_user: true }],
+    ["Cancellation requested", { cancel_requested: true }],
+    ["Agent reported complete", { reported_state: "completed" as const }],
+    ["Failed", { reported_state: "failed" as const }],
+    ["Cancelled", { reported_state: "cancelled" as const }],
+    ["Stopped reporting", { stopped_reporting: true }],
+    ["Agent no longer reports this run", { agent_task_missing: true }],
+    ["Connection disconnected", { connection_disconnected: true }],
+    ["Queued", { exchange_state: "queued" as const, exchange_open: true }],
+    ["Sent", {}],
+    ["Delivery unconfirmed", { dispatch_state: "delivery_unconfirmed" as const }],
+    ["Not sent", { dispatch_state: "not_sent" as const }]
+  ])("renders %s verbatim from the projection", (label, overrides) => {
+    renderSection([makeRun({ ...overrides, primary_state_label: label })]);
+
+    expect(screen.getByText(label)).toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S07 attributes the agent's own status text", () => {
+    renderSection([
+      makeRun({
+        reported_state: "running",
+        primary_state_label: "Running",
+        progress_text: "Cloning the repository"
+      })
+    ]);
+
+    expect(screen.getByText("Cloning the repository")).toBeInTheDocument();
+    // AC-013: never a percentage, a stage or an ETA BrainBuddy invented.
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/step \d+ of \d+/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ETA/i)).not.toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S10 offers no reply control for an authentication block", () => {
+    renderSection([
+      makeRun({
+        reported_state: "blocked",
+        primary_state_label: "Needs you",
+        needs_user: true,
+        blocked_reason: "Agent needs additional authentication",
+        question_text: null
+      })
+    ]);
+
+    // A reply box here would invite the user to type a secret to a third party.
+    expect(screen.queryByLabelText("Your answer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send answer" })).not.toBeInTheDocument();
+  });
+
+  it("014-FR-009 D-03-S10 states the block reason as inert text with no reply control", () => {
+    renderSection([
+      makeRun({
+        reported_state: "blocked",
+        primary_state_label: "Needs you",
+        needs_user: true,
+        blocked_reason: "Agent needs additional authentication",
+        question_text: null
+      })
+    ]);
+
+    // "Needs you" with nothing else on the card is a dead end: the user is told
+    // they are needed and never told what for.
+    expect(screen.getByText("Agent needs additional authentication")).toBeInTheDocument();
+    // Inert. A control here would invite typing a credential to a third party.
+    expect(screen.queryByLabelText("Your answer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send answer" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("014-FR-009 hides the block reason once retention has expired the content", () => {
+    renderSection([
+      makeRun({
+        reported_state: "blocked",
+        primary_state_label: "Needs you",
+        needs_user: true,
+        blocked_reason: "Agent needs additional authentication",
+        content_expired: true
+      })
+    ]);
+
+    expect(screen.queryByText("Agent needs additional authentication")).not.toBeInTheDocument();
+    expect(screen.getByText("Content expired under retention policy")).toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S11 names artifact content types and never a download", () => {
+    renderSection([
+      makeRun({
+        reported_state: "completed",
+        primary_state_label: "Agent reported complete",
+        result_text: "Done.",
+        artifacts_summary: [
+          { name: "report.pdf", media_type: "application/pdf", kind: "file" }
+        ]
+      })
+    ]);
+
+    expect(screen.getByText("report.pdf · application/pdf")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S11 marks a too-large result and never calls it silence", () => {
+    renderSection([
+      makeRun({
+        reported_state: "completed",
+        primary_state_label: "Agent reported complete",
+        result_availability: "too_large",
+        result_text: null
+      })
+    ]);
+
+    expect(screen.getByText("Result too large to store.")).toBeInTheDocument();
+    expect(screen.queryByText("Stopped reporting")).not.toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S16 withdraws cancel on a refusal and keeps it on silence", () => {
+    const { unmount } = renderSection([
+      makeRun({
+        reported_state: "running",
+        primary_state_label: "Running",
+        cancel_outcome: "unsupported"
+      })
+    ]);
+
+    expect(screen.getByText("Cancellation not supported by this agent.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request cancellation" })).not.toBeInTheDocument();
+    unmount();
+
+    renderSection([
+      makeRun({
+        reported_state: "running",
+        primary_state_label: "Running",
+        cancel_outcome: "unconfirmed",
+        cancel_requested: true
+      })
+    ]);
+
+    expect(
+      screen.getByText("Cancellation request unconfirmed — you can try again.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request cancellation" })).toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S18 withdraws both controls when the agent forgot the run", () => {
+    renderSection([
+      makeRun({
+        reported_state: "blocked",
+        needs_user: true,
+        question_text: "Which environment?",
+        primary_state_label: "Agent no longer reports this run",
+        agent_task_missing: true
+      })
+    ]);
+
+    expect(screen.getByText("Agent no longer reports this run")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send answer" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request cancellation" })).not.toBeInTheDocument();
+    // Not a failure claim: BrainBuddy lost sight of the work, which is a
+    // different thing from the work having gone wrong.
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+  });
+
+  it("014-SC-004 D-03-S27 shows the succession row with both task identifiers", () => {
+    renderSection([
+      makeRun({
+        reported_state: "running",
+        primary_state_label: "Running",
+        agent_task_id: "task-b2",
+        events: [
+          makeEvent({
+            id: "evt-1",
+            type: "running",
+            run_version: 4,
+            summary: "The agent continued this run in a new task",
+            trigger: "command",
+            kind: "task_succession",
+            previous_agent_task_id: "task-a1",
+            new_agent_task_id: "task-b2"
+          })
+        ]
+      })
+    ]);
+
+    expect(screen.getByText("The agent continued this run in a new task")).toBeInTheDocument();
+    expect(screen.getByText("task-a1 → task-b2")).toBeInTheDocument();
+    // The projection is unchanged by the succession itself.
+    expect(screen.getByText("Running")).toBeInTheDocument();
+  });
+
+  it("014-SC-004 AC-031 renders an agent name carrying markup as plain text", () => {
+    renderSection([
+      makeRun({
+        agent_name: '<img src=x onerror=alert(1)> javascript:alert(2)',
+        reported_state: "running",
+        primary_state_label: "Running"
+      })
+    ]);
+
+    expect(
+      screen.getByText('<img src=x onerror=alert(1)> javascript:alert(2)')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("014-SC-004 D-03-S26 shows two runs on one task with their own frozen content", () => {
+    renderSection([
+      makeRun({
+        id: "agentrun_1",
+        reported_state: "completed",
+        primary_state_label: "Agent reported complete",
+        result_text: "First result"
+      }),
+      makeRun({
+        id: "agentrun_2",
+        reported_state: "running",
+        primary_state_label: "Running",
+        progress_text: "Second attempt"
+      })
+    ]);
+
+    expect(screen.getByText("First result")).toBeInTheDocument();
+    expect(screen.getByText("Second attempt")).toBeInTheDocument();
   });
 });

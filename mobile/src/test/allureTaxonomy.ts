@@ -31,6 +31,22 @@ const PATH_RULES: { match: RegExp; epic: string; feature: string }[] = [
   { match: /\/braindump\//, epic: "Brain dump", feature: "Capture & upload protocol" },
   { match: /\/app\/task\//, epic: "Native GTD", feature: "Task detail" },
   { match: /\/features\/tasks\//, epic: "Native GTD", feature: "Task capture" },
+  // Spec 014. These three must precede the broader `/lifecycle/`, `/api/` and
+  // `/app/` rules below: first match wins, so `agentGuards.test.ts` would
+  // otherwise be filed under "Native GTD / Lifecycle guards" and the SC-004 /
+  // SC-005 agent suites would fall to the `Mobile / General behaviour`
+  // fallback — neither of which names the capability under test.
+  {
+    match: /\/lifecycle\/__tests__\/agentGuards/,
+    epic: "External agent relay",
+    feature: "Hand-off lifecycle guards",
+  },
+  {
+    match: /\/features\/agents\//,
+    epic: "External agent relay",
+    feature: "Agent screens",
+  },
+  { match: /\/agents\//, epic: "External agent relay", feature: "Agent state machine" },
   { match: /\/lifecycle\//, epic: "Native GTD", feature: "Lifecycle guards" },
   { match: /\/auth\//, epic: "Authentication", feature: "Session handling" },
   { match: /\/api\//, epic: "Mobile API client", feature: "Wire protocol" },

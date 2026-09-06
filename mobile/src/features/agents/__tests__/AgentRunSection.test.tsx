@@ -5,19 +5,23 @@
  * inert, and a control the connector cannot honour is never offered.
  */
 
+import { ApiError } from "@/api/client";
 import { AgentRunSection } from "@/features/agents/AgentRunSection";
-import { makeRun } from "@/test/agentFixtures";
+import { makeManifest, makeRun, makeRunEvent } from "@/test/agentFixtures";
 import {
   getByLabel,
   pressText,
+  queryByLabel,
   queryByText,
   renderWithProviders,
+  settle,
   typeInto,
   visibleText,
 } from "@/test/render";
 
 const mockReply = jest.fn();
 const mockCancel = jest.fn();
+const mockCheckDelivery = jest.fn();
 
 // jest-expo's expo-crypto stub returns no UUID, so pin one: every relay
 // command must still carry an `Idempotency-Key`.
@@ -27,6 +31,7 @@ jest.mock("@/auth/SessionProvider", () => {
   const api = {
     replyToAgentRun: (...args: unknown[]) => mockReply(...args),
     cancelAgentRun: (...args: unknown[]) => mockCancel(...args),
+    checkAgentRunDelivery: (...args: unknown[]) => mockCheckDelivery(...args),
   };
   return {
     useApi: () => api,
@@ -45,6 +50,10 @@ function props(overrides: Partial<Parameters<typeof AgentRunSection>[0]> = {}) {
     error: null,
     online: true,
     onRunUpdated: jest.fn(),
+    // The task screen supplies this only while the rollout allows a hand-off.
+    // Here it is always present, so these tests read the run monitor's own rule
+    // for the retry rather than the rollout gate above it.
+    onRetryHandoff: jest.fn(),
     ...overrides,
   };
 }
@@ -195,7 +204,7 @@ describe("AgentRunSection", () => {
       needs_user: true,
       primary_state_label: "Needs you",
       question_text: "Which repository should I open?",
-      capabilities: { progress: true, reply: false, cancel: false },
+      capabilities: { reply: false, cancel: false },
     });
 
     const { renderer, unmount } = await renderWithProviders(
@@ -240,7 +249,7 @@ describe("AgentRunSection", () => {
     expect(onRunUpdated).toHaveBeenCalledWith(cancelled);
     await unmount();
 
-    const noCancel = makeRun({ capabilities: { progress: true, reply: true, cancel: false } });
+    const noCancel = makeRun({ capabilities: { reply: true, cancel: false } });
     const second = await renderWithProviders(
       <AgentRunSection {...props({ runs: [noCancel] })} />,
     );
@@ -262,7 +271,7 @@ describe("AgentRunSection", () => {
 
     const text = visibleText(renderer);
     expect(text).toContain("http://agent.example.test/result");
-    expect(text).toContain("plain text only");
+    expect(text).toContain("Copy link");
     expect(queryByText(renderer, "Open result")).toBeNull();
 
     await unmount();
@@ -319,7 +328,9 @@ describe("AgentRunSection", () => {
     const text = visibleText(renderer);
     expect(text).toContain("No report since the last contact");
     expect(text).toContain("did not cancel any work");
-    expect(text).toContain("could not confirm");
+    // 014-FR-006: the agent reported, and that *is* the delivery evidence, so
+    // the ambiguous-delivery sentence is now known false and is withdrawn.
+    expect(text).not.toContain("could not confirm");
 
     await unmount();
   });
@@ -396,6 +407,497 @@ describe("AgentRunSection when a refresh fails", () => {
     expect(queryByText(renderer, "Request cancellation")).toBeNull();
     expect(visibleText(renderer)).toContain("Which repository should I open?");
     expect(visibleText(renderer)).toContain("You are offline");
+    expect(mockReply).not.toHaveBeenCalled();
+    expect(mockCancel).not.toHaveBeenCalled();
+
+    await unmount();
+  });
+});
+
+describe("AgentRunSection dispatch states", () => {
+  it("014-SC-004 shows a queued exchange as Queued and never as Sent", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              dispatch_state: "delivery_unconfirmed",
+              exchange_state: "queued",
+              exchange_open: true,
+              reported_state: null,
+              primary_state_label: "Queued",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Queued");
+    expect(text).toContain("Waiting for a free connection slot; nothing has been sent yet");
+    expect(text).not.toContain("could not confirm the agent received");
+    // A queued hand-off has provably not been sent, so there is nothing at the
+    // agent to check on.
+    expect(queryByText(renderer, "Check again")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-FR-006 states a restart that never sent and re-offers the hand-off", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              dispatch_state: "not_sent",
+              dispatch_error_code: "restarted_before_send",
+              reported_state: null,
+              primary_state_label: "Not sent",
+              // The frozen review is what makes the retry a *retry*.
+              manifest: makeManifest(),
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(visibleText(renderer)).toContain(
+      "Brain Buddy restarted before this hand-off was sent. Nothing left Brain Buddy.",
+    );
+    expect(queryByText(renderer, "Try this hand-off again")).toBeTruthy();
+
+    await unmount();
+  });
+
+  it("014-FR-012 draws no retry when the screen offers nowhere for it to go", async () => {
+    // The task screen withholds the handler while rollout is off, and a control
+    // whose press flips a state nothing reads is worse than no control at all.
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          onRetryHandoff: undefined,
+          runs: [
+            makeRun({
+              dispatch_state: "not_sent",
+              dispatch_error_code: "restarted_before_send",
+              reported_state: null,
+              primary_state_label: "Not sent",
+              manifest: makeManifest(),
+            }),
+          ],
+        })}
+      />,
+    );
+
+    // The run itself is unchanged: rollout gates new work, not visibility.
+    expect(visibleText(renderer)).toContain("Nothing left Brain Buddy");
+    expect(queryByText(renderer, "Try this hand-off again")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-FR-006 names the rate-limited category on a hand-off that was refused", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              dispatch_state: "not_sent",
+              dispatch_error_code: "a2a_rate_limited",
+              reported_state: null,
+              primary_state_label: "Not sent",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(visibleText(renderer)).toContain("The agent is rate limiting.");
+
+    await unmount();
+  });
+
+  it("014-FR-006 checks delivery with the run's own ids and never mints a new run", async () => {
+    mockCheckDelivery.mockResolvedValue(
+      makeRun({ dispatch_state: "sent", primary_state_label: "Sent" }),
+    );
+    const onRunUpdated = jest.fn();
+    const unconfirmed = makeRun({
+      dispatch_state: "delivery_unconfirmed",
+      exchange_state: "closed",
+      reported_state: null,
+      primary_state_label: "Delivery unconfirmed",
+      revision: 6,
+    });
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection {...props({ onRunUpdated, runs: [unconfirmed] })} />,
+    );
+
+    expect(visibleText(renderer)).toContain(
+      "Runs the same check again with the same correlation ID and the same message ID.",
+    );
+    const again = getByLabel(renderer, "Check again");
+    // 44pt, like every other real decision on this surface.
+    expect(again.props.style).toEqual(expect.objectContaining({ minHeight: 44 }));
+
+    await pressText(renderer, "Check again");
+
+    // Tied to the revision the user was looking at (`mobile/AGENTS.md`): a
+    // check from a stale cached run must not resend for a state that moved.
+    expect(mockCheckDelivery).toHaveBeenCalledWith(
+      "run_1",
+      { current_password: null, expected_revision: unconfirmed.revision },
+      "idem_key_test",
+    );
+
+    await unmount();
+  });
+
+  it("014-FR-006 surfaces a refused delivery check with its correlation reference", async () => {
+    // A refusal (rollout_disabled, connection_not_ready, agent_card_changed, a
+    // 409 on expected_revision) or a transport failure used to stop silently
+    // here: the control simply did nothing and the run kept its old label.
+    mockCheckDelivery.mockRejectedValue(
+      new ApiError("Bad Request", 400, {
+        message: "This agent is not part of the current rollout.",
+        reference_id: "corr_check_refused",
+        detail: { reason: "rollout_disabled" },
+      }),
+    );
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              dispatch_state: "delivery_unconfirmed",
+              exchange_state: "closed",
+              reported_state: null,
+              primary_state_label: "Delivery unconfirmed",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    await pressText(renderer, "Check again");
+    await settle();
+
+    const text = visibleText(renderer);
+    expect(text).toContain("This agent is not part of the current rollout.");
+    expect(text).toContain("ref: corr_check_refused");
+    // The run is unchanged, so the check stays on offer.
+    expect(queryByText(renderer, "Check again")).not.toBeNull();
+
+    await unmount();
+  });
+
+  it("014-FR-006 disables Check again offline and queues nothing", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          online: false,
+          runs: [
+            makeRun({
+              dispatch_state: "delivery_unconfirmed",
+              exchange_state: "closed",
+              reported_state: null,
+              primary_state_label: "Delivery unconfirmed",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const again = getByLabel(renderer, "Check again");
+    expect(again.props.accessibilityState?.disabled).toBe(true);
+    await pressText(renderer, "Check again");
+    expect(mockCheckDelivery).not.toHaveBeenCalled();
+
+    await unmount();
+  });
+});
+
+describe("014-SC-004 every run state reads as itself on iOS", () => {
+  /**
+   * M-03-S05..S19. One projection in, one label out, rendered verbatim and
+   * identically to web.
+   *
+   * The whole vocabulary rather than a sample, because the requirement is
+   * exhaustive: an operator must be able to tell any two of these apart on
+   * sight, and a suite checking five of fifteen would pass while three of them
+   * rendered the same.
+   */
+  it.each([
+    ["Accepted", { reported_state: "accepted" as const }],
+    ["Running", { reported_state: "running" as const }],
+    ["Needs you", { reported_state: "blocked" as const, needs_user: true }],
+    ["Cancellation requested", { cancel_requested: true }],
+    ["Agent reported complete", { reported_state: "completed" as const }],
+    ["Failed", { reported_state: "failed" as const }],
+    ["Cancelled", { reported_state: "cancelled" as const }],
+    ["Stopped reporting", { stopped_reporting: true }],
+    ["Agent no longer reports this run", { agent_task_missing: true }],
+    ["Connection disconnected", { connection_disconnected: true }],
+    ["Queued", { exchange_state: "queued" as const, exchange_open: true }],
+    ["Sent", {}],
+    ["Delivery unconfirmed", { dispatch_state: "delivery_unconfirmed" as const }],
+    ["Not sent", { dispatch_state: "not_sent" as const }],
+  ])("renders %s verbatim from the projection", async (label, overrides) => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({ runs: [makeRun({ ...overrides, primary_state_label: label })] })}
+      />,
+    );
+
+    expect(visibleText(renderer)).toContain(label);
+
+    await unmount();
+  });
+
+  it("014-FR-009 M-03-S09 states the block reason as inert text with no reply control", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "blocked",
+              needs_user: true,
+              primary_state_label: "Needs you",
+              blocked_reason: "Agent needs additional authentication",
+              question_text: null,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    // "Needs you" alone is a dead end: the user is told they are needed and
+    // never told what for.
+    expect(visibleText(renderer)).toContain("Agent needs additional authentication");
+    // Inert. A field here would invite typing a credential to a third party.
+    expect(queryByLabel(renderer, "Your answer")).toBeNull();
+    expect(queryByText(renderer, "Send answer")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-FR-009 hides the block reason once retention has expired the content", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "blocked",
+              needs_user: true,
+              primary_state_label: "Needs you",
+              blocked_reason: "Agent needs additional authentication",
+              content_expired: true,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const text = visibleText(renderer);
+    expect(text).not.toContain("Agent needs additional authentication");
+    expect(text).toContain("Content expired under retention policy");
+
+    await unmount();
+  });
+
+  it("014-SC-004 M-03-S10 offers a 44pt Copy link beside the inert address", async () => {
+    const run = makeRun({
+      reported_state: "completed",
+      primary_state_label: "Agent reported complete",
+      result_link: "https://results.example.test/1",
+      // Even marked interactive: no address an agent reported is ever opened.
+      result_link_interactive: true,
+    });
+
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection {...props({ runs: [run] })} />,
+    );
+
+    expect(visibleText(renderer)).toContain("https://results.example.test/1");
+    const copy = getByLabel(renderer, `Copy link for ${run.agent_name}`);
+    expect(copy.props.style).toEqual(
+      expect.objectContaining({ minHeight: 44 }),
+    );
+    expect(queryByText(renderer, "Open result")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-SC-004 M-03-S10 marks a too-large result and never calls it silence", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "completed",
+              primary_state_label: "Agent reported complete",
+              result_availability: "too_large",
+              result_text: null,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Result too large to store.");
+    expect(text).not.toContain("Stopped reporting");
+
+    await unmount();
+  });
+
+  it("014-SC-004 M-03-S15 withdraws cancel on a refusal and keeps it on silence", async () => {
+    const refused = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "running",
+              primary_state_label: "Running",
+              cancel_outcome: "not_cancelable",
+            }),
+          ],
+        })}
+      />,
+    );
+    expect(visibleText(refused.renderer)).toContain(
+      "Cancellation not supported by this agent.",
+    );
+    expect(queryByText(refused.renderer, "Request cancellation")).toBeNull();
+    await refused.unmount();
+
+    const unconfirmed = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "running",
+              primary_state_label: "Running",
+              cancel_outcome: "unconfirmed",
+              cancel_requested: true,
+            }),
+          ],
+        })}
+      />,
+    );
+    expect(visibleText(unconfirmed.renderer)).toContain(
+      "Cancellation request unconfirmed — you can try again.",
+    );
+    expect(queryByText(unconfirmed.renderer, "Request cancellation")).not.toBeNull();
+    await unconfirmed.unmount();
+  });
+
+  it("014-SC-004 M-03-S17 withdraws both controls when the agent forgot the run", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "blocked",
+              needs_user: true,
+              question_text: "Which environment?",
+              primary_state_label: "Agent no longer reports this run",
+              agent_task_missing: true,
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const text = visibleText(renderer);
+    expect(text).toContain("Agent no longer reports this run");
+    expect(text).not.toContain("Failed");
+    expect(queryByText(renderer, "Send answer")).toBeNull();
+    expect(queryByText(renderer, "Request cancellation")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-SC-004 M-03-S26 shows the succession row with both task identifiers", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              reported_state: "running",
+              primary_state_label: "Running",
+              agent_task_id: "task-b2",
+              events: [
+                makeRunEvent({
+                  id: "ev-succession",
+                  type: "running",
+                  run_version: 4,
+                  summary: "The agent continued this run in a new task",
+                  trigger: "command",
+                  kind: "task_succession",
+                  previous_agent_task_id: "task-a1",
+                  new_agent_task_id: "task-b2",
+                }),
+              ],
+            }),
+          ],
+        })}
+      />,
+    );
+
+    const text = visibleText(renderer);
+    expect(text).toContain("The agent continued this run in a new task");
+    expect(text).toContain("task-a1");
+    expect(text).toContain("task-b2");
+    // The projection is unchanged by the succession itself.
+    expect(text).toContain("Running");
+
+    await unmount();
+  });
+
+  it("014-SC-004 AC-031 renders an agent name carrying markup as plain text", async () => {
+    const hostile = "<img src=x onerror=alert(1)> javascript:alert(2)";
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          runs: [
+            makeRun({
+              agent_name: hostile,
+              reported_state: "running",
+              primary_state_label: "Running",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(visibleText(renderer)).toContain(hostile);
+    // No `Linking` target exists for it: the only tappable things on this run
+    // are the controls the product itself offers.
+    expect(queryByText(renderer, "Open result")).toBeNull();
+
+    await unmount();
+  });
+
+  it("014-SC-004 M-03-S22 disables reply and cancel offline and queues nothing", async () => {
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection
+        {...props({
+          online: false,
+          runs: [
+            makeRun({
+              reported_state: "blocked",
+              needs_user: true,
+              question_text: "Which environment?",
+              primary_state_label: "Needs you",
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(queryByText(renderer, "Send answer")).toBeNull();
+    expect(queryByText(renderer, "Request cancellation")).toBeNull();
     expect(mockReply).not.toHaveBeenCalled();
     expect(mockCancel).not.toHaveBeenCalled();
 
