@@ -8,9 +8,9 @@ import { useAgentRunSummaries } from "../../api/agentHooks";
 import { compactRunLabel } from "../agents/agentCopy";
 import type { AgentRunSummaryResponse } from "../../api/agentTypes";
 
-import { apiClient, getApiBaseUrl } from "../../api/client";
+import { apiClient } from "../../api/client";
 import { useAuthStore } from "../../stores/authStore";
-import { parseOpenTaskState, parseTaskDateView, taskKeys, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
+import { getTaskCacheScope, parseOpenTaskState, parseTaskDateView, taskKeys, useProjects, useTags, useTaskDetail, useTaskList } from "../../api/taskHooks";
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts, TaskResponse, TaskSubtaskResponse, TaskSort } from "../../api/taskTypes";
 import { AppShell } from "../../components/shell/AppShell";
 import { Button } from "../../components/ui/Button";
@@ -24,6 +24,7 @@ import { TaskSideSheet } from "./TaskSideSheet";
 import { getTaskDetailAutosaveController } from "./taskDetailAutosave";
 import type { AutosaveResult } from "./taskDetailAutosave";
 import { useTaskTitleAutocomplete } from "./useTaskTitleAutocomplete";
+import { useTaskCompletionAnimation } from "./useTaskCompletionAnimation";
 
 const stateLabels: Record<OpenTaskState, string> = {
   inbox: "Inbox",
@@ -80,7 +81,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const queryClient = useQueryClient();
   const [newTitle, setNewTitle] = useState("");
   const [newWaitingFor, setNewWaitingFor] = useState("");
-  const [showCompleted, setShowCompleted] = useState(false);
+  const [showCancelled, setShowCancelled] = useState(false);
+  const pendingCompletionsRef = useRef(new Set<string>());
+  const [pendingCompletions, setPendingCompletions] = useState(new Set<string>());
+  const completionFocusRef = useRef(new Map<string, HTMLElement>());
   const [panelOpen, setPanelOpen] = useState(true);
   const [sheetPresent, setSheetPresent] = useState(Boolean(taskId));
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -131,8 +135,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     projectId,
     tagId,
     unassignedProject: isInboxProductView,
-    includeCompleted: showCompleted,
-    includeCancelled: showCompleted,
+    includeCompleted: true,
+    includeCancelled: showCancelled,
     q: searchQuery,
     sort,
     dueBefore: dateView === "overdue" ? today : undefined,
@@ -175,27 +179,31 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
   const tasks = taskQuery.data?.items ?? [];
+  const openTasks = tasks.filter((task) => task.state !== "completed" && task.state !== "cancelled");
+  const completedTasks = tasks.filter((task) => task.state === "completed");
+  const cancelledTasks = tasks.filter((task) => task.state === "cancelled");
+  const openGroups = groupByProject ? groupTasksByProject(openTasks, projects) : [];
   const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
 
   const accountId = useAuthStore((store) => store.user?.id);
-  const detailController = detailQuery.data && accountId
-    ? getTaskDetailAutosaveController(accountId, getApiBaseUrl(), detailQuery.data, (accepted) => {
-        queryClient.setQueryData(taskKeys.detail(accepted.id), accepted);
-        queryClient.setQueriesData<{ pages: Array<{ items: TaskResponse[] }>; pageParams: unknown[] }>(
-          { queryKey: ["tasks", "list"] },
-          (cached) => cached ? { ...cached, pages: cached.pages.map((page) => ({ ...page, items: page.items.map((item) => item.id === accepted.id ? accepted : item) })) } : cached
-        );
-        return invalidateTasks();
-      })
-    : null;
-
+  const cacheScope = getTaskCacheScope(accountId ?? null);
+  const scopeKey = JSON.stringify(cacheScope);
+  const completionAnimation = useTaskCompletionAnimation(scopeKey, JSON.stringify({ state, projectId, tagId, dateView, searchQuery, sort, groupByProject, showCancelled }));
+  const isCurrentScope = () => {
+    const current = getTaskCacheScope();
+    return current.accountId === cacheScope.accountId && current.apiOrigin === cacheScope.apiOrigin;
+  };
   const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
-  const applyCanonicalTask = (canonical: TaskResponse) => {
-    queryClient.setQueryData(taskKeys.detail(canonical.id), canonical);
+  const applyCanonicalTask = (canonical: TaskResponse, animateCompletion = false) => {
+    if (!isCurrentScope()) return;
+    if (animateCompletion && canonical.state === "completed") {
+      completionAnimation.capture(canonical.id, completionFocusRef.current.get(`${scopeKey}:${canonical.id}`));
+    }
+    queryClient.setQueryData(taskKeys.detail(canonical.id, cacheScope), canonical);
     queryClient.setQueriesData<{
       pages: Array<{ items: TaskResponse[] }>;
       pageParams: unknown[];
-    }>({ queryKey: ["tasks", "list"] }, (cached) => {
+    }>({ queryKey: taskKeys.lists(cacheScope) }, (cached) => {
       if (!cached) return cached;
       return {
         ...cached,
@@ -205,12 +213,15 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         }))
       };
     });
-    void invalidateTasks();
+    return invalidateTasks();
   };
+  const detailController = detailQuery.data && accountId
+    ? getTaskDetailAutosaveController(accountId, cacheScope.apiOrigin, detailQuery.data, (accepted) => applyCanonicalTask(accepted, true))
+    : null;
   const refetchCanonicalProjections = async (canonical: TaskResponse) => {
     // Apply the server-authoritative detail and list snapshot before waiting on
     // the network refresh, so Discard never leaves a stale row/count visible.
-    applyCanonicalTask(canonical);
+    void applyCanonicalTask(canonical);
     await taskQuery.refetch();
   };
   useEffect(() => {
@@ -418,12 +429,11 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   }, [dateView, projectId, projects, state, tagId, tags]);
 
   // The prototype's Inbox pane leads with a processing hint instead of a count.
-  const taskNoun = counts[state ?? "next"] === 1 ? "task" : "tasks";
+  const openCount = state ? counts[state] : Object.values(counts).reduce((total, count) => total + count, 0);
+  const taskNoun = openCount === 1 ? "task" : "tasks";
   const meta = state === "inbox"
     ? "Process these — decide the next action for each."
-    : state
-      ? `${counts[state]} ${taskNoun}`
-      : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`;
+    : `${openCount} ${taskNoun}`;
 
   const hasFrameError = taskQuery.isError || projectsQuery.isError || tagsQuery.isError;
 
@@ -441,29 +451,44 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     taskSearch: searchParams.toString(),
     selectedTaskId: taskId,
     registerRowLink,
+    pendingCompletions,
+    scopeKey,
     onComplete: (task: TaskResponse) => {
       if (!accountId) return;
-      const controller = getTaskDetailAutosaveController(accountId, getApiBaseUrl(), task, (accepted) => {
-        queryClient.setQueryData(taskKeys.detail(accepted.id), accepted);
-        return invalidateTasks();
-      });
+      const pendingKey = `${scopeKey}:${task.id}`;
+      if (pendingCompletionsRef.current.has(pendingKey)) return;
+      const controller = getTaskDetailAutosaveController(accountId, cacheScope.apiOrigin, task, (accepted) => applyCanonicalTask(accepted, true));
+      const snapshot = controller.getSnapshot();
+      const completionInFlight = snapshot.inFlight?.kind === "transition" && "action" in snapshot.inFlight.body && snapshot.inFlight.body.action === "complete";
+      const retryCompletion = completionInFlight && snapshot.status === "failed" && snapshot.error?.retryAllowed;
+      if (!retryCompletion && (snapshot.barriers.some((barrier) => barrier.action === "complete") || completionInFlight)) return;
+      if (document.activeElement instanceof HTMLButtonElement && document.activeElement.closest("[data-task-id]")?.getAttribute("data-task-id") === task.id) completionFocusRef.current.set(pendingKey, document.activeElement);
+      pendingCompletionsRef.current.add(pendingKey);
+      setPendingCompletions(new Set(pendingCompletionsRef.current));
       conflictControllerRef.current = controller;
-      void controller.save({ kind: "transition", payload: { action: "complete" } }, idempotencyKey("complete"))
-        .then((result) => handleAutosaveResult(result, controller))
-        .catch((caught: unknown) => setMutationError(getErrorMessage(caught)));
+      const save = retryCompletion ? controller.resumeRecovery() : controller.save({ kind: "transition", payload: { action: "complete" } }, idempotencyKey("complete"));
+      void save
+        .then((result) => { if (isCurrentScope()) handleAutosaveResult(result, controller); })
+        .catch((caught: unknown) => { if (isCurrentScope()) setMutationError(getErrorMessage(caught)); })
+        .finally(() => {
+          pendingCompletionsRef.current.delete(pendingKey);
+          completionFocusRef.current.delete(pendingKey);
+          setPendingCompletions(new Set(pendingCompletionsRef.current));
+        });
     },
     agentRuns: agentRunSummaries
   };
 
+  const isSavedNotice = mutationError === "Saved";
   const mutationNotice = mutationError ? (
-    <div role="alert" className="relative mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+    <div role={isSavedNotice ? "status" : "alert"} className={`relative mb-3 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm ${isSavedNotice ? "border-slate-200 bg-slate-50 text-slate-600" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
       <span>{mutationError}</span>
       {autosaveConflict ? <Button size="sm" variant="secondary" onClick={() => void autosaveConflict.retry().then(handleAutosaveResult).catch((caught: unknown) => setMutationError(getErrorMessage(caught)))}>Retry</Button> : recoveryAvailable ? <Button size="sm" variant="secondary" onClick={recoverAutosave}>Retry</Button> : null}
       {(autosaveConflict || recoveryAvailable) ? <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={discardAutosave}>Discard</Button> : null}
     </div>
   ) : null;
 
-  const displayedTasks = groupByProject ? groupTasksByProject(tasks, projects).flatMap((group) => group.tasks) : tasks;
+  const displayedTasks = [...(groupByProject ? openGroups.flatMap((group) => group.tasks) : openTasks), ...completedTasks, ...cancelledTasks];
   const taskPosition = displayedTasks.findIndex((task) => task.id === taskId);
   const navigateTask = (id: string) => {
     navigationControlRef.current = document.activeElement?.matches("[data-task-navigation]") ? document.activeElement as HTMLButtonElement : null;
@@ -547,10 +572,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               <input
                 type="checkbox"
                 className="h-3.5 w-3.5 rounded border-slate-300 text-brand-primary accent-brand-primary"
-                checked={showCompleted}
-                onChange={(event) => setShowCompleted(event.currentTarget.checked)}
+                checked={showCancelled}
+                onChange={(event) => setShowCancelled(event.currentTarget.checked)}
               />
-              Show completed
+              Show cancelled
             </label>
             <label className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
               <span className="text-slate-500">Sort</span>
@@ -583,6 +608,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
         {!panel ? mutationNotice : null}
 
+        <div ref={completionAnimation.containerRef}>
         {hasFrameError ? (
           <ErrorState
             message={getErrorMessage(taskQuery.error ?? projectsQuery.error ?? tagsQuery.error)}
@@ -595,9 +621,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         ) : taskQuery.isLoading || projectsQuery.isLoading || tagsQuery.isLoading ? (
           <LoadingState label={title} />
         ) : tasks.length ? (
-          groupByProject ? (
-            <div className="flex flex-col gap-6">
-              {groupTasksByProject(tasks, projects).map((group) => (
+          <div className="flex flex-col gap-6">
+              {groupByProject ? openGroups.map((group) => (
                 <section key={group.key} aria-labelledby={`task-group-${group.key}`}>
                   <div className="mb-2 flex items-baseline gap-2.5 px-1">
                     <span
@@ -615,11 +640,20 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
                   </div>
                   <TaskList {...taskListProps} tasks={group.tasks} label={group.name} />
                 </section>
-              ))}
-            </div>
-          ) : (
-            <TaskList {...taskListProps} tasks={tasks} />
-          )
+              )) : openTasks.length ? <TaskList {...taskListProps} tasks={openTasks} /> : null}
+            {completedTasks.length ? (
+              <section aria-labelledby="completed-tasks-heading">
+                <h2 id="completed-tasks-heading" className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Completed</h2>
+                <TaskList {...taskListProps} tasks={completedTasks} label="Completed" />
+              </section>
+            ) : null}
+            {cancelledTasks.length ? (
+              <section aria-labelledby="cancelled-tasks-heading">
+                <h2 id="cancelled-tasks-heading" className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Cancelled</h2>
+                <TaskList {...taskListProps} tasks={cancelledTasks} label="Cancelled" />
+              </section>
+            ) : null}
+          </div>
         ) : (
           <EmptyState
             state={state}
@@ -631,6 +665,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             } : undefined}
           />
         )}
+        </div>
 
         {taskQuery.hasNextPage ? (
           <div className="mt-3 flex justify-center">
@@ -751,6 +786,8 @@ function TaskList({
   taskSearch,
   selectedTaskId,
   registerRowLink,
+  pendingCompletions,
+  scopeKey,
   onComplete,
   agentRuns,
   label
@@ -761,6 +798,8 @@ function TaskList({
   taskSearch: string;
   selectedTaskId?: string;
   registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
+  pendingCompletions: Set<string>;
+  scopeKey: string;
   onComplete: (task: TaskResponse) => void;
   /** Latest external run per task, sparse: most tasks have none. */
   agentRuns: Record<string, AgentRunSummaryResponse>;
@@ -779,6 +818,7 @@ function TaskList({
           detailPath={`${taskPathBase}/${task.id}${taskSearch ? `?${taskSearch}` : ""}`}
           isSelected={selectedTaskId === task.id}
           registerRowLink={registerRowLink}
+          completionPending={pendingCompletions.has(`${scopeKey}:${task.id}`)}
           onComplete={onComplete}
           agentRun={agentRuns[task.id]}
         />
@@ -793,6 +833,7 @@ function TaskRow({
   detailPath,
   isSelected,
   registerRowLink,
+  completionPending,
   onComplete,
   agentRun
 }: {
@@ -801,6 +842,7 @@ function TaskRow({
   detailPath: string;
   isSelected: boolean;
   registerRowLink: (taskId: string, el: HTMLAnchorElement | null) => void;
+  completionPending: boolean;
   onComplete: (task: TaskResponse) => void;
   agentRun?: AgentRunSummaryResponse;
 }): React.JSX.Element {
@@ -813,8 +855,10 @@ function TaskRow({
     <article
       className={`group rounded-[12px] border px-3.5 py-[7px] transition-colors duration-200 ease-smooth ${
         isSelected ? "border-sky-700 bg-info-bg" : "border-slate-200 bg-white hover:bg-slate-50"
-      } ${isTerminal ? "opacity-45" : ""}`}
+      }`}
       role="listitem"
+      data-task-id={task.id}
+      data-task-state={task.state}
       onClick={(event) => {
         const target = event.target as HTMLElement;
         if (target.closest("a, button, input, textarea, select, label")) {
@@ -826,7 +870,8 @@ function TaskRow({
       <div className="flex min-h-[26px] flex-wrap items-center gap-x-2.5 gap-y-1.5">
         {isTerminal ? (
           <span
-            aria-hidden
+            role="img"
+            aria-label={task.state === "completed" ? "Completed" : "Cancelled"}
             className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] ${
               task.state === "completed"
                 ? "border-brand-primary bg-brand-primary text-white"
@@ -840,6 +885,7 @@ function TaskRow({
             type="button"
             className="group/complete -my-[7px] -ml-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
             aria-label={`Complete ${task.title}`}
+            disabled={completionPending}
             onClick={() => onComplete(task)}
           >
             <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-slate-300 bg-white text-transparent transition-colors duration-200 ease-smooth group-hover/complete:border-sky-700">

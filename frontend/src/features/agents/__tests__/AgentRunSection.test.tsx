@@ -35,7 +35,7 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     result_link_interactive: false,
     failure_reason: null,
     content_expired: false,
-    content_expires_at: "2026-09-08T12:00:00Z",
+    content_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
     last_contact_at: "2026-08-09T12:00:00Z",
     reporting_window_seconds: 3600,
     capabilities: { reply: true, cancel: true },

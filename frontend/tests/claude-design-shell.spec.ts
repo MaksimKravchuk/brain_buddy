@@ -359,21 +359,23 @@ test("task detail preserves the filtered route, focus, and Back history after de
 });
 
 test("mobile task detail slides over the list and browser back restores it", async ({ page }) => {
-  await page.setViewportSize({ width: 402, height: 874 });
-  await page.goto("/tasks/next");
+  await test.step("Open mobile task detail and restore the list with browser Back", async () => {
+    await page.setViewportSize({ width: 402, height: 874 });
+    await page.goto("/tasks/next");
 
-  await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
-  await expect(page.getByRole("heading", { name: "Task detail" })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Fix onboarding drop-off");
-  await expect(page.getByRole("heading", { name: "Comments" })).toBeVisible();
-  await expect(page.locator("body")).toHaveScreenshot("claude-design-task-detail-mobile-402x874.png", {
-    animations: "disabled",
-    maxDiffPixelRatio: 0.08
+    await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
+    await expect(page.getByRole("heading", { name: "Task detail" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Fix onboarding drop-off");
+    await expect(page.getByRole("heading", { name: "Comments" })).toBeVisible();
+    await expect(page.locator("body")).toHaveScreenshot("claude-design-task-detail-mobile-402x874.png", {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.08
+    });
+
+    await page.goBack();
+    await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
   });
-
-  await page.goBack();
-  await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
 });
 
 for (const width of [320, 402]) {
@@ -388,10 +390,10 @@ for (const width of [320, 402]) {
     await test.step("keep the header and task filters within the narrow viewport", async () => {
       const header = await page.locator("header").evaluate((element) => Array.from(element.querySelectorAll("button, a")).map((control) => ({ label: control.textContent, left: control.getBoundingClientRect().left, right: control.getBoundingClientRect().right })));
       const sort = await page.getByLabel("Sort tasks").boundingBox();
-      const completed = await page.getByLabel("Show completed").locator("..").boundingBox();
+      const cancelled = await page.getByLabel("Show cancelled").locator("..").boundingBox();
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-      await attachment("Narrow workspace geometry", JSON.stringify({ width, header, sort, completed, overflow }), ContentType.JSON);
-      if (header.some((control) => control.left < 0 || control.right > width) || !sort || sort.x + sort.width > width || !completed || completed.x + completed.width > width || overflow > 0) throw new Error("Header or task filters exceed the mobile viewport");
+      await attachment("Narrow workspace geometry", JSON.stringify({ width, header, sort, cancelled, overflow }), ContentType.JSON);
+      if (header.some((control) => control.left < 0 || control.right > width) || !sort || sort.x + sort.width > width || !cancelled || cancelled.x + cancelled.width > width || overflow > 0) throw new Error("Header or task filters exceed the mobile viewport");
     });
     await page.getByRole("link", { name: "Fix onboarding drop-off" }).click();
 
@@ -553,22 +555,24 @@ test("Brain Dump recording and review surfaces use source-derived mobile geometr
     }
   });
 
-  await expect(page.getByRole("dialog", { name: "Brain dump" })).toBeVisible();
-  await page.getByRole("checkbox", { name: "Allow secure cloud transcription" }).check();
-  await page.getByRole("button", { name: "Record" }).click();
-  await expect(page.getByText("Recording")).toBeVisible();
-  await expect(page.getByText("Nothing is saved until you stop")).toBeVisible();
-  await expect(page.locator("body")).toHaveScreenshot("claude-design-brain-dump-recording-402x874.png", {
-    animations: "disabled",
-    maxDiffPixelRatio: 0.08
-  });
+  await test.step("Verify the mobile recording and review surfaces through a Brain Dump", async () => {
+    await expect(page.getByRole("dialog", { name: "Brain dump" })).toBeVisible();
+    await page.getByRole("checkbox", { name: "Allow secure cloud transcription" }).check();
+    await page.getByRole("button", { name: "Record" }).click();
+    await expect(page.getByText("Recording")).toBeVisible();
+    await expect(page.getByText("Nothing is saved until you stop")).toBeVisible();
+    await expect(page.locator("body")).toHaveScreenshot("claude-design-brain-dump-recording-402x874.png", {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.08
+    });
 
-  await page.getByRole("button", { name: "Stop & review" }).click();
-  await expect(page.getByRole("heading", { name: "Review 9 tasks" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Send 9 to inbox" })).toBeVisible();
-  await expect(page.locator("body")).toHaveScreenshot("claude-design-brain-dump-review-402x874.png", {
-    animations: "disabled",
-    maxDiffPixelRatio: 0.08
+    await page.getByRole("button", { name: "Stop & review" }).click();
+    await expect(page.getByRole("heading", { name: "Review 9 tasks" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send 9 to inbox" })).toBeVisible();
+    await expect(page.locator("body")).toHaveScreenshot("claude-design-brain-dump-review-402x874.png", {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.08
+    });
   });
 });
 });

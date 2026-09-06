@@ -4,8 +4,9 @@
  * Import `test`/`expect` from this module instead of `@playwright/test`. An
  * auto-fixture applies a deterministic epic/feature/story derived from the spec
  * path, so every emitted Allure result has product taxonomy without per-test
- * boilerplate. It intentionally does not create a placeholder step: real
- * Playwright actions/assertions must provide the scenario evidence.
+ * boilerplate. It intentionally does not create a placeholder step: each test
+ * must wrap its product actions and assertions in explicit named `test.step`
+ * calls. Automatic Playwright diagnostic steps are omitted from the report.
  *
  * A spec can override any dimension by calling `epic()`, `feature()`, `story()`,
  * `displayName()`, or `step()` from `allure-js-commons` inside the test body —
