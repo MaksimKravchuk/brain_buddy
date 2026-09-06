@@ -37,6 +37,12 @@ dev = [
   "import-linter>=2.0,<3.0",
   "schemathesis>=3.34,<5.0",
   "mutmut>=3.6,<4.0",
+  # Reference runtime for the conformance tests only (spec 014 FR-017): the
+  # vendored official helloworld sample runs on the a2a-sdk server in the test
+  # interpreter. BrainBuddy's own client is hand-written on `egress.pinned_request`
+  # (research.md Decision A), so a2a-sdk must never enter the runtime dependency
+  # set above.
+  "a2a-sdk[http-server]==1.1.2",
 ]
 
 [tool.black]
@@ -46,6 +52,11 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 88
 target-version = "py311"
+# Vendored third-party runtimes are kept byte-for-byte against a recorded
+# sha256 provenance (spec 014 FR-017); linting them would demand edits the
+# provenance test forbids. Mirrored by the global `exclude` in
+# ../.pre-commit-config.yaml.
+extend-exclude = ["vendor"]
 
 [tool.ruff.lint]
 select = [
@@ -183,6 +194,14 @@ only_mutate = [
   "app/repositories/tree.py",
   "app/repositories/version.py",
   "app/repositories/index.py",
+  # Spec 014: the two pure modules of the A2A wire contract. They are
+  # exhaustively parametrised, which is exactly the shape where full line and
+  # branch coverage can still hide a live mutant (an inverted comparison in the
+  # state projection, a swapped scheme in the security-scheme selection).
+  # OBSERVED tier under ADR-0016 — report-only, gates nothing; graduation to the
+  # enforced scope is a later calibration with its own measured score.
+  "app/modules/agents/a2a/mapping.py",
+  "app/modules/agents/a2a/card.py",
 ]
 pytest_add_cli_args_test_selection = [
   # Task module and auth: non-ASGI only. The HTTP-level suites cover the same

@@ -23,6 +23,9 @@ EPIC_TASKS = "Task Management"
 EPIC_AUTH = "Authentication & Access"
 EPIC_AI = "AI Validation"
 EPIC_QUALITY = "Platform Quality"
+# Spec 014. The relay suites earn their own epic; the vendored runtimes are the
+# first of them to land.
+EPIC_AGENT_RELAY = "External agent relay"
 
 # Module stem -> (epic, feature, story). Keyed by the test file name without the
 # leading ``test_`` and ``.py``. Keep these meaningful: feature is the subsystem
@@ -145,6 +148,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
     "health": (EPIC_QUALITY, "Health", "Health endpoint"),
     "utils_file_ops": (EPIC_QUALITY, "File utilities", "Atomic file operations"),
     "utils_time": (EPIC_QUALITY, "Time utilities", "Time helpers"),
+    "vendor_provenance": (
+        EPIC_AGENT_RELAY,
+        "Reference runtimes",
+        "Vendored runtime provenance",
+    ),
 }
 
 
