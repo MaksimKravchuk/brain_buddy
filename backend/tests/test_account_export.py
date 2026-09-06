@@ -97,9 +97,11 @@ def _seed_relay_export_data(
             credential=SealedSecret(
                 key_id="k1", ciphertext=f"{marker}-credential-secret"
             ),
-            inbound_secret=SealedSecret(
-                key_id="k1", ciphertext=f"{marker}-signing-secret"
-            ),
+            # 014: the A2A wire has no inbound secret at all. What a connection
+            # keeps instead is the discovered card and its fingerprint, and the
+            # fingerprint is a *verifier* — anyone holding the export and a
+            # candidate could confirm a match — so it must not leave either.
+            card_fingerprint=f"{marker}0".ljust(8, "0")[:8] * 8,
             status="ready",
             scope_verified_at=now,
             revision=1,
@@ -123,7 +125,6 @@ def _seed_relay_export_data(
                 title=f"{marker}-manifest-title",
                 details=f"{marker}-manifest-details",
                 reporting=AgentReportingContract(
-                    callback_url="https://brainbuddy.example/api/agent-events",
                     connection_id=connection_id,
                 ),
                 reporting_instructions=f"{marker}-reporting-instructions",
@@ -133,6 +134,11 @@ def _seed_relay_export_data(
             result_text=f"{marker}-run-result",
             result_link=f"https://agent.example.com/{marker}-result",
             failure_reason=f"{marker}-run-failure",
+            context_id=run_id,
+            message_id=f"{run_id}:start",
+            agent_task_id=f"task-{marker}-a1",
+            card_fingerprint=f"{marker}0".ljust(8, "0")[:8] * 8,
+            push_token_fingerprint=f"v1:{marker}".ljust(16, "0"),
             content_expires_at=content_expires_at or now + timedelta(days=30),
             dispatched_at=now,
             revision=1,
@@ -294,6 +300,15 @@ def test_export_contains_owner_scoped_portable_relay_data(second_api_client) -> 
     assert run["failure_reason"] == "bob-run-failure"
     assert relay["events"][0]["summary"] == "bob-event-secret"
     assert relay["commands"][0]["body"] == "bob-command-secret"
+    # 014-SC-007 / AC-025: the run and its coarse metadata travel; nothing that
+    # could verify a guess does. A sealed credential is useless without the key
+    # ring, but a fingerprint is a comparison oracle on its own.
+    assert run["id"] == "agentrun_bob"
+    assert run["context_id"] == "agentrun_bob"
+    assert run["agent_task_id"] == "task-bob-a1"
+    rendered = json.dumps(relay)
+    for verifier in ("credential", "push_token_fingerprint", "card_fingerprint"):
+        assert verifier not in rendered, f"{verifier} must not leave the instance"
 
     manifest = json.loads(archive.read("export_manifest.json"))
     assert (

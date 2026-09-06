@@ -17,11 +17,15 @@ Rotation has exactly two safe moves, and the order matters:
   anything, and the *oldest* entry — the fingerprint anchor, see
   ``SecretBox.fingerprint`` — does not move.
 * **Retiring** a key removes the last entry, which does move the anchor. Stored
-  fingerprints become unfindable and sealed credentials become undecryptable,
-  so this is safe only once every live reference is gone under its own retention
-  contract. That precondition is enforced rather than documented: relay commands
-  fail closed while any live fingerprint, connection credential, inbound signing
-  secret, or signing-secret replay receipt names a key id the ring no longer has.
+  fingerprints become unfindable, sealed credentials become undecryptable, and
+  every derived push token stops matching — ``derive_push_token`` is anchored
+  here too, so the token an agent already holds and the fingerprint a reply
+  re-derives against would both change, giving a 403 in each direction with
+  nothing to say why. Retiring is therefore safe only once every live reference
+  is gone under its own retention contract. That precondition is enforced rather
+  than documented: relay commands fail closed while any live fingerprint,
+  connection credential, run push-token fingerprint, inbound signing secret, or
+  signing-secret replay receipt names a key id the ring no longer has.
 """
 
 from __future__ import annotations
@@ -65,12 +69,6 @@ _KEY_FORMAT_ERROR = (
 
 AAD_PURPOSE_OUTBOUND_CREDENTIAL = "outbound-credential"
 """The credential BrainBuddy sends *to* the user's agent."""
-
-AAD_PURPOSE_INBOUND_SIGNING = "inbound-signing-secret"
-"""The secret the user's agent signs its reports *with*."""
-
-AAD_PURPOSE_SIGNING_RECEIPT = "signing-secret-receipt"
-"""A one-time replacement secret held only for lost-response recovery."""
 
 _AAD_SCHEME = "brain-buddy/agent-relay"
 
@@ -313,6 +311,70 @@ class SecretBox:
         return plaintext.decode("utf-8")
 
 
+#: Bytes of randomness in a per-run push callback token (data-model.md §7).
+#: It travels in a path segment on an unauthenticated route, so it is the whole
+#: authentication of that route and is sized accordingly.
+PUSH_TOKEN_BYTES = 32
+
+
+PUSH_CALLBACK_DERIVATION_LABEL = "brainbuddy.push_callback.v1"
+"""Domain separation for the derivation below.
+
+Without a label the same key ring would produce the same bytes for a run id
+used as a fingerprint input and as a callback derivation, so one value could be
+recovered from the other."""
+
+
+def derive_push_token(box: SecretBox, run_id: str) -> str:
+    """The one push callback token for a run, recomputable and never stored.
+
+    Derived rather than drawn from ``secrets.token_urlsafe`` for one reason
+    that matters: the same token has to go out again with every reply, so a
+    successor task created by that reply stays push-accelerated
+    (``contracts/push-callback.md``). Storing the plaintext to achieve that
+    would put a live route credential in the database, and minting a fresh one
+    per reply would silently invalidate a push the agent is already preparing.
+    Deriving it under the key ring keeps the data model's promise exactly — a
+    run stores only ``push_token_fingerprint`` — while making the value
+    reproducible inside the process that holds the key.
+
+    Indistinguishable from random without the key, and unguessable with it,
+    because the run id it is derived from is itself unguessable. ``urlsafe``
+    because the value travels in a *path segment*: an encoding that needed
+    escaping would give the two sides one more thing to disagree about, and a
+    disagreement there reads as a forged token.
+    """
+
+    digest = box.fingerprint(f"{PUSH_CALLBACK_DERIVATION_LABEL}:{run_id}").partition(
+        ":"
+    )[2]
+    raw = bytes.fromhex(digest)[:PUSH_TOKEN_BYTES]
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def push_token_fingerprint(box: SecretBox, token: str) -> str:
+    """What a run may store about its push token: a keyed fingerprint, no more.
+
+    Kept until identifier expiry rather than cleared when the run ends, so a
+    valid push racing BrainBuddy's own terminal observation still *recognises*
+    itself and is classified `push_after_close` instead of being reported as a
+    forged token (data-model.md §7, SC-003).
+    """
+
+    return box.fingerprint(token)
+
+
+def push_token_matches(box: SecretBox, stored: str, token: str) -> bool:
+    """Constant-time comparison, and a refusal for anything unreadable.
+
+    A malformed stored value is `False`, never an exception: the push route
+    answers one opaque `403` for every failure mode, and a raised error there
+    would be a timing and log-shape difference a prober could measure.
+    """
+
+    return box.fingerprint_matches(stored, token)
+
+
 def build_secret_box(raw_keys: str | None, *, environment: AppEnvironment) -> SecretBox:
     """Build the process's secret box, failing closed in production.
 
@@ -333,12 +395,14 @@ def build_secret_box(raw_keys: str | None, *, environment: AppEnvironment) -> Se
 
 
 __all__ = [
-    "AAD_PURPOSE_INBOUND_SIGNING",
+    "PUSH_TOKEN_BYTES",
     "AAD_PURPOSE_OUTBOUND_CREDENTIAL",
-    "AAD_PURPOSE_SIGNING_RECEIPT",
     "SealedSecret",
     "SecretBox",
     "SecretDecryptionFailed",
+    "derive_push_token",
+    "push_token_fingerprint",
+    "push_token_matches",
     "SecretsUnavailable",
     "build_secret_box",
     "fingerprint_key_id",
