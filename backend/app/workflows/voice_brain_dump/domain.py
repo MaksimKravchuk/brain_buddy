@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime
@@ -16,6 +17,20 @@ ProviderRole = Literal["browser_preview", "fast", "accurate"]
 TranscriptStability = Literal["interim", "stable"]
 PatchProducer = Literal["fast", "accurate", "reconciler", "user"]
 PatchOperation = Literal["add", "update", "split", "merge", "remove", "supersede"]
+# The durable stage a provider run resumes from (``sealed``,
+# ``accurate_transcribed``, ``preview_transcribed``) or froze at (``reconciled``,
+# ``preview_reconciled``). The two ``preview_*`` values belong to the explicit,
+# owner-chosen browser-preview recovery (ADR-0002, 2026-09-05): they are kept
+# distinct from ``accurate_transcribed``/``reconciled`` on purpose, so nothing
+# derived from preview text can ever satisfy the canonical ``accurate`` gate.
+BrainDumpProviderRunCheckpoint = Literal[
+    "sealed",
+    "accurate_transcribed",
+    "reconciled",
+    "preview_transcribed",
+    "preview_reconciled",
+]
+ReconcilerSourceCheckpoint = Literal["accurate_transcribed", "preview_transcribed"]
 
 
 @dataclass(frozen=True)
@@ -201,6 +216,19 @@ class ProposalProjection:
     patches: list[ProposalPatch]
 
 
+def normalized_title(title: str) -> str:
+    """Case-, whitespace- and trailing-punctuation-insensitive identity of a title.
+
+    The one answer to "is this the same proposal?": the reconciler adapter's
+    duplicate and tombstone guards and the service's lineage matching all key
+    on it, so «Купить молоко.» and «купить  молоко» are one task everywhere.
+    """
+
+    collapsed = re.sub(r"\s+", " ", title).strip()
+    unquoted = collapsed.strip("«»\"'“”‘’()[]")
+    return unquoted.rstrip(".!?…,;:").strip().casefold()
+
+
 def active_transcript_hypotheses(
     hypotheses: list[TranscriptHypothesis],
 ) -> list[TranscriptHypothesis]:
@@ -219,6 +247,51 @@ def active_transcript_hypotheses(
             segment.sequence,
             segment.id,
         ),
+    )
+
+
+def browser_preview_recovery_hypotheses(
+    segments: list[BrainDumpTranscriptSegmentDocument],
+) -> list[TranscriptHypothesis]:
+    """Stable browser-preview text that no later segment has superseded.
+
+    The exact input of the owner-chosen preview recovery (ADR-0002, 2026-09-05
+    amendment): only ``browser_preview`` segments the browser marked ``stable``
+    -- never an interim fragment such as «Надо купить моло» -- and only while
+    no other segment (typically an accurate-STT utterance) supersedes them.
+    Hypotheses keep their ``browser_preview`` role so the reconciler and the
+    audit trail both see what kind of text they are working from. A segment
+    that cannot form a valid hypothesis (blank text, empty span) is skipped
+    rather than raising, so the predicate built on this helper is total.
+    """
+
+    superseded = {
+        superseded_id
+        for segment in segments
+        for superseded_id in segment.supersedes_segment_ids
+    }
+    return active_transcript_hypotheses(
+        [
+            TranscriptHypothesis(
+                id=segment.id,
+                sequence=segment.sequence,
+                start_ms=segment.start_ms,
+                end_ms=segment.end_ms,
+                text=segment.text,
+                stability="stable",
+                provider_role="browser_preview",
+                confidence=segment.confidence,
+                language=segment.language,
+                model=segment.model,
+                supersedes_segment_ids=list(segment.supersedes_segment_ids),
+            )
+            for segment in segments
+            if segment.provider_role == "browser_preview"
+            and segment.stability == "stable"
+            and segment.id not in superseded
+            and segment.text.strip()
+            and segment.end_ms > segment.start_ms
+        ]
     )
 
 
@@ -424,6 +497,9 @@ BrainDumpStatus = Literal[
 ]
 BrainDumpProposalStatus = Literal[
     "provisional",
+    # Retained read-only for proposals persisted before 2026-09-05, when the
+    # browser-preview lane still minted drafts; nothing produces it any more,
+    # and ``_proposal_document_to_reconciled`` folds it into ``provisional``.
     "wording_changing",
     "ready_to_review",
     "user_edited",
@@ -537,7 +613,7 @@ class BrainDumpProviderRunDocument(StorageBaseModel):
         "pending", "running", "succeeded", "retryable_error", "terminal_error"
     ]
     input_hash: str = Field(min_length=64, max_length=64)
-    checkpoint: Literal["sealed", "accurate_transcribed", "reconciled"]
+    checkpoint: BrainDumpProviderRunCheckpoint
     attempt: int = Field(default=0, ge=0)
     recovery_count: int = Field(default=0, ge=0)
     error: str | None = Field(default=None, max_length=1000)

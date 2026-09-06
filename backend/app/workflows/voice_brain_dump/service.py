@@ -54,6 +54,7 @@ from .domain import (
     BrainDumpProposalDocument,
     BrainDumpProposalPatchDocument,
     BrainDumpProposalStatus,
+    BrainDumpProviderRunCheckpoint,
     BrainDumpProviderRunDocument,
     BrainDumpSegmentContentHashDocument,
     BrainDumpTranscriptSegmentDocument,
@@ -61,8 +62,11 @@ from .domain import (
     ProposalConflict,
     ProposalPatch,
     ReconciledProposal,
+    ReconcilerSourceCheckpoint,
     TranscriptHypothesis,
     apply_proposal_patches,
+    browser_preview_recovery_hypotheses,
+    normalized_title,
 )
 from .providers import (
     AccurateSttPort,
@@ -115,6 +119,166 @@ def can_review_brain_dump_provisionally(
     )
 
 
+def _effective_consented_providers(consent: BrainDumpConsent) -> set[str]:
+    """Every external provider category this operation consented to.
+
+    One precedence rule (T029): a non-empty ``providers`` list is authoritative
+    and is used verbatim -- the legacy single ``provider`` is never unioned in,
+    so a disagreeing legacy field can never silently widen the consented set (a
+    *conflicting* dual-field payload is instead rejected fail-closed at the
+    consent boundary, see
+    ``VoiceBrainDumpService._assert_external_provider_consent``). When no list is
+    present the legacy single ``provider`` still resolves to a singleton set, so
+    an older single-provider client keeps working during migration.
+    """
+
+    if consent.providers:
+        return set(consent.providers)
+    if consent.provider:
+        return {consent.provider}
+    return set()
+
+
+def cumulative_provider_cost_usd(runs: list[BrainDumpProviderRunDocument]) -> float:
+    """The one operation-wide spend figure every cost admission check sums.
+
+    Accepted/actual spend counts for every persisted run, and a run still
+    ``pending``/``running`` -- including one whose process died mid-call or is
+    otherwise unresolved -- additionally counts its outstanding reservation, so
+    a stuck or unknown-outcome attempt's reserved spend is never silently
+    dropped from any admission check (accurate STT, reconciler, or the
+    browser-preview recovery).
+    """
+
+    return sum(
+        max(run.estimated_cost_usd, run.consumed_cost_usd)
+        + (run.reserved_cost_usd if run.status in {"pending", "running"} else 0.0)
+        for run in runs
+    )
+
+
+def provider_cost_budget_allows(
+    *, cumulative_spent_usd: float, worst_case_next_usd: float, cap_usd: float
+) -> bool:
+    """Whether one more provider call fits under the operation's cumulative cap.
+
+    The call is refused before any provider I/O when prior spend already meets
+    the cap, or when adding the worst-case cost of the call about to be
+    admitted would push cumulative spend past it.
+    """
+
+    return (
+        cumulative_spent_usd < cap_usd
+        and cumulative_spent_usd + worst_case_next_usd <= cap_usd
+    )
+
+
+_PREVIEW_RECOVERY_CHECKPOINTS: frozenset[str] = frozenset(
+    {"preview_transcribed", "preview_reconciled"}
+)
+
+
+def _preview_recovery_state_eligible(operation: BrainDumpOperationDocument) -> bool:
+    """The state half of ``can_reconcile_brain_dump_preview`` (no consent/cost).
+
+    Terminal failure of accurate STT or the reconciler, nothing left to review
+    (otherwise ``review_provisional`` is the recovery, and the two are mutually
+    exclusive), stable non-superseded browser-preview text to recover from, and
+    no earlier preview recovery on this operation -- it is one shot, whether
+    that earlier run succeeded or failed.
+    """
+
+    if operation.status != "terminal_error" or not operation.provider_runs:
+        return False
+    last_run = operation.provider_runs[-1]
+    if last_run.status != "terminal_error" or last_run.role not in {
+        "accurate_stt",
+        "reconciler",
+    }:
+        return False
+    if any(not proposal.deleted for proposal in operation.proposals):
+        return False
+    if any(
+        run.checkpoint in _PREVIEW_RECOVERY_CHECKPOINTS
+        for run in operation.provider_runs
+    ):
+        return False
+    return bool(browser_preview_recovery_hypotheses(operation.segments))
+
+
+def _preview_recovery_consent_refusal(
+    operation: BrainDumpOperationDocument, *, text_reconciler: TextReconcilerPort
+) -> str | None:
+    """The redacted consent code that refuses a preview recovery, or ``None``.
+
+    Preview text exists on the operation only because
+    ``external_processing_allowed`` was true when the browser appended it; once
+    consent is withdrawn (which also flips that flag) the text is scheduled for
+    deletion and must never be sent anywhere. An externally processed
+    reconciler additionally needs its provider category named in consent.
+    """
+
+    consent = operation.consent
+    if (
+        not consent.external_processing_allowed
+        or operation.consent_withdrawn_at is not None
+    ):
+        return "RECONCILER_CONSENT_REQUIRED"
+    if (
+        text_reconciler.requires_external_processing
+        and text_reconciler.provider_id not in _effective_consented_providers(consent)
+    ):
+        return "RECONCILER_CONSENT_PROVIDER_MISMATCH"
+    return None
+
+
+def _preview_recovery_within_cost_cap(
+    operation: BrainDumpOperationDocument,
+    *,
+    text_reconciler: TextReconcilerPort,
+    max_cumulative_cost_usd: float,
+) -> bool:
+    """Whether the reconciler's worst-case reservation still fits under the cap."""
+
+    return provider_cost_budget_allows(
+        cumulative_spent_usd=cumulative_provider_cost_usd(operation.provider_runs),
+        worst_case_next_usd=getattr(text_reconciler, "max_cost_usd_per_operation", 0.0),
+        cap_usd=max_cumulative_cost_usd,
+    )
+
+
+def can_reconcile_brain_dump_preview(
+    operation: BrainDumpOperationDocument,
+    *,
+    text_reconciler: TextReconcilerPort,
+    max_cumulative_cost_usd: float,
+) -> bool:
+    """Whether an explicit owner action may recover tasks from browser-preview text.
+
+    ADR-0002 (2026-09-05 amendment): the one qualification of "if audio is
+    intact, retry from audio, never over fast text". It is offered only when
+    the accurate lane failed terminally and left nothing to review, it is
+    owner-chosen, one shot per operation, visibly ``provisional_only``, and it
+    still needs external-processing consent plus room under the operation's
+    cumulative cost cap for one reconciler call (no STT is ever run). It is
+    deliberately *not* gated on the accurate lane's exhausted recovery budget:
+    the preview recovery is its own separate, cost-capped, one-shot budget.
+    """
+
+    return (
+        _preview_recovery_state_eligible(operation)
+        and _preview_recovery_consent_refusal(
+            operation, text_reconciler=text_reconciler
+        )
+        is None
+        and _preview_recovery_within_cost_cap(
+            operation,
+            text_reconciler=text_reconciler,
+            max_cumulative_cost_usd=max_cumulative_cost_usd,
+        )
+    )
+
+
 def brain_dump_operation_is_committable(
     operation: BrainDumpOperationDocument,
 ) -> bool:
@@ -125,6 +289,10 @@ def brain_dump_operation_is_committable(
     if any(
         not proposal.deleted and proposal.conflicts for proposal in operation.proposals
     ):
+        return False
+    if not any(not proposal.deleted for proposal in operation.proposals):
+        # Nothing actionable was said (or everything was discarded): there is
+        # no batch to freeze, so "save" must not mint an empty completion.
         return False
     if operation.legacy_import == "legacy_preview_only" or operation.manual_review:
         return True
@@ -214,11 +382,7 @@ class VoiceBrainDumpService:
         single-provider client keeps working during migration.
         """
 
-        if consent.providers:
-            return set(consent.providers)
-        if consent.provider:
-            return {consent.provider}
-        return set()
+        return _effective_consented_providers(consent)
 
     def _required_external_provider_categories(self) -> set[str]:
         """Every configured role that genuinely ships bytes off-device.
@@ -839,6 +1003,131 @@ class VoiceBrainDumpService:
         )
         return reviewed
 
+    def can_reconcile_preview(self, operation: BrainDumpOperationDocument) -> bool:
+        """``can_reconcile_brain_dump_preview`` under this service's configuration."""
+
+        return can_reconcile_brain_dump_preview(
+            operation,
+            text_reconciler=self.text_reconciler,
+            max_cumulative_cost_usd=self.max_cumulative_cost_usd_per_operation,
+        )
+
+    def reconcile_brain_dump_preview(
+        self,
+        operation_id: str,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> BrainDumpOperationDocument:
+        """Queue the owner-chosen, one-shot reconciliation of browser-preview text.
+
+        The explicit recovery for a recording whose accurate transcription or
+        reconciliation failed terminally with nothing to review: the persisted
+        stable browser-preview segments -- a transcript readout, never a task
+        source on their own -- are handed to the text reconciler exactly once,
+        with no audio read and no STT call. The outcome is visibly
+        ``provisional_only`` and opens the same manual review
+        ``review_brain_dump_provisionally`` does; it is never called accurate.
+        Like seal and retry, this persists a ``pending`` run and wakes the
+        runner -- provider I/O never happens inside the request handler.
+        """
+
+        command = f"brain_dump_reconcile_preview:{operation_id}"
+        request_hash = self._request_hash(command, payload)
+        with self.operation_repo.command_lock(owner_id):
+            self.operation_repo.purge_expired_idempotency(
+                owner_id=owner_id, now=utcnow()
+            )
+            self._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
+            record = self._idempotency_record(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+            )
+            if record is not None:
+                return self._brain_dump_operation_result(record, owner_id=owner_id)
+            operation = self.get_brain_dump_operation(operation_id, owner_id=owner_id)
+            self._assert_revision(
+                "Brain dump operation",
+                operation.id,
+                operation.revision,
+                payload.expected_revision,
+            )
+            if not _preview_recovery_state_eligible(operation):
+                raise ValidationFailure(
+                    "BRAIN_DUMP_PREVIEW_RECOVERY_UNAVAILABLE: only a terminal "
+                    "transcription or reconciliation failure with stable "
+                    "browser-preview text, no reviewable proposals and no earlier "
+                    "preview recovery can recover tasks from the preview."
+                )
+            consent_refusal = _preview_recovery_consent_refusal(
+                operation, text_reconciler=self.text_reconciler
+            )
+            if consent_refusal is not None:
+                raise ValidationFailure(
+                    f"{consent_refusal}: external-processing consent naming the "
+                    "configured task reconciler is required before preview text "
+                    "may leave the device."
+                )
+            reservation = getattr(
+                self.text_reconciler, "max_cost_usd_per_operation", 0.0
+            )
+            if not _preview_recovery_within_cost_cap(
+                operation,
+                text_reconciler=self.text_reconciler,
+                max_cumulative_cost_usd=self.max_cumulative_cost_usd_per_operation,
+            ):
+                raise ValidationFailure(
+                    "OPERATION_COST_BUDGET_EXCEEDED: this recording has no cost "
+                    "budget left for another reconciler call."
+                )
+            preview_hypotheses = browser_preview_recovery_hypotheses(operation.segments)
+            now = utcnow()
+            claimed = operation.model_copy(
+                update={
+                    "status": "reconciling",
+                    "status_history": [*operation.status_history, "reconciling"],
+                    "provider_runs": [
+                        *operation.provider_runs,
+                        BrainDumpProviderRunDocument(
+                            id=generate_id("provider_run"),
+                            role="reconciler",
+                            status="pending",
+                            input_hash=hashlib.sha256(
+                                "\n".join(
+                                    hypothesis.text for hypothesis in preview_hypotheses
+                                ).encode("utf-8")
+                            ).hexdigest(),
+                            checkpoint="preview_transcribed",
+                            # A fresh stage with its own bounded retry budget:
+                            # the accurate lane's exhausted recoveries do not
+                            # carry over, and the one-shot rule in the state
+                            # predicate is what forbids a second preview run.
+                            attempt=1,
+                            recovery_count=0,
+                            reserved_cost_usd=reservation,
+                            created_at=now,
+                            updated_at=now,
+                        ),
+                    ],
+                    "updated_at": now,
+                    "revision": operation.revision + 1,
+                }
+            )
+            self.operation_repo.save_brain_dump_operation(claimed)
+            self._store_idempotency(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                resource_id=claimed.id,
+                response=claimed,
+            )
+        self.runner_wake()
+        return claimed
+
     def upload_brain_dump_audio_chunk(
         self,
         operation_id: str,
@@ -1090,10 +1379,13 @@ class VoiceBrainDumpService:
             claimed = operation.model_copy(
                 update={
                     "status": "accurate_transcribing",
+                    # ``fast_processing`` is no longer a stage: the browser
+                    # preview lane derives nothing after seal (ADR-0002,
+                    # 2026-09-05 amendment), so the history goes straight from
+                    # sealing to accurate transcription.
                     "status_history": [
                         *operation.status_history,
                         "sealing",
-                        "fast_processing",
                         "accurate_transcribing",
                     ],
                     "sealed_manifest_hash": manifest_hash,
@@ -1253,61 +1545,16 @@ class VoiceBrainDumpService:
             claimed_run
             and claimed_run.role == "reconciler"
             and claimed_run.status == "running"
-            and claimed_run.checkpoint == "accurate_transcribed"
         ):
-            checkpoint_runs = operation.provider_runs[:-1]
-            accurate_run = next(
-                (
-                    run
-                    for run in reversed(checkpoint_runs)
-                    if run.role == "accurate_stt"
-                    and run.status == "succeeded"
-                    and run.checkpoint == "accurate_transcribed"
-                ),
-                None,
-            )
-            if accurate_run is None or not accurate_run.output_segment_ids:
-                raise ValidationFailure(
-                    "Brain dump has no accurate transcript checkpoint to reconcile."
+            # A claimed reconciler run resumes from exactly one of two durable
+            # transcript checkpoints: the owner-chosen browser-preview recovery
+            # (``preview_transcribed``) or the accurate transcript; the accurate
+            # path itself fails closed when its checkpoint is missing.
+            if claimed_run.checkpoint == "preview_transcribed":
+                return self._reconcile_claimed_preview_run(
+                    operation, claimed_run, now=now
                 )
-            # Rebuild the full ordered accurate transcript (one hypothesis per
-            # utterance) from the checkpoint's output segment ids. The STT
-            # adapter may emit many utterance-level segments; every one must
-            # reach the reconciler in emission order, not just the first.
-            segments_by_id = {segment.id: segment for segment in operation.segments}
-            accurate_segments = [
-                segments_by_id[segment_id]
-                for segment_id in accurate_run.output_segment_ids
-                if segment_id in segments_by_id
-            ]
-            if len(accurate_segments) != len(accurate_run.output_segment_ids):
-                raise ValidationFailure(
-                    "Brain dump accurate transcript checkpoint is incomplete."
-                )
-            accurate_hypotheses = [
-                TranscriptHypothesis(
-                    id=segment.id,
-                    sequence=segment.sequence,
-                    start_ms=segment.start_ms,
-                    end_ms=segment.end_ms,
-                    text=segment.text,
-                    stability=segment.stability,
-                    provider_role="accurate",
-                    model=segment.model,
-                    supersedes_segment_ids=segment.supersedes_segment_ids,
-                )
-                for segment in accurate_segments
-            ]
-            return self._reconcile_accurate_checkpoint(
-                operation,
-                accurate_hypotheses=accurate_hypotheses,
-                checkpoint_runs=checkpoint_runs,
-                checkpoint_segments=operation.segments,
-                input_hash=accurate_run.input_hash,
-                now=now,
-                attempt=claimed_run.attempt,
-                recovery_count=claimed_run.recovery_count,
-            )
+            return self._reconcile_claimed_accurate_run(operation, claimed_run, now=now)
         replaces_claim = bool(
             claimed_run
             and claimed_run.role == "accurate_stt"
@@ -1494,40 +1741,149 @@ class VoiceBrainDumpService:
             }
         )
 
+    def _reconcile_claimed_accurate_run(
+        self,
+        operation: BrainDumpOperationDocument,
+        claimed_run: BrainDumpProviderRunDocument,
+        *,
+        now: datetime,
+    ) -> BrainDumpOperationDocument:
+        """Reconcile the persisted accurate transcript behind a claimed run."""
+
+        checkpoint_runs = operation.provider_runs[:-1]
+        accurate_run = next(
+            (
+                run
+                for run in reversed(checkpoint_runs)
+                if run.role == "accurate_stt"
+                and run.status == "succeeded"
+                and run.checkpoint == "accurate_transcribed"
+            ),
+            None,
+        )
+        if accurate_run is None or not accurate_run.output_segment_ids:
+            raise ValidationFailure(
+                "Brain dump has no accurate transcript checkpoint to reconcile."
+            )
+        # Rebuild the full ordered accurate transcript (one hypothesis per
+        # utterance) from the checkpoint's output segment ids. The STT
+        # adapter may emit many utterance-level segments; every one must
+        # reach the reconciler in emission order, not just the first.
+        segments_by_id = {segment.id: segment for segment in operation.segments}
+        accurate_segments = [
+            segments_by_id[segment_id]
+            for segment_id in accurate_run.output_segment_ids
+            if segment_id in segments_by_id
+        ]
+        if len(accurate_segments) != len(accurate_run.output_segment_ids):
+            raise ValidationFailure(
+                "Brain dump accurate transcript checkpoint is incomplete."
+            )
+        accurate_hypotheses = [
+            TranscriptHypothesis(
+                id=segment.id,
+                sequence=segment.sequence,
+                start_ms=segment.start_ms,
+                end_ms=segment.end_ms,
+                text=segment.text,
+                stability=segment.stability,
+                provider_role="accurate",
+                model=segment.model,
+                supersedes_segment_ids=segment.supersedes_segment_ids,
+            )
+            for segment in accurate_segments
+        ]
+        return self._reconcile_accurate_checkpoint(
+            operation,
+            transcript_hypotheses=accurate_hypotheses,
+            checkpoint_runs=checkpoint_runs,
+            checkpoint_segments=operation.segments,
+            input_hash=accurate_run.input_hash,
+            now=now,
+            attempt=claimed_run.attempt,
+            recovery_count=claimed_run.recovery_count,
+            source_checkpoint="accurate_transcribed",
+        )
+
+    def _reconcile_claimed_preview_run(
+        self,
+        operation: BrainDumpOperationDocument,
+        claimed_run: BrainDumpProviderRunDocument,
+        *,
+        now: datetime,
+    ) -> BrainDumpOperationDocument:
+        """Reconcile stable browser-preview text behind a claimed recovery run.
+
+        Owner-chosen through ``reconcile_brain_dump_preview``: exactly the
+        surviving stable preview segments -- never an interim fragment, never
+        text an accurate utterance already superseded -- reach the reconciler
+        as ``browser_preview`` hypotheses, so the model and the audit trail
+        both see what kind of text this is. No audio is read and no STT call
+        is made; the outcome is provisional by construction (see
+        ``_reconcile_accurate_checkpoint``).
+        """
+
+        preview_hypotheses = browser_preview_recovery_hypotheses(operation.segments)
+        if not preview_hypotheses:
+            raise ValidationFailure(
+                "Brain dump has no browser-preview transcript to recover tasks from."
+            )
+        return self._reconcile_accurate_checkpoint(
+            operation,
+            transcript_hypotheses=preview_hypotheses,
+            checkpoint_runs=operation.provider_runs[:-1],
+            checkpoint_segments=operation.segments,
+            input_hash=claimed_run.input_hash,
+            now=now,
+            attempt=claimed_run.attempt,
+            recovery_count=claimed_run.recovery_count,
+            source_checkpoint="preview_transcribed",
+        )
+
     def _reconcile_accurate_checkpoint(
         self,
         operation: BrainDumpOperationDocument,
         *,
-        accurate_hypotheses: list[TranscriptHypothesis],
+        transcript_hypotheses: list[TranscriptHypothesis],
         checkpoint_runs: list[BrainDumpProviderRunDocument],
         checkpoint_segments: list[BrainDumpTranscriptSegmentDocument],
         input_hash: str,
         now: datetime,
         attempt: int,
         recovery_count: int,
+        source_checkpoint: ReconcilerSourceCheckpoint,
     ) -> BrainDumpOperationDocument:
-        cumulative_spent = sum(
-            max(run.estimated_cost_usd, run.consumed_cost_usd)
-            # A prior run still "pending"/"running" -- including one whose
-            # process crashed or is otherwise unresolved -- has an
-            # outstanding reservation that must count against the cap here
-            # exactly as it does for accurate-STT admission
-            # (``_operation_cost_budget_exceeded``); otherwise a stuck or
-            # unknown-outcome run's reserved spend would be silently
-            # dropped from the reconciler's own admission check.
-            + (run.reserved_cost_usd if run.status in {"pending", "running"} else 0.0)
-            for run in checkpoint_runs
-        )
-        worst_case_next = getattr(
-            self.text_reconciler, "max_cost_usd_per_operation", 0.0
-        )
-        cap = self.max_cumulative_cost_usd_per_operation
-        if cumulative_spent >= cap or cumulative_spent + worst_case_next > cap:
+        """Run the text reconciler over one durable transcript checkpoint.
+
+        ``source_checkpoint`` names what the hypotheses are: the accurate
+        transcript (``accurate_transcribed``, the canonical path that freezes at
+        ``reconciled`` with ``reconciliation_quality="accurate"``) or the
+        owner-chosen browser-preview recovery (``preview_transcribed``, which
+        freezes at ``preview_reconciled`` as ``provisional_only`` manual review
+        and can never satisfy the canonical commit gate). Cost admission,
+        consent checks, patch projection and failure persistence are identical
+        for both; only the labels the outcome carries differ.
+        """
+
+        # A prior run still "pending"/"running" -- including one whose
+        # process crashed or is otherwise unresolved -- has an outstanding
+        # reservation that counts against the cap here exactly as it does for
+        # accurate-STT admission (``_operation_cost_budget_exceeded``); both
+        # sum through ``cumulative_provider_cost_usd`` so a stuck or
+        # unknown-outcome run's reserved spend is never silently dropped.
+        if not provider_cost_budget_allows(
+            cumulative_spent_usd=cumulative_provider_cost_usd(checkpoint_runs),
+            worst_case_next_usd=getattr(
+                self.text_reconciler, "max_cost_usd_per_operation", 0.0
+            ),
+            cap_usd=self.max_cumulative_cost_usd_per_operation,
+        ):
             return self._reconciler_failure(
                 operation,
                 checkpoint_segments=checkpoint_segments,
                 checkpoint_runs=checkpoint_runs,
                 input_hash=input_hash,
+                checkpoint=source_checkpoint,
                 error="OPERATION_COST_BUDGET_EXCEEDED",
                 error_code="OPERATION_COST_BUDGET_EXCEEDED",
                 now=now,
@@ -1542,6 +1898,7 @@ class VoiceBrainDumpService:
                     checkpoint_segments=checkpoint_segments,
                     checkpoint_runs=checkpoint_runs,
                     input_hash=input_hash,
+                    checkpoint=source_checkpoint,
                     error="RECONCILER_CONSENT_REQUIRED",
                     now=now,
                     attempt=attempt,
@@ -1556,6 +1913,7 @@ class VoiceBrainDumpService:
                     checkpoint_segments=checkpoint_segments,
                     checkpoint_runs=checkpoint_runs,
                     input_hash=input_hash,
+                    checkpoint=source_checkpoint,
                     error="RECONCILER_CONSENT_PROVIDER_MISMATCH",
                     now=now,
                     attempt=attempt,
@@ -1568,7 +1926,7 @@ class VoiceBrainDumpService:
             fixture_result = self.text_reconciler.reconcile(
                 ReconcileTextRequest(
                     operation_id=operation.id,
-                    transcript_segments=accurate_hypotheses,
+                    transcript_segments=transcript_hypotheses,
                     active_proposals=[],
                     user_locks={},
                 )
@@ -1579,20 +1937,20 @@ class VoiceBrainDumpService:
                 titles,
                 operation_id=operation.id,
                 source_segment_ids=[
-                    hypothesis.id for hypothesis in accurate_hypotheses
+                    hypothesis.id for hypothesis in transcript_hypotheses
                 ],
                 now=now,
             )
             reconciler_input_hash = hashlib.sha256(
-                "\n".join(hypothesis.text for hypothesis in accurate_hypotheses).encode(
-                    "utf-8"
-                )
+                "\n".join(
+                    hypothesis.text for hypothesis in transcript_hypotheses
+                ).encode("utf-8")
             ).hexdigest()
             reconciler_cost = fixture_result.estimated_cost_usd
         else:
             reconciler_request = ReconcileTextRequest(
                 operation_id=operation.id,
-                transcript_segments=accurate_hypotheses,
+                transcript_segments=transcript_hypotheses,
                 active_proposals=[
                     self._proposal_document_to_reconciled(proposal)
                     for proposal in operation.proposals
@@ -1630,6 +1988,7 @@ class VoiceBrainDumpService:
                     checkpoint_segments=checkpoint_segments,
                     checkpoint_runs=checkpoint_runs,
                     input_hash=input_hash,
+                    checkpoint=source_checkpoint,
                     error=redacted_code,
                     error_code=redacted_code,
                     now=now,
@@ -1640,6 +1999,18 @@ class VoiceBrainDumpService:
                     recovery_count=recovery_count,
                     estimated_cost_usd=exc.estimated_cost_usd,
                     validation_rejected=isinstance(exc, ValidationFailure),
+                )
+            if reconcile_result.skipped_operations:
+                # Skip reasons are fixed adapter strings (never transcript or
+                # title text), so they are safe to log; they are the only
+                # trace that the model emitted fillers, duplicates or
+                # ungrounded tasks that the server refused.
+                logger.info(
+                    "brain_dump_reconciler_dropped_operations operation_id=%s "
+                    "dropped=%d reasons=%s",
+                    operation.id,
+                    len(reconcile_result.skipped_operations),
+                    " | ".join(reconcile_result.skipped_operations),
                 )
             proposals = self._apply_reconciler_patches(
                 operation.proposals, reconcile_result.patches, now=now
@@ -1654,6 +2025,18 @@ class VoiceBrainDumpService:
             now=now,
         )
         active_reconciler_run = operation.provider_runs[-1]
+        recovered_from_preview = source_checkpoint == "preview_transcribed"
+        # A browser-preview recovery is provisional by construction: it is
+        # labelled ``provisional_only``, opens the same owner-chosen manual
+        # review ``review_brain_dump_provisionally`` does, and freezes at
+        # ``preview_reconciled`` -- never ``reconciled`` -- so the canonical
+        # ``accurate`` commit gate cannot be satisfied by preview text.
+        reconciliation_quality: Literal["provisional_only", "accurate"] = (
+            "provisional_only" if recovered_from_preview else "accurate"
+        )
+        frozen_checkpoint: BrainDumpProviderRunCheckpoint = (
+            "preview_reconciled" if recovered_from_preview else "reconciled"
+        )
         return operation.model_copy(
             update={
                 "status": "awaiting_confirmation",
@@ -1662,7 +2045,8 @@ class VoiceBrainDumpService:
                     "reconciling",
                     "awaiting_confirmation",
                 ],
-                "reconciliation_quality": "accurate",
+                "reconciliation_quality": reconciliation_quality,
+                "manual_review": operation.manual_review or recovered_from_preview,
                 "segments": checkpoint_segments,
                 "proposals": proposals,
                 "proposal_patches": proposal_patches,
@@ -1672,7 +2056,7 @@ class VoiceBrainDumpService:
                         update={
                             "status": "succeeded",
                             "input_hash": reconciler_input_hash,
-                            "checkpoint": "reconciled",
+                            "checkpoint": frozen_checkpoint,
                             "attempt": attempt,
                             "recovery_count": recovery_count,
                             "provider": self.text_reconciler.provider_id,
@@ -1746,10 +2130,19 @@ class VoiceBrainDumpService:
             resume_reconciliation = bool(
                 latest_provider_run
                 and latest_provider_run.role == "reconciler"
-                and latest_provider_run.checkpoint == "accurate_transcribed"
+                and latest_provider_run.checkpoint
+                in {"accurate_transcribed", "preview_transcribed"}
                 and (
                     latest_provider_run.status == "retryable_error" or recoverable_claim
                 )
+            )
+            # A browser-preview recovery run resumes over the persisted preview
+            # text: it never rewinds to sealed audio, and it does not need the
+            # sealed manifest (the owner may already have deleted raw audio).
+            resume_preview = bool(
+                resume_reconciliation
+                and latest_provider_run
+                and latest_provider_run.checkpoint == "preview_transcribed"
             )
             last_run = (
                 latest_provider_run
@@ -1763,7 +2156,9 @@ class VoiceBrainDumpService:
                     None,
                 )
             )
-            if last_run is None or operation.sealed_manifest_hash is None:
+            if last_run is None or (
+                operation.sealed_manifest_hash is None and not resume_preview
+            ):
                 raise ValidationFailure(
                     "Brain dump has no sealed checkpoint to resume from."
                 )
@@ -1834,9 +2229,11 @@ class VoiceBrainDumpService:
             claimed_role: Literal["accurate_stt", "reconciler"] = (
                 "reconciler" if resume_reconciliation else "accurate_stt"
             )
-            claimed_checkpoint: Literal["sealed", "accurate_transcribed"] = (
-                "accurate_transcribed" if resume_reconciliation else "sealed"
-            )
+            claimed_checkpoint: BrainDumpProviderRunCheckpoint = "sealed"
+            if resume_preview:
+                claimed_checkpoint = "preview_transcribed"
+            elif resume_reconciliation:
+                claimed_checkpoint = "accurate_transcribed"
             claimed = operation.model_copy(
                 update={
                     "status": claimed_status,
@@ -1948,50 +2345,15 @@ class VoiceBrainDumpService:
                 created_at=now,
             )
         segments = sorted(segments_by_sequence.values(), key=lambda item: item.sequence)
-        proposals = self._proposals_from_segments(
-            operation.proposals, segments, now=now
-        )
-        existing_by_id = {proposal.id: proposal for proposal in operation.proposals}
-        patch_drafts: list[ProposalPatch] = []
-        for proposal in proposals:
-            previous = existing_by_id.get(proposal.id)
-            if previous is None:
-                patch_drafts.append(
-                    ProposalPatch.add(
-                        proposal_id=proposal.id,
-                        title=proposal.title,
-                        source_segment_ids=proposal.source_segment_ids,
-                        producer="fast",
-                    )
-                )
-                continue
-            title = proposal.title if proposal.title != previous.title else None
-            source_segment_ids = (
-                proposal.source_segment_ids
-                if proposal.source_segment_ids != previous.source_segment_ids
-                else None
-            )
-            if title is not None or source_segment_ids is not None:
-                patch_drafts.append(
-                    ProposalPatch.update(
-                        proposal_id=proposal.id,
-                        title=title,
-                        source_segment_ids=source_segment_ids,
-                        producer="fast",
-                        base_revision=previous.title_revision,
-                    )
-                )
-        proposal_patches = self._append_proposal_patch_documents(
-            operation_id=operation.id,
-            existing=operation.proposal_patches,
-            drafts=patch_drafts,
-            now=now,
-        )
+        # Browser preview text is a live status readout, never a task source.
+        # Proposals are minted only by the reconciler from the accurate
+        # transcript after seal (``_reconcile_accurate_checkpoint``), so a
+        # half-recognised interim fragment ("Так", "Надо купить моло") can
+        # never surface as a draft task, and no fast-lane leftover can later
+        # block commit as an unreconciled proposal.
         updated = operation.model_copy(
             update={
                 "segments": segments,
-                "proposals": proposals,
-                "proposal_patches": proposal_patches,
                 "updated_at": now,
                 "revision": operation.revision + 1,
             }
@@ -2302,7 +2664,8 @@ class VoiceBrainDumpService:
           * blocks all future upload/provider calls, which already fail
             closed on ``consent.external_processing_allowed`` at every call
             site (``upload_brain_dump_audio_chunk``,
-            ``append_brain_dump_transcript``, ``_run_accurate_stt_and_reconcile``,
+            ``append_brain_dump_transcript``, ``reconcile_brain_dump_preview``,
+            ``_run_accurate_stt_and_reconcile``,
             ``_reconcile_accurate_checkpoint``);
           * invalidates a due/leased in-flight provider run immediately
             (rather than waiting for lease expiry) by marking it
@@ -2471,7 +2834,7 @@ class VoiceBrainDumpService:
         prior_runs: list[BrainDumpProviderRunDocument],
         *,
         role: Literal["accurate_stt", "reconciler"],
-        checkpoint: Literal["sealed", "accurate_transcribed", "reconciled"],
+        checkpoint: BrainDumpProviderRunCheckpoint,
         input_hash: str,
         provider: str | None,
         claimed_run_id: str | None,
@@ -2493,13 +2856,11 @@ class VoiceBrainDumpService:
         silent fallback. The provider is never called once this rejects.
         """
 
-        cumulative_spent = sum(
-            max(run.estimated_cost_usd, run.consumed_cost_usd)
-            + (run.reserved_cost_usd if run.status in {"pending", "running"} else 0.0)
-            for run in prior_runs
-        )
-        cap = self.max_cumulative_cost_usd_per_operation
-        if cumulative_spent < cap and cumulative_spent + worst_case_next_usd <= cap:
+        if provider_cost_budget_allows(
+            cumulative_spent_usd=cumulative_provider_cost_usd(prior_runs),
+            worst_case_next_usd=worst_case_next_usd,
+            cap_usd=self.max_cumulative_cost_usd_per_operation,
+        ):
             return None
         return BrainDumpProviderRunDocument(
             id=claimed_run_id or generate_id("provider_run"),
@@ -2524,11 +2885,11 @@ class VoiceBrainDumpService:
         ``finish``/``transition_brain_dump_operation`` can move an operation to
         ``awaiting_confirmation`` directly from ``recording``/``paused`` (e.g.
         when external-processing consent was never granted, so nothing could
-        be sealed or reconciled). That path only ever carries "fast" preview
-        proposals from the live heuristic extractor and must never be
-        committable as canonical tasks — it is provisional-only and review is
-        limited to editing/discarding, per ADR-0002's model-output-as-proposals
-        invariant.
+        be sealed or reconciled). That path carries no reconciler output -- at
+        most pre-existing ``provisional`` proposals from a legacy import -- and
+        must never be committable as canonical tasks: it is provisional-only
+        and review is limited to editing/discarding, per ADR-0002's
+        model-output-as-proposals invariant.
 
         This deliberately does not require ``sealed_manifest_hash`` to still be
         set: raw audio may be deleted promptly after a successful reconciliation
@@ -2692,9 +3053,8 @@ class VoiceBrainDumpService:
                 if unreconciled:
                     raise ValidationFailure(
                         "BRAIN_DUMP_PROPOSAL_NOT_RECONCILED: an operation-level "
-                        "reconciler success cannot make an untouched browser-"
-                        "preview/fast proposal canonical; edit or delete it "
-                        "before save.",
+                        "reconciler success cannot make an untouched provisional "
+                        "proposal canonical; edit or delete it before save.",
                         {"proposal_ids": unreconciled},
                     )
             if not committable:
@@ -2905,13 +3265,19 @@ class VoiceBrainDumpService:
         plaintext title hash), before any retention reduction.
         """
 
+        # Audit provenance names the run whose model actually produced the
+        # titles -- the canonical ``reconciled`` batch or the owner-chosen
+        # ``preview_reconciled`` recovery. The receipt's
+        # ``reconciliation_quality`` (copied from the operation) is what says
+        # which of the two it was; a preview recovery is always
+        # ``provisional_only`` there.
         reconciler_run = next(
             (
                 run
                 for run in reversed(operation.provider_runs)
                 if run.role == "reconciler"
                 and run.status == "succeeded"
-                and run.checkpoint == "reconciled"
+                and run.checkpoint in {"reconciled", "preview_reconciled"}
             ),
             None,
         )
@@ -3532,6 +3898,7 @@ class VoiceBrainDumpService:
         checkpoint_segments: list[BrainDumpTranscriptSegmentDocument],
         checkpoint_runs: list[BrainDumpProviderRunDocument],
         input_hash: str,
+        checkpoint: ReconcilerSourceCheckpoint,
         error: str,
         now: datetime,
         retryable: bool = False,
@@ -3572,7 +3939,7 @@ class VoiceBrainDumpService:
                         update={
                             "status": status,
                             "input_hash": input_hash,
-                            "checkpoint": "accurate_transcribed",
+                            "checkpoint": checkpoint,
                             "attempt": attempt,
                             "recovery_count": recovery_count,
                             "error": error,
@@ -3598,197 +3965,11 @@ class VoiceBrainDumpService:
             }
         )
 
-    def _matching_proposal_index(
-        self, proposals: list[BrainDumpProposalDocument], title: str
-    ) -> int | None:
-        for index, proposal in enumerate(proposals):
-            if self._titles_refer_to_same_item(
-                title, proposal.title
-            ) or self._titles_share_first_word(title, proposal.title):
-                return index
-        return None
-
-    def _proposals_from_segments(
-        self,
-        existing: list[BrainDumpProposalDocument],
-        segments: list[BrainDumpTranscriptSegmentDocument],
-        *,
-        now: datetime,
-    ) -> list[BrainDumpProposalDocument]:
-        if not segments:
-            return existing
-        proposal_segments = self._segments_for_proposal_extraction(segments)
-        if not proposal_segments:
-            return existing
-        latest_is_interim = proposal_segments[-1].stability == "interim"
-        candidates = self._extract_task_titles(
-            " ".join(segment.text for segment in proposal_segments)
-        )
-        segment_ids = [segment.id for segment in proposal_segments]
-        status: BrainDumpProposalStatus = (
-            "wording_changing" if latest_is_interim else "provisional"
-        )
-        proposals = list(existing)
-        proposal_index_by_title = {
-            self._proposal_identity_key(proposal.title): index
-            for index, proposal in enumerate(proposals)
-            if not proposal.deleted
-        }
-        for title in candidates:
-            existing_index = proposal_index_by_title.get(
-                self._proposal_identity_key(title)
-            )
-            if existing_index is not None:
-                proposal = proposals[existing_index]
-                if proposal.user_edited or proposal.deleted:
-                    continue
-                if (
-                    proposal.title == title
-                    and proposal.source_segment_ids == segment_ids
-                ):
-                    continue
-                proposals[existing_index] = proposal.model_copy(
-                    update={
-                        "title": title,
-                        "status": status,
-                        "source_segment_ids": segment_ids,
-                        "updated_at": now,
-                        "revision": proposal.revision + 1,
-                    }
-                )
-                continue
-            semantic_matches = [
-                (index, proposal)
-                for index, proposal in enumerate(proposals)
-                if self._proposal_semantic_key(proposal.title)
-                == self._proposal_semantic_key(title)
-            ]
-            protected_matches = [
-                proposal
-                for _index, proposal in semantic_matches
-                if proposal.user_edited or proposal.deleted
-            ]
-            if protected_matches or any(
-                (proposal.user_edited or proposal.deleted)
-                and self._titles_share_first_word(title, proposal.title)
-                for proposal in proposals
-            ):
-                # A conservative lock/deletion guard is allowed to omit an
-                # ambiguous preview candidate; it must never overwrite it.
-                continue
-            mutable_matches = [
-                (index, proposal)
-                for index, proposal in semantic_matches
-                if not proposal.deleted and not proposal.user_edited
-            ]
-            if len(mutable_matches) == 1:
-                matched_index, proposal = mutable_matches[0]
-                proposals[matched_index] = proposal.model_copy(
-                    update={
-                        "title": title,
-                        "status": status,
-                        "source_segment_ids": segment_ids,
-                        "updated_at": now,
-                        "revision": proposal.revision + 1,
-                    }
-                )
-                proposal_index_by_title[self._proposal_identity_key(title)] = (
-                    matched_index
-                )
-                continue
-            proposals.append(
-                BrainDumpProposalDocument(
-                    id=generate_id("proposal"),
-                    ordinal=len(proposals) + 1,
-                    title=title,
-                    status=status,
-                    source_segment_ids=segment_ids,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-            proposal_index_by_title[self._proposal_identity_key(title)] = (
-                len(proposals) - 1
-            )
-        return proposals
-
-    @classmethod
-    def _segments_for_proposal_extraction(
-        cls, segments: list[BrainDumpTranscriptSegmentDocument]
-    ) -> list[BrainDumpTranscriptSegmentDocument]:
-        proposal_segments: list[BrainDumpTranscriptSegmentDocument] = []
-        for segment in segments:
-            if segment.stability == "stable":
-                stable_text = cls._normalized_transcript_for_replacement(segment.text)
-                proposal_segments = [
-                    existing
-                    for existing in proposal_segments
-                    if not (
-                        existing.stability == "interim"
-                        and stable_text.startswith(
-                            cls._normalized_transcript_for_replacement(existing.text)
-                        )
-                    )
-                ]
-            proposal_segments.append(segment)
-        return proposal_segments
-
     @staticmethod
-    def _normalized_transcript_for_replacement(text: str) -> str:
-        return re.sub(r"\s+", " ", text).strip().casefold()
-
-    @classmethod
-    def _proposal_identity_key(cls, title: str) -> str:
+    def _proposal_identity_key(title: str) -> str:
         """Identity is content-derived, never inferred from a candidate position."""
 
-        return cls._normalized_transcript_for_replacement(title)
-
-    @classmethod
-    def _proposal_semantic_key(cls, title: str) -> str:
-        """Use a unique two-token key only to preserve an existing opaque ID."""
-
-        return " ".join(cls._proposal_identity_key(title).split()[:2])
-
-    @staticmethod
-    def _extract_task_titles(text: str) -> list[str]:
-        """Heuristically split live browser-preview text into draft titles.
-
-        This feeds only the local, non-committable "fast" preview proposals
-        shown while the user is still talking (see ``append_brain_dump_transcript``).
-        It must never gain fixture-specific literal branches: those belong to
-        test-only deterministic providers, not this always-on production path.
-        Canonical tasks may only be created from a sealed, reconciled batch —
-        enforced separately in ``commit_brain_dump_operation`` — so this
-        heuristic's imprecision cannot itself produce an invented task.
-        """
-
-        normalized = re.sub(r"\s+", " ", text).strip()
-        if not normalized:
-            return []
-        rough_parts = re.split(
-            r"(?:\s*\d+[.)]\s+|[.;\n]+|\bthen\b|\bпотом\b)",
-            normalized,
-            flags=re.IGNORECASE,
-        )
-        titles: list[str] = []
-        seen: set[str] = set()
-        for part in rough_parts:
-            title = re.sub(r"^[-*•\s]+", "", part).strip(" ,")
-            title = re.sub(
-                r"^(?:and\s+)?(?:i\s+)?(?:need|should|must|have)\s+to\s+",
-                "",
-                title,
-                flags=re.IGNORECASE,
-            )
-            if not title:
-                continue
-            title = title[0].upper() + title[1:]
-            key = title.casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            titles.append(title)
-        return titles
+        return normalized_title(title)
 
     @staticmethod
     def _titles_refer_to_same_item(candidate: str, existing: str) -> bool:

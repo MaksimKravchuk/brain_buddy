@@ -248,7 +248,7 @@ Legend:
 | edit/remove/reorder candidate | remove at `bbm-app.jsx:354`; labels imply edit/date but do not implement them | only remove mutates local review array | user patches; edits lock fields; freeze invalidation | edit/remove **T1**, reorder **T2** |
 | add date in review | `bbm-app.jsx:351`; `bbm-screens.jsx:190` | label only | proposal field patch; exact date semantics | **T2** |
 | explicit confirmation | `bbm-app.jsx:360` | appends fixed items directly to local Inbox | `confirm` idempotent batch commit | **T1**, relabel as confirm/add |
-| close/discard/reopen/resume | close/discard at `bbm-app.jsx:342,361`; no resume UI | close currently discards; no persisted operation | UI close never cancels; discard is explicit cancel; refetch projection on reopen | **T1** |
+| close/discard/reopen/resume | close/discard at `bbm-app.jsx:342,361`; no resume UI | close currently discards; no persisted operation | UI close never cancels; discard is explicit cancel behind an inline confirmation; refetch projection on reopen | **T1** |
 | offline/chunk retry | absent | absent | numbered chunks, manifest, missing-chunk resume | **T1 safety requirement** |
 | retryable/terminal errors | absent | absent | operation error states and checkpoint retry | **T1** |
 | commit progress/partial result | absent | absent | action DAG and per-action results | **T1** |
@@ -466,6 +466,12 @@ transaction.
 ## 7. Brain Dump UX mapped to ADR-0002
 
 ### 7.1 Required correction to CloudDesign language
+
+> Superseded on 2026-09-05 (ADR-0002 amendment): the recording surface no longer
+> shows a candidate list at all. Browser-preview text is rendered as a transcript
+> readout, and tasks appear only on the review surface once the reconciler has
+> turned the accurate transcript into next actions. The mapping below documents
+> the earlier mockup language and is kept as design history.
 
 During recording, no item is “headed to inbox,” nothing has been sent, and the total may
 change during reconciliation. Replace the mockup's authority language:

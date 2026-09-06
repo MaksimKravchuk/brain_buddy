@@ -1,13 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, Inbox, Mic, Pause, Play, Square, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { apiClient } from "../../api/client";
 import { taskKeys, useBrainDumpProviders } from "../../api/taskHooks";
 import type { BrainDumpOperationResponse, BrainDumpProposal, BrainDumpProposalStatus } from "../../api/taskTypes";
+import { getErrorContext } from "../../utils/error";
 import { BrainDumpOverlay, BrainDumpOverlayHeader } from "./BrainDumpOverlay";
 import { useCloseBrainDump } from "./brainDumpNavigation";
+import { operationStatusLabels, processingStatuses } from "./brainDumpStatusLabels";
 
 const TITLE_ID = "brain-dump-title";
 
@@ -43,13 +45,9 @@ const statusLabels: Record<BrainDumpProposalStatus, string> = {
   conflicted: "Needs review"
 };
 
-const processingStatusLabels = new Map<string, string>([
-  ["sealing", "Sealing audio"],
-  ["fast_processing", "Building provisional tasks"],
-  ["accurate_transcribing", "Improving transcript"],
-  ["reconciling", "Reconciling tasks"],
-  ["committing", "Saving tasks"]
-]);
+const processingStatusLabels = new Map<string, string>(
+  processingStatuses.map((status) => [status, operationStatusLabels[status]])
+);
 
 // A background lease-recovery sweep or another process can advance one of
 // these statuses server-side without any client action; the poll keeps a
@@ -70,6 +68,22 @@ type LanguageMode = keyof typeof languageOptions;
 
 function idempotencyKey(suffix: string) {
   return `brain-dump-${suffix}-${Date.now()}`;
+}
+
+/**
+ * The text an error banner shows. A refused request answers with the reason the
+ * server gave (`RECONCILER_CONSENT_REQUIRED: …`, a stale-revision conflict), never
+ * the bare HTTP status text an `ApiError` carries as its message, and names the
+ * request's correlation id so the owner can quote it. Any other Error keeps its
+ * own message; a non-Error rejection gets the caller's wording. The raw payload
+ * and the stack never reach the banner.
+ */
+function describeError(caught: unknown, fallback: string): string {
+  if (!(caught instanceof Error)) {
+    return fallback;
+  }
+  const { message, referenceId } = getErrorContext(caught, fallback);
+  return referenceId ? `${message} Ref: ${referenceId}` : message;
 }
 
 export function BrainDumpRoute(): React.JSX.Element {
@@ -130,7 +144,7 @@ export function BrainDumpRoute(): React.JSX.Element {
     }
     return map;
   }, [operation]);
-  const hasUnresolvedConflicts = activeProposals.some((proposal) => (proposal.conflicts ?? []).length > 0);
+  const unresolvedConflictCount = activeProposals.filter((proposal) => (proposal.conflicts ?? []).length > 0).length;
 
   const applyOperation = useCallback((next: BrainDumpOperationResponse | null) => {
     const current = operationRef.current;
@@ -148,6 +162,17 @@ export function BrainDumpRoute(): React.JSX.Element {
     sequenceRef.current = Math.max(sequenceRef.current, ...operation.segments.map((segment) => segment.sequence), 0);
     if (operation.status === "completed") {
       setSavedCount(operation.committed_task_ids.length);
+    }
+    // A resumed recording (reload of /brain-dump/{id}) has no local recognizer,
+    // so nothing would ever fill the live tail beside the microphone although
+    // the persisted transcript is right there. While capture is still open,
+    // seed it from the latest utterance the server holds. A running recognizer
+    // owns the tail, and a tail that already has words is never overwritten.
+    if (!recognitionRef.current && (operation.status === "recording" || operation.status === "paused")) {
+      const latest = latestSegmentText(operation.segments);
+      if (latest) {
+        setLastTranscript((current) => current || latest);
+      }
     }
   }, [operation]);
 
@@ -170,7 +195,7 @@ export function BrainDumpRoute(): React.JSX.Element {
     const controller = new AbortController();
     apiClient.getBrainDump(operationId, controller.signal).then(applyOperation).catch((caught: unknown) => {
       if (!controller.signal.aborted) {
-        setError(caught instanceof Error ? caught.message : "Could not resume brain dump.");
+        setError(describeError(caught, "Could not resume brain dump."));
       }
     });
     return () => controller.abort();
@@ -263,7 +288,7 @@ export function BrainDumpRoute(): React.JSX.Element {
           idempotencyKey(`segment-${sequence}`)
         )
         .then(applyOperation)
-        .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "Transcript upload failed."));
+        .catch((caught: unknown) => setError(describeError(caught, "Transcript upload failed.")));
     };
     recognition.onerror = (event) => setError(event.error === "not-allowed" ? "Microphone permission was denied." : `Microphone error: ${event.error}`);
     recognition.start();
@@ -306,7 +331,7 @@ export function BrainDumpRoute(): React.JSX.Element {
         applyOperation(updated);
       });
       void audioUploadQueueRef.current.catch((caught: unknown) => {
-        setError(caught instanceof Error ? caught.message : "Original audio upload failed.");
+        setError(describeError(caught, "Original audio upload failed."));
       });
     };
     recorder.start(1000);
@@ -420,13 +445,13 @@ export function BrainDumpRoute(): React.JSX.Element {
       if (!streamIsManagedByRecorder) {
         stream?.getTracks().forEach((track) => track.stop());
       }
-      setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
+      setError(describeError(caught, "Microphone permission was denied."));
     } finally {
       setIsStarting(false);
     }
   }
 
-  async function commandInternal(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "withdraw_consent" | "delete_raw_audio") {
+  async function commandInternal(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "reconcile_preview" | "withdraw_consent" | "delete_raw_audio") {
     if (!operationRef.current) {
       return;
     }
@@ -459,7 +484,7 @@ export function BrainDumpRoute(): React.JSX.Element {
           permissionProbe.getTracks().forEach((track) => track.stop());
         }
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Microphone permission was denied.");
+        setError(describeError(caught, "Microphone permission was denied."));
         return;
       }
     }
@@ -537,17 +562,24 @@ export function BrainDumpRoute(): React.JSX.Element {
       }
       if (action === "cancel") {
         localCaptureOperationIdRef.current = null;
-        applyOperation(null);
-        setConsentWithdrawnMidCapture(false);
-        setLastTranscript("");
-        navigateWithinBrainDump("/brain-dump/new");
+        // React Router applies the navigation as a transition. Left on their
+        // own, the resets here would commit first, with the URL still naming
+        // the cancelled operation: the loading branch would flash and the
+        // resume effect would re-fetch an operation there is nothing left to
+        // resume. Sharing the transition commits the reset and the URL together.
+        startTransition(() => {
+          applyOperation(null);
+          setConsentWithdrawnMidCapture(false);
+          setLastTranscript("");
+          navigateWithinBrainDump("/brain-dump/new");
+        });
       }
       if (action === "commit") {
         setSavedCount(updated.committed_task_ids.length);
         void queryClient.invalidateQueries({ queryKey: taskKeys.all });
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Brain dump command failed.");
+      setError(describeError(caught, "Brain dump command failed."));
     } finally {
       if (action === "commit") {
         setIsSaving(false);
@@ -555,7 +587,7 @@ export function BrainDumpRoute(): React.JSX.Element {
     }
   }
 
-  function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "withdraw_consent" | "delete_raw_audio") {
+  function command(action: "pause" | "resume" | "finish" | "cancel" | "commit" | "retry" | "review_provisional" | "reconcile_preview" | "withdraw_consent" | "delete_raw_audio") {
     if (action !== "finish") {
       return commandInternal(action);
     }
@@ -592,7 +624,7 @@ export function BrainDumpRoute(): React.JSX.Element {
           : kind === "resolve"
             ? "Could not resolve the conflict."
             : "Could not delete the task.";
-      setError(caught instanceof Error ? caught.message : fallback);
+      setError(describeError(caught, fallback));
     }
   }
 
@@ -642,8 +674,22 @@ export function BrainDumpRoute(): React.JSX.Element {
     );
   }
 
+  if (!operation && params.operationId && params.operationId !== "new" && !error) {
+    // A reload of /brain-dump/{id} (or its /review) is resuming a persisted
+    // operation. Until it arrives, neither "Record" nor an empty review is
+    // true, so say we are loading instead of flashing the wrong surface.
+    return (
+      <BrainDumpOverlay labelledBy={TITLE_ID} size="narrow" operationId={params.operationId}>
+        <BrainDumpOverlayHeader titleId={TITLE_ID} eyebrow="Brain dump" title="Loading your brain dump" />
+        <p role="status" className="px-5 py-4 text-sm text-slate-500 sm:px-6">
+          Fetching the recording and anything already proposed from it…
+        </p>
+      </BrainDumpOverlay>
+    );
+  }
+
   if (operation && processingStatusLabels.has(operation.status)) {
-    return <ProcessingSurface error={error} operation={operation} proposals={activeProposals} />;
+    return <ProcessingSurface error={error} operation={operation} onCancel={() => void command("cancel")} />;
   }
 
   if (operation && (operation.status === "retryable_error" || operation.status === "terminal_error")) {
@@ -655,6 +701,7 @@ export function BrainDumpRoute(): React.JSX.Element {
         operation={operation}
         providerError={providerError}
         onDelete={() => void command("cancel")}
+        onReconcilePreview={() => void command("reconcile_preview")}
         onReview={() => void command("review_provisional")}
         onRetry={() => void command("retry")}
       />
@@ -665,10 +712,11 @@ export function BrainDumpRoute(): React.JSX.Element {
     return (
       <ReviewSurface
         error={error}
-        hasUnresolvedConflicts={hasUnresolvedConflicts}
+        unresolvedConflictCount={unresolvedConflictCount}
         isSaving={isSaving}
         committable={operation?.committable ?? false}
         proposals={activeProposals}
+        segments={operation?.segments ?? []}
         segmentsById={segmentsById}
         reconciliationQuality={operation?.reconciliation_quality ?? "none"}
         rawAudioExpiresAt={operation?.raw_audio_expires_at}
@@ -697,7 +745,6 @@ export function BrainDumpRoute(): React.JSX.Element {
       lastTranscript={lastTranscript}
       locallyStartedOperationId={localCaptureOperationIdRef.current}
       operation={operation}
-      proposals={activeProposals}
       providersReady={providersReady}
       providersFailed={providersFailed}
       onCancel={() => void command("cancel")}
@@ -721,6 +768,7 @@ function RecoverySurface({
   operation,
   providerError,
   onDelete,
+  onReconcilePreview,
   onReview,
   onRetry
 }: {
@@ -728,9 +776,11 @@ function RecoverySurface({
   operation: BrainDumpOperationResponse;
   providerError: string | null;
   onDelete: () => void;
+  onReconcilePreview: () => void;
   onReview: () => void;
   onRetry: () => void;
 }): React.JSX.Element {
+  const reconcilePreviewHelpId = useId();
   const availableActions = new Set(operation.available_recovery_actions ?? []);
   const retryable = availableActions.has("retry");
   const providerRuns = operation.provider_runs ?? [];
@@ -758,7 +808,35 @@ function RecoverySurface({
         <div className="flex flex-col gap-2">
           {retryable ? <button type="button" className="h-11 rounded-xl bg-sky-700 px-4 text-sm font-semibold text-white" onClick={onRetry}>{retryLabel}</button> : null}
           {availableActions.has("review_provisional") ? <button type="button" className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700" onClick={onReview}>Review provisional tasks</button> : null}
-          <button type="button" className="h-11 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-700" onClick={onDelete}>Delete recording</button>
+          {availableActions.has("reconcile_preview") ? (
+            // Owner-initiated fallback when the accurate audio path is unusable:
+            // the browser-preview transcript goes to the consented task-extraction
+            // provider instead. The server answers with `reconciling`, so the
+            // processing surface takes over until the provisional review is ready;
+            // nothing is saved without that review. The label may wrap on a
+            // 390px-wide screen, so the button grows instead of clipping.
+            <div className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                aria-describedby={reconcilePreviewHelpId}
+                className="min-h-11 rounded-xl border border-slate-200 px-4 py-2 text-center text-sm font-medium leading-snug text-slate-700"
+                onClick={onReconcilePreview}
+              >
+                Extract tasks from the browser transcript
+              </button>
+              <p id={reconcilePreviewHelpId} className="px-1 text-xs leading-snug text-slate-500">
+                Sends the browser transcript to the consented task-extraction provider. The result is provisional and is reviewed before anything is saved.
+              </p>
+            </div>
+          ) : null}
+          <DestructiveConfirm
+            trigger="Delete recording"
+            triggerClassName="h-11 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-700"
+            question="Delete this recording? Its audio and transcript are removed and nothing is saved."
+            keepLabel="Keep recording"
+            confirmLabel="Delete recording permanently"
+            onConfirm={onDelete}
+          />
         </div>
       </div>
     </BrainDumpOverlay>
@@ -777,7 +855,6 @@ function RecordingSurface({
   lastTranscript,
   locallyStartedOperationId,
   operation,
-  proposals,
   providersReady,
   providersFailed,
   onCancel,
@@ -804,7 +881,6 @@ function RecordingSurface({
   lastTranscript: string;
   locallyStartedOperationId: string | null;
   operation: BrainDumpOperationResponse | null;
-  proposals: BrainDumpProposal[];
   providersReady: boolean;
   providersFailed: boolean;
   onCancel: () => void;
@@ -821,7 +897,6 @@ function RecordingSurface({
   onVocabularyTextChange: (value: string) => void;
   vocabularyText: string;
 }): React.JSX.Element {
-  const count = proposals.length;
   // A stopped recorder must never keep showing Recording/Paused: consent
   // withdrawal already stopped local capture (see `stopMediaRecorder` in
   // `command()`), even though the server may leave `status` unchanged for a
@@ -878,14 +953,20 @@ function RecordingSurface({
           </div>
           <div>
             <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">Brain dump</h1>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {count ? `${count} ${count === 1 ? "task" : "tasks"} captured` : "Speak freely — tasks are extracted as you go"}
-            </p>
+            <p className="mt-0.5 text-xs text-slate-500">Speak freely — tasks are proposed after you stop</p>
           </div>
           <span className={`inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold tabular-nums ${isRecording ? "text-rose-600" : "text-slate-500"}`}>
             <span className={`h-[7px] w-[7px] rounded-full ${isRecording ? "bg-rose-600 motion-safe:animate-pulse-dot" : "bg-slate-400"}`} aria-hidden />
             {captureStopped ? "Cloud processing stopped" : isPaused ? "Paused" : isRecording ? "Recording" : "Ready"}
-            {operation && !captureStopped ? <RecordingTimer running={isRecording} /> : null}
+            {operation && !captureStopped ? (
+              // Each uploaded chunk is one MediaRecorder timeslice
+              // (`recorder.start(1000)`), and a paused recorder emits none, so the
+              // chunk count is the seconds captured so far net of pauses -- the
+              // best estimate a reload has for time already recorded. A recording
+              // started here mounts the timer before its first chunk lands, so it
+              // still counts up from zero.
+              <RecordingTimer running={isRecording} initialSeconds={operation.audio_chunks?.length ?? 0} />
+            ) : null}
           </span>
           <div className="min-h-2 flex-1" aria-hidden />
           <div className="min-h-[38px] max-w-[280px] text-center text-[13px] leading-[1.45] text-slate-400" aria-live="off">
@@ -912,7 +993,7 @@ function RecordingSurface({
                   <Square className="h-3.5 w-3.5" aria-hidden />
                   Stop &amp; review
                 </button>
-                <div className="flex w-full gap-2">
+                <div className="flex w-full flex-wrap gap-2">
                   {captureStopped ? (
                     <span className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-medium text-amber-800">
                       Cloud processing stopped
@@ -928,7 +1009,14 @@ function RecordingSurface({
                       Pause
                     </button>
                   )}
-                  <button type="button" className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300" onClick={onCancel}>Discard</button>
+                  <DestructiveConfirm
+                    trigger="Discard"
+                    triggerClassName="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300"
+                    question="Discard this recording? The audio and transcript are deleted and nothing is saved."
+                    keepLabel="Keep recording"
+                    confirmLabel="Discard recording"
+                    onConfirm={onCancel}
+                  />
                 </div>
                 {operation.consent.external_processing_allowed ? (
                   <button type="button" className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-amber-200 bg-white px-3 text-xs font-medium text-amber-800 transition-colors duration-200 ease-smooth hover:bg-amber-50" onClick={onWithdrawConsent}>
@@ -944,8 +1032,9 @@ function RecordingSurface({
           <span className="text-xs text-slate-500">Nothing is saved until you stop</span>
         </div>
 
-        {/* Captured-task stack: provisional tasks headed to the inbox. */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-6 pb-4 pt-[18px]" aria-live="polite">
+        {/* Live transcript readout: raw text is a status, never a draft task. Tasks
+            are only minted by the reconciler from the accurate transcript after Stop. */}
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-6 pb-4 pt-[18px]">
           {error ? <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
           {!operation && isNewRecording ? (
             <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-soft">
@@ -980,13 +1069,12 @@ function RecordingSurface({
               )}
             </div>
           ) : null}
-          <div className="mb-0.5 mt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Headed to inbox · {count}</div>
-          {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
-          {proposals.length === 0 ? (
-            <p className="rounded-[12px] border-[1.5px] border-dashed border-slate-300 px-3.5 py-3 text-[13px] text-slate-400">
-              Tasks appear here as you speak
-            </p>
-          ) : null}
+          <TranscriptReadout
+            segments={operation?.segments ?? []}
+            headings={recordingTranscriptHeadings}
+            emptyText="Your words appear here as you speak. Tasks are proposed after you stop."
+            live
+          />
         </div>
       </div>
     </BrainDumpOverlay>
@@ -1024,9 +1112,13 @@ function DumpWave({ active }: { active: boolean }): React.JSX.Element {
   );
 }
 
-/** Elapsed capture time — freezes while paused, like the prototype's REC counter. */
-function RecordingTimer({ running }: { running: boolean }): React.JSX.Element {
-  const [elapsed, setElapsed] = useState(0);
+/**
+ * Elapsed capture time — freezes while paused, like the prototype's REC counter.
+ * `initialSeconds` is read once on mount: a resumed recording starts from the
+ * time it had already captured, a fresh one from zero.
+ */
+function RecordingTimer({ running, initialSeconds }: { running: boolean; initialSeconds: number }): React.JSX.Element {
+  const [elapsed, setElapsed] = useState(initialSeconds);
   useEffect(() => {
     if (!running) {
       return;
@@ -1034,61 +1126,225 @@ function RecordingTimer({ running }: { running: boolean }): React.JSX.Element {
     const timer = setInterval(() => setElapsed((seconds) => seconds + 1), 1000);
     return () => clearInterval(timer);
   }, [running]);
-  return (
-    <span>
-      {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}
-    </span>
-  );
+  return <span>{`${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`}</span>;
 }
 
-function ProposalCard({ proposal }: { proposal: BrainDumpProposal }): React.JSX.Element {
-  if (proposal.status === "wording_changing") {
-    // The prototype's "forming" card: dashed with a shimmer sweep while the
-    // wording is still moving under the speaker.
+/**
+ * Inline confirmation for the destructive exits. Cancel is accepted from any
+ * active status and deletes the operation's audio at once (ADR-0002), so one
+ * stray tap must never be enough. The question renders in place of its trigger:
+ * while it is open the trigger is gone, focus lands on the safe answer, and
+ * Escape or that answer put the trigger back and return focus to it. Confirming
+ * hands off to the existing handler and closes at once — the handler may still
+ * fail (stale revision) and report through the surface's alert, and the
+ * question must not stay open over it. The brain-dump panel is itself a modal,
+ * so this is a labelled group rather than a nested dialog.
+ */
+function DestructiveConfirm({
+  trigger,
+  triggerClassName,
+  question,
+  keepLabel,
+  confirmLabel,
+  className = "",
+  onConfirm
+}: {
+  /** Label of the button that opens the question. */
+  trigger: string;
+  triggerClassName: string;
+  question: string;
+  /** The safe answer; focused when the question opens. */
+  keepLabel: string;
+  /** The destructive answer. */
+  confirmLabel: string;
+  /** Extra classes for the open question's container. */
+  className?: string;
+  onConfirm: () => void;
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const questionId = useId();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const keepRef = useRef<HTMLButtonElement | null>(null);
+  const returnFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (open) {
+      keepRef.current?.focus();
+    } else if (returnFocusRef.current) {
+      // Only after a close: the trigger must not steal focus on first mount.
+      returnFocusRef.current = false;
+      triggerRef.current?.focus();
+    }
+  }, [open]);
+
+  const close = () => {
+    returnFocusRef.current = true;
+    setOpen(false);
+  };
+
+  if (!open) {
     return (
-      <article
-        aria-label={`Draft task ${proposal.ordinal}: ${proposal.title}`}
-        className="relative flex items-center gap-2.5 overflow-hidden rounded-[12px] border-[1.5px] border-dashed border-slate-300 px-3.5 py-[11px]"
-      >
-        <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-slate-400/15 to-transparent motion-safe:animate-shimmer-sweep" aria-hidden />
-        <span className="text-[11px] font-semibold text-slate-400">#{proposal.ordinal}</span>
-        <div className="min-w-0 flex-1 text-sm text-slate-500">{proposal.title}</div>
-        <span className="text-[11px] text-slate-400">{statusLabels[proposal.status]}</span>
-      </article>
+      <button ref={triggerRef} type="button" className={triggerClassName} onClick={() => setOpen(true)}>
+        {trigger}
+      </button>
     );
   }
   return (
-    <article
-      aria-label={`Draft task ${proposal.ordinal}: ${proposal.title}`}
-      className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-[12px] border border-slate-200 bg-white px-3.5 py-[11px] shadow-soft motion-safe:animate-card-in"
+    <div
+      role="group"
+      aria-labelledby={questionId}
+      className={`flex w-full flex-col gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 ${className}`}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+        }
+      }}
     >
-      <span className="text-[11px] font-semibold text-slate-500">#{proposal.ordinal}</span>
-      <div className="min-w-0 flex-1 text-sm font-medium text-slate-900">{proposal.title}</div>
-      <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700">{statusLabels[proposal.status]}</span>
-    </article>
+      <p id={questionId} className="text-[13px] leading-snug text-rose-900">
+        {question}
+      </p>
+      <button
+        ref={keepRef}
+        type="button"
+        className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300"
+        onClick={close}
+      >
+        {keepLabel}
+      </button>
+      <button
+        type="button"
+        className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-700 transition-colors duration-200 ease-smooth hover:bg-rose-100"
+        onClick={() => {
+          onConfirm();
+          close();
+        }}
+      >
+        {confirmLabel}
+      </button>
+    </div>
+  );
+}
+
+type TranscriptSegment = BrainDumpOperationResponse["segments"][number];
+type TranscriptHeadings = { accurate: string; preview: string };
+
+const recordingTranscriptHeadings: TranscriptHeadings = {
+  accurate: "Accurate transcript",
+  preview: "What you've said · browser preview"
+};
+const processingTranscriptHeadings: TranscriptHeadings = {
+  accurate: "Accurate transcript",
+  preview: "Browser preview · provisional"
+};
+
+/**
+ * The transcript worth reading right now: every settled utterance that no later
+ * segment supersedes (accurate segments name the preview hypotheses they replace
+ * via `supersedes_segment_ids`), in spoken order. Interim hypotheses are left
+ * out — they belong to the live tail under the microphone, not to the record —
+ * so a fragment whose final landed under another sequence can never linger.
+ */
+function transcriptLane(segments: TranscriptSegment[]): { source: "accurate" | "preview"; segments: TranscriptSegment[] } {
+  const superseded = new Set(segments.flatMap((segment) => segment.supersedes_segment_ids ?? []));
+  const current = segments
+    .filter((segment) => segment.stability === "stable" && !superseded.has(segment.id))
+    .sort((left, right) => left.sequence - right.sequence);
+  return {
+    source: current.some((segment) => segment.provider_role === "accurate") ? "accurate" : "preview",
+    segments: current
+  };
+}
+
+/**
+ * The most recent utterance the server holds, whatever its stability: the
+ * highest-sequence segment that no other segment supersedes. Seeds the live
+ * tail beside the microphone when a persisted recording is resumed before any
+ * local recognizer has spoken.
+ */
+function latestSegmentText(segments: TranscriptSegment[]): string {
+  const superseded = new Set(segments.flatMap((segment) => segment.supersedes_segment_ids ?? []));
+  let latest: TranscriptSegment | null = null;
+  for (const segment of segments) {
+    if (!superseded.has(segment.id) && (!latest || segment.sequence > latest.sequence)) {
+      latest = segment;
+    }
+  }
+  return latest?.text.trim() ?? "";
+}
+
+function TranscriptReadout({
+  segments,
+  headings,
+  emptyText,
+  live = false
+}: {
+  segments: TranscriptSegment[];
+  headings: TranscriptHeadings;
+  emptyText: string;
+  /** Announce newly settled utterances; off where an enclosing status region already does. */
+  live?: boolean;
+}): React.JSX.Element {
+  const headingId = useId();
+  const lane = transcriptLane(segments);
+  return (
+    <section aria-labelledby={headingId} aria-live={live ? "polite" : undefined} className="flex flex-col gap-1.5">
+      <p id={headingId} className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+        {headings[lane.source]}
+      </p>
+      {lane.segments.length === 0 ? (
+        <p className="rounded-[12px] border-[1.5px] border-dashed border-slate-300 px-3.5 py-3 text-[13px] text-slate-400">{emptyText}</p>
+      ) : (
+        <ul className="flex flex-col gap-1.5 rounded-[12px] border border-slate-200 bg-white px-3.5 py-3 shadow-soft">
+          {lane.segments.map((segment) => (
+            <li key={segment.id} className="text-sm leading-snug text-slate-700">
+              {segment.text}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
 function ProcessingSurface({
   error,
   operation,
-  proposals
+  onCancel
 }: {
   error: string | null;
   operation: BrainDumpOperationResponse;
-  proposals: BrainDumpProposal[];
+  onCancel: () => void;
 }): React.JSX.Element {
   const label = processingStatusLabels.get(operation.status) ?? "Processing";
   return (
     // Not dismissible: the operation is mid-pipeline server-side and the panel is
-    // the only place its progress and outcome surface.
+    // the only place its progress and outcome surface. The one exit is an
+    // explicit, confirmed cancel, which discards the recording.
     <BrainDumpOverlay labelledBy={TITLE_ID} size="narrow" operationId={operation.id}>
       <BrainDumpOverlayHeader titleId={TITLE_ID} eyebrow="Brain dump" title={label} meta={operation.status} />
-      <div role="status" aria-live="polite" className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
         {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
-        <div className="flex flex-col gap-2">
-          {proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} />)}
-          {proposals.length === 0 ? <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">We are keeping the task list first while the accurate transcript catches up.</p> : null}
+        {/* Only the stage is announced; the growing transcript below is read on demand. */}
+        <p role="status" aria-live="polite" className="mb-3 text-sm text-slate-500">
+          {label}. Your tasks appear for review once the accurate transcript has been turned into next actions.
+        </p>
+        <TranscriptReadout
+          segments={operation.segments}
+          headings={processingTranscriptHeadings}
+          emptyText="The transcript appears here once processing catches up."
+        />
+        <div className="mt-4 flex flex-col gap-2">
+          <p className="text-xs text-slate-500">Processing continues on the server while this panel is open.</p>
+          <DestructiveConfirm
+            trigger="Cancel processing"
+            triggerClassName="inline-flex h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300"
+            question="Cancel processing? The recording and its transcript are discarded and no tasks are created."
+            keepLabel="Keep processing"
+            confirmLabel="Cancel processing"
+            onConfirm={onCancel}
+          />
         </div>
       </div>
     </BrainDumpOverlay>
@@ -1098,11 +1354,12 @@ function ProcessingSurface({
 function ReviewSurface({
   committable,
   error,
-  hasUnresolvedConflicts,
+  unresolvedConflictCount,
   isSaving,
   rawAudioExpiresAt,
   rawAudioPresent,
   proposals,
+  segments,
   segmentsById,
   reconciliationQuality,
   onBack,
@@ -1115,11 +1372,13 @@ function ReviewSurface({
 }: {
   committable: boolean;
   error: string | null;
-  hasUnresolvedConflicts: boolean;
+  /** Active proposals still carrying an unanswered conflict; Send stays disabled above zero. */
+  unresolvedConflictCount: number;
   isSaving: boolean;
   rawAudioExpiresAt?: string | null;
   rawAudioPresent: boolean;
   proposals: BrainDumpProposal[];
+  segments: TranscriptSegment[];
   segmentsById: Map<string, BrainDumpOperationResponse["segments"][number]>;
   reconciliationQuality: "none" | "provisional_only" | "accurate" | "conflicted";
   onBack: () => void;
@@ -1130,6 +1389,9 @@ function ReviewSurface({
   onSave: () => void;
   onUpdateTitle: (proposal: BrainDumpProposal, title: string) => void;
 }): React.JSX.Element {
+  const isEmpty = proposals.length === 0;
+  const hasUnresolvedConflicts = unresolvedConflictCount > 0;
+  const conflictHelpId = useId();
   return (
     // Not dismissible: these drafts exist only inside the operation, so leaving
     // has to be an explicit Discard or Confirm.
@@ -1140,16 +1402,35 @@ function ReviewSurface({
         </button>
         <div className="min-w-0 flex-1">
           <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Brain dump</p>
-          <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">Review {proposals.length} {proposals.length === 1 ? "task" : "tasks"}</h1>
-          <p className="mt-0.5 text-xs text-slate-500">Edit before they land in your inbox</p>
+          <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">
+            {isEmpty ? "No tasks to review" : `Review ${proposals.length} ${proposals.length === 1 ? "task" : "tasks"}`}
+          </h1>
+          <p className="mt-0.5 text-xs text-slate-500">{isEmpty ? "Nothing actionable came out of this dump" : "Edit before they land in your inbox"}</p>
         </div>
       </header>
 
       <main aria-label="Review brain dump proposals" className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6">
         {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
-        {!committable ? (
+        {isEmpty ? (
+          <div className="mb-3 flex flex-col gap-3">
+            <p role="status" className="rounded-xl border border-slate-200 bg-surface-base px-3 py-2 text-sm text-slate-600">
+              No tasks were proposed from this dump. Here is what was heard; discard it to record again.
+            </p>
+            <TranscriptReadout segments={segments} headings={processingTranscriptHeadings} emptyText="No transcript was captured for this recording." />
+          </div>
+        ) : reconciliationQuality === "provisional_only" ? (
+          // Drafts minted from the browser preview (a no-consent finish, a
+          // provisional review of a failed pipeline, or `reconcile_preview`)
+          // carry this caution whether or not the server already lets them be
+          // saved; it stands in for the not-committable notice below so the two
+          // never stack, and only says why Send is disabled while it still is.
           <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            These are {reconciliationQuality === "provisional_only" ? "provisional" : "not yet reconciled"} drafts. They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation.
+            These tasks were extracted from the browser transcript, not from accurate audio. Review them carefully before saving.
+            {committable ? null : " They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation."}
+          </div>
+        ) : !committable ? (
+          <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            These are not yet reconciled drafts. They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation.
           </div>
         ) : null}
         {rawAudioPresent ? (
@@ -1206,13 +1487,29 @@ function ReviewSurface({
       </main>
 
       <footer className="flex shrink-0 flex-col items-center gap-2.5 border-t border-slate-200 bg-surface-base px-6 py-4 pb-[max(16px,env(safe-area-inset-bottom))]">
-        <button type="button" className="inline-flex h-11 w-full max-w-[320px] items-center justify-center gap-2 rounded-xl bg-sky-700 px-5 text-[15px] font-semibold text-white shadow-glow transition-colors duration-200 ease-smooth hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50" disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
-          <Inbox className="h-4 w-4" aria-hidden />
-          {isSaving ? "Sending…" : `Send ${proposals.length} to inbox`}
-        </button>
-        <button type="button" className="text-[13px] font-medium text-slate-500 transition-colors duration-200 ease-smooth hover:text-slate-700" onClick={onDiscard}>
-          Discard all
-        </button>
+        {isEmpty ? null : (
+          <button type="button" className="inline-flex h-11 w-full max-w-[320px] items-center justify-center gap-2 rounded-xl bg-sky-700 px-5 text-[15px] font-semibold text-white shadow-glow transition-colors duration-200 ease-smooth hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50" aria-describedby={hasUnresolvedConflicts ? conflictHelpId : undefined} disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
+            <Inbox className="h-4 w-4" aria-hidden />
+            {isSaving ? "Sending…" : `Send ${proposals.length} to inbox`}
+          </button>
+        )}
+        {hasUnresolvedConflicts ? (
+          // An open conflict on one of the cards above is what disables Send; say
+          // so beside the button instead of leaving it silently inert. Mobile
+          // words the same line as "… before confirming."
+          <p id={conflictHelpId} role="status" className="max-w-[320px] text-center text-xs text-amber-800">
+            {`Resolve ${unresolvedConflictCount} ${unresolvedConflictCount === 1 ? "conflict" : "conflicts"} before sending.`}
+          </p>
+        ) : null}
+        <DestructiveConfirm
+          trigger="Discard all"
+          triggerClassName="text-[13px] font-medium text-slate-500 transition-colors duration-200 ease-smooth hover:text-slate-700"
+          question="Discard all tasks? Nothing is saved to Inbox and the recording is deleted."
+          keepLabel="Keep reviewing"
+          confirmLabel="Discard all tasks"
+          className="max-w-[320px]"
+          onConfirm={onDiscard}
+        />
       </footer>
     </BrainDumpOverlay>
   );

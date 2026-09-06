@@ -92,6 +92,23 @@ export function visibleProposals(operation: BrainDumpOperationResponse): BrainDu
     .sort((a, b) => a.ordinal - b.ordinal);
 }
 
+/** A transcript segment as the operation response carries it. */
+export type BrainDumpSegment = BrainDumpOperationResponse["segments"][number];
+
+/**
+ * What was heard, as the web review shows it: every settled utterance that no
+ * later segment supersedes (accurate segments name the preview hypotheses they
+ * replace via `supersedes_segment_ids`), in spoken order. Interim hypotheses
+ * are left out — they were never the record.
+ */
+export function heardTranscript(segments: BrainDumpSegment[]): BrainDumpSegment[] {
+  const superseded = new Set(segments.flatMap((segment) => segment.supersedes_segment_ids ?? []));
+  // `filter` returns a fresh array, so the in-place sort cannot reach the caller's.
+  return segments
+    .filter((segment) => segment.stability === "stable" && !superseded.has(segment.id))
+    .sort((a, b) => a.sequence - b.sequence);
+}
+
 export function openConflictCount(operation: BrainDumpOperationResponse): number {
   return visibleProposals(operation).reduce(
     (count, proposal) => count + (proposal.conflicts?.length ?? 0),
