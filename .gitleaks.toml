@@ -55,3 +55,13 @@ regexTarget = "line"
 # whole range, so an earlier commit's `ACCOUNT_PASSWORD` still has to be
 # recognised after a later one renamed it — same synthetic value, same file.
 regexes = ['''^\s*const (password|ACCOUNT_PASSWORD) = "correct-horse-battery-staple-1";\s*$''']
+
+[[allowlists]]
+description = "Never-issued historical agent connection mock signing secret"
+regexTarget = "line"
+regexes = ['''^\s*inbound_signing_secret: "sk-inbound-9f2c"\s*$''']
+
+[[allowlists]]
+description = "Never-issued historical relay golden-vector signing secret"
+regexTarget = "line"
+regexes = ['''^\s*fixed_secret = "golden-vector-signing-secret-v2"\s*$''']
