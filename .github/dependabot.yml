@@ -48,6 +48,13 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(frontend)"
+    # typescript 7.x is the Go-native compiler: the npm package ships a binary
+    # and no JavaScript API, so typescript-eslint (peer `typescript <6.1.0`)
+    # cannot load it and `npm ci` fails on the peer conflict (#191). Lift this
+    # once typescript-eslint declares support for 7.x.
+    ignore:
+      - dependency-name: typescript
+        versions: [">=7.0.0"]
     groups:
       frontend-dependencies:
         patterns:

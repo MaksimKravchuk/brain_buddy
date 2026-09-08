@@ -1,7 +1,7 @@
 import {
   onlineManager,
   useMutation,
-  type MutateOptions,
+  type MutateFunctionRest,
   type MutationFunction,
   type MutationFunctionContext,
   type UseMutationOptions,
@@ -108,8 +108,14 @@ export function useRelayMutation<TData, TError = Error, TVariables = void, TCont
   // object rather than passing the mutation's — so they are bound to this
   // dispatch by closure instead. Both capture points read the same store inside
   // the same synchronous dispatch, so they cannot disagree about the scope.
+  //
+  // The wrappers take React Query's own rest signature (`variables` is optional
+  // when `TVariables` admits `undefined`), so they stay assignable to the
+  // `mutate` / `mutateAsync` slots of the result.
   const dispatch = useCallback(
-    (variables: TVariables, callbacks?: MutateOptions<TData, TError, TVariables, TContext>) => {
+    (...args: MutateFunctionRest<TData, TError, TVariables, TContext>) => {
+      const variables = args[0] as TVariables;
+      const callbacks = args[1];
       const dispatchScope = currentRelayScope();
       const stillDispatchScope = () => currentRelayScope() === dispatchScope;
       return mutateAsync(variables, {
@@ -129,8 +135,8 @@ export function useRelayMutation<TData, TError = Error, TVariables = void, TCont
   // `mutate` is the fire-and-forget form: the rejection is reported through
   // the guarded callbacks and must not also surface as an unhandled rejection.
   const fireAndForget = useCallback(
-    (variables: TVariables, callbacks?: MutateOptions<TData, TError, TVariables, TContext>) => {
-      void dispatch(variables, callbacks).catch(() => undefined);
+    (...args: MutateFunctionRest<TData, TError, TVariables, TContext>) => {
+      void dispatch(...args).catch(() => undefined);
     },
     [dispatch]
   );
