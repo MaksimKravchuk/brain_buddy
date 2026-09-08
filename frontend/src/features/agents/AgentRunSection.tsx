@@ -300,7 +300,7 @@ function RunCard({
                       value={answer}
                       onChange={(event) => setAnswer(event.target.value)}
                       rows={2}
-                      className="resize-y rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12.5px] text-slate-900 focus:border-brand-primary focus:outline-none"
+                      className="resize-y rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12.5px] text-slate-900 focus:border-brand-primary focus:outline-hidden"
                     />
                   </label>
                   <div>

@@ -149,7 +149,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         {toast ? (
           <div
             role="status"
-            className="fixed bottom-6 left-1/2 z-[200] -translate-x-1/2 whitespace-nowrap rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-[13px] text-slate-700 shadow-floating backdrop-blur motion-safe:animate-fade-in-up"
+            className="fixed bottom-6 left-1/2 z-[200] -translate-x-1/2 whitespace-nowrap rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-[13px] text-slate-700 shadow-floating backdrop-blur-sm motion-safe:animate-fade-in-up"
           >
             {toast}
           </div>
@@ -394,7 +394,7 @@ function TopBar({ onOpenDrawer, navigationTriggerRef }: {
 
   return (
     <header
-      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
+      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
       style={{ height: "56px" }}
     >
       <button

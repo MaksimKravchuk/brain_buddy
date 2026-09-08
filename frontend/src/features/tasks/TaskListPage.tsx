@@ -518,7 +518,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       <section aria-labelledby="task-list-title" className="mx-auto max-w-[760px]">
         <div className="mb-5 flex flex-wrap items-end gap-x-3 gap-y-2">
           <div className="min-w-0">
-            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-title font-semibold text-slate-900 outline-none">
+            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-title font-semibold text-slate-900 outline-hidden">
               {title}
             </h1>
             <p className="m-0 mt-1 text-xs text-slate-500">{meta}</p>
@@ -546,7 +546,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
               <input
                 type="checkbox"
-                className="h-3.5 w-3.5 rounded border-slate-300 text-brand-primary accent-brand-primary"
+                className="h-3.5 w-3.5 rounded-sm border-slate-300 text-brand-primary accent-brand-primary"
                 checked={showCompleted}
                 onChange={(event) => setShowCompleted(event.currentTarget.checked)}
               />
@@ -557,7 +557,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               <span className="relative inline-flex">
                 <select
                   aria-label="Sort tasks"
-                  className="appearance-none bg-transparent pr-5 text-xs font-medium text-slate-700 outline-none"
+                  className="appearance-none bg-transparent pr-5 text-xs font-medium text-slate-700 outline-hidden"
                   value={sort}
                   onChange={(event) => {
                     const next = new URLSearchParams(searchParams);
@@ -1034,7 +1034,7 @@ function TaskCreator({
                 ? `${completionListboxId}-option-${activeCompletionIndex}`
                 : undefined
           }
-          className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+          className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-hidden placeholder:text-slate-400"
           placeholder={placeholder}
           value={newTitle}
           onChange={(event) => {
@@ -1099,7 +1099,7 @@ function TaskCreator({
             <input
               id="new-task-waiting-for"
               aria-label="Waiting for"
-              className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+              className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-hidden placeholder:text-slate-400"
               placeholder="Waiting for who or what?"
               value={newWaitingFor}
               onChange={(event) => onWaitingForChange(event.currentTarget.value)}

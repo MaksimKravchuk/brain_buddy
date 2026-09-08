@@ -86,7 +86,7 @@ export function Overlay({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-stretch justify-center bg-slate-50/80 backdrop-blur-sm motion-safe:animate-fade-in sm:items-center sm:p-6">
+    <div className="fixed inset-0 z-[100] flex items-stretch justify-center bg-slate-50/80 backdrop-blur-xs motion-safe:animate-fade-in sm:items-center sm:p-6">
       {/* Click-outside-to-close. Deliberately not a button: the header's X is the
           accessible close control, and a second one with the same name would just
           duplicate it in the accessibility tree and the tab order. */}
@@ -101,7 +101,7 @@ export function Overlay({
         // The panel takes focus on mount so the dialog is where the keyboard
         // lands; `focus-visible:shadow-floating` keeps the global focus ring from
         // drawing a highlight around the whole dialog for that programmatic focus.
-        className={`relative flex max-h-full w-full flex-col overflow-hidden bg-white shadow-floating outline-none focus-visible:shadow-floating motion-safe:sm:animate-fade-in-up sm:rounded-[20px] sm:border sm:border-slate-200 ${
+        className={`relative flex max-h-full w-full flex-col overflow-hidden bg-white shadow-floating outline-hidden focus-visible:shadow-floating motion-safe:sm:animate-fade-in-up sm:rounded-[20px] sm:border sm:border-slate-200 ${
           size === "wide" ? "sm:w-[880px]" : "sm:w-[480px]"
         }`}
       >

@@ -1,5 +1,5 @@
 /* Brain Buddy — colors & type primitives
- * Derived from frontend/tailwind.config.ts + styles.css + nodeColors.json.
+ * Derived from frontend/src/styles.css (Tailwind @theme) + nodeColors.json.
  * Load this file before any other stylesheet.
  */
 

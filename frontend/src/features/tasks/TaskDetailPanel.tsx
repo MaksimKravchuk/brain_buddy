@@ -42,10 +42,10 @@ const iconButtonClass =
 const propLabelClass = "text-slate-600";
 
 const propFieldClass =
-  "w-full min-w-0 appearance-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[12.5px] text-slate-800 outline-none transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary";
+  "w-full min-w-0 appearance-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[12.5px] text-slate-800 outline-hidden transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary";
 
 const dashedInputClass =
-  "w-full rounded-lg border-[1.5px] border-dashed border-slate-300 bg-transparent px-2.5 py-1.5 text-[13px] text-slate-900 outline-none transition-colors duration-200 ease-smooth placeholder:text-slate-500 focus:border-solid focus:border-brand-primary";
+  "w-full rounded-lg border-[1.5px] border-dashed border-slate-300 bg-transparent px-2.5 py-1.5 text-[13px] text-slate-900 outline-hidden transition-colors duration-200 ease-smooth placeholder:text-slate-500 focus:border-solid focus:border-brand-primary";
 
 export function TaskDetailPanel({
   active = true,
@@ -358,7 +358,7 @@ function TaskDetailBody({
           value={draft?.title ?? title}
           rows={1}
           ref={autosizeTitle}
-          className={`w-full min-w-0 resize-none overflow-hidden rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold leading-[1.35] outline-none transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary ${
+          className={`w-full min-w-0 resize-none overflow-hidden rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold leading-[1.35] outline-hidden transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary ${
             isTerminal ? "text-slate-500 line-through" : "text-slate-900"
           }`}
           onChange={(event) => { setTitle(event.currentTarget.value); change("title", event.currentTarget.value as never, 500); }}
