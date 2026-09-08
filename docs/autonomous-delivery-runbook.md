@@ -83,8 +83,10 @@ external effects — never land automatically; they use the ASK landing procedur
    on `main`; that re-run re-verifies the landed SHA on `main` and its release run
    takes the proof-only path (no push, so no recursion) and idempotently redeploys the
    same SHA, failing closed if a newer landing superseded it. The consumed candidate
-   CI run plus the landing proof remain the evidence. Production exposure of
-   the new behavior remains gated by server-owned feature flags (default OFF).
+   CI run plus the landing proof remain the evidence. Significant new capabilities
+   use server-owned feature flags (default OFF). Corrections to expected existing
+   behavior do not require a new flag, per the owner's 2026-09-06 decision in
+   ADR-0022; all verification and rollback requirements still apply.
    `delivery_canary` still rolls out OFF → INTERNAL → ON via
    `BRAIN_BUDDY_FEATURE_FLAGS` / `BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS` at
    deploy time. The three SQLite-managed flags (`voice_brain_dump`,

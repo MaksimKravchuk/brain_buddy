@@ -1,0 +1,640 @@
+{
+  "run_id": "completion-ui-20260906-2",
+  "status": "founder-accepted",
+  "risk": "medium",
+  "automated_status": "escalated",
+  "founder_acceptance": {
+    "accepted_by": "Maksim Kravchuk (repository owner, task conversation)",
+    "accepted_on": "2026-09-08",
+    "expires_on": "2026-09-13",
+    "authorization_quote": "ты оркестратор. Гоняй маленьких агентов пока фича не будет готова",
+    "authorization_context": "Owner requested continued orchestration after the assistant disclosed that implementation was waiting on incomplete planning review and provided outputs/completion-review-decision.md. The instruction is interpreted as permission to proceed with that bounded plan and compensating measures.",
+    "artifacts_digest": "0c4e4b240ebc8ba6600dbf106acc5ba12d8ad3cc07ea844444c28f6bc98f877c",
+    "rationale": "Continue the already requested completion-placement correction after two non-converged planning campaigns. Technical planning findings have been addressed, but two prior Codex reviews are stale and three second-campaign Claude lenses are missing. Preserve that evidence honestly and rely on targeted failing-then-passing tests, full unchanged verification, independent exact-candidate implementation review and QA, and the standard verified production delivery before completion can be claimed.",
+    "compensating_measures": [
+      "Require targeted failing-then-passing tests for partition, shared task status across views, canonical completion, failure, repeated activation, keyboard, reduced motion and account isolation.",
+      "Run make verify-all with unchanged validators and coverage floors, plus real-browser motion and durable-state evidence.",
+      "Require independent code review and acceptance QA against the exact final candidate SHA; resolve blocking implementation findings before submission.",
+      "Use the standard candidate -> CI -> landing -> deployment pipeline, verify production smoke and the synthetic user journey, and restore the original task state."
+    ],
+    "campaign_history": [
+      {
+        "run_id": "completion-20260906-1",
+        "status": "preflight-only",
+        "note": "Preparation only; no reviewer campaign."
+      },
+      {
+        "run_id": "completion-filters-20260906-1",
+        "status": "preflight-only",
+        "note": "Preparation only; no reviewer campaign."
+      },
+      {
+        "run_id": "completion-ui-20260906-1",
+        "status": "escalated",
+        "note": "Five standard lenses ran; derived high-risk sixth lens missing."
+      },
+      {
+        "run_id": "completion-ui-20260906-2",
+        "status": "escalated",
+        "note": "Two Codex changes-required reviews; three Claude auth failures; artifacts subsequently changed."
+      }
+    ]
+  },
+  "original_automated_summary": {
+    "architect_action": "The reviewed artifacts changed after preflight, so every review in this run describes different content. Rerun the campaign against the current artifacts; a verdict on superseded content is not evidence about this one. Every lens that produced evidence ran on one provider, so this panel's agreement is one vendor's opinion counted several times.",
+    "artifacts_changed_since_preflight": true,
+    "artifacts_digest": "279c1195c7cce1f22be11ee27bf28c3cd454163bf1702d9008e2fb4d49b53d22",
+    "declared_risk": "medium",
+    "degraded_lenses": [],
+    "human_signoff": null,
+    "missing_reviewers": [
+      "architecture-consistency",
+      "privacy-consent-security",
+      "ux-accessibility-mobile"
+    ],
+    "oracle_unknown_lenses": [],
+    "panel_correlated": true,
+    "panel_oracles": {
+      "codex/gpt-5.6-sol": 2
+    },
+    "panel_providers": {
+      "codex": 2
+    },
+    "product_decisions": [],
+    "reviewers": [
+      {
+        "oracle": {
+          "artifacts_digest": "f650667ef8ad2aeb23b9b5c5ba1715826a6ae1987789b967c7265c1120034060",
+          "degraded": false,
+          "executable": "/opt/homebrew/bin/codex",
+          "integration": "codex",
+          "model": "gpt-5.6-sol"
+        },
+        "role": "requirements-consistency",
+        "summary": "The primary completion-placement behavior is mostly consistent, and the Spec Kit artifact checker passes. Four agent-resolvable inconsistencies remain: an unsupported no-motion fallback, bundled dependency work outside the stated feature scope, contradictory ADR amendment mechanics, and owner-isolation behavior that is planned but not frozen as acceptance.",
+        "verdict": "changes-required"
+      },
+      {
+        "oracle": {
+          "artifacts_digest": "f650667ef8ad2aeb23b9b5c5ba1715826a6ae1987789b967c7265c1120034060",
+          "degraded": false,
+          "executable": "/opt/homebrew/bin/codex",
+          "integration": "codex",
+          "model": "gpt-5.6-sol"
+        },
+        "role": "testability-evidence",
+        "summary": "The revised plan now provides proportionate evidence for filtering, paging, account isolation, motion timing, failure, reduced motion, exact-SHA delivery, and production restoration. Three planning gaps remain: tasks are not organized into the required test-first US1 lanes, success-criterion traceability is not mechanically closed, and two new interaction-safety claims lack explicit tests. These are implementation-planning issues; no product decision is required. No files were changed and no tests were run.",
+        "verdict": "changes-required"
+      }
+    ],
+    "risk": "medium",
+    "risk_escalated_by_classifier": false,
+    "run_id": "completion-ui-20260906-2",
+    "single_provider_panel": true,
+    "stale_reviews": [
+      "requirements-consistency",
+      "testability-evidence"
+    ],
+    "status": "escalated",
+    "technical_findings": [
+      {
+        "category": "acceptance-behavior mismatch",
+        "description": "The plan adds an immediate-placement exception when the Web Animations API is unavailable, but the specification requires every successful completion to move visibly unless reduced motion is requested. This would permit an implementation that passes the plan while failing FR-002 and SC-002.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md:35 (FR-002 requires animation after canonical success)",
+          "specs/016-completed-task-animation/spec.md:47 (SC-002 names reduced motion as the no-movement case)",
+          "specs/016-completed-task-animation/design.md:45-49 (motion is required after success; only prefers-reduced-motion is exempted)",
+          "specs/016-completed-task-animation/plan.md:23 (unavailable animation APIs produce immediate final placement)",
+          "specs/016-completed-task-animation/plan.md:29 (hook evidence explicitly includes an API fallback)"
+        ],
+        "recommendation": "Align the plan with the frozen acceptance: when motion is allowed, provide a technical fallback that still completes visible movement within 600ms. Reserve immediate placement for reduced motion, and make the fallback evidence assert the same outcome.",
+        "reviewer": "requirements-consistency",
+        "severity": "important"
+      },
+      {
+        "category": "unsupported scope",
+        "description": "The plan declares that the feature contains only completion presentation, but then requires a broad runtime/toolchain dependency repair in the same candidate. The repair changes runtime and compiler semantics and is not an outcome or non-goal covered by the feature specification.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md:54,63 (scope is only web completion animation and placement)",
+          "specs/016-completed-task-animation/plan.md:7 (declares only existing web completion presentation)",
+          "specs/016-completed-task-animation/plan.md:37-39 (requires manifest/lockfile repair and bundles it into the feature candidate)",
+          "specs/016-completed-task-animation/research.md:24-28 (describes eight direct constraint changes and acknowledges runtime semantic effects)",
+          "specs/016-completed-task-animation/tasks.md:4 (T002 adds the dependency-repair lane)"
+        ],
+        "recommendation": "Treat the compatibility repair as a separately landed prerequisite, then base the feature candidate on that repaired main. If separation is genuinely impossible, revise the planning scope and traceability so the candidate no longer claims to contain only completion presentation.",
+        "reviewer": "requirements-consistency",
+        "severity": "important"
+      },
+      {
+        "category": "accepted-ADR consistency",
+        "description": "The no-flag product intent is settled, but the plan records it by amending accepted ADR-0008 in place. That conflicts with accepted ADR-0012's decision-versioning rule, and ADR-0008 still says every SHOW rollout starts OFF or INTERNAL, contradicting this feature's unflagged rollout.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:13 (directs recording the new rule in ADR-0008)",
+          "specs/016-completed-task-animation/spec.md:65 (claims the decision is recorded in ADR-0008)",
+          "docs/decisions/0008-verified-trunk-serial-landing.md:3-5,55-68 (the accepted record now contains a later in-place amendment)",
+          "docs/decisions/0008-verified-trunk-serial-landing.md:75-77 (SHOW rollout still starts OFF or INTERNAL)",
+          "docs/decisions/0012-risk-classes-escalation-and-gate-integrity.md:12-15,252-253 (accepted decisions change through a new superseding record, not retroactive edits)"
+        ],
+        "recommendation": "Preserve ADR-0008 as historical and record the already-settled owner policy in a new superseding ADR that identifies the exact clauses it narrows. Update the spec and plan references and remove the contradictory universal SHOW-rollout statement from current authority.",
+        "reviewer": "requirements-consistency",
+        "severity": "important"
+      },
+      {
+        "category": "missing acceptance traceability",
+        "description": "Cross-account first-paint and late-acknowledgement isolation is load-bearing behavior in the plan, but spec.md states it only as an assumption and omits it from FR/SC acceptance. The current task keys are not owner-scoped and canonical updates target every cached task list, so this is not a merely hypothetical implementation detail.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md:34-49 (FR-001–FR-003 and SC-001–SC-004 do not name account-switch or late-acknowledgement isolation)",
+          "specs/016-completed-task-animation/spec.md:63 (cache isolation appears only under Assumptions)",
+          "specs/016-completed-task-animation/plan.md:25,29 (defines captured account/origin scope and specific A-to-B evidence)",
+          "specs/016-completed-task-animation/tasks.md:5 (scoped cache work is assigned generically to FR-001–FR-003)",
+          "specs/011-rtm-task-parity/spec.md:365-366 (accepted FR-031 requires every task surface to remain owner-scoped)",
+          "frontend/src/api/taskHooks.ts:7-10,29-34 (current list keys contain filters but no owner scope)",
+          "frontend/src/features/tasks/TaskListPage.tsx:180-208 (canonical acknowledgements update all cached task-list queries)"
+        ],
+        "recommendation": "Promote this preservation rule into explicit FR/SC acceptance and map T003 and its focused test to it: switching accounts must never paint the previous owner's rows, and a late acknowledgement from the old scope must not update or animate the current scope.",
+        "reviewer": "requirements-consistency",
+        "severity": "important"
+      },
+      {
+        "category": "task-lanes-and-test-order",
+        "description": "The flat task list is not grouped under the sole independently testable user story and contradicts the plan's test-first order. T003 combines component/hook RED tests with all product implementation, while T004 places the new and updated browser tests after that implementation. Several test targets are also described generically rather than by concrete path, preventing clean component/query, motion-hook, and browser evidence lanes.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md:10-20 defines User Story 1 and its independent acceptance journey.",
+          "specs/016-completed-task-animation/tasks.md:3-8 contains no US1 phase or [US1] labels; T003 combines RED tests and implementation, and T004 follows with browser evidence.",
+          "specs/016-completed-task-animation/tasks.md:5 says only “taskHooks/animation-hook tests,” although the concrete targets are frontend/src/api/__tests__/taskHooks.test.ts and a new frontend/src/features/tasks/__tests__/useTaskCompletionAnimation.test.ts.",
+          "specs/016-completed-task-animation/tasks.md:6 says “existing native-task and shell browser suites” instead of the paths named in plan.md: frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts and frontend/tests/claude-design-shell.spec.ts.",
+          "specs/016-completed-task-animation/plan.md:29-33 assigns component, hook, and Playwright evidence and explicitly states that tests precede product implementation.",
+          "specs/016-completed-task-animation/plan.md:37-39 correctly makes the dependency repair foundational, so the evidence lanes can begin after T002.",
+          ".specify/memory/constitution.md:77 and :99 require tasks organized by user story, dependency, concrete path, and tests-before-implementation order.",
+          "docs/spec-kit-workflow.md:180-184 requires logical tasks grouped by independently testable user story without imposing an execution runtime."
+        ],
+        "recommendation": "Rewrite tasks.md into a foundational section for T001-T002, a [US1] section with separate RED tasks for TaskListPage/query behavior, the animation hook, and Playwright/current-suite expectations using exact paths, followed by dependency-ordered implementation tasks and then verification/release. Mark [P] only where files and prerequisites are independent; this is conceptual lane grouping and does not require parallel agents or any particular runtime.",
+        "reviewer": "testability-evidence",
+        "severity": "blocking"
+      },
+      {
+        "category": "acceptance-traceability",
+        "description": "The evidence descriptions cover the behaviors, but the tasks do not require feature-qualified coverage for SC-001 through SC-004 or run the feature requirement-coverage check. T003 and T004 cite only the three FRs. Because make verify-all only unit-tests the checker, the candidate can be frozen with passing suites while the mandatory criterion-to-test link remains absent.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md:46-49 defines four measurable success criteria, SC-001 through SC-004.",
+          "specs/016-completed-task-animation/tasks.md:5-6 names 016-FR-001, 016-FR-002, and 016-FR-003 but no 016-SC marker; T005 relies on make verify-all.",
+          "specs/016-completed-task-animation/plan.md:29-33 identifies appropriate component, hook, and browser cases but does not assign feature-qualified FR/SC markers to them.",
+          "scripts/check_requirement_coverage.py:2-29 requires each FR and SC to appear as a feature-qualified marker in a test file and documents the command for checking a feature.",
+          "Makefile:120-121 only runs scripts/test_check_requirement_coverage.py, which tests the checker itself; Makefile:203-207 shows make verify-all does not invoke scripts/check_requirement_coverage.py for spec 016.",
+          "docs/spec-kit-workflow.md:203-205 makes criterion-to-test traceability an explicit acceptance stage."
+        ],
+        "recommendation": "Assign all seven markers to meaningful tests: cover 016-FR-001/016-SC-001/016-SC-003 in the partition/filter tests, 016-FR-002/016-SC-002 in motion evidence, and 016-FR-003/016-SC-004 across the interaction and real-stack journey. Require `python3 scripts/check_requirement_coverage.py specs/016-completed-task-animation` before candidate freeze or explicitly at acceptance. Ensure SC-001 evidence checks the completed indicator, grey strikethrough/readability, exact-once placement, and absence of whole-row opacity.",
+        "reviewer": "testability-evidence",
+        "severity": "important"
+      },
+      {
+        "category": "interaction-safety-evidence",
+        "description": "Two behavior claims introduced specifically to make the animation safe are not assigned concrete assertions: repeated activation must issue only one completion while pending, and controls displaced by an active transform must remain hit-testable at their visual position. Generic pending/overlap hook coverage does not prove either browser-visible property.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md:36 requires preservation of idempotency and accessibility behavior.",
+          "specs/016-completed-task-animation/design.md:47-49 requires one real row, tappable displaced controls, a per-task pending guard, and safe overlapping acknowledgements.",
+          "specs/016-completed-task-animation/plan.md:23 commits to a disabled pending control, duplicate-barrier prevention, and hit-testing at transformed positions.",
+          "specs/016-completed-task-animation/plan.md:29-31 names pending, overlap, timing, failure, reduced-motion, focus, and layout tests but does not require a one-request assertion or a transformed-position hit test.",
+          "specs/016-completed-task-animation/tasks.md:5-6 likewise omits these assertions.",
+          "frontend/src/features/tasks/TaskListPage.tsx:444-453 currently constructs and saves through a fresh controller for every completion activation, demonstrating that the planned pending guard protects a real changed seam.",
+          "frontend/src/features/tasks/__tests__/TaskListPage.test.tsx:552-579 currently covers one successful click and one failure, but not rapid repeated completion activation."
+        ],
+        "recommendation": "Add a component test that rapidly activates the same completion control twice, asserts it becomes disabled while pending, and verifies exactly one transition request. Add a Playwright step during an active displacement animation that verifies the control or link at the transformed visual coordinates is the hit target and remains operable. Keep hook overlap tests for animation bookkeeping; they are complementary rather than substitutes for these interaction assertions.",
+        "reviewer": "testability-evidence",
+        "severity": "important"
+      }
+    ]
+  },
+  "campaign_one_automated_summary": {
+    "architect_action": "Mandatory review evidence is missing for adversarial-high-risk. This is not a pass: rerun those lenses, or record an explicit human decision to proceed without them. A partial campaign is never reported as a clean one.",
+    "artifacts_changed_since_preflight": false,
+    "artifacts_digest": "f5d7aca8a208cd4b2a9385b66a6edb326e688c9bfa8b3a36b6c10cbe1e010ff9",
+    "declared_risk": "medium",
+    "degraded_lenses": [],
+    "human_signoff": null,
+    "missing_reviewers": [
+      "adversarial-high-risk"
+    ],
+    "oracle_unknown_lenses": [],
+    "panel_correlated": false,
+    "panel_oracles": {
+      "claude/opus": 2,
+      "claude/sonnet": 1,
+      "codex/gpt-5.6-sol": 2
+    },
+    "panel_providers": {
+      "claude": 3,
+      "codex": 2
+    },
+    "product_decisions": [
+      {
+        "affected_acceptance": "FR-001 ('partition loaded results into open tasks followed by a labelled Completed section'), SC-001 ('A completed task appears exactly once below all loaded open tasks'), SC-003 (filtered views still display completed tasks through existing include-completed behavior), and design.md states S13 (pagination) and S14 (filtered or grouped completion).",
+        "category": "acceptance-behavior",
+        "options": [
+          "Unbounded as specified: every loaded completed task renders in the Completed section, accepting that open rows share the 50-row page budget with completed history and may require paging to reach.",
+          "Bound by recency: the Completed section shows only tasks completed within a recent window (for example today, or the last 7 days); older completed work stays reachable through the existing history path.",
+          "Bound by count: the Completed section shows the most recent N completed tasks (for example 20) with the remainder reachable through the existing history path, keeping the open list's page budget effectively intact."
+        ],
+        "question": "How much completed history should the always-visible Completed section show by default in a task list?",
+        "reviewer": "architecture-consistency",
+        "why_needed": "The spec freezes scope to animation and open/completed placement with no new filters (spec.md:54-55), and reuses `include_completed` unchanged. That combination mechanically yields an unbounded Completed section: `complete` never reassigns `order_key` (service.py:702-711), the sort key has no completed dimension (service.py:1583-1595), and the server truncates at 50 (service.py:843, tasks.py:970). For a long-lived account the first page becomes mostly completed history and the open work the feature exists to surface is pushed behind repeated 'Load more'. The implementing agent cannot bound the section on its own, because any bound adds default behavior the owner explicitly excluded from scope — so the choice needs the owner."
+      }
+    ],
+    "reviewers": [
+      {
+        "oracle": {
+          "artifacts_digest": "f5d7aca8a208cd4b2a9385b66a6edb326e688c9bfa8b3a36b6c10cbe1e010ff9",
+          "degraded": false,
+          "executable": "/opt/homebrew/bin/codex",
+          "integration": "codex",
+          "model": "gpt-5.6-sol"
+        },
+        "role": "requirements-consistency",
+        "summary": "The core completion behavior is coherent, but the artifacts leave two binding contract conflicts unresolved and omit acceptance treatment for counts and filtered/reloaded views. The owner's product direction is already explicit, so no further product decision is required.",
+        "verdict": "changes-required"
+      },
+      {
+        "oracle": {
+          "artifacts_digest": "f5d7aca8a208cd4b2a9385b66a6edb326e688c9bfa8b3a36b6c10cbe1e010ff9",
+          "degraded": false,
+          "executable": "/Users/max/.local/bin/claude",
+          "integration": "claude",
+          "model": "opus"
+        },
+        "role": "architecture-consistency",
+        "summary": "The feature is buildable in the named files (TaskListPage.tsx, its Vitest suite and frontend/tests all exist, and the include-completed query support the plan relies on is real), but the plan's central architectural assertion — that no server-side change is needed because \"loaded pages are flattened then partitioned\" — does not survive contact with the code. `complete` leaves `order_key` untouched, `_sort_key` has no open/completed dimension, and the server truncates at `all_filtered[:limit]` (default 50), so always-on `include_completed` makes completed history compete with open tasks for the page window and can push the owner's open work off the loaded list entirely. The plan also mis-describes the control it intends to change (\"existing cancelled-history toggle\" — there is no such control; there is one \"Show completed\" checkbox driving both flags), which conceals that the change deletes the only way to hide completed work; that rename silently breaks two Playwright specs and one Vitest assertion the plan says it preserves. Rollback is under-stated because the candidate bundles an unrelated Tailwind/TypeScript/ESLint downgrade whose revert re-breaks the frontend build. One genuine product fork remains: the spec freezes scope to \"no new filters\", which mechanically yields an unbounded Completed section, and the implementing agent cannot bound it without contradicting that freeze — so the owner must choose. Layering, data ownership and ADR-0008 landing class are clean: the change is frontend-presentation only, touches no repository/service boundary, and every path it modifies classifies SHIP.",
+        "verdict": "product-decision-required"
+      },
+      {
+        "oracle": {
+          "artifacts_digest": "f5d7aca8a208cd4b2a9385b66a6edb326e688c9bfa8b3a36b6c10cbe1e010ff9",
+          "degraded": false,
+          "executable": "/opt/homebrew/bin/codex",
+          "integration": "codex",
+          "model": "gpt-5.6-sol"
+        },
+        "role": "testability-evidence",
+        "summary": "The chosen evidence layers are appropriate, but the package does not yet map every acceptance outcome to concrete assertions. Filter/reload and cancelled-history behavior are under-specified, motion evidence lacks measurable trigger/timing checks, existing required Playwright tests encode the superseded behavior, dependency repair is sequenced after tests that require it, and production cleanup is not executable through the current Task controls. These are implementation-planning issues; no product decision is required. No tests were run and no files were changed.",
+        "verdict": "changes-required"
+      },
+      {
+        "oracle": {
+          "artifacts_digest": "f5d7aca8a208cd4b2a9385b66a6edb326e688c9bfa8b3a36b6c10cbe1e010ff9",
+          "degraded": false,
+          "executable": "/Users/max/.local/bin/claude",
+          "integration": "claude",
+          "model": "opus"
+        },
+        "role": "privacy-consent-security",
+        "summary": "Four rubric areas pass on the artifacts plus code verification, and three do not. Passing: no new path sends user content to a remote provider, so the consent questions are genuinely N/A (spec.md:61-63, plan.md:9 — verified: the change only flips an existing query parameter, and the flag-gated title-completion path at backend/app/api/tasks.py:136-208 logs only ids/provider/duration). Owner scoping holds server-side — GET /api/tasks resolves through task_repo.list_for_owner(owner_id=...) (backend/app/modules/tasks/service.py:823) and no new endpoint is added, so the 404-vs-403 question does not arise. No new durable record type is created (spec.md:40), and tasks in every state are already covered by account purge and by the ZIP export (docs/data-retention.md:16,131-133), so there is no deletion or export gap. No invite code, session token or correlation ID becomes an authorization input; completion stays idempotent and is never shown before the canonical acknowledgement (design.md:45); no new credential or provider config appears. Failing: (1) plan.md:31 and SC-004 make production screenshots of the task list a delivery deliverable on precisely the surface this feature fills with real task titles by default — Constitution Principle I (.specify/memory/constitution.md:41) forbids real user data in PR evidence, and the artifacts name no synthetic identity, no crop/redaction rule and no closed field list; (2) plan.md:17 writes the completed row into a process-global query cache that deliberately survives sign-out and account switch and is keyed without an account id, so the widened default payload (now including completed history) can paint for the wrong owner; (3) plan.md:31's \"clean up synthetic work through existing controls\" names a control that does not fully exist — there is no task delete/erase endpoint, and a synthetic task left completed is now permanently visible by default. Separately, the bundled \"build repair\" is a partial rollback of a merged Dependabot group update with no advisory check recorded. All four are settleable by the implementing agent; no product decision is required — the owner has already decided default completed visibility (spec.md:53-57) and the mobile/web scope split (spec.md:61).",
+        "verdict": "changes-required"
+      },
+      {
+        "oracle": {
+          "artifacts_digest": "f5d7aca8a208cd4b2a9385b66a6edb326e688c9bfa8b3a36b6c10cbe1e010ff9",
+          "degraded": false,
+          "executable": "/Users/max/.local/bin/claude",
+          "integration": "claude",
+          "model": "sonnet"
+        },
+        "role": "ux-accessibility-mobile",
+        "summary": "Feature 016 is a frontend-presentation-only change (default-visible Completed section, canonical-success-triggered movement, grey-strikethrough styling) over the existing TaskListPage. The spec/plan/design package is unusually thorough for this rubric: 15 named states across D-01/M-01 cover loading, both empty variants, fetch error with correlation-ID mention, save failure/interruption, partial (mixed-outcome) completion, completed-only, pagination, filtered/grouped completion, and reduced-motion/keyboard — all bidirectionally mapped to FR-001..FR-003 with no orphaned affordances or requirements. Keyboard/focus handling (focus transfers to the title link when the completion button disappears) matches the real, tested code pattern at frontend/src/features/tasks/TaskListPage.tsx:842 and frontend/src/features/tasks/__tests__/TaskListPage.test.tsx:1469. Mobile viability targets the rubric's exact 390x851 viewport, preserves 44px targets, and explicitly states primary-loop impact per Principle V. No forbidden ADR-0006 terminology, no new destructive action, and no color-only status signaling (checkmark + strikethrough + heading, not grey alone). The claimed supersession of spec 011 FR-029 and the referenced design-skill validator script were both verified against the repository. No blocking or important findings surfaced; the three findings below are advisory polish/clarity items only, so the lens returns pass.",
+        "verdict": "pass"
+      }
+    ],
+    "risk": "high",
+    "risk_escalated_by_classifier": true,
+    "run_id": "completion-ui-20260906-1",
+    "single_provider_panel": false,
+    "stale_reviews": [],
+    "status": "escalated",
+    "technical_findings": [
+      {
+        "category": "requirements-supersession",
+        "description": "The web-only default visibility change does not fully identify the requirements it overrides. The artifacts say only Spec 011 FR-029 is superseded, while Spec 011 also requires web, API, and mobile behavior to be observably equivalent and accepted ADR-0006 prescribes an explicit Show completed control. Native mobile and backend are simultaneously declared out of scope.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md §Clarifications lines 55-57 and §Assumptions lines 59-63",
+          "specs/016-completed-task-animation/plan.md §Scope and constitution lines 7-9",
+          "specs/011-rtm-task-parity/spec.md §Search, filters and history FR-029 and §Cross-cutting FR-030, lines 356-364",
+          "docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md §Visible-control acceptance lines 307-320",
+          "docs/decisions/0020-rtm-parity-priority-and-archive-semantics.md §Scope of supersession lines 73-85"
+        ],
+        "recommendation": "Amend spec.md and plan.md to record the complete narrow exception: web presentation includes completed records by default, while the API default, native-mobile history surface, and open-count semantics remain unchanged. Explicitly identify the affected portion of Spec 011 FR-030 and ADR-0006's Show completed UI rule.",
+        "reviewer": "requirements-consistency",
+        "severity": "blocking"
+      },
+      {
+        "category": "release-contract-consistency",
+        "description": "The artifacts prohibit a new feature flag and claim an existing task-workspace exposure can be reused, but the accepted release contract requires new production behavior to remain behind a server-owned default-OFF flag, and the current allow-list contains no task-workspace or completed-animation flag. The planned standard release therefore cannot demonstrate the required OFF-to-cohort-to-ON exposure or safe OFF behavior.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md §Assumptions line 63",
+          "specs/016-completed-task-animation/plan.md §Scope and constitution lines 7-9 and §Existing build repair and delivery lines 31-33",
+          "docs/decisions/0008-verified-trunk-serial-landing.md §Decision lines 34-52",
+          "backend/app/core/config.py KNOWN_FEATURE_FLAGS lines 82-88"
+        ],
+        "recommendation": "Reconcile the artifacts with ADR-0008 before implementation. The implementing agent should choose the technical gating mechanism, then update scope, tasks, and acceptance evidence to cover default-OFF exposure, intended cohort rollout, OFF behavior, and rollback; alternatively, cite an accepted ADR that explicitly exempts this correction.",
+        "reviewer": "requirements-consistency",
+        "severity": "blocking"
+      },
+      {
+        "category": "missing-acceptance-behavior",
+        "description": "The effect of including completed records on the visible task-count subtitle is unspecified. Current state views display open counts, while project, tag, and date views display the loaded result length; requesting completed items by default would silently make the latter count completed rows and potentially only the loaded page, contrary to the design's promise to retain the existing subtitle and the narrow animation-and-placement scope.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md FR-003 line 36 and §Clarifications lines 53-55",
+          "specs/016-completed-task-animation/design.md state S01 line 27",
+          "specs/016-completed-task-animation/plan.md §Implementation lines 13-15",
+          "frontend/src/features/tasks/TaskListPage.tsx TaskListPage meta calculation lines 420-426",
+          "backend/app/modules/tasks/service.py TaskService._open_counts lines 1485-1514"
+        ],
+        "recommendation": "State explicitly that existing visible counts remain open-task counts when completed rows are shown, and include that preservation in the plan and targeted acceptance evidence. The implementing agent can choose how to derive the value.",
+        "reviewer": "requirements-consistency",
+        "severity": "important"
+      },
+      {
+        "category": "acceptance-evidence-mismatch",
+        "description": "SC-003 requires completed records to remain visible through project, tag, and search filtering and reload, but the plan names only a generic always-included case and generic preservation of existing query tests. The browser evidence also says only actual movement, without explicitly checking the 600ms ceiling or the required absence of initial-load and filter-navigation animation.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md SC-002 through SC-004 lines 47-49",
+          "specs/016-completed-task-animation/spec.md §Edge Cases lines 24-27",
+          "specs/016-completed-task-animation/plan.md §Targeted evidence lines 21-25",
+          "specs/016-completed-task-animation/plan.md production verification line 31"
+        ],
+        "recommendation": "Make the evidence map explicit for default completed visibility after reload under project, tag, and search filters; verify the 600ms ceiling; and verify that initial loads and filter navigation do not animate. This is an implementation-planning correction, not a product decision.",
+        "reviewer": "requirements-consistency",
+        "severity": "important"
+      },
+      {
+        "category": "false-repository-claim",
+        "description": "The plan's load-bearing claim that always-on `include_completed` needs no server change is false: completed tasks keep their open-state `order_key`, the sort key has no open/completed dimension, and the server truncates the result at `limit` (default 50) before the client ever partitions it — so completed history competes with open tasks for the page window and can push open work off the loaded list.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:13-15 — 'Request includeCompleted=true using the existing endpoint... Do not change server sorting or pagination. Completion keeps its canonical query position because existing sort fields are unchanged; loaded pages are flattened then partitioned. Therefore no additional history retention cache or completion-origin field is needed.'",
+          "backend/app/modules/tasks/service.py:702-711 — the `complete` branch sets only `state`/`completed_at`/`cancelled_at`/`waiting_for`/`waiting_since`; `order_key` is never reassigned.",
+          "backend/app/modules/tasks/repository.py:669-673 — `next_order_key` is `SELECT MAX(order_key) ... WHERE owner_id = ? AND state = ?`, i.e. per-state, so a completed task retains a low per-state integer and sorts among (often above) open rows.",
+          "backend/app/modules/tasks/service.py:1583-1595 — `_sort_key` is `(order_key, created_at, id)` for `manual` (the default), with no completed-vs-open component in any sort mode.",
+          "backend/app/modules/tasks/service.py:843-849 — `page = all_filtered[:limit]`; the window is chosen server-side before the client can partition.",
+          "backend/app/api/tasks.py:970 — `limit: int = Query(default=50, ge=1, le=200)`; frontend/src/api/taskHooks.ts:29-35 — `useInfiniteQuery` passes no `limit`, so the default applies.",
+          "frontend/src/features/tasks/TaskListPage.tsx:433-434 and backend/app/api/agents.py:369-381 — `useAgentRunSummaries(tasks.map((task) => task.id), ...)` sends one `task_id` per loaded task to `/agent-run-summaries`, which is capped at `max_length=200` and returns 422 past that; the error is swallowed by `.data ?? {}` at TaskListPage.tsx:434."
+        ],
+        "recommendation": "State in plan.md how the open list stays complete once completed rows share the page budget. Either fetch the Completed section as its own bounded query (a second `useTaskList` with `state`-less `include_completed` and a small `limit`) so the open query keeps its full 50 slots, or make the ordering completed-aware server-side. If the 'no server change' constraint is kept, plan.md must say explicitly that page composition now mixes open and completed rows, that reaching all open work may require repeated 'Load more tasks', and that the agent-run-summaries 200-id cap is reached sooner.",
+        "reviewer": "architecture-consistency",
+        "severity": "blocking"
+      },
+      {
+        "category": "false-repository-claim",
+        "description": "The plan, design and spec all describe repurposing an 'existing cancelled-history toggle'. No such control exists: there is a single 'Show completed' checkbox that drives both `includeCompleted` and `includeCancelled`. The mis-description conceals that the change deletes the owner's only means of hiding completed work, which the spec's supersession note does not cover.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:7 — 'Existing cancelled-history toggle becomes Show cancelled.'; specs/016-completed-task-animation/design.md:10 — 'the existing history toggle becomes Show cancelled'; specs/016-completed-task-animation/spec.md:56 — 'Existing cancelled-history access remains opt-in, labelled Show cancelled'.",
+          "frontend/src/features/tasks/TaskListPage.tsx:83 — `const [showCompleted, setShowCompleted] = useState(false);`",
+          "frontend/src/features/tasks/TaskListPage.tsx:134-135 — `includeCompleted: showCompleted, includeCancelled: showCompleted` — one piece of state drives both flags.",
+          "frontend/src/features/tasks/TaskListPage.tsx:546-554 — the single checkbox is labelled 'Show completed'; there is no cancelled-only control anywhere in the file.",
+          "specs/016-completed-task-animation/spec.md:57 — the supersession is scoped to 'default completed visibility in the web view', not to removing the ability to hide completed tasks; specs/011-rtm-task-parity/spec.md:356-357 (FR-029) is the requirement being narrowed."
+        ],
+        "recommendation": "Correct the three artifacts to describe the control that exists ('the existing Show completed checkbox, which today sets both include_completed and include_cancelled') and state plainly that this change removes the completed-hiding opt-out, so the supersession of 011-FR-029 covers the capability removal and not only the default. If the opt-out should survive, say so and keep two independent checkboxes.",
+        "reviewer": "architecture-consistency",
+        "severity": "blocking"
+      },
+      {
+        "category": "contract-break-unstated",
+        "description": "Renaming the 'Show completed' control breaks three existing tests that address it by accessible name, none of which the plan lists as changing while it claims existing tests are preserved.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:25 — 'Preserve existing query tests'; plan.md:23-25 names only `frontend/src/features/tasks/__tests__/TaskListPage.test.tsx` and a new test under `frontend/tests/`.",
+          "frontend/tests/claude-design-shell.spec.ts:391,394 — mobile-viewport geometry assertion reads `page.getByLabel(\"Show completed\")` and throws 'Header or task filters exceed the mobile viewport' when the box is missing.",
+          "frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts:431 — `await page.getByRole(\"checkbox\", { name: \"Show completed\" }).check();` is how that spec reveals committed tasks.",
+          "frontend/src/features/tasks/__tests__/TaskListPage.test.tsx:454-456 — clicks the 'Show completed' checkbox and asserts `lastListFilters().includeCompleted` and `.includeCancelled` both become true."
+        ],
+        "recommendation": "List these three specs in plan.md and tasks.md as files this change must update. Note in particular that the brain-dump compose spec uses the checkbox to reveal completed work; once completed items are always included that `.check()` becomes unnecessary and, if left pointing at a 'Show cancelled' control, will fail for a reason unrelated to what the spec tests.",
+        "reviewer": "architecture-consistency",
+        "severity": "important"
+      },
+      {
+        "category": "concurrency-and-design-citation",
+        "description": "The plan cites design.md but realizes none of its screen or state ids, and two of the design's states have no plan coverage: S11 (several completions with mixed outcomes) and S13 (pagination). The plan describes a single FLIP pass while the code fires an independent autosave controller plus a list invalidation per completed row, so overlapping completions produce interleaved refetch and layout passes with no stated behavior.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:3 — 'Design: `design.md` and the owner's annotated screenshots' — no D-01/M-01 or S01–S15 id appears anywhere in plan.md.",
+          "specs/016-completed-task-animation/design.md:23-41 — the state inventory defines S01–S15, including S11 'Several completion requests have mixed outcomes' and S13 'Another existing page loads'.",
+          "specs/016-completed-task-animation/plan.md:17 — 'Capture old row rectangles before applying a completed task, then use a layout effect and Web Animations API to move existing matching task rows from their old to new positions' — written for one row transition, with nothing about a second completion arriving mid-flight.",
+          "frontend/src/features/tasks/TaskListPage.tsx:444-454 — `onComplete` builds a fresh `getTaskDetailAutosaveController` per row whose acknowledgement calls `invalidateTasks()` (line 448); two rapid completions therefore queue two independent refetches of every loaded page.",
+          "frontend/src/features/tasks/TaskListPage.tsx:192,208 — `invalidateTasks` / `applyCanonicalTask` re-render the list asynchronously, which can reorder rows while a FLIP animation is still running."
+        ],
+        "recommendation": "Name the design states the plan realizes (at minimum S02, S03, S10, S11, S13, S15) and add one paragraph on overlapping completions: whether a second completion cancels, queues behind, or runs concurrently with an in-flight animation, and what the FLIP pass does when the invalidation refetch re-renders the list mid-animation. Prefer reusing the existing `applyCanonicalTask` (TaskListPage.tsx:193-209) so the list cache patch is synchronous and the animation is not gated on a network round trip.",
+        "reviewer": "architecture-consistency",
+        "severity": "important"
+      },
+      {
+        "category": "planning-artifact-completeness",
+        "description": "tasks.md carries no concrete file paths and is not grouped by user story, contrary to the constitution's task requirements; T002 collapses all three functional requirements plus focus handling and reduced motion into one checkbox.",
+        "evidence": [
+          ".specify/memory/constitution.md:99 — 'Tasks MUST be grouped by independently shippable user story, include concrete file paths, and preserve tests-before-implementation ordering unless the spec explicitly waives tests.'",
+          ".specify/memory/constitution.md:77 — 'Generated `tasks.md` is portable planning input organized by user story, dependency, and concrete file path.'",
+          "specs/016-completed-task-animation/tasks.md:3-6 — four lines, no path on any of them; T002 is 'Add focused failing tests and implement default completed section, canonical movement and accessible focus/reduced motion (016-FR-001, 016-FR-002, 016-FR-003)'.",
+          "specs/016-completed-task-animation/plan.md:13,23,25 — the concrete targets (`frontend/src/features/tasks/TaskListPage.tsx`, `frontend/src/features/tasks/__tests__/TaskListPage.test.tsx`, `frontend/tests/`) exist only in plan prose."
+        ],
+        "recommendation": "Split T002 into per-requirement tasks carrying the paths already known from plan.md, and add the three test files identified in the previous finding as explicit task targets. Without this, T002 can be reported complete with FR-003's reduced-motion or keyboard-focus behavior unimplemented and no artifact records the gap.",
+        "reviewer": "architecture-consistency",
+        "severity": "important"
+      },
+      {
+        "category": "design-code-disagreement",
+        "description": "On every view where no GTD state is selected — project, tag, and the overdue/today/upcoming date views, plus the default list — the header count is computed from the raw fetched array, so always-including completed tasks silently changes it from an open-task count to an open-plus-completed-loaded-so-far count that grows with each 'Load more'. design.md states the heading and subtitle are unchanged.",
+        "evidence": [
+          "frontend/src/features/tasks/TaskListPage.tsx:422-426 — `const meta = state === \"inbox\" ? ... : state ? `${counts[state]} ${taskNoun}` : `${tasks.length} ${tasks.length === 1 ? \"task\" : \"tasks\"}`;`",
+          "frontend/src/features/tasks/TaskListPage.tsx:74-77 — `state` is undefined for `mode === \"project\"`, `mode === \"tag\"` and any `dateView`, so those views take the `tasks.length` branch.",
+          "frontend/src/features/tasks/TaskListPage.tsx:177 — `const tasks = taskQuery.data?.items ?? [];` is the flattened fetched list, which will now contain completed rows.",
+          "backend/app/modules/tasks/service.py:850-861 and `_open_counts` at :1485 — `counts_by_state` deliberately counts open work only, so the state-filtered branch stays correct while the `tasks.length` branch drifts.",
+          "specs/016-completed-task-animation/design.md:27 — S01 copy is 'Existing list heading and subtitle', i.e. unchanged."
+        ],
+        "recommendation": "Decide and record in plan.md whether the header on state-less views should count open rows only (partition first, then count the open partition) or open plus completed, and align design.md S01 with the choice. Add a component assertion for the project or tag view header so the count cannot drift silently.",
+        "reviewer": "architecture-consistency",
+        "severity": "important"
+      },
+      {
+        "category": "rollback",
+        "description": "The candidate bundles an unrelated frontend dependency downgrade with the feature, but the rollback statement covers only the UI. Reverting the candidate restores the incompatible dependency pins and re-breaks the frontend build on main.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:29-33 — 'The most recent dependency update already broke frontend install/build/lint/test runtime... This repair is independent of new product scope and changes no source or gate configuration.' and 'Existing rollback restores the prior UI. No data migration or new release mechanism is required.'",
+          "Working-tree diff of frontend/package.json (uncommitted, on branch feat/completed-task-animation): tailwindcss ^4.3.3 → ^3.4.19, typescript ~7.0.2 → ~6.0.3, eslint ^10.9.1 → ^9.39.5, eslint-plugin-react-hooks ^7.1.1 → ^5.2.0, jsdom ^30.0.1 → ^24.1.3, @eslint/js ^10.0.1 → ^9.39.5, allure ^3.16.0 → ~3.14.3, @tanstack/react-query ^5.102.8 → ~5.101.4; frontend/package-lock.json changes by ~2760 lines.",
+          "frontend/src/styles.css:3-5 (`@tailwind base; @tailwind components; @tailwind utilities;`), frontend/postcss.config.cjs (plugin `tailwindcss`) and frontend/tailwind.config.ts confirm the checked-in source is Tailwind v3-shaped, so the committed `^4.3.3` pin genuinely cannot build — the repair itself is justified.",
+          "scripts/classify_path_risk.py:176-193 — `frontend/package.json` and `frontend/package-lock.json` classify SHIP, so nothing stops the two concerns landing as one candidate."
+        ],
+        "recommendation": "State the rollback consequence explicitly in plan.md: reverting this candidate also reverts the dependency repair and returns main to a non-building frontend. Land the package/lock repair as its own SHIP candidate ahead of the feature so each can be reverted independently, or record the forward-fix (re-apply the pins) as the rollback path for the bundled candidate.",
+        "reviewer": "architecture-consistency",
+        "severity": "important"
+      },
+      {
+        "category": "acceptance-evidence",
+        "description": "SC-003 and the cancelled-history separation do not have explicit evidence assignments. The plan's generic component coverage does not state that project, tag, and search projections retain completed results across reload, or that completed items are requested by default while cancelled items remain opt-in. This is a changed seam: the current implementation and test intentionally couple both terminal-state flags.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md:24-28 Edge Cases require grouped/paginated behavior and separately accessible cancelled history.",
+          "specs/016-completed-task-animation/spec.md:34-36 FR-001 and FR-003 require default completed inclusion while preserving query behavior.",
+          "specs/016-completed-task-animation/spec.md:48 SC-003 explicitly requires project/tag/search views and reload to display completed tasks.",
+          "specs/016-completed-task-animation/design.md:38-40 states S12 and S14 require cancelled history to remain distinct and completed records to survive filters/grouping.",
+          "specs/016-completed-task-animation/plan.md:23-25 lists component/browser evidence but does not assign project/tag/search reload or Show-cancelled separation to a test.",
+          "frontend/src/features/tasks/TaskListPage.tsx:129-140 passes every projection filter through one useTaskList call and currently derives includeCompleted and includeCancelled from the same state.",
+          "frontend/src/features/tasks/__tests__/TaskListPage.test.tsx:435-470 currently verifies that Show completed enables both includeCompleted and includeCancelled, while search is tested separately without completed results.",
+          "backend/app/modules/tasks/service.py:1455-1477 supports the required combinations, so this gap is in client acceptance evidence rather than a need for new backend behavior.",
+          "specs/016-completed-task-animation/checklists/requirements.md:5-6 marks these cases observable and all requirements bounded despite the missing assignments."
+        ],
+        "recommendation": "Add a compact parameterized component matrix for state/project/tag/search projections asserting includeCompleted=true, includeCancelled=false by default, exactly one matching completed row in the Completed section, and includeCancelled changing only through Show cancelled. Update one real-stack Playwright journey to retain the completed task through a representative filtered reload. Reuse existing backend tests rather than adding backend behavior tests.",
+        "reviewer": "testability-evidence",
+        "severity": "important"
+      },
+      {
+        "category": "motion-evidence",
+        "description": "The browser evidence is described only as verifying “actual movement.” It does not define assertions for the 600ms ceiling, the post-canonical-response trigger, or the prohibition on animation during initial load and filter navigation. Consequently SC-002 can pass even if movement is late or begins optimistically, and the explicitly excluded animation triggers can regress unnoticed.",
+        "evidence": [
+          "specs/016-completed-task-animation/spec.md:18-19 requires movement only after successful save and no false-success animation after failure.",
+          "specs/016-completed-task-animation/spec.md:27 excludes movement for reduced motion, initial loads, and filter navigation.",
+          "specs/016-completed-task-animation/spec.md:47 SC-002 sets a measurable 600ms ceiling.",
+          "specs/016-completed-task-animation/design.md:45-48 defines canonical acknowledgement, approximately 380ms motion, and excluded triggers.",
+          "specs/016-completed-task-animation/plan.md:17-19 proposes the Web Animations API and trigger behavior, but plan.md:25 assigns only unspecified “actual movement” and reduced-motion behavior to the browser test.",
+          "specs/016-completed-task-animation/tasks.md:4 combines all motion evidence into T002 without naming the observable assertions.",
+          "specs/016-completed-task-animation/checklists/requirements.md:5-6 claims bounded evidence although the timing and trigger boundary are not bounded by the stated test plan."
+        ],
+        "recommendation": "Specify a deterministic browser assertion that records the row's pre-completion position, waits for the canonical transition response, observes a non-zero movement or active animation, and verifies final placement with configured duration no greater than 600ms. Add focused assertions that no animation starts before acknowledgement, after failure, on initial load, or on filter navigation; emulate reduced motion and verify immediate final placement. Avoid sleep-based pass criteria.",
+        "reviewer": "testability-evidence",
+        "severity": "important"
+      },
+      {
+        "category": "required-browser-regression",
+        "description": "The plan proposes an unnamed new browser test but omits existing required Playwright evidence that directly asserts the behavior this feature supersedes. Those tests will fail under the accepted behavior and cannot remain valid acceptance evidence until updated.",
+        "evidence": [
+          "frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts:405-445 story “Minimal native task management” currently expects the completed row to disappear and requires checking Show completed before reopening it.",
+          "frontend/tests/claude-design-shell.spec.ts:379-395 locates a control named Show completed as part of narrow-viewport geometry evidence.",
+          "docs/e2e-acceptance-charter.md:90-107 makes the native task management story active required Playwright/Allure evidence and rejects missing or stale results.",
+          "specs/016-completed-task-animation/spec.md:49 SC-004 requires named component and browser evidence plus required CI.",
+          "specs/016-completed-task-animation/plan.md:23-25 names the component file but only says a bounded browser test will exist somewhere under frontend/tests/.",
+          "specs/016-completed-task-animation/tasks.md:4 does not identify either required existing browser surface."
+        ],
+        "recommendation": "Name and update the existing “Minimal native task management” story so completion leaves exactly one row under Completed, reload preserves it there, and explicit reopen restores it to the open section. Update the narrow-layout geometry test from Show completed to Show cancelled. Use a separate browser test only for motion-specific geometry/reduced-motion checks that the existing real-stack story cannot express, while preserving required Allure taxonomy.",
+        "reviewer": "testability-evidence",
+        "severity": "important"
+      },
+      {
+        "category": "task-lanes-and-dependencies",
+        "description": "The task order is internally unexecutable if the plan's broken-toolchain claim is current: T002 requires focused failing tests before T003 performs the dependency repair needed to run tests. T003 also combines writer-owned package repair and validation with independent exact-candidate review/QA, obscuring the immutable candidate boundary. If the repair is already complete, the artifacts are stale instead.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:29 states frontend install, build, lint, and test runtime are broken until package/lock repair.",
+          "specs/016-completed-task-animation/plan.md:31 orders focused red/green tests before required validation.",
+          "specs/016-completed-task-animation/tasks.md:4 places RED/GREEN tests and implementation in T002, while tasks.md:5 defers the necessary dependency repair to T003 alongside independent review and QA.",
+          "frontend/package.json:6-16 shows that lint, typecheck, build, Vitest, and Playwright all depend on the frontend package toolchain.",
+          "docs/decisions/0008-verified-trunk-serial-landing.md:30-44 requires one exact tested candidate SHA before landing and deployment.",
+          "AGENTS.md §Definition of Done / Engineering Quality and Production and Release Evidence requires applicable suites, independent review, QA, and release evidence against the exact candidate/deployed SHA."
+        ],
+        "recommendation": "Make the package/lock repair an explicit prerequisite task with its own bounded compatibility evidence, or remove the repair claim if it is already landed. Then keep one coherent frontend RED/GREEN writer lane, freeze and fully verify one candidate, run independent review/QA against that exact SHA, and only then enter the release/production lane. This grouping is runtime-agnostic and does not require parallel execution.",
+        "reviewer": "testability-evidence",
+        "severity": "important"
+      },
+      {
+        "category": "operational-evidence",
+        "description": "The production acceptance task promises cleanup of a synthetic Task through existing controls, but the current Task surface has no delete operation. Complete, reopen, or cancel all retain the record, while the standard production smoke cleans only its temporary tree. The artifact also does not explicitly name the product guardrail whose exact-SHA production evidence will be recorded.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:31 requires a synthetic completion/reload observation at mobile and desktop widths and cleanup through existing controls.",
+          "specs/016-completed-task-animation/tasks.md:6 delegates production observation, cleanup, and traceability to T004 without a concrete teardown/read-back condition.",
+          "frontend/src/api/client.ts:244-297 exposes Task create, update, and lifecycle transition methods but no Task deletion method.",
+          "backend/app/api/tasks.py:886-990 exposes Task update, transition, create, and list routes but no Task deletion route.",
+          "backend/app/schemas/tasks.py:172-173 limits Task transitions to move, complete, reopen, and cancel.",
+          "scripts/production_smoke.sh:145-176 creates, deletes, and verifies cleanup only for a temporary tree; it provides no Task cleanup path.",
+          "AGENTS.md §Definition of Done / Product Outcome requires a named product signal or guardrail and production evidence that it is captured correctly."
+        ],
+        "recommendation": "Define a reversible production recipe and final read-back before implementation—for example, exercise a dedicated canary Task and restore its original open lifecycle rather than creating an undeletable Task per run. Name the guardrail explicitly, such as “the canonical Task appears exactly once after completion and reload, with cancelled history still excluded,” and record the exact SHA, intended exposure state, desktop/390px results, screenshots or recording, restoration result, and CI/release run links.",
+        "reviewer": "testability-evidence",
+        "severity": "important"
+      },
+      {
+        "category": "pii-in-pr-evidence",
+        "description": "The delivery plan makes production screenshots a required evidence artifact on the one surface whose entire purpose is rendering task titles, and this feature makes the account's completed history render there by default — with no artifact stating which account is used, whether it is synthetic, or what may appear in a recorded image. plan.md:31 instructs: 'Verify synthetic completion and reload in production at mobile/desktop widths, record screenshots/run links', and SC-004 (spec.md:49) elevates 'browser evidence' to an acceptance criterion. FR-001 (spec.md:34) requires the web view to request completed items by default and render them in a labelled Completed section, so a full-width production screenshot now necessarily carries the surrounding real open rows plus the account's real completed history — not just the one synthetic row. Constitution Principle I (.specify/memory/constitution.md:41) states that real user data MUST NOT enter logs, metrics, committed fixtures, or PR evidence; the repository already has a worked precedent for exactly this shape of evidence, docs/external-agent-relay-release.md:346-369, which closes the field list and states that 'the handed-off Task's title, its details, or its supporting items' may not appear 'in any form, including inside a screenshot ... If a screenshot would carry a single field from the second list, it is not evidence, it is a leak.' Neither spec.md, plan.md, design.md nor tasks.md (T004, tasks.md:6, which is where 'record acceptance/traceability/report' lands) carries any equivalent constraint.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:31 — 'Verify synthetic completion and reload in production at mobile/desktop widths, record screenshots/run links and clean up synthetic work through existing controls.'",
+          "specs/016-completed-task-animation/spec.md:49 — SC-004 requires 'Named component and browser evidence'",
+          "specs/016-completed-task-animation/spec.md:34 — FR-001 requires the view to 'request completed items by default' and render a labelled Completed section",
+          ".specify/memory/constitution.md:41 — Principle I: 'real user data MUST NOT enter logs, metrics, committed fixtures, or PR evidence'",
+          "docs/external-agent-relay-release.md:362,368-369 — closed field list forbidding a Task title in evidence 'including inside a screenshot'",
+          "specs/016-completed-task-animation/tasks.md:6 — T004 records acceptance evidence with no redaction or identity constraint"
+        ],
+        "recommendation": "Bind the production verification to the provisioned synthetic smoke identity rather than a real owner account: scripts/check_smoke_identity_cohort.py already guarantees BRAIN_BUDDY_ADMIN_EMAIL is a member of BRAIN_BUDDY_FEATURE_FLAG_INTERNAL_USERS and is deliberately independent of BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS, so that account holds only synthetic tasks. Then add to plan.md's delivery section a closed field list in the form of docs/external-agent-relay-release.md:346-369, naming what a recorded artifact may contain (task ids, correlation ids, CI run links, section headings, measured durations, viewport widths) and stating that no real task title, details, tag or project name may appear in any recorded screenshot, cropped or otherwise. Restate that constraint as a checked acceptance outcome inside T004 (tasks.md:6) so the evidence step cannot be satisfied by an unredacted capture.",
+        "reviewer": "privacy-consent-security",
+        "severity": "blocking"
+      },
+      {
+        "category": "owner-scoping",
+        "description": "The plan writes completed rows into a shared client cache whose task entries deliberately survive sign-out and an A→B account switch and are keyed without an account identifier, so the widened default payload can be painted for the wrong owner. plan.md:17 says 'Use canonical autosave acknowledgements to update the list/detail cache immediately', and FR-001 makes completed content part of every default list response (spec.md:34, plan.md:13 'Request includeCompleted=true'). That cache is the process-global QueryClient at frontend/src/queryClient.ts:8, whose only session bindings are bindRelaySession and bindAdminSession (:10-11). Sign-out clears the auth store only (frontend/src/stores/authStore.ts:107-117), and the retention of task entries across a session change is deliberate and asserted: frontend/src/__tests__/queryClient.test.ts:40-42 comments 'Admin-only purge: task/account/relay records survive a session change' and asserts a ['tasks','next'] entry still holds its data after clearSession(). taskKeys.list(filters) (frontend/src/api/taskHooks.ts:9) contains no account id, and after this change the default filter object is identical for every account (includeCompleted is no longer derived from the per-session showCompleted state at frontend/src/features/tasks/TaskListPage.tsx:83,134-135), so the next signed-in owner hits the previous owner's entry. This gap predates the feature, but the feature widens the retained payload from open tasks to open plus completed history while plan.md:9 asserts 'No consent/processor/retention or telemetry change' — the artifacts never mention cache lifetime or account-switch behaviour at all.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:17 — 'Use canonical autosave acknowledgements to update the list/detail cache immediately.'",
+          "specs/016-completed-task-animation/plan.md:9 — 'No consent/processor/retention or telemetry change'",
+          "frontend/src/queryClient.ts:8-11 — sole process-global QueryClient, bound only for relay and admin sessions",
+          "frontend/src/__tests__/queryClient.test.ts:40-42 — 'task/account/relay records survive a session change, matching the existing relay policy rather than clearing the whole cache'",
+          "frontend/src/api/taskHooks.ts:9 — taskKeys.list(filters) carries no account identifier",
+          "frontend/src/stores/authStore.ts:107-117 — logout() clears auth state only, never the query cache",
+          "frontend/src/features/tasks/TaskListPage.tsx:83,134-135 — includeCompleted currently derives from per-session showCompleted state defaulting to false"
+        ],
+        "recommendation": "Pick one and state it in plan.md with a named 016-FR-00x test: either (a) include the authenticated account id in the task query keys (frontend/src/api/taskHooks.ts:7-14) so a different owner can never hit another owner's cache entry, or (b) extend the existing session-boundary subscription wired in frontend/src/queryClient.ts to remove the ['tasks'] key alongside the admin and relay keys on clearSession()/logout(). Option (b) contradicts the deliberate policy recorded at frontend/src/__tests__/queryClient.test.ts:40-41, so if it is chosen, update that test's assertion and comment in the same change rather than leaving two sources of truth. Add a Vitest case that seeds a completed-task list entry for account A, drives clearSession() then a sign-in as account B, and asserts B's first paint contains none of A's titles.",
+        "reviewer": "privacy-consent-security",
+        "severity": "important"
+      },
+      {
+        "category": "retention-deletion",
+        "description": "The production verification step creates a durable task record in a production account and promises cleanup 'through existing controls', but no control erases a task, and under this feature the residue is now visible by default. plan.md:31 requires observing 'synthetic completion and reload in production' and then to 'clean up synthetic work through existing controls'. There is no task delete or erase endpoint: backend/app/api/tasks.py exposes create, PATCH /tasks/{task_id} (:886) and POST /tasks/{task_id}/transitions (:908) only — the single @router.delete at :691 is for tags — and the service's terminal states are 'completed' and 'cancelled' (backend/app/modules/tasks/service.py:527,723; _OPEN_STATES at :57). Spec 011's Trash and explicit erasure (specs/011-rtm-task-parity/spec.md FR-012/FR-013/FR-037-039) are planned, not built. So a synthetic production task can only be cancelled, and persists in the production data store until account purge (docs/data-retention.md:16). Because FR-001 now makes completed items visible by default, a synthetic task left in 'completed' would remain permanently on screen in that account's list — cleanup therefore has to be an explicit cancel transition, which no artifact says.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:31 — 'clean up synthetic work through existing controls'",
+          "backend/app/api/tasks.py:691 — the only @router.delete on this router targets /tags/{tag_id}, not a task",
+          "backend/app/modules/tasks/service.py:527,723 — transitions reach 'cancelled'/'completed'; no erase path exists",
+          "backend/app/modules/tasks/service.py:57 — _OPEN_STATES = (inbox, next, waiting, someday); completed and cancelled are the only terminal states",
+          "docs/data-retention.md:16 — tasks persist for the life of the account, removed only by account purge",
+          "specs/016-completed-task-animation/spec.md:34 — FR-001 makes completed items part of the default view"
+        ],
+        "recommendation": "State the exact cleanup control in plan.md — POST /api/tasks/{task_id}/transitions with the 'cancel' action (backend/app/modules/tasks/service.py:527), since cancelled work stays out of the default list per spec.md:56 — and record honestly that the record survives as a cancelled task until account purge because no erasure endpoint exists. Prefer running the whole production verification under the synthetic smoke identity from scripts/check_smoke_identity_cohort.py so the unerasable residue never lands in a real owner's account; this resolves the same root cause as the screenshot finding. Promote the cleanup from a trailing clause to a checked outcome in T004 (tasks.md:6).",
+        "reviewer": "privacy-consent-security",
+        "severity": "important"
+      },
+      {
+        "category": "supply-chain",
+        "description": "The plan folds an unrelated dependency rollback into this SHOW-class landing and describes it in terms that understate what it does, with no record that the reverted versions are advisory-free. plan.md:27-29 calls it a 'necessary package/lock repair' that 'restores only demonstrated compatible constraints' and 'changes no source or gate configuration'. The working-tree diff of frontend/package.json is in fact a partial revert of the merged Dependabot group update (commit 33bd442, PR #191, 'bump the frontend-dependencies group across 1 directory with 26 updates'): typescript ^7.0.2→~6.0.3, eslint ^10.9.1→^9.39.5, eslint-plugin-react-hooks ^7.1.1→^5.2.0, tailwindcss ^4.3.3→^3.4.19, jsdom ^30.0.1→^24.1.3, allure ^3.16.0→~3.14.3, and the runtime dependency @tanstack/react-query ^5.102.8→~5.101.4. Two claims do not hold: downgrading TypeScript and ESLint across majors changes what the type and lint gates enforce, and @tanstack/react-query ships to production, so this is not tooling-only. .github/dependabot.yml:3-7 records that this watcher exists precisely because 'advisories accumulated silently', yet no artifact states that none of the reverted versions reintroduces a known advisory. Nothing mechanical will ask: scripts/classify_path_risk.py:58-88 classifies frontend/package.json as SHIP (no ASK prefix, exact path or risk token), and it is not in the GUARDED_FILES list at scripts/check_gate_integrity.py:41-61. ADR-0008 puts 'dependency patches' in SHIP (docs/decisions/0008-verified-trunk-serial-landing.md:56-58); a cross-major rollback of a security-motivated group update is not a dependency patch, and a security regression would fall under the ASK class at :62-64.",
+        "evidence": [
+          "specs/016-completed-task-animation/plan.md:29 — 'The necessary package/lock repair restores only demonstrated compatible constraints ... changes no source or gate configuration.'",
+          "frontend/package.json (working tree diff) — typescript ^7.0.2→~6.0.3, eslint ^10.9.1→^9.39.5, tailwindcss ^4.3.3→^3.4.19, jsdom ^30.0.1→^24.1.3, @tanstack/react-query ^5.102.8→~5.101.4",
+          "git commit 33bd442 — 'chore(frontend): bump the frontend-dependencies group across 1 directory with 26 updates' (PR #191)",
+          ".github/dependabot.yml:3-7 — 'advisories accumulated silently: a fresh audit reports findings against ... the frontend and mobile toolchains'",
+          "scripts/classify_path_risk.py:58-88 — frontend/package.json matches no ASK prefix or exact path, so it classifies SHIP",
+          "docs/decisions/0008-verified-trunk-serial-landing.md:56-58,62-64 — SHIP covers 'dependency patches'; security changes are ASK"
+        ],
+        "recommendation": "Record in plan.md the advisory status of every reverted package at its pinned version — run `npm audit --omit=dev` plus a dev-scope `npm audit` against the repaired frontend tree and paste the counts — and state explicitly that no reverted version reintroduces a known advisory. Correct the two inaccurate claims in plan.md:29 (the revert does change what the tsc/eslint gates enforce, and @tanstack/react-query is a runtime dependency). Land the repair as its own candidate ahead of the UI change so its evidence is separable and rollback of one does not force rollback of the other. If any reverted version does carry an advisory, escalate that candidate to ASK per ADR-0008:62-74 instead of relying on the path classifier's SHIP verdict.",
+        "reviewer": "privacy-consent-security",
+        "severity": "important"
+      },
+      {
+        "category": "mobile-tap-safety",
+        "description": "The ~380ms FLIP-style row reflow moves sibling rows' 44px completion targets while the transition is in flight, but neither plan.md nor design.md states whether completion controls on displaced rows remain safely tappable (or are briefly guarded) during that window, which matters for rapid successive completions one-handed on a 390px viewport.",
+        "evidence": [
+          "specs/016-completed-task-animation/design.md:43-48 (Completion motion) — 'Apply the checked circle and grey strikethrough, then move the row to its final Completed position over approximately 380ms' / 'Animate displaced rows coherently'",
+          "specs/016-completed-task-animation/plan.md:17 — 'Animate the completed row and displaced rows; no fake duplicate DOM row, forced scrolling or looping effects' does not address hit-testing/input during the shift",
+          "specs/016-completed-task-animation/design/task-completion.html — each `.complete` button is a fixed 44x44 target that visually relocates with its row during the transition"
+        ],
+        "recommendation": "State explicitly whether completion buttons on rows displaced by the animation stay immediately tappable at their moving position, or are momentarily non-interactive, so a fast second tap during reflow can't land on the wrong task.",
+        "reviewer": "ux-accessibility-mobile",
+        "severity": "advisory"
+      },
+      {
+        "category": "traceability",
+        "description": "The composite acceptance-test id for each state (e.g. D-01-S09) is established once in prose above the state table but is not restated per row; the table itself labels rows only 'S01', 'S02', etc.",
+        "evidence": [
+          "specs/016-completed-task-animation/design.md:21 — 'Both screens share these stable state suffixes: D-01-S01 / M-01-S01, and so on.'",
+          "specs/016-completed-task-animation/design.md:26-41 (State inventory table) — the state column shows only 'S01 default', 'S02 pending', ... 'S15 reduced motion / keyboard', never the D-01-/M-01- prefix inline"
+        ],
+        "recommendation": "Add the full composite id (e.g. D-01-S09 / M-01-S09) as a literal value per row so an acceptance test or auditor can copy it directly instead of reconstructing it from the prose rule.",
+        "reviewer": "ux-accessibility-mobile",
+        "severity": "advisory"
+      },
+      {
+        "category": "state-completeness",
+        "description": "The zero-completed-tasks condition (Completed heading fully absent, as opposed to rendered empty) is only inferable from the phrase 'any matching completed tasks' in S01 and from the static HTML's 'before' frame; it isn't named as its own state the way first-run vs. filtered-empty (S06/S07) are explicitly distinguished.",
+        "evidence": [
+          "specs/016-completed-task-animation/design.md:27 (S01 default) — 'Open tasks first; any matching completed tasks under one Completed heading; no entry animation'",
+          "specs/016-completed-task-animation/design/task-completion.html — the 'D-01 · Desktop · Before completion' frame renders no `.completed` section markup at all when the completed count is zero"
+        ],
+        "recommendation": "State explicitly that the Completed heading renders only when at least one completed task is loaded, so implementers don't render an empty 'Completed (0)' heading instead of omitting the section.",
+        "reviewer": "ux-accessibility-mobile",
+        "severity": "advisory"
+      }
+    ]
+  }
+}

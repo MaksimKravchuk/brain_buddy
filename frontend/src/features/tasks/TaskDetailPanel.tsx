@@ -338,6 +338,7 @@ function TaskDetailBody({
         <button
           type="button"
           aria-label={isTerminal ? "Reopen task" : "Complete task"}
+          disabled={Boolean(autosaveSnapshot?.barriers.some((barrier) => barrier.action === "complete") || (autosaveSnapshot?.inFlight?.kind === "transition" && "action" in autosaveSnapshot.inFlight.body && autosaveSnapshot.inFlight.body.action === "complete"))}
           className="group -ml-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
           onClick={() => autosave ? autosave.barrier(isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined) : onTransition(task, isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined)}
         >

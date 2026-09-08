@@ -13,7 +13,7 @@ export default defineConfig({
   reporter: [
     [isCI ? "github" : "list"],
     ["html", { outputFolder: "playwright-report", open: "never" }],
-    ["allure-playwright", { resultsDir: "allure-results/playwright" }]
+    ["allure-playwright", { resultsDir: "allure-results/playwright", detail: false }]
   ],
   outputDir: "test-results/playwright",
   use: {
