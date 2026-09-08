@@ -266,12 +266,14 @@ test.describe("account trigger rendered keyboard focus", () => {
     });
     const forcedPage = await forcedContext.newPage();
     try {
-      await loginThroughUi(forcedPage, operatorEmail, operatorPassword);
-      await forcedPage.goto("/admin");
-      await expect(forcedPage.getByRole("heading", { name: /Users|Admin/ }).first()).toBeVisible();
-      await assertRenderedFocus(forcedPage, true);
-      await forcedPage.screenshot({ path: testInfo.outputPath("admin-forced-colors-focus.png") });
-      await assertAccountMenuJourney(forcedPage);
+      await test.step("Verify operator account focus and menu navigation in forced colors", async () => {
+        await loginThroughUi(forcedPage, operatorEmail, operatorPassword);
+        await forcedPage.goto("/admin");
+        await expect(forcedPage.getByRole("heading", { name: /Users|Admin/ }).first()).toBeVisible();
+        await assertRenderedFocus(forcedPage, true);
+        await forcedPage.screenshot({ path: testInfo.outputPath("admin-forced-colors-focus.png") });
+        await assertAccountMenuJourney(forcedPage);
+      });
     } finally {
       await forcedContext.close();
     }

@@ -427,9 +427,8 @@ test("minimal task management creates, edits, moves, completes, reopens and pers
 
   await test.step("complete and reopen the task through the panel list selector", async () => {
     await page.getByRole("button", { name: "Complete Book dentist checkup" }).click();
-    await expect(page.getByText("Book dentist checkup")).toHaveCount(0);
-    await page.getByRole("checkbox", { name: "Show completed" }).check();
-    await expect(page.getByText("Book dentist checkup")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Completed", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Book dentist checkup" })).toHaveCSS("text-decoration-line", "line-through");
     await page.getByRole("link", { name: "Book dentist checkup" }).click();
     await page.getByLabel("List").selectOption("next");
     await expect(page.getByRole("button", { name: "Complete Book dentist checkup" })).toBeVisible();
@@ -446,119 +445,121 @@ test("minimal task management creates, edits, moves, completes, reopens and pers
 
 test("012-SC-001 012-SC-003 title completion is responsive and never writes before submit", async ({ page }, testInfo) => {
   await productLabels("Web task title autocomplete");
-  await signup(page, unique("autocomplete"));
-  const memberResponse = await page.request.get("/api/auth/me");
-  await expectOk(memberResponse, "read signed-in member");
-  const member = (await memberResponse.json()) as JsonRecord;
-  let taskCreates = 0;
-  let completionRequests = 0;
-  let runtimeAutocompleteEnabled = true;
-  let providerAvailable = true;
-  page.on("request", (request) => {
-    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/tasks") {
-      taskCreates += 1;
-    }
-  });
-  await page.goto("/tasks/next");
-  const rolloutOffInput = page.getByRole("combobox", { name: "New task title" });
-  await rolloutOffInput.fill("Prepare rollout off notes");
-  await expect(page.getByRole("checkbox", { name: /Allow/ })).toHaveCount(0);
-  assertCondition(completionRequests === 0, "rollout OFF must not discover or generate completions");
-
-  await page.route("**/api/auth/me", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        ...member,
-        feature_flags: {
-          ...(member.feature_flags as JsonRecord),
-          task_title_autocomplete: runtimeAutocompleteEnabled
-        }
-      })
+  await test.step("Keep title suggestions provisional until submit across viewports and rollout states", async () => {
+    await signup(page, unique("autocomplete"));
+    const memberResponse = await page.request.get("/api/auth/me");
+    await expectOk(memberResponse, "read signed-in member");
+    const member = (await memberResponse.json()) as JsonRecord;
+    let taskCreates = 0;
+    let completionRequests = 0;
+    let runtimeAutocompleteEnabled = true;
+    let providerAvailable = true;
+    page.on("request", (request) => {
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/api/tasks") {
+        taskCreates += 1;
+      }
     });
-  });
-  await page.route("**/api/tasks/title-completion-provider", async (route) => {
-    completionRequests += 1;
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ provider: providerAvailable ? "deterministic" : null })
-    });
-  });
-  await page.route("**/api/tasks/title-completions", async (route) => {
-    completionRequests += 1;
-    const draft = String((route.request().postDataJSON() as JsonRecord).draft);
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        request_id: "8f3d2f73-0e55-4f47-9f9b-1a0b6c7a9c6e",
-        candidates: [`${draft} today`, `${draft} this week`, `${draft} tomorrow`]
-      })
-    });
-  });
-  await page.route("**/api/tasks/title-completions/accepted", async (route) => {
-    await route.fulfill({ status: 204, body: "" });
-  });
-
-  for (const viewport of [{ width: 390, height: 851 }, { width: 1280, height: 780 }]) {
-    await page.setViewportSize(viewport);
     await page.goto("/tasks/next");
-    const input = page.getByRole("combobox", { name: "New task title" });
-    await input.fill(`Prepare launch notes ${viewport.width}`);
-    await page.getByRole("checkbox", { name: /Allow deterministic/ }).check();
-    const listbox = page.getByRole("listbox", { name: "Task title suggestions" });
-    await expect(listbox.getByRole("option")).toHaveCount(3);
-    await testInfo.attach(`autocomplete-${viewport.width}`, {
-      body: await page.screenshot({ fullPage: true }),
-      contentType: "image/png"
+    const rolloutOffInput = page.getByRole("combobox", { name: "New task title" });
+    await rolloutOffInput.fill("Prepare rollout off notes");
+    await expect(page.getByRole("checkbox", { name: /Allow/ })).toHaveCount(0);
+    assertCondition(completionRequests === 0, "rollout OFF must not discover or generate completions");
+
+    await page.route("**/api/auth/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...member,
+          feature_flags: {
+            ...(member.feature_flags as JsonRecord),
+            task_title_autocomplete: runtimeAutocompleteEnabled
+          }
+        })
+      });
     });
-    await input.focus();
-    await input.press("Enter");
-    await expect(input).toHaveValue(`Prepare launch notes ${viewport.width} today`);
-    assertCondition(taskCreates === (viewport.width === 390 ? 0 : 1), "acceptance must not create a Task");
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    assertCondition(overflow <= 0, `autocomplete viewport ${viewport.width} must not overflow; overflow=${overflow}`);
-    await input.press("Enter");
-    const expectedTaskCreates = viewport.width === 390 ? 1 : 2;
-    const createDeadline = Date.now() + 2_000;
-    while (taskCreates !== expectedTaskCreates && Date.now() < createDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    await page.route("**/api/tasks/title-completion-provider", async (route) => {
+      completionRequests += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ provider: providerAvailable ? "deterministic" : null })
+      });
+    });
+    await page.route("**/api/tasks/title-completions", async (route) => {
+      completionRequests += 1;
+      const draft = String((route.request().postDataJSON() as JsonRecord).draft);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          request_id: "8f3d2f73-0e55-4f47-9f9b-1a0b6c7a9c6e",
+          candidates: [`${draft} today`, `${draft} this week`, `${draft} tomorrow`]
+        })
+      });
+    });
+    await page.route("**/api/tasks/title-completions/accepted", async (route) => {
+      await route.fulfill({ status: 204, body: "" });
+    });
+
+    for (const viewport of [{ width: 390, height: 851 }, { width: 1280, height: 780 }]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/tasks/next");
+      const input = page.getByRole("combobox", { name: "New task title" });
+      await input.fill(`Prepare launch notes ${viewport.width}`);
+      await page.getByRole("checkbox", { name: /Allow deterministic/ }).check();
+      const listbox = page.getByRole("listbox", { name: "Task title suggestions" });
+      await expect(listbox.getByRole("option")).toHaveCount(3);
+      await testInfo.attach(`autocomplete-${viewport.width}`, {
+        body: await page.screenshot({ fullPage: true }),
+        contentType: "image/png"
+      });
+      await input.focus();
+      await input.press("Enter");
+      await expect(input).toHaveValue(`Prepare launch notes ${viewport.width} today`);
+      assertCondition(taskCreates === (viewport.width === 390 ? 0 : 1), "acceptance must not create a Task");
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      assertCondition(overflow <= 0, `autocomplete viewport ${viewport.width} must not overflow; overflow=${overflow}`);
+      await input.press("Enter");
+      const expectedTaskCreates = viewport.width === 390 ? 1 : 2;
+      const createDeadline = Date.now() + 2_000;
+      while (taskCreates !== expectedTaskCreates && Date.now() < createDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assertCondition(
+        taskCreates === expectedTaskCreates,
+        `submit must create exactly ${expectedTaskCreates} Task(s); observed ${taskCreates}`
+      );
     }
+
+    await page.goto("/tasks/next");
+    const arbitrationInput = page.getByRole("combobox", { name: "New task title" });
+    await expect(page.getByRole("checkbox", { name: /Allow deterministic/ })).toBeVisible();
+    const requestsBeforeSmartAdd = completionRequests;
+    await arbitrationInput.fill("Call the bank #calls");
+    await new Promise((resolve) => setTimeout(resolve, 450));
     assertCondition(
-      taskCreates === expectedTaskCreates,
-      `submit must create exactly ${expectedTaskCreates} Task(s); observed ${taskCreates}`
+      completionRequests === requestsBeforeSmartAdd,
+      "Smart Add token ownership must suppress autocomplete requests"
     );
-  }
+    await expect(page.getByRole("listbox", { name: "Task title suggestions" })).toHaveCount(0);
 
-  await page.goto("/tasks/next");
-  const arbitrationInput = page.getByRole("combobox", { name: "New task title" });
-  await expect(page.getByRole("checkbox", { name: /Allow deterministic/ })).toBeVisible();
-  const requestsBeforeSmartAdd = completionRequests;
-  await arbitrationInput.fill("Call the bank #calls");
-  await new Promise((resolve) => setTimeout(resolve, 450));
-  assertCondition(
-    completionRequests === requestsBeforeSmartAdd,
-    "Smart Add token ownership must suppress autocomplete requests"
-  );
-  await expect(page.getByRole("listbox", { name: "Task title suggestions" })).toHaveCount(0);
+    providerAvailable = false;
+    await page.reload();
+    const unavailableInput = page.getByRole("combobox", { name: "New task title" });
+    await unavailableInput.fill("Keep unavailable draft intact");
+    await expect(page.getByText("Suggestions unavailable.")).toBeVisible();
+    await expect(unavailableInput).toHaveValue("Keep unavailable draft intact");
 
-  providerAvailable = false;
-  await page.reload();
-  const unavailableInput = page.getByRole("combobox", { name: "New task title" });
-  await unavailableInput.fill("Keep unavailable draft intact");
-  await expect(page.getByText("Suggestions unavailable.")).toBeVisible();
-  await expect(unavailableInput).toHaveValue("Keep unavailable draft intact");
+    runtimeAutocompleteEnabled = false;
+    await page.reload();
+    const runtimeOffInput = page.getByRole("combobox", { name: "New task title" });
+    await runtimeOffInput.fill("Keep runtime off draft intact");
+    await expect(page.getByRole("checkbox", { name: /Allow/ })).toHaveCount(0);
+    await expect(runtimeOffInput).toHaveValue("Keep runtime off draft intact");
+    assertCondition(taskCreates === 2, `runtime OFF must preserve the two submitted Tasks; observed ${taskCreates}`);
 
-  runtimeAutocompleteEnabled = false;
-  await page.reload();
-  const runtimeOffInput = page.getByRole("combobox", { name: "New task title" });
-  await runtimeOffInput.fill("Keep runtime off draft intact");
-  await expect(page.getByRole("checkbox", { name: /Allow/ })).toHaveCount(0);
-  await expect(runtimeOffInput).toHaveValue("Keep runtime off draft intact");
-  assertCondition(taskCreates === 2, `runtime OFF must preserve the two submitted Tasks; observed ${taskCreates}`);
-
+  });
 });
 
 test("015-FR-001 015-SC-002 Voice Brain Dump shows a live transcript, reviews the reconciled task and saves exactly one Inbox task", async ({ page }) => {

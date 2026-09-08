@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiClient } from "../../../api/client";
+import { taskKeys } from "../../../api/taskHooks";
 import type {
   ProjectResponse,
   TagResponse,
@@ -107,9 +108,9 @@ function LocationProbe(): React.JSX.Element {
 }
 
 const currentLocation = () => screen.getByTestId("location").textContent;
+const renderedTaskRows = () => screen.getAllByRole("listitem").filter((row) => row.tagName === "ARTICLE");
 
-function renderPage(initialEntry = "/tasks/next") {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(initialEntry = "/tasks/next", client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[initialEntry]}>
@@ -128,6 +129,7 @@ function renderPage(initialEntry = "/tasks/next") {
 }
 
 beforeEach(() => {
+  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
   resetTaskDetailAutosaveControllersForTests();
   sessionStorage.clear();
   act(() => {
@@ -190,6 +192,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   resetTaskDetailAutosaveControllersForTests();
   sessionStorage.clear();
   vi.clearAllMocks();
@@ -433,7 +436,7 @@ describe("TaskListPage projections", () => {
 });
 
 describe("TaskListPage list controls", () => {
-  it("moves grouping, sorting and completed tasks through the URL and the query", async () => {
+  it("moves grouping, sorting and cancelled history through the URL and the query", async () => {
     const user = userEvent.setup();
     renderPage("/tasks/next");
 
@@ -451,7 +454,7 @@ describe("TaskListPage list controls", () => {
     await user.selectOptions(screen.getByLabelText("Sort tasks"), "manual");
     expect(currentLocation()).toBe("/tasks/next");
 
-    await user.click(screen.getByRole("checkbox", { name: "Show completed" }));
+    await user.click(screen.getByRole("checkbox", { name: "Show cancelled" }));
     await waitFor(() => expect(lastListFilters().includeCompleted).toBe(true));
     expect(lastListFilters().includeCancelled).toBe(true);
   });
@@ -576,6 +579,194 @@ describe("TaskListPage rows", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Revision is stale.");
     expect(screen.getByText("Fix onboarding drop-off")).toBeInTheDocument();
+  });
+});
+
+describe("016 completed task presentation", () => {
+  it.each(["/tasks/next", "/projects/project-launch", "/tags/tag-deep-work", "/tasks/next?q=shared", "/tasks/today"])(
+    "016-FR-001 016-SC-001 016-SC-003 includes completed work after all open groups in %s",
+    async (route) => {
+      mocked.listTasks.mockImplementation(async () => listResponse([
+        taskFixture({ id: "done", title: "Finished shared task", state: "completed" }),
+        taskFixture({ id: "open-b", title: "Second open group", project_id: "project-onboarding" }),
+        taskFixture({ id: "open-a", title: "First open group" })
+      ], { counts_by_state: { inbox: 0, next: 2, waiting: 0, someday: 0 } }));
+      renderPage(route);
+      await screen.findByText("Finished shared task");
+      expect(lastListFilters()).toMatchObject({ includeCompleted: true, includeCancelled: false });
+      const rows = renderedTaskRows();
+      expect(rows[rows.length - 1]).toHaveTextContent("Finished shared task");
+      expect(screen.getAllByRole("heading", { name: "Completed" })).toHaveLength(1);
+      const completed = screen.getByRole("list", { name: "Completed" });
+      expect(within(completed).getAllByRole("listitem")).toHaveLength(1);
+      expect(within(completed).getByRole("link", { name: "Finished shared task" })).toHaveClass("text-slate-500", "line-through");
+      expect(within(completed).getByRole("listitem").className).not.toMatch(/opacity-/);
+      expect(screen.getByText("2 tasks")).toBeInTheDocument();
+    }
+  );
+
+  it("016-FR-001 separates opt-in cancelled history and omits empty terminal headings", async () => {
+    mocked.listTasks.mockImplementation(async (filters) => listResponse([
+      taskFixture(),
+      ...(filters?.includeCancelled ? [taskFixture({ id: "cancelled", title: "Cancelled history", state: "cancelled" })] : [])
+    ]));
+    renderPage();
+    await screen.findByText("Fix onboarding drop-off");
+    expect(screen.queryByRole("heading", { name: "Completed" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Cancelled" })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("checkbox", { name: "Show cancelled" }));
+    expect(await screen.findByRole("list", { name: "Cancelled" })).toHaveTextContent("Cancelled history");
+    expect(lastListFilters()).toMatchObject({ includeCompleted: true, includeCancelled: true });
+  });
+
+  it("016-FR-001 016-SC-003 places later fetched open work before a completed-only first page", async () => {
+    mocked.listTasks.mockImplementation(async (filters) => filters?.cursor
+      ? listResponse([taskFixture({ id: "later", title: "Later open task" }), taskFixture({ id: "done", title: "First page done", state: "completed" })])
+      : listResponse([taskFixture({ id: "done", title: "First page done", state: "completed" })], { has_more: true, next_cursor: "page-2" }));
+    renderPage();
+    expect(await screen.findByRole("list", { name: "Completed" })).toHaveTextContent("First page done");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Load more tasks" }));
+    await screen.findByText("Later open task");
+    expect(renderedTaskRows().map((row) => within(row).getByRole("link").textContent)).toEqual(["Later open task", "First page done"]);
+  });
+
+  it.each(["/projects/project-launch", "/tags/tag-deep-work", "/tasks/today"])("016-FR-001 keeps the full open-only subtitle when completed work fills the first page in %s", async (route) => {
+    mocked.listTasks.mockResolvedValue(listResponse([taskFixture({ state: "completed" })], {
+      counts_by_state: { inbox: 0, next: 3, waiting: 2, someday: 1 }, has_more: true, next_cursor: "page-2"
+    }));
+    renderPage(route);
+    await screen.findByRole("heading", { name: "Completed" });
+    expect(screen.getByText("6 tasks")).toBeInTheDocument();
+  });
+
+  it("016-FR-003 guards repeated completion while pending and focuses the moved title only after acknowledgement", async () => {
+    let resolveSave!: (task: TaskResponse) => void;
+    mocked.transitionTask.mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve; }));
+    renderPage();
+    const complete = await screen.findByRole("button", { name: "Complete Fix onboarding drop-off" });
+    complete.focus();
+    fireEvent.click(complete);
+    fireEvent.click(complete);
+    expect(complete).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).not.toHaveClass("line-through");
+    expect(screen.queryByRole("heading", { name: "Completed" })).not.toBeInTheDocument();
+    await waitFor(() => expect(mocked.transitionTask).toHaveBeenCalledTimes(1));
+    const done = taskFixture({ state: "completed", revision: 5, completed_at: "2026-07-15T11:00:00Z" });
+    mocked.listTasks.mockResolvedValue(listResponse([done]));
+    await act(async () => resolveSave(done));
+    const link = within(await screen.findByRole("list", { name: "Completed" })).getByRole("link", { name: "Fix onboarding drop-off" });
+    expect(link).toHaveFocus();
+    expect(mocked.transitionTask).toHaveBeenCalledTimes(1);
+    expect(renderedTaskRows()).toHaveLength(1);
+    const saved = await screen.findByText("Saved");
+    expect(saved.closest("[role]")).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("016-FR-003 disables repeated detail completion until the canonical response", async () => {
+    let resolveSave!: (task: TaskResponse) => void;
+    mocked.transitionTask.mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve; }));
+    renderPage("/tasks/next/task-1");
+    const complete = await screen.findByRole("button", { name: "Complete task" });
+    fireEvent.click(complete);
+    fireEvent.click(complete);
+    expect(complete).toBeDisabled();
+    await waitFor(() => expect(mocked.transitionTask).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("heading", { name: "Completed" })).not.toBeInTheDocument();
+    const done = taskFixture({ state: "completed", revision: 5, completed_at: "2026-07-15T11:00:00Z" });
+    mocked.listTasks.mockResolvedValue(listResponse([done]));
+    mocked.getTask.mockResolvedValue(done);
+    await act(async () => resolveSave(done));
+    expect(await screen.findByRole("list", { name: "Completed" })).toHaveTextContent(done.title);
+    expect(await screen.findByRole("button", { name: "Reopen task" })).toBeEnabled();
+    expect(mocked.transitionTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("016-FR-003 keeps failed rows open during mixed completion outcomes", async () => {
+    const first = taskFixture();
+    const second = taskFixture({ id: "task-2", title: "Failed second task" });
+    let saved = false;
+    mocked.listTasks.mockImplementation(async () => listResponse([saved ? { ...first, state: "completed", revision: 5 } : first, second]));
+    mocked.transitionTask.mockImplementation(async (id) => {
+      if (id === second.id) throw new Error("Connection interrupted");
+      saved = true;
+      return { ...first, state: "completed", revision: 5, completed_at: "2026-07-15T11:00:00Z" };
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: `Complete ${first.title}` }));
+    fireEvent.click(screen.getByRole("button", { name: `Complete ${second.title}` }));
+    expect(await screen.findByRole("list", { name: "Completed" })).toHaveTextContent(first.title);
+    expect(screen.getByRole("button", { name: `Complete ${second.title}` })).toBeEnabled();
+    expect(screen.getByRole("link", { name: second.title })).not.toHaveClass("line-through");
+    expect(renderedTaskRows()).toHaveLength(2);
+  });
+
+  it("016-FR-003 retries an exhausted transient completion from its row using the original idempotency key", async () => {
+    const done = taskFixture({ state: "completed", revision: 5, completed_at: "2026-07-15T11:00:00Z" });
+    mocked.transitionTask
+      .mockRejectedValueOnce(new ApiError("Temporarily unavailable", 503, {}))
+      .mockRejectedValueOnce(new ApiError("Temporarily unavailable", 503, {}))
+      .mockRejectedValueOnce(new ApiError("Temporarily unavailable", 503, {}))
+      .mockResolvedValueOnce(done);
+    renderPage();
+    const complete = await screen.findByRole("button", { name: "Complete Fix onboarding drop-off" });
+    fireEvent.click(complete);
+    expect(await screen.findByRole("alert", {}, { timeout: 3500 })).toHaveTextContent("Temporarily unavailable");
+    expect(complete).toBeEnabled();
+    expect(mocked.transitionTask).toHaveBeenCalledTimes(3);
+    mocked.listTasks.mockResolvedValue(listResponse([done]));
+    fireEvent.click(complete);
+    expect(await screen.findByRole("list", { name: "Completed" })).toHaveTextContent(done.title);
+    expect(mocked.transitionTask).toHaveBeenCalledTimes(4);
+    const keys = mocked.transitionTask.mock.calls.map((call) => call[2]);
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  it("016-FR-003 shares completion and reopen across cached project, tag and search matches without inserting unrelated tasks", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const matchingKeys = [
+      taskKeys.list({ projectId: "project-launch", includeCompleted: true }),
+      taskKeys.list({ tagId: "tag-deep-work", includeCompleted: true }),
+      taskKeys.list({ q: "onboarding", includeCompleted: true })
+    ];
+    const unrelatedKey = taskKeys.list({ q: "unrelated", includeCompleted: true });
+    for (const key of matchingKeys) client.setQueryData(key, { pages: [listResponse([taskFixture()])], pageParams: [undefined] });
+    client.setQueryData(unrelatedKey, { pages: [listResponse([])], pageParams: [undefined] });
+    let canonical = taskFixture();
+    mocked.listTasks.mockImplementation(async () => listResponse([canonical]));
+    mocked.getTask.mockImplementation(async () => canonical);
+    mocked.transitionTask.mockImplementation(async (_id, payload) => {
+      canonical = { ...canonical, state: payload.action === "complete" ? "completed" : "next", revision: canonical.revision + 1, completed_at: payload.action === "complete" ? "2026-07-15T11:00:00Z" : null };
+      return canonical;
+    });
+    renderPage("/tasks/next", client);
+    await userEvent.setup().click(await screen.findByRole("button", { name: `Complete ${canonical.title}` }));
+    await screen.findByRole("list", { name: "Completed" });
+    const cachedItems = (key: ReturnType<typeof taskKeys.list>) => client.getQueryData<{ pages: TaskListResponse[] }>(key)?.pages.flatMap((page) => page.items);
+    for (const key of matchingKeys) expect(cachedItems(key)).toEqual([canonical]);
+    expect(cachedItems(unrelatedKey)).toEqual([]);
+    await userEvent.setup().click(screen.getByRole("link", { name: canonical.title }));
+    await userEvent.setup().selectOptions(await screen.findByLabelText("List"), "next");
+    await waitFor(() => { for (const key of matchingKeys) expect(cachedItems(key)).toEqual([canonical]); });
+    expect(canonical.state).toBe("next");
+    expect(cachedItems(unrelatedKey)).toEqual([]);
+  });
+
+  it("016-FR-003 isolates first paint and late completion after an account switch", async () => {
+    let resolveSave!: (task: TaskResponse) => void;
+    mocked.transitionTask.mockReturnValueOnce(new Promise((resolve) => { resolveSave = resolve; }));
+    mocked.listTasks.mockImplementation(async () => listResponse([taskFixture({ title: useAuthStore.getState().user?.id === "user-1" ? "Owner A task" : "Owner B task" })]));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Complete Owner A task" }));
+    await waitFor(() => expect(mocked.transitionTask).toHaveBeenCalledTimes(1));
+    act(() => useAuthStore.setState({ user: { id: "user-2", email: "b@example.test" } }));
+    expect(screen.queryByRole("link", { name: "Owner A task" })).not.toBeInTheDocument();
+    await screen.findByRole("link", { name: "Owner B task" });
+    await act(async () => resolveSave(taskFixture({ title: "Owner A task", state: "completed", revision: 5, completed_at: "2026-07-15T11:00:00Z" })));
+    expect(screen.queryByRole("link", { name: "Owner A task" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Complete Owner B task" })).toBeEnabled();
+    expect(screen.queryByRole("heading", { name: "Completed" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
   });
 });
 
@@ -1576,10 +1767,11 @@ describe("TaskListPage canonical Discard paths", () => {
 
   it("keeps detail fallback controls inert when the account controller disappears", async () => {
     renderPage("/tasks/next/task-1");
-    const title = await screen.findByLabelText("Title");
+    await screen.findByLabelText("Title");
     act(() => {
       useAuthStore.setState({ user: null, status: "authed" });
     });
+    const title = await screen.findByLabelText("Title");
 
     fireEvent.change(title, { target: { value: "Local only" } });
     fireEvent.blur(title);
