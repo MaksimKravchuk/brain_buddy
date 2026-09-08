@@ -420,7 +420,12 @@ jobs:
         if: env.RUN == 'true'
         uses: actions/setup-node@v7
         with:
-          node-version: "20.19.0"
+          # The frontend toolchain needs Node 22 (frontend/Dockerfile already
+          # builds on node:22): jsdom 30 pulls undici 8, which needs >= 22.19;
+          # Stryker 10 refuses anything below 22; allure 3.16's quality gate
+          # uses Iterator helpers that Node 20 lacks. Every job that installs
+          # frontend/package-lock.json pins the same version.
+          node-version: "22.22.2"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -1024,7 +1029,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "20.19.0"
+          node-version: "22.22.2"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -1258,7 +1263,7 @@ jobs:
         if: steps.aggregate.outputs.run == 'true'
         uses: actions/setup-node@v7
         with:
-          node-version: "20.19.0"
+          node-version: "22.22.2"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
