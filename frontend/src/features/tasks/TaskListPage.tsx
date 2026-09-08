@@ -1,5 +1,5 @@
 import { AlertTriangle, Bot, CalendarDays, Check, ChevronDown, Layers, Plus, RotateCcw, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -89,10 +89,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const [canonicalResetKey, setCanonicalResetKey] = useState(0);
   const conflictControllerRef = useRef<ReturnType<typeof getTaskDetailAutosaveController> | null>(null);
   const discardFocusRef = useRef<HTMLElement | null>(null);
+  // Settlement compares against the draft as it is *now*, not as it was when
+  // the request left; synced after commit so a discarded render cannot leak in.
   const newTitleRef = useRef(newTitle);
   const newWaitingForRef = useRef(newWaitingFor);
-  newTitleRef.current = newTitle;
-  newWaitingForRef.current = newWaitingFor;
+  useLayoutEffect(() => {
+    newTitleRef.current = newTitle;
+    newWaitingForRef.current = newWaitingFor;
+  }, [newTitle, newWaitingFor]);
   type CaptureRequest = {
     payload: Parameters<typeof apiClient.createTask>[0] | Parameters<typeof apiClient.smartAddTask>[0];
     key: string;
@@ -144,9 +148,13 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
 
-  useEffect(() => {
+  // Selecting a task reopens a panel the shortcut had hidden, in the same
+  // render as the selection rather than a commit later.
+  const [panelTaskId, setPanelTaskId] = useState(taskId);
+  if (taskId !== panelTaskId) {
+    setPanelTaskId(taskId);
     if (taskId) setPanelOpen(true);
-  }, [taskId]);
+  }
 
   useEffect(() => {
     if (taskId && panelOpen) {
@@ -214,6 +222,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     await taskQuery.refetch();
   };
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- `recover()` reads the persisted autosave draft (browser storage) for this controller/task; the conflict and recovery flags are reset before that external read and re-derived from it, so a stale conflict never outlives the task it belonged to.
     setAutosaveConflict(null);
     const available = Boolean(detailController?.recover());
     setRecoveryAvailable(available);

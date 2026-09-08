@@ -34,6 +34,7 @@ export function AdminUsersSection(): React.JSX.Element {
   useEffect(() => {
     if (!showCreate && focusCreateAfterClose) {
       triggerRefs.current.get("create")?.focus();
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the Create trigger only exists once the form has unmounted, so focus is placed after commit and the one-shot request is consumed here rather than replayed on the next render.
       setFocusCreateAfterClose(false);
     }
   }, [showCreate, focusCreateAfterClose]);

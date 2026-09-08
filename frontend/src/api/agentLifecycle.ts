@@ -7,7 +7,7 @@ import {
   type UseMutationOptions,
   type UseMutationResult
 } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useAuthStore } from "../stores/authStore";
 import { agentKeysFor } from "./agentHooks";
@@ -72,9 +72,12 @@ export function useRelayMutation<TData, TError = Error, TVariables = void, TCont
   }
 ): UseMutationResult<TData, TError, TVariables, TContext> {
   // Settlement runs long after the render that dispatched it, and the caller's
-  // callbacks are re-read at that moment rather than captured per render.
+  // callbacks are re-read at that moment rather than captured per render. The
+  // ref is synced after commit, so a render React discards never reaches it.
   const latest = useRef(options);
-  latest.current = options;
+  useLayoutEffect(() => {
+    latest.current = options;
+  });
 
   const mutation = useMutation<TData, TError, TVariables, TContext>({
     ...options,

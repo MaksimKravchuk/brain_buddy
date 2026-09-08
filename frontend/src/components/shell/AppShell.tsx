@@ -113,15 +113,17 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     };
   }, []);
 
-  useEffect(() => {
+  // Any route change dismisses the weekly-review placeholder; a path change
+  // also closes the drawer. Browser history can select a task while navigation
+  // is open, and that drawer must not stay active behind the sheet — typing a
+  // search (same path, new query) keeps it open. Adjusted during render so the
+  // dismissal lands in the same commit as the new location.
+  const [renderedLocation, setRenderedLocation] = useState({ pathname: location.pathname, search: location.search });
+  if (renderedLocation.pathname !== location.pathname || renderedLocation.search !== location.search) {
+    setRenderedLocation({ pathname: location.pathname, search: location.search });
     setWeeklyReviewOpen(false);
-  }, [location.pathname, location.search]);
-
-  useEffect(() => {
-    // Browser history can select a task while navigation is open. Do not leave
-    // that drawer active behind the sheet; typing a search keeps it open.
-    setIsDrawerOpen(false);
-  }, [location.pathname]);
+    if (renderedLocation.pathname !== location.pathname) setIsDrawerOpen(false);
+  }
 
   const sidebarProps: SidebarProps = {
     ...props,

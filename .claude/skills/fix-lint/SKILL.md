@@ -165,7 +165,9 @@ lint nit — fix the import, do not edit the contract:
 `frontend/eslint.config.js` is ESLint 9 flat config over `src/**/*.{ts,tsx}`:
 `js.configs.recommended` + `tseslint.configs.strict` + `react-hooks` recommended
 + `react-refresh/only-export-components` (with `allowConstantExport`).
-`@typescript-eslint/no-invalid-void-type` is the single rule turned off.
+Two rules are turned off: `@typescript-eslint/no-invalid-void-type`, and
+`react-hooks/preserve-manual-memoization` (a React Compiler diagnostic; the app
+does not run the compiler).
 `coverage`, `dist`, `allure-results`, `playwright-report`, and `test-results` are
 ignored.
 
