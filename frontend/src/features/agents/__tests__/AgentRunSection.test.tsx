@@ -332,6 +332,29 @@ describe("AgentRunSection", () => {
     expect(screen.getByText("Accepted")).toBeInTheDocument();
   });
 
+  it("shows a completed result once when the timeline carries the same report", () => {
+    const result = "The agent completed the task.";
+    renderSection([
+      makeRun({
+        reported_state: "completed",
+        primary_state_label: "Agent reported complete",
+        result_text: result,
+        events: [
+          makeEvent({
+            id: "evt_completed",
+            type: "completed",
+            run_version: 3,
+            received_at: "2026-08-09T12:10:00Z",
+            summary: result
+          })
+        ]
+      })
+    ]);
+
+    expect(screen.getAllByText(result)).toHaveLength(1);
+    expect(screen.getAllByText("Agent reported complete")).toHaveLength(2);
+  });
+
   it("renders every honest exceptional projection without inventing work state", () => {
     renderSection(
       [

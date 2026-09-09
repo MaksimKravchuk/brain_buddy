@@ -7,7 +7,7 @@ import {
   useCheckAgentRunDelivery,
   useReplyToAgentRun,
 } from "@/api/hooks";
-import type { AgentRunResponse } from "@/api/types";
+import type { AgentRunEvent, AgentRunResponse } from "@/api/types";
 import {
   EXPIRED_CONTENT_NOTICE,
   canCheckDelivery,
@@ -61,6 +61,12 @@ function questionIdentity(run: AgentRunResponse): string {
     blockedEvent?.id ?? run.run_version,
     run.question_text,
   ]);
+}
+
+function shouldRenderEventSummary(run: AgentRunResponse, event: AgentRunEvent): boolean {
+  return Boolean(event.summary) &&
+    event.kind !== "task_succession" &&
+    !(event.type === "completed" && event.summary === run.result_text);
 }
 
 /**
@@ -537,7 +543,7 @@ function RunCard({
                   {event.previous_agent_task_id} → {event.new_agent_task_id}
                 </BBText>
               ) : null}
-              {event.summary && event.kind !== "task_succession" ? (
+              {shouldRenderEventSummary(run, event) ? (
                 <BBText variant="micro" color={colors.fg5}>
                   {event.summary}
                 </BBText>
