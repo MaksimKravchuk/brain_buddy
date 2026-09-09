@@ -85,6 +85,33 @@ counts, the fixes and the compensating measures; it was not asserted by an
 agent. It expires on 2026-12-31: after that date it no longer closes the
 review and a fresh decision is required.
 
+## Desktop registry amendment decision (2026-09-09)
+
+The list-first web registry amendment was reviewed in
+`agent-settings-table-20260909` and `agent-settings-table-20260909-r2`. The
+first campaign correctly identified that feature 014, rather than the older
+007 card design, owns this surface. The second campaign completed all six
+lenses at high risk with no missing or degraded reviewer and returned
+`product-decision-required`: the one product question was whether **Delete**
+keeps a disconnected row or removes it from the registry.
+
+Max directed the current flow to continue and had originally requested a
+per-agent **Delete** action. The accepted resolution is therefore: a successful
+Delete removes the connection row from this registry, while the bounded run
+history remains available on Tasks under the existing disconnect contract.
+The amendment remains covered by the feature's unexpired founder acceptance;
+the review result is not misreported as `approved`.
+
+The amendment-specific review findings are compensated by a deliberately
+bounded implementation: no backend, schema, persistence, authentication,
+mobile or deployment change; the saved-address link is restricted at render
+time to HTTP(S) with inert fallback; card-sourced interfaces remain inert;
+rollout-OFF Edit is read-only; existing Vitest and Compose Playwright selectors
+are migrated; and desktop plus 390×851 layout evidence is required before any
+Done claim. Findings about the already shipped wire core remain governed by
+the original 2026-09-04 founder-acceptance record rather than being silently
+reclassified by this UI amendment.
+
 ## Post-acceptance amendments (analyze stage, 2026-09-04)
 
 `/speckit-analyze` ran on the accepted artifacts after `tasks.md` was written

@@ -233,7 +233,7 @@ async function openAgentSettings(page: Page): Promise<void> {
  */
 async function testConnection(page: Page, agentName: string, expected: string): Promise<Locator> {
   const card = page.getByRole("article", { name: agentName });
-  await card.getByRole("button", { name: "Test connection" }).click();
+  await card.getByRole("button", { name: `Test ${agentName}` }).click();
   await expect(card.getByText(expected, { exact: true })).toBeVisible({ timeout: 30_000 });
   return card;
 }
@@ -261,7 +261,11 @@ async function openHandoffReview(
 ): Promise<{ review: Locator; manifest: Locator }> {
   await page.getByRole("button", { name: "Hand to agent" }).click();
   const review = page.getByRole("dialog");
-  await review.getByRole("radio", { name: agentName }).check();
+  const optionValue = await review.getByRole("option", { name: new RegExp(agentName) }).getAttribute("value");
+  if (!optionValue) {
+    throw new Error(`No selectable connection found for ${agentName}`);
+  }
+  await review.getByRole("combobox", { name: "Agent" }).selectOption(optionValue);
   const manifest = review.getByRole("region", { name: "What will be sent" });
   await expect(manifest).toBeVisible({ timeout: 30_000 });
   return { review, manifest };
@@ -335,6 +339,7 @@ test.describe("external agent relay over the A2A wire", () => {
       await openAgentSettings(page);
       // D-01-S11: readiness is the agent's own card plus an authenticated call.
       const card = await testConnection(page, "Hello World Agent", "Tested ready");
+      await card.getByText("Connection details").click();
       await expect(card.getByText("Echo Bot")).toBeVisible();
       return created;
     });
@@ -345,6 +350,7 @@ test.describe("external agent relay over the A2A wire", () => {
       await openTask(page, task.id);
       const { review, manifest } = await openHandoffReview(page, "Hello World Agent");
       await expect(manifest.getByText("Draft the relay migration plan")).toBeVisible();
+      await manifest.getByText("Delivery and privacy details").click();
       await expect(manifest.getByText(HELLOWORLD_URL)).toBeVisible();
       // D-02-S13/S14: the send is gated on the one-time acknowledgement,
       // because this agent declares no single-start extension.

@@ -83,6 +83,16 @@ function cardFor(name: string): HTMLElement {
   return screen.getByRole("article", { name });
 }
 
+async function openAddForm(): Promise<HTMLElement> {
+  await userEvent.click(await screen.findByRole("button", { name: "Add new agent" }));
+  return screen.getByRole("form", { name: /add an agent/i });
+}
+
+async function openEditForm(card: HTMLElement, name = "Hermes"): Promise<HTMLElement> {
+  await userEvent.click(within(card).getByRole("button", { name: `Edit ${name}` }));
+  return screen.getByRole("form", { name: "Edit connection" });
+}
+
 describe("AgentSettingsPage", () => {
   beforeEach(() => {
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: true });
@@ -106,12 +116,82 @@ describe("AgentSettingsPage", () => {
     });
   });
 
+  it("014-FR-018 014-SC-011 renders a list-first agent table and opens creation in a modal", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
+    renderPage();
+
+    const table = await screen.findByRole("table", { name: "Your agents" });
+    for (const heading of ["Agent", "Version", "Protocol", "Interface", "Status", "Actions"]) {
+      expect(within(table).getByRole("columnheader", { name: heading })).toBeInTheDocument();
+    }
+
+    const row = within(table).getByRole("row", { name: "Hermes" });
+    const address = within(row).getByRole("link", { name: "https://agent.example.com" });
+    expect(address).toHaveAttribute("target", "_blank");
+    expect(address).toHaveAttribute("rel", expect.stringContaining("noreferrer"));
+    expect(within(row).getAllByText("1.2.3").length).toBeGreaterThan(0);
+    expect(within(row).getAllByText("1.0").length).toBeGreaterThan(0);
+    expect(within(row).getAllByText("https://agent.example.com/a2a").length).toBeGreaterThan(0);
+    expect(within(row).getByRole("button", { name: "Test Hermes" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Edit Hermes" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Delete Hermes" })).toBeInTheDocument();
+
+    expect(screen.queryByRole("form", { name: /add an agent/i })).not.toBeInTheDocument();
+    const add = screen.getByRole("button", { name: "Add new agent" });
+    await userEvent.click(add);
+    const dialog = screen.getByRole("dialog", { name: "Add new agent" });
+    expect(within(dialog).getByRole("form", { name: /add an agent/i })).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Add new agent" })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(add);
+
+    await userEvent.click(add);
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: "Add new agent" })).getByRole("button", {
+        name: "Close dialog"
+      })
+    );
+    expect(screen.queryByRole("dialog", { name: "Add new agent" })).not.toBeInTheDocument();
+  });
+
+  it("renders an invalid agent address as inert text", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([
+      connection({ agent_address: "not a valid URL" })
+    ]);
+    renderPage();
+
+    const row = await screen.findByRole("row", { name: "Hermes" });
+    expect(within(row).getByText("not a valid URL")).toBeInTheDocument();
+    expect(within(row).queryByRole("link", { name: "not a valid URL" })).toBeNull();
+  });
+
+  it("closes the edit modal through both dialog controls and restores focus", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
+    renderPage();
+
+    const row = await screen.findByRole("row", { name: "Hermes" });
+    const edit = within(row).getByRole("button", { name: "Edit Hermes" });
+    await userEvent.click(edit);
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: "Edit Hermes" })).getByRole("button", {
+        name: "Close dialog"
+      })
+    );
+    expect(screen.queryByRole("dialog", { name: "Edit Hermes" })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(edit);
+
+    await userEvent.click(edit);
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Edit Hermes" })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(edit);
+  });
+
   it("never queues an offline connection create for automatic replay", async () => {
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
     onlineManager.setOnline(false);
     const create = vi.spyOn(apiClient, "createAgentConnection");
     renderPage();
-    const form = await screen.findByRole("form", { name: /add an agent/i });
+    const form = await openAddForm();
     const submit = within(form).getByRole("button", { name: "Add agent" });
 
     expect(submit).toBeDisabled();
@@ -139,16 +219,16 @@ describe("AgentSettingsPage", () => {
     expect(apiClient.listAgentConnections).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/relay rollout is off/i)).toBeInTheDocument();
     expect(screen.queryByRole("form", { name: /add an agent/i })).not.toBeInTheDocument();
-    expect(within(card).queryByRole("button", { name: /edit connection/i })).not.toBeInTheDocument();
-    expect(within(card).queryByRole("button", { name: /test connection/i })).not.toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Edit Hermes" })).toBeEnabled();
+    expect(within(card).queryByRole("button", { name: "Test Hermes" })).not.toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: /replace signing secret/i })).not.toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: /replace credential/i })).not.toBeInTheDocument();
 
     const user = userEvent.setup();
-    await user.click(within(card).getByRole("button", { name: /disconnect/i }));
+    await user.click(within(card).getByRole("button", { name: "Delete Hermes" }));
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText("Confirm with your password"), "hunter2hunter2");
-    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
+    await user.click(within(dialog).getByRole("button", { name: /^Delete$/ }));
     await waitFor(() => expect(disconnect).toHaveBeenCalledTimes(1));
   });
 
@@ -181,7 +261,7 @@ describe("AgentSettingsPage", () => {
     renderPage();
 
     const user = userEvent.setup();
-    const form = await screen.findByRole("form", { name: /add an agent/i });
+    const form = await openAddForm();
     await act(async () => {
       await user.type(within(form).getByLabelText("Agent name"), "Hermes");
       await user.clear(within(form).getByLabelText("Agent address"));
@@ -208,14 +288,14 @@ describe("AgentSettingsPage", () => {
     // There is no secret to show once: the A2A wire has no inbound secret an
     // owner has to configure at their agent (014-FR-012).
     expect(screen.queryByRole("region", { name: /signing secret/i })).not.toBeInTheDocument();
-    expect(await screen.findByText(/BrainBuddy reads its card/i)).toBeInTheDocument();
+    expect(await screen.findByText(/was added\. Test it before handing over a task/i)).toBeInTheDocument();
   });
 
   it("014-FR-001 reads the API-key header name off the card and never accepts one typed", async () => {
     renderPage();
 
     const user = userEvent.setup();
-    const form = await screen.findByRole("form", { name: /add an agent/i });
+    const form = await openAddForm();
     expect(within(form).queryByLabelText("Header name")).not.toBeInTheDocument();
 
     await act(async () => {
@@ -246,7 +326,7 @@ describe("AgentSettingsPage", () => {
     renderPage();
 
     const user = userEvent.setup();
-    const form = await screen.findByRole("form", { name: /add an agent/i });
+    const form = await openAddForm();
     await user.type(within(form).getByLabelText("Agent name"), "Hermes");
     await user.type(within(form).getByLabelText("Agent address"), "https://agent.example.com");
     await user.type(within(form).getByLabelText("Credential"), "token-abc");
@@ -271,7 +351,7 @@ describe("AgentSettingsPage", () => {
     renderPage();
 
     const user = userEvent.setup();
-    const form = await screen.findByRole("form", { name: /add an agent/i });
+    const form = await openAddForm();
     await user.type(within(form).getByLabelText("Agent name"), "Hermes");
     await user.type(within(form).getByLabelText("Agent address"), "https://agent.example.com");
     await user.type(within(form).getByLabelText("Credential"), "token-abc");
@@ -297,7 +377,7 @@ describe("AgentSettingsPage", () => {
     renderPage();
 
     const user = userEvent.setup();
-    const form = await screen.findByRole("form", { name: /add an agent/i });
+    const form = await openAddForm();
     await user.type(within(form).getByLabelText("Agent name"), "Hermes");
     await user.type(within(form).getByLabelText("Agent address"), "https://agent.example.com");
     await user.type(within(form).getByLabelText("Credential"), "token-abc");
@@ -323,15 +403,15 @@ describe("AgentSettingsPage", () => {
     renderPage();
 
     const user = userEvent.setup();
-    const form = await screen.findByRole("form", { name: /add an agent/i });
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      const form = await openAddForm();
       await user.type(within(form).getByLabelText("Agent name"), "Hermes");
       await user.type(within(form).getByLabelText("Agent address"), "https://agent.example.com/hooks");
       await user.type(within(form).getByLabelText("Credential"), "token-abc");
       await user.type(within(form).getByLabelText("Current password"), "hunter2hunter2");
       await user.click(within(form).getByRole("button", { name: "Add agent" }));
       await waitFor(() => expect(create).toHaveBeenCalledTimes(attempt + 1));
-      await waitFor(() => expect(within(form).getByLabelText("Agent name")).toHaveValue(""));
+      await waitFor(() => expect(screen.queryByRole("form", { name: /add an agent/i })).not.toBeInTheDocument());
     }
 
     expect(create.mock.calls[1][1]).not.toBe(create.mock.calls[0][1]);
@@ -351,7 +431,7 @@ describe("AgentSettingsPage", () => {
     renderPage();
 
     const user = userEvent.setup();
-    const form = await screen.findByRole("form", { name: /add an agent/i });
+    const form = await openAddForm();
     await user.type(within(form).getByLabelText("Agent name"), "Hermes replayed");
     await user.type(within(form).getByLabelText("Agent address"), "https://agent.example.com");
     await user.type(within(form).getByLabelText("Credential"), "token-abc");
@@ -374,7 +454,8 @@ describe("AgentSettingsPage", () => {
     renderPage();
 
     await screen.findByRole("article", { name: "Hermes" });
-    const credential = screen.getByLabelText("Credential");
+    const form = await openAddForm();
+    const credential = within(form).getByLabelText("Credential");
     expect(credential).toHaveAttribute("type", "password");
     expect(credential).toHaveAttribute("autocomplete", "off");
     expect(screen.queryByText(/inbound signing secret/i)).not.toBeInTheDocument();
@@ -391,7 +472,7 @@ describe("AgentSettingsPage", () => {
     expect(within(card).getByText(/has not contacted this agent yet/i)).toBeInTheDocument();
     expect(within(card).getByText(/cannot receive a hand-off yet/i)).toBeInTheDocument();
     expect(within(card).queryByText("Tested ready")).not.toBeInTheDocument();
-    expect(within(card).getByText(/last contact: never/i)).toBeInTheDocument();
+    expect(within(card).getAllByText("Never").length).toBeGreaterThan(0);
   });
 
   it("distinguishes invalid credentials from an unreachable endpoint", async () => {
@@ -535,7 +616,7 @@ describe("AgentSettingsPage", () => {
     const article = await screen.findByRole("article", { name: "Legacy agent" });
     expect(within(article).getByText("Superseded wire contract")).toBeInTheDocument();
     expect(within(article).getByText(/Add the agent again by its address/i)).toBeInTheDocument();
-    for (const name of ["Edit connection", "Test connection", "Disconnect…"]) {
+    for (const name of ["Edit Legacy agent", "Test Legacy agent", "Delete Legacy agent"]) {
       expect(within(article).getByRole("button", { name })).toBeDisabled();
     }
   });
@@ -564,7 +645,7 @@ describe("AgentSettingsPage", () => {
       // Never `ready`, so still no hand-off — and the retry stays available and
       // asks for nothing to be retyped.
       expect(within(article).getByText(/cannot receive a hand-off yet/i)).toBeInTheDocument();
-      expect(within(article).getByRole("button", { name: "Test connection" })).toBeEnabled();
+      expect(within(article).getByRole("button", { name: "Test Busy agent" })).toBeEnabled();
     }
   );
 
@@ -576,11 +657,10 @@ describe("AgentSettingsPage", () => {
     const article = await screen.findByRole("article", { name: "Hermes" });
     expect(screen.getByText(/external-agent relay rollout is off/i)).toBeInTheDocument();
     expect(screen.queryByRole("form", { name: /add an agent/i })).toBeNull();
-    for (const name of ["Edit connection", "Test connection"]) {
-      expect(within(article).queryByRole("button", { name })).toBeNull();
-    }
-    // Disconnect stays: it only ever destroys, so it is safe while rollout is off.
-    expect(within(article).getByRole("button", { name: /disconnect/i })).toBeEnabled();
+    expect(within(article).queryByRole("button", { name: "Test Hermes" })).toBeNull();
+    expect(within(article).getByRole("button", { name: "Edit Hermes" })).toBeEnabled();
+    // Delete stays: it only ever destroys, so it is safe while rollout is off.
+    expect(within(article).getByRole("button", { name: "Delete Hermes" })).toBeEnabled();
   });
 
   it("014-FR-011 states the guaranteed tier without the extension link (D-01-S10)", async () => {
@@ -670,8 +750,8 @@ describe("AgentSettingsPage", () => {
     // The tier is a claim about how this agent behaves. Nothing has asked it
     // yet, so there is nothing honest to say (D-01-S01).
     expect(within(article).queryByRole("region", { name: "Guarantee" })).toBeNull();
-    expect(within(article).queryByRole("region", { name: "Discovery result" })).toBeNull();
-    expect(within(article).getByText(/card is only read on a successful test/i)).toBeInTheDocument();
+    const discovery = within(article).getByRole("region", { name: "Discovery result" });
+    expect(within(discovery).getAllByText("Not stated").length).toBeGreaterThan(0);
   });
 
   it("014-FR-012 tones an owner disconnect neutrally, not as a failure", async () => {
@@ -723,7 +803,7 @@ describe("AgentSettingsPage", () => {
 
     const user = userEvent.setup();
     await act(async () => {
-      await user.click(within(article).getByRole("button", { name: "Edit connection" }));
+      await user.click(within(article).getByRole("button", { name: "Edit Hermes" }));
     });
     const form = within(article).getByRole("form", { name: "Edit connection" });
     expect(within(form).getByLabelText(/Header name/)).toHaveValue("X-API-Key");
@@ -739,7 +819,7 @@ describe("AgentSettingsPage", () => {
     const article = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
     await act(async () => {
-      await user.click(within(article).getByRole("button", { name: "Edit connection" }));
+      await user.click(within(article).getByRole("button", { name: "Edit Hermes" }));
     });
     const form = within(article).getByRole("form", { name: "Edit connection" });
     await act(async () => {
@@ -797,7 +877,7 @@ describe("AgentSettingsPage", () => {
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
     await act(async () => {
-      await user.click(within(card).getByRole("button", { name: "Test connection" }));
+      await user.click(within(card).getByRole("button", { name: "Test Hermes" }));
     });
 
     await waitFor(() => expect(test).toHaveBeenCalledWith("conn-ready"));
@@ -814,7 +894,7 @@ describe("AgentSettingsPage", () => {
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
     await act(async () => {
-      await user.click(within(card).getByRole("button", { name: "Test connection" }));
+      await user.click(within(card).getByRole("button", { name: "Test Hermes" }));
     });
 
     await waitFor(() =>
@@ -829,7 +909,7 @@ describe("AgentSettingsPage", () => {
 
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
-    await user.click(within(card).getByRole("button", { name: "Edit connection" }));
+    await user.click(within(card).getByRole("button", { name: "Edit Hermes" }));
     const form = within(card).getByRole("form", { name: "Edit connection" });
     await user.clear(within(form).getByLabelText("Agent name"));
     await user.type(within(form).getByLabelText("Agent name"), "Hermes prod");
@@ -857,7 +937,7 @@ describe("AgentSettingsPage", () => {
 
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
-    await user.click(within(card).getByRole("button", { name: "Edit connection" }));
+    await user.click(within(card).getByRole("button", { name: "Edit Hermes" }));
     const form = within(card).getByRole("form", { name: "Edit connection" });
     await user.clear(within(form).getByLabelText("Agent address"));
     await user.type(within(form).getByLabelText("Agent address"), "https://new.example.com");
@@ -889,7 +969,7 @@ describe("AgentSettingsPage", () => {
 
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
-    await user.click(within(card).getByRole("button", { name: "Edit connection" }));
+    await user.click(within(card).getByRole("button", { name: "Edit Hermes" }));
     const form = within(card).getByRole("form", { name: "Edit connection" });
     await user.clear(within(form).getByLabelText("Agent address"));
     await user.type(within(form).getByLabelText("Agent address"), "https://new.example.com");
@@ -913,7 +993,7 @@ describe("AgentSettingsPage", () => {
 
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
-    await user.click(within(card).getByRole("button", { name: "Edit connection" }));
+    await user.click(within(card).getByRole("button", { name: "Edit Hermes" }));
     const form = within(card).getByRole("form", { name: "Edit connection" });
     await user.clear(within(form).getByLabelText("Agent address"));
     await user.type(within(form).getByLabelText("Agent address"), "https://new.example.com/hooks");
@@ -934,6 +1014,7 @@ describe("AgentSettingsPage", () => {
 
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
+    await openEditForm(card);
     await act(async () => {
       await user.type(within(card).getByLabelText("New credential"), "token-def");
       await user.type(within(card).getByLabelText("Current password"), "hunter2hunter2");
@@ -957,6 +1038,7 @@ describe("AgentSettingsPage", () => {
     renderPage();
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
+    await openEditForm(card);
     await user.type(within(card).getByLabelText("New credential"), "token-def");
     await user.type(within(card).getByLabelText("Current password"), "hunter2hunter2");
     await user.click(within(card).getByRole("button", { name: "Replace credential" }));
@@ -976,6 +1058,7 @@ describe("AgentSettingsPage", () => {
     renderPage();
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
+    await openEditForm(card);
     await user.type(within(card).getByLabelText("New credential"), "token-one");
     await user.type(within(card).getByLabelText("Current password"), "wrong");
     await user.click(within(card).getByRole("button", { name: "Replace credential" }));
@@ -1018,7 +1101,7 @@ describe("AgentSettingsPage", () => {
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
     await act(async () => {
-      await user.click(within(card).getByRole("button", { name: /disconnect/i }));
+      await user.click(within(card).getByRole("button", { name: /delete/i }));
     });
 
     const dialog = screen.getByRole("dialog");
@@ -1027,7 +1110,7 @@ describe("AgentSettingsPage", () => {
 
     await act(async () => {
       await user.type(within(dialog).getByLabelText("Confirm with your password"), "hunter2hunter2");
-      await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
+      await user.click(within(dialog).getByRole("button", { name: /^Delete$/ }));
     });
 
     await waitFor(() =>
@@ -1038,6 +1121,7 @@ describe("AgentSettingsPage", () => {
       )
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByRole("article", { name: "Hermes" })).not.toBeInTheDocument();
   });
 
   it("disables an open disconnect confirmation when connectivity is lost", async () => {
@@ -1047,9 +1131,9 @@ describe("AgentSettingsPage", () => {
 
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
-    await user.click(within(card).getByRole("button", { name: /disconnect/i }));
+    await user.click(within(card).getByRole("button", { name: /delete/i }));
     const dialog = screen.getByRole("dialog");
-    const confirm = within(dialog).getByRole("button", { name: /^Disconnect$/ });
+    const confirm = within(dialog).getByRole("button", { name: /^Delete$/ });
     expect(confirm).toBeEnabled();
 
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
@@ -1071,12 +1155,12 @@ describe("AgentSettingsPage", () => {
     renderPage();
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
-    await user.click(within(card).getByRole("button", { name: /disconnect/i }));
+    await user.click(within(card).getByRole("button", { name: /delete/i }));
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText("Confirm with your password"), "hunter2hunter2");
-    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
+    await user.click(within(dialog).getByRole("button", { name: /^Delete$/ }));
     await within(dialog).findByRole("alert");
-    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
+    await user.click(within(dialog).getByRole("button", { name: /^Delete$/ }));
     await waitFor(() => expect(disconnect).toHaveBeenCalledTimes(2));
 
     expect(disconnect.mock.calls[1][1]).toEqual(disconnect.mock.calls[0][1]);
@@ -1091,15 +1175,15 @@ describe("AgentSettingsPage", () => {
     renderPage();
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
-    await user.click(within(card).getByRole("button", { name: /disconnect/i }));
+    await user.click(within(card).getByRole("button", { name: /delete/i }));
     const dialog = screen.getByRole("dialog");
     const password = within(dialog).getByLabelText("Confirm with your password");
     await user.type(password, "wrong");
-    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
+    await user.click(within(dialog).getByRole("button", { name: /^Delete$/ }));
     await within(dialog).findByRole("alert");
     await user.clear(password);
     await user.type(password, "correct");
-    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
+    await user.click(within(dialog).getByRole("button", { name: /^Delete$/ }));
     await waitFor(() => expect(disconnect).toHaveBeenCalledTimes(2));
 
     expect(disconnect.mock.calls[1][2]).not.toBe(disconnect.mock.calls[0][2]);
@@ -1113,11 +1197,11 @@ describe("AgentSettingsPage", () => {
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
     await act(async () => {
-      await user.click(within(card).getByRole("button", { name: /disconnect/i }));
+      await user.click(within(card).getByRole("button", { name: /delete/i }));
     });
     await act(async () => {
       await user.click(
-        within(screen.getByRole("dialog")).getByRole("button", { name: "Keep it connected" })
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" })
       );
     });
 
@@ -1134,6 +1218,7 @@ describe("AgentSettingsPage", () => {
 
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
+    await openEditForm(card);
     await user.type(within(card).getByLabelText("New credential"), "token-def");
     await user.type(within(card).getByLabelText("Current password"), "wrong-password");
     await user.click(within(card).getByRole("button", { name: "Replace credential" }));
@@ -1153,10 +1238,10 @@ describe("AgentSettingsPage", () => {
 
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
-    await user.click(within(card).getByRole("button", { name: /disconnect/i }));
+    await user.click(within(card).getByRole("button", { name: /delete/i }));
     const dialog = screen.getByRole("dialog");
     await user.type(within(dialog).getByLabelText("Confirm with your password"), "wrong-password");
-    await user.click(within(dialog).getByRole("button", { name: /^Disconnect$/ }));
+    await user.click(within(dialog).getByRole("button", { name: /^Delete$/ }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
       /current password is incorrect.*corr-disconnect-2/i
@@ -1187,7 +1272,7 @@ describe("AgentSettingsPage", () => {
     renderPage();
 
     const user = userEvent.setup();
-    const form = await screen.findByRole("form", { name: /add an agent/i });
+    const form = await openAddForm();
     await act(async () => {
       await user.type(within(form).getByLabelText("Agent name"), "Loopback agent");
       await user.type(within(form).getByLabelText("Credential"), "token-abc");
@@ -1237,7 +1322,7 @@ describe("014-FR-016 the disconnect confirmation is a decision, not a keystroke"
     renderPage();
     const card = await screen.findByRole("article", { name: "Hermes" });
     const user = userEvent.setup();
-    const trigger = within(card).getByRole("button", { name: "Disconnect…" });
+    const trigger = within(card).getByRole("button", { name: "Delete Hermes" });
     await act(async () => {
       await user.click(trigger);
     });
@@ -1253,7 +1338,7 @@ describe("014-FR-016 the disconnect confirmation is a decision, not a keystroke"
     // AC-024: a connection that could no longer say where it pointed would
     // outlive the decision to stop pointing there.
     expect(text).toContain("interface");
-    expect(text).toContain("Disconnecting does not cancel work this agent has already accepted.");
+    expect(text).toContain("Deleting this connection does not cancel work this agent has already accepted.");
   });
 
   it("requires the password and reads safe-then-destructive", async () => {
@@ -1263,16 +1348,16 @@ describe("014-FR-016 the disconnect confirmation is a decision, not a keystroke"
     const actions = within(dialog)
       .getAllByRole("button")
       .map((button) => button.textContent?.trim());
-    expect(actions).toEqual(["Keep it connected", "Disconnect"]);
+    expect(actions).toEqual(["Cancel", "Delete"]);
   });
 
-  it("traps focus with Disconnect as the last control", async () => {
+  it("traps focus with Delete as the last control", async () => {
     const { user, dialog } = await openDialog();
 
     const focusable = Array.from(
       dialog.querySelectorAll<HTMLElement>("button, input, textarea, select, a[href]")
     );
-    expect(focusable[focusable.length - 1]).toHaveTextContent("Disconnect");
+    expect(focusable[focusable.length - 1]).toHaveTextContent("Delete");
 
     // Tabbing off the end wraps back inside: the page behind is never
     // reachable while the confirmation is open.
@@ -1296,11 +1381,11 @@ describe("014-FR-016 the disconnect confirmation is a decision, not a keystroke"
     expect(disconnect).not.toHaveBeenCalled();
   });
 
-  it("restores focus to the invoking Disconnect control", async () => {
+  it("restores focus to the invoking Delete control", async () => {
     const { user, trigger, dialog } = await openDialog();
 
     await act(async () => {
-      await user.click(within(dialog).getByRole("button", { name: "Keep it connected" }));
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
