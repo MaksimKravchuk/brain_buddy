@@ -3,8 +3,8 @@
 **Feature**: `specs/014-a2a-relay-wire-contract/`
 **Spec**: `spec.md` (Clarifications settled: 2026-09-03, session 2026-09-03, zero open markers)
 **Screens**: `design/*.html` — six self-contained static files, no script, no external font, no CDN
-**States**: **129 total** — D-01 25, D-02 15, D-03 27, M-01 22, M-02 14, M-03 26
-**Human sign-off**: Max, 2026-09-03 (decisions recorded in spec.md Clarifications).
+**States**: **130 total** — D-01 26, D-02 15, D-03 27, M-01 22, M-02 14, M-03 26
+**Human sign-off**: Max, 2026-09-03 (decisions recorded in spec.md Clarifications). Max explicitly directed the D-01 card-to-table amendment on 2026-09-09; this is semantic design approval, not approval of exact artifact bytes or release authority.
 Amended after review campaign 1 (2026-09-03): D-03-S27, M-03-S26 added; Check again
 affordance on D-03-S05/M-03-S04; M-01 sheet order; focus rules; result links inert
 (D-03-S11/M-03-S10). Re-acknowledged by Max, 2026-09-04.
@@ -75,7 +75,7 @@ feature directory.
 
 | id | surface | screen | purpose | FR refs |
 |---|---|---|---|---|
-| D-01 | desktop | Connected agents | Add by agent address, test, read the discovery result and guarantee tier, rotate, disconnect | FR-001, FR-002, FR-003, FR-004, FR-011, FR-012, FR-014, FR-016 |
+| D-01 | desktop | Connected agents | Scan saved agents in a table; add in a modal; test, inspect, edit/rotate and delete one connection | FR-001, FR-002, FR-003, FR-004, FR-011, FR-012, FR-014, FR-016, FR-018 |
 | D-02 | desktop | Hand-off review | The consent boundary: the exact text that leaves, the destination, both disclosures, one confirmation | FR-003, FR-004, FR-005, FR-006, FR-010, FR-011, FR-014, FR-016 |
 | D-03 | desktop | Task agent panel and compact Task rows | Monitor, answer, request cancellation, read the result; every run condition from one projection | FR-006, FR-007, FR-008, FR-009, FR-010, FR-013, FR-014, FR-015, FR-016 |
 | M-01 | mobile | Connected agents | The same connection contract at iPhone width, forms as sheets | FR-001, FR-002, FR-003, FR-004, FR-011, FR-012, FR-014, FR-016 |
@@ -103,14 +103,14 @@ correlation ID, because nothing has failed.
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| D-01-S01 default | one or more saved connections | Name, address, status pill, tier disclosure (best-effort rows carry the extension link), credential scheme, last contact, last tested, stale threshold, four actions | "The last test reached this agent and it authenticated." | FR-001, FR-002, FR-003, FR-011 |
+| D-01-S01 default | one or more saved connections | A semantic table with Agent (saved name plus linked saved address), Version, Protocol, Interface, Status and Actions. Test, Edit and Delete belong to their row. Edit opens the complete detail surface with description, skills, capabilities, guarantee disclosure, credential scheme, timing, error/drift recovery and credential replacement; card-sourced interface text is never linked | "The last test reached this agent and it authenticated." | FR-001, FR-002, FR-003, FR-011, FR-018, SC-011 |
 | D-01-S02 loading | first server fetch | Settings frame intact, skeleton rows after ~250 ms, "Loading connections…"; never the empty state | "Loading connections…" | 007 FR-018 |
-| D-01-S03 empty (first run) | no connection has ever been saved | Display heading, one-line hint, single primary action | "Connect an agent you operate" | FR-001 |
+| D-01-S03 empty (first run) | no connection has ever been saved | Empty table region with one-line hint; the persistent Add new agent action remains above it | "No agents connected yet." | FR-001, FR-018 |
 | D-01-S04 empty (filtered to nothing) | — | Deliberately absent: the list has no filter, search or sort. The real case lives on D-02-S05 | "No filter, no search, no sort on this list" | scope boundary, FR-001 |
 | D-01-S05 error | list fetch fails | Category, correlation ID, retry; no partial rows invented | "We couldn't load your connections" | SC-009, 007 FR-017 |
 | D-01-S06 partial failure | cached list exists, refresh fails | Cached rows stay, each stamped with the time it was read, all labelled potentially stale | "Showing potentially stale saved data." | 007 FR-018 |
 | D-01-S07 offline / interrupted | browser reports offline | Saved status visible and stamped; every secret-bearing action disabled; nothing queued | "Offline — reconnect to manage agents." | 007 FR-018 |
-| D-01-S08 add agent (bearer) | user opens the add form | Agent name, agent address, scheme radio, credential, password; egress rule stated on the address field. Navigating away or closing the form discards it silently: nothing was stored, no credential was sent, and the four fields are cheap to re-enter, so no warning is shown | "BrainBuddy fetches the agent card from this address's standard well-known location…" | FR-001, FR-004 |
+| D-01-S08 add agent modal (bearer) | user chooses Add new agent | Labelled modal over the unchanged registry: agent name, agent address, scheme radio, credential, password; egress rule stated on the address field. Close/Escape clears entered secrets and restores focus. Pending or ambiguous submission blocks dismissal; an exact retry keeps its intent key until success, definitive rejection or explicit abandonment | "BrainBuddy fetches the agent card from this address's standard well-known location…" | FR-001, FR-004, FR-018 |
 | D-01-S09 add agent (API key) | user picks the API-key scheme | Read-only header name sourced from the card; before discovery it reads "Read from the agent card when you test" | "Read from the agent card after discovery. You do not type it." | FR-001 |
 | D-01-S10 test: ready, guaranteed | test succeeds, card declares the extension | Agent name, version, description, skills, streaming, push, protocol version, interface, then the tier. Every card-sourced value here is inert plain text — never an anchor, never markup, never auto-linkified (AC-031) | "**Guaranteed single start.** …a retry cannot start a second run." | AC-001, FR-002, FR-003, FR-011 |
 | D-01-S11 test: ready, best-effort | test succeeds, card does not declare it | Same discovery result, best-effort tier, the link to the published extension specification, plus the push-not-supported note. Card text stays inert as on S10 (AC-031); the only link on the row is BrainBuddy's own extension link | "**Best-effort single start.** …A duplicate remains possible if the agent forgets its tasks." · "Read the single-start extension specification" | AC-005, FR-003, FR-011 |
@@ -124,16 +124,19 @@ correlation ID, because nothing has failed.
 | D-01-S19 stale | last contact older than the threshold | Amber pill overriding an earlier ready; hand-off blocked | "Test it again before a hand-off." | FR-002 |
 | D-01-S20 **Agent changed** | card fingerprint drift on interface address or authentication | Tested interface and current card interface shown side by side — both are card text, shown inert and never as a link (AC-031); the connection behaves as untested until a new successful test; reauthentication demanded | "**Agent changed**" · "BrainBuddy will not send task content to a destination you have not tested." | FR-002, FR-014, AC-012, FR-004 |
 | D-01-S21 disconnected: superseded wire | a pre-existing bespoke connection record | Neutral disconnected pill with the reason; no path to reuse it | "Superseded wire contract." | FR-012, SC-010 |
-| D-01-S22 rollout OFF | deployment flag off | Add, edit, test and rotate unavailable; disconnect still available; runs keep reporting | "The external-agent relay rollout is off." | FR-016, 007 FR-019 |
-| D-01-S23 disconnect confirmation | user chooses Disconnect | Names what is destroyed — the credential **and the discovered agent-card summary with its fingerprint** — what stops, and what is *not* cancelled; password required | "The stored credential and the agent-card summary BrainBuddy discovered — its name, version, description, skills and interface — are erased together, along with the card fingerprint." · "Disconnecting does not cancel work the agent already accepted." | AC-022, FR-016 |
-| D-01-S24 rotate credential | user chooses Rotate credential | No current value shown; new credential plus password | "BrainBuddy cannot show you the current one." | FR-001, AC-023 |
+| D-01-S22 rollout OFF | deployment flag off | Add and Test unavailable; Edit opens read-only details with save/rotate hidden; Delete remains available; runs keep reporting | "The external-agent relay rollout is off." | FR-016, FR-018 |
+| D-01-S23 delete confirmation | user chooses Delete | Names what is destroyed — the credential **and the discovered agent-card summary with its fingerprint** — what stops, what is *not* cancelled, and that the row disappears while bounded run history remains on Tasks; password required | "The stored credential and the agent-card summary BrainBuddy discovered — its name, version, description, skills and interface — are erased together, along with the card fingerprint." · "Deleting this connection does not cancel work the agent already accepted." | AC-022, FR-016, FR-018 |
+| D-01-S24 rotate credential | user opens Edit and chooses Replace credential | The Edit modal keeps the connection detail visible and provides a separately labelled credential-replacement section; no current value shown; new credential plus password | "BrainBuddy cannot show you the current one." | FR-001, FR-018, AC-023 |
 | D-01-S25 rate limited | the connection test is answered by the agent's own rate limit (`last_test_error_code = a2a_rate_limited`) | Rose category pill, the retry-after hint when the agent gave one, correlation ID. The connection stays **untested** — never ready — so it still cannot take a hand-off; **Test connection** stays available and re-uses the sealed credential, echoing nothing secret and asking for nothing to be retyped | "**Rate limited**" · "The agent is rate limiting. It answered the test by refusing it, so BrainBuddy learned nothing about the connection and nothing was sent." · "Test again in about 60 seconds." · "Test again shortly." (when the agent gave no retry-after; CHK051) | FR-002, SC-009, AC-037 |
+| D-01-S26 edit connection modal | user chooses Edit on one row | Labelled modal for that row with complete read-only connection detail followed, while rollout is ON, by editable name/address/scheme and the separate credential replacement section. Successful save closes and refreshes the row; cancel restores focus to the same Edit trigger. Narrow view uses one column and keeps actions reachable | "Edit {agent name}" | FR-001, FR-018, AC-038, SC-011 |
+
+Below 768 px, D-01-S01 changes presentation rather than content: each table row becomes a one-column bordered record; every value has a visible compact label and the Test/Edit/Delete group wraps below the status. Long addresses and interface URLs break inside their field, so the page itself never scrolls horizontally. This web amendment does not alter the native M-01 screen.
 
 ### D-02 — Hand-off review (desktop)
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| D-02-S01 default (guaranteed) | user picks a ready connection | Agent chooser, Task title, optional details toggle, removable supporting items, Task ID, run ID, correlation ID, destination, **the push callback address with its token masked**, tier, cancellation disclosure, external-copy notice. The agent name (in the chooser and the destination line) and the destination interface are card-sourced and render as inert text (AC-031) | "What will be sent" · "This agent advertises push notifications, so BrainBuddy also registers the callback address above with it. It is private to this one run, its secret part is never shown to anyone, and the agent holds it until the run ends. The agent can only use it to ask BrainBuddy to check on the run — no task content ever comes back through it." | AC-007, FR-005, SC-005 |
+| D-02-S01 default (guaranteed) | user picks a ready connection from the compact dropdown | The no-scroll primary path is Agent → Task title and details toggle → optional additional instructions → Send. "Task details and supporting items" and "Delivery and privacy details" are closed disclosures by default; together they reveal the complete manifest, including removable supporting items, Task ID, run ID, correlation ID, inert destination, **the push callback address with its token masked**, tier, cancellation disclosure and external-copy notice. A required acknowledgement remains outside the disclosures. | "What will be sent" · "Additional instructions (optional)" · "Task details and supporting items" · "Delivery and privacy details" | AC-007, FR-005, SC-005 |
 | D-02-S02 review (best-effort) | the chosen agent lacks the extension | Same manifest, amber tier block restating the duplicate risk and the mitigation, plus the link to the published extension specification. This block appears in *every* best-effort review; S13–S15 are its three acknowledgement states | "**Best-effort single start.**" · "Read the single-start extension specification" | FR-003, FR-011, AC-005 |
 | D-02-S03 loading | preview being built server-side | Skeleton manifest, explicit "no task content has been sent" | "Building the hand-off preview…" | FR-005 |
 | D-02-S04 empty (first run) | account has no connection | Explanation plus a route to Connected agents | "No agents connected yet" | FR-001 |
@@ -385,11 +388,13 @@ matches `spec.md` line 19, which declares the same thing.
 
 ## Keyboard and focus
 
-- **Tab order**: heading → connection or run content → primary action → secondary →
-  destructive. In `D-02`, the agent chooser precedes the manifest, which precedes the
+- **Tab order**: D-01 follows heading → Add new agent → table rows in reading order →
+  each row's Test, Edit and Delete actions. Other surfaces follow heading → connection
+  or run content → primary action → secondary → destructive. In `D-02`, the agent chooser precedes the manifest, which precedes the
   disclosures, which precede Cancel and Send to agent.
-- **Focus on open**: the dialog or sheet heading, or the first required field.
-  **Focus restored on close to**: the control that opened it (Hand to agent, Disconnect…,
+- **Focus on open**: the labelled dialog or sheet container receives focus, matching the
+  shared web `Overlay`; native sheets may focus their heading or first required field.
+  **Focus restored on close to**: the control that opened it (Add new agent, Edit, Hand to agent, Delete,
   Rotate credential) — on every close path, including Escape, the cancel action and a
   completed submission.
 - **Focus containment**: every dialog and every sheet traps focus. Tab and Shift+Tab
@@ -400,7 +405,9 @@ matches `spec.md` line 19, which declares the same thing.
   on `D-02`/`M-02`; **Disconnect** on the `D-01`/`M-01` disconnect confirmation; **Rotate
   credential** on `D-01-S24`). Nothing outside the surface takes focus until it closes.
 - **Escape**: closes a non-destructive dialog or sheet without submitting and without
-  minting a new intent key, and focus returns to the control that invoked it. A
+  minting a new intent key, and focus returns to the control that invoked it. It does not
+  dismiss Add/Edit while a mutation or ambiguous retry remains unresolved; explicit
+  abandonment clears entered secrets before closing. A
   destructive confirmation (`D-01-S23`, `M-01-S21`) is dismissed by its own **Keep it
   connected** action rather than by Escape alone, so a stray key cannot be read as a
   decision. While a confirmation is in flight (`D-02-S12`, `M-02-S11`) the surface is not

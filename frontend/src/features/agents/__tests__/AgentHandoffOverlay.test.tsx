@@ -102,9 +102,9 @@ function renderOverlay(onDispatched = vi.fn(), onClose = vi.fn()) {
 }
 
 async function selectReadyAgent(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  const radio = await screen.findByRole("radio", { name: /Hermes/ }, { timeout: 5000 });
+  const chooser = await screen.findByRole("combobox", { name: "Agent" }, { timeout: 5000 });
   await act(async () => {
-    await user.click(radio);
+    await user.selectOptions(chooser, "conn-ready");
   });
   await screen.findByRole("heading", { name: "What will be sent" });
 }
@@ -125,9 +125,10 @@ describe("AgentHandoffOverlay", () => {
   it("offers only tested connections and explains why the others cannot be used", async () => {
     renderOverlay();
 
-    expect(await screen.findByRole("radio", { name: /Hermes/ })).toBeEnabled();
-    const blocked = screen.getByRole("radio", { name: /Fresh agent/ });
+    expect(await screen.findByRole("option", { name: /Hermes/ })).toBeEnabled();
+    const blocked = screen.getByRole("option", { name: /Fresh agent/ });
     expect(blocked).toBeDisabled();
+    await userEvent.click(screen.getByText("Why some agents are unavailable"));
     expect(screen.getByText(/has not contacted this agent yet/i)).toBeInTheDocument();
   });
 
@@ -135,6 +136,8 @@ describe("AgentHandoffOverlay", () => {
     const user = userEvent.setup();
     renderOverlay();
     await selectReadyAgent(user);
+    await user.click(screen.getByText("Task details and supporting items"));
+    await user.click(screen.getByText("Delivery and privacy details"));
 
     const review = screen.getByRole("region", { name: "What will be sent" });
     expect(within(review).getByText("Fix onboarding drop-off")).toBeInTheDocument();
@@ -162,6 +165,23 @@ describe("AgentHandoffOverlay", () => {
     expect(screen.queryByText(/reporting instructions/i)).toBeNull();
   });
 
+  it("014-FR-005 keeps the primary hand-off path compact and reveals technical details on request", async () => {
+    const user = userEvent.setup();
+    renderOverlay();
+
+    expect(await screen.findByRole("combobox", { name: "Agent" })).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Agent" }), "conn-ready");
+    await screen.findByRole("heading", { name: "What will be sent" });
+
+    expect(screen.getByLabelText("Additional instructions (optional)")).toBeVisible();
+    expect(screen.getByText("Task details and supporting items")).toBeVisible();
+    expect(screen.getByText("Delivery and privacy details")).toBeVisible();
+    expect(screen.getByText(manifest.external_copy_notice)).not.toBeVisible();
+    for (const value of screen.getAllByText("run-77")) {
+      expect(value).not.toBeVisible();
+    }
+  });
+
   it("014-FR-005 discloses the masked push callback only when one is registered", async () => {
     const user = userEvent.setup();
     vi.mocked(apiClient.previewAgentHandoff).mockResolvedValue({
@@ -174,6 +194,7 @@ describe("AgentHandoffOverlay", () => {
     });
     renderOverlay();
     await selectReadyAgent(user);
+    await user.click(screen.getByText("Delivery and privacy details"));
 
     const review = screen.getByRole("region", { name: "What will be sent" });
     expect(
@@ -250,7 +271,7 @@ describe("AgentHandoffOverlay", () => {
     expect(screen.getByRole("button", { name: "Send to agent" })).toBeEnabled();
 
     await act(async () => {
-      await user.click(screen.getByRole("radio", { name: /Ops runner/ }));
+      await user.selectOptions(screen.getByRole("combobox", { name: "Agent" }), "conn-second");
     });
 
     await waitFor(() =>
@@ -347,9 +368,8 @@ describe("AgentHandoffOverlay", () => {
     await selectReadyAgent(user);
 
     for (const body of ["First reviewed body", "Second reviewed body"]) {
-      await user.type(screen.getByLabelText("Context label"), "Runbook");
-      await user.type(screen.getByLabelText("Context body"), body);
-      await user.click(screen.getByRole("button", { name: "Add context" }));
+      await user.type(screen.getByLabelText("Additional instructions (optional)"), body);
+      await user.click(screen.getByRole("button", { name: "Add instructions" }));
       await waitFor(() => expect(screen.getByText(body)).toBeInTheDocument());
     }
     expect(apiClient.previewAgentHandoff).toHaveBeenLastCalledWith(
@@ -358,8 +378,8 @@ describe("AgentHandoffOverlay", () => {
         connection_id: "conn-ready",
         include_details: true,
         supporting_items: [
-          { label: "Runbook", body: "First reviewed body" },
-          { label: "Runbook", body: "Second reviewed body" }
+          { label: "Additional instructions", body: "First reviewed body" },
+          { label: "Additional instructions", body: "Second reviewed body" }
         ]
       },
       expect.anything()
@@ -370,7 +390,7 @@ describe("AgentHandoffOverlay", () => {
     if (!firstItem) {
       throw new Error("Expected the first reviewed context item to render in a list item.");
     }
-    await user.click(within(firstItem).getByRole("button", { name: "Remove Runbook" }));
+    await user.click(within(firstItem).getByRole("button", { name: "Remove Additional instructions" }));
 
     await waitFor(() =>
       expect(apiClient.previewAgentHandoff).toHaveBeenLastCalledWith(
@@ -378,7 +398,7 @@ describe("AgentHandoffOverlay", () => {
         {
           connection_id: "conn-ready",
           include_details: true,
-          supporting_items: [{ label: "Runbook", body: "Second reviewed body" }]
+          supporting_items: [{ label: "Additional instructions", body: "Second reviewed body" }]
         },
         expect.anything()
       )
@@ -393,9 +413,8 @@ describe("AgentHandoffOverlay", () => {
     await selectReadyAgent(user);
 
     await act(async () => {
-      await user.type(screen.getByLabelText("Context label"), "Runbook");
-      await user.type(screen.getByLabelText("Context body"), "Deploy notes live in docs/.");
-      await user.click(screen.getByRole("button", { name: "Add context" }));
+      await user.type(screen.getByLabelText("Additional instructions (optional)"), "Deploy notes live in docs/.");
+      await user.click(screen.getByRole("button", { name: "Add instructions" }));
     });
 
     await waitFor(() =>
@@ -404,7 +423,7 @@ describe("AgentHandoffOverlay", () => {
         {
           connection_id: "conn-ready",
           include_details: true,
-          supporting_items: [{ label: "Runbook", body: "Deploy notes live in docs/." }]
+          supporting_items: [{ label: "Additional instructions", body: "Deploy notes live in docs/." }]
         },
         expect.anything()
       )
@@ -556,16 +575,15 @@ describe("AgentHandoffOverlay", () => {
     expect(screen.queryByText(/no agents connected yet/i)).not.toBeInTheDocument();
   });
 
-  it("does not re-preview when an incomplete context item is submitted", async () => {
+  it("does not re-preview when empty additional instructions are submitted", async () => {
     const user = userEvent.setup();
     renderOverlay();
     await selectReadyAgent(user);
 
-    await user.type(screen.getByLabelText("Context label"), "Runbook");
-    await user.click(screen.getByRole("button", { name: "Add context" }));
+    await user.click(screen.getByRole("button", { name: "Add instructions" }));
 
     expect(apiClient.previewAgentHandoff).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText("Context label")).toHaveValue("Runbook");
+    expect(screen.getByLabelText("Additional instructions (optional)")).toHaveValue("");
   });
 
   it("reports a failed preview instead of showing a partial payload", async () => {
@@ -577,7 +595,9 @@ describe("AgentHandoffOverlay", () => {
     // fireEvent, not userEvent: this is the one path where the preview query
     // settles as a rejection, and userEvent's pointer sequence deadlocks
     // against the resulting error render in this environment.
-    fireEvent.click(await screen.findByRole("radio", { name: /Hermes/ }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Agent" }), {
+      target: { value: "conn-ready" }
+    });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /this connection is stale.*corr-preview-1/i
@@ -598,7 +618,7 @@ describe("AgentHandoffOverlay", () => {
     const user = userEvent.setup();
     renderOverlay();
     await act(async () => {
-      await user.click(await screen.findByRole("radio", { name: /Hermes/ }));
+      await user.selectOptions(await screen.findByRole("combobox", { name: "Agent" }), "conn-ready");
     });
 
     expect(screen.getByText("Building the hand-off preview…")).toBeInTheDocument();
@@ -627,12 +647,10 @@ describe("AgentHandoffOverlay", () => {
     ]);
     renderOverlay();
 
-    expect(
-      await screen.findByText("None of your agents can take this hand-off")
-    ).toBeInTheDocument();
-    expect(screen.getByText("Agent changed")).toBeInTheDocument();
+    expect(await screen.findByText("None of your agents can take this hand-off")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Moved agent.*Agent changed/ })).toBeDisabled();
+    await userEvent.click(screen.getByText("Why some agents are unavailable"));
     expect(screen.getByText(/advertises a different interface address/i)).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /Moved agent/ })).toBeDisabled();
     expect(screen.queryByText(/no agents connected yet/i)).toBeNull();
   });
 
@@ -651,14 +669,14 @@ describe("AgentHandoffOverlay", () => {
     ]);
     renderOverlay();
 
-    expect(await screen.findByText("Status unknown")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /Drafting sample agent/ })).toBeDisabled();
+    expect(await screen.findByRole("option", { name: /Drafting sample agent.*Status unknown/ })).toBeDisabled();
+    await userEvent.click(screen.getByText("Why some agents are unavailable"));
     expect(
       screen.getByText(/could not refresh this connection just now, so it is not offered/i)
     ).toBeInTheDocument();
     // The refreshable one is still offered: partial knowledge fails closed on
     // the row it concerns, not on the whole list.
-    expect(screen.getByRole("radio", { name: /Hermes/ })).toBeEnabled();
+    expect(screen.getByRole("option", { name: /Hermes/ })).toBeEnabled();
   });
 
   it("014-FR-003 links the extension specification as an explicit, marked external click", async () => {
@@ -667,6 +685,7 @@ describe("AgentHandoffOverlay", () => {
     const user = userEvent.setup();
     renderOverlay();
     await selectReadyAgent(user);
+    await user.click(screen.getByText("Delivery and privacy details"));
 
     const guarantee = screen.getByRole("region", { name: "Guarantee" });
     const link = within(guarantee).getByRole("link", {
@@ -810,17 +829,18 @@ describe("AgentHandoffOverlay", () => {
     });
     const user = userEvent.setup();
     renderOverlay();
-    const radio = await screen.findByRole("radio", { name: /onerror/ });
+    const chooser = await screen.findByRole("combobox", { name: "Agent" });
     await act(async () => {
-      await user.click(radio);
+      await user.selectOptions(chooser, "conn-ready");
     });
     await screen.findByRole("heading", { name: "What will be sent" });
+    await user.click(screen.getByText("Delivery and privacy details"));
 
     const review = screen.getByRole("region", { name: "What will be sent" });
     const destination = within(review).getByText("javascript:alert(document.cookie)");
     expect(destination.tagName).toBe("P");
     expect(destination.querySelector("a")).toBeNull();
-    expect(within(review).queryAllByRole("link")).toHaveLength(0);
+    expect(within(review).queryByRole("link", { name: /javascript|onerror/i })).toBeNull();
     // The markup is text, not nodes: it never became an element.
     expect(screen.getByText(/<img src=x onerror=alert\(1\)>Agent/)).toBeInTheDocument();
     expect(document.querySelector("img")).toBeNull();

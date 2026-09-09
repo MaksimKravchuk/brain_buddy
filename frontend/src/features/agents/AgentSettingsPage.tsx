@@ -40,6 +40,10 @@ export function AgentSettingsPage({ rolloutEnabled }: { rolloutEnabled: boolean 
   const tagsQuery = useTags();
   const connectionsQuery = useAgentConnections(true);
   const browserOnline = useRelayOnline();
+  const [addOpen, setAddOpen] = useState(false);
+  const [addNotice, setAddNotice] = useState<string | null>(null);
+  const [hiddenConnectionIds, setHiddenConnectionIds] = useState<Set<string>>(() => new Set());
+  const addTrigger = useRef<HTMLButtonElement | null>(null);
 
   const connectionTransportOnline =
     browserOnline && (!connectionsQuery.isError || connectionsQuery.error instanceof ApiError);
@@ -50,14 +54,27 @@ export function AgentSettingsPage({ rolloutEnabled }: { rolloutEnabled: boolean 
       projects={projectsQuery.data ?? []}
       tags={tagsQuery.data ?? []}
     >
-      <div className="mx-auto flex max-w-[680px] flex-col gap-5 pb-12">
-        <header>
-          <h1 className="text-title font-semibold text-slate-900">Connected agents</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            BrainBuddy relays one task at a time to an agent you operate. You own its hosting,
-            tools, credentials, cost, and output quality. BrainBuddy sends only what you review and
-            shows only what the agent reports back.
-          </p>
+      <div className="mx-auto flex max-w-[1120px] flex-col gap-5 pb-12">
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="max-w-[720px]">
+            <h1 className="text-title font-semibold text-slate-900">Connected agents</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Manage the agents BrainBuddy can hand reviewed work to. Test a connection before
+              using it, and keep credentials with the agent you operate.
+            </p>
+          </div>
+          {rolloutEnabled ? (
+            <Button
+              ref={addTrigger}
+              type="button"
+              variant="primary"
+              size="md"
+              className="shrink-0 self-start"
+              onClick={() => setAddOpen(true)}
+            >
+              Add new agent
+            </Button>
+          ) : null}
         </header>
         {!rolloutEnabled ? (
           <section className="rounded-xl border border-needs-you-border bg-needs-you-bg p-4 text-sm text-needs-you-fg">
@@ -66,38 +83,56 @@ export function AgentSettingsPage({ rolloutEnabled }: { rolloutEnabled: boolean 
             testing, or replacing credentials is unavailable.
           </section>
         ) : null}
-        {rolloutEnabled ? <AddConnectionSection /> : null}
+        <Feedback error={null} success={addNotice} />
         <SectionCard
           title="Your agents"
-          description="Everything below is read from the agent's own published card by the last connection test. BrainBuddy states only what it observed."
+          description="Saved connection details and the latest result BrainBuddy observed."
         >
           {connectionsQuery.isError ? (
             <Feedback error={getErrorMessage(connectionsQuery.error)} success={null} />
           ) : connectionsQuery.isLoading ? (
             <p className="text-sm text-slate-500">Loading connections…</p>
-          ) : connectionsQuery.data?.length ? (
-            <div className="flex flex-col gap-4">
-              {connectionsQuery.data.map((connection) => (
-                <ConnectionCard
-                  key={connection.id}
-                  connection={connection}
-                  online={connectionTransportOnline}
-                  mutationsEnabled={rolloutEnabled}
-                />
-              ))}
-            </div>
+          ) : connectionsQuery.data?.some((item) => !hiddenConnectionIds.has(item.id)) ? (
+            <AgentRegistryTable
+              connections={connectionsQuery.data.filter((item) => !hiddenConnectionIds.has(item.id))}
+              online={connectionTransportOnline}
+              mutationsEnabled={rolloutEnabled}
+              onDeleted={(connectionId) => {
+                setHiddenConnectionIds((current) => new Set(current).add(connectionId));
+              }}
+            />
           ) : (
             <p className="text-sm text-slate-500">
-              No agents connected yet. Add one above, then test it before handing over a task.
+              No agents connected yet. Add one, then test it before handing over a task.
             </p>
           )}
         </SectionCard>
+        {addOpen ? (
+          <AddConnectionModal
+            onClose={() => {
+              setAddOpen(false);
+              addTrigger.current?.focus();
+            }}
+            onAdded={(name) => {
+              setAddNotice(`${name} was added. Test it before handing over a task.`);
+              setAddOpen(false);
+              addTrigger.current?.focus();
+            }}
+          />
+        ) : null}
       </div>
     </AppShell>
   );
 }
 
-function AddConnectionSection(): React.JSX.Element {
+function AddConnectionModal({
+  onClose,
+  onAdded
+}: {
+  onClose: () => void;
+  onAdded: (name: string) => void;
+}): React.JSX.Element {
+  const titleId = useId();
   const queryClient = useQueryClient();
   const keys = useAgentKeys();
   const online = useRelayOnline();
@@ -107,7 +142,7 @@ function AddConnectionSection(): React.JSX.Element {
   const [credential, setCredential] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [added, setAdded] = useState<string | null>(null);
+  const [ambiguous, setAmbiguous] = useState(false);
   const createKey = useIntentKey("agent-connection-create");
 
   const mutation = useRelayMutation({
@@ -128,20 +163,21 @@ function AddConnectionSection(): React.JSX.Element {
     },
     onSuccess: (created) => {
       createKey.settle();
+      setAmbiguous(false);
       setError(null);
-      setAdded(created.name);
       setName("");
       setAgentAddress("");
       setAuthScheme("bearer");
       setCredential("");
       setCurrentPassword("");
       void queryClient.invalidateQueries({ queryKey: keys.connections() });
+      onAdded(created.name);
     },
     onError: (caught: unknown) => {
       if (definitivelyRejected(caught)) {
         createKey.settle();
       }
-      setAdded(null);
+      setAmbiguous(!definitivelyRejected(caught));
       setError(getErrorMessage(caught));
     }
   });
@@ -152,11 +188,17 @@ function AddConnectionSection(): React.JSX.Element {
   };
 
   return (
-    <SectionCard
-      title="Add an agent"
-      description="BrainBuddy stores the credential sealed and never shows it again. Adding an agent re-checks your password."
-    >
-      <form aria-label="Add an agent" className="flex flex-col gap-3" onSubmit={handleSubmit}>
+    <Overlay labelledBy={titleId} size="narrow" onClose={mutation.isPending || ambiguous ? undefined : onClose}>
+      <OverlayHeader
+        titleId={titleId}
+        eyebrow="Connected agents"
+        title="Add new agent"
+        onClose={mutation.isPending || ambiguous ? undefined : onClose}
+      />
+      <form aria-label="Add an agent" className="flex flex-col gap-3 overflow-y-auto px-5 py-5 sm:px-6" onSubmit={handleSubmit}>
+        <p className="text-sm text-slate-500">
+          BrainBuddy stores the credential sealed and never shows it again. Adding an agent re-checks your password.
+        </p>
         <Field label="Agent name" name="agent_name" type="text" value={name} onChange={setName} />
         <Field
           label="Agent address"
@@ -186,19 +228,27 @@ function AddConnectionSection(): React.JSX.Element {
           autoComplete="current-password"
         />
         <Feedback error={error} success={null} />
-        <div>
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+          <Button
+            type="button"
+            variant="secondary"
+            size="md"
+            onClick={() => {
+              createKey.settle();
+              setCredential("");
+              setCurrentPassword("");
+              onClose();
+            }}
+            disabled={mutation.isPending}
+          >
+            {ambiguous ? "Discard and close" : "Cancel"}
+          </Button>
           <Button type="submit" variant="primary" size="md" isLoading={mutation.isPending} disabled={!online}>
             Add agent
           </Button>
         </div>
       </form>
-      {added ? (
-        <p role="status" className="mt-3 text-sm text-slate-600">
-          {added} was added. Test it below — BrainBuddy reads its card and checks the
-          credential before it will take a hand-off.
-        </p>
-      ) : null}
-    </SectionCard>
+    </Overlay>
   );
 }
 
@@ -267,16 +317,78 @@ function AuthSchemeChoice({
   );
 }
 
-function ConnectionCard({
+function AgentRegistryTable({
+  connections,
+  online,
+  mutationsEnabled,
+  onDeleted
+}: {
+  connections: AgentConnectionResponse[];
+  online: boolean;
+  mutationsEnabled: boolean;
+  onDeleted: (connectionId: string) => void;
+}): React.JSX.Element {
+  return (
+    <div className="min-w-0">
+      <table aria-label="Your agents" className="block w-full border-separate border-spacing-0 md:table">
+        <thead className="sr-only md:not-sr-only md:table-header-group">
+          <tr>
+            {['Agent', 'Version', 'Protocol', 'Interface', 'Status', 'Actions'].map((heading) => (
+              <th
+                key={heading}
+                scope="col"
+                className="border-b border-slate-200 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500 first:pl-0 last:pr-0"
+              >
+                {heading}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="block space-y-3 md:table-row-group md:space-y-0">
+          {connections.map((connection) => (
+            <ConnectionRow
+              key={connection.id}
+              connection={connection}
+              online={online}
+              mutationsEnabled={mutationsEnabled}
+              onDeleted={() => onDeleted(connection.id)}
+            />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function mobileLabel(label: string): React.JSX.Element {
+  return (
+    <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400 md:hidden">
+      {label}
+    </span>
+  );
+}
+
+function safeAgentAddress(address: string): boolean {
+  try {
+    const parsed = new URL(address);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function ConnectionRow({
   connection,
   online,
-  mutationsEnabled
+  mutationsEnabled,
+  onDeleted
 }: {
   connection: AgentConnectionResponse;
   online: boolean;
   mutationsEnabled: boolean;
+  onDeleted: () => void;
 }): React.JSX.Element {
-  const titleId = useId();
+  const editTitleId = useId();
   const queryClient = useQueryClient();
   const keys = useAgentKeys();
   const [error, setError] = useState<string | null>(null);
@@ -288,6 +400,7 @@ function ConnectionCard({
   // opened it, so a keyboard user is never dropped at the top of the page
   // wondering what happened to their decision.
   const disconnectTrigger = useRef<HTMLButtonElement | null>(null);
+  const editTrigger = useRef<HTMLButtonElement | null>(null);
   const closeDisconnect = () => {
     setDisconnectOpen(false);
     disconnectTrigger.current?.focus();
@@ -312,127 +425,141 @@ function ConnectionCard({
   });
 
   const isDisconnected = connection.status === "disconnected";
+  const version = connection.card?.version ?? "Not tested";
+  const protocol = connection.card?.protocol_version ?? "Not tested";
+  const interfaceUrl = connection.card?.interface_url ?? "Not tested";
 
   return (
-    <article
-      aria-labelledby={titleId}
-      className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4"
-    >
-      <div className="flex flex-wrap items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <h3 id={titleId} className="text-sm font-semibold text-slate-900">
-            {connection.name}
-          </h3>
-          <p className="mt-0.5 break-all text-xs text-slate-500">{connection.agent_address}</p>
+    <>
+      <tr aria-label={connection.name}>
+        <td colSpan={6} className="border-b border-slate-100 p-0">
+        <article
+          aria-label={connection.name}
+          className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 p-4 md:grid-cols-[minmax(160px,1.25fr)_minmax(70px,.55fr)_minmax(70px,.55fr)_minmax(150px,1fr)_minmax(150px,1fr)_auto] md:rounded-none md:border-0 md:px-0 md:py-4"
+        >
+        <div className="min-w-0 align-top md:px-3 md:pl-0">
+          {mobileLabel("Agent")}
+          <strong className="mt-0.5 block text-sm font-semibold text-slate-900">{connection.name}</strong>
+          {safeAgentAddress(connection.agent_address) ? (
+            <a
+              className="mt-0.5 block break-all text-xs text-sky-700 underline decoration-sky-200 underline-offset-2 hover:text-sky-900"
+              href={connection.agent_address}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {connection.agent_address}
+            </a>
+          ) : (
+            <span className="mt-0.5 block break-all text-xs text-slate-500">{connection.agent_address}</span>
+          )}
         </div>
-        <StatusBadge connection={connection} />
-      </div>
+        <div className="min-w-0 align-top text-sm text-slate-700 md:px-3">
+          {mobileLabel("Version")}
+          <span className="mt-0.5 block break-words">{version}</span>
+        </div>
+        <div className="min-w-0 align-top text-sm text-slate-700 md:px-3">
+          {mobileLabel("Protocol")}
+          <span className="mt-0.5 block break-words">{protocol}</span>
+        </div>
+        <div className="min-w-0 align-top text-xs text-slate-600 md:max-w-[220px] md:px-3">
+          {mobileLabel("Interface")}
+          <span className="mt-0.5 block break-all font-mono" title={interfaceUrl}>{interfaceUrl}</span>
+        </div>
+        <div className="min-w-0 align-top md:px-3">
+          {mobileLabel("Status")}
+          <div className="mt-1 flex flex-col items-start gap-1 md:mt-0">
+            <StatusBadge connection={connection} />
+            <span className="text-xs text-slate-500">{connectionStatusDetail(connection)}</span>
+          </div>
+          <Feedback error={error} success={success} />
+        </div>
+        <div className="align-top md:px-3 md:pr-0">
+          {mobileLabel("Actions")}
+          <div className="mt-1 flex flex-wrap gap-2 md:mt-0 md:justify-end">
+            {mutationsEnabled ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                aria-label={`Test ${connection.name}`}
+                isLoading={testMutation.isPending}
+                disabled={isDisconnected || !online}
+                onClick={() => testMutation.mutate()}
+              >
+                Test
+              </Button>
+            ) : null}
+            <Button
+              ref={editTrigger}
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-label={`Edit ${connection.name}`}
+              disabled={isDisconnected}
+              onClick={() => setEditing(true)}
+            >
+              Edit
+            </Button>
+            <Button
+              type="button"
+              ref={disconnectTrigger}
+              variant="danger"
+              size="sm"
+              aria-label={`Delete ${connection.name}`}
+              disabled={isDisconnected || !online}
+              onClick={() => setDisconnectOpen(true)}
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
 
-      <p className="text-sm text-slate-600">{connectionStatusDetail(connection)}</p>
-      <p className={`text-xs font-medium ${connection.ready_for_handoff ? "text-ai-fg" : "text-needs-you-fg"}`}>
-        {connection.ready_for_handoff
-          ? "Ready to receive a hand-off."
-          : "Cannot receive a hand-off yet."}
-      </p>
-      {connection.last_test_error_code === "a2a_rate_limited" ? (
-        <p className="text-xs text-needs-you-fg">{rateLimitRetryCopy(connection)}</p>
-      ) : connection.last_test_error_code ===
-        "legacy_invalid_auth_header_requires_reconfiguration" ? (
-        <p className="text-xs text-needs-you-fg">
-          Enter a replacement credential, then test the connection.
-        </p>
-      ) : null}
+        <details className="md:col-span-6 rounded-lg border border-slate-100 bg-surface-sunken px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium text-slate-600">Connection details</summary>
+          <ConnectionDetails connection={connection} className="mt-3" />
+        </details>
 
-      {connection.agent_changed ? <AgentChangedComparison connection={connection} /> : null}
-      {connection.card ? <DiscoveryResult connection={connection} /> : null}
-      {connection.tier_disclosure ? <TierDisclosure connection={connection} /> : null}
-
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-500">
-        <dt className="sr-only">Credential</dt>
-        <dd className="col-span-2">Credential: {authSchemeLabel(connection)}</dd>
-        <dt className="sr-only">Last contact</dt>
-        <dd className="col-span-2">Last contact: {formatTimestamp(connection.last_contact_at)}</dd>
-        <dt className="sr-only">Last tested</dt>
-        <dd className="col-span-2">Last tested: {formatTimestamp(connection.last_tested_at)}</dd>
-        <dt className="sr-only">Staleness threshold</dt>
-        <dd className="col-span-2">
-          Goes stale after {formatDuration(connection.stale_after_seconds)} without contact
-        </dd>
-      </dl>
-
-      <div className="flex flex-col gap-1.5">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-          What this agent can do
-        </p>
-        <ul className="flex flex-col gap-1 text-xs text-slate-600">
-          {capabilityDisclosure(connection.capabilities).map((capability) => (
-            <li key={capability.label} className="flex items-center justify-between gap-3">
-              <span>{capability.label}</span>
-              <span className={capability.supported ? "text-ai-fg" : "text-slate-400"}>
-                {capability.supported ? "Supported" : "Not supported"}
-              </span>
-            </li>
-          ))}
-        </ul>
-        {connection.card === null ? (
-          <p className="text-xs text-slate-500">
-            The agent&apos;s card is only read on a successful test.
-          </p>
-        ) : null}
-      </div>
-
-      <Feedback error={error} success={success} />
-
-      <div className="flex flex-wrap gap-2">
-        {mutationsEnabled ? (
-          <>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={isDisconnected || !online}
-          onClick={() => setEditing((open) => !open)}
-        >
-          Edit connection
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          isLoading={testMutation.isPending}
-          disabled={isDisconnected || !online}
-          onClick={() => testMutation.mutate()}
-        >
-          Test connection
-        </Button>
-          </>
-        ) : null}
-        <Button
-          type="button"
-          ref={disconnectTrigger}
-          variant="danger"
-          size="sm"
-          disabled={isDisconnected || !online}
-          onClick={() => setDisconnectOpen(true)}
-        >
-          Disconnect…
-        </Button>
-      </div>
-
-      {mutationsEnabled && editing && !isDisconnected ? (
-        <UpdateConnectionForm
-          connection={connection}
-          online={online}
-          onDone={(message) => {
+      {editing ? (
+        <Overlay
+          labelledBy={editTitleId}
+          size="wide"
+          onClose={() => {
             setEditing(false);
-            refresh(message);
+            editTrigger.current?.focus();
           }}
-        />
+        >
+          <OverlayHeader
+            titleId={editTitleId}
+            eyebrow="Connected agents"
+            title={`Edit ${connection.name}`}
+            onClose={() => {
+              setEditing(false);
+              editTrigger.current?.focus();
+            }}
+          />
+          <div className="flex flex-col gap-4 overflow-y-auto px-5 py-5 sm:px-6">
+            <ConnectionDetails connection={connection} />
+            {mutationsEnabled ? (
+              <>
+                <UpdateConnectionForm
+                  connection={connection}
+                  online={online}
+                  onDone={(message) => {
+                    setEditing(false);
+                    refresh(message);
+                    editTrigger.current?.focus();
+                  }}
+                />
+                <RotateCredentialForm connection={connection} online={online} onDone={refresh} onFailed={setError} />
+              </>
+            ) : (
+              <p className="rounded-lg border border-needs-you-border bg-needs-you-bg p-3 text-sm text-needs-you-fg">
+                Editing and credential replacement are unavailable while rollout is off.
+              </p>
+            )}
+          </div>
+        </Overlay>
       ) : null}
-
-      {!mutationsEnabled || isDisconnected ? null : (
-        <RotateCredentialForm connection={connection} online={online} onDone={refresh} onFailed={setError} />
-      )}
 
       {disconnectOpen ? (
         <DisconnectDialog
@@ -441,12 +568,59 @@ function ConnectionCard({
           online={online}
           onClose={closeDisconnect}
           onDisconnected={() => {
-            closeDisconnect();
-            refresh("Agent disconnected. Its credential was destroyed.");
+            setDisconnectOpen(false);
+            void queryClient.invalidateQueries({ queryKey: keys.connections() });
+            onDeleted();
           }}
         />
       ) : null}
-    </article>
+        </article>
+        </td>
+      </tr>
+    </>
+  );
+}
+
+function ConnectionDetails({
+  connection,
+  className = ""
+}: {
+  connection: AgentConnectionResponse;
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <div className={`flex flex-col gap-3 ${className}`}>
+      <p className={`text-xs font-medium ${connection.ready_for_handoff ? "text-ai-fg" : "text-needs-you-fg"}`}>
+        {connection.ready_for_handoff ? "Ready to receive a hand-off." : "Cannot receive a hand-off yet."}
+      </p>
+      {connection.last_test_error_code === "a2a_rate_limited" ? (
+        <p className="text-xs text-needs-you-fg">{rateLimitRetryCopy(connection)}</p>
+      ) : connection.last_test_error_code === "legacy_invalid_auth_header_requires_reconfiguration" ? (
+        <p className="text-xs text-needs-you-fg">Enter a replacement credential, then test the connection.</p>
+      ) : null}
+      {connection.agent_changed ? <AgentChangedComparison connection={connection} /> : null}
+      <DiscoveryResult connection={connection} />
+      {connection.tier_disclosure ? <TierDisclosure connection={connection} /> : null}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-500">
+        <dt>Credential</dt><dd>{authSchemeLabel(connection)}</dd>
+        <dt>Last contact</dt><dd>{formatTimestamp(connection.last_contact_at)}</dd>
+        <dt>Last tested</dt><dd>{formatTimestamp(connection.last_tested_at)}</dd>
+        <dt>Staleness threshold</dt><dd>Goes stale after {formatDuration(connection.stale_after_seconds)} without contact</dd>
+      </dl>
+      <section aria-label="Capabilities" className="flex flex-col gap-1.5">
+        <h3 className="text-xs font-semibold text-slate-700">What this agent can do</h3>
+        <ul className="grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
+          {capabilityDisclosure(connection.capabilities).map((capability) => (
+            <li key={capability.label} className="flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2">
+              <span>{capability.label}</span>
+              <span className={capability.supported ? "text-ai-fg" : "text-slate-400"}>
+                {capability.supported ? "Supported" : "Not supported"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
   );
 }
 
@@ -856,8 +1030,8 @@ function DisconnectDialog({
     <Overlay labelledBy={titleId} size="narrow">
       <OverlayHeader
         titleId={titleId}
-        eyebrow="Disconnect"
-        title={`Disconnect ${connection.name}?`}
+        eyebrow="Delete connection"
+        title={`Delete ${connection.name}?`}
       />
       <form
         className="flex flex-col gap-4 px-5 py-5 sm:px-6"
@@ -872,7 +1046,7 @@ function DisconnectDialog({
       >
         <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600">
           <li>
-            Disconnecting does not cancel work this agent has already accepted. If you want it
+            Deleting this connection does not cancel work this agent has already accepted. If you want it
             stopped, request cancellation first and wait for the agent to confirm it.
           </li>
           <li>
@@ -894,12 +1068,12 @@ function DisconnectDialog({
           autoComplete="current-password"
         />
         <Feedback error={error} success={null} />
-        {/* Safe first, destructive last — which is also what makes **Disconnect**
+        {/* Safe first, destructive last — which is also what makes **Delete**
             the focus trap's wrap boundary, so tabbing to the end of the dialog
             never lands anywhere but on the decision the user came to make. */}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" size="md" onClick={onClose}>
-            Keep it connected
+            Cancel
           </Button>
           <Button
             type="submit"
@@ -908,7 +1082,7 @@ function DisconnectDialog({
             isLoading={mutation.isPending}
             disabled={!online}
           >
-            Disconnect
+            Delete
           </Button>
         </div>
       </form>
