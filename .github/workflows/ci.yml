@@ -1034,7 +1034,14 @@ jobs:
 
       - name: Install Chromium browser
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: |
+          if [ -f /etc/apt/sources.list.d/google-chrome.list ]; then
+            sudo mv /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.list.disabled
+          fi
+          if [ -f /etc/apt/sources.list.d/google-chrome.sources ]; then
+            sudo mv /etc/apt/sources.list.d/google-chrome.sources /etc/apt/sources.list.d/google-chrome.sources.disabled
+          fi
+          npx playwright install --with-deps chromium
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
