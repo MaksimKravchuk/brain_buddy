@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core.config import AppConfig
 from app.core.rate_limit import sensitive_action_rate_limiter
+from app.modules.tasks import TaskService
 from app.schemas.account import (
     AccountDeleteRequest,
     AccountDeleteResponse,
@@ -29,6 +30,7 @@ from .dependencies import (
     get_auth_service,
     get_config_dep,
     get_current_user,
+    get_task_service,
 )
 
 router = APIRouter(tags=["account"])
@@ -42,11 +44,17 @@ def _check_sensitive_rate_limit(user: User) -> None:
         )
 
 
-def _account_response(user: User, account_service: AccountService) -> AccountResponse:
+def _account_response(
+    user: User,
+    account_service: AccountService,
+    *,
+    completed_task_count: int,
+) -> AccountResponse:
     return AccountResponse(
         id=user.id,
         email=user.email,
         display_name=user.display_name,
+        completed_task_count=completed_task_count,
         created_at=user.created_at,
         deletion_requested_at=user.deletion_requested_at,
         purge_at=account_service.purge_at_for(user),
@@ -57,9 +65,15 @@ def _account_response(user: User, account_service: AccountService) -> AccountRes
 def get_account(
     current_user: User = Depends(get_current_user),
     account_service: AccountService = Depends(get_account_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> AccountResponse:
     user = account_service.get_account(current_user)
-    return _account_response(user, account_service)
+    completed_task_count = task_service.completed_task_count(owner_id=current_user.id)
+    return _account_response(
+        user,
+        account_service,
+        completed_task_count=completed_task_count,
+    )
 
 
 @router.patch(
@@ -71,11 +85,17 @@ def update_profile(
     payload: ProfileUpdateRequest,
     current_user: User = Depends(get_current_user),
     account_service: AccountService = Depends(get_account_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> AccountResponse:
+    completed_task_count = task_service.completed_task_count(owner_id=current_user.id)
     user = account_service.update_profile(
         current_user, display_name=payload.display_name
     )
-    return _account_response(user, account_service)
+    return _account_response(
+        user,
+        account_service,
+        completed_task_count=completed_task_count,
+    )
 
 
 @router.post(
@@ -87,14 +107,20 @@ def change_email(
     payload: EmailChangeRequest,
     current_user: User = Depends(get_current_user),
     account_service: AccountService = Depends(get_account_service),
+    task_service: TaskService = Depends(get_task_service),
 ) -> AccountResponse:
     _check_sensitive_rate_limit(current_user)
+    completed_task_count = task_service.completed_task_count(owner_id=current_user.id)
     user = account_service.change_email(
         current_user,
         new_email=payload.new_email,
         current_password=payload.current_password,
     )
-    return _account_response(user, account_service)
+    return _account_response(
+        user,
+        account_service,
+        completed_task_count=completed_task_count,
+    )
 
 
 @router.post(

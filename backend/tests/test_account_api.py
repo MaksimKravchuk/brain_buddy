@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.container import Container
 from app.core.rate_limit import SENSITIVE_ACTION_MAX_ATTEMPTS
+from app.exceptions import StorageUnavailableError
 
 from .conftest import (
     SECOND_USER_EMAIL,
@@ -31,6 +32,45 @@ def _second_session(client: TestClient) -> TestClient:
     return other
 
 
+def _create_task(
+    client: TestClient,
+    title: str,
+    *,
+    key: str,
+    state: str = "inbox",
+) -> dict[str, object]:
+    response = client.post(
+        "/api/tasks",
+        headers={"Idempotency-Key": key},
+        json={"title": title, "state": state},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _transition_task(
+    client: TestClient,
+    task: dict[str, object],
+    action: str,
+    *,
+    key: str,
+    to_state: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "action": action,
+        "expected_revision": task["revision"],
+    }
+    if to_state is not None:
+        payload["to_state"] = to_state
+    response = client.post(
+        f"/api/tasks/{task['id']}/transitions",
+        headers={"Idempotency-Key": key},
+        json=payload,
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 # ----------------------------------------------------------------------
 # GET /api/account
 # ----------------------------------------------------------------------
@@ -45,8 +85,94 @@ def test_get_account_returns_profile(api_client: TestClient) -> None:
     assert body["email"] == TEST_USER_EMAIL
     assert body["id"].startswith("user_")
     assert body["display_name"] is None
+    assert body["completed_task_count"] == 0
     assert body["deletion_requested_at"] is None
     assert body["purge_at"] is None
+
+
+def test_015_SC_001_account_count_tracks_complete_and_reopen(
+    api_client: TestClient,
+) -> None:
+    """015-FR-001, 015-FR-007: profile reads reflect current lifecycle state."""
+
+    task = _create_task(
+        api_client,
+        "Count lifecycle",
+        key="015-count-lifecycle",
+        state="next",
+    )
+    assert api_client.get("/api/account").json()["completed_task_count"] == 0
+
+    completed = _transition_task(
+        api_client,
+        task,
+        "complete",
+        key="015-count-complete",
+    )
+    assert api_client.get("/api/account").json()["completed_task_count"] == 1
+
+    _transition_task(
+        api_client,
+        completed,
+        "reopen",
+        key="015-count-reopen",
+        to_state="next",
+    )
+    assert api_client.get("/api/account").json()["completed_task_count"] == 0
+
+
+def test_015_SC_002_account_count_excludes_other_owner_cancelled_and_subtasks(
+    second_api_client: tuple[TestClient, TestClient],
+) -> None:
+    """015-FR-003, 015-FR-004, 015-FR-005, 015-FR-006; 015-SC-002/003."""
+
+    client_a, client_b = second_api_client
+    for index in range(2):
+        task = _create_task(
+            client_a,
+            f"Owned completed {index}",
+            key=f"015-owned-{index}",
+        )
+        _transition_task(
+            client_a,
+            task,
+            "complete",
+            key=f"015-owned-complete-{index}",
+        )
+
+    cancelled = _create_task(client_a, "Cancelled", key="015-cancelled")
+    _transition_task(
+        client_a,
+        cancelled,
+        "cancel",
+        key="015-cancel-transition",
+    )
+
+    parent = _create_task(client_a, "Parent", key="015-parent")
+    subtask_response = client_a.post(
+        f"/api/tasks/{parent['id']}/subtasks",
+        headers={"Idempotency-Key": "015-subtask"},
+        json={"title": "Completed child"},
+    )
+    assert subtask_response.status_code == 201, subtask_response.text
+    subtask = subtask_response.json()
+    completed_subtask = client_a.post(
+        f"/api/tasks/{parent['id']}/subtasks/{subtask['id']}/transitions",
+        headers={"Idempotency-Key": "015-subtask-complete"},
+        json={"action": "complete", "expected_revision": subtask["revision"]},
+    )
+    assert completed_subtask.status_code == 200, completed_subtask.text
+
+    other_task = _create_task(client_b, "Other owner", key="015-other")
+    _transition_task(
+        client_b,
+        other_task,
+        "complete",
+        key="015-other-complete",
+    )
+
+    assert client_a.get("/api/account").json()["completed_task_count"] == 2
+    assert client_b.get("/api/account").json()["completed_task_count"] == 1
 
 
 def test_get_account_requires_auth(anonymous_api_client: TestClient) -> None:
@@ -78,6 +204,45 @@ def test_update_profile_empty_clears_display_name(api_client: TestClient) -> Non
     resp = api_client.patch("/api/account/profile", json={"display_name": "   "})
     assert resp.status_code == 200
     assert resp.json()["display_name"] is None
+
+
+def test_015_FR_012_count_failure_prevents_profile_and_email_writes(
+    api_client: TestClient,
+    monkeypatch,
+) -> None:
+    """015-FR-009, 015-FR-012: task failure happens before account mutation."""
+
+    container = _container(api_client)
+    current = api_client.get("/api/auth/me").json()
+
+    def unavailable(*, owner_id: str) -> int:
+        raise StorageUnavailableError(f"task store unavailable for {owner_id}")
+
+    monkeypatch.setattr(
+        container.task_service,
+        "completed_task_count",
+        unavailable,
+    )
+
+    profile_response = api_client.patch(
+        "/api/account/profile",
+        json={"display_name": "Must not persist"},
+    )
+    assert profile_response.status_code == 503
+    stored = container.user_repo.get_by_id(current["id"])
+    assert stored is not None
+    assert stored.display_name is None
+
+    email_response = api_client.post(
+        "/api/account/email",
+        json={
+            "new_email": "must-not-persist@example.com",
+            "current_password": TEST_USER_PASSWORD,
+        },
+    )
+    assert email_response.status_code == 503
+    assert container.user_repo.get_by_email(TEST_USER_EMAIL) is not None
+    assert container.user_repo.get_by_email("must-not-persist@example.com") is None
 
 
 def test_update_profile_rejects_overlong_name(api_client: TestClient) -> None:

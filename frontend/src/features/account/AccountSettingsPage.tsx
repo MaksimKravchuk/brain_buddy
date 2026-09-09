@@ -14,7 +14,7 @@ import { Button } from "../../components/ui/Button";
 import { Overlay, OverlayHeader } from "../../components/ui/Overlay";
 import { Feedback, Field, SectionCard } from "../../components/ui/SettingsSection";
 import { useAuthStore } from "../../stores/authStore";
-import { getErrorMessage } from "../../utils/error";
+import { getErrorContext, getErrorMessage } from "../../utils/error";
 
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
 
@@ -69,6 +69,9 @@ function ProfileSection(): React.JSX.Element {
   const [success, setSuccess] = useState<string | null>(null);
 
   const displayName = draft ?? account.data?.display_name ?? "";
+  const countError = account.error
+    ? getErrorContext(account.error, "Completed tasks unavailable.")
+    : null;
 
   const mutation = useMutation({
     mutationFn: () => apiClient.updateProfile({ display_name: displayName }),
@@ -94,6 +97,20 @@ function ProfileSection(): React.JSX.Element {
       title="Profile"
       description="The name shown in the app. Leave it empty to go by your email."
     >
+      {countError ? (
+        <p role="alert" className="text-sm text-red-700">
+          Completed tasks unavailable. Refresh the page to try again.
+          {countError.referenceId ? ` (ref: ${countError.referenceId})` : ""}
+        </p>
+      ) : account.data ? (
+        <p className="text-sm text-slate-600">
+          Completed tasks: {account.data.completed_task_count}
+        </p>
+      ) : (
+        <p role="status" aria-live="polite" className="text-sm text-slate-600">
+          Completed tasks: …
+        </p>
+      )}
       <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
         <Field
           label="Display name"

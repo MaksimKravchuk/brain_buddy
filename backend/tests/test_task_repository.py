@@ -71,17 +71,42 @@ def _make_task(
     )
 
 
-def _task_doc(task_id: str = "task_direct") -> TaskDocument:
+def _task_doc(
+    task_id: str = "task_direct",
+    *,
+    owner_id: str = OWNER,
+    state: str = "inbox",
+) -> TaskDocument:
     now = utcnow()
     return TaskDocument(
         id=task_id,
-        owner_id=OWNER,
+        owner_id=owner_id,
         title="Directly built task",
-        state="inbox",
+        state=state,
         order_key=0,
         created_at=now,
         updated_at=now,
     )
+
+
+def test_015_FR_003_repository_counts_only_requested_owner_and_state(
+    repository: TaskRepository,
+) -> None:
+    """015-FR-002, 015-FR-003, 015-FR-006: use indexed owner/state columns."""
+
+    repository.create(_task_doc("task_done_1", state="completed"))
+    repository.create(_task_doc("task_done_2", state="completed"))
+    repository.create(_task_doc("task_open", state="next"))
+    repository.create(
+        _task_doc("task_other_owner", owner_id="user_other", state="completed")
+    )
+
+    assert repository.count_for_owner_by_state(
+        owner_id=OWNER, state="completed"
+    ) == 2
+    assert repository.count_for_owner_by_state(
+        owner_id="user_other", state="completed"
+    ) == 1
 
 
 def _start_brain_dump(

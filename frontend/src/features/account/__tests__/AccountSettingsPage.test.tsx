@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { downloadAccountExport } from "../../../api/account";
+import { accountKeys } from "../../../api/accountHooks";
 import type { AccountResponse } from "../../../api/accountTypes";
 import { ApiError, apiClient } from "../../../api/client";
 import { useAuthStore } from "../../../stores/authStore";
@@ -18,6 +19,7 @@ const account: AccountResponse = {
   id: "user_1",
   email: "primary@example.com",
   display_name: null,
+  completed_task_count: 2,
   created_at: "2026-08-01T00:00:00Z",
   deletion_requested_at: null,
   purge_at: null
@@ -29,9 +31,13 @@ function LoginProbe(): React.JSX.Element {
   return <div>login page {state?.deletionScheduled ?? ""}</div>;
 }
 
-function renderPage() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+function createQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+function renderPage(client = createQueryClient()) {
+  return {
+    ...render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/settings/account"]}>
         <Routes>
@@ -40,7 +46,9 @@ function renderPage() {
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
-  );
+    ),
+    client
+  };
 }
 
 describe("AccountSettingsPage", () => {
@@ -66,6 +74,63 @@ describe("AccountSettingsPage", () => {
     vi.restoreAllMocks();
   });
 
+  it("015-FR-010 shows a polite completed-count placeholder immediately", () => {
+    vi.spyOn(apiClient, "getAccount").mockReturnValue(
+      new Promise<AccountResponse>(() => undefined)
+    );
+
+    renderPage();
+
+    expect(screen.getByRole("status")).toHaveTextContent("Completed tasks: …");
+    expect(screen.getByLabelText(/display name/i)).toBeInTheDocument();
+  });
+
+  it("015-FR-001 shows exact zero and nonzero completed-task counts", async () => {
+    const getAccount = vi.spyOn(apiClient, "getAccount");
+    renderPage();
+
+    expect(await screen.findByText("Completed tasks: 2")).toBeInTheDocument();
+
+    getAccount.mockResolvedValue({ ...account, completed_task_count: 0 });
+    const zeroClient = createQueryClient();
+    renderPage(zeroClient);
+
+    expect(await screen.findByText("Completed tasks: 0")).toBeInTheDocument();
+  });
+
+  it("015-FR-010 shows unavailable copy for an authenticated initial failure", async () => {
+    vi.spyOn(apiClient, "getAccount").mockRejectedValue(
+      new ApiError("Server Error", 500, { message: "Internal storage error." })
+    );
+
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Completed tasks unavailable. Refresh the page to try again."
+    );
+    expect(screen.queryByText(/Completed tasks: \d/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/display name/i)).toBeInTheDocument();
+  });
+
+  it("015-SC-004 hides stale count data after an authenticated failed refetch", async () => {
+    const client = createQueryClient();
+    client.setQueryData(accountKeys.detail(), {
+      ...account,
+      completed_task_count: 9
+    });
+    vi.spyOn(apiClient, "getAccount").mockRejectedValue(
+      new ApiError("Server Error", 503, { message: "Storage unavailable." }, "corr-015")
+    );
+
+    renderPage(client);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Completed tasks unavailable. Refresh the page to try again. (ref: corr-015)"
+    );
+    expect(screen.queryByText("Completed tasks: 9")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/display name/i)).toBeInTheDocument();
+  });
+
   it("shows the current account in the email section", async () => {
     renderPage();
     await waitFor(() =>
@@ -73,8 +138,12 @@ describe("AccountSettingsPage", () => {
     );
   });
 
-  it("saves a trimmed display name and reports success", async () => {
-    const updated = { ...account, display_name: "Maks" };
+  it("015-FR-009 keeps the returned count after a profile save", async () => {
+    const updated = {
+      ...account,
+      display_name: "Maks",
+      completed_task_count: 3
+    };
     const spy = vi.spyOn(apiClient, "updateProfile").mockResolvedValue(updated);
     renderPage();
 
@@ -87,6 +156,7 @@ describe("AccountSettingsPage", () => {
     await waitFor(() => expect(spy).toHaveBeenCalledWith({ display_name: "Maks" }));
     await waitFor(() => expect(screen.getByText(/profile saved/i)).toBeInTheDocument());
     expect(useAuthStore.getState().user?.display_name).toBe("Maks");
+    expect(screen.getByText("Completed tasks: 3")).toBeInTheDocument();
   });
 
   it("surfaces profile-save failures as an alert", async () => {

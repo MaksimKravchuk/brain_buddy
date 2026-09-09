@@ -1,6 +1,14 @@
 import { expect, test } from "../allure.fixtures";
 
-import { mintInvite, password, signupThroughUi, uniqueEmail } from "./gtdHelpers";
+import {
+  apiPost,
+  createTaskViaApi,
+  mintInvite,
+  password,
+  signupThroughUi,
+  type TaskRecord,
+  uniqueEmail
+} from "./gtdHelpers";
 
 const newPassword = "E2E-rotated-password-456";
 
@@ -47,6 +55,44 @@ test.describe("account & data rights acceptance", () => {
       await page.getByLabel("Password").fill(newPassword);
       await page.getByRole("button", { name: "Sign in" }).click();
       await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+    });
+  });
+
+  test("E2E-ACCT-05 015-FR-001 015-FR-007 015-SC-001 completed profile count follows lifecycle", async ({ page }, testInfo) => {
+    const email = uniqueEmail("account-completed-count", testInfo);
+    await signupThroughUi(page, email, await mintInvite());
+    await openAccountSettings(page, email);
+    const profile = sectionByHeading(page, "Profile");
+
+    await test.step("show the authoritative zero state", async () => {
+      await expect(profile.getByText("Completed tasks: 0")).toBeVisible();
+    });
+
+    const task = await createTaskViaApi(page, "Profile count lifecycle", { state: "next" });
+    const completed = await apiPost<TaskRecord>(
+      page,
+      `/api/tasks/${task.id}/transitions`,
+      { action: "complete", expected_revision: task.revision }
+    );
+
+    await test.step("show one after completing a top-level task", async () => {
+      await page.reload();
+      await expect(profile.getByText("Completed tasks: 1")).toBeVisible();
+    });
+
+    await apiPost<TaskRecord>(
+      page,
+      `/api/tasks/${task.id}/transitions`,
+      {
+        action: "reopen",
+        to_state: "next",
+        expected_revision: completed.revision
+      }
+    );
+
+    await test.step("return to zero after reopening the task", async () => {
+      await page.reload();
+      await expect(profile.getByText("Completed tasks: 0")).toBeVisible();
     });
   });
 

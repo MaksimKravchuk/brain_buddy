@@ -771,6 +771,13 @@ class TaskService:
     def get_task(self, task_id: str, *, owner_id: str) -> TaskDocument:
         return self.task_repo.get_for_owner(task_id, owner_id=owner_id)
 
+    def completed_task_count(self, *, owner_id: str) -> int:
+        """Return the owner's current completed top-level task count."""
+
+        return self.task_repo.count_for_owner_by_state(
+            owner_id=owner_id, state="completed"
+        )
+
     def list_tasks(
         self,
         *,
