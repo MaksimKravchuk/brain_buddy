@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, useEffect } from "react";
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,7 +16,11 @@ function Harness({ completed = false, secondCompleted = false, scope = "owner-a"
   view?: string;
 }) {
   const animation = useTaskCompletionAnimation(scope, view);
-  capture = animation.capture;
+  // Expose the hook's API to the test after commit rather than during render
+  // (react-hooks/globals); RTL's act() flushes this effect before render() returns.
+  useEffect(() => {
+    capture = animation.capture;
+  });
   const row = (id: string, done: boolean, top: number) => createElement("article", {
     key: id, "data-task-id": id, "data-task-state": done ? "completed" : "next", "data-top": top
   }, done ? createElement("span", null, "Completed") : createElement("button", { "aria-label": `Complete ${id}` }, "Complete"), createElement("a", { href: `#${id}` }, id));

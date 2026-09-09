@@ -1,5 +1,5 @@
 import { AlertTriangle, Bot, CalendarDays, Check, ChevronDown, Layers, Plus, RotateCcw, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -93,10 +93,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const [canonicalResetKey, setCanonicalResetKey] = useState(0);
   const conflictControllerRef = useRef<ReturnType<typeof getTaskDetailAutosaveController> | null>(null);
   const discardFocusRef = useRef<HTMLElement | null>(null);
+  // Settlement compares against the draft as it is *now*, not as it was when
+  // the request left; synced after commit so a discarded render cannot leak in.
   const newTitleRef = useRef(newTitle);
   const newWaitingForRef = useRef(newWaitingFor);
-  newTitleRef.current = newTitle;
-  newWaitingForRef.current = newWaitingFor;
+  useLayoutEffect(() => {
+    newTitleRef.current = newTitle;
+    newWaitingForRef.current = newWaitingFor;
+  }, [newTitle, newWaitingFor]);
   type CaptureRequest = {
     payload: Parameters<typeof apiClient.createTask>[0] | Parameters<typeof apiClient.smartAddTask>[0];
     key: string;
@@ -148,9 +152,13 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
 
-  useEffect(() => {
+  // Selecting a task reopens a panel the shortcut had hidden, in the same
+  // render as the selection rather than a commit later.
+  const [panelTaskId, setPanelTaskId] = useState(taskId);
+  if (taskId !== panelTaskId) {
+    setPanelTaskId(taskId);
     if (taskId) setPanelOpen(true);
-  }, [taskId]);
+  }
 
   useEffect(() => {
     if (taskId && panelOpen) {
@@ -216,6 +224,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     return invalidateTasks();
   };
   const detailController = detailQuery.data && accountId
+    // eslint-disable-next-line react-hooks/refs -- the controller stores this callback and invokes it when an autosave is accepted, after commit; the completion focus map it reads is never read during render
     ? getTaskDetailAutosaveController(accountId, cacheScope.apiOrigin, detailQuery.data, (accepted) => applyCanonicalTask(accepted, true))
     : null;
   const refetchCanonicalProjections = async (canonical: TaskResponse) => {
@@ -225,6 +234,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     await taskQuery.refetch();
   };
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- `recover()` reads the persisted autosave draft (browser storage) for this controller/task; the conflict and recovery flags are reset before that external read and re-derived from it, so a stale conflict never outlives the task it belonged to.
     setAutosaveConflict(null);
     const available = Boolean(detailController?.recover());
     setRecoveryAvailable(available);
@@ -543,7 +553,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       <section aria-labelledby="task-list-title" className="mx-auto max-w-[760px]">
         <div className="mb-5 flex flex-wrap items-end gap-x-3 gap-y-2">
           <div className="min-w-0">
-            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-title font-semibold text-slate-900 outline-none">
+            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-title font-semibold text-slate-900 outline-hidden">
               {title}
             </h1>
             <p className="m-0 mt-1 text-xs text-slate-500">{meta}</p>
@@ -571,7 +581,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
               <input
                 type="checkbox"
-                className="h-3.5 w-3.5 rounded border-slate-300 text-brand-primary accent-brand-primary"
+                className="h-3.5 w-3.5 rounded-sm border-slate-300 text-brand-primary accent-brand-primary"
                 checked={showCancelled}
                 onChange={(event) => setShowCancelled(event.currentTarget.checked)}
               />
@@ -582,7 +592,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               <span className="relative inline-flex">
                 <select
                   aria-label="Sort tasks"
-                  className="appearance-none bg-transparent pr-5 text-xs font-medium text-slate-700 outline-none"
+                  className="appearance-none bg-transparent pr-5 text-xs font-medium text-slate-700 outline-hidden"
                   value={sort}
                   onChange={(event) => {
                     const next = new URLSearchParams(searchParams);
@@ -1080,7 +1090,7 @@ function TaskCreator({
                 ? `${completionListboxId}-option-${activeCompletionIndex}`
                 : undefined
           }
-          className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+          className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-hidden placeholder:text-slate-400"
           placeholder={placeholder}
           value={newTitle}
           onChange={(event) => {
@@ -1145,7 +1155,7 @@ function TaskCreator({
             <input
               id="new-task-waiting-for"
               aria-label="Waiting for"
-              className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+              className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-hidden placeholder:text-slate-400"
               placeholder="Waiting for who or what?"
               value={newWaitingFor}
               onChange={(event) => onWaitingForChange(event.currentTarget.value)}

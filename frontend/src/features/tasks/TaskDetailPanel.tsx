@@ -1,5 +1,5 @@
 import { ArrowRight, Bot, Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, MoreHorizontal, X } from "lucide-react";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 
@@ -42,10 +42,10 @@ const iconButtonClass =
 const propLabelClass = "text-slate-600";
 
 const propFieldClass =
-  "w-full min-w-0 appearance-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[12.5px] text-slate-800 outline-none transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary";
+  "w-full min-w-0 appearance-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[12.5px] text-slate-800 outline-hidden transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary";
 
 const dashedInputClass =
-  "w-full rounded-lg border-[1.5px] border-dashed border-slate-300 bg-transparent px-2.5 py-1.5 text-[13px] text-slate-900 outline-none transition-colors duration-200 ease-smooth placeholder:text-slate-500 focus:border-solid focus:border-brand-primary";
+  "w-full rounded-lg border-[1.5px] border-dashed border-slate-300 bg-transparent px-2.5 py-1.5 text-[13px] text-slate-900 outline-hidden transition-colors duration-200 ease-smooth placeholder:text-slate-500 focus:border-solid focus:border-brand-primary";
 
 export function TaskDetailPanel({
   active = true,
@@ -93,9 +93,13 @@ export function TaskDetailPanel({
     autosave?.getSnapshot ?? (() => undefined)
   );
 
-  useEffect(() => {
+  // The overflow menu belongs to one task: switching tasks closes it in the
+  // same render rather than a commit later.
+  const [menuTaskId, setMenuTaskId] = useState(task?.id);
+  if (task?.id !== menuTaskId) {
+    setMenuTaskId(task?.id);
     setMenuOpen(false);
-  }, [task?.id]);
+  }
 
   return (
     <aside aria-labelledby="task-detail-title" className={activePanelClass} onKeyDown={(event) => {
@@ -304,9 +308,11 @@ function TaskDetailBody({
   const waitingRef = useRef<HTMLInputElement>(null);
 
   // Acknowledged revisions must not overwrite an active draft. Identity
-  // changes and explicit conflict Discard are the only canonical resets.
-  /* eslint-disable react-hooks/exhaustive-deps */
-  useEffect(() => {
+  // changes and explicit conflict Discard are the only canonical resets, and
+  // they happen during render so the canonical values land in the same commit.
+  const [canonical, setCanonical] = useState({ taskId: task.id, resetKey });
+  if (canonical.taskId !== task.id || canonical.resetKey !== resetKey) {
+    setCanonical({ taskId: task.id, resetKey });
     setWaitingFor(task.waiting_for ?? "");
     setTitle(task.title);
     setDetails(task.details ?? "");
@@ -315,8 +321,7 @@ function TaskDetailBody({
     setProjectId(task.project_id ?? "");
     setPriority(task.priority);
     setTagIds(task.tag_ids);
-  }, [task.id, resetKey]);
-  /* eslint-enable react-hooks/exhaustive-deps */
+  }
 
   const save = (payload: Omit<TaskDetailSavePayload, "expected_revision">) =>
     onSave(task, { ...payload, expected_revision: task.revision });
@@ -359,7 +364,7 @@ function TaskDetailBody({
           value={draft?.title ?? title}
           rows={1}
           ref={autosizeTitle}
-          className={`w-full min-w-0 resize-none overflow-hidden rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold leading-[1.35] outline-none transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary ${
+          className={`w-full min-w-0 resize-none overflow-hidden rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold leading-[1.35] outline-hidden transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary ${
             isTerminal ? "text-slate-500 line-through" : "text-slate-900"
           }`}
           onChange={(event) => { setTitle(event.currentTarget.value); change("title", event.currentTarget.value as never, 500); }}
@@ -659,9 +664,13 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
   };
   const runsQuery = useAgentRuns(task.id, Boolean(user));
 
-  useEffect(() => {
+  // A review is bound to its task, the rollout and an active sheet: when any of
+  // them changes the overlay closes in the same render.
+  const [reviewScope, setReviewScope] = useState({ taskId: task.id, handoffEnabled, active });
+  if (reviewScope.taskId !== task.id || reviewScope.handoffEnabled !== handoffEnabled || reviewScope.active !== active) {
+    setReviewScope({ taskId: task.id, handoffEnabled, active });
     setReviewing(false);
-  }, [task.id, handoffEnabled, active]);
+  }
 
   // Some older deployments/tests may answer a non-list projection while this
   // read is rolling out independently. Fail closed to an empty monitor rather

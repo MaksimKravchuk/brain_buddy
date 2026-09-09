@@ -61,7 +61,18 @@ async function expectCompleted(page: Page, task: TaskRecord, openTitles: string[
   const title = page.getByRole("link", { name: task.title, exact: true });
   await expect(title).toHaveCount(1);
   await expect(title).toHaveCSS("text-decoration-line", "line-through");
-  await expect(title).toHaveCSS("color", "rgb(100, 116, 139)");
+  // Tailwind 4 defines its palette in oklch, so the computed colour is no
+  // longer an rgb() string. Resolve what `text-slate-500` renders as in this
+  // browser instead of hard-coding one serialisation of it.
+  const mutedColor = await page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.className = "text-slate-500";
+    document.body.append(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  await expect(title).toHaveCSS("color", mutedColor);
   const completed = page.getByRole("heading", { name: "Completed", exact: true });
   await expect(completed).toBeVisible();
   const headingBox = await completed.boundingBox();

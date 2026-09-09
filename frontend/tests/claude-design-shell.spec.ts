@@ -222,7 +222,24 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
             const background = style.backgroundColor === "rgba(0, 0, 0, 0)"
               ? getComputedStyle(element.closest(".bg-surface-base")!).backgroundColor
               : style.backgroundColor;
-            const luminance = (color: string) => {
+            // Tailwind 4 emits its palette in oklch and opacity modifiers as
+            // oklab color-mix, so computed colours are no longer rgb(). Painting
+            // the colour onto a 1×1 sRGB canvas and reading the pixel back gives
+            // the luminance math its 0–255 channels again.
+            const canvas = document.createElement("canvas");
+            canvas.width = 1;
+            canvas.height = 1;
+            const context = canvas.getContext("2d", { willReadFrequently: true });
+            const toSrgb = (color: string): string => {
+              if (!context) return color;
+              context.clearRect(0, 0, 1, 1);
+              context.fillStyle = color;
+              context.fillRect(0, 0, 1, 1);
+              const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+              return `rgb(${r}, ${g}, ${b})`;
+            };
+            const luminance = (rawColor: string) => {
+              const color = toSrgb(rawColor);
               const channels = color.match(/[\d.]+/g)!.slice(0, 3).map((value) => {
                 const channel = Number(value) / 255;
                 return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;

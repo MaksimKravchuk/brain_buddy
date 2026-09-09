@@ -39,6 +39,7 @@ function useAgentRunContentExpired(run: AgentRunResponse): boolean {
   useEffect(() => {
     const deadline = Date.parse(expiresAt);
     const effective = serverExpired || (Number.isFinite(deadline) && Date.now() >= deadline);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- expiry is a wall-clock latch: the effect that arms the deadline timer first records a deadline that has already passed (Date.now() is not a render-time value), and it never un-expires.
     setExpired((previous) => previous || effective);
     if (effective || !Number.isFinite(deadline)) {
       return;
@@ -300,7 +301,7 @@ function RunCard({
                       value={answer}
                       onChange={(event) => setAnswer(event.target.value)}
                       rows={2}
-                      className="resize-y rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12.5px] text-slate-900 focus:border-brand-primary focus:outline-none"
+                      className="resize-y rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12.5px] text-slate-900 focus:border-brand-primary focus:outline-hidden"
                     />
                   </label>
                   <div>

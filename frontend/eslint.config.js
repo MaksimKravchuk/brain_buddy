@@ -21,6 +21,9 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // React Compiler diagnostic ("Compilation Skipped: existing memoization could not be
+      // preserved"); this app does not run the compiler, so revisit only if it is adopted.
+      "react-hooks/preserve-manual-memoization": "off",
       "@typescript-eslint/no-invalid-void-type": "off",
       "react-refresh/only-export-components": ["error", { allowConstantExport: true }]
     }

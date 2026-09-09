@@ -95,12 +95,14 @@ export function BrainDumpRoute(): React.JSX.Element {
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastTranscript, setLastTranscript] = useState("");
-  const [savedCount, setSavedCount] = useState<number | null>(null);
   const [consentWithdrawnMidCapture, setConsentWithdrawnMidCapture] = useState(false);
   const [languageMode, setLanguageMode] = useState<LanguageMode>("ru-en");
   const [externalProcessingAllowed, setExternalProcessingAllowed] = useState(false);
   const [vocabularyText, setVocabularyText] = useState("BrainBuddy, production smoke");
   const [isSaving, setIsSaving] = useState(false);
+  // The operation this client started capturing itself (as opposed to one it
+  // only resumed by URL); the recording surface renders from it.
+  const [localCaptureOperationId, setLocalCaptureOperationId] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -109,7 +111,6 @@ export function BrainDumpRoute(): React.JSX.Element {
   const sequenceRef = useRef(0);
   const pendingInterimSequenceRef = useRef<number | null>(null);
   const operationRef = useRef<BrainDumpOperationResponse | null>(null);
-  const localCaptureOperationIdRef = useRef<string | null>(null);
   const proposalMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const finishInFlightRef = useRef<Promise<void> | null>(null);
   const closeOverlay = useCloseBrainDump();
@@ -145,6 +146,9 @@ export function BrainDumpRoute(): React.JSX.Element {
     return map;
   }, [operation]);
   const unresolvedConflictCount = activeProposals.filter((proposal) => (proposal.conflicts ?? []).length > 0).length;
+  // The completion outcome is the operation itself: a commit response and a
+  // resumed completed operation both arrive through `applyOperation`.
+  const savedCount = operation?.status === "completed" ? operation.committed_task_ids.length : null;
 
   const applyOperation = useCallback((next: BrainDumpOperationResponse | null) => {
     const current = operationRef.current;
@@ -160,9 +164,6 @@ export function BrainDumpRoute(): React.JSX.Element {
       return;
     }
     sequenceRef.current = Math.max(sequenceRef.current, ...operation.segments.map((segment) => segment.sequence), 0);
-    if (operation.status === "completed") {
-      setSavedCount(operation.committed_task_ids.length);
-    }
     // A resumed recording (reload of /brain-dump/{id}) has no local recognizer,
     // so nothing would ever fill the live tail beside the microphone although
     // the persisted transcript is right there. While capture is still open,
@@ -171,6 +172,7 @@ export function BrainDumpRoute(): React.JSX.Element {
     if (!recognitionRef.current && (operation.status === "recording" || operation.status === "paused")) {
       const latest = latestSegmentText(operation.segments);
       if (latest) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- the tail is seeded from the server only while no local recognizer owns it; that recognizer is a Web Speech handle held in a ref, which can only be consulted from an effect.
         setLastTranscript((current) => current || latest);
       }
     }
@@ -425,7 +427,7 @@ export function BrainDumpRoute(): React.JSX.Element {
           vocabulary
         }
       }, idempotencyKey("start")));
-      localCaptureOperationIdRef.current = started.id;
+      setLocalCaptureOperationId(started.id);
       applyOperation(started);
       if (params.operationId === "new") {
         navigateWithinBrainDump(`/brain-dump/${started.id}`);
@@ -561,13 +563,13 @@ export function BrainDumpRoute(): React.JSX.Element {
         mediaRecorderRef.current.resume();
       }
       if (action === "cancel") {
-        localCaptureOperationIdRef.current = null;
         // React Router applies the navigation as a transition. Left on their
         // own, the resets here would commit first, with the URL still naming
         // the cancelled operation: the loading branch would flash and the
         // resume effect would re-fetch an operation there is nothing left to
         // resume. Sharing the transition commits the reset and the URL together.
         startTransition(() => {
+          setLocalCaptureOperationId(null);
           applyOperation(null);
           setConsentWithdrawnMidCapture(false);
           setLastTranscript("");
@@ -575,7 +577,6 @@ export function BrainDumpRoute(): React.JSX.Element {
         });
       }
       if (action === "commit") {
-        setSavedCount(updated.committed_task_ids.length);
         void queryClient.invalidateQueries({ queryKey: taskKeys.all });
       }
     } catch (caught) {
@@ -743,7 +744,7 @@ export function BrainDumpRoute(): React.JSX.Element {
       isStarting={isStarting}
       languageMode={languageMode}
       lastTranscript={lastTranscript}
-      locallyStartedOperationId={localCaptureOperationIdRef.current}
+      locallyStartedOperationId={localCaptureOperationId}
       operation={operation}
       providersReady={providersReady}
       providersFailed={providersFailed}
@@ -1040,7 +1041,7 @@ function RecordingSurface({
             <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-soft">
               <label className="grid gap-1 text-slate-700">
                 <span className="text-xs font-semibold">Speech languages</span>
-                <select aria-label="Speech languages" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition-colors duration-200 ease-smooth focus:border-brand-primary" value={languageMode} onChange={(event) => onLanguageModeChange(event.target.value as LanguageMode)}>
+                <select aria-label="Speech languages" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-hidden transition-colors duration-200 ease-smooth focus:border-brand-primary" value={languageMode} onChange={(event) => onLanguageModeChange(event.target.value as LanguageMode)}>
                   <option value="ru-en">Russian + English</option>
                   <option value="ru">Russian</option>
                   <option value="en">English</option>
@@ -1048,7 +1049,7 @@ function RecordingSurface({
               </label>
               <label className="grid gap-1 text-slate-700">
                 <span className="text-xs font-semibold">Key terms</span>
-                <input aria-label="Voice key terms" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition-colors duration-200 ease-smooth focus:border-brand-primary" value={vocabularyText} onChange={(event) => onVocabularyTextChange(event.target.value)} />
+                <input aria-label="Voice key terms" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-hidden transition-colors duration-200 ease-smooth focus:border-brand-primary" value={vocabularyText} onChange={(event) => onVocabularyTextChange(event.target.value)} />
               </label>
               {providersReady ? (
                 <label className="flex items-start gap-2 text-xs text-slate-600">
@@ -1104,7 +1105,7 @@ function DumpWave({ active }: { active: boolean }): React.JSX.Element {
       {waveBarHeights.map((height, index) => (
         <span
           key={index}
-          className={`w-1 rounded-sm bg-brand-primary ${active ? "motion-safe:animate-wave-bar" : "opacity-40"}`}
+          className={`w-1 rounded-xs bg-brand-primary ${active ? "motion-safe:animate-wave-bar" : "opacity-40"}`}
           style={{ height: Math.round(height * 26), animationDelay: `${(index % 5) * 0.15}s` }}
         />
       ))}
@@ -1448,7 +1449,7 @@ function ReviewSurface({
                 <span className="mt-1.5 text-xs font-semibold text-slate-500">#{proposal.ordinal}</span>
                 <div className="min-w-0 flex-1">
                   <label className="sr-only" htmlFor={`proposal-title-${proposal.id}`}>Task title #{proposal.ordinal}</label>
-                  <input key={`${proposal.id}-${proposal.revision}`} id={`proposal-title-${proposal.id}`} defaultValue={proposal.title} onBlur={(event) => void onUpdateTitle(proposal, event.currentTarget.value)} className="-ml-1.5 w-full rounded-md border-[1.5px] border-transparent bg-transparent px-1.5 py-0.5 text-sm font-medium text-slate-900 outline-none transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary focus:bg-white" />
+                  <input key={`${proposal.id}-${proposal.revision}`} id={`proposal-title-${proposal.id}`} defaultValue={proposal.title} onBlur={(event) => void onUpdateTitle(proposal, event.currentTarget.value)} className="-ml-1.5 w-full rounded-md border-[1.5px] border-transparent bg-transparent px-1.5 py-0.5 text-sm font-medium text-slate-900 outline-hidden transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary focus:bg-white" />
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700">Inbox</span>
                     <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-700">{statusLabels[proposal.status]}</span>

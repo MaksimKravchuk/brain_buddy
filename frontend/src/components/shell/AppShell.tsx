@@ -113,15 +113,17 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     };
   }, []);
 
-  useEffect(() => {
+  // Any route change dismisses the weekly-review placeholder; a path change
+  // also closes the drawer. Browser history can select a task while navigation
+  // is open, and that drawer must not stay active behind the sheet — typing a
+  // search (same path, new query) keeps it open. Adjusted during render so the
+  // dismissal lands in the same commit as the new location.
+  const [renderedLocation, setRenderedLocation] = useState({ pathname: location.pathname, search: location.search });
+  if (renderedLocation.pathname !== location.pathname || renderedLocation.search !== location.search) {
+    setRenderedLocation({ pathname: location.pathname, search: location.search });
     setWeeklyReviewOpen(false);
-  }, [location.pathname, location.search]);
-
-  useEffect(() => {
-    // Browser history can select a task while navigation is open. Do not leave
-    // that drawer active behind the sheet; typing a search keeps it open.
-    setIsDrawerOpen(false);
-  }, [location.pathname]);
+    if (renderedLocation.pathname !== location.pathname) setIsDrawerOpen(false);
+  }
 
   const sidebarProps: SidebarProps = {
     ...props,
@@ -149,7 +151,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         {toast ? (
           <div
             role="status"
-            className="fixed bottom-6 left-1/2 z-[200] -translate-x-1/2 whitespace-nowrap rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-[13px] text-slate-700 shadow-floating backdrop-blur motion-safe:animate-fade-in-up"
+            className="fixed bottom-6 left-1/2 z-[200] -translate-x-1/2 whitespace-nowrap rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-[13px] text-slate-700 shadow-floating backdrop-blur-sm motion-safe:animate-fade-in-up"
           >
             {toast}
           </div>
@@ -394,7 +396,7 @@ function TopBar({ onOpenDrawer, navigationTriggerRef }: {
 
   return (
     <header
-      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
+      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
       style={{ height: "56px" }}
     >
       <button

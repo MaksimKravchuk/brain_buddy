@@ -258,6 +258,7 @@ function FlagRow({
         .find((node) => Boolean(node));
       focusFirstAvailable([next ?? null, addInputRef.current, countRef.current]);
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a focus request is a one-shot event: it needs the committed DOM above, and consuming it here is what stops a later `flag` refresh from replaying it.
     setFocusRequest(null);
   }, [focusRequest, flag]);
 

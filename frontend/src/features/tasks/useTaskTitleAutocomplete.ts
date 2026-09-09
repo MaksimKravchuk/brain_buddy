@@ -46,6 +46,7 @@ export function useTaskTitleAutocomplete({ enabled, draft, projectId, smartAddAc
   useEffect(() => {
     const controller = new AbortController();
     sequence.current += 1;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- discovery effect: toggling the flag clears the previous request's state ahead of the provider fetch it starts (or of clearing provider and consent when disabled); the fetch callbacks own the rest.
     setCandidates([]);
     setRequestId(null);
     setError(null);
@@ -73,12 +74,17 @@ export function useTaskTitleAutocomplete({ enabled, draft, projectId, smartAddAc
     return () => controller.abort();
   }, [enabled]);
 
+  // A dismissal is pinned to the draft it silenced, and the first change to
+  // that draft lifts it. Adjusted during render so the request effect below
+  // already sees the lifted state instead of running a second pass for it.
+  const snapshot = `${draft}\u0000${projectId ?? ""}`;
+  if (dismissedSnapshot !== null && dismissedSnapshot !== snapshot) {
+    setDismissedSnapshot(null);
+  }
+
   useEffect(() => {
     const current = ++sequence.current;
-    const snapshot = `${draft}\u0000${projectId ?? ""}`;
-    if (dismissedSnapshot !== null && dismissedSnapshot !== snapshot) {
-      setDismissedSnapshot(null);
-    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- request effect: every input change clears the previous request's results ahead of the debounced fetch it schedules, whose callbacks then own the state.
     setCandidates([]);
     setRequestId(null);
     setLoading(false);
@@ -124,7 +130,7 @@ export function useTaskTitleAutocomplete({ enabled, draft, projectId, smartAddAc
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [consent, dismissedSnapshot, draft, enabled, projectId, provider, smartAddActive]);
+  }, [consent, dismissedSnapshot, draft, enabled, projectId, provider, smartAddActive, snapshot]);
 
   const setConsent = useCallback((allowed: boolean) => {
     setConsentState(allowed);
