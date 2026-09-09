@@ -389,6 +389,7 @@ function ConnectionRow({
   onDeleted: () => void;
 }): React.JSX.Element {
   const editTitleId = useId();
+  const testDisclosureId = useId();
   const queryClient = useQueryClient();
   const keys = useAgentKeys();
   const [error, setError] = useState<string | null>(null);
@@ -475,6 +476,11 @@ function ConnectionRow({
         </div>
         <div className="align-top md:px-3 md:pr-0">
           {mobileLabel("Actions")}
+          <p id={testDisclosureId} className="mb-2 text-xs text-slate-500">
+            Test makes authenticated, external, read-only A2A calls to the configured agent. It calls
+            ListTasks first. Only if that method is unsupported/MethodNotFound, it calls
+            GetTask("brainbuddy-probe"). It does not send Task content or start agent work.
+          </p>
           <div className="mt-1 flex flex-wrap gap-2 md:mt-0 md:justify-end">
             {mutationsEnabled ? (
               <Button
@@ -484,6 +490,7 @@ function ConnectionRow({
                 aria-label={`Test ${connection.name}`}
                 isLoading={testMutation.isPending}
                 disabled={isDisconnected || !online}
+                aria-describedby={testDisclosureId}
                 onClick={() => testMutation.mutate()}
               >
                 Test

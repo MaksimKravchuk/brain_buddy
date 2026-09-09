@@ -70,13 +70,14 @@ function signIn(flagOn: boolean): void {
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const rendered = render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/settings/agents"]}>
         <AgentSettingsGate />
       </MemoryRouter>
     </QueryClientProvider>
   );
+  return { ...rendered, client };
 }
 
 function cardFor(name: string): HTMLElement {
@@ -205,6 +206,40 @@ describe("AgentSettingsPage", () => {
     });
     await Promise.resolve();
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("discloses the read-only A2A test sequence and runs it once only after an explicit click", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([
+      connection({ status: "untested", ready_for_handoff: false })
+    ]);
+    const test = vi.spyOn(apiClient, "testAgentConnection").mockResolvedValue(ready);
+    const dispatch = vi.spyOn(apiClient, "confirmAgentHandoff");
+    const page = renderPage();
+
+    const article = await screen.findByRole("article", { name: "Hermes" });
+    expect(within(article).getByText(/authenticated, external, read-only A2A calls/i)).toBeInTheDocument();
+    expect(within(article).getByText(/ListTasks first/i)).toBeInTheDocument();
+    expect(within(article).getByText(/GetTask\("brainbuddy-probe"\)/i)).toBeInTheDocument();
+    expect(within(article).getByText(/does not send Task content or start agent work/i)).toBeInTheDocument();
+    const button = within(article).getByRole("button", { name: "Test Hermes" });
+    const disclosure = within(article).getByText(/authenticated, external, read-only A2A calls/i);
+    expect(button).toHaveAttribute("aria-describedby", disclosure.id);
+    expect(test).not.toHaveBeenCalled();
+
+    page.unmount();
+    const remountedPage = renderPage();
+    const remountedArticle = await screen.findByRole("article", { name: "Hermes" });
+    expect(remountedArticle).toBeInTheDocument();
+    expect(test).not.toHaveBeenCalled();
+
+    await remountedPage.client.invalidateQueries({ queryKey: ["agents"] });
+    await waitFor(() => expect(apiClient.listAgentConnections).toHaveBeenCalledTimes(3));
+    expect(test).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+
+    await userEvent.click(within(remountedArticle).getByRole("button", { name: "Test Hermes" }));
+    await waitFor(() => expect(test).toHaveBeenCalledTimes(1));
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("keeps rollout-off connection reads and safe disconnect while hiding blocked mutations", async () => {
