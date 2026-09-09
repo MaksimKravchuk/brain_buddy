@@ -383,6 +383,12 @@ function ConnectionCard({
 
       <Feedback error={error} success={success} />
 
+      <p id={`${titleId}-test-disclosure`} className="text-xs text-slate-500">
+        Test makes authenticated, external, read-only A2A calls to the configured agent. It calls
+        ListTasks first. Only if that method is unsupported/MethodNotFound, it calls
+        GetTask("brainbuddy-probe"). It does not send Task content or start agent work.
+      </p>
+
       <div className="flex flex-wrap gap-2">
         {mutationsEnabled ? (
           <>
@@ -401,6 +407,7 @@ function ConnectionCard({
           size="sm"
           isLoading={testMutation.isPending}
           disabled={isDisconnected || !online}
+          aria-describedby={`${titleId}-test-disclosure`}
           onClick={() => testMutation.mutate()}
         >
           Test connection
