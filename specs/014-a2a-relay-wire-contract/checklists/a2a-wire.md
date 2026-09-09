@@ -95,6 +95,7 @@ Focus: (1) wire contract, identifiers and observation honesty; (2) privacy, secu
 <!-- BrainBuddy pre-freeze receipt contract: checklist. Preserve this section. -->
 
 - [x] CHK052 Writer receipt validates with `scripts/validate_pre_freeze_receipt.py` against the full lowercase implementation SHA
+- [x] CHK053 The 2026-09-09 desktop registry amendment preserves every accepted D-01 disclosure and recovery path, defines semantic table and narrow layouts, distinguishes the linked saved address from inert card metadata, keeps disconnect available while rollout is OFF, and specifies Add/Edit modal focus, secret-clearing and ambiguous-retry behavior. [Completeness, Spec §FR-018, §SC-011, AC-038]
 
 ## Notes
 

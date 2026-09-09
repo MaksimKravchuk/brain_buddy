@@ -15,6 +15,8 @@ import { Feedback, Field } from "../../components/ui/SettingsSection";
 import { getErrorMessage } from "../../utils/error";
 import { connectionStatusDetail, connectionStatusLabel } from "./agentCopy";
 
+const ADDITIONAL_INSTRUCTIONS_LABEL = "Additional instructions";
+
 /** The server's own machine-readable refusal reason, or nothing. */
 function refusalReason(caught: unknown): string | null {
   if (!(caught instanceof ApiError) || typeof caught.payload !== "object" || caught.payload === null) {
@@ -102,8 +104,8 @@ export function AgentHandoffOverlay({
   const [connectionId, setConnectionId] = useState<string | null>(seed?.connectionId ?? null);
   const [includeDetails, setIncludeDetails] = useState(seed?.includeDetails ?? true);
   const [contextItems, setContextItems] = useState<AgentContextItem[]>(seed?.supportingItems ?? []);
-  const [contextLabel, setContextLabel] = useState("");
   const [contextBody, setContextBody] = useState("");
+  const [payloadDetailsOpen, setPayloadDetailsOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [reReviewNotice, setReReviewNotice] = useState<string | null>(null);
@@ -215,10 +217,7 @@ export function AgentHandoffOverlay({
         onClose={dismiss}
       />
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-5 sm:px-6">
-        <fieldset className="flex flex-col gap-2">
-          <legend className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-            Choose an agent
-          </legend>
+        <div className="flex flex-col gap-2">
           {connectionsQuery.isError ? (
             <Feedback error={getErrorMessage(connectionsQuery.error)} success={null} />
           ) : connectionsQuery.isPending ? (
@@ -231,50 +230,57 @@ export function AgentHandoffOverlay({
               No agents connected yet. Add one under Connected agents, then test it.
             </p>
           ) : (
-            <>
-              {/* Not the same claim as "no agents connected": the account has
-                  agents, and the user needs the reason each one is out. */}
+            <div className="flex flex-col gap-2">
+              <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+                Agent
+                <select
+                  aria-label="Agent"
+                  value={connectionId ?? ""}
+                  onChange={(event) => {
+                    setError(null);
+                    setReReviewNotice(null);
+                    setAcknowledged(false);
+                    setConnectionId(event.currentTarget.value || null);
+                  }}
+                  className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-soft outline-none transition-colors focus:border-brand-primary"
+                >
+                  <option value="">Choose an agent…</option>
+                  {connections.map((connection) => (
+                    <option
+                      key={connection.id}
+                      value={connection.id}
+                      disabled={!connection.ready_for_handoff}
+                    >
+                      {connection.name} — {statusUnknown(connection) ? "Status unknown" : connectionStatusLabel(connection)}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {noneEligible ? (
                 <p className="text-sm font-medium text-slate-900">
                   None of your agents can take this hand-off
                 </p>
               ) : null}
-              {connections.map((connection) => (
-                <div key={connection.id} className="rounded-xl border border-slate-200 p-3">
-                  <label className="flex items-center gap-2 text-sm text-slate-800">
-                    <input
-                      type="radio"
-                      name="agent-connection"
-                      value={connection.id}
-                      checked={connectionId === connection.id}
-                      disabled={!connection.ready_for_handoff}
-                      onChange={() => {
-                        setError(null);
-                        setReReviewNotice(null);
-                        // The tick is consent for one specific agent. Carrying
-                        // it across a change of selection would arm Send for an
-                        // agent the user never acknowledged (AC-026).
-                        setAcknowledged(false);
-                        setConnectionId(connection.id);
-                      }}
-                    />
-                    <span className="font-medium">{connection.name}</span>
-                    <span className="text-xs text-slate-500">
-                      {statusUnknown(connection) ? "Status unknown" : connectionStatusLabel(connection)}
-                    </span>
-                  </label>
-                  {connection.ready_for_handoff ? null : (
-                    <p className="mt-1 pl-6 text-xs text-slate-500">
-                      {statusUnknown(connection)
-                        ? "BrainBuddy could not refresh this connection just now, so it is not offered. Test it from Connected agents."
-                        : connectionStatusDetail(connection)}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </>
+              {connections.some((connection) => !connection.ready_for_handoff) ? (
+                <details className="text-xs text-slate-500">
+                  <summary className="cursor-pointer font-medium text-slate-600">
+                    Why some agents are unavailable
+                  </summary>
+                  <ul className="mt-2 space-y-2 border-l border-slate-200 pl-3">
+                    {connections.filter((connection) => !connection.ready_for_handoff).map((connection) => (
+                      <li key={connection.id}>
+                        <span className="font-medium text-slate-700">{connection.name}: </span>
+                        {statusUnknown(connection)
+                          ? "BrainBuddy could not refresh this connection just now, so it is not offered. Test it from Connected agents."
+                          : connectionStatusDetail(connection)}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </div>
           )}
-        </fieldset>
+        </div>
 
         {previewQuery.isError ? <Feedback error={getErrorMessage(previewQuery.error)} success={null} /> : null}
         {previewQuery.isFetching && !manifest ? (
@@ -290,17 +296,15 @@ export function AgentHandoffOverlay({
 
         {manifest ? (
           <>
-            <section aria-labelledby={reviewId} className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4">
-              <h3 id={reviewId} className="text-sm font-semibold text-slate-900">
+            <section aria-labelledby={reviewId} className="flex flex-col gap-4 rounded-xl border border-slate-200 p-4 sm:p-5">
+              <div>
+                <h3 id={reviewId} className="text-sm font-semibold text-slate-900">
                 What will be sent
-              </h3>
+                </h3>
+                <p className="mt-1 text-base font-medium text-slate-900">{manifest.title}</p>
+              </div>
 
-              <ReviewRow label="Task title">
-                <p className="text-sm text-slate-800">{manifest.title}</p>
-              </ReviewRow>
-
-              <div className="flex flex-col gap-1">
-                <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
                     checked={includeDetails}
@@ -310,176 +314,140 @@ export function AgentHandoffOverlay({
                     }}
                   />
                   Include task details
-                </label>
-                {manifest.details ? (
-                  <p className="whitespace-pre-wrap text-sm text-slate-800">{manifest.details}</p>
-                ) : (
-                  <p className="text-sm text-slate-500">No task details will be sent.</p>
-                )}
-              </div>
-
-              <ReviewRow label="Supporting items">
-                {contextFromManifest.length === 0 ? (
-                  <p className="text-sm text-slate-500">No supporting items will be sent.</p>
-                ) : (
-                  <ul className="flex flex-col gap-2">
-                    {contextFromManifest.map((item, index) => (
-                      <li
-                        key={`${item.label}-${index}`}
-                        className="flex items-start gap-2 rounded-lg border border-slate-200 p-2"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-slate-600">{item.label}</p>
-                          <p className="whitespace-pre-wrap text-sm text-slate-800">{item.body}</p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          aria-label={`Remove ${item.label}`}
-                          onClick={() =>
-                            replaceContext(contextItems.filter((_candidate, candidateIndex) => candidateIndex !== index))
-                          }
-                        >
-                          Remove
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </ReviewRow>
-
-              <ReviewRow label="Task ID">
-                <p className="font-mono text-xs text-slate-700">{manifest.task_id}</p>
-              </ReviewRow>
-              <ReviewRow label="Run ID">
-                <p className="font-mono text-xs text-slate-700">{manifest.run_id}</p>
-              </ReviewRow>
-              <ReviewRow label="Correlation ID">
-                <p className="font-mono text-xs text-slate-700">{manifest.correlation_id}</p>
-              </ReviewRow>
-              <ReviewRow label="Destination">
-                {/* Card-sourced, so inert: shown so the owner can see where
-                    their content would go, which is exactly why it must not be
-                    something a stray click can follow (AC-031). */}
-                <p className="break-all font-mono text-xs text-slate-700">
-                  {manifest.destination_interface}
-                </p>
-              </ReviewRow>
-              {manifest.push_callback?.registered ? (
-                <ReviewRow label="Push callback">
-                  <p className="break-all font-mono text-xs text-slate-700">
-                    {manifest.push_callback.url_preview}
-                  </p>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {manifest.push_callback.disclosure}
-                  </p>
-                </ReviewRow>
-              ) : null}
-            </section>
-
-            <section
-              aria-label="Guarantee"
-              className={`flex flex-col gap-2 rounded-xl border px-3 py-2 text-sm ${
-                manifest.guarantee_tier === "guaranteed"
-                  ? "border-ai-border bg-ai-bg text-ai-fg"
-                  : "border-needs-you-border bg-needs-you-bg text-needs-you-fg"
-              }`}
-            >
-              <p>{manifest.tier_disclosure}</p>
-              {manifest.guarantee_tier === "best_effort" ? (
-                <p>
-                  <a
-                    className="underline"
-                    href={manifest.tier_disclosure_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Read the single-start extension specification
-                  </a>{" "}
-                  <span className="text-slate-500">
-                    Opens the published specification outside BrainBuddy.
-                  </span>
-                </p>
-              ) : null}
-              {manifest.acknowledgement_required ? (
-                <>
-                  <label className="flex items-start gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={acknowledged}
-                      onChange={(event) => setAcknowledged(event.currentTarget.checked)}
-                    />
-                    <span>
-                      I understand that a duplicate task is possible with this agent
-                      <span className="block text-xs text-slate-500">
-                        Asked once, on your first hand-off to this agent.
-                      </span>
-                    </span>
-                  </label>
-                  {acknowledged ? (
-                    <p className="text-xs text-slate-500">
-                      Acknowledged. BrainBuddy will not ask again for this agent.
-                    </p>
-                  ) : null}
-                </>
-              ) : manifest.guarantee_tier === "best_effort" ? (
-                <p className="text-xs text-slate-500">
-                  You acknowledged the duplicate risk for this agent on your first hand-off, so
-                  BrainBuddy does not ask again.
-                </p>
-              ) : null}
-            </section>
-
-            <p
-              aria-label="Cancellation"
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600"
-            >
-              {manifest.cancellation_disclosure}
-            </p>
-
-            <p className="rounded-xl border border-needs-you-border bg-needs-you-bg px-3 py-2 text-sm text-needs-you-fg">
-              {manifest.external_copy_notice}
-            </p>
+              </label>
 
             <form
-              className="flex flex-col gap-2 rounded-xl border border-slate-200 p-3"
+              className="flex flex-col gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!contextLabel.trim() || !contextBody.trim()) {
+                if (!contextBody.trim()) {
                   return;
                 }
                 replaceContext([
                   ...contextItems,
-                  { label: contextLabel.trim(), body: contextBody.trim() }
+                  { label: ADDITIONAL_INSTRUCTIONS_LABEL, body: contextBody.trim() }
                 ]);
-                setContextLabel("");
                 setContextBody("");
+                setPayloadDetailsOpen(true);
               }}
             >
-              <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-                Add context to send
-              </p>
-              <Field
-                label="Context label"
-                name="context_label"
-                type="text"
-                value={contextLabel}
-                onChange={setContextLabel}
-              />
-              <Field
-                label="Context body"
-                name="context_body"
-                type="text"
-                value={contextBody}
-                onChange={setContextBody}
-              />
+              <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+                Additional instructions (optional)
+                <textarea
+                  name="additional_instructions"
+                  rows={3}
+                  value={contextBody}
+                  onChange={(event) => setContextBody(event.currentTarget.value)}
+                  placeholder="Add a constraint, preference, or useful background"
+                  className="resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 shadow-soft outline-none transition-colors placeholder:text-slate-400 focus:border-brand-primary"
+                />
+              </label>
               <div>
                 <Button type="submit" variant="secondary" size="sm">
-                  Add context
+                  Add instructions
                 </Button>
               </div>
             </form>
+
+              <details
+                open={payloadDetailsOpen}
+                onToggle={(event) => setPayloadDetailsOpen(event.currentTarget.open)}
+                className="group rounded-lg border border-slate-200 bg-surface-sunken px-3 py-2"
+              >
+                <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                  Task details and supporting items
+                </summary>
+                <div className="mt-3 flex flex-col gap-3 border-t border-slate-200 pt-3">
+                  <ReviewRow label="Task details">
+                    {manifest.details ? (
+                      <p className="whitespace-pre-wrap text-sm text-slate-800">{manifest.details}</p>
+                    ) : (
+                      <p className="text-sm text-slate-500">No task details will be sent.</p>
+                    )}
+                  </ReviewRow>
+                  <ReviewRow label="Supporting items">
+                    {contextFromManifest.length === 0 ? (
+                      <p className="text-sm text-slate-500">No supporting items will be sent.</p>
+                    ) : (
+                      <ul className="flex flex-col gap-2">
+                        {contextFromManifest.map((item, index) => (
+                          <li key={`${item.label}-${index}`} className="flex items-start gap-2 rounded-lg bg-white p-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium text-slate-600">{item.label}</p>
+                              <p className="whitespace-pre-wrap text-sm text-slate-800">{item.body}</p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Remove ${item.label}`}
+                              onClick={() => replaceContext(contextItems.filter((_candidate, candidateIndex) => candidateIndex !== index))}
+                            >
+                              Remove
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </ReviewRow>
+                </div>
+              </details>
+
+              <details className="group rounded-lg border border-slate-200 px-3 py-2">
+                <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                  Delivery and privacy details
+                </summary>
+                <div className="mt-3 flex flex-col gap-3 border-t border-slate-100 pt-3">
+                  <ReviewRow label="Task ID"><p className="font-mono text-xs text-slate-700">{manifest.task_id}</p></ReviewRow>
+                  <ReviewRow label="Run ID"><p className="font-mono text-xs text-slate-700">{manifest.run_id}</p></ReviewRow>
+                  <ReviewRow label="Correlation ID"><p className="font-mono text-xs text-slate-700">{manifest.correlation_id}</p></ReviewRow>
+                  <ReviewRow label="Destination"><p className="break-all font-mono text-xs text-slate-700">{manifest.destination_interface}</p></ReviewRow>
+                  {manifest.push_callback?.registered ? (
+                    <ReviewRow label="Push callback">
+                      <p className="break-all font-mono text-xs text-slate-700">{manifest.push_callback.url_preview}</p>
+                      <p className="mt-1 text-sm text-slate-600">{manifest.push_callback.disclosure}</p>
+                    </ReviewRow>
+                  ) : null}
+                  <section aria-label="Guarantee" className="flex flex-col gap-2 text-sm text-slate-600">
+                    <p>{manifest.tier_disclosure}</p>
+                    {manifest.guarantee_tier === "best_effort" ? (
+                      <p>
+                        <a className="underline" href={manifest.tier_disclosure_url} target="_blank" rel="noopener noreferrer">
+                          Read the single-start extension specification
+                        </a>{" "}
+                        <span className="text-slate-500">Opens the published specification outside BrainBuddy.</span>
+                      </p>
+                    ) : null}
+                    {manifest.guarantee_tier === "best_effort" && !manifest.acknowledgement_required ? (
+                      <p className="text-xs text-slate-500">
+                        You acknowledged the duplicate risk for this agent on your first hand-off, so BrainBuddy does not ask again.
+                      </p>
+                    ) : null}
+                  </section>
+                  <p aria-label="Cancellation" className="text-sm text-slate-600">{manifest.cancellation_disclosure}</p>
+                  <p className="text-sm text-slate-600">{manifest.external_copy_notice}</p>
+                </div>
+              </details>
+            </section>
+
+            {manifest.acknowledgement_required ? (
+              <section className="rounded-xl border border-needs-you-border bg-needs-you-bg p-3 text-needs-you-fg">
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={acknowledged}
+                    onChange={(event) => setAcknowledged(event.currentTarget.checked)}
+                  />
+                  <span>
+                    I understand that a duplicate task is possible with this agent
+                    <span className="block text-xs text-slate-500">Asked once, on your first hand-off to this agent.</span>
+                  </span>
+                </label>
+                {acknowledged ? (
+                  <p className="mt-2 text-xs text-slate-500">Acknowledged. BrainBuddy will not ask again for this agent.</p>
+                ) : null}
+              </section>
+            ) : null}
 
             {manifest.reauthentication_required ? (
               <Field
