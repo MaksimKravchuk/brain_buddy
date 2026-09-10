@@ -133,7 +133,7 @@ def _seed_relay_export_data(
             result_text=f"{marker}-run-result",
             result_link=f"https://agent.example.com/{marker}-result",
             failure_reason=f"{marker}-run-failure",
-            content_expires_at=content_expires_at or now + timedelta(days=30),
+            content_expires_at=content_expires_at or utcnow() + timedelta(days=30),
             dispatched_at=now,
             revision=1,
             created_at=now,

@@ -89,7 +89,9 @@ describe("AccountSettingsPage", () => {
     const getAccount = vi.spyOn(apiClient, "getAccount");
     renderPage();
 
-    expect(await screen.findByText("Completed tasks: 2")).toBeInTheDocument();
+    const completedCount = await screen.findByText("Completed tasks: 2");
+    expect(completedCount).toBeInTheDocument();
+    expect(completedCount).toHaveAttribute("aria-live", "polite");
 
     getAccount.mockResolvedValue({ ...account, completed_task_count: 0 });
     const zeroClient = createQueryClient();

@@ -103,7 +103,7 @@ function ProfileSection(): React.JSX.Element {
           {countError.referenceId ? ` (ref: ${countError.referenceId})` : ""}
         </p>
       ) : account.data ? (
-        <p className="text-sm text-slate-600">
+        <p aria-live="polite" className="text-sm text-slate-600">
           Completed tasks: {account.data.completed_task_count}
         </p>
       ) : (
