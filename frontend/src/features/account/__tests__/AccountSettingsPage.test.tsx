@@ -92,6 +92,7 @@ describe("AccountSettingsPage", () => {
     const completedCount = await screen.findByText("Completed tasks: 2");
     expect(completedCount).toBeInTheDocument();
     expect(completedCount).toHaveAttribute("aria-live", "polite");
+    expect(completedCount).toHaveAttribute("aria-atomic", "true");
 
     getAccount.mockResolvedValue({ ...account, completed_task_count: 0 });
     const zeroClient = createQueryClient();
