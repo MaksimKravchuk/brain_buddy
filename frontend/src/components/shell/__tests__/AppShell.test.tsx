@@ -120,21 +120,16 @@ describe("AppShell canonical sidebar", () => {
     expect(screen.getByRole("button", { name: "Brain dump" })).toHaveClass("shrink-0", "whitespace-nowrap", "px-3", "sm:px-4");
   });
 
-  it("returns to the Inbox route after Weekly review without retaining the in-shell placeholder", async () => {
-    const user = userEvent.setup();
+  it("renders Weekly review and Thinking Mode as matching disabled Soon affordances", () => {
     renderShell();
 
-    expect(screen.getByRole("button", { name: "Thinking Mode — Coming soon" })).toBeDisabled();
+    const weeklyReview = screen.getByRole("button", { name: "Weekly review — Coming soon" });
+    const thinkingMode = screen.getByRole("button", { name: "Thinking Mode — Coming soon" });
+    expect(weeklyReview).toBeDisabled();
+    expect(weeklyReview).toHaveClass("cursor-not-allowed", "text-slate-400");
+    expect(thinkingMode).toBeDisabled();
+    expect(thinkingMode).toHaveClass("cursor-not-allowed", "text-slate-400");
     expect(screen.getByText("Next task list content")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Weekly review" }));
-    expect(screen.getByRole("region", { name: "Weekly review placeholder" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Weekly review — coming soon" })).toBeInTheDocument();
-    expect(screen.queryByText("Next task list content")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("link", { name: "Inbox" }));
-    expect(await screen.findByText("Inbox task list content")).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Weekly review placeholder" })).not.toBeInTheDocument();
   });
 
   it("drives project create, rename and archive through the popover menus", async () => {
