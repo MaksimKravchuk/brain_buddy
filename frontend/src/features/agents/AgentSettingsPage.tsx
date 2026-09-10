@@ -362,7 +362,7 @@ function AgentRegistryTable({
 
 function mobileLabel(label: string): React.JSX.Element {
   return (
-    <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400 md:hidden">
+    <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500 md:hidden">
       {label}
     </span>
   );
@@ -436,7 +436,7 @@ function ConnectionRow({
         <td colSpan={6} className="border-b border-slate-100 p-0">
         <article
           aria-label={connection.name}
-          className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 p-4 md:grid-cols-[minmax(160px,1.25fr)_minmax(70px,.55fr)_minmax(70px,.55fr)_minmax(150px,1fr)_minmax(150px,1fr)_auto] md:rounded-none md:border-0 md:px-0 md:py-4"
+          className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 p-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,.6fr)_minmax(0,.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(140px,1.4fr)] md:rounded-none md:border-0 md:px-0 md:py-4"
         >
         <div className="min-w-0 align-top md:px-3 md:pl-0">
           {mobileLabel("Agent")}
@@ -474,9 +474,9 @@ function ConnectionRow({
           </div>
           <Feedback error={error} success={success} />
         </div>
-        <div className="align-top md:px-3 md:pr-0">
+        <div className="min-w-0 align-top md:px-3 md:pr-0">
           {mobileLabel("Actions")}
-          <p id={testDisclosureId} className="mb-2 text-xs text-slate-500">
+          <p id={testDisclosureId} className="mb-2 break-all text-xs text-slate-500">
             Test makes authenticated, external, read-only A2A calls to the configured agent. It calls
             ListTasks first. Only if that method is unsupported/MethodNotFound, it calls
             GetTask("brainbuddy-probe"). It does not send Task content or start agent work.
