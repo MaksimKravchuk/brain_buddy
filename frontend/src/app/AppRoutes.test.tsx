@@ -173,7 +173,7 @@ describe("AppRoutes", () => {
     expect(screen.getByText("6 tasks")).toBeInTheDocument();
     expect(screen.queryByText("Draft the launch announcement")).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/tasks?state=next"), expect.anything());
-    expect(screen.getByRole("button", { name: "Weekly review" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Weekly review — Coming soon" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Thinking Mode — Coming soon" })).toBeDisabled();
     expect(screen.queryByRole("link", { name: /CRT.*legacy/i })).not.toBeInTheDocument();
   });

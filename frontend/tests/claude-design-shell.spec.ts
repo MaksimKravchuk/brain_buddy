@@ -206,7 +206,7 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
       }
       // Zero secondary counts stay visible (Someday / maybe has 0 open tasks).
       await expect(page.getByRole("link", { name: "Someday / maybe 0" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Weekly review" })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Weekly review — Coming soon" })).toBeDisabled();
       await expect(page.getByRole("button", { name: "Thinking Mode — Coming soon" })).toBeDisabled();
     });
 

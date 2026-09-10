@@ -14,7 +14,7 @@ test.describe("mobile acceptance", () => {
     });
     await test.step("verify planned workflows are honestly marked Soon and the legacy CRT link is absent", async () => {
       const navigation = page.getByRole("navigation", { name: "Task navigation" });
-      await expect(navigation.getByRole("button", { name: "Weekly review" })).toBeEnabled();
+      await expect(navigation.getByRole("button", { name: "Weekly review — Coming soon" })).toBeDisabled();
       await expect(navigation.getByRole("button", { name: "Thinking Mode — Coming soon" })).toBeDisabled();
       await expect(navigation.getByRole("link", { name: /CRT.*legacy/i })).toHaveCount(0);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

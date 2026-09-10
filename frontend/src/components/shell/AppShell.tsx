@@ -47,10 +47,7 @@ interface AppShellProps {
   onDeleteTag?: (tag: TagResponse) => void;
 }
 
-type SidebarProps = AppShellProps & {
-  weeklyReviewOpen: boolean;
-  onOpenWeeklyReview: () => void;
-};
+type SidebarProps = AppShellProps;
 
 const listItems: Array<{ state: OpenTaskState; label: string; icon: ComponentType<{ className?: string }> }> = [
   { state: "inbox", label: "Inbox", icon: Inbox },
@@ -87,7 +84,6 @@ export function SoonChip(): React.JSX.Element {
 export function AppShell(props: AppShellProps): React.JSX.Element {
   const { children, panel, panelModal } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
@@ -114,20 +110,10 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    setWeeklyReviewOpen(false);
-  }, [location.pathname, location.search]);
-
-  useEffect(() => {
     // Browser history can select a task while navigation is open. Do not leave
     // that drawer active behind the sheet; typing a search keeps it open.
     setIsDrawerOpen(false);
   }, [location.pathname]);
-
-  const sidebarProps: SidebarProps = {
-    ...props,
-    weeklyReviewOpen,
-    onOpenWeeklyReview: () => setWeeklyReviewOpen(true)
-  };
 
   return (
     <ShellToastContext.Provider value={notify}>
@@ -137,15 +123,15 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           <DeletionCancelledBanner />
           <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
             <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
-              <Sidebar {...sidebarProps} />
+              <Sidebar {...props} />
             </aside>
             <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 lg:pb-16 lg:pt-8">
-              {weeklyReviewOpen ? <WeeklyReviewPlaceholder /> : children}
+              {children}
             </main>
           </div>
-          <NavigationDrawer {...sidebarProps} open={isDrawerOpen} onClose={closeDrawer} />
+          <NavigationDrawer {...props} open={isDrawerOpen} onClose={closeDrawer} />
         </div>
-        {weeklyReviewOpen ? null : panel}
+        {panel}
         {toast ? (
           <div
             role="status"
@@ -159,27 +145,6 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
   );
 }
 
-function WeeklyReviewPlaceholder(): React.JSX.Element {
-  return (
-    <section aria-label="Weekly review placeholder" className="mx-auto max-w-[760px]">
-      <div className="flex flex-col items-center gap-2 rounded-xl border-[1.5px] border-dashed border-slate-300 px-8 py-14 text-center">
-        <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-info-bg text-brand-primary">
-          <RotateCcw className="h-[26px] w-[26px]" aria-hidden />
-        </div>
-        <h2 className="m-0 text-[28px] font-semibold leading-[1.15] tracking-[-0.02em] text-slate-900">
-          Weekly review — coming soon
-        </h2>
-        <p className="m-0 max-w-[400px] text-sm leading-normal text-slate-500">
-          A guided pass over your lists — empty the inbox, refresh next actions, decide on the somedays. We&apos;re
-          still building this one.
-        </p>
-        <span className="mt-3 rounded-full bg-surface-sunken px-2.5 py-[3px] text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
-          Placeholder — not designed yet
-        </span>
-      </div>
-    </section>
-  );
-}
 
 function DeletionCancelledBanner(): React.JSX.Element | null {
   const notice = useAuthStore((state) => state.deletionCancelledNotice);
@@ -472,7 +437,7 @@ function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): R
           className="min-h-0 flex-1 overflow-y-auto"
           onClick={(event) => {
             const target = event.target as HTMLElement;
-            if (target.closest("a, [data-drawer-dismiss]")) {
+            if (target.closest("a")) {
               onClose();
             }
           }}
@@ -496,9 +461,7 @@ function Sidebar({
   onArchiveProject,
   onCreateTag,
   onRenameTag,
-  onDeleteTag,
-  weeklyReviewOpen,
-  onOpenWeeklyReview
+  onDeleteTag
 }: SidebarProps): React.JSX.Element {
   const [newProjectName, setNewProjectName] = useState("");
   const [projectEdits, setProjectEdits] = useState<Record<string, string>>({});
@@ -521,7 +484,7 @@ function Sidebar({
           <li key={item.state}>
             <NavLink
               to={`/tasks/${item.state}`}
-              className={({ isActive }) => navRowClass(!weeklyReviewOpen && (isActive || activeState === item.state))}
+              className={({ isActive }) => navRowClass(isActive || activeState === item.state)}
             >
               <item.icon className="h-4 w-4 shrink-0" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
@@ -540,10 +503,9 @@ function Sidebar({
         <li>
           <button
             type="button"
-            aria-label="Weekly review"
-            data-drawer-dismiss
-            className={navRowClass(weeklyReviewOpen)}
-            onClick={onOpenWeeklyReview}
+            disabled
+            aria-label="Weekly review — Coming soon"
+            className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
           >
             <RotateCcw className="h-4 w-4 shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 truncate">Weekly review</span>
@@ -569,7 +531,7 @@ function Sidebar({
         <ul className="space-y-0.5">
           {dateItems.map((item) => (
             <li key={item.path}>
-              <NavLink to={item.path} className={({ isActive }) => navRowClass(!weeklyReviewOpen && isActive)}>
+              <NavLink to={item.path} className={({ isActive }) => navRowClass(isActive)}>
                 <item.icon className="h-4 w-4 shrink-0" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </NavLink>
@@ -590,7 +552,7 @@ function Sidebar({
                   <NavLink
                     to={`/projects/${project.id}`}
                     className={`flex min-h-[34px] w-full items-start gap-2.5 rounded-lg px-2.5 py-[7px] pr-7 text-sm font-medium transition-colors duration-200 ease-smooth ${
-                      !weeklyReviewOpen && activeProjectId === project.id
+                      activeProjectId === project.id
                         ? "bg-white text-slate-900 shadow-soft"
                         : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
                     }`}
@@ -732,7 +694,7 @@ function Sidebar({
                       to={`/tags/${tag.id}`}
                       title={tag.name}
                       className={`max-w-full truncate rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors duration-200 ease-smooth ${
-                        !weeklyReviewOpen && activeTagId === tag.id
+                        activeTagId === tag.id
                           ? "border-brand-primary bg-info-bg text-info-fg"
                           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
                       }`}
