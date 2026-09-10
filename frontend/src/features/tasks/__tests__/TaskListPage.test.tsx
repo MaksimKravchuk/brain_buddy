@@ -605,6 +605,23 @@ describe("016 completed task presentation", () => {
     }
   );
 
+  it("places the task creator after active tasks and before Completed", async () => {
+    mocked.listTasks.mockResolvedValue(listResponse([
+      taskFixture({ id: "active", title: "Active task" }),
+      taskFixture({ id: "done", title: "Completed task", state: "completed" })
+    ]));
+    renderPage("/tasks/next");
+
+    const active = await screen.findByRole("link", { name: "Active task" });
+    const creator = screen.getByRole("combobox", { name: "New task title" }).closest("form");
+    const completed = screen.getByRole("heading", { name: "Completed" });
+    if (!creator) {
+      throw new Error("Task creator form is missing");
+    }
+    expect(active.compareDocumentPosition(creator)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(creator.compareDocumentPosition(completed)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("016-FR-001 separates opt-in cancelled history and omits empty terminal headings", async () => {
     mocked.listTasks.mockImplementation(async (filters) => listResponse([
       taskFixture(),

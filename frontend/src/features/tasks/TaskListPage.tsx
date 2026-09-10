@@ -523,6 +523,38 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     />
   ) : null;
 
+  const taskCreator = dateView ? null : (
+    <TaskCreator
+      newTitle={newTitle}
+      newWaitingFor={newWaitingFor}
+      projects={projects}
+      tags={tags}
+      contextProjectId={projectId}
+      contextTagId={tagId}
+      state={state}
+      isCreating={createMutation.isPending}
+      captureSettlementVersion={captureSettlementVersion}
+      onCreate={(draft, restoreFocus) => {
+        const waitingFor = newWaitingForRef.current;
+        const payload = {
+          title: draft.cleanTitle,
+          state: state ?? "inbox",
+          ...(state === "waiting" ? { waiting_for: waitingFor.trim() } : {}),
+          ...(draft.hasCompletedTokens
+            ? { project: draft.project, tags: draft.tags }
+            : { ...(projectId ? { project_id: projectId } : {}), ...(tagId ? { tag_ids: [tagId] } : {}) })
+        };
+        const signature = captureSignature(draft, state, projectId, tagId, waitingFor);
+        const previous = captureAttemptRef.current;
+        const key = previous?.signature === signature ? previous.key : idempotencyKey(draft.hasCompletedTokens ? "smart-add" : "create");
+        captureAttemptRef.current = { signature, key };
+        createMutation.mutate({ payload, key, signature, smart: draft.hasCompletedTokens, restoreFocus });
+      }}
+      onTitleChange={setNewTitle}
+      onWaitingForChange={setNewWaitingFor}
+    />
+  );
+
   return (
     <AppShell
       counts={shellCounts}
@@ -641,6 +673,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
                   <TaskList {...taskListProps} tasks={group.tasks} label={group.name} />
                 </section>
               )) : openTasks.length ? <TaskList {...taskListProps} tasks={openTasks} /> : null}
+            {taskCreator}
             {completedTasks.length ? (
               <section aria-labelledby="completed-tasks-heading">
                 <h2 id="completed-tasks-heading" className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Completed</h2>
@@ -655,15 +688,18 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             ) : null}
           </div>
         ) : (
-          <EmptyState
-            state={state}
-            onClearSearch={searchQuery.trim() ? () => {
-              const next = new URLSearchParams(searchParams);
-              next.delete("q");
-              setSearchParams(next, { replace: true });
-              listHeadingRef.current?.focus();
-            } : undefined}
-          />
+          <>
+            <EmptyState
+              state={state}
+              onClearSearch={searchQuery.trim() ? () => {
+                const next = new URLSearchParams(searchParams);
+                next.delete("q");
+                setSearchParams(next, { replace: true });
+                listHeadingRef.current?.focus();
+              } : undefined}
+            />
+            {taskCreator}
+          </>
         )}
         </div>
 
@@ -679,39 +715,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           </div>
         ) : null}
 
-        {dateView ? (
-          <DateViewCaptureHint />
-        ) : (
-          <TaskCreator
-            newTitle={newTitle}
-            newWaitingFor={newWaitingFor}
-            projects={projects}
-            tags={tags}
-            contextProjectId={projectId}
-            contextTagId={tagId}
-            state={state}
-            isCreating={createMutation.isPending}
-            captureSettlementVersion={captureSettlementVersion}
-            onCreate={(draft, restoreFocus) => {
-              const waitingFor = newWaitingForRef.current;
-              const payload = {
-                title: draft.cleanTitle,
-                state: state ?? "inbox",
-                ...(state === "waiting" ? { waiting_for: waitingFor.trim() } : {}),
-                ...(draft.hasCompletedTokens
-                  ? { project: draft.project, tags: draft.tags }
-                  : { ...(projectId ? { project_id: projectId } : {}), ...(tagId ? { tag_ids: [tagId] } : {}) })
-              };
-              const signature = captureSignature(draft, state, projectId, tagId, waitingFor);
-              const previous = captureAttemptRef.current;
-              const key = previous?.signature === signature ? previous.key : idempotencyKey(draft.hasCompletedTokens ? "smart-add" : "create");
-              captureAttemptRef.current = { signature, key };
-              createMutation.mutate({ payload, key, signature, smart: draft.hasCompletedTokens, restoreFocus });
-            }}
-            onTitleChange={setNewTitle}
-            onWaitingForChange={setNewWaitingFor}
-          />
-        )}
+        {dateView ? <DateViewCaptureHint /> : null}
       </section>
     </AppShell>
   );
