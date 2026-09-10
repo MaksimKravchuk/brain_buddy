@@ -155,6 +155,30 @@ describe("AgentSettingsPage", () => {
     expect(screen.queryByRole("dialog", { name: "Add new agent" })).not.toBeInTheDocument();
   });
 
+  it("014-FR-018 014-SC-011 keeps the desktop table columns shrinkable at the 768px boundary", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
+    renderPage();
+
+    const table = await screen.findByRole("table", { name: "Your agents" });
+    const row = within(table).getByRole("row", { name: "Hermes" });
+    const article = within(row).getByRole("article", { name: "Hermes" });
+
+    expect(article).toHaveClass(
+      "md:grid-cols-[minmax(0,1.4fr)_minmax(0,.6fr)_minmax(0,.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(140px,1.4fr)]"
+    );
+  });
+
+  it("014-FR-018 014-SC-011 uses the contrast-safe token for all six narrow row labels", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
+    renderPage();
+
+    const article = await screen.findByRole("article", { name: "Hermes" });
+    const labels = ["Agent", "Version", "Protocol", "Interface", "Status", "Actions"];
+    for (const label of labels) {
+      expect(within(article).getByText(label, { selector: "span" })).toHaveClass("text-slate-500");
+    }
+  });
+
   it("renders an invalid agent address as inert text", async () => {
     vi.mocked(apiClient.listAgentConnections).mockResolvedValue([
       connection({ agent_address: "not a valid URL" })

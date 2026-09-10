@@ -326,6 +326,84 @@ test.describe("external agent relay over the A2A wire", () => {
     await signupThroughUi(page, uniqueEmail("relay", testInfo), await mintInvite());
   });
 
+  test("014-SC-011 exact Test disclosure wraps inside the 768px action cell", async ({ page }, testInfo) => {
+    await test.step("render the saved connection in the production build at the semantic-table breakpoint", async () => {
+      await page.setViewportSize({ width: 768, height: 1024 });
+      await connectAgent(page, {
+        name: "Hermes",
+        address: HERMES_URL,
+        credential: HERMES_TOKEN
+      });
+      await openAgentSettings(page);
+      const card = page.getByRole("article", { name: "Hermes" });
+      const disclosure = card.getByText(/authenticated, external, read-only A2A calls/i);
+      await expect(disclosure).toBeVisible();
+      await testInfo.attach("a2a-disclosure-768", {
+        body: await page.screenshot({ fullPage: true }),
+        contentType: "image/png"
+      });
+
+      const geometry = await disclosure.evaluate((element) => {
+        const actionCell = element.parentElement;
+        const table = element.closest("table");
+        const disclosureBox = element.getBoundingClientRect();
+        const actionBox = actionCell?.getBoundingClientRect();
+        const tableStyle = table ? window.getComputedStyle(table).display : "";
+        const textRange = document.createRange();
+        textRange.selectNodeContents(element);
+        const textRects = Array.from(textRange.getClientRects());
+        return {
+          disclosure: {
+            left: disclosureBox.left,
+            right: disclosureBox.right,
+            bottom: disclosureBox.bottom,
+            clientWidth: element.clientWidth,
+            scrollWidth: element.scrollWidth
+          },
+          action: actionBox
+            ? {
+                left: actionBox.left,
+                right: actionBox.right,
+                bottom: actionBox.bottom,
+                clientWidth: actionCell?.clientWidth ?? 0,
+                scrollWidth: actionCell?.scrollWidth ?? 0
+              }
+            : null,
+          textRects: textRects.map((rect) => ({ left: rect.left, right: rect.right, bottom: rect.bottom })),
+          tableDisplay: tableStyle,
+          horizontalOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          text: element.textContent
+        };
+      });
+      await page.waitForTimeout(10);
+      if (geometry.tableDisplay !== "table") {
+        throw new Error(`Expected the semantic table at 768px, received display=${geometry.tableDisplay}`);
+      }
+      if (!geometry.action) {
+        throw new Error("Expected the Test disclosure to have an action cell");
+      }
+      const action = geometry.action;
+      if (
+        geometry.disclosure.left < action.left ||
+        geometry.disclosure.right > action.right ||
+        geometry.disclosure.bottom > action.bottom ||
+        geometry.disclosure.scrollWidth > geometry.disclosure.clientWidth ||
+        action.scrollWidth > action.clientWidth ||
+        geometry.textRects.some(
+          (rect) => rect.left < action.left || rect.right > action.right || rect.bottom > action.bottom
+        )
+      ) {
+        throw new Error(`Test disclosure escaped its action cell: ${JSON.stringify(geometry)}`);
+      }
+      if (geometry.horizontalOverflow > 0) {
+        throw new Error(`768px settings page horizontally overflowed by ${geometry.horizontalOverflow}px`);
+      }
+      if (!geometry.text?.includes("unsupported/MethodNotFound")) {
+        throw new Error("The exact unsupported/MethodNotFound disclosure copy was not rendered");
+      }
+    });
+  });
+
   test("014-SC-005 A2A hand-off to the helloworld sample", async ({ page }) => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width: 1440, height: 900 });
