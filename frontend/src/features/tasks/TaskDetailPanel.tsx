@@ -70,7 +70,8 @@ export function TaskDetailPanel({
   onTransition,
   onCreateSubtask,
   onTransitionSubtask,
-  onCreateComment
+  onCreateComment,
+  onAgentDispatched
 }: {
   active?: boolean;
   layout?: "sheet" | "inline";
@@ -90,6 +91,7 @@ export function TaskDetailPanel({
   onCreateSubtask: (task: TaskResponse, title: string) => void;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
+  onAgentDispatched?: (run: AgentRunResponse) => void;
 }): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLButtonElement>(null);
@@ -182,6 +184,7 @@ export function TaskDetailPanel({
           onCreateSubtask={onCreateSubtask}
           onTransitionSubtask={onTransitionSubtask}
           onCreateComment={onCreateComment}
+          onAgentDispatched={onAgentDispatched}
         />
       ) : null}
     </aside>
@@ -281,7 +284,8 @@ function TaskDetailBody({
   onTransition,
   onCreateSubtask,
   onTransitionSubtask,
-  onCreateComment
+  onCreateComment,
+  onAgentDispatched
 }: {
   active: boolean;
   task: TaskResponse;
@@ -296,6 +300,7 @@ function TaskDetailBody({
   onCreateSubtask: (task: TaskResponse, title: string) => void;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
+  onAgentDispatched?: (run: AgentRunResponse) => void;
 }): React.JSX.Element {
   // Live value shared between the "waiting" prop row and list moves into
   // Waiting for, which require a non-empty waiting_for on the transition.
@@ -563,7 +568,7 @@ function TaskDetailBody({
         {waitingRequired ? <span className="col-start-2 text-xs text-[#92400e]">Add who or what you’re waiting for</span> : null}
       </section>
 
-      <AgentTaskRelay task={task} isTerminal={isTerminal} active={active} />
+      <AgentTaskRelay task={task} isTerminal={isTerminal} active={active} onDispatched={onAgentDispatched} />
 
       <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
         <div className="flex items-center gap-2">
@@ -652,7 +657,17 @@ function TaskDetailBody({
  * The flag gates only creation of new hand-offs; it must not strand work that
  * already left BrainBuddy.
  */
-function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTerminal: boolean; active: boolean }): React.JSX.Element | null {
+function AgentTaskRelay({
+  task,
+  isTerminal,
+  active,
+  onDispatched
+}: {
+  task: TaskResponse;
+  isTerminal: boolean;
+  active: boolean;
+  onDispatched?: (run: AgentRunResponse) => void;
+}): React.JSX.Element | null {
   const user = useAuthStore((state) => state.user);
   const handoffEnabled = hasFeatureFlag(user, "external_agent_relay");
   const [reviewing, setReviewing] = useState(false);
@@ -670,6 +685,7 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
       run.connection_id
     );
     closeHandoff();
+    onDispatched?.(run);
   };
   const runsQuery = useAgentRuns(task.id, Boolean(user));
 

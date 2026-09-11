@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver, onlineManager } from "@tanstack/react-query";
 import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -474,16 +474,23 @@ describe("AgentHandoffOverlay", () => {
     const runKey = ["agents", connectionKey?.[1], "runs", "task-1"];
     const loadingSummaryKey = ["agents", connectionKey?.[1], "summaries", ["task-1", "task-2"]];
     const olderRun = { ...dispatchedRun, id: "run-older" };
-    client.setQueryData(loadingSummaryKey, {});
     client.setQueryData(runKey, [olderRun]);
     let resolveStaleSummary: (summaries: Record<string, AgentRunSummaryResponse>) => void = () => undefined;
     let resolveStaleRuns: (runs: AgentRunResponse[]) => void = () => undefined;
-    const staleSummaryFetch = client.fetchQuery({
+    let summaryRequestCount = 0;
+    const summaryObserver = new QueryObserver<Record<string, AgentRunSummaryResponse>>(client, {
       queryKey: loadingSummaryKey,
-      queryFn: () => new Promise<Record<string, AgentRunSummaryResponse>>((resolve) => {
-        resolveStaleSummary = resolve;
-      })
-    }).catch(() => undefined);
+      queryFn: () => {
+        summaryRequestCount += 1;
+        if (summaryRequestCount > 1) {
+          return Promise.resolve({ "task-1": { id: "run-77" } as AgentRunSummaryResponse });
+        }
+        return new Promise<Record<string, AgentRunSummaryResponse>>((resolve) => {
+          resolveStaleSummary = resolve;
+        });
+      }
+    });
+    const unsubscribeSummary = summaryObserver.subscribe(() => undefined);
     const staleRunsFetch = client.fetchQuery({
       queryKey: runKey,
       queryFn: () => new Promise<AgentRunResponse[]>((resolve) => {
@@ -515,7 +522,10 @@ describe("AgentHandoffOverlay", () => {
     await waitFor(() => expect(onDispatched).toHaveBeenCalledWith(dispatchedRun));
     resolveStaleSummary({});
     resolveStaleRuns([]);
-    await Promise.all([staleSummaryFetch, staleRunsFetch]);
+    await staleRunsFetch;
+    await act(async () => Promise.resolve());
+    unsubscribeSummary();
+    expect(summaryRequestCount).toBe(2);
     expect(client.getQueryData(runKey)).toEqual([dispatchedRun, olderRun]);
     expect(client.getQueryData(loadingSummaryKey)).toMatchObject({ "task-1": { id: "run-77" } });
   });

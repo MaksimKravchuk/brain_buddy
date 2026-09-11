@@ -209,6 +209,11 @@ export function AgentHandoffOverlay({
         run,
         ...(Array.isArray(current) ? current.filter((item) => item.id !== run.id) : [])
       ]);
+      // A first-load summary has no trustworthy values for the other rows, so
+      // do not turn a one-task optimistic projection into a successful batch.
+      // Replace every active batch from the committed server state instead;
+      // the mutation remains pending until those rows can render safely.
+      await queryClient.refetchQueries({ queryKey: [...keys.all, "summaries"], type: "active" });
       onDispatched(run);
     },
     onError: (caught: unknown) => {

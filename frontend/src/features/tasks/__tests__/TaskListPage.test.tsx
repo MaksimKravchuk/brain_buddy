@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiClient, getApiBaseUrl } from "../../../api/client";
+import type { AgentRunResponse, AgentRunSummaryResponse } from "../../../api/agentTypes";
 import { taskKeys } from "../../../api/taskHooks";
 import type {
   ProjectResponse,
@@ -87,6 +88,73 @@ function taskFixture(overrides: Partial<TaskResponse> = {}): TaskResponse {
     subtasks: [],
     comments: [],
     ...overrides
+  };
+}
+
+function agentRunFixture(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
+  return {
+    id: "run-row",
+    task_id: "task-1",
+    connection_id: "agent-hermes",
+    agent_name: "Hermes",
+    dispatch_state: "sent",
+    dispatch_error_code: null,
+    reported_state: null,
+    run_version: 0,
+    stopped_reporting: false,
+    connection_disconnected: false,
+    reply_pending: false,
+    cancel_requested: false,
+    needs_user: false,
+    primary_state_label: "Queued",
+    progress_text: null,
+    question_text: null,
+    result_text: null,
+    result_link: null,
+    result_link_interactive: false,
+    failure_reason: null,
+    content_expired: false,
+    content_expires_at: "2026-08-15T12:00:00Z",
+    last_contact_at: null,
+    reporting_window_seconds: 3600,
+    capabilities: { reply: false, cancel: true },
+    guarantee_tier: "guaranteed",
+    message_id: "run-row:start",
+    correlation_id: "run-row",
+    agent_task_id: null,
+    exchange_open: true,
+    exchange_state: "queued",
+    exchange_kind: "start",
+    push_registration: "unregistered",
+    agent_task_missing: false,
+    cancel_outcome: "none",
+    blocked_reason: null,
+    artifacts_summary: [],
+    result_availability: null,
+    last_observed_at: null,
+    observation_interval_seconds: 60,
+    identifiers_expired: false,
+    manifest: null,
+    events: [],
+    commands: [],
+    created_at: "2026-07-15T12:00:00Z",
+    revision: 1,
+    ...overrides
+  };
+}
+
+function agentRunSummary(run: AgentRunResponse): AgentRunSummaryResponse {
+  return {
+    id: run.id,
+    task_id: run.task_id,
+    agent_name: run.agent_name,
+    primary_state_label: run.primary_state_label,
+    needs_user: run.needs_user,
+    stopped_reporting: run.stopped_reporting,
+    last_contact_at: run.last_contact_at,
+    guarantee_tier: run.guarantee_tier,
+    cancel_outcome: run.cancel_outcome,
+    agent_task_missing: run.agent_task_missing
   };
 }
 
@@ -716,21 +784,14 @@ describe("TaskListPage rows", () => {
         ready_for_handoff: true
       } as Awaited<ReturnType<typeof apiClient.listAgentConnections>>[number]
     ]);
-    mocked.listAgentRunSummaries.mockResolvedValue({});
+    const confirmedRun = agentRunFixture();
+    let dispatched = false;
+    mocked.listAgentRunSummaries.mockImplementation(async (): Promise<Record<string, AgentRunSummaryResponse>> =>
+      dispatched ? { "task-1": agentRunSummary(confirmedRun) } : {}
+    );
     mocked.confirmAgentHandoff.mockImplementation(async () => {
-      return {
-        id: "run-row",
-        task_id: "task-1",
-        connection_id: "agent-hermes",
-        agent_name: "Hermes",
-        primary_state_label: "Queued",
-        needs_user: false,
-        stopped_reporting: false,
-        last_contact_at: null,
-        guarantee_tier: "guaranteed",
-        cancel_outcome: "none",
-        agent_task_missing: false
-      } as Awaited<ReturnType<typeof apiClient.confirmAgentHandoff>>;
+      dispatched = true;
+      return confirmedRun;
     });
     renderPage("/tasks/next?group=off");
 
@@ -749,6 +810,85 @@ describe("TaskListPage rows", () => {
     expect(screen.queryByRole("button", { name: "Hand Fix onboarding drop-off to Hermes" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Choose agent for Fix onboarding drop-off" })).not.toBeInTheDocument();
     await waitFor(() => expect(assigned).toHaveFocus());
+  });
+
+  it("017-FR-011 returns focus to the originating row when an inline handoff summary is unavailable", async () => {
+    const user = userEvent.setup();
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { external_agent_relay: true }
+        },
+        status: "authed"
+      });
+    });
+    mocked.listAgentConnections.mockResolvedValue([
+      {
+        id: "agent-hermes",
+        name: "Hermes",
+        agent_address: "https://hermes.example.test/a2a",
+        status: "ready",
+        stale: false,
+        ready_for_handoff: true
+      } as Awaited<ReturnType<typeof apiClient.listAgentConnections>>[number]
+    ]);
+    const confirmedRun = agentRunFixture();
+    mocked.listAgentRunSummaries.mockResolvedValue({});
+    mocked.confirmAgentHandoff.mockResolvedValue(confirmedRun);
+    renderPage("/tasks/next/task-1?group=off");
+
+    await user.click(await screen.findByRole("button", { name: "Hand to agent" }));
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Agent" }), "agent-hermes");
+    expect(await screen.findByRole("heading", { name: "What will be sent" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send to agent" }));
+
+    const rowLink = screen.getByRole("link", { name: "Fix onboarding drop-off" });
+    await waitFor(() => expect(rowLink).toHaveFocus());
+    expect(screen.queryByRole("button", { name: /Hermes.*Queued.*Guaranteed single start/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId("inline-task-detail")).toBeInTheDocument();
+  });
+
+  it("017-FR-011 focuses the list heading when the dispatched task no longer has a row", async () => {
+    const user = userEvent.setup();
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { external_agent_relay: true }
+        },
+        status: "authed"
+      });
+    });
+    mocked.listAgentConnections.mockResolvedValue([
+      {
+        id: "agent-hermes",
+        name: "Hermes",
+        agent_address: "https://hermes.example.test/a2a",
+        status: "ready",
+        stale: false,
+        ready_for_handoff: true
+      } as Awaited<ReturnType<typeof apiClient.listAgentConnections>>[number]
+    ]);
+    mocked.listAgentRunSummaries.mockResolvedValue({});
+    mocked.confirmAgentHandoff.mockResolvedValue(agentRunFixture());
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage("/tasks/next?group=off", client);
+
+    await user.click(await screen.findByRole("button", { name: "Hand Fix onboarding drop-off to Hermes" }));
+    expect(await screen.findByRole("heading", { name: "What will be sent" })).toBeInTheDocument();
+    mocked.listTasks.mockResolvedValue(listResponse([]));
+    await act(async () => {
+      await client.refetchQueries({ queryKey: taskKeys.lists() });
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: "Fix onboarding drop-off" })).not.toBeInTheDocument();
+    });
+    await user.click(await screen.findByRole("button", { name: "Send to agent" }));
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus());
   });
 
   it("renders due dates, subtask progress, tags and who a task waits on", async () => {

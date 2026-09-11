@@ -493,11 +493,15 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     : null;
 
   useEffect(() => {
-    if (!agentFocusTaskId || !agentRunSummaries[agentFocusTaskId]) return;
+    if (!agentFocusTaskId) return;
     const control = Array.from(document.querySelectorAll<HTMLElement>("[data-agent-assigned-control]"))
       .find((element) => element.dataset.agentAssignedControl === agentFocusTaskId);
-    if (!control) return;
-    control.focus({ preventScroll: true });
+    if (control) control.focus({ preventScroll: true });
+    else {
+      const rowLink = rowLinkRefs.current.get(agentFocusTaskId);
+      if (rowLink && document.contains(rowLink)) rowLink.focus({ preventScroll: true });
+      else listHeadingRef.current?.focus({ preventScroll: true });
+    }
     setAgentFocusTaskId(null);
   }, [agentFocusTaskId, agentRunSummaries]);
 
@@ -601,6 +605,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       onCreateSubtask={(task, subtaskTitle) => subtaskCreateMutation.mutate({ task, title: subtaskTitle })}
       onTransitionSubtask={(task, subtask, action) => subtaskTransitionMutation.mutate({ task, subtask, action })}
       onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
+      onAgentDispatched={(run) => {
+        setAgentFocusTaskId(run.task_id);
+        void queryClient.invalidateQueries({ queryKey: agentKeys.connections() });
+      }}
     />
   ) : null;
 
