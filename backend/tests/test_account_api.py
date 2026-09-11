@@ -90,15 +90,15 @@ def test_get_account_returns_profile(api_client: TestClient) -> None:
     assert body["purge_at"] is None
 
 
-def test_015_SC_001_account_count_tracks_complete_and_reopen(
+def test_018_SC_001_account_count_tracks_complete_and_reopen(
     api_client: TestClient,
 ) -> None:
-    """015-FR-001, 015-FR-007: profile reads reflect current lifecycle state."""
+    """018-FR-001, 018-FR-007: profile reads reflect current lifecycle state."""
 
     task = _create_task(
         api_client,
         "Count lifecycle",
-        key="015-count-lifecycle",
+        key="018-count-lifecycle",
         state="next",
     )
     assert api_client.get("/api/account").json()["completed_task_count"] == 0
@@ -107,7 +107,7 @@ def test_015_SC_001_account_count_tracks_complete_and_reopen(
         api_client,
         task,
         "complete",
-        key="015-count-complete",
+        key="018-count-complete",
     )
     assert api_client.get("/api/account").json()["completed_task_count"] == 1
 
@@ -115,60 +115,60 @@ def test_015_SC_001_account_count_tracks_complete_and_reopen(
         api_client,
         completed,
         "reopen",
-        key="015-count-reopen",
+        key="018-count-reopen",
         to_state="next",
     )
     assert api_client.get("/api/account").json()["completed_task_count"] == 0
 
 
-def test_015_SC_002_account_count_excludes_other_owner_cancelled_and_subtasks(
+def test_018_SC_002_account_count_excludes_other_owner_cancelled_and_subtasks(
     second_api_client: tuple[TestClient, TestClient],
 ) -> None:
-    """015-FR-003, 015-FR-004, 015-FR-005, 015-FR-006; 015-SC-002/003."""
+    """018-FR-003, 018-FR-004, 018-FR-005, 018-FR-006; 018-SC-002, 018-SC-003."""
 
     client_a, client_b = second_api_client
     for index in range(2):
         task = _create_task(
             client_a,
             f"Owned completed {index}",
-            key=f"015-owned-{index}",
+            key=f"018-owned-{index}",
         )
         _transition_task(
             client_a,
             task,
             "complete",
-            key=f"015-owned-complete-{index}",
+            key=f"018-owned-complete-{index}",
         )
 
-    cancelled = _create_task(client_a, "Cancelled", key="015-cancelled")
+    cancelled = _create_task(client_a, "Cancelled", key="018-cancelled")
     _transition_task(
         client_a,
         cancelled,
         "cancel",
-        key="015-cancel-transition",
+        key="018-cancel-transition",
     )
 
-    parent = _create_task(client_a, "Parent", key="015-parent")
+    parent = _create_task(client_a, "Parent", key="018-parent")
     subtask_response = client_a.post(
         f"/api/tasks/{parent['id']}/subtasks",
-        headers={"Idempotency-Key": "015-subtask"},
+        headers={"Idempotency-Key": "018-subtask"},
         json={"title": "Completed child"},
     )
     assert subtask_response.status_code == 201, subtask_response.text
     subtask = subtask_response.json()
     completed_subtask = client_a.post(
         f"/api/tasks/{parent['id']}/subtasks/{subtask['id']}/transitions",
-        headers={"Idempotency-Key": "015-subtask-complete"},
+        headers={"Idempotency-Key": "018-subtask-complete"},
         json={"action": "complete", "expected_revision": subtask["revision"]},
     )
     assert completed_subtask.status_code == 200, completed_subtask.text
 
-    other_task = _create_task(client_b, "Other owner", key="015-other")
+    other_task = _create_task(client_b, "Other owner", key="018-other")
     _transition_task(
         client_b,
         other_task,
         "complete",
-        key="015-other-complete",
+        key="018-other-complete",
     )
 
     assert client_a.get("/api/account").json()["completed_task_count"] == 2
@@ -206,11 +206,11 @@ def test_update_profile_empty_clears_display_name(api_client: TestClient) -> Non
     assert resp.json()["display_name"] is None
 
 
-def test_015_FR_012_count_failure_prevents_profile_and_email_writes(
+def test_018_FR_012_count_failure_prevents_profile_and_email_writes(
     api_client: TestClient,
     monkeypatch,
 ) -> None:
-    """015-FR-009, 015-FR-012: task failure happens before account mutation."""
+    """018-FR-009, 018-FR-012: task failure happens before account mutation."""
 
     container = _container(api_client)
     current = api_client.get("/api/auth/me").json()

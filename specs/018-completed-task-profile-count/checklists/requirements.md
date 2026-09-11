@@ -24,7 +24,7 @@
 
 - [x] CHK010 D-01-S01…D-01-S07 cover applicable loading, zero, nonzero, refresh, unavailable and unauthorized states.
 - [x] CHK011 Responsive, keyboard, focus and accessibility impact is explicitly bounded.
-- [x] CHK012 Backend, frontend and browser RED→GREEN tasks carry concrete paths and `015-FR-nnn`/Allure requirements, including the typed account-hook fixture.
+- [x] CHK012 Backend, frontend and browser RED→GREEN tasks carry concrete paths and `018-FR-nnn`/Allure requirements, including the typed account-hook fixture.
 - [x] CHK013 Full verification, independent review/PO, snapshot freshness and no-publication boundaries are retained.
 
 ## Result

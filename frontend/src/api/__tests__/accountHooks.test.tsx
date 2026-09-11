@@ -29,7 +29,7 @@ describe("accountHooks", () => {
     expect(accountKeys.detail()).toEqual(["account", "detail"]);
   });
 
-  it("015-FR-001 useAccountQuery fetches the caller's count", async () => {
+  it("018-FR-001 useAccountQuery fetches the caller's count", async () => {
     const spy = vi.spyOn(apiClient, "getAccount").mockResolvedValue(account);
 
     const { result } = renderHook(() => useAccountQuery(), { wrapper });

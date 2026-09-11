@@ -58,7 +58,9 @@ test.describe("account & data rights acceptance", () => {
     });
   });
 
-  test("E2E-ACCT-05 015-FR-001 015-FR-007 015-SC-001 completed profile count follows lifecycle", async ({ page }, testInfo) => {
+  // FR-011 links this taxonomy-bearing journey to the aggregate Allure gate.
+  // SC-005 is a traceability link; only make verify-all proves the full gate.
+  test("E2E-ACCT-05 018-FR-001 018-FR-007 018-FR-011 018-SC-001 018-SC-005 completed profile count follows lifecycle", async ({ page }, testInfo) => {
     const email = uniqueEmail("account-completed-count", testInfo);
     await signupThroughUi(page, email, await mintInvite());
     await openAccountSettings(page, email);

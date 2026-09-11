@@ -1,8 +1,12 @@
 # Implementation Plan: Completed Task Profile Count
 
-**Branch**: `015-completed-task-profile-count` | **Date**: 2026-09-05 | **Spec**: [spec.md](spec.md) | **Design**: [design.md](design.md)
+**Branch**: `018-completed-task-profile-count` | **Date**: 2026-09-05 | **Spec**: [spec.md](spec.md) | **Design**: [design.md](design.md)
 
 **Base audited**: `040f1de82e0b122bdcbb62f92db34fcde1d53bbd`
+
+**Review follow-up (2026-09-11)**: [PR #221 disposition](review-resolution.md)
+records the metadata-only renumbering from `015` to `018`, the retained historical
+approval receipt, and the current upstream policy rationale for no new feature flag.
 
 ## Summary
 
@@ -71,14 +75,14 @@ frontend/
 ├── src/features/account/__tests__/AccountSettingsPage.test.tsx
 └── tests/e2e/account.spec.ts               # synthetic visible journey
 
-specs/015-completed-task-profile-count/    # ratified product contract
+specs/018-completed-task-profile-count/    # ratified product contract
 ```
 
 No task schema, repository schema, mobile, provider, voice, CRT, deployment or CI file is planned.
 
 ## Test Strategy
 
-1. Backend RED: add the indexed repository count contract in `backend/tests/test_task_repository.py`, the public query contract in `backend/tests/test_task_service.py`, then extend `backend/tests/test_account_api.py` with zero, exact nonzero, cancelled exclusion, completed subtask exclusion, cross-owner exclusion, complete +1, reopen -1, and forced task-count failure before profile/email mutation. Use the central Allure helper and `015-FR-001…012` qualifiers.
+1. Backend RED: add the indexed repository count contract in `backend/tests/test_task_repository.py`, the public query contract in `backend/tests/test_task_service.py`, then extend `backend/tests/test_account_api.py` with zero, exact nonzero, cancelled exclusion, completed subtask exclusion, cross-owner exclusion, complete +1, reopen -1, and forced task-count failure before profile/email mutation. Use the central Allure helper and `018-FR-001…012` qualifiers.
 2. Backend GREEN: implement the smallest Tasks-owned query and additive account projection, then rerun the focused files.
 3. Frontend RED: extend `frontend/src/features/account/__tests__/AccountSettingsPage.test.tsx` for exact zero/nonzero copy, the immediate loading placeholder, authenticated non-401 initial/refetch failure honesty, and preservation after profile mutation. Cover the unchanged 401 redirect boundary at the existing route/client level.
 4. Frontend GREEN: update the strict type and Profile card only; rerun the focused Vitest file.
@@ -92,11 +96,11 @@ The qualified marker appears in the named test's title, docstring or Allure stor
 
 | marker | executable link | substantive evidence |
 |---|---|---|
-| `015-SC-001` | Account API lifecycle test and Playwright Profile counter journey | zero, exact nonzero, complete +1 and reopen -1 |
-| `015-SC-002` | Account API owner-isolation test and Playwright second-user observation | only the signed-in owner's completed rows contribute |
-| `015-SC-003` | Account API exclusion test | cancelled top-level tasks and completed subtasks contribute zero |
-| `015-SC-004` | Account page Vitest state test and Playwright responsive journey | the line is readable in place; loading, failure and recovery are distinguishable |
-| `015-SC-005` | Playwright Profile counter journey carries the mechanical link | separate hash-bound command evidence in `acceptance.md` proves `make verify-all`; the marker itself is not presented as proof that the aggregate command ran |
+| `018-SC-001` | Account API lifecycle test and Playwright Profile counter journey | zero, exact nonzero, complete +1 and reopen -1 |
+| `018-SC-002` | Account API owner-isolation test and Playwright second-user observation | only the signed-in owner's completed rows contribute |
+| `018-SC-003` | Account API exclusion test | cancelled top-level tasks and completed subtasks contribute zero |
+| `018-SC-004` | Account page Vitest state test and Playwright responsive journey | the line is readable in place; loading, failure and recovery are distinguishable |
+| `018-SC-005` | Playwright Profile counter journey carries the mechanical link | separate hash-bound command evidence in `acceptance.md` proves `make verify-all`; the marker itself is not presented as proof that the aggregate command ran |
 
 ## Rollback and Delivery
 

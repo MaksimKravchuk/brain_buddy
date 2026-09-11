@@ -20,11 +20,11 @@ def task_service(task_repo: TaskRepository) -> TaskService:
     return TaskService(task_repo)
 
 
-def test_015_FR_012_completed_count_stays_behind_public_task_service(
+def test_018_FR_012_completed_count_stays_behind_public_task_service(
     task_service: TaskService,
     monkeypatch,
 ) -> None:
-    """015-FR-003, 015-FR-008, 015-FR-012: service owns the derived query."""
+    """018-FR-003, 018-FR-008, 018-FR-012: service owns the derived query."""
 
     calls: list[tuple[str, str]] = []
 
@@ -42,10 +42,10 @@ def test_015_FR_012_completed_count_stays_behind_public_task_service(
     assert calls == [("user_profile", "completed")]
 
 
-def test_015_SC_001_completed_count_tracks_complete_and_reopen(
+def test_018_SC_001_completed_count_tracks_complete_and_reopen(
     task_service: TaskService,
 ) -> None:
-    """015-FR-002, 015-FR-007, 015-FR-008: every read is authoritative."""
+    """018-FR-002, 018-FR-007, 018-FR-008: every read is authoritative."""
 
     owner_id = "user_profile"
     task = task_service.create_task(

@@ -89,10 +89,10 @@ def _task_doc(
     )
 
 
-def test_015_FR_003_repository_counts_only_requested_owner_and_state(
+def test_018_FR_003_repository_counts_only_requested_owner_and_state(
     repository: TaskRepository,
 ) -> None:
-    """015-FR-002, 015-FR-003, 015-FR-006: use indexed owner/state columns."""
+    """018-FR-002, 018-FR-003, 018-FR-006: use indexed owner/state columns."""
 
     repository.create(_task_doc("task_done_1", state="completed"))
     repository.create(_task_doc("task_done_2", state="completed"))
@@ -101,12 +101,11 @@ def test_015_FR_003_repository_counts_only_requested_owner_and_state(
         _task_doc("task_other_owner", owner_id="user_other", state="completed")
     )
 
-    assert repository.count_for_owner_by_state(
-        owner_id=OWNER, state="completed"
-    ) == 2
-    assert repository.count_for_owner_by_state(
-        owner_id="user_other", state="completed"
-    ) == 1
+    assert repository.count_for_owner_by_state(owner_id=OWNER, state="completed") == 2
+    assert (
+        repository.count_for_owner_by_state(owner_id="user_other", state="completed")
+        == 1
+    )
 
 
 def _start_brain_dump(

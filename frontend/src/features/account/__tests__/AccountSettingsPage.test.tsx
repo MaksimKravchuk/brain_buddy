@@ -74,7 +74,7 @@ describe("AccountSettingsPage", () => {
     vi.restoreAllMocks();
   });
 
-  it("015-FR-010 shows a polite completed-count placeholder immediately", () => {
+  it("018-FR-010 shows a polite completed-count placeholder immediately", () => {
     vi.spyOn(apiClient, "getAccount").mockReturnValue(
       new Promise<AccountResponse>(() => undefined)
     );
@@ -85,7 +85,7 @@ describe("AccountSettingsPage", () => {
     expect(screen.getByLabelText(/display name/i)).toBeInTheDocument();
   });
 
-  it("015-FR-001 shows exact zero and nonzero completed-task counts", async () => {
+  it("018-FR-001 shows exact zero and nonzero completed-task counts", async () => {
     const getAccount = vi.spyOn(apiClient, "getAccount");
     renderPage();
 
@@ -101,7 +101,7 @@ describe("AccountSettingsPage", () => {
     expect(await screen.findByText("Completed tasks: 0")).toBeInTheDocument();
   });
 
-  it("015-FR-010 shows unavailable copy for an authenticated initial failure", async () => {
+  it("018-FR-010 shows unavailable copy for an authenticated initial failure", async () => {
     vi.spyOn(apiClient, "getAccount").mockRejectedValue(
       new ApiError("Server Error", 500, { message: "Internal storage error." })
     );
@@ -115,7 +115,7 @@ describe("AccountSettingsPage", () => {
     expect(screen.getByLabelText(/display name/i)).toBeInTheDocument();
   });
 
-  it("015-SC-004 hides stale count data after an authenticated failed refetch", async () => {
+  it("018-SC-004 hides stale count data after an authenticated failed refetch", async () => {
     const client = createQueryClient();
     client.setQueryData(accountKeys.detail(), {
       ...account,
@@ -141,7 +141,7 @@ describe("AccountSettingsPage", () => {
     );
   });
 
-  it("015-FR-009 keeps the returned count after a profile save", async () => {
+  it("018-FR-009 keeps the returned count after a profile save", async () => {
     const updated = {
       ...account,
       display_name: "Maks",

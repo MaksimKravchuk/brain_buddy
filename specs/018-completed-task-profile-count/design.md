@@ -1,6 +1,6 @@
 # Design: Completed Task Profile Count
 
-**Feature**: `specs/015-completed-task-profile-count/`
+**Feature**: `specs/018-completed-task-profile-count/`
 **Spec**: `spec.md` (clarifications settled: 2026-09-05)
 **Screens**: no new mockup; this is one line inside the existing Profile card
 **Human sign-off**: pending exact-package approval

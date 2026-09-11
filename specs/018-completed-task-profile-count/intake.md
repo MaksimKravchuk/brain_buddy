@@ -1,6 +1,6 @@
 # Business Intake: Completed Task Profile Count
 
-**Feature**: `specs/015-completed-task-profile-count/`
+**Feature**: `specs/018-completed-task-profile-count/`
 **Interviewed**: 2026-09-05
 **Interviewee**: Max
 

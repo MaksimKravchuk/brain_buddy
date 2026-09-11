@@ -1,6 +1,6 @@
 # Feature Specification: Completed Task Profile Count
 
-**Feature Branch**: `015-completed-task-profile-count`
+**Feature Branch**: `018-completed-task-profile-count`
 
 **Created**: 2026-09-05
 
@@ -50,7 +50,7 @@ As a signed-in user, I can open Account settings and read how many of my current
 - **FR-008**: The value MUST be derived from existing task records; the feature MUST NOT introduce a stored aggregate, migration, background reconciliation or external provider.
 - **FR-009**: Successful profile editing, authentication, account export/deletion and task lifecycle semantics MUST remain unchanged. The sole planned availability change is FR-012's fail-before-write behavior when the Tasks count query is unavailable.
 - **FR-010**: While the account request is pending, the Profile card MUST expose an immediate polite status `Completed tasks: …`. On an authenticated non-401 account-response failure it MUST expose an alert `Completed tasks unavailable. Refresh the page to try again.` plus `(ref: <correlation-id>)` when present, and MUST NOT show a guessed or stale number. The existing profile form remains available and unchanged in both states. A 401 MUST preserve the existing session-clear and `/login` redirect.
-- **FR-011**: New backend, frontend and browser product tests MUST carry `015-FR-nnn` references and the repository Allure epic/feature/story/title/named-step taxonomy.
+- **FR-011**: New backend, frontend and browser product tests MUST carry `018-FR-nnn` references and the repository Allure epic/feature/story/title/named-step taxonomy.
 - **FR-012**: The completed-task query MUST remain owned by the Tasks module and exposed through its public service boundary. Account mutations that return the additive field MUST obtain it before committing the account write; if that query fails, no profile or email mutation may be applied.
 
 ### Key Entities
