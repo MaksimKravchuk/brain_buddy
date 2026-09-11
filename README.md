@@ -5,9 +5,11 @@
 
 Brain Buddy is a personal GTD workspace whose product focus is helping people turn loosely expressed intentions into executable next actions. It is built first for its owner's everyday use, then for people with similar needs.
 
-The intended core loop is **capture → clarify into an executable next action → act → weekly review of what got stuck**. During review, AI helps identify why work stalled and clarify, resize, defer, or otherwise resolve it. Task detail should fit the person and situation; more subtasks are not automatically better.
+The intended core loop is **capture → clarify into an executable next action → act personally or delegate → inspect the result → weekly review of what got stuck**. During review, AI helps identify why work stalled and clarify, resize, defer, or otherwise resolve it. Task detail should fit the person, executor, and situation; more subtasks are not automatically better.
 
-See [Product direction: executable next actions](docs/product-direction.md) for the owner-confirmed rationale, the garage example, and the role of weekly review. This is product direction, not a claim that the full loop is implemented; the feature specs and release evidence track delivery.
+Personal usefulness, learning, and a demonstrable body of work are the project's current goals. Open-source publication is under consideration; a large commercial business is not required for success.
+
+See [Product direction: executable next actions](docs/product-direction.md) for the owner's goals, behavioral hypothesis, garage example, and roles of weekly review and agents. This is product direction, not a claim that the full loop is implemented; the feature specs and release evidence track delivery.
 
 ## Highlights
 - **Interactive canvas** powered by React Flow with undo/redo, optimistic updates, and large-graph tuning for 200+ nodes.

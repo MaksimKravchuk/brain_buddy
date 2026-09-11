@@ -17,6 +17,24 @@ Existing domain, consent, confirmation, and delivery contracts remain authoritat
 Behavior changes still need the [Spec Kit workflow](spec-kit-workflow.md); this
 document does not amend frozen specs or authorize automatic task mutations.
 
+## Project goals and possible public direction
+
+Max's primary goal is a tool he finds useful in everyday life. Building a large
+revenue-generating business is not a requirement for the project's success.
+Professional learning, a demonstrable body of work, and career opportunities are
+also meaningful outcomes for this side project.
+
+Max is considering open-source publication as a way for others to try, inspect,
+and improve the approach. Useful public evidence would include a runnable core
+journey and case studies showing what helped, what failed, and what changed.
+Repeat use and concrete feedback from similar people matter more than repository
+stars alone. Keep development and support effort sustainable for a side project.
+
+Publication scope and license remain undecided. A reusable skill or plugin for an
+existing AI assistant is an exploratory distribution option, not a committed
+deliverable. Monetization, acquisition, or adoption by a platform are possible
+future outcomes, not planning assumptions or success requirements.
+
 ## Who and what problem
 
 Build first for Max's own everyday use, then test whether the same benefit holds
@@ -37,6 +55,26 @@ Max's words, from this discussion:
 > «чтобы задачи из брейндампа и вообще из инбокса попадали в твой лист задач
 > таким образом, чтобы они были исполнимы. То есть трансформирование в
 > исполнимость должно произойти.»
+
+## Behavioral rationale (hypothesis)
+
+Max relates the problem to cognitive behavioral therapy (CBT): a large, unclear
+commitment can feel overwhelming, and avoidance can leave it unresolved. The
+product hypothesis is that guided clarification, an achievable action, and review
+of what happened can help the person move forward. BB should offer support when
+thinking through the work alone is difficult; learning GTD is not a prerequisite.
+
+This resembles the collaborative action planning and obstacle review described by
+the [Beck Institute](https://beckinstitute.org/blog/the-new-homework-in-cognitive-behavior-therapy/)
+and the specific plans and reflection described in the
+[NHS problem-solving guidance](https://www.nhs.uk/every-mind-matters/mental-wellbeing-tips/self-help-cbt-techniques/problem-solving/).
+These sources support the rationale, not evidence of BB's effectiveness or a claim
+that GTD or BB is a proven therapy. Unfinished work alone does not establish avoidance.
+
+Clarification should require little effort: use known context, ask one useful
+question at a time, and stop when there is a usable next action. Help with a stuck
+item should also be available between weekly reviews. Endless planning and a
+burdensome review can recreate the very problem the product aims to address.
 
 ## What executable means
 
@@ -77,6 +115,27 @@ question finishes that action; a reply, sale, or collection may require further
 actions or an explicit waiting state. The exact UI and representation belong in
 future specs.
 
+## Execution by people and agents
+
+Max identifies agent delegation as a way to turn clarified intentions into actual
+progress. The intended loop is capture → clarify → execute personally or delegate
+→ inspect the result → review what remains stuck.
+
+Executability depends on the chosen executor. An agent needs relevant source
+information, an expected result, and clear limits on what it may do independently.
+BB should help form that brief and preserve its connection to the intended outcome.
+A complete project plan is not necessary before delegating a useful next step.
+
+Delegation can also address a prerequisite. If pricing were the obstacle to selling
+the refrigerator, an agent could research comparable offers and prepare a draft
+listing from supplied facts. This is an illustrative option, not a new fact about
+Max's garage or a claim about a shipped capability. The person still chooses the
+approach and reviews the returned work under the existing delegation contracts.
+
+Weekly review should include delegated work: what returned, whether it helped,
+where the agent got stuck, and what now needs the person's decision. Sending work
+to an agent is not itself proof of progress or completion.
+
 ## Weekly review keeps work executable
 
 Weekly review is a central part of this same product loop. Once a week, AI helps
@@ -110,8 +169,8 @@ This direction does not prescribe a learning model or a persistent user-profile 
 - **Tasks, projects/lists, and tags** preserve actionable commitments and their context.
 - **Weekly review** revisits stalled work and restores clarity about what happens next.
 - **Thinking / CRT** can support deeper examination of a complex or recurring problem.
-- **External agents** can carry out suitable, understood actions; delegation still
-  needs a clear intended result and user review of the returned work.
+- **External agents** extend the execution step, including useful research or
+  preparation that resolves a prerequisite; the result still needs user review.
 
 Capture quality, task management, CRT, and agent connectivity support this focus.
 Their presence alone is not evidence that intentions became executable or that
@@ -121,12 +180,18 @@ the user made progress.
 
 The primary value question is: after inbox clarification or weekly review, can the
 person begin the next action without having to work out what to do all over again?
-Then observe whether the work actually moves, or is consciously deferred or dropped,
-and how much clarification and system-maintenance effort this required.
+Then observe whether the work actually moves, personally or through an agent, and
+how much clarification and system-maintenance effort this required. Record conscious
+deferral or cancellation separately from executed work.
 
 Real stalled entries from Max are the starting evidence. The number of tasks
 created, subtasks generated, or dates moved is insufficient on its own. No numeric
 success target, retention result, or broader willingness to pay has been established.
+
+For the side-project goal, also look for useful personal learning, repeat use by
+others, and understandable public examples of the approach. Revenue or an acquisition
+is not required to establish that value. Comparison with an ordinary AI chat can
+help reveal what BB's context, interaction, and follow-through actually add.
 
 Future discovery and specs must resolve the interaction, how project context and
 dependencies are represented, how review selects items, and what the user confirms.
