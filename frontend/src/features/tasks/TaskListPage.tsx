@@ -96,8 +96,15 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const pendingCompletionsRef = useRef(new Set<string>());
   const [pendingCompletions, setPendingCompletions] = useState(new Set<string>());
   const completionFocusRef = useRef(new Map<string, HTMLElement>());
-  const [rowHandoff, setRowHandoff] = useState<{ task: TaskResponse; connectionId: string } | null>(null);
-  const [agentFocusTaskId, setAgentFocusTaskId] = useState<string | null>(null);
+  const [rowHandoff, setRowHandoff] = useState<{
+    task: TaskResponse;
+    connectionId: string;
+    fallbackTaskId: string | null;
+  } | null>(null);
+  const [agentFocusTarget, setAgentFocusTarget] = useState<{
+    taskId: string;
+    fallbackTaskId: string | null;
+  } | null>(null);
   const [selectionRecoveryMessage, setSelectionRecoveryMessage] = useState<string | null>(null);
   const [selectionRecoveryVersion, setSelectionRecoveryVersion] = useState(0);
   const recoveryAttemptRef = useRef<{
@@ -492,18 +499,34 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       )
     : null;
 
+  const agentFocusFallbackTaskId = (focusedTaskId: string): string | null => {
+    const orderedTasks = [...openTasks, ...completedTasks, ...cancelledTasks];
+    const focusedIndex = orderedTasks.findIndex((task) => task.id === focusedTaskId);
+    if (focusedIndex < 0) return null;
+    return orderedTasks[focusedIndex + 1]?.id ?? orderedTasks[focusedIndex - 1]?.id ?? null;
+  };
+
   useEffect(() => {
-    if (!agentFocusTaskId) return;
+    if (!agentFocusTarget) return;
     const control = Array.from(document.querySelectorAll<HTMLElement>("[data-agent-assigned-control]"))
-      .find((element) => element.dataset.agentAssignedControl === agentFocusTaskId);
+      .find((element) => element.dataset.agentAssignedControl === agentFocusTarget.taskId);
     if (control) control.focus({ preventScroll: true });
     else {
-      const rowLink = rowLinkRefs.current.get(agentFocusTaskId);
+      const rowLink = rowLinkRefs.current.get(agentFocusTarget.taskId);
       if (rowLink && document.contains(rowLink)) rowLink.focus({ preventScroll: true });
-      else listHeadingRef.current?.focus({ preventScroll: true });
+      else {
+        const preferredFallback = agentFocusTarget.fallbackTaskId
+          ? rowLinkRefs.current.get(agentFocusTarget.fallbackTaskId)
+          : null;
+        const survivingRow = preferredFallback && document.contains(preferredFallback)
+          ? preferredFallback
+          : Array.from(rowLinkRefs.current.values()).find((link) => document.contains(link));
+        if (survivingRow) survivingRow.focus({ preventScroll: true });
+        else listHeadingRef.current?.focus({ preventScroll: true });
+      }
     }
-    setAgentFocusTaskId(null);
-  }, [agentFocusTaskId, agentRunSummaries]);
+    setAgentFocusTarget(null);
+  }, [agentFocusTarget, agentRunSummaries]);
 
   const closeRowHandoff = () => setRowHandoff(null);
   const handleRowHandoffDispatched = (run: AgentRunResponse) => {
@@ -514,8 +537,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       );
     }
     const taskToFocus = rowHandoff?.task.id;
+    const fallbackTaskId = rowHandoff?.fallbackTaskId ?? null;
     setRowHandoff(null);
-    setAgentFocusTaskId(taskToFocus ?? null);
+    setAgentFocusTarget(taskToFocus ? { taskId: taskToFocus, fallbackTaskId } : null);
     void queryClient.invalidateQueries({ queryKey: agentKeys.connections() });
   };
 
@@ -556,7 +580,11 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     relayEnabled: agentHandoffEnabled,
     agentConnections,
     preferredConnectionId: preferredConnection?.id,
-    onReviewAgent: (task: TaskResponse, connectionId: string) => setRowHandoff({ task, connectionId }),
+    onReviewAgent: (task: TaskResponse, connectionId: string) => setRowHandoff({
+      task,
+      connectionId,
+      fallbackTaskId: agentFocusFallbackTaskId(task.id)
+    }),
     onOpenTask: (task: TaskResponse) => {
       if (task.id !== taskId) navigate({ pathname: `${listPath}/${task.id}`, search: searchParams.toString() });
     },
@@ -606,7 +634,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       onTransitionSubtask={(task, subtask, action) => subtaskTransitionMutation.mutate({ task, subtask, action })}
       onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
       onAgentDispatched={(run) => {
-        setAgentFocusTaskId(run.task_id);
+        setAgentFocusTarget({
+          taskId: run.task_id,
+          fallbackTaskId: agentFocusFallbackTaskId(run.task_id)
+        });
         void queryClient.invalidateQueries({ queryKey: agentKeys.connections() });
       }}
     />

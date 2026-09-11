@@ -850,7 +850,20 @@ describe("TaskListPage rows", () => {
     expect(screen.getByTestId("inline-task-detail")).toBeInTheDocument();
   });
 
-  it("017-FR-011 focuses the list heading when the dispatched task no longer has a row", async () => {
+  it.each([
+    {
+      label: "focuses the next surviving row",
+      initialTasks: [taskFixture(), taskFixture({ id: "task-2", title: "Another task", order_key: 2 })],
+      settledTasks: [taskFixture({ id: "task-2", title: "Another task", order_key: 2 })],
+      expectedFocus: "Another task"
+    },
+    {
+      label: "focuses the list heading when no rows survive",
+      initialTasks: [taskFixture()],
+      settledTasks: [],
+      expectedFocus: "Next actions"
+    }
+  ])("017-FR-011 $label after dispatch removes the originating row", async ({ initialTasks, settledTasks, expectedFocus }) => {
     const user = userEvent.setup();
     act(() => {
       useAuthStore.setState({
@@ -874,12 +887,13 @@ describe("TaskListPage rows", () => {
     ]);
     mocked.listAgentRunSummaries.mockResolvedValue({});
     mocked.confirmAgentHandoff.mockResolvedValue(agentRunFixture());
+    mocked.listTasks.mockResolvedValue(listResponse(initialTasks));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     renderPage("/tasks/next?group=off", client);
 
     await user.click(await screen.findByRole("button", { name: "Hand Fix onboarding drop-off to Hermes" }));
     expect(await screen.findByRole("heading", { name: "What will be sent" })).toBeInTheDocument();
-    mocked.listTasks.mockResolvedValue(listResponse([]));
+    mocked.listTasks.mockResolvedValue(listResponse(settledTasks));
     await act(async () => {
       await client.refetchQueries({ queryKey: taskKeys.lists() });
     });
@@ -888,7 +902,10 @@ describe("TaskListPage rows", () => {
     });
     await user.click(await screen.findByRole("button", { name: "Send to agent" }));
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus());
+    const focusTarget = expectedFocus === "Next actions"
+      ? screen.getByRole("heading", { name: expectedFocus })
+      : screen.getByRole("link", { name: expectedFocus });
+    await waitFor(() => expect(focusTarget).toHaveFocus());
   });
 
   it("renders due dates, subtask progress, tags and who a task waits on", async () => {
