@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, apiClient } from "../../../api/client";
+import { ApiError, apiClient, getApiBaseUrl } from "../../../api/client";
 import { taskKeys } from "../../../api/taskHooks";
 import type {
   ProjectResponse,
@@ -16,6 +16,7 @@ import type {
 } from "../../../api/taskTypes";
 import { useAuthStore } from "../../../stores/authStore";
 import { TaskListPage } from "../TaskListPage";
+import { taskAgentPreferenceKey } from "../taskAgentPreference";
 import { resetTaskDetailAutosaveControllersForTests, taskAutosaveStorageKey } from "../taskDetailAutosave";
 
 vi.mock("../../../api/client", async () => {
@@ -134,6 +135,7 @@ function renderPage(initialEntry = "/tasks/next", client = new QueryClient({ def
 beforeEach(() => {
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
   resetTaskDetailAutosaveControllersForTests();
+  window.localStorage.clear();
   sessionStorage.clear();
   act(() => {
     useAuthStore.setState({ user: { id: "user-1", email: "max@example.test" }, status: "authed" });
@@ -226,6 +228,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   resetTaskDetailAutosaveControllersForTests();
+  window.localStorage.clear();
   sessionStorage.clear();
   vi.clearAllMocks();
   act(() => {
@@ -330,6 +333,96 @@ describe("TaskListPage projections", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(screen.queryByText("Agent statuses may be out of date.")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: /Hermes.*Running.*Guaranteed single start/i })).toBeInTheDocument();
+  });
+
+  it("017-FR-010 waits for a trustworthy run projection before exposing handoff controls", async () => {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { external_agent_relay: true }
+        },
+        status: "authed"
+      });
+    });
+    mocked.listAgentConnections.mockResolvedValue([
+      {
+        id: "agent-hermes",
+        name: "Hermes",
+        agent_address: "https://hermes.example.test/a2a",
+        status: "ready",
+        stale: false,
+        ready_for_handoff: true
+      } as Awaited<ReturnType<typeof apiClient.listAgentConnections>>[number]
+    ]);
+    let rejectSummaries: (reason: Error) => void = () => undefined;
+    mocked.listAgentRunSummaries.mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectSummaries = reject;
+    }));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage("/tasks/next?group=off", client);
+
+    expect(await screen.findByRole("link", { name: "Fix onboarding drop-off" })).toBeInTheDocument();
+    await waitFor(() => expect(mocked.listAgentConnections).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Hand Fix onboarding drop-off to Hermes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose agent for Fix onboarding drop-off" })).not.toBeInTheDocument();
+
+    await act(async () => rejectSummaries(new Error("Status projection unavailable.")));
+    expect(screen.queryByRole("button", { name: "Hand Fix onboarding drop-off to Hermes" })).not.toBeInTheDocument();
+
+    mocked.listAgentRunSummaries.mockResolvedValueOnce({});
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["agents"] });
+    });
+    expect(await screen.findByRole("button", { name: "Hand Fix onboarding drop-off to Hermes" })).toBeInTheDocument();
+  });
+
+  it("017-FR-011 preserves the last-used agent preference until connections finish loading", async () => {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { external_agent_relay: true }
+        },
+        status: "authed"
+      });
+    });
+    const preferenceKey = taskAgentPreferenceKey({ ownerId: "user-1", apiOrigin: getApiBaseUrl() });
+    window.localStorage.setItem(preferenceKey, JSON.stringify({ connectionId: "agent-hermes", confirmedAt: Date.now() }));
+    let resolveConnections: (connections: Awaited<ReturnType<typeof apiClient.listAgentConnections>>) => void = () => undefined;
+    mocked.listAgentConnections.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveConnections = resolve;
+    }));
+
+    renderPage("/tasks/next?group=off");
+
+    expect(await screen.findByRole("link", { name: "Fix onboarding drop-off" })).toBeInTheDocument();
+    await waitFor(() => expect(mocked.listAgentConnections).toHaveBeenCalled());
+    expect(window.localStorage.getItem(preferenceKey)).not.toBeNull();
+
+    await act(async () => resolveConnections([
+      {
+        id: "agent-athena",
+        name: "Athena",
+        agent_address: "https://athena.example.test/a2a",
+        status: "ready",
+        stale: false,
+        ready_for_handoff: true
+      },
+      {
+        id: "agent-hermes",
+        name: "Hermes",
+        agent_address: "https://hermes.example.test/a2a",
+        status: "ready",
+        stale: false,
+        ready_for_handoff: true
+      }
+    ] as Awaited<ReturnType<typeof apiClient.listAgentConnections>>));
+    expect(await screen.findByRole("button", { name: "Hand Fix onboarding drop-off to Hermes" })).toBeInTheDocument();
+    expect(window.localStorage.getItem(preferenceKey)).not.toBeNull();
   });
 
   it("titles each projection from the route and groups tasks by project by default", async () => {
@@ -1475,6 +1568,29 @@ describe("TaskListPage detail wiring", () => {
     renderPage("/tasks/waiting/task-1");
     await waitFor(() => expect(currentLocation()).toBe("/tasks/next/task-1?showCancelled=1"));
     expect(await screen.findByLabelText("Title")).toHaveValue(cancelled.title);
+  });
+
+  it("017-FR-005 waits for projects before choosing the canonical route of a missing row", async () => {
+    const moved = taskFixture({ state: "waiting", project_id: "project-launch" });
+    mocked.getTask.mockResolvedValue(moved);
+    mocked.listTasks.mockImplementation(async (filters) =>
+      filters?.projectId === "project-launch" ? listResponse([moved]) : listResponse([])
+    );
+    let resolveProjects: (loaded: ProjectResponse[]) => void = () => undefined;
+    mocked.listProjects.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveProjects = resolve;
+    }));
+
+    renderPage("/tasks/next/task-1");
+
+    await waitFor(() => expect(mocked.getTask).toHaveBeenCalledWith("task-1", expect.any(AbortSignal)));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(currentLocation()).toBe("/tasks/next/task-1");
+
+    await act(async () => resolveProjects(projects));
+    await waitFor(() => expect(currentLocation()).toBe("/projects/project-launch/task-1"));
   });
 
   it("017-FR-005 redirects an Inbox-state task with a project to that project", async () => {

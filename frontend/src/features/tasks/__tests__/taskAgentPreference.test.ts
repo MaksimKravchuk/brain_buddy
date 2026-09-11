@@ -50,6 +50,7 @@ describe("017-FR-013 last-used task agent preference", () => {
 
   it("falls back safely and removes malformed, expired, or no-longer-eligible records", () => {
     const eligible = [connection("connection-1"), connection("connection-2")];
+    expect(readTaskAgentPreference(scope, [])).toBeNull();
     window.localStorage.setItem(taskAgentPreferenceKey(scope), "not json");
     expect(readTaskAgentPreference(scope, eligible)?.id).toBe("connection-1");
     expect(window.localStorage.getItem(taskAgentPreferenceKey(scope))).toBeNull();

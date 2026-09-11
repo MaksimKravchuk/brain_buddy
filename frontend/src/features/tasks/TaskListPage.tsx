@@ -473,18 +473,20 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   const hasFrameError = (taskQuery.isError && !taskQuery.data) || projectsQuery.isError || tagsQuery.isError;
 
-  // Existing run chips stay visible after rollout is disabled; only creation of
-  // new hand-offs is gated. A failed summary fetch still degrades to no chips.
+  // Existing run chips stay visible after rollout is disabled or a refresh
+  // fails. New hand-offs wait for a successful summary projection, otherwise
+  // an unknown assigned task could be dispatched twice.
   const hasOwner = Boolean(user);
   const relayEnabled = hasFeatureFlag(user, "external_agent_relay");
   const agentRunSummariesQuery = useAgentRunSummaries(tasks.map((task) => task.id), hasOwner);
   const agentRunSummaries = agentRunSummariesQuery.data ?? emptyAgentRunSummaries;
+  const agentHandoffEnabled = relayEnabled && agentRunSummariesQuery.isSuccess;
   const agentConnectionsQuery = useAgentConnections(relayEnabled);
   const agentConnections = agentConnectionsQuery.data ?? [];
-  const preferredConnection = accountId
+  const preferredConnection = accountId && agentConnectionsQuery.data !== undefined
     ? readTaskAgentPreference(
         { ownerId: accountId, apiOrigin: cacheScope.apiOrigin },
-        agentConnections
+        agentConnectionsQuery.data
       )
     : null;
 
@@ -545,7 +547,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         });
     },
     agentRuns: agentRunSummaries,
-    relayEnabled,
+    relayEnabled: agentHandoffEnabled,
     agentConnections,
     preferredConnectionId: preferredConnection?.id,
     onReviewAgent: (task: TaskResponse, connectionId: string) => setRowHandoff({ task, connectionId }),
@@ -644,7 +646,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         recoveryAttemptRef.current = attempt;
       }
     }
-    if (attempt.stopped || taskQueryIsLoading || taskQueryIsFetchingNextPage) return;
+    if (attempt.stopped || taskQueryIsLoading || taskQueryIsFetchingNextPage || projectsQuery.isLoading) return;
 
     if (!attempt.redirected) {
       const target = canonicalTaskTarget({
@@ -696,6 +698,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     navigate,
     projectId,
     projects,
+    projectsQuery.isLoading,
     searchParams,
     state,
     tagId,
