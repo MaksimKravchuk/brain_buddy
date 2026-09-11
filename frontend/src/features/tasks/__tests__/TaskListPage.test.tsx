@@ -855,15 +855,31 @@ describe("TaskListPage rows", () => {
       label: "focuses the next surviving row",
       initialTasks: [taskFixture(), taskFixture({ id: "task-2", title: "Another task", order_key: 2 })],
       settledTasks: [taskFixture({ id: "task-2", title: "Another task", order_key: 2 })],
-      expectedFocus: "Another task"
+      expectedFocus: "Another task",
+      route: "/tasks/next?group=off"
+    },
+    {
+      label: "uses the rendered project-group order for the next row",
+      initialTasks: [
+        taskFixture({ id: "task-2", title: "Unassigned A", project_id: null, order_key: 1 }),
+        taskFixture({ order_key: 2 }),
+        taskFixture({ id: "task-3", title: "Unassigned C", project_id: null, order_key: 3 })
+      ],
+      settledTasks: [
+        taskFixture({ id: "task-2", title: "Unassigned A", project_id: null, order_key: 1 }),
+        taskFixture({ id: "task-3", title: "Unassigned C", project_id: null, order_key: 3 })
+      ],
+      expectedFocus: "Unassigned A",
+      route: "/tasks/next"
     },
     {
       label: "focuses the list heading when no rows survive",
       initialTasks: [taskFixture()],
       settledTasks: [],
-      expectedFocus: "Next actions"
+      expectedFocus: "Next actions",
+      route: "/tasks/next?group=off"
     }
-  ])("017-FR-011 $label after dispatch removes the originating row", async ({ initialTasks, settledTasks, expectedFocus }) => {
+  ])("017-FR-011 $label after dispatch removes the originating row", async ({ initialTasks, settledTasks, expectedFocus, route }) => {
     const user = userEvent.setup();
     act(() => {
       useAuthStore.setState({
@@ -889,7 +905,7 @@ describe("TaskListPage rows", () => {
     mocked.confirmAgentHandoff.mockResolvedValue(agentRunFixture());
     mocked.listTasks.mockResolvedValue(listResponse(initialTasks));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    renderPage("/tasks/next?group=off", client);
+    renderPage(route, client);
 
     await user.click(await screen.findByRole("button", { name: "Hand Fix onboarding drop-off to Hermes" }));
     expect(await screen.findByRole("heading", { name: "What will be sent" })).toBeInTheDocument();

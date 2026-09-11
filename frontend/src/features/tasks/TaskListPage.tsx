@@ -499,11 +499,15 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       )
     : null;
 
+  const displayedTasks = [
+    ...(groupByProject ? openGroups.flatMap((group) => group.tasks) : openTasks),
+    ...completedTasks,
+    ...cancelledTasks
+  ];
   const agentFocusFallbackTaskId = (focusedTaskId: string): string | null => {
-    const orderedTasks = [...openTasks, ...completedTasks, ...cancelledTasks];
-    const focusedIndex = orderedTasks.findIndex((task) => task.id === focusedTaskId);
+    const focusedIndex = displayedTasks.findIndex((task) => task.id === focusedTaskId);
     if (focusedIndex < 0) return null;
-    return orderedTasks[focusedIndex + 1]?.id ?? orderedTasks[focusedIndex - 1]?.id ?? null;
+    return displayedTasks[focusedIndex + 1]?.id ?? displayedTasks[focusedIndex - 1]?.id ?? null;
   };
 
   useEffect(() => {
@@ -600,7 +604,6 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     </div>
   ) : null;
 
-  const displayedTasks = [...(groupByProject ? openGroups.flatMap((group) => group.tasks) : openTasks), ...completedTasks, ...cancelledTasks];
   const taskPosition = displayedTasks.findIndex((task) => task.id === taskId);
   const navigateTask = (id: string) => {
     navigationControlRef.current = document.activeElement?.matches("[data-task-navigation]") ? document.activeElement as HTMLButtonElement : null;
