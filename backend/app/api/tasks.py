@@ -6,7 +6,6 @@ import logging
 import time
 from collections.abc import Sequence
 from datetime import date
-from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -53,6 +52,7 @@ from app.schemas.tasks import (
     BrainDumpProposalUpdateRequest,
     BrainDumpProviderRunResponse,
     BrainDumpProvidersResponse,
+    BrainDumpRecoveryAction,
     BrainDumpSealRequest,
     BrainDumpTranscriptAppendRequest,
     BrainDumpTranscriptSegmentResponse,
@@ -261,7 +261,8 @@ def start_brain_dump_operation(
             payload,
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
-        )
+        ),
+        voice_brain_dump_service,
     )
 
 
@@ -315,7 +316,8 @@ def get_brain_dump_operation(
     return _to_brain_dump_response(
         voice_brain_dump_service.get_brain_dump_operation(
             operation_id, owner_id=current_user.id
-        )
+        ),
+        voice_brain_dump_service,
     )
 
 
@@ -339,7 +341,8 @@ def append_brain_dump_transcript(
             payload,
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
-        )
+        ),
+        voice_brain_dump_service,
     )
 
 
@@ -406,7 +409,8 @@ async def upload_brain_dump_audio_chunk(
             owner_id=current_user.id,
             content_sha256=x_content_sha256,
             content_type=content_type,
-        )
+        ),
+        voice_brain_dump_service,
     )
 
 
@@ -430,7 +434,8 @@ def seal_brain_dump_operation(
             payload,
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
-        )
+        ),
+        voice_brain_dump_service,
     )
 
 
@@ -456,7 +461,8 @@ def update_brain_dump_proposal(
             payload,
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
-        )
+        ),
+        voice_brain_dump_service,
     )
 
 
@@ -502,6 +508,13 @@ def command_brain_dump_operation(
         operation = voice_brain_dump_service.review_brain_dump_provisionally(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
         )
+    elif action == "reconcile_preview":
+        # Deliberately NOT in ``_VOICE_OFF_REACHABLE_ACTIONS``: it spends
+        # reconciler budget and ships preview text to a vendor, so it is a
+        # forward action and stays flag-gated like retry/commit.
+        operation = voice_brain_dump_service.reconcile_brain_dump_preview(
+            operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
+        )
     elif action == "withdraw_consent":
         operation = voice_brain_dump_service.withdraw_brain_dump_consent(
             operation_id, payload, owner_id=current_user.id, idempotency_key=idempotency
@@ -520,7 +533,7 @@ def command_brain_dump_operation(
         )
     else:
         raise ValidationFailure("Unsupported brain dump operation command.")
-    return _to_brain_dump_response(operation)
+    return _to_brain_dump_response(operation, voice_brain_dump_service)
 
 
 @router.post(
@@ -985,6 +998,7 @@ def list_tasks(
 
 def _to_brain_dump_response(
     operation: BrainDumpOperationDocument,
+    voice_brain_dump_service: VoiceBrainDumpService,
 ) -> BrainDumpOperationResponse:
     return BrainDumpOperationResponse(
         id=operation.id,
@@ -1021,7 +1035,9 @@ def _to_brain_dump_response(
         working_artifacts_expires_at=operation.working_artifacts_expires_at,
         reconciliation_quality=operation.reconciliation_quality,
         committable=brain_dump_operation_is_committable(operation),
-        available_recovery_actions=_brain_dump_available_recovery_actions(operation),
+        available_recovery_actions=_brain_dump_available_recovery_actions(
+            operation, voice_brain_dump_service
+        ),
         provider_runs=[
             BrainDumpProviderRunResponse(
                 id=run.id,
@@ -1092,14 +1108,24 @@ def _to_brain_dump_response(
 
 def _brain_dump_available_recovery_actions(
     operation: BrainDumpOperationDocument,
-) -> list[Literal["retry", "review_provisional", "cancel"]]:
-    """Project only recovery commands the service will authorize for this state."""
+    voice_brain_dump_service: VoiceBrainDumpService,
+) -> list[BrainDumpRecoveryAction]:
+    """Project only recovery commands the service will authorize for this state.
 
-    actions: list[Literal["retry", "review_provisional", "cancel"]] = []
+    ``review_provisional`` (surviving proposals to review) and
+    ``reconcile_preview`` (no proposals, but stable browser-preview text to
+    recover from) are mutually exclusive by construction; the preview predicate
+    also depends on the configured reconciler's consent identity and cost
+    ceiling, which is why the service -- not the bare operation -- answers it.
+    """
+
+    actions: list[BrainDumpRecoveryAction] = []
     if operation.status == "retryable_error":
         actions.append("retry")
     if can_review_brain_dump_provisionally(operation):
         actions.append("review_provisional")
+    if voice_brain_dump_service.can_reconcile_preview(operation):
+        actions.append("reconcile_preview")
     if operation.status in {"retryable_error", "terminal_error"}:
         actions.append("cancel")
     return actions

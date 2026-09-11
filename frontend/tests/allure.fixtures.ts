@@ -4,8 +4,9 @@
  * Import `test`/`expect` from this module instead of `@playwright/test`. An
  * auto-fixture applies a deterministic epic/feature/story derived from the spec
  * path, so every emitted Allure result has product taxonomy without per-test
- * boilerplate. It intentionally does not create a placeholder step: real
- * Playwright actions/assertions must provide the scenario evidence.
+ * boilerplate. It intentionally does not create a placeholder step: each test
+ * must wrap its product actions and assertions in explicit named `test.step`
+ * calls. Automatic Playwright diagnostic steps are omitted from the report.
  *
  * A spec can override any dimension by calling `epic()`, `feature()`, `story()`,
  * `displayName()`, or `step()` from `allure-js-commons` inside the test body —
@@ -29,6 +30,16 @@ const PATH_RULES: Array<{ match: RegExp } & EpicFeatureStory> = [
     epic: "End-to-end journeys",
     feature: "External agent relay",
     story: "Connect an agent and gate the hand-off honestly",
+  },
+  {
+    // Spec 014, quickstart.md §7. The `e2e/agents` rule above does not match
+    // `agent-relay`, so without this line the compose spec would fall through
+    // to the generic application-shell fallback and leave the A2A stories
+    // outside their own epic in the aggregate report.
+    match: /e2e\/agent-relay/,
+    epic: "External agent relay",
+    feature: "A2A wire contract",
+    story: "Hand off to a real A2A agent end to end",
   },
   {
     match: /e2e\/auth/,

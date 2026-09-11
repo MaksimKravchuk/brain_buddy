@@ -269,7 +269,7 @@ describe("hand-off confirmation idempotency", () => {
   const payload = (token: string): AgentHandoffConfirmRequest => ({
     connection_id: "conn_1",
     include_details: true,
-    context_items: [],
+    supporting_items: [],
     manifest_token: token,
     current_password: null,
   });

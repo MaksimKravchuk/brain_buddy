@@ -92,6 +92,28 @@ describe("task detail autosave contract UI", () => {
     expect(update).toHaveBeenCalledWith("task-ux", expect.objectContaining({ tag_ids: [] }), expect.any(String));
   });
 
+  it("saves the current draft before moving an Inbox task to Next actions", async () => {
+    const update = vi.spyOn(apiClient, "updateTask").mockResolvedValue(task({
+      state: "inbox", title: "Send the proposal", revision: 2
+    }));
+    const transition = vi.spyOn(apiClient, "transitionTask").mockResolvedValue(task({
+      title: "Send the proposal", revision: 3
+    }));
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task({ state: "inbox" }));
+    renderAutosave(controller);
+
+    const user = userEvent.setup();
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "Send the proposal");
+    await user.click(screen.getByRole("button", { name: "Move to Next actions" }));
+    await act(async () => { await controller.whenIdle(); });
+
+    expect(update).toHaveBeenCalledWith("task-ux", expect.objectContaining({ title: "Send the proposal", expected_revision: 1 }), expect.any(String));
+    expect(transition).toHaveBeenCalledWith("task-ux", expect.objectContaining({ action: "move", to_state: "next", expected_revision: 2 }), expect.any(String));
+    expect(screen.getByLabelText("List")).toHaveValue("next");
+    expect(screen.queryByRole("button", { name: "Move to Next actions" })).not.toBeInTheDocument();
+  });
+
   it("reopens a terminal task through the autosave barrier", async () => {
     const transition = vi.spyOn(apiClient, "transitionTask").mockResolvedValue(task({
       state: "inbox",
@@ -124,7 +146,7 @@ describe("task detail autosave contract UI", () => {
     await user.type(title, "Local");
     await user.tab();
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Task changed elsewhere"));
-    expect(screen.getByText("Your edits are safe here. Retry to apply them to the latest task.")).toBeInTheDocument();
+    expect(screen.getByText("Your edits remain in this tab. Retry to apply them to the latest task.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry my edits" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Discard my edits" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Discard my edits" }));
@@ -144,12 +166,12 @@ describe("task detail autosave contract UI", () => {
     await user.clear(title);
     await user.type(title, "Local");
     await user.tab();
-    expect(await screen.findByText("Your edits are safe here. Check your connection and try again.")).toBeInTheDocument();
+    expect(await screen.findByText("The latest task couldn’t be loaded. Your edits remain in this tab. Try again.")).toBeInTheDocument();
     const retry = screen.getByRole("button", { name: "Retry my edits" });
     expect(retry).toBeEnabled();
     await user.click(retry);
     await waitFor(() => expect(getTask).toHaveBeenCalledTimes(2));
-    expect(screen.getByText("Your edits are safe here. Retry to apply them to the latest task.")).toBeInTheDocument();
+    expect(screen.getByText("Your edits remain in this tab. Retry to apply them to the latest task.")).toBeInTheDocument();
   });
 
   it("shows exact offline recovery copy with actionable 44px Retry while fields remain enabled", async () => {
@@ -160,10 +182,54 @@ describe("task detail autosave contract UI", () => {
     await user.selectOptions(screen.getByLabelText("Priority"), "high");
     await act(async () => { await vi.runAllTimersAsync(); });
     expect(await screen.findByText("Couldn’t save changes")).toBeInTheDocument();
-    expect(screen.getByText("Your edits are safe here. Check your connection and try again.")).toBeInTheDocument();
+    expect(screen.getByText("Your edits remain in this tab. Try again when the service is available.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toHaveClass("min-h-11");
     expect(screen.getByLabelText("Priority")).toBeEnabled();
     expect(screen.queryByText(/Saved locally/i)).not.toBeInTheDocument();
+  });
+
+  it("explains an unverified save and offers an actual saved-version check without blaming the connection", async () => {
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+    controller.sync(task({ title: "Contradictory version" }));
+    const get = vi.spyOn(apiClient, "getTask").mockRejectedValueOnce(new TypeError("network")).mockResolvedValueOnce(task());
+    renderAutosave(controller);
+
+    expect(screen.getByText("Save unverified")).toBeInTheDocument();
+    expect(screen.getByTestId("autosave-announcement")).toHaveTextContent("Could not verify whether changes were saved");
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t verify the saved version");
+    expect(screen.queryByText(/check your connection/i)).not.toBeInTheDocument();
+    const details = screen.getByText("Error details").closest("details");
+    expect(details).not.toHaveAttribute("open");
+    expect(details).toHaveTextContent("Server returned contradictory canonical task data");
+    expect(screen.getByText("Save unverified").previousElementSibling).not.toHaveClass("motion-safe:animate-spin");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Check saved version" }));
+    await waitFor(() => expect(get).toHaveBeenCalledOnce());
+    expect(screen.getByText("The saved version couldn’t be loaded or verified. Your edits remain in this tab. Try checking again.")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Check saved version" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("retries an unverified acknowledgement with the original command and key", async () => {
+    const update = vi.spyOn(apiClient, "updateTask")
+      .mockResolvedValueOnce(task({ revision: 2, priority: "none" }))
+      .mockResolvedValueOnce(task({ revision: 2, priority: "high" }));
+    renderAutosave();
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText("Priority"), "high");
+    expect(await screen.findByText("Save unverified")).toBeInTheDocument();
+    expect(screen.getByText("The server response couldn’t be verified. Your edits remain in this tab. Retry to confirm the save.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry verification" }));
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    expect(update.mock.calls[1]).toEqual(update.mock.calls[0]);
+    expect(screen.getByText("Saved").previousElementSibling).not.toHaveClass("motion-safe:animate-spin");
+  });
+
+  it.each([401, 404])("disables a save retry the controller cannot perform after HTTP %s", async (status) => {
+    vi.spyOn(apiClient, "updateTask").mockRejectedValueOnce(new ApiError("unavailable", status, {}));
+    renderAutosave();
+    await userEvent.setup().selectOptions(screen.getByLabelText("Priority"), "high");
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeDisabled();
+    expect(screen.queryByText(/check your connection/i)).not.toBeInTheDocument();
   });
 
   it("blocks blank Waiting with exact inline guidance and focuses Waiting for without dispatch", async () => {
@@ -175,9 +241,9 @@ describe("task detail autosave contract UI", () => {
     expect(transition).not.toHaveBeenCalled();
   });
 
-  it("uses full viewport width below desktop and reserves keyboard scroll margin", () => {
+  it("fills the containing sheet and reserves keyboard scroll margin", () => {
     renderAutosave();
-    expect(screen.getByRole("complementary")).toHaveClass("w-full", "min-[1100px]:w-[320px]");
+    expect(screen.getByRole("complementary")).toHaveClass("h-full", "w-full", "overflow-y-auto");
     expect(screen.getByLabelText("Waiting for")).toHaveClass("scroll-mb-[88px]");
   });
 

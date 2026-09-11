@@ -22,6 +22,8 @@ Brain Buddy uses email+password accounts with server-side opaque sessions. This 
 
 9. **Ownership is checked on every tree read and mutation.** Wrong owner returns **404**, not 403, so a user can't probe tree IDs to find ones that exist. Every route in `app/api/routes.py` calls `tree_service.assert_owner` (or `get_tree_for_owner`) before delegating to a child service.
 
+   The one route that departs from that convention is the A2A push callback (`POST {api_prefix}/a2a/push/{run_id}/{token}`, spec 014): it answers 403 rather than 404 — byte-identically for an unknown run, a wrong token and a run that has already closed, so the three are indistinguishable to the caller — and its per-run 429 is a deliberate, run-id-gated existence signal, accepted because run ids are unguessable and the token authorises only an observation Brain Buddy would perform anyway (014-FR-008, 014-SC-003; `specs/014-a2a-relay-wire-contract/contracts/push-callback.md`).
+
 10. **Imported trees get `owner_id` stamped to the importing user** and are assigned a fresh tree id. An attacker cannot craft an import payload that claims ownership of someone else's tree id or pollutes with a specific `owner_id`.
 
 ## Creating an invite

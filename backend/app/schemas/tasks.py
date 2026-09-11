@@ -390,7 +390,13 @@ class BrainDumpProviderRunResponse(StrictBaseModel):
     status: Literal[
         "pending", "running", "succeeded", "retryable_error", "terminal_error"
     ]
-    checkpoint: Literal["sealed", "accurate_transcribed", "reconciled"]
+    checkpoint: Literal[
+        "sealed",
+        "accurate_transcribed",
+        "reconciled",
+        "preview_transcribed",
+        "preview_reconciled",
+    ]
     attempt: int
     recovery_count: int
     error: str | None = None
@@ -442,6 +448,15 @@ class BrainDumpActionReceiptResponse(StrictBaseModel):
     confirmed_at: datetime
 
 
+# Recovery commands the service will authorize for an operation's current
+# state, in the order the clients render them. ``reconcile_preview`` is the
+# owner-chosen, one-shot, provisional-only recovery from browser-preview text
+# (ADR-0002, 2026-09-05); it and ``review_provisional`` are mutually exclusive.
+BrainDumpRecoveryAction = Literal[
+    "retry", "review_provisional", "reconcile_preview", "cancel"
+]
+
+
 class BrainDumpOperationResponse(StrictBaseModel):
     id: str
     owner_id: str
@@ -460,9 +475,9 @@ class BrainDumpOperationResponse(StrictBaseModel):
         "none", "provisional_only", "accurate", "conflicted"
     ] = "none"
     committable: bool = False
-    available_recovery_actions: list[
-        Literal["retry", "review_provisional", "cancel"]
-    ] = Field(default_factory=list)
+    available_recovery_actions: list[BrainDumpRecoveryAction] = Field(
+        default_factory=list
+    )
     provider_runs: list[BrainDumpProviderRunResponse] = Field(default_factory=list)
     proposal_patches: list[BrainDumpProposalPatchResponse] = Field(default_factory=list)
     action_receipts: list[BrainDumpActionReceiptResponse] = Field(default_factory=list)

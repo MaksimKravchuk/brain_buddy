@@ -5,7 +5,7 @@ export type EditableField = "title" | "details" | "state" | "project_id" | "prio
 export type TaskDraft = Pick<TaskResponse, EditableField>;
 export type DirtyValue = { baseValue: TaskDraft[EditableField]; generation: number; value: TaskDraft[EditableField] };
 export type AutosaveStatus = "clean" | "queued" | "saving" | "retrying" | "saved" | "conflicted" | "failed";
-export type AutosaveError = { kind: "network" | "validation" | "unauthorized" | "unavailable" | "protocol"; message: string; retryAllowed: boolean; offline: boolean };
+export type AutosaveError = { kind: "network" | "validation" | "unauthorized" | "unavailable" | "protocol"; message: string; retryAllowed: boolean; offline: boolean; refetchFailed?: boolean };
 export type AutosaveConflict = { latestServerTask: TaskResponse | null; correlationId?: string; rejectedCommandKind: "patch" | "transition"; refetchFailed: boolean };
 
 type InFlight = {
@@ -42,6 +42,7 @@ export type AutosaveCommand =
 const STORAGE_PREFIX = "bb.taskDetailDraft.v1";
 const fields: EditableField[] = ["title", "details", "state", "project_id", "priority", "tag_ids", "waiting_for", "due_date"];
 const openStates: OpenTaskState[] = ["inbox", "next", "waiting", "someday"];
+class TaskProtocolError extends Error {}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const sortedTags = (value: string[]) => [...new Set(value)].sort();
@@ -65,7 +66,14 @@ const normalize = (field: EditableField, value: TaskDraft[EditableField]): TaskD
 };
 const randomKey = () => globalThis.crypto?.randomUUID?.() ?? `autosave-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-const taskEqual = (a: TaskResponse, b: TaskResponse) => JSON.stringify(a) === JSON.stringify(b);
+// Subtasks and comments have their own revisions. GET includes those projections,
+// while parent mutation acknowledgements leave them empty; neither changes the
+// parent revision. Compare only parent-owned data, independently of JSON key order.
+const taskEqual = (a: TaskResponse, b: TaskResponse) => fields.every((field) => equal(field, a[field], b[field])) &&
+  (["id", "waiting_since", "order_key", "created_at", "updated_at", "completed_at", "cancelled_at", "revision"] as const)
+    .every((field) => a[field] === b[field]) &&
+  a.source_capture_ids.length === b.source_capture_ids.length &&
+  a.source_capture_ids.every((id, index) => id === b.source_capture_ids[index]);
 
 export function taskAutosaveStorageKey(accountId: string, apiOrigin: string, taskId: string): string {
   if (!accountId || !apiOrigin || !taskId) throw new Error("Autosave identity is incomplete");
@@ -96,7 +104,7 @@ export function validateTaskResponse(
   previousState?: TaskResponse["state"]
 ): TaskResponse {
   if (!validTask(value) || value.id !== taskId || (requireAdvance && value.revision <= previousRevision)) {
-    throw new Error("Server returned an invalid task acknowledgement");
+    throw new TaskProtocolError("Server returned an invalid task acknowledgement");
   }
   const waitingValid = value.state === "waiting"
     ? Boolean(value.waiting_for?.trim()) && typeof value.waiting_since === "string"
@@ -106,22 +114,22 @@ export function validateTaskResponse(
     : value.state === "cancelled"
       ? value.cancelled_at !== null && value.completed_at === null
       : value.completed_at === null && value.cancelled_at === null;
-  if (!waitingValid || !terminalValid) throw new Error("Server returned an invalid task acknowledgement");
+  if (!waitingValid || !terminalValid) throw new TaskProtocolError("Server returned an invalid task acknowledgement");
   if (command?.kind === "patch") {
-    if (previousState !== undefined && value.state !== previousState) throw new Error("Server returned an invalid task acknowledgement");
+    if (previousState !== undefined && value.state !== previousState) throw new TaskProtocolError("Server returned an invalid task acknowledgement");
     for (const [key, expected] of Object.entries(command.payload)) {
       if (expected !== undefined && !equal(key as EditableField, value[key as keyof TaskResponse], expected)) {
-        throw new Error("Server acknowledgement does not match the saved task");
+        throw new TaskProtocolError("Server acknowledgement does not match the saved task");
       }
     }
   }
   if (command?.kind === "transition") {
     const { action, to_state: toState, waiting_for: waitingFor } = command.payload;
-    if (action === "complete" && value.state !== "completed") throw new Error("Server returned an invalid task acknowledgement");
-    if (action === "cancel" && value.state !== "cancelled") throw new Error("Server returned an invalid task acknowledgement");
-    if ((action === "move" || action === "reopen") && value.state !== toState) throw new Error("Server returned an invalid task acknowledgement");
-    if (action === "reopen" && (!previousState || !["completed", "cancelled"].includes(previousState))) throw new Error("Server returned an invalid task acknowledgement");
-    if (toState === "waiting" && value.waiting_for !== waitingFor?.trim()) throw new Error("Server returned an invalid task acknowledgement");
+    if (action === "complete" && value.state !== "completed") throw new TaskProtocolError("Server returned an invalid task acknowledgement");
+    if (action === "cancel" && value.state !== "cancelled") throw new TaskProtocolError("Server returned an invalid task acknowledgement");
+    if ((action === "move" || action === "reopen") && value.state !== toState) throw new TaskProtocolError("Server returned an invalid task acknowledgement");
+    if (action === "reopen" && (!previousState || !["completed", "cancelled"].includes(previousState))) throw new TaskProtocolError("Server returned an invalid task acknowledgement");
+    if (toState === "waiting" && value.waiting_for !== waitingFor?.trim()) throw new TaskProtocolError("Server returned an invalid task acknowledgement");
   }
   return value;
 }
@@ -234,7 +242,7 @@ export function createTaskDetailAutosaveController(
   const markFailed = (error: unknown, kind?: AutosaveError["kind"], retryAllowed = true) => {
     const apiStatus = error instanceof ApiError ? error.status : 0;
     state.error = {
-      kind: kind ?? (error instanceof TypeError ? "network" : apiStatus === 400 || apiStatus === 422 ? "validation" : apiStatus === 401 ? "unauthorized" : apiStatus === 404 ? "unavailable" : "network"),
+      kind: kind ?? (error instanceof TaskProtocolError ? "protocol" : error instanceof TypeError ? "network" : apiStatus === 400 || apiStatus === 422 ? "validation" : apiStatus === 401 ? "unauthorized" : apiStatus === 404 ? "unavailable" : "network"),
       message: errorMessage(error),
       retryAllowed: retryAllowed && apiStatus !== 401 && apiStatus !== 404,
       offline: typeof navigator !== "undefined" && navigator.onLine === false
@@ -438,15 +446,29 @@ export function createTaskDetailAutosaveController(
         state.error = null; state.retrying = true; state.inFlight = null; persistAndEmit();
         running = dispatch(failed).then(() => undefined);
         void running.then(() => { running = null; void drain(); persistAndEmit(); });
+      } else if (!state.error && !state.inFlight) {
+        flushTimers(); void drain();
       }
     },
     async retryRefetch() {
-      if (!state.conflict) return;
+      if (!state.conflict && (state.error?.kind !== "protocol" || state.inFlight)) return;
       try {
         const canonical = validateTaskResponse(await apiClient.getTask(suppliedTask.id), suppliedTask.id, state.baseline.revision, undefined, false);
+        if (canonical.revision < state.baseline.revision || canonical.revision === state.baseline.revision && !taskEqual(canonical, state.baseline)) throw new Error("Server returned contradictory canonical task data");
         mergeCanonical(canonical);
-        state.conflict = { ...state.conflict, latestServerTask: canonical, refetchFailed: false };
-      } catch { state.conflict = { ...state.conflict, refetchFailed: true }; }
+        if (state.conflict) state.conflict = { ...state.conflict, latestServerTask: canonical, refetchFailed: false };
+        else {
+          state.error = null;
+          state.status = "clean";
+          if (fields.some((field) => state.dirty[field]) || state.barriers.length) {
+            state.conflict = { latestServerTask: canonical, rejectedCommandKind: state.barriers.length ? "transition" : "patch", refetchFailed: false };
+            state.status = "conflicted";
+          } else await acceptedCallback?.(canonical);
+        }
+      } catch (error) {
+        if (state.conflict) state.conflict = { ...state.conflict, refetchFailed: true };
+        else if (state.error) state.error = { ...state.error, message: errorMessage(error), refetchFailed: true };
+      }
       persistAndEmit();
     },
     discard() {
@@ -457,7 +479,9 @@ export function createTaskDetailAutosaveController(
     sync(nextTask: TaskResponse) {
       if (nextTask.id !== suppliedTask.id || nextTask.revision < state.baseline.revision) return;
       if (nextTask.revision === state.baseline.revision) {
-        if (!taskEqual(nextTask, state.baseline)) { state.inFlight = null; markFailed(new Error("Server returned contradictory canonical task data"), "protocol", false); persistAndEmit(); }
+        if (!taskEqual(nextTask, state.baseline)) { state.inFlight = null; markFailed(new Error("Server returned contradictory canonical task data"), "protocol", false); persistAndEmit(); return; }
+        const childrenChanged = JSON.stringify([nextTask.subtasks, nextTask.comments]) !== JSON.stringify([state.baseline.subtasks, state.baseline.comments]);
+        if (childrenChanged) { mergeCanonical(nextTask); persistAndEmit(); }
         return;
       }
       mergeCanonical(nextTask); persistAndEmit();
@@ -481,10 +505,22 @@ export function createTaskDetailAutosaveController(
       ]);
     },
     recover: () => persisted(accountId, apiOrigin, suppliedTask.id),
-    resumeRecovery: async () => { controller.retry(); await controller.whenIdle(); return { status: "saved" as const, task: state.baseline }; },
+    resumeRecovery: async () => {
+      controller.retry();
+      await Promise.race([
+        controller.whenIdle(),
+        controller.whenPaused().then(() => { throw new Error(state.error?.kind === "protocol" ? "The saved version could not be verified. Check it in the task details." : state.error?.message ?? "Task changed elsewhere. Review the latest task before retrying."); })
+      ]);
+      return { status: "saved" as const, task: state.baseline };
+    },
     discardRecovery: () => controller.discard(),
     get conflict() { return state.conflict; }
   };
+  // Reconcile old false-protocol journals only when the reopened parent agrees.
+  // Any later local edits remain dirty until the user explicitly retries them.
+  if (restored?.error?.kind === "protocol" && !restored.inFlight && taskEqual(suppliedTask, restored.baseline)) {
+    state.error = null; state.status = "clean"; mergeCanonical(suppliedTask); persistAndEmit();
+  }
   const restoredCommand = restored?.inFlight;
   if (restoredCommand && (restored?.status === "saving" || restored?.status === "retrying" || restored?.status === "queued")) queueMicrotask(() => {
     if (state.inFlight !== restoredCommand) return;

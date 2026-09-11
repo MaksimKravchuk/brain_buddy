@@ -50,10 +50,10 @@ function input(renderer: ReactTestRenderer, placeholder: string): ReactTestInsta
 async function fillForm(renderer: ReactTestRenderer) {
   await typeInto(input(renderer, "What you call this agent"), "Release agent");
   await typeInto(
-    input(renderer, "https://your-agent.example.com/brain-buddy"),
-    "https://agent.example.test/relay",
+    input(renderer, "https://your-agent.example.com"),
+    "https://agent.example.test",
   );
-  await typeInto(input(renderer, "Sent as the auth header value"), "Bearer secret");
+  await typeInto(input(renderer, "Sent as the credential"), "Bearer secret");
   await typeInto(input(renderer, "Confirm it is you"), "brain-buddy-password");
 }
 
@@ -63,14 +63,13 @@ beforeEach(() => {
 });
 
 describe("AddConnectionSheet idempotency", () => {
-  it("resets a changed auth header after close and reopen", async () => {
+  it("014-FR-001 resets a chosen credential scheme after close and reopen", async () => {
     const onClose = jest.fn();
     const { renderer, client, unmount } = await renderWithProviders(
       <AddConnectionSheet visible onClose={onClose} onCreated={jest.fn()} />,
     );
-    const authHeader = input(renderer, "X-Agent-Key");
-    await typeInto(authHeader, "X-Temporary-Key");
-    expect(authHeader.props.value).toBe("X-Temporary-Key");
+    await pressLabel(renderer, "API key");
+    expect(visibleText(renderer)).toContain("Read from the agent card when you test");
 
     await act(async () => {
       renderer.update(
@@ -87,14 +86,16 @@ describe("AddConnectionSheet idempotency", () => {
       );
     });
 
-    expect(input(renderer, "X-Agent-Key").props.value).toBe("X-Agent-Key");
+    // Dismissing discards everything silently: nothing was stored and nothing
+    // was sent, so the sheet reopens on the default scheme (M-01-S08).
+    expect(visibleText(renderer)).not.toContain("Read from the agent card when you test");
     await unmount();
   });
 
   it("clears mounted secrets and error while preserving ambiguous create intent on reopen", async () => {
     mockCreate
       .mockRejectedValueOnce(new Error("Response lost"))
-      .mockResolvedValue({ ...makeConnection(), inbound_signing_secret: "shown-once" });
+      .mockResolvedValue(makeConnection());
     const onClose = jest.fn();
     const onCreated = jest.fn();
     const { renderer, client, unmount } = await renderWithProviders(
@@ -110,9 +111,8 @@ describe("AddConnectionSheet idempotency", () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(input(renderer, "What you call this agent").props.value).toBe("");
-    expect(input(renderer, "https://your-agent.example.com/brain-buddy").props.value).toBe("");
-    expect(input(renderer, "X-Agent-Key").props.value).toBe("X-Agent-Key");
-    expect(input(renderer, "Sent as the auth header value").props.value).toBe("");
+    expect(input(renderer, "https://your-agent.example.com").props.value).toBe("");
+    expect(input(renderer, "Sent as the credential").props.value).toBe("");
     expect(input(renderer, "Confirm it is you").props.value).toBe("");
     expect(visibleText(renderer)).not.toContain("Response lost");
 
@@ -140,7 +140,7 @@ describe("AddConnectionSheet idempotency", () => {
   });
 
   it("clears every mounted field before the successful create closes the sheet", async () => {
-    const created = { ...makeConnection(), inbound_signing_secret: "shown-once" };
+    const created = makeConnection();
     mockCreate.mockResolvedValue(created);
     const onCreated = jest.fn();
     const { renderer, unmount } = await renderWithProviders(
@@ -153,15 +153,14 @@ describe("AddConnectionSheet idempotency", () => {
 
     expect(onCreated).toHaveBeenCalledWith(created);
     expect(input(renderer, "What you call this agent").props.value).toBe("");
-    expect(input(renderer, "https://your-agent.example.com/brain-buddy").props.value).toBe("");
-    expect(input(renderer, "X-Agent-Key").props.value).toBe("X-Agent-Key");
-    expect(input(renderer, "Sent as the auth header value").props.value).toBe("");
+    expect(input(renderer, "https://your-agent.example.com").props.value).toBe("");
+    expect(input(renderer, "Sent as the credential").props.value).toBe("");
     expect(input(renderer, "Confirm it is you").props.value).toBe("");
     await unmount();
   });
 
   it("retries a lost create response with the original key and recovers the one-time secret", async () => {
-    const created = { ...makeConnection(), inbound_signing_secret: "shown-once" };
+    const created = makeConnection();
     mockCreate.mockRejectedValueOnce(new Error("Response lost")).mockResolvedValue(created);
     const onCreated = jest.fn();
     const { renderer, unmount } = await renderWithProviders(
@@ -175,7 +174,8 @@ describe("AddConnectionSheet idempotency", () => {
     await settle();
 
     expect(mockCreate).toHaveBeenCalledTimes(2);
-    expect(mockCreate.mock.calls[0][0].auth_header_name).toBe("X-Agent-Key");
+    expect(mockCreate.mock.calls[0][0].auth_scheme).toBe("bearer");
+    expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("auth_header_name");
     expect(mockCreate.mock.calls[1][1]).toBe(mockCreate.mock.calls[0][1]);
     expect(onCreated).toHaveBeenCalledWith(created);
 
@@ -185,7 +185,6 @@ describe("AddConnectionSheet idempotency", () => {
   it("blocks a materially changed connection form after an ambiguous failure", async () => {
     mockCreate.mockRejectedValueOnce(new Error("Response lost")).mockResolvedValue({
       ...makeConnection(),
-      inbound_signing_secret: "shown-once",
     });
     const { renderer, unmount } = await renderWithProviders(
       <AddConnectionSheet visible onClose={jest.fn()} onCreated={jest.fn()} />,
@@ -195,7 +194,7 @@ describe("AddConnectionSheet idempotency", () => {
     await pressText(renderer, "Save agent");
     await settle();
     await typeInto(
-      input(renderer, "https://your-agent.example.com/brain-buddy"),
+      input(renderer, "https://your-agent.example.com"),
       "https://different-agent.example.test/relay",
     );
     await pressText(renderer, "Save agent");
@@ -210,7 +209,6 @@ describe("AddConnectionSheet idempotency", () => {
   it("blocks a changed password after an ambiguous failure", async () => {
     mockCreate.mockRejectedValueOnce(new Error("Response lost")).mockResolvedValue({
       ...makeConnection(),
-      inbound_signing_secret: "shown-once",
     });
     const { renderer, unmount } = await renderWithProviders(
       <AddConnectionSheet visible onClose={jest.fn()} onCreated={jest.fn()} />,
@@ -232,7 +230,7 @@ describe("AddConnectionSheet idempotency", () => {
   it("retires the key after a definitive client rejection", async () => {
     mockCreate
       .mockRejectedValueOnce(new ApiError("Invalid endpoint", 422, {}))
-      .mockResolvedValue({ ...makeConnection(), inbound_signing_secret: "shown-once" });
+      .mockResolvedValue(makeConnection());
     const { renderer, unmount } = await renderWithProviders(
       <AddConnectionSheet visible onClose={jest.fn()} onCreated={jest.fn()} />,
     );

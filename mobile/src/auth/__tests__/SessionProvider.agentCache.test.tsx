@@ -21,7 +21,7 @@ import {
   useCreateAgentConnection,
   usePreviewAgentHandoff,
   useReplyToAgentRun,
-  useRotateAgentSigningSecret,
+  useRotateAgentCredential,
   useTestAgentConnection,
 } from "@/api/hooks";
 import { SessionProvider, useSession } from "@/auth/SessionProvider";
@@ -148,7 +148,7 @@ const mockApi = {
   testAgentConnection: jest.fn(),
   previewAgentHandoff: jest.fn(),
   createAgentConnection: jest.fn(),
-  rotateAgentSigningSecret: jest.fn(),
+  rotateAgentCredential: jest.fn(),
   confirmAgentHandoff: jest.fn(),
   replyToAgentRun: jest.fn(),
   cancelAgentRun: jest.fn(),
@@ -192,8 +192,8 @@ function SessionHarness() {
       <Text>{`${session.status}:${session.me?.id ?? "none"}`}</Text>
       <Text>
         {(connections.data ?? [])
-          .map((connection: { name: string; endpoint_url: string }) =>
-            `${connection.name}:${connection.endpoint_url}`,
+          .map((connection: { name: string; agent_address: string }) =>
+            `${connection.name}:${connection.agent_address}`,
           )
           .join("|") || "no private agents"}
       </Text>
@@ -211,7 +211,7 @@ function RelayMutationHarness() {
   useAgentConnection("connection-1");
   const createConnection = useCreateAgentConnection();
   const testConnection = useTestAgentConnection();
-  const rotateSigningSecret = useRotateAgentSigningSecret();
+  const rotateCredential = useRotateAgentCredential();
   const previewHandoff = usePreviewAgentHandoff("task-1");
   const confirmHandoff = useConfirmAgentHandoff("task-1");
   const reply = useReplyToAgentRun();
@@ -224,8 +224,7 @@ function RelayMutationHarness() {
           createConnection.mutate({
             payload: {
               name: "Hermes",
-              endpoint_url: "https://agent.example.test/hook",
-              auth_header_name: "X-Agent-Key",
+              agent_address: "https://agent.example.test/hook",
               credential: "secret",
               current_password: "password",
             },
@@ -238,12 +237,16 @@ function RelayMutationHarness() {
         onPress={() => testConnection.mutate("connection-1")}
       />
       <Pressable
-        accessibilityLabel="Rotate signing secret"
+        accessibilityLabel="Rotate credential"
         onPress={() =>
-          rotateSigningSecret.mutate({
+          rotateCredential.mutate({
             connectionId: "connection-1",
-            payload: { current_password: "password", expected_revision: 2 },
-            idempotencyKey: "rotate-signing-key",
+            payload: {
+              credential: "next",
+              current_password: "password",
+              expected_revision: 2,
+            },
+            idempotencyKey: "rotate-credential-key",
           })
         }
       />
@@ -253,7 +256,7 @@ function RelayMutationHarness() {
           previewHandoff.mutate({
             connection_id: "connection-1",
             include_details: false,
-            context_items: [],
+            supporting_items: [],
           })
         }
       />
@@ -264,7 +267,7 @@ function RelayMutationHarness() {
             payload: {
               connection_id: "connection-1",
               include_details: false,
-              context_items: [],
+              supporting_items: [],
               manifest_token: "a".repeat(64),
               current_password: "password",
             },
@@ -323,7 +326,7 @@ describe("SessionProvider private agent cleanup", () => {
     mockApi.testAgentConnection.mockReset().mockResolvedValue({ id: "connection-1" });
     mockApi.previewAgentHandoff.mockReset().mockResolvedValue({ manifest_token: "token" });
     mockApi.createAgentConnection.mockReset().mockResolvedValue({ id: "connection-1" });
-    mockApi.rotateAgentSigningSecret.mockReset().mockResolvedValue({ id: "connection-1" });
+    mockApi.rotateAgentCredential.mockReset().mockResolvedValue({ id: "connection-1" });
     mockApi.confirmAgentHandoff.mockReset().mockResolvedValue({ id: "run-1" });
     mockApi.replyToAgentRun.mockReset().mockResolvedValue({ id: "run-1" });
     mockApi.cancelAgentRun.mockReset().mockResolvedValue({ id: "run-1" });
@@ -360,7 +363,7 @@ describe("SessionProvider private agent cleanup", () => {
     for (const accessibilityLabel of [
       "Create relay",
       "Test relay",
-      "Rotate signing secret",
+      "Rotate credential",
       "Preview handoff",
       "Confirm handoff",
       "Reply to run",
@@ -371,9 +374,9 @@ describe("SessionProvider private agent cleanup", () => {
         await Promise.resolve();
       });
     }
-    mockApi.rotateAgentSigningSecret.mockRejectedValueOnce(new ApiError("stale", 409, null));
+    mockApi.rotateAgentCredential.mockRejectedValueOnce(new ApiError("stale", 409, null));
     await act(async () => {
-      renderer.root.findByProps({ accessibilityLabel: "Rotate signing secret" }).props.onPress();
+      renderer.root.findByProps({ accessibilityLabel: "Rotate credential" }).props.onPress();
       await Promise.resolve();
     });
 
@@ -389,7 +392,7 @@ describe("SessionProvider private agent cleanup", () => {
       expect.objectContaining({ connection_id: "connection-1" }),
     );
     expect(mockApi.previewAgentHandoff.mock.calls[0]).toHaveLength(2);
-    expect(mockApi.rotateAgentSigningSecret.mock.calls[0][2]).toBe("rotate-signing-key");
+    expect(mockApi.rotateAgentCredential.mock.calls[0][2]).toBe("rotate-credential-key");
     expect(mockApi.confirmAgentHandoff.mock.calls[0][2]).toBe("handoff-key");
     expect(mockApi.replyToAgentRun.mock.calls[0][2]).toBe("reply-key");
     expect(mockApi.cancelAgentRun).toHaveBeenCalledWith("run-1", "cancel-key");
@@ -468,12 +471,12 @@ describe("SessionProvider private agent cleanup", () => {
         mutations: { retry: false, gcTime: 0 },
       },
     });
-    let resolveA!: (value: { name: string; endpoint_url: string }[]) => void;
-    let resolveB!: (value: { name: string; endpoint_url: string }[]) => void;
-    const pendingA = new Promise<{ name: string; endpoint_url: string }[]>((resolve) => {
+    let resolveA!: (value: { name: string; agent_address: string }[]) => void;
+    let resolveB!: (value: { name: string; agent_address: string }[]) => void;
+    const pendingA = new Promise<{ name: string; agent_address: string }[]>((resolve) => {
       resolveA = resolve;
     });
-    const pendingB = new Promise<{ name: string; endpoint_url: string }[]>((resolve) => {
+    const pendingB = new Promise<{ name: string; agent_address: string }[]>((resolve) => {
       resolveB = resolve;
     });
     mockApi.listAgentConnections.mockReturnValueOnce(pendingA).mockReturnValueOnce(pendingB);
@@ -502,7 +505,7 @@ describe("SessionProvider private agent cleanup", () => {
     expect(text(renderer)).not.toContain("a-agent.example.test");
 
     resolveA([
-      { name: "Account A agent", endpoint_url: "https://a-agent.example.test/relay" },
+      { name: "Account A agent", agent_address: "https://a-agent.example.test/relay" },
     ]);
     await act(async () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -511,7 +514,7 @@ describe("SessionProvider private agent cleanup", () => {
     expect(text(renderer)).not.toContain("a-agent.example.test");
 
     resolveB([
-      { name: "Account B agent", endpoint_url: "https://b-agent.example.test/relay" },
+      { name: "Account B agent", agent_address: "https://b-agent.example.test/relay" },
     ]);
     await waitFor(() => text(renderer).includes("Account B agent"));
     expect(text(renderer)).toContain("Account B agent:https://b-agent.example.test/relay");

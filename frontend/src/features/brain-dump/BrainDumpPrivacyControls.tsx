@@ -6,23 +6,7 @@ import { apiClient } from "../../api/client";
 import type { BrainDumpOperationResponse } from "../../api/taskTypes";
 import { BrainDumpOverlay } from "./BrainDumpOverlay";
 import { useCloseBrainDump } from "./brainDumpNavigation";
-
-// Human-readable operation status for the privacy surface. Mirrors the phrasing
-// the main route uses so the two never disagree about what a status means.
-const operationStatusLabels: Record<string, string> = {
-  recording: "Recording",
-  paused: "Paused",
-  sealing: "Sealing audio",
-  fast_processing: "Building provisional tasks",
-  accurate_transcribing: "Improving transcript",
-  reconciling: "Reconciling tasks",
-  committing: "Saving tasks",
-  awaiting_confirmation: "Awaiting review",
-  retryable_error: "Needs attention",
-  terminal_error: "Could not be processed",
-  completed: "Saved to Inbox",
-  cancelled: "Discarded"
-};
+import { operationStatusLabels } from "./brainDumpStatusLabels";
 
 // Once an operation is cancelled or committed there is no retained transcript,
 // audio, or in-flight egress left to act on, so no privacy control applies.

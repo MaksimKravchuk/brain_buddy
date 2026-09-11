@@ -31,7 +31,7 @@ from app.modules.agents.domain import (
     AgentRunDocument,
     AgentRunEventDocument,
 )
-from app.modules.agents.repository import EVENT_ID_RETENTION, AgentRepository
+from app.modules.agents.repository import AgentRepository
 from app.modules.agents.secrets import SealedSecret
 
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
@@ -64,7 +64,7 @@ def make_connection(
         "owner_id": owner_id,
         "name": "Hermes",
         "endpoint_url": "https://agent.example.com/hooks",
-        "capabilities": AgentCapabilities(progress=True, reply=True, cancel=False),
+        "capabilities": AgentCapabilities(streaming=True, push_notifications=False),
         "created_at": NOW,
         "updated_at": NOW,
     }
@@ -281,7 +281,7 @@ class TestConnections:
 
         stored = repo.get_connection("agentconn_1", owner_id="user_a")
         assert stored.name == "Hermes"
-        assert stored.capabilities.reply is True
+        assert stored.capabilities.streaming is True
 
     def test_another_owner_cannot_read_the_connection(
         self, repo: AgentRepository
@@ -482,7 +482,7 @@ class TestConnections:
             "agentconn_legacy", owner_id="user_a"
         )
 
-        assert repaired.auth_header_name == "X-Agent-Key"
+        assert repaired.auth_header_name is None
         assert repaired.revision == 2
         assert repaired.status == "untested"
         assert repaired.last_test_error_code == (
@@ -549,7 +549,6 @@ class TestConnections:
             "legacy_invalid_connection_requires_reconfiguration"
         }
         assert all(item.credential is None for item in quarantined)
-        assert all(item.inbound_secret is None for item in quarantined)
         assert all(
             not any(item.capabilities.model_dump().values()) for item in quarantined
         )
@@ -822,7 +821,10 @@ class TestRuns:
     ) -> None:
         """Confirmation resolves the exact reservation the review produced."""
 
-        from app.modules.agents.domain import AgentReportingContract, AgentRunManifest
+        from app.modules.agents.domain import (
+            AgentRunManifest,
+            inert_reporting_contract,
+        )
 
         manifest = AgentRunManifest(
             token="a" * 64,
@@ -831,10 +833,7 @@ class TestRuns:
             connection_id="agentconn_1",
             agent_name="Hermes",
             title="Draft the plan",
-            reporting=AgentReportingContract(
-                callback_url="https://brainbuddy.example/api/agent-events",
-                connection_id="agentconn_1",
-            ),
+            reporting=inert_reporting_contract("agentconn_1"),
             reporting_instructions="Report to the callback URL.",
         )
         repo.create_connection(make_connection())
@@ -871,72 +870,7 @@ class TestRuns:
         assert repo.find_connection_anywhere("agentconn_missing") is None
 
 
-class TestEventReplayConsumption:
-    def test_expired_event_ids_are_purged(self, repo: AgentRepository) -> None:
-        repo.create_connection(make_connection())
-        repo.consume_event_id(
-            owner_id="user_a",
-            connection_id="agentconn_1",
-            event_id="evt_old",
-            now=NOW - EVENT_ID_RETENTION - timedelta(seconds=1),
-        )
-
-        assert repo.purge_expired_event_ids(now=NOW) == 1
-
-    def test_a_fresh_event_id_is_consumed_once(self, repo: AgentRepository) -> None:
-        """The first sighting of an event ID wins."""
-
-        repo.create_connection(make_connection())
-
-        assert (
-            repo.consume_event_id(
-                owner_id="user_a",
-                connection_id="agentconn_1",
-                event_id="evt_1",
-                now=NOW,
-            )
-            is True
-        )
-
-    def test_a_replayed_event_id_is_refused(self, repo: AgentRepository) -> None:
-        """A duplicate delivery is rejected atomically, before any mutation."""
-
-        repo.create_connection(make_connection())
-        repo.consume_event_id(
-            owner_id="user_a", connection_id="agentconn_1", event_id="evt_1", now=NOW
-        )
-
-        assert (
-            repo.consume_event_id(
-                owner_id="user_a",
-                connection_id="agentconn_1",
-                event_id="evt_1",
-                now=NOW,
-            )
-            is False
-        )
-
-    def test_the_same_event_id_on_a_different_connection_is_independent(
-        self, repo: AgentRepository
-    ) -> None:
-        """Replay identifiers are scoped to the connection that signed them."""
-
-        repo.create_connection(make_connection())
-        repo.create_connection(make_connection(connection_id="agentconn_2"))
-        repo.consume_event_id(
-            owner_id="user_a", connection_id="agentconn_1", event_id="evt_1", now=NOW
-        )
-
-        assert (
-            repo.consume_event_id(
-                owner_id="user_a",
-                connection_id="agentconn_2",
-                event_id="evt_1",
-                now=NOW,
-            )
-            is True
-        )
-
+class TestRunEventOrdering:
     def test_appended_events_come_back_in_chronological_order(
         self, repo: AgentRepository
     ) -> None:
@@ -1406,10 +1340,12 @@ class TestRetentionAndPurge:
         repo.create_connection(
             make_connection(
                 credential={"key_id": "k1", "ciphertext": "credential-secret"},
-                inbound_secret={"key_id": "k1", "ciphertext": "signing-secret"},
             )
         )
-        from app.modules.agents.domain import AgentReportingContract, AgentRunManifest
+        from app.modules.agents.domain import (
+            AgentRunManifest,
+            inert_reporting_contract,
+        )
 
         manifest = AgentRunManifest(
             token="a" * 64,
@@ -1419,10 +1355,7 @@ class TestRetentionAndPurge:
             agent_name="Hermes",
             title="private task title",
             details="private task details",
-            reporting=AgentReportingContract(
-                callback_url="https://brainbuddy.example/api/agent-events",
-                connection_id="agentconn_1",
-            ),
+            reporting=inert_reporting_contract("agentconn_1"),
             reporting_instructions="private reporting instructions",
         )
         repo.create_run(
@@ -1496,7 +1429,10 @@ class TestRetentionAndPurge:
     def test_export_redacts_due_unswept_content_without_mutating_storage(
         self, repo: AgentRepository
     ) -> None:
-        from app.modules.agents.domain import AgentReportingContract, AgentRunManifest
+        from app.modules.agents.domain import (
+            AgentRunManifest,
+            inert_reporting_contract,
+        )
 
         repo.create_connection(make_connection())
         manifest = AgentRunManifest(
@@ -1507,10 +1443,7 @@ class TestRetentionAndPurge:
             agent_name="Hermes",
             title="expired title",
             details="expired details",
-            reporting=AgentReportingContract(
-                callback_url="https://brainbuddy.example/api/agent-events",
-                connection_id="agentconn_1",
-            ),
+            reporting=inert_reporting_contract("agentconn_1"),
             reporting_instructions="expired reporting instructions",
         )
         repo.create_run(
@@ -1711,9 +1644,6 @@ class TestRetentionAndPurge:
                 created_at=NOW,
             )
         )
-        repo.consume_event_id(
-            owner_id="user_a", connection_id="agentconn_1", event_id="evt_1", now=NOW
-        )
         repo.create_connection(
             make_connection(owner_id="user_b", connection_id="agentconn_9")
         )
@@ -1829,17 +1759,10 @@ class TestIdempotency:
         self, repo: AgentRepository
     ) -> None:
         sealed_v1 = SealedSecret(key_id="kid-0", ciphertext="sealed")
-        repo.create_connection(
-            make_connection(credential=sealed_v1, inbound_secret=sealed_v1)
-        )
+        repo.create_connection(make_connection(credential=sealed_v1))
         repo.save_idempotency(
             owner_id="user_a",
-            record=make_idempotency(
-                key_hash=fingerprint("kid-1", "k1"),
-                response_body={
-                    "sealed_signing_secret": sealed_v1.model_dump(mode="json")
-                },
-            ),
+            record=make_idempotency(key_hash=fingerprint("kid-1", "k1")),
         )
 
         live = repo.live_sealed_key_ids(owner_id="user_a", now=NOW)
@@ -1856,9 +1779,6 @@ class TestIdempotency:
             owner_id="user_a",
             record=make_idempotency(
                 key_hash=fingerprint("kid-1", "k1"),
-                response_body={
-                    "sealed_signing_secret": sealed_v1.model_dump(mode="json")
-                },
                 created_at=NOW - timedelta(hours=25),
             ),
         )
@@ -1868,49 +1788,27 @@ class TestIdempotency:
         assert live.key_ids == {"kid-0"}
         assert live.unreadable == 0
 
-    @pytest.mark.parametrize(
-        ("table", "payload"),
-        [
-            ("agent_connections", {"credential": {"key_id": "bad key"}}),
-            (
-                "agent_idempotency",
-                {"sealed_signing_secret": {"key_id": "bad key"}},
-            ),
-        ],
-    )
     def test_malformed_sealed_key_ids_fail_closed_without_being_returned(
-        self, repo: AgentRepository, table: str, payload: dict[str, object]
+        self, repo: AgentRepository
     ) -> None:
+        """A stored envelope whose key label is unreadable is counted, never returned."""
+
         with sqlite3.connect(repo.db_path) as database:
-            if table == "agent_connections":
-                database.execute(
-                    "INSERT INTO agent_connections "
-                    "(owner_id, id, status, created_at, payload) VALUES (?, ?, ?, ?, ?)",
-                    ("user_a", "broken", "ready", NOW.isoformat(), json.dumps(payload)),
-                )
-            else:
-                database.execute(
-                    "INSERT INTO agent_idempotency "
-                    "(owner_id, key_hash, command, request_hash, resource_id, "
-                    "command_id, delivery_attempted, completed, response_body, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        "user_a",
-                        fingerprint("kid-1", "broken"),
-                        "rotate_signing_secret",
-                        fingerprint("kid-1", "request"),
-                        "broken",
-                        None,
-                        0,
-                        1,
-                        json.dumps(payload),
-                        NOW.isoformat(),
-                    ),
-                )
+            database.execute(
+                "INSERT INTO agent_connections "
+                "(owner_id, id, status, created_at, payload) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "user_a",
+                    "broken",
+                    "ready",
+                    NOW.isoformat(),
+                    json.dumps({"credential": {"key_id": "bad key"}}),
+                ),
+            )
 
         live = repo.live_sealed_key_ids(owner_id="user_a", now=NOW)
 
-        assert live.key_ids <= {"kid-1"}
+        assert live.key_ids == frozenset()
         assert "bad key" not in live.key_ids
         assert live.unreadable == 1
 
@@ -2410,3 +2308,693 @@ class TestCommandCheckpoint:
         with repo.command_lock("user_a"):
             repo.create_connection(make_connection())
         assert repo.get_connection("agentconn_1", owner_id="user_a").name == "Hermes"
+
+
+class TestA2AWireStorage:
+    """The columns and queries the A2A observer runs on.
+
+    An observation arrives on a background worker, minutes or hours after the
+    hand-off, on a row the owner may meanwhile have disconnected, purged or
+    watched go terminal. So the storage contract is narrower than "write the
+    row": a worker may only ever *update* a run it re-read, at the version it
+    re-read, and it may never bring one back.
+
+    014-FR-008, 014-FR-016, 014-SC-007.
+    """
+
+    def test_014_FR_008_the_wire_migration_adds_its_run_columns_and_indices(
+        self, repo: AgentRepository, tmp_path: Path
+    ) -> None:
+        """The five values the scheduler and recovery read.
+
+        They are real columns rather than JSON lookups because the due-work
+        query runs across every owner on a schedule: a JSON scan of every run
+        row would make the observer's cost grow with total history rather than
+        with work actually due.
+        """
+
+        with closing(sqlite3.connect(tmp_path / "agents.sqlite3")) as database:
+            columns = {
+                row[1] for row in database.execute("PRAGMA table_info(agent_runs)")
+            }
+            indices = {
+                row[1] for row in database.execute("PRAGMA index_list(agent_runs)")
+            }
+            migrations = {
+                row[0]
+                for row in database.execute("SELECT name FROM agent_schema_migrations")
+            }
+
+        assert {
+            "agent_task_id",
+            "context_id",
+            "next_observation_at",
+            "exchange_state",
+            "identifiers_expire_at",
+        } <= columns
+        assert "idx_agent_runs_observation" in indices
+        assert "a2a_wire_contract_v1" in migrations
+
+    def test_014_FR_008_a_conditional_update_is_a_no_op_on_a_stale_version(
+        self, repo: AgentRepository
+    ) -> None:
+        """Compare-and-set, because two observations can be in flight at once.
+
+        A worker reads a run's version *before* its network call and applies the
+        result after. Without the version in the WHERE clause, a slow
+        observation returning after a fast one would overwrite the newer state
+        with older truth — the run would appear to move backwards, which reads
+        to a user as the agent having un-completed their work.
+        """
+
+        run = make_run(run_version=4)
+        repo.create_run(run)
+
+        stale = run.model_copy(update={"run_version": 5, "reported_state": "completed"})
+        assert repo.update_run_if_version(stale, expected_version=3) is False
+        assert repo.get_run(run.id, owner_id=run.owner_id).reported_state is None
+
+        fresh = run.model_copy(update={"run_version": 5, "reported_state": "completed"})
+        assert repo.update_run_if_version(fresh, expected_version=4) is True
+        assert repo.get_run(run.id, owner_id=run.owner_id).reported_state == "completed"
+
+    def test_014_FR_008_a_conditional_update_never_resurrects_a_purged_run(
+        self, repo: AgentRepository
+    ) -> None:
+        """The property that makes the observer safe against account purge.
+
+        An UPSERT here would re-create a row the user asked to be erased,
+        minutes after the erasure, from a worker that started before it. The
+        update is therefore an UPDATE — it can only ever change a row that is
+        still there.
+        """
+
+        run = make_run(run_version=1)
+        repo.create_run(run)
+        repo.delete_all_for_owner(owner_id=run.owner_id)
+
+        applied = repo.update_run_if_version(
+            run.model_copy(update={"run_version": 2}), expected_version=1
+        )
+
+        assert applied is False
+        with pytest.raises(NotFoundError):
+            repo.get_run(run.id, owner_id=run.owner_id)
+        assert repo.list_runs_for_owner(owner_id=run.owner_id) == []
+
+    def test_014_FR_008_the_conditional_update_is_owner_scoped(
+        self, repo: AgentRepository
+    ) -> None:
+        """A run id alone must never address another owner's row."""
+
+        run = make_run(owner_id="user_a", run_id="shared-id", run_version=1)
+        repo.create_run(run)
+
+        applied = repo.update_run_if_version(
+            run.model_copy(update={"owner_id": "user_b", "run_version": 2}),
+            expected_version=1,
+        )
+
+        assert applied is False
+        assert repo.get_run("shared-id", owner_id="user_a").run_version == 1
+
+    def test_014_FR_008_due_observations_span_owners_and_respect_the_clock(
+        self, repo: AgentRepository
+    ) -> None:
+        """One scheduler pass, every owner. The filters are the honesty rules.
+
+        A terminal, disconnected or undispatched run has nothing left to
+        observe; polling it would spend a bounded worker on a question already
+        answered, and on a disconnected connection there is no credential to
+        ask with.
+        """
+
+        due = NOW - timedelta(seconds=1)
+        later = NOW + timedelta(minutes=5)
+
+        repo.create_run(
+            make_run(owner_id="user_a", run_id="due-a", next_observation_at=due)
+        )
+        repo.create_run(
+            make_run(owner_id="user_b", run_id="due-b", next_observation_at=due)
+        )
+        repo.create_run(
+            make_run(owner_id="user_a", run_id="not-yet", next_observation_at=later)
+        )
+        repo.create_run(
+            make_run(owner_id="user_a", run_id="unscheduled", next_observation_at=None)
+        )
+        repo.create_run(
+            make_run(
+                owner_id="user_a",
+                run_id="terminal",
+                next_observation_at=due,
+                reported_state="completed",
+            )
+        )
+        repo.create_run(
+            make_run(
+                owner_id="user_a",
+                run_id="disconnected",
+                next_observation_at=due,
+                connection_disconnected_at=NOW,
+            )
+        )
+        repo.create_run(
+            make_run(
+                owner_id="user_a",
+                run_id="never-dispatched",
+                next_observation_at=due,
+                dispatched_at=None,
+            )
+        )
+
+        found = {run_id for _owner, run_id in repo.due_observations(now=NOW)}
+
+        assert found == {"due-a", "due-b"}
+
+    def test_014_FR_008_due_observations_are_bounded_per_pass(
+        self, repo: AgentRepository
+    ) -> None:
+        """A backlog must not become one unbounded query and one unbounded
+        submit storm; the scheduler takes what it can work on."""
+
+        due = NOW - timedelta(seconds=1)
+        for index in range(10):
+            repo.create_run(make_run(run_id=f"run-{index}", next_observation_at=due))
+
+        assert len(repo.due_observations(now=NOW, limit=4)) == 4
+
+    def test_014_SC_007_the_export_excludes_every_relay_secret_and_fingerprint(
+        self, repo: AgentRepository
+    ) -> None:
+        """AC-024: an export is a file a user may email to themselves.
+
+        A sealed credential is useless without the key ring, but a *fingerprint*
+        is a verifier: anyone holding the export and a candidate push token
+        could confirm a match. None of the three is content the user asked for,
+        so none of them travels.
+
+        ``card_fingerprint`` is named on the connection too. The connection does
+        not carry one yet — it arrives with card discovery — and naming it in
+        the exclusion set now is deliberate: the exclusion is a property of the
+        export, and the field must never be able to appear in one.
+        """
+
+        repo.save_connection(
+            make_connection(credential=SealedSecret(key_id="v1", ciphertext="sealed"))
+        )
+        repo.create_run(
+            make_run(
+                push_token_fingerprint="p" * 64,
+                card_fingerprint="c" * 64,
+                agent_task_id="task-at-agent",
+            )
+        )
+
+        export = repo.export_owner_data(owner_id="user_a", now=NOW)
+
+        rendered = json.dumps(export)
+        assert "credential" not in export["connections"][0]
+        assert "inbound_secret" not in export["connections"][0]
+        assert "push_token_fingerprint" not in export["runs"][0]
+        assert "card_fingerprint" not in export["runs"][0]
+        assert "card_fingerprint" not in export["connections"][0]
+        assert "sealed" not in rendered
+        assert "p" * 64 not in rendered
+        assert "c" * 64 not in rendered
+        # The agent's own task id is coarse metadata the user is entitled to:
+        # it is what lets them ask the agent's operator about their own run.
+        assert export["runs"][0]["agent_task_id"] == "task-at-agent"
+
+    def test_014_FR_016_delete_all_for_owner_still_covers_every_table(
+        self, repo: AgentRepository, tmp_path: Path
+    ) -> None:
+        """Purge is the promise with no second chance.
+
+        Asserted by enumerating the tables that exist rather than by listing
+        them here, so a table added later fails this test instead of quietly
+        surviving an erasure.
+        """
+
+        repo.save_connection(make_connection())
+        repo.create_run(make_run())
+        repo.save_connection(make_connection(owner_id="user_b", connection_id="other"))
+        repo.create_run(make_run(owner_id="user_b", run_id="other-run"))
+
+        repo.delete_all_for_owner(owner_id="user_a")
+
+        with closing(sqlite3.connect(tmp_path / "agents.sqlite3")) as database:
+            tables = [
+                row[0]
+                for row in database.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' "
+                    "AND name LIKE 'agent_%'"
+                )
+                if row[0] != "agent_schema_migrations"
+            ]
+            for table in tables:
+                columns = {
+                    row[1] for row in database.execute(f"PRAGMA table_info({table})")
+                }
+                if "owner_id" not in columns:
+                    continue
+                remaining = database.execute(
+                    f"SELECT owner_id FROM {table}"  # noqa: S608 - name from sqlite_master
+                ).fetchall()
+                assert all(row[0] == "user_b" for row in remaining), table
+
+        assert repo.list_runs_for_owner(owner_id="user_b")
+
+
+# --- 014 FR-006: the exchange the run is waiting on -------------------------
+
+
+class TestExchangePersistence:
+    """The `queued → open` write, and what it must never come apart from."""
+
+    def _queued(self, repo: AgentRepository) -> AgentRunDocument:
+        repo.create_connection(make_connection())
+        run = make_run(exchange_state="queued", exchange_kind="start")
+        repo.create_run(run)
+        return run
+
+    def test_014_FR_006_starting_an_exchange_stamps_the_run_and_spends_the_trigger(
+        self, repo: AgentRepository
+    ) -> None:
+        """AC-032, AC-034. Both stamps mean the same fact, so both happen or neither.
+
+        `exchange_started_at` is what makes **Queued** and **Sent** different
+        claims; `first_dispatch_at` is the spent marker of the re-authentication
+        trigger. Both say "content has now left BrainBuddy for this
+        destination", so one without the other would either render an unsent
+        hand-off as sent or skip the password on its retry.
+        """
+
+        run = self._queued(repo)
+        started = NOW + timedelta(seconds=5)
+        deadline = started + timedelta(seconds=315)
+
+        opened = repo.start_exchange(
+            run, expected_version=0, started_at=started, deadline_at=deadline
+        )
+
+        assert opened is not None
+        assert opened.exchange_state == "open"
+        assert opened.exchange_started_at == started
+        assert opened.exchange_deadline_at == deadline
+        stored = repo.get_run("agentrun_1", owner_id="user_a")
+        assert stored.exchange_state == "open"
+        assert stored.exchange_started_at == started
+        connection = repo.get_connection("agentconn_1", owner_id="user_a")
+        assert connection.first_dispatch_at == started
+        assert connection.revision == 2
+
+    def test_014_FR_004_a_spent_first_dispatch_marker_is_never_moved_forward(
+        self, repo: AgentRepository
+    ) -> None:
+        """The trigger is spent once. A later exchange must not re-date it.
+
+        Re-dating would slide the 15-minute re-authentication window forward on
+        every send, which is the opposite of what a *first*-content trigger is
+        for.
+        """
+
+        repo.create_connection(make_connection(first_dispatch_at=NOW))
+        run = make_run(exchange_state="queued", exchange_kind="start")
+        repo.create_run(run)
+        later = NOW + timedelta(hours=2)
+
+        repo.start_exchange(
+            run,
+            expected_version=0,
+            started_at=later,
+            deadline_at=later + timedelta(seconds=315),
+        )
+
+        assert (
+            repo.get_connection("agentconn_1", owner_id="user_a").first_dispatch_at
+            == NOW
+        )
+
+    def test_014_SC_008_only_one_caller_can_open_a_queued_exchange(
+        self, repo: AgentRepository
+    ) -> None:
+        """A second worker, a replay and restart recovery converge on one send.
+
+        The compare-and-set is on `run_version` *and* on the exchange still
+        being queued, so a loser gets `None` and does no network I/O rather than
+        opening a second exchange for the same run.
+        """
+
+        run = self._queued(repo)
+        started = NOW + timedelta(seconds=5)
+        deadline = started + timedelta(seconds=315)
+
+        first = repo.start_exchange(
+            run, expected_version=0, started_at=started, deadline_at=deadline
+        )
+        second = repo.start_exchange(
+            run, expected_version=0, started_at=started, deadline_at=deadline
+        )
+        stale = repo.start_exchange(
+            run, expected_version=7, started_at=started, deadline_at=deadline
+        )
+
+        assert first is not None
+        assert second is None, "the exchange is no longer queued"
+        assert stale is None, "a stale run_version never wins"
+        assert repo.get_connection("agentconn_1", owner_id="user_a").revision == 2
+
+    def test_014_FR_006_a_missing_run_cannot_be_opened_back_into_existence(
+        self, repo: AgentRepository
+    ) -> None:
+        """Purge safety: this is an UPDATE, so it can only change a live row."""
+
+        repo.create_connection(make_connection())
+        run = make_run(exchange_state="queued")
+
+        opened = repo.start_exchange(
+            run,
+            expected_version=0,
+            started_at=NOW,
+            deadline_at=NOW + timedelta(seconds=315),
+        )
+
+        assert opened is None
+        assert repo.list_runs_for_owner(owner_id="user_a") == []
+
+    def test_014_FR_003_the_duplicate_risk_acknowledgement_is_stamped_once(
+        self, repo: AgentRepository
+    ) -> None:
+        """AC-026. Two racing confirmations record the first, not the later one."""
+
+        repo.create_connection(make_connection())
+        first_at = NOW + timedelta(seconds=1)
+
+        repo.acknowledge_duplicate_risk("agentconn_1", owner_id="user_a", at=first_at)
+        repo.acknowledge_duplicate_risk(
+            "agentconn_1", owner_id="user_a", at=NOW + timedelta(hours=1)
+        )
+
+        connection = repo.get_connection("agentconn_1", owner_id="user_a")
+        assert connection.best_effort_acknowledged_at == first_at
+        assert connection.revision == 2
+
+        # A connection that is not there is not an error: the caller holds the
+        # command lock, and a purge that landed inside it must not raise past
+        # the acknowledgement into the dispatch it belongs to.
+        repo.acknowledge_duplicate_risk("agentconn_missing", owner_id="user_a", at=NOW)
+
+    def test_014_FR_006_restart_recovery_sees_queued_and_open_exchanges_apart(
+        self, repo: AgentRepository
+    ) -> None:
+        """AC-032. The two need opposite treatment, so the state comes back too.
+
+        A queued exchange provably never left and is settled as **Not sent**; an
+        open one may already be at the agent and is resolved by lookup only.
+        Guessing which is which from anything else would risk resending work the
+        agent already has.
+        """
+
+        repo.create_connection(make_connection())
+        repo.create_run(make_run(run_id="agentrun_queued", exchange_state="queued"))
+        repo.create_run(
+            make_run(
+                run_id="agentrun_open",
+                exchange_state="open",
+                exchange_started_at=NOW,
+                created_at=NOW + timedelta(seconds=1),
+            )
+        )
+        repo.create_run(
+            make_run(
+                run_id="agentrun_closed",
+                exchange_state="closed",
+                created_at=NOW + timedelta(seconds=2),
+            )
+        )
+        repo.create_run(
+            make_run(
+                run_id="agentrun_idle",
+                created_at=NOW + timedelta(seconds=3),
+            )
+        )
+
+        assert repo.interrupted_exchanges() == [
+            ("user_a", "agentrun_queued", "queued"),
+            ("user_a", "agentrun_open", "open"),
+        ]
+
+
+# --- the two retention tiers (spec 014, US4) ---------------------------------
+
+
+class TestRelayRetentionTiers:
+    """Thirty days for what the agent said; ninety for what could reach it."""
+
+    def test_014_FR_016_expire_due_content_nulls_every_content_column(
+        self, repo: AgentRepository
+    ) -> None:
+        """014-SC-007. The 007 six, plus the three the observation lane added."""
+
+        repo.create_run(
+            make_run(
+                content_expires_at=NOW - timedelta(seconds=1),
+                progress_text="Cloning",
+                question_text="Which environment?",
+                result_text="Shipped",
+                result_link="https://agent.example.com/r/1",
+                failure_reason="Out of credit",
+                blocked_reason="Agent needs additional authentication",
+                result_availability="too_large",
+                artifacts_summary=[
+                    {
+                        "name": "report.pdf",
+                        "media_type": "application/pdf",
+                        "kind": "file",
+                    }
+                ],
+            )
+        )
+
+        assert repo.expire_due_content(now=NOW) == 1
+
+        run = repo.get_run("agentrun_1", owner_id="user_a")
+        assert run.content_expired is True
+        for field in (
+            "progress_text",
+            "question_text",
+            "result_text",
+            "result_link",
+            "failure_reason",
+            "blocked_reason",
+            "result_availability",
+            "manifest",
+        ):
+            assert getattr(run, field) is None, field
+        assert run.artifacts_summary == []
+
+    def test_014_FR_016_content_written_after_expiry_is_re_detected(
+        self, repo: AgentRepository
+    ) -> None:
+        """The predicate reads the columns, not the flag it already set."""
+
+        repo.create_run(
+            make_run(
+                content_expires_at=NOW - timedelta(seconds=1), content_expired=True
+            )
+        )
+        run = repo.get_run("agentrun_1", owner_id="user_a")
+        repo.save_run(run.model_copy(update={"blocked_reason": "Snuck back in"}))
+
+        assert repo.expire_due_content(now=NOW) == 1
+
+        assert repo.get_run("agentrun_1", owner_id="user_a").blocked_reason is None
+
+    def test_expire_due_content_skips_and_logs_an_unparseable_row(
+        self, repo: AgentRepository, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """One broken row costs one skipped run, never every other owner's sweep."""
+
+        import logging
+
+        repo.create_run(
+            make_run(
+                run_id="agentrun_broken",
+                content_expires_at=NOW - timedelta(seconds=1),
+                result_text="Unreadable later",
+            )
+        )
+        repo.create_run(
+            make_run(
+                owner_id="user_b",
+                run_id="agentrun_healthy",
+                content_expires_at=NOW - timedelta(seconds=1),
+                result_text="Still here",
+            )
+        )
+        with sqlite3.connect(repo.root / "agents.sqlite3") as raw:
+            raw.execute(
+                "UPDATE agent_runs SET payload = ? WHERE id = ?",
+                ('{"broken": true}', "agentrun_broken"),
+            )
+
+        with caplog.at_level(logging.WARNING):
+            assert repo.expire_due_content(now=NOW) == 1
+
+        assert repo.get_run("agentrun_healthy", owner_id="user_b").result_text is None
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("agentrun_broken" in message for message in messages)
+        assert not any("Unreadable later" in message for message in messages)
+
+    def test_014_FR_016_expire_due_identifiers_nulls_the_reachable_ids(
+        self, repo: AgentRepository
+    ) -> None:
+        """014-SC-007. Ninety days, and the run row itself stays."""
+
+        repo.create_run(
+            make_run(
+                dispatched_at=NOW - timedelta(days=91),
+                context_id="agentrun_1",
+                message_id="agentrun_1:start",
+                agent_task_id="task-a1",
+                interface_url="https://agent.example.com/a2a",
+                card_fingerprint="f" * 64,
+                push_token_fingerprint="v1:" + "a" * 64,
+                next_observation_at=NOW,
+            )
+        )
+        repo.append_event(
+            AgentRunEventDocument(
+                id="agentevt_1",
+                owner_id="user_a",
+                run_id="agentrun_1",
+                connection_id="agentconn_1",
+                type="running",
+                run_version=1,
+                received_at=NOW,
+            )
+        )
+        repo.save_command(
+            AgentRunCommandDocument(
+                id="agentcmd_1",
+                owner_id="user_a",
+                run_id="agentrun_1",
+                kind="reply",
+                agent_task_id_after="task-b2",
+                created_at=NOW,
+            )
+        )
+
+        assert repo.expire_due_identifiers(now=NOW) == 1
+
+        run = repo.get_run("agentrun_1", owner_id="user_a")
+        assert run.identifiers_expired is True
+        assert run.message_id is None
+        assert run.agent_task_id is None
+        assert run.interface_url is None
+        assert run.card_fingerprint is None
+        assert run.push_token_fingerprint is None
+        assert run.next_observation_at is None
+        # The run and its id stay: the conversation identifier *is* the run id,
+        # and no sweep deletes a dispatched run row (014-SC-007, research H).
+        assert run.id == "agentrun_1"
+        assert run.context_id == "agentrun_1"
+        assert repo.list_events("agentrun_1", owner_id="user_a") == []
+        command = repo.get_command("agentcmd_1", owner_id="user_a")
+        assert command is not None
+        assert command.agent_task_id_after is None
+
+    def test_014_FR_016_identifiers_within_ninety_days_are_left_alone(
+        self, repo: AgentRepository
+    ) -> None:
+        repo.create_run(
+            make_run(dispatched_at=NOW - timedelta(days=89), agent_task_id="task-a1")
+        )
+
+        assert repo.expire_due_identifiers(now=NOW) == 0
+
+        assert repo.get_run("agentrun_1", owner_id="user_a").agent_task_id == "task-a1"
+        # Idempotent: a second pass over an already-expired run does nothing.
+        repo.save_run(
+            repo.get_run("agentrun_1", owner_id="user_a").model_copy(
+                update={"dispatched_at": NOW - timedelta(days=91)}
+            )
+        )
+        assert repo.expire_due_identifiers(now=NOW) == 1
+        assert repo.expire_due_identifiers(now=NOW) == 0
+
+    def test_014_FR_016_the_identifier_sweep_skips_a_row_it_cannot_parse(
+        self, repo: AgentRepository, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """One broken row costs one skipped run, never every other owner's sweep."""
+
+        import logging
+
+        repo.create_run(
+            make_run(
+                run_id="agentrun_broken",
+                dispatched_at=NOW - timedelta(days=91),
+                agent_task_id="task-a1",
+            )
+        )
+        repo.create_run(
+            make_run(
+                owner_id="user_b",
+                run_id="agentrun_healthy",
+                dispatched_at=NOW - timedelta(days=91),
+                agent_task_id="task-b1",
+            )
+        )
+        with sqlite3.connect(repo.root / "agents.sqlite3") as raw:
+            raw.execute(
+                "UPDATE agent_runs SET payload = ? WHERE id = ?",
+                ('{"broken": true}', "agentrun_broken"),
+            )
+
+        with caplog.at_level(logging.WARNING):
+            assert repo.expire_due_identifiers(now=NOW) == 1
+
+        assert repo.get_run("agentrun_healthy", owner_id="user_b").agent_task_id is None
+        assert any(
+            "agentrun_broken" in record.getMessage() for record in caplog.records
+        )
+
+    def test_014_FR_016_delete_all_for_owner_covers_every_table(
+        self, repo: AgentRepository
+    ) -> None:
+        """AC-025. Including the bounded-audit ledger, which is a table too."""
+
+        repo.create_run(make_run())
+        repo.append_audit(
+            AgentAuditEntryDocument(
+                id="agentaudit_1",
+                owner_id="user_a",
+                action="run_dispatched",
+                outcome="ok",
+                created_at=NOW,
+            )
+        )
+        repo.append_bounded_audit(
+            AgentAuditEntryDocument(
+                id="agentaudit_2",
+                owner_id="user_a",
+                action="observation_accepted",
+                outcome="running",
+                created_at=NOW,
+            ),
+            bucket="agentrun_1:running",
+            day="2026-08-12",
+        )
+
+        repo.delete_all_for_owner(owner_id="user_a")
+
+        assert repo.list_runs_for_owner(owner_id="user_a") == []
+        assert repo.list_audit(owner_id="user_a") == []
+        with sqlite3.connect(repo.root / "agents.sqlite3") as raw:
+            remaining = raw.execute(
+                "SELECT COUNT(*) FROM agent_audit_buckets WHERE owner_id = ?",
+                ("user_a",),
+            ).fetchone()[0]
+        assert remaining == 0

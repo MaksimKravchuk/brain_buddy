@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,6 +25,20 @@ import { Sheet } from "@/components/Sheet";
 import { canHandOff } from "@/lifecycle/agentGuards";
 import { colors, fonts, radii, space, type as typeScale } from "@/theme/tokens";
 
+/**
+ * The reviewed payload of a hand-off that never left, replayed exactly.
+ *
+ * Seeding the review from a run's frozen manifest is what makes **Try this
+ * hand-off again** a *retry*: the server rebuilds the same manifest and returns
+ * the same token, so the same run ID and message ID are reused precisely when
+ * the user changed nothing.
+ */
+export interface AgentHandoffSeed {
+  connectionId: string;
+  includeDetails: boolean;
+  supportingItems: AgentContextItem[];
+}
+
 interface HandoffSheetProps {
   visible: boolean;
   onClose: () => void;
@@ -31,6 +46,7 @@ interface HandoffSheetProps {
   projectName: string | null;
   tagNames: string[];
   onDispatched: (run: AgentRunResponse) => void;
+  seed?: AgentHandoffSeed | null;
 }
 
 interface PreviewMaterial {
@@ -57,16 +73,16 @@ function previewInputSnapshot(material: PreviewMaterial): string {
       ? [
           connection.id,
           connection.name,
-          connection.endpoint_url,
+          connection.agent_address,
+          connection.auth_scheme,
           connection.auth_header_name,
           connection.status,
           connection.stale,
           connection.ready_for_handoff,
-          [
-            connection.capabilities.progress,
-            connection.capabilities.reply,
-            connection.capabilities.cancel,
-          ],
+          [connection.capabilities.streaming, connection.capabilities.push_notifications],
+          [connection.controls_offered.reply, connection.controls_offered.cancel],
+          connection.guarantee_tier,
+          connection.agent_changed,
           connection.last_test_error_code,
           connection.last_contact_at,
           connection.last_tested_at,
@@ -87,7 +103,13 @@ function previewInputSnapshot(material: PreviewMaterial): string {
  * something the user did not read.
  */
 export function HandoffSheet({ visible, onClose, ...contentProps }: HandoffSheetProps) {
-  const [connectionId, setConnectionId] = useState<string | null>(null);
+  // Seeded from a run's frozen manifest when the review is *re*opened. That is
+  // what makes **Try this hand-off again** a retry rather than a second
+  // hand-off: the server rebuilds the same manifest, returns the same token,
+  // and the token is the idempotency key.
+  const [connectionId, setConnectionId] = useState<string | null>(
+    contentProps.seed?.connectionId ?? null,
+  );
   const [confirmPending, setConfirmPending] = useState(false);
   return (
     <Sheet visible={visible} onClose={onClose} title="Hand to agent" dismissible={!confirmPending}>
@@ -118,6 +140,7 @@ function HandoffSheetContent({
   projectName,
   tagNames,
   onDispatched,
+  seed,
   connectionId,
   onConnectionIdChange,
   onConfirmPendingChange,
@@ -129,16 +152,22 @@ function HandoffSheetContent({
 
   const initialContextItems = buildContextCandidates(task, { projectName, tagNames });
   const contextSourceSnapshot = JSON.stringify([task.id, projectName, tagNames, initialContextItems]);
-  const [includeDetails, setIncludeDetails] = useState(() => Boolean(task.details?.trim()));
+  const [includeDetails, setIncludeDetails] = useState(() =>
+    seed ? seed.includeDetails : Boolean(task.details?.trim()),
+  );
   const [contextSelection, setContextSelection] = useState(() => ({
     sourceSnapshot: contextSourceSnapshot,
-    items: initialContextItems,
+    items: seed?.supportingItems ?? initialContextItems,
   }));
   const [receivedManifest, setManifest] = useState<AgentManifestResponse | null>(null);
   const [manifestSnapshot, setManifestSnapshot] = useState<string | null>(null);
   const [previewPending, setPreviewPending] = useState(false);
   const [previewError, setPreviewError] = useState<unknown>(null);
   const [password, setPassword] = useState("");
+  // Asked once per connection, and again whenever its verified scope resets.
+  // Held here rather than derived: the user's tap is the thing being recorded,
+  // and a value read back off the manifest would tick itself.
+  const [acknowledged, setAcknowledged] = useState(false);
   const [rereviewNotice, setRereviewNotice] = useState<string | null>(null);
   const [previewRequestNonce, setPreviewRequestNonce] = useState(0);
   const previewGeneration = useRef(0);
@@ -183,7 +212,7 @@ function HandoffSheetContent({
     const request = preview.mutateAsync({
       connection_id: connectionId,
       include_details: effectiveIncludeDetails,
-      context_items: contextItems,
+      supporting_items: contextItems,
     });
     void Promise.resolve().then(() => {
       if (generation !== previewGeneration.current) return;
@@ -216,6 +245,10 @@ function HandoffSheetContent({
   const choose = (id: string) => {
     onConnectionIdChange(id);
     setRereviewNotice(null);
+    // The tap is consent for one specific agent. Carrying it across a change of
+    // selection would arm Send for an agent the user never acknowledged
+    // (AC-026).
+    setAcknowledged(false);
   };
 
   const toggleDetails = () => {
@@ -246,8 +279,13 @@ function HandoffSheetContent({
         payload: {
           connection_id: connectionId,
           include_details: effectiveIncludeDetails,
-          context_items: contextItems,
+          supporting_items: contextItems,
           manifest_token: manifest.token,
+          // Part of the request identity, so a replayed confirmation carries
+          // exactly what the user agreed to (AC-026).
+          acknowledge_duplicate_risk: manifest.acknowledgement_required
+            ? acknowledged
+            : false,
           ...(manifest.reauthentication_required ? { current_password: password } : {}),
         },
         idempotencyKey: `agent-handoff-${manifest.token}`,
@@ -277,7 +315,11 @@ function HandoffSheetContent({
     Boolean(manifest) &&
     !previewPending &&
     manifestSnapshot === currentInputSnapshot &&
-    (!needsPassword || password.length > 0);
+    (!needsPassword || password.length > 0) &&
+    // The acknowledgement gates the send *here* as well as at the server: the
+    // user has to be able to see that ticking the row is what unlocks the
+    // action they are about to take (AC-026, M-02-S12/S13).
+    (manifest?.acknowledgement_required !== true || acknowledged);
 
   return (
     <>
@@ -375,13 +417,13 @@ function HandoffSheetContent({
               ) : null}
 
               <View style={styles.field}>
-                <BBText variant="label">Context items</BBText>
-                {manifest.context_items.length === 0 ? (
+                <BBText variant="label">Supporting items</BBText>
+                {manifest.supporting_items.length === 0 ? (
                   <BBText variant="caption" color={colors.fg6}>
                     None. Only the fields above will be sent.
                   </BBText>
                 ) : null}
-                {manifest.context_items.map((item, index) => (
+                {manifest.supporting_items.map((item, index) => (
                   <View key={`${item.label}-${index}`} style={styles.contextItem}>
                     <View style={styles.fieldHead}>
                       <BBText variant="caption" weight="medium" color={colors.fg3}>
@@ -407,13 +449,71 @@ function HandoffSheetContent({
 
               <Field label="Task ID" value={manifest.task_id} mono />
               <Field label="Run ID" value={manifest.run_id} mono />
-              <Field label="Destination endpoint" value={manifest.destination_endpoint} mono />
-              <Field
-                label="Reporting instructions"
-                value={manifest.reporting_instructions}
-              />
-              <BBText variant="micro" color={colors.fg6}>
-                {`Instructions ${manifest.instructions_version} · protocol ${manifest.protocol_version}`}
+              <Field label="Correlation ID" value={manifest.correlation_id} mono />
+              {/* Card-sourced, so inert: shown precisely so the owner can see
+                  where their content would go, which is also why it is never a
+                  `Linking` target (AC-031). */}
+              <Field label="Destination" value={manifest.destination_interface} mono />
+              {manifest.push_callback?.registered ? (
+                <View style={styles.field}>
+                  <BBText variant="label">Push callback</BBText>
+                  <BBText variant="body" color={colors.fg2} style={styles.mono} selectable>
+                    {manifest.push_callback.url_preview}
+                  </BBText>
+                  <BBText variant="caption" color={colors.fg5}>
+                    {manifest.push_callback.disclosure}
+                  </BBText>
+                </View>
+              ) : null}
+
+              <View style={styles.field}>
+                <BBText variant="label">Guarantee</BBText>
+                <BBText variant="body" color={colors.fg2}>
+                  {manifest.tier_disclosure}
+                </BBText>
+                {manifest.guarantee_tier === "best_effort" ? (
+                  <Pressable
+                    accessibilityRole="link"
+                    accessibilityLabel="Read the single-start extension specification"
+                    onPress={() => {
+                      void Linking.openURL(manifest.tier_disclosure_url);
+                    }}
+                  >
+                    <BBText variant="caption" weight="medium" color={colors.infoFg}>
+                      Read the single-start extension specification
+                    </BBText>
+                  </Pressable>
+                ) : null}
+                {manifest.acknowledgement_required ? (
+                  <>
+                    <Pressable
+                      accessibilityRole="checkbox"
+                      accessibilityLabel="I understand that a duplicate task is possible with this agent"
+                      accessibilityState={{ checked: acknowledged }}
+                      onPress={() => setAcknowledged((current) => !current)}
+                      style={styles.acknowledgeRow}
+                    >
+                      <BBText variant="body" color={colors.fg2}>
+                        {acknowledged ? "☑" : "☐"} I understand that a duplicate task is
+                        possible with this agent
+                      </BBText>
+                    </Pressable>
+                    {acknowledged ? (
+                      <BBText variant="caption" color={colors.fg5}>
+                        Acknowledged. Brain Buddy will not ask again for this agent.
+                      </BBText>
+                    ) : null}
+                  </>
+                ) : manifest.guarantee_tier === "best_effort" ? (
+                  <BBText variant="caption" color={colors.fg5}>
+                    You acknowledged the duplicate risk for this agent on your first hand-off,
+                    so there is no acknowledgement step here.
+                  </BBText>
+                ) : null}
+              </View>
+
+              <BBText variant="caption" color={colors.fg5}>
+                {manifest.cancellation_disclosure}
               </BBText>
 
               {needsPassword ? (
@@ -465,6 +565,11 @@ function Field({ label, value, mono = false }: { label: string; value: string; m
 const styles = StyleSheet.create({
   body: {
     gap: space.s3,
+  },
+  // 44pt, because it is a real decision and has to be tappable like one.
+  acknowledgeRow: {
+    minHeight: 44,
+    justifyContent: "center",
   },
   option: {
     borderWidth: 1,

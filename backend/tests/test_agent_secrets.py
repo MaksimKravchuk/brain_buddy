@@ -15,15 +15,17 @@ import pytest
 
 from app.core.config import AppEnvironment
 from app.modules.agents.secrets import (
-    AAD_PURPOSE_INBOUND_SIGNING,
     AAD_PURPOSE_OUTBOUND_CREDENTIAL,
     SealedSecret,
     SecretBox,
     SecretDecryptionFailed,
     SecretsUnavailable,
     build_secret_box,
+    derive_push_token,
     fingerprint_key_id,
     parse_secret_keys,
+    push_token_fingerprint,
+    push_token_matches,
     secret_aad,
 )
 
@@ -145,28 +147,6 @@ class TestOwnerBoundAssociatedData:
                     AAD_PURPOSE_OUTBOUND_CREDENTIAL,
                     owner_id="user_a",
                     connection_id="conn_2",
-                ),
-            )
-
-    def test_purposes_are_domain_separated(self, box: SecretBox) -> None:
-        """An outbound credential can never be opened as a signing secret."""
-
-        sealed = box.seal(
-            "hermes-token-value",
-            aad=secret_aad(
-                AAD_PURPOSE_OUTBOUND_CREDENTIAL,
-                owner_id="user_a",
-                connection_id="conn_1",
-            ),
-        )
-
-        with pytest.raises(SecretDecryptionFailed):
-            box.open(
-                sealed,
-                aad=secret_aad(
-                    AAD_PURPOSE_INBOUND_SIGNING,
-                    owner_id="user_a",
-                    connection_id="conn_1",
                 ),
             )
 
@@ -499,3 +479,62 @@ def test_two_ephemeral_development_boxes_do_not_share_a_key() -> None:
 
     with pytest.raises(SecretDecryptionFailed):
         second.open(sealed, aad="conn_1")
+
+
+# --- 014 FR-008: the per-run push callback token --------------------------
+
+
+def test_014_FR_008_a_push_token_is_urlsafe_unique_per_run_and_reproducible(
+    box: SecretBox,
+) -> None:
+    """The token is the whole authentication of an unauthenticated route.
+
+    Derived under the key ring rather than drawn from the random pool, because
+    the *same* token has to go out again with every reply so a successor task
+    stays push-accelerated — and the alternative, storing the plaintext, would
+    put a live route credential in the database. Unguessable all the same: the
+    run id it is derived from is unguessable and the key never leaves the
+    process. Urlsafe because it travels in a *path segment*, where an encoding
+    that needed escaping would be one more thing the two sides could disagree
+    about.
+    """
+
+    tokens = {derive_push_token(box, f"agentrun_{index}") for index in range(64)}
+
+    assert len(tokens) == 64
+    for token in tokens:
+        assert len(token) >= 43, "32 derived bytes, urlsafe-encoded"
+        assert set(token) <= set(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        )
+    assert derive_push_token(box, "agentrun_0") == derive_push_token(
+        box, "agentrun_0"
+    ), "a reply must be able to re-offer the token the start registered"
+
+
+def test_014_FR_008_only_a_keyed_fingerprint_of_the_push_token_is_storable(
+    box: SecretBox,
+) -> None:
+    """A run keeps a fingerprint, never the token, and compares in constant time.
+
+    The agent holds the token for the life of the run, so the row that verifies
+    it is the one an attacker with the database would go for. A keyed
+    fingerprint makes that row prove nothing: the key never lives in the data
+    directory, and the token is high-entropy enough that even a plain digest
+    would not be guessable — the keying is what stops the *fingerprint itself*
+    being replayed as a comparison oracle across deployments.
+    """
+
+    token = derive_push_token(box, "agentrun_1")
+    stored = push_token_fingerprint(box, token)
+
+    assert token not in stored
+    assert stored.startswith("v1:")
+    assert push_token_matches(box, stored, token) is True
+    assert (
+        push_token_matches(box, stored, derive_push_token(box, "agentrun_2")) is False
+    )
+    # A truncated or malformed stored value is a refusal, never an exception:
+    # the push route answers one opaque 403 for every failure mode.
+    assert push_token_matches(box, "", token) is False
+    assert push_token_matches(box, "v9:deadbeef", token) is False

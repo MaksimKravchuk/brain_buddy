@@ -1,22 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentManifestResponse } from "../agentTypes";
 import { apiClient } from "../client";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
-
-const reportingContract = {
-  callback_url: "https://brain.example.test/api/agent-runs/run-1/reports",
-  connection_id: "conn-1",
-  connection_header: "X-BrainBuddy-Connection",
-  timestamp_header: "X-BrainBuddy-Timestamp",
-  signature_header: "X-BrainBuddy-Signature",
-  timestamp_format: "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero",
-  signature_algorithm: "hmac-sha256",
-  signing_bytes: "timestamp_bytes + b'.' + raw_body",
-  signature_format: "v1=<lowercase hex>",
-  body_envelope_version: "1"
-} satisfies AgentManifestResponse["reporting"];
 
 function response(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
@@ -52,14 +38,14 @@ describe("apiClient external agent relay contract", () => {
     expect(new Headers(init.headers).get("Idempotency-Key")).toBeNull();
   });
 
-  it("creates a connection with the caller's idempotency key and the re-authentication password", async () => {
-    fetchMock.mockResolvedValue(response({ id: "conn-1", inbound_signing_secret: "secret" }, 201));
+  it("014-FR-001 creates a connection by address and scheme, never a header name", async () => {
+    fetchMock.mockResolvedValue(response({ id: "conn-1" }, 201));
 
     await apiClient.createAgentConnection(
       {
         name: "Hermes",
-        endpoint_url: "https://agent.example.com/hooks",
-        auth_header_name: "Authorization",
+        agent_address: "https://agent.example.com",
+        auth_scheme: "api_key",
         credential: "token-abc",
         current_password: "hunter2hunter2"
       },
@@ -70,21 +56,27 @@ describe("apiClient external agent relay contract", () => {
     expect(url).toBe(`${API_BASE_URL}/agent-connections`);
     expect(init.method).toBe("POST");
     expect(new Headers(init.headers).get("Idempotency-Key")).toBe("create-connection-key");
-    expect(JSON.parse(String(init.body))).toEqual({
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body).toEqual({
       name: "Hermes",
-      endpoint_url: "https://agent.example.com/hooks",
-      auth_header_name: "Authorization",
+      agent_address: "https://agent.example.com",
+      auth_scheme: "api_key",
       credential: "token-abc",
       current_password: "hunter2hunter2"
     });
+    // The header the credential travels in comes from the agent's card, so the
+    // client has nothing to send and no field to send it in.
+    expect(body).not.toHaveProperty("auth_header_name");
+    expect(body).not.toHaveProperty("endpoint_url");
   });
 
-  it("updates a connection with the backend PUT contract and caller idempotency key", async () => {
+  it("014-FR-001 updates a connection by address and scheme with the caller's key", async () => {
     fetchMock.mockResolvedValue(response({ id: "conn-1", name: "Hermes prod", revision: 3 }));
 
     const payload = {
       name: "Hermes prod",
-      endpoint_url: "https://agent.example.com/v2/hooks",
+      agent_address: "https://second.example.com",
+      auth_scheme: "bearer" as const,
       expected_revision: 2,
       current_password: "hunter2hunter2"
     };
@@ -138,71 +130,30 @@ describe("apiClient external agent relay contract", () => {
     });
   });
 
-  it("replaces the signing secret at its own endpoint, never the credential one", async () => {
-    fetchMock.mockResolvedValue(
-      response({ id: "conn-1", revision: 3, inbound_signing_secret: "sk-inbound-new" })
-    );
-
-    const replaced = await apiClient.rotateAgentSigningSecret(
-      "conn-1",
-      { current_password: "hunter2hunter2", expected_revision: 2 },
-      "signing-secret-key"
-    );
-
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`${API_BASE_URL}/agent-connections/conn-1/signing-secret`);
-    expect(init.method).toBe("POST");
-    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("signing-secret-key");
-    // No credential field: this route replaces what the agent signs *with*, not
-    // what BrainBuddy authenticates *to* it with.
-    expect(JSON.parse(String(init.body))).toEqual({
-      current_password: "hunter2hunter2",
-      expected_revision: 2
-    });
-    expect(replaced.inbound_signing_secret).toBe("sk-inbound-new");
-  });
-
-  it("surfaces a superseded signing-secret replay as a conflict rather than a secret", async () => {
-    fetchMock.mockResolvedValue(
-      response(
-        { message: "This agent's signing secret has been replaced since that request." },
-        409,
-        { "X-Correlation-ID": "corr-signing-9" }
-      )
-    );
-
-    await expect(
-      apiClient.rotateAgentSigningSecret(
-        "conn-1",
-        { current_password: "hunter2hunter2", expected_revision: 2 },
-        "signing-secret-key"
-      )
-    ).rejects.toMatchObject({ status: 409, correlationId: "corr-signing-9" });
-  });
-
-  it("previews a hand-off without an idempotency key and confirms it with one", async () => {
+  it("014-FR-005 previews a hand-off without an idempotency key and confirms it with one", async () => {
     fetchMock.mockImplementation(() =>
-      Promise.resolve(response({ token: "manifest-token", reporting: reportingContract }))
+      Promise.resolve(response({ token: "manifest-token", supporting_items: [] }))
     );
 
     const preview = await apiClient.previewAgentHandoff("task-1", {
       connection_id: "conn-1",
       include_details: false,
-      context_items: [{ label: "Spec", body: "Read the spec" }]
+      supporting_items: [{ label: "Spec", body: "Read the spec" }]
     });
     await apiClient.confirmAgentHandoff(
       "task-1",
       {
         connection_id: "conn-1",
         include_details: false,
-        context_items: [{ label: "Spec", body: "Read the spec" }],
+        supporting_items: [{ label: "Spec", body: "Read the spec" }],
         manifest_token: "manifest-token",
-        current_password: null
+        current_password: null,
+        acknowledge_duplicate_risk: true
       },
       "handoff-key"
     );
 
-    expect(preview.reporting).toEqual(reportingContract);
+    expect(preview.supporting_items).toEqual([]);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       `${API_BASE_URL}/tasks/task-1/agent-runs/preview`,
       `${API_BASE_URL}/tasks/task-1/agent-runs`
@@ -210,7 +161,50 @@ describe("apiClient external agent relay contract", () => {
     const inits = fetchMock.mock.calls.map(([, init]) => init as RequestInit);
     expect(new Headers(inits[0].headers).get("Idempotency-Key")).toBeNull();
     expect(new Headers(inits[1].headers).get("Idempotency-Key")).toBe("handoff-key");
-    expect(JSON.parse(String(inits[1].body))).toMatchObject({ manifest_token: "manifest-token" });
+    // The acknowledgement travels in the body, so it is part of the canonical
+    // request the Idempotency-Key is spent on (AC-026).
+    expect(JSON.parse(String(inits[1].body))).toMatchObject({
+      manifest_token: "manifest-token",
+      supporting_items: [{ label: "Spec", body: "Read the spec" }],
+      acknowledge_duplicate_risk: true
+    });
+  });
+
+  it("014-FR-006 checks delivery under an idempotency key and carries the password when asked", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(response({ id: "run-1" })));
+
+    await apiClient.checkAgentRunDelivery(
+      "run-1",
+      { current_password: null, expected_revision: 3 },
+      "check-key"
+    );
+    await apiClient.checkAgentRunDelivery(
+      "run-1",
+      { current_password: "hunter2hunter2", expected_revision: 3 },
+      "check-key"
+    );
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      `${API_BASE_URL}/agent-runs/run-1/check-delivery`,
+      `${API_BASE_URL}/agent-runs/run-1/check-delivery`
+    ]);
+    const inits = fetchMock.mock.calls.map(([, init]) => init as RequestInit);
+    // Every identifier the check needs is already on the run, so the key is the
+    // run's own: a second check is the same check, never a second send.
+    expect(inits.map((init) => new Headers(init.headers).get("Idempotency-Key"))).toEqual([
+      "check-key",
+      "check-key"
+    ]);
+    // The revision the user was looking at travels with it: the check can end
+    // in a message on the wire, so it names the state it was composed against.
+    expect(JSON.parse(String(inits[0].body))).toEqual({
+      current_password: null,
+      expected_revision: 3
+    });
+    expect(JSON.parse(String(inits[1].body))).toEqual({
+      current_password: "hunter2hunter2",
+      expected_revision: 3
+    });
   });
 
   it("lists, reads, replies to, and requests cancellation of runs", async () => {

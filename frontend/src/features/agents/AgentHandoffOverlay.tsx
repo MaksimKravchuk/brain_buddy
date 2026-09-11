@@ -1,9 +1,14 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useAgentConnections, useAgentKeys } from "../../api/agentHooks";
 import { useRelayMutation, useRelayOnline } from "../../api/agentLifecycle";
-import type { AgentContextItem, AgentRunResponse } from "../../api/agentTypes";
+import type {
+  AgentConnectionResponse,
+  AgentContextItem,
+  AgentRunResponse,
+  AgentRunSummaryResponse
+} from "../../api/agentTypes";
 import { ApiError, apiClient } from "../../api/client";
 import { Button } from "../../components/ui/Button";
 import { Overlay, OverlayHeader } from "../../components/ui/Overlay";
@@ -11,20 +16,61 @@ import { Feedback, Field } from "../../components/ui/SettingsSection";
 import { getErrorMessage } from "../../utils/error";
 import { connectionStatusDetail, connectionStatusLabel } from "./agentCopy";
 
+const ADDITIONAL_INSTRUCTIONS_LABEL = "Additional instructions";
+
+function compactSummary(run: AgentRunResponse): AgentRunSummaryResponse {
+  return {
+    id: run.id,
+    task_id: run.task_id,
+    agent_name: run.agent_name,
+    primary_state_label: run.primary_state_label,
+    needs_user: run.needs_user,
+    stopped_reporting: run.stopped_reporting,
+    last_contact_at: run.last_contact_at,
+    guarantee_tier: run.guarantee_tier,
+    cancel_outcome: run.cancel_outcome,
+    agent_task_missing: run.agent_task_missing
+  };
+}
+
+/** The server's own machine-readable refusal reason, or nothing. */
+function refusalReason(caught: unknown): string | null {
+  if (!(caught instanceof ApiError) || typeof caught.payload !== "object" || caught.payload === null) {
+    return null;
+  }
+  const detail = (caught.payload as { detail?: unknown }).detail;
+  if (typeof detail !== "object" || detail === null) {
+    return null;
+  }
+  const reason = (detail as { reason?: unknown }).reason;
+  return typeof reason === "string" ? reason : null;
+}
+
+/**
+ * A connection the server refuses for no reason it was willing to name.
+ *
+ * Every condition BrainBuddy actually knows about — untested, unreachable,
+ * invalid credentials, unsupported, disconnected, stale, changed — carries its
+ * own sentence. A row that matches none of them and is still not offered is one
+ * whose current state could not be refreshed, and partial knowledge fails
+ * closed: it is shown, named honestly, and never selectable (D-02-S07).
+ */
+function statusUnknown(connection: AgentConnectionResponse): boolean {
+  return (
+    !connection.ready_for_handoff &&
+    connection.status === "ready" &&
+    !connection.stale &&
+    !connection.agent_changed
+  );
+}
+
 /**
  * A server reason that means "what you reviewed is no longer what would be
  * sent". The only safe response is to fetch a fresh manifest and make the user
  * look at it again — never to retry the confirmation behind their back.
  */
 function needsReReview(caught: unknown): boolean {
-  if (!(caught instanceof ApiError) || typeof caught.payload !== "object" || caught.payload === null) {
-    return false;
-  }
-  const detail = (caught.payload as { detail?: unknown }).detail;
-  if (typeof detail !== "object" || detail === null) {
-    return false;
-  }
-  const reason = (detail as { reason?: unknown }).reason;
+  const reason = refusalReason(caught);
   return reason === "manifest_token_mismatch" || reason === "manifest_not_reserved";
 }
 
@@ -37,14 +83,31 @@ function needsReReview(caught: unknown): boolean {
  * manifest and fetches a new one, so a confirmation can never carry values the
  * user did not see.
  */
+/**
+ * The reviewed payload of a hand-off that never left, replayed exactly.
+ *
+ * Seeding the review from a run's frozen manifest is what makes **Try this
+ * hand-off again** a *retry* rather than a second hand-off: the server rebuilds
+ * the same manifest, returns the same token, and the token is the idempotency
+ * key — so the same run ID and message ID are reused precisely when the user
+ * changed nothing.
+ */
+export interface AgentHandoffSeed {
+  connectionId: string;
+  includeDetails: boolean;
+  supportingItems: AgentContextItem[];
+}
+
 export function AgentHandoffOverlay({
   taskId,
   taskTitle,
+  seed = null,
   onClose,
   onDispatched
 }: {
   taskId: string;
   taskTitle: string;
+  seed?: AgentHandoffSeed | null;
   onClose: () => void;
   onDispatched: (run: AgentRunResponse) => void;
 }): React.JSX.Element {
@@ -54,14 +117,29 @@ export function AgentHandoffOverlay({
   const keys = useAgentKeys();
   const online = useRelayOnline();
   const connectionsQuery = useAgentConnections(true);
-  const [connectionId, setConnectionId] = useState<string | null>(null);
-  const [includeDetails, setIncludeDetails] = useState(true);
-  const [contextItems, setContextItems] = useState<AgentContextItem[]>([]);
-  const [contextLabel, setContextLabel] = useState("");
+  const [connectionId, setConnectionId] = useState<string | null>(seed?.connectionId ?? null);
+  const [includeDetails, setIncludeDetails] = useState(seed?.includeDetails ?? true);
+  const [contextItems, setContextItems] = useState<AgentContextItem[]>(seed?.supportingItems ?? []);
   const [contextBody, setContextBody] = useState("");
+  const [payloadDetailsOpen, setPayloadDetailsOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [reReviewNotice, setReReviewNotice] = useState<string | null>(null);
+  // Asked once per connection, and again whenever its verified scope resets.
+  // Held here rather than derived, because the user's tick is the thing being
+  // recorded — a value read back off the manifest would tick itself.
+  const [acknowledged, setAcknowledged] = useState(false);
+  // The card moved between the review and the confirmation. Nothing left, and
+  // the next step costs a password, so the refusal says both (D-02-S09).
+  const [agentChanged, setAgentChanged] = useState(false);
+
+  // Captured during render, before the dialog's own mount effect moves focus to
+  // the panel: this is the control the user was on when the review opened, and
+  // it is where the keyboard goes back when the review closes.
+  const [invoker] = useState<HTMLElement | null>(() =>
+    document.activeElement instanceof HTMLElement ? document.activeElement : null
+  );
+  useEffect(() => () => invoker?.focus(), [invoker]);
 
   const previewQuery = useQuery({
     enabled: Boolean(connectionId),
@@ -74,7 +152,7 @@ export function AgentHandoffOverlay({
         {
           connection_id: connectionId ?? "",
           include_details: includeDetails,
-          context_items: contextItems
+          supporting_items: contextItems
         },
         signal
       ),
@@ -95,23 +173,52 @@ export function AgentHandoffOverlay({
         {
           connection_id: manifest.connection_id,
           include_details: includeDetails,
-          context_items: contextItems,
+          supporting_items: contextItems,
           manifest_token: manifest.token,
-          current_password: manifest.reauthentication_required ? currentPassword : null
+          current_password: manifest.reauthentication_required ? currentPassword : null,
+          // Sent whenever the review asked for it, so the confirmation that
+          // reaches the server is exactly the one the user agreed to. It is
+          // part of the request identity, so a replay carries it too (AC-026).
+          acknowledge_duplicate_risk: manifest.acknowledgement_required
+            ? acknowledged
+            : false
         },
         // Derived from the reviewed token, not from the clock: retrying the same
         // reviewed hand-off must return the original run, never start a second.
         `agent-handoff-${manifest.token}`
       );
     },
-    onSuccess: (run) => {
+    onSuccess: async (run) => {
       setError(null);
       setReReviewNotice(null);
-      void queryClient.invalidateQueries({ queryKey: keys.runs(taskId) });
+      setAgentChanged(false);
+      // Confirmation is the authoritative creation response. Project it into
+      // every mounted list that contains this task before the overlay closes,
+      // so a previously successful empty batch cannot briefly re-offer a
+      // second hand-off. Cancel older reads first: otherwise a pre-dispatch
+      // response can arrive after this write and erase the guard.
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: [...keys.all, "summaries"] }),
+        queryClient.cancelQueries({ queryKey: keys.runs(taskId) })
+      ]);
+      queryClient.setQueriesData<Record<string, AgentRunSummaryResponse>>(
+        { queryKey: [...keys.all, "summaries"] },
+        (current) => current ? { ...current, [taskId]: compactSummary(run) } : current
+      );
+      queryClient.setQueryData<AgentRunResponse[]>(keys.runs(taskId), (current) => [
+        run,
+        ...(Array.isArray(current) ? current.filter((item) => item.id !== run.id) : [])
+      ]);
+      // A first-load summary has no trustworthy values for the other rows, so
+      // do not turn a one-task optimistic projection into a successful batch.
+      // Replace every active batch from the committed server state instead;
+      // the mutation remains pending until those rows can render safely.
+      await queryClient.refetchQueries({ queryKey: [...keys.all, "summaries"], type: "active" });
       onDispatched(run);
     },
     onError: (caught: unknown) => {
       setError(getErrorMessage(caught));
+      setAgentChanged(refusalReason(caught) === "agent_card_changed");
       if (needsReReview(caught)) {
         setReReviewNotice("What would be sent has changed. Review it again before confirming.");
         void previewQuery.refetch();
@@ -122,7 +229,13 @@ export function AgentHandoffOverlay({
   });
 
   const connections = connectionsQuery.data ?? [];
-  const contextFromManifest = manifest?.context_items ?? contextItems;
+  const contextFromManifest = manifest?.supporting_items ?? contextItems;
+  // A confirmation in flight has no exit at all: an interrupted one must not be
+  // able to come back as a second hand-off (D-02-S12).
+  const sending = confirmMutation.isPending;
+  const dismiss = sending ? undefined : onClose;
+  const noneEligible =
+    connections.length > 0 && connections.every((candidate) => !candidate.ready_for_handoff);
 
 
   const replaceContext = (next: AgentContextItem[]) => {
@@ -131,19 +244,17 @@ export function AgentHandoffOverlay({
   };
 
   return (
-    <Overlay labelledBy={titleId} onClose={onClose} size="wide">
+    <Overlay labelledBy={titleId} onClose={dismiss} size="wide">
       <OverlayHeader
         titleId={titleId}
         eyebrow="Review before sending"
         title="Hand this task to an agent"
         meta={taskTitle}
-        onClose={onClose}
+        closeLabel="Close the review"
+        onClose={dismiss}
       />
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-5 sm:px-6">
-        <fieldset className="flex flex-col gap-2">
-          <legend className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-            Choose an agent
-          </legend>
+        <div className="flex flex-col gap-2">
           {connectionsQuery.isError ? (
             <Feedback error={getErrorMessage(connectionsQuery.error)} success={null} />
           ) : connectionsQuery.isPending ? (
@@ -156,50 +267,81 @@ export function AgentHandoffOverlay({
               No agents connected yet. Add one under Connected agents, then test it.
             </p>
           ) : (
-            connections.map((connection) => (
-              <div key={connection.id} className="rounded-xl border border-slate-200 p-3">
-                <label className="flex items-center gap-2 text-sm text-slate-800">
-                  <input
-                    type="radio"
-                    name="agent-connection"
-                    value={connection.id}
-                    checked={connectionId === connection.id}
-                    disabled={!connection.ready_for_handoff}
-                    onChange={() => {
-                      setError(null);
-                      setReReviewNotice(null);
-                      setConnectionId(connection.id);
-                    }}
-                  />
-                  <span className="font-medium">{connection.name}</span>
-                  <span className="text-xs text-slate-500">{connectionStatusLabel(connection)}</span>
-                </label>
-                {connection.ready_for_handoff ? null : (
-                  <p className="mt-1 pl-6 text-xs text-slate-500">{connectionStatusDetail(connection)}</p>
-                )}
-              </div>
-            ))
+            <div className="flex flex-col gap-2">
+              <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+                Agent
+                <select
+                  aria-label="Agent"
+                  value={connectionId ?? ""}
+                  onChange={(event) => {
+                    setError(null);
+                    setReReviewNotice(null);
+                    setAcknowledged(false);
+                    setConnectionId(event.currentTarget.value || null);
+                  }}
+                  className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-soft outline-none transition-colors focus:border-brand-primary"
+                >
+                  <option value="">Choose an agent…</option>
+                  {connections.map((connection) => (
+                    <option
+                      key={connection.id}
+                      value={connection.id}
+                      disabled={!connection.ready_for_handoff}
+                    >
+                      {connection.name} — {statusUnknown(connection) ? "Status unknown" : connectionStatusLabel(connection)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {noneEligible ? (
+                <p className="text-sm font-medium text-slate-900">
+                  None of your agents can take this hand-off
+                </p>
+              ) : null}
+              {connections.some((connection) => !connection.ready_for_handoff) ? (
+                <details className="text-xs text-slate-500">
+                  <summary className="cursor-pointer font-medium text-slate-600">
+                    Why some agents are unavailable
+                  </summary>
+                  <ul className="mt-2 space-y-2 border-l border-slate-200 pl-3">
+                    {connections.filter((connection) => !connection.ready_for_handoff).map((connection) => (
+                      <li key={connection.id}>
+                        <span className="font-medium text-slate-700">{connection.name}: </span>
+                        {statusUnknown(connection)
+                          ? "BrainBuddy could not refresh this connection just now, so it is not offered. Test it from Connected agents."
+                          : connectionStatusDetail(connection)}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </div>
           )}
-        </fieldset>
+        </div>
 
         {previewQuery.isError ? <Feedback error={getErrorMessage(previewQuery.error)} success={null} /> : null}
         {previewQuery.isFetching && !manifest ? (
-          <p className="text-sm text-slate-500">Building the hand-off preview…</p>
+          <div className="flex flex-col gap-1">
+            <p className="text-sm text-slate-500">Building the hand-off preview…</p>
+            {/* The moment a user is likeliest to assume something already left.
+                It has not, and the wait says so (D-02-S03). */}
+            <p className="text-xs text-slate-500">
+              BrainBuddy is only assembling the review — no task content has been sent.
+            </p>
+          </div>
         ) : null}
 
         {manifest ? (
           <>
-            <section aria-labelledby={reviewId} className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4">
-              <h3 id={reviewId} className="text-sm font-semibold text-slate-900">
+            <section aria-labelledby={reviewId} className="flex flex-col gap-4 rounded-xl border border-slate-200 p-4 sm:p-5">
+              <div>
+                <h3 id={reviewId} className="text-sm font-semibold text-slate-900">
                 What will be sent
-              </h3>
+                </h3>
+                <p className="mt-1 text-base font-medium text-slate-900">{manifest.title}</p>
+              </div>
 
-              <ReviewRow label="Task title">
-                <p className="text-sm text-slate-800">{manifest.title}</p>
-              </ReviewRow>
-
-              <div className="flex flex-col gap-1">
-                <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
                     checked={includeDetails}
@@ -209,103 +351,140 @@ export function AgentHandoffOverlay({
                     }}
                   />
                   Include task details
-                </label>
-                {manifest.details ? (
-                  <p className="whitespace-pre-wrap text-sm text-slate-800">{manifest.details}</p>
-                ) : (
-                  <p className="text-sm text-slate-500">No task details will be sent.</p>
-                )}
-              </div>
-
-              <ReviewRow label="Context items">
-                {contextFromManifest.length === 0 ? (
-                  <p className="text-sm text-slate-500">No context items will be sent.</p>
-                ) : (
-                  <ul className="flex flex-col gap-2">
-                    {contextFromManifest.map((item, index) => (
-                      <li
-                        key={`${item.label}-${index}`}
-                        className="flex items-start gap-2 rounded-lg border border-slate-200 p-2"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-slate-600">{item.label}</p>
-                          <p className="whitespace-pre-wrap text-sm text-slate-800">{item.body}</p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          aria-label={`Remove ${item.label}`}
-                          onClick={() =>
-                            replaceContext(contextItems.filter((_candidate, candidateIndex) => candidateIndex !== index))
-                          }
-                        >
-                          Remove
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </ReviewRow>
-
-              <ReviewRow label="Task ID">
-                <p className="font-mono text-xs text-slate-700">{manifest.task_id}</p>
-              </ReviewRow>
-              <ReviewRow label="Run ID">
-                <p className="font-mono text-xs text-slate-700">{manifest.run_id}</p>
-              </ReviewRow>
-              <ReviewRow label="Destination">
-                <p className="break-all font-mono text-xs text-slate-700">{manifest.destination_endpoint}</p>
-              </ReviewRow>
-              <ReviewRow
-                label={`Reporting instructions (v${manifest.instructions_version}, protocol ${manifest.protocol_version})`}
-              >
-                <p className="whitespace-pre-wrap text-sm text-slate-800">{manifest.reporting_instructions}</p>
-              </ReviewRow>
-            </section>
-
-            <p className="rounded-xl border border-needs-you-border bg-needs-you-bg px-3 py-2 text-sm text-needs-you-fg">
-              {manifest.external_copy_notice}
-            </p>
+              </label>
 
             <form
-              className="flex flex-col gap-2 rounded-xl border border-slate-200 p-3"
+              className="flex flex-col gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!contextLabel.trim() || !contextBody.trim()) {
+                if (!contextBody.trim()) {
                   return;
                 }
                 replaceContext([
                   ...contextItems,
-                  { label: contextLabel.trim(), body: contextBody.trim() }
+                  { label: ADDITIONAL_INSTRUCTIONS_LABEL, body: contextBody.trim() }
                 ]);
-                setContextLabel("");
                 setContextBody("");
+                setPayloadDetailsOpen(true);
               }}
             >
-              <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
-                Add context to send
-              </p>
-              <Field
-                label="Context label"
-                name="context_label"
-                type="text"
-                value={contextLabel}
-                onChange={setContextLabel}
-              />
-              <Field
-                label="Context body"
-                name="context_body"
-                type="text"
-                value={contextBody}
-                onChange={setContextBody}
-              />
+              <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+                Additional instructions (optional)
+                <textarea
+                  name="additional_instructions"
+                  rows={3}
+                  value={contextBody}
+                  onChange={(event) => setContextBody(event.currentTarget.value)}
+                  placeholder="Add a constraint, preference, or useful background"
+                  className="resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 shadow-soft outline-none transition-colors placeholder:text-slate-400 focus:border-brand-primary"
+                />
+              </label>
               <div>
                 <Button type="submit" variant="secondary" size="sm">
-                  Add context
+                  Add instructions
                 </Button>
               </div>
             </form>
+
+              <details
+                open={payloadDetailsOpen}
+                onToggle={(event) => setPayloadDetailsOpen(event.currentTarget.open)}
+                className="group rounded-lg border border-slate-200 bg-surface-sunken px-3 py-2"
+              >
+                <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                  Task details and supporting items
+                </summary>
+                <div className="mt-3 flex flex-col gap-3 border-t border-slate-200 pt-3">
+                  <ReviewRow label="Task details">
+                    {manifest.details ? (
+                      <p className="whitespace-pre-wrap text-sm text-slate-800">{manifest.details}</p>
+                    ) : (
+                      <p className="text-sm text-slate-500">No task details will be sent.</p>
+                    )}
+                  </ReviewRow>
+                  <ReviewRow label="Supporting items">
+                    {contextFromManifest.length === 0 ? (
+                      <p className="text-sm text-slate-500">No supporting items will be sent.</p>
+                    ) : (
+                      <ul className="flex flex-col gap-2">
+                        {contextFromManifest.map((item, index) => (
+                          <li key={`${item.label}-${index}`} className="flex items-start gap-2 rounded-lg bg-white p-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium text-slate-600">{item.label}</p>
+                              <p className="whitespace-pre-wrap text-sm text-slate-800">{item.body}</p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Remove ${item.label}`}
+                              onClick={() => replaceContext(contextItems.filter((_candidate, candidateIndex) => candidateIndex !== index))}
+                            >
+                              Remove
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </ReviewRow>
+                </div>
+              </details>
+
+              <details className="group rounded-lg border border-slate-200 px-3 py-2">
+                <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                  Delivery and privacy details
+                </summary>
+                <div className="mt-3 flex flex-col gap-3 border-t border-slate-100 pt-3">
+                  <ReviewRow label="Task ID"><p className="font-mono text-xs text-slate-700">{manifest.task_id}</p></ReviewRow>
+                  <ReviewRow label="Run ID"><p className="font-mono text-xs text-slate-700">{manifest.run_id}</p></ReviewRow>
+                  <ReviewRow label="Correlation ID"><p className="font-mono text-xs text-slate-700">{manifest.correlation_id}</p></ReviewRow>
+                  <ReviewRow label="Destination"><p className="break-all font-mono text-xs text-slate-700">{manifest.destination_interface}</p></ReviewRow>
+                  {manifest.push_callback?.registered ? (
+                    <ReviewRow label="Push callback">
+                      <p className="break-all font-mono text-xs text-slate-700">{manifest.push_callback.url_preview}</p>
+                      <p className="mt-1 text-sm text-slate-600">{manifest.push_callback.disclosure}</p>
+                    </ReviewRow>
+                  ) : null}
+                  <section aria-label="Guarantee" className="flex flex-col gap-2 text-sm text-slate-600">
+                    <p>{manifest.tier_disclosure}</p>
+                    {manifest.guarantee_tier === "best_effort" ? (
+                      <p>
+                        <a className="underline" href={manifest.tier_disclosure_url} target="_blank" rel="noopener noreferrer">
+                          Read the single-start extension specification
+                        </a>{" "}
+                        <span className="text-slate-500">Opens the published specification outside BrainBuddy.</span>
+                      </p>
+                    ) : null}
+                    {manifest.guarantee_tier === "best_effort" && !manifest.acknowledgement_required ? (
+                      <p className="text-xs text-slate-500">
+                        You acknowledged the duplicate risk for this agent on your first hand-off, so BrainBuddy does not ask again.
+                      </p>
+                    ) : null}
+                  </section>
+                  <p aria-label="Cancellation" className="text-sm text-slate-600">{manifest.cancellation_disclosure}</p>
+                  <p className="text-sm text-slate-600">{manifest.external_copy_notice}</p>
+                </div>
+              </details>
+            </section>
+
+            {manifest.acknowledgement_required ? (
+              <section className="rounded-xl border border-needs-you-border bg-needs-you-bg p-3 text-needs-you-fg">
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={acknowledged}
+                    onChange={(event) => setAcknowledged(event.currentTarget.checked)}
+                  />
+                  <span>
+                    I understand that a duplicate task is possible with this agent
+                    <span className="block text-xs text-slate-500">Asked once, on your first hand-off to this agent.</span>
+                  </span>
+                </label>
+                {acknowledged ? (
+                  <p className="mt-2 text-xs text-slate-500">Acknowledged. BrainBuddy will not ask again for this agent.</p>
+                ) : null}
+              </section>
+            ) : null}
 
             {manifest.reauthentication_required ? (
               <Field
@@ -321,15 +500,31 @@ export function AgentHandoffOverlay({
           </>
         ) : null}
 
+        {manifest && !online ? (
+          <p className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600">
+            Sending is unavailable and nothing is queued.
+          </p>
+        ) : null}
+        {sending ? (
+          <p role="status" className="text-sm text-slate-600">
+            Confirming again while this is in flight returns the same run.
+          </p>
+        ) : null}
         {reReviewNotice ? (
           <p role="status" className="text-sm text-needs-you-fg">
             {reReviewNotice}
           </p>
         ) : null}
         <Feedback error={error} success={null} />
+        {agentChanged ? (
+          <p className="text-sm text-needs-you-fg">
+            Test this connection again from Connected agents. You will be asked for your password,
+            because a new destination is a new content-bearing send.
+          </p>
+        ) : null}
       </div>
       <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-100 px-5 py-4 sm:px-6">
-        <Button type="button" variant="secondary" size="md" onClick={onClose}>
+        <Button type="button" variant="secondary" size="md" disabled={sending} onClick={onClose}>
           Cancel
         </Button>
         {manifest ? (
@@ -337,8 +532,12 @@ export function AgentHandoffOverlay({
             type="button"
             variant="primary"
             size="md"
-            isLoading={confirmMutation.isPending}
-            disabled={!online}
+            isLoading={sending}
+            // The acknowledgement gates the send, and it gates it *here* rather
+            // than only at the server: the user has to be able to see that
+            // ticking the box is what unlocks the action they are about to
+            // take (AC-026, D-02-S13/S14).
+            disabled={!online || (manifest?.acknowledgement_required === true && !acknowledged)}
             onClick={() => confirmMutation.mutate()}
           >
             Send to agent

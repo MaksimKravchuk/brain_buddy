@@ -14,7 +14,7 @@ Do not use this for anything else without thinking about the tradeoffs.
 from __future__ import annotations
 
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from threading import Lock
 
 
@@ -109,6 +109,130 @@ class InMemoryRateLimiter:
                 self._reservations.pop(key, None)
 
 
+class BoundedKeyRateLimiter:
+    """A sliding-window limiter that also forgets keys (spec 014, FR-008).
+
+    ``InMemoryRateLimiter`` above never forgets a key: its buckets are
+    ``defaultdict``s and ``_prune`` only trims timestamps *inside* a key. Keyed
+    by source IP on a login route that is a considered trade. Keyed by a
+    caller-supplied run id on the A2A push callback — a route anyone who guesses
+    the URL shape can reach — it is a remote memory-growth primitive, so this
+    variant exists rather than a change to the class those routes share.
+
+    Two bounds, and the second matters as much as the first:
+
+    * ``max_keys`` caps how many buckets exist at once. At the cap the
+      least-recently-used key is displaced rather than the new one refused:
+      refusing at the cap would let a flood of stale ids deny push acceleration
+      to every legitimate run, making the limiter the outage it prevents.
+    * ``evict`` drops a key outright, which the route calls when a run goes
+      terminal or its connection is disconnected. Such a run can never be
+      pushed for again, so keeping its bucket retains something with no use.
+
+    Displacement is not a bypass: the caller only evicts a key it will never
+    honour again, and a displaced key starts a fresh window under a cap the
+    attacker does not control.
+    """
+
+    def __init__(
+        self, *, max_attempts: int, window_seconds: float, max_keys: int
+    ) -> None:
+        self._max = max_attempts
+        self._window = window_seconds
+        self._max_keys = max_keys
+        # Insertion-ordered, and re-inserted on touch, so the first key is the
+        # least recently used one.
+        self._hits: OrderedDict[str, deque[float]] = OrderedDict()
+        self._lock = Lock()
+
+    @property
+    def key_count(self) -> int:
+        """How many buckets are currently held. Bounded by ``max_keys``."""
+
+        with self._lock:
+            return len(self._hits)
+
+    def check(self, key: str) -> bool:
+        """Record an attempt for ``key``; ``True`` when it is within the limit."""
+
+        now = time.monotonic()
+        cutoff = now - self._window
+        with self._lock:
+            bucket = self._hits.get(key)
+            if bucket is None:
+                bucket = deque()
+                self._hits[key] = bucket
+            else:
+                self._hits.move_to_end(key)
+            while bucket and bucket[0] < cutoff:
+                bucket.popleft()
+            while len(self._hits) > self._max_keys:
+                self._hits.popitem(last=False)
+            if len(bucket) >= self._max:
+                return False
+            bucket.append(now)
+            return True
+
+    def evict(self, key: str) -> bool:
+        """Forget one key. ``True`` when it existed."""
+
+        with self._lock:
+            return self._hits.pop(key, None) is not None
+
+    def reset(self) -> None:
+        """Drop every bucket (used by tests)."""
+
+        with self._lock:
+            self._hits.clear()
+
+
+class FixedWindowCounter:
+    """A process-wide event counter with no per-key state at all.
+
+    Step 2 of the push-callback check order: consulted **before** any database
+    read, so a flood costs one integer comparison rather than a lookup per
+    request. It deliberately cannot be keyed — a per-caller or per-id counter
+    here would reintroduce exactly the unbounded growth
+    :class:`BoundedKeyRateLimiter` exists to cap, and rejections of *unknown*
+    ids are counted only in aggregate, for alerting.
+    """
+
+    def __init__(self, *, max_events: int, window_seconds: float) -> None:
+        self._max = max_events
+        self._window = window_seconds
+        self._window_started = time.monotonic()
+        self._count = 0
+        self._rejected = 0
+        self._lock = Lock()
+
+    @property
+    def rejected(self) -> int:
+        """How many events this counter has refused since process start."""
+
+        with self._lock:
+            return self._rejected
+
+    def check(self) -> bool:
+        """Record one event; ``True`` when it is within the window's budget."""
+
+        now = time.monotonic()
+        with self._lock:
+            if now - self._window_started >= self._window:
+                self._window_started = now
+                self._count = 0
+            if self._count >= self._max:
+                self._rejected += 1
+                return False
+            self._count += 1
+            return True
+
+    def reset(self) -> None:
+        with self._lock:
+            self._window_started = time.monotonic()
+            self._count = 0
+            self._rejected = 0
+
+
 LOGIN_MAX_ATTEMPTS = 10
 LOGIN_WINDOW_SECONDS = 10 * 60
 
@@ -137,6 +261,8 @@ title_completion_rate_limiter = InMemoryRateLimiter(
 
 
 __all__ = [
+    "BoundedKeyRateLimiter",
+    "FixedWindowCounter",
     "InMemoryRateLimiter",
     "LOGIN_MAX_ATTEMPTS",
     "LOGIN_WINDOW_SECONDS",

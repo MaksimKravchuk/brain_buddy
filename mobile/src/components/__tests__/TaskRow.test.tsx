@@ -162,6 +162,9 @@ function makeSummary(overrides: Partial<AgentRunSummaryResponse> = {}): AgentRun
     needs_user: false,
     stopped_reporting: false,
     last_contact_at: "2026-08-09T09:05:00Z",
+    guarantee_tier: "best_effort",
+    cancel_outcome: "none",
+    agent_task_missing: false,
     ...overrides,
   };
 }

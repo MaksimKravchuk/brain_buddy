@@ -4,6 +4,13 @@
 # not a gate.
 #
 # Install once per clone: `pre-commit install`.
+#
+# `backend/vendor/` holds third-party runtimes vendored byte-for-byte with a
+# recorded sha256 provenance (spec 014 FR-017). black and `ruff --fix` would
+# rewrite those sources and break the provenance proof, so every hook here skips
+# the tree globally; the matching ruff `extend-exclude` lives in
+# backend/pyproject.toml so CI agrees with the hook.
+exclude: ^backend/vendor/
 repos:
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1

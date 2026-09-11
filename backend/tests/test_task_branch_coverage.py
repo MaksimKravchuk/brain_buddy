@@ -41,12 +41,15 @@ from app.schemas.tasks import (
 )
 from app.utils.time import utcnow
 from app.workflows.voice_brain_dump.domain import (
+    BrainDumpOperationDocument,
     BrainDumpProviderRunDocument,
     BrainDumpTranscriptSegmentDocument,
 )
 from app.workflows.voice_brain_dump.repository import OperationRepository
 from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
 from app.workflows.voice_brain_dump.task_port import InProcessTaskPort
+
+from .conftest import seed_provisional_proposals
 
 OWNER = "user_branch_owner"
 
@@ -562,6 +565,14 @@ def test_reconcile_restores_pending_create_results(service: TaskService) -> None
     assert [item.id for item in restored_comments] == [comment.id]
 
 
+def _seed_provisional_proposals(
+    voice_service: VoiceBrainDumpService,
+    operation: BrainDumpOperationDocument,
+    titles: list[str],
+) -> BrainDumpOperationDocument:
+    return seed_provisional_proposals(voice_service.operation_repo, operation, titles)
+
+
 def test_brain_dump_operation_uses_sqlite_canonical_when_json_mirror_is_missing(
     data_dir: Path,
 ) -> None:
@@ -752,6 +763,7 @@ def test_brain_dump_proposal_update_replay_not_found_and_invalid_state(
         owner_id=OWNER,
         idempotency_key="brain-dump-proposal-segment",
     )
+    operation = _seed_provisional_proposals(voice_service, operation, ["Email broker"])
     proposal_id = operation.proposals[0].id
     payload = BrainDumpProposalUpdateRequest(
         title="Email mortgage broker", expected_revision=operation.revision
@@ -924,6 +936,9 @@ def test_brain_dump_commit_replay_invalid_state_and_deleted_proposals(
         owner_id=OWNER,
         idempotency_key="brain-dump-commit-segments",
     )
+    operation = _seed_provisional_proposals(
+        voice_service, operation, ["Book dentist", "Call bank"]
+    )
     deleted = voice_service.update_brain_dump_proposal(
         operation.id,
         operation.proposals[0].id,
@@ -1047,13 +1062,6 @@ def test_idempotent_result_replay_repairs_stale_canonical_records(
         ).revision
         == 2
     )
-
-
-def test_brain_dump_title_extraction_ignores_blank_and_duplicate_items() -> None:
-    assert VoiceBrainDumpService._extract_task_titles("   \n  ") == []
-    assert VoiceBrainDumpService._extract_task_titles("call bank. Call bank.") == [
-        "Call bank"
-    ]
 
 
 # --- transition branches ---------------------------------------------------
@@ -1909,3 +1917,88 @@ def test_reconciler_admission_accounts_for_a_crashed_reconciler_reservation(
     final = voice_service.get_brain_dump_operation(operation.id, owner_id=OWNER)
     assert final.status == "terminal_error"
     assert final.provider_runs[-1].error_code == "OPERATION_COST_BUDGET_EXCEEDED"
+
+
+# --- shared provider cost admission ------------------------------------------
+
+
+def test_cumulative_provider_cost_counts_reservations_only_while_unresolved() -> None:
+    """Every admission check sums accepted spend plus still-open reservations."""
+
+    from app.workflows.voice_brain_dump.service import cumulative_provider_cost_usd
+
+    now = utcnow()
+
+    def run(
+        status: str,
+        *,
+        estimated: float = 0.0,
+        consumed: float = 0.0,
+        reserved: float = 0.0,
+    ) -> BrainDumpProviderRunDocument:
+        return BrainDumpProviderRunDocument.model_validate(
+            {
+                "id": f"run_{status}_{estimated}_{consumed}_{reserved}",
+                "role": "reconciler",
+                "status": status,
+                "input_hash": "0" * 64,
+                "checkpoint": "accurate_transcribed",
+                "estimated_cost_usd": estimated,
+                "consumed_cost_usd": consumed,
+                "reserved_cost_usd": reserved,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+
+    assert cumulative_provider_cost_usd([]) == 0.0
+    assert (
+        cumulative_provider_cost_usd([run("succeeded", estimated=0.3, consumed=0.2)])
+        == 0.3
+    )
+    assert (
+        cumulative_provider_cost_usd([run("succeeded", estimated=0.1, consumed=0.4)])
+        == 0.4
+    )
+    assert cumulative_provider_cost_usd([run("pending", reserved=0.5)]) == 0.5
+    assert cumulative_provider_cost_usd(
+        [run("running", estimated=0.1, reserved=0.5)]
+    ) == pytest.approx(0.6)
+    assert (
+        cumulative_provider_cost_usd(
+            [run("terminal_error", estimated=0.1, reserved=0.9)]
+        )
+        == 0.1
+    )
+    assert cumulative_provider_cost_usd([run("retryable_error", reserved=0.9)]) == 0.0
+    assert cumulative_provider_cost_usd(
+        [run("succeeded", consumed=0.3), run("pending", reserved=0.5)]
+    ) == pytest.approx(0.8)
+
+
+@pytest.mark.parametrize(
+    ("spent", "next_call", "cap", "expected"),
+    [
+        (0.0, 0.0, 1.0, True),
+        (0.5, 0.5, 1.0, True),
+        (0.6, 0.5, 1.0, False),
+        (0.99, 0.0, 1.0, True),
+        (1.0, 0.0, 1.0, False),
+        (1.1, 0.0, 1.0, False),
+        (0.0, 1.0, 1.0, True),
+        (0.0, 1.5, 1.0, False),
+    ],
+)
+def test_provider_cost_budget_admits_only_strictly_under_the_cap(
+    spent: float, next_call: float, cap: float, expected: bool
+) -> None:
+    """One more call is admitted only below the cap with its worst case fitting under it."""
+
+    from app.workflows.voice_brain_dump.service import provider_cost_budget_allows
+
+    assert (
+        provider_cost_budget_allows(
+            cumulative_spent_usd=spent, worst_case_next_usd=next_call, cap_usd=cap
+        )
+        is expected
+    )

@@ -13,6 +13,8 @@ from datetime import timedelta
 
 from app.utils.time import utcnow
 
+from .conftest import seed_provisional_proposals
+
 
 def _start(api_client, key: str):
     resp = api_client.post(
@@ -63,6 +65,13 @@ def test_withdrawal_sets_a_deletion_deadline_and_sweep_purges_derived_text(
         api_client, operation["id"], "withdraw-append", "Buy milk. Call dentist."
     )
     assert appended["segments"], "precondition: uncommitted transcript exists"
+    # Browser preview no longer derives proposals; persist one directly so the
+    # sweep is proven to purge derived proposals as well as transcript text.
+    persisted = service.get_brain_dump_operation(operation["id"], owner_id=owner_id)
+    seed_provisional_proposals(
+        api_client.app.state.container.voice_operation_repo, persisted, ["Buy milk"]
+    )
+    appended = api_client.get(f"/api/brain-dump-operations/{operation['id']}").json()
     assert appended["proposals"], "precondition: uncommitted proposals exist"
 
     withdrawn = _withdraw(

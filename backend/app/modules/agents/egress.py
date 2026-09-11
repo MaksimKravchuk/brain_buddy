@@ -17,9 +17,10 @@ from __future__ import annotations
 import ipaddress
 import re
 import socket
+import time
 import zlib
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -51,6 +52,7 @@ DESTINATION_SCHEME_NOT_ALLOWED = "destination_scheme_not_allowed"
 DESTINATION_NETWORK_NOT_ALLOWED = "destination_network_not_allowed"
 DESTINATION_UNRESOLVABLE = "destination_unresolvable"
 DESTINATION_REDIRECT_NOT_ALLOWED = "destination_redirect_not_allowed"
+DESTINATION_DEADLINE_EXCEEDED = "destination_deadline_exceeded"
 
 
 class DestinationRejected(ValueError):
@@ -62,6 +64,36 @@ class DestinationRejected(ValueError):
         super().__init__(message)
         self.code = code
         self.message = message
+        self.delivery_attempted = delivery_attempted
+
+
+class EgressDeadlineExceeded(Exception):
+    """One request outlived its absolute wall-clock deadline (spec 014).
+
+    Deliberately **not** a ``DestinationRejected``. The two mean different
+    things and map to different run states: a rejection says BrainBuddy refused
+    to talk to the address at all, a deadline breach says it talked and got no
+    answer in time. Collapsing them would let an exchange timeout be reported as
+    "not sent" — the one claim that must never be made when the message may
+    already be sitting at the agent. Every caller therefore has to decide:
+    exchange ⇒ delivery unconfirmed (lookup before any resend), observation ⇒
+    contact not refreshed, cancel ⇒ unconfirmed, test ⇒ unreachable.
+    """
+
+    code = DESTINATION_DEADLINE_EXCEEDED
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        deadline_seconds: float,
+        elapsed_seconds: float,
+        delivery_attempted: bool = True,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.deadline_seconds = deadline_seconds
+        self.elapsed_seconds = elapsed_seconds
         self.delivery_attempted = delivery_attempted
 
 
@@ -87,10 +119,18 @@ class ResolvedDestination:
 
 @dataclass(frozen=True, slots=True)
 class PinnedResponse:
-    """A bounded response body plus its status, from a pinned connection."""
+    """A bounded response body plus its status, from a pinned connection.
+
+    ``headers`` carries only what a caller needs to answer a *user's* question
+    honestly — today that is ``Retry-After`` on a rate-limited answer (spec 014,
+    AC-037): without it the most the product could say is "try later", which is
+    exactly what makes people retry immediately. It defaults to empty so every
+    007 caller is unaffected.
+    """
 
     status_code: int
     body: bytes
+    headers: Mapping[str, str] = field(default_factory=dict)
 
 
 def _system_resolver(host: str, port: int) -> list[str]:
@@ -348,6 +388,8 @@ def pinned_request(
     max_response_bytes: int,
     client_factory: Callable[..., httpx.Client] | None = None,
     decoder_factory: DecoderFactory | None = None,
+    deadline_seconds: float | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> PinnedResponse:
     """Send one request to a pre-validated destination, over a pinned address.
 
@@ -355,11 +397,35 @@ def pinned_request(
     while SNI and certificate verification still use the original hostname — so
     a rebinding answer arriving between check and connect cannot redirect the
     credential. Redirects are refused and the response body is bounded.
+
+    ``deadline_seconds`` adds an **absolute wall-clock** bound on the whole
+    exchange, enforced here rather than left to httpx. It has to be: an httpx
+    read timeout is per *chunk*, so a server emitting one byte every few hundred
+    seconds never trips it, and the byte budget below bounds bytes rather than
+    time. Between them a drip-feeding agent holds a worker open indefinitely
+    while every configured limit reports itself satisfied. On breach the stream
+    is closed — the resource being protected is a bounded pool worker, not
+    memory — and :class:`EgressDeadlineExceeded` is raised.
+
+    ``monotonic`` is injectable so the behaviour is testable without a suite
+    that waits five minutes to find out whether a clock works.
     """
 
     factory = client_factory if client_factory is not None else httpx.Client
     address = destination.addresses[0]
     request_headers = {**dict(headers), "Host": destination.host_header}
+    started = monotonic()
+
+    def enforce_deadline() -> None:
+        if deadline_seconds is None:
+            return
+        elapsed = monotonic() - started
+        if elapsed > deadline_seconds:
+            raise EgressDeadlineExceeded(
+                "The agent did not answer within the allowed time.",
+                deadline_seconds=deadline_seconds,
+                elapsed_seconds=elapsed,
+            )
 
     with (
         factory(timeout=timeout_seconds, follow_redirects=False) as client,
@@ -371,6 +437,9 @@ def pinned_request(
             extensions={"sni_hostname": destination.host},
         ) as response,
     ):
+        # Checked before the body is touched: an agent that accepts the
+        # connection and then says nothing has already spent the window.
+        enforce_deadline()
         if 300 <= response.status_code < 400:
             raise DestinationRejected(
                 DESTINATION_REDIRECT_NOT_ALLOWED,
@@ -383,12 +452,17 @@ def pinned_request(
                 response,
                 max_response_bytes=max_response_bytes,
                 decoder_factory=decoder_factory,
+                enforce_deadline=enforce_deadline if deadline_seconds else None,
             )
         except DestinationRejected as exc:
             raise DestinationRejected(
                 exc.code, exc.message, delivery_attempted=True
             ) from None
-        return PinnedResponse(status_code=response.status_code, body=bytes(body))
+        return PinnedResponse(
+            status_code=response.status_code,
+            body=bytes(body),
+            headers=dict(response.headers),
+        )
 
 
 def _default_decoder(encoding: str) -> Any:
@@ -406,8 +480,15 @@ def _bounded_response_body(
     *,
     max_response_bytes: int,
     decoder_factory: DecoderFactory | None,
+    enforce_deadline: Callable[[], None] | None = None,
 ) -> bytearray:
-    """Read raw bytes and cap each decompressor allocation before it happens."""
+    """Read raw bytes and cap each decompressor allocation before it happens.
+
+    ``enforce_deadline`` is called once per network chunk. That is the only
+    place a drip-feeding server can be caught: every chunk restarts httpx's read
+    timeout, so time is never exceeded from httpx's point of view, and the byte
+    budget is never exceeded from the body's.
+    """
 
     encoding = response.headers.get("content-encoding", "").strip().lower()
     body = bytearray()
@@ -434,6 +515,15 @@ def _bounded_response_body(
     zlib_failed = False
     try:
         for raw_chunk in response.iter_raw():
+            if enforce_deadline is not None:
+                try:
+                    enforce_deadline()
+                except EgressDeadlineExceeded:
+                    # Close before propagating: the socket is what the deadline
+                    # exists to release, and leaving it to a finaliser would let
+                    # a bounded worker stay held for an unbounded time.
+                    response.close()
+                    raise
             if decoder is None:
                 if len(body) + len(raw_chunk) > max_response_bytes:
                     raise DestinationRejected(
@@ -496,8 +586,10 @@ __all__ = [
     "DESTINATION_NETWORK_NOT_ALLOWED",
     "DESTINATION_REDIRECT_NOT_ALLOWED",
     "DESTINATION_SCHEME_NOT_ALLOWED",
+    "DESTINATION_DEADLINE_EXCEEDED",
     "DESTINATION_UNRESOLVABLE",
     "DestinationRejected",
+    "EgressDeadlineExceeded",
     "PinnedResponse",
     "ResolvedDestination",
     "Resolver",

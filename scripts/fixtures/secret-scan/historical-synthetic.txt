@@ -1,0 +1,22 @@
+Historical synthetic secret-scan regression input
+
+These are never-issued synthetic values from historical unit tests, not
+credentials from a live service. The original test lines below are preserved
+verbatim so the pinned Gitleaks scanner can exercise the proposed exact-line
+allowlist entries. Scan this input with the proposed configuration, then
+substitute different synthetic credential values and verify they are detected.
+The allowlist must not exempt other values, fields, lines, or entire files.
+
+Original commit: 293f3112296f352790243b86f9490187678667d1
+Original path: frontend/src/features/agents/__tests__/AgentSettingsPage.test.tsx
+Original line: 92
+Context: createAgentConnection is replaced with vi.spyOn(...).mockResolvedValue
+in the unit test that shows a mocked inbound signing secret exactly once.
+      inbound_signing_secret: "sk-inbound-9f2c"
+
+Original commit: 272db98e8efa918fec34599160e4fa78cadec17a
+Original path: backend/tests/test_agent_relay_api.py
+Original line: 764
+Context: test_reporting_v2_accepts_a_fixed_external_golden_vector fixes the
+signing bytes and patches token_urlsafe to return this synthetic constant.
+        fixed_secret = "golden-vector-signing-secret-v2"

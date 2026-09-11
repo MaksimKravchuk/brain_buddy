@@ -30,10 +30,10 @@ type OperationName =
   | "appendBrainDumpTranscript" | "uploadBrainDumpAudio" | "sealBrainDump"
   | "updateBrainDumpProposal" | "commandBrainDump" | "listAgentConnections"
   | "createAgentConnection" | "getAgentConnection" | "updateAgentConnection"
-  | "testAgentConnection" | "rotateAgentCredential" | "rotateAgentSigningSecret"
+  | "testAgentConnection" | "rotateAgentCredential"
   | "disconnectAgentConnection" | "previewAgentHandoff" | "confirmAgentHandoff"
   | "listAgentRuns" | "getAgentRun" | "listAgentRunSummaries" | "replyToAgentRun"
-  | "cancelAgentRun";
+  | "checkAgentRunDelivery" | "cancelAgentRun";
 type Manifest = { operations: Record<OperationName, { path: string; method: string; body: "none" | "json" | "binary"; idempotency: boolean; headers: string[] }> };
 function isManifest(value: unknown): value is Manifest {
   return typeof value === "object" && value !== null && "operations" in value && typeof value.operations === "object" && value.operations !== null;
@@ -72,12 +72,11 @@ const adapters = {
   updateBrainDumpProposal: (c) => c.updateBrainDumpProposal("op-1", "proposal-1", { expected_revision: 1 }, "key-dump-proposal"),
   commandBrainDump: (c) => c.commandBrainDump("op-1", "finish", 1, "key-dump-command"),
   listAgentConnections: (c) => c.listAgentConnections(),
-  createAgentConnection: (c) => c.createAgentConnection({ name: "agent", endpoint_url: "https://agent.test", credential: "credential", current_password: "password" }, "key-agent-create"),
+  createAgentConnection: (c) => c.createAgentConnection({ name: "agent", agent_address: "https://agent.test", credential: "credential", current_password: "password" }, "key-agent-create"),
   getAgentConnection: (c) => c.getAgentConnection("connection-1"),
   updateAgentConnection: (c) => c.updateAgentConnection("connection-1", { expected_revision: 1 }, "key-agent-update"),
   testAgentConnection: (c) => c.testAgentConnection("connection-1"),
   rotateAgentCredential: (c) => c.rotateAgentCredential("connection-1", { credential: "credential", current_password: "password", expected_revision: 1 }, "key-agent-credential"),
-  rotateAgentSigningSecret: (c) => c.rotateAgentSigningSecret("connection-1", { current_password: "password", expected_revision: 1 }, "key-agent-secret"),
   disconnectAgentConnection: (c) => c.disconnectAgentConnection("connection-1", { current_password: "password", expected_revision: 1 }, "key-agent-disconnect"),
   previewAgentHandoff: (c) => c.previewAgentHandoff("task-1", { connection_id: "connection-1" }),
   confirmAgentHandoff: (c) => c.confirmAgentHandoff("task-1", { connection_id: "connection-1", manifest_token: "token" }, "key-agent-confirm"),
@@ -85,6 +84,7 @@ const adapters = {
   getAgentRun: (c) => c.getAgentRun("run-1"),
   listAgentRunSummaries: (c) => c.listAgentRunSummaries(["task-1", "task-2"]),
   replyToAgentRun: (c) => c.replyToAgentRun("run-1", { message: "reply", expected_revision: 1 }, "key-agent-reply"),
+  checkAgentRunDelivery: (c) => c.checkAgentRunDelivery("run-1", { current_password: null, expected_revision: 1 }, "key-agent-check-delivery"),
   cancelAgentRun: (c) => c.cancelAgentRun("run-1", "key-agent-cancel"),
 } satisfies Record<OperationName, Adapter>;
 

@@ -4,6 +4,7 @@ import { Trash2, X } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Pressable,
   ScrollView,
@@ -24,6 +25,7 @@ import { useToast } from "@/components/ToastHost";
 import {
   applyOperation,
   canCommit,
+  heardTranscript,
   isPollable,
   nextPollDelay,
   openConflictCount,
@@ -33,6 +35,48 @@ import {
 import { newIdempotencyKey } from "@/utils/ids";
 import { useServerDraft } from "@/utils/useServerDraft";
 import { colors, fonts, minHitTarget, radii, shadows, space, type as typeScale } from "@/theme/tokens";
+
+interface DiscardPrompt {
+  title: string;
+  message: string;
+  keep: string;
+  discard: string;
+}
+
+/** Discarding from the failure screen: the recording itself is what is lost. */
+const DISCARD_RECORDING: DiscardPrompt = {
+  title: "Discard this recording?",
+  message: "The audio and transcript are deleted and nothing is saved.",
+  keep: "Keep",
+  discard: "Discard recording",
+};
+
+/** Discarding from the review: the reviewed tasks go with the recording. */
+const DISCARD_REVIEW: DiscardPrompt = {
+  title: "Discard all tasks?",
+  message: "Nothing is saved to Inbox and the recording is deleted.",
+  keep: "Keep reviewing",
+  discard: "Discard all tasks",
+};
+
+/**
+ * FR-007: a destructive exit asks first, in the platform dialog. The safe
+ * answer is listed first and styled `cancel`, so the platform treats it as
+ * the default; only the destructive answer runs `onConfirm`, and dismissing
+ * the dialog any other way (Android back, a tap outside) keeps everything as
+ * it was.
+ */
+function confirmDiscard(prompt: DiscardPrompt, onConfirm: () => void): void {
+  Alert.alert(
+    prompt.title,
+    prompt.message,
+    [
+      { text: prompt.keep, style: "cancel" },
+      { text: prompt.discard, style: "destructive", onPress: onConfirm },
+    ],
+    { cancelable: true },
+  );
+}
 
 export default function BrainDumpOperationScreen() {
   const { operationId } = useLocalSearchParams<{ operationId: string }>();
@@ -166,7 +210,15 @@ export default function BrainDumpOperationScreen() {
   );
 
   const runCommand = useCallback(
-    async (action: "commit" | "retry" | "review_provisional" | "cancel" | "delete_raw_audio") => {
+    async (
+      action:
+        | "commit"
+        | "retry"
+        | "review_provisional"
+        | "reconcile_preview"
+        | "cancel"
+        | "delete_raw_audio",
+    ) => {
       const current = operationRef.current;
       if (!current) {
         return;
@@ -228,6 +280,13 @@ export default function BrainDumpOperationScreen() {
     [api, fetchOnce, leave, remember],
   );
 
+  // Every exit that runs `cancel` deletes the audio and the transcript, so
+  // each one is confirmed first (FR-007). The failure screen loses a
+  // recording; the review loses its reviewed tasks with it, so both review
+  // exits share one prompt.
+  const discardRecording = () => confirmDiscard(DISCARD_RECORDING, () => runCommand("cancel"));
+  const discardReview = () => confirmDiscard(DISCARD_REVIEW, () => runCommand("cancel"));
+
   if (!operation) {
     return (
       <Screen>
@@ -248,17 +307,22 @@ export default function BrainDumpOperationScreen() {
   const commitReady = canCommit(operation);
   const provisionalOnly = operation.reconciliation_quality === "provisional_only";
   const recoveryActions = operation.available_recovery_actions ?? [];
+  // FR-005: a review with no surviving task cannot be saved; it says so and
+  // shows what was heard instead of counting tasks it does not have.
+  const emptyReview = proposals.length === 0;
+  const heard = emptyReview ? heardTranscript(operation.segments) : [];
 
   const headRow = (
     <View style={[styles.head, { paddingTop: insets.top + space.s3 }]}>
       <View style={styles.headSpacer} />
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Close"
-        onPress={() => runCommand("cancel")}
+        accessibilityLabel="Discard recording"
+        onPress={discardReview}
+        disabled={actionPending}
         style={styles.iconButton}
       >
-        <X size={18} color={colors.fg4} strokeWidth={2} />
+        <Trash2 size={18} color={colors.fg4} strokeWidth={2} />
       </Pressable>
     </View>
   );
@@ -278,8 +342,16 @@ export default function BrainDumpOperationScreen() {
           {headRow}
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
             <PaneHead
-              title={`Review ${proposals.length} ${proposals.length === 1 ? "task" : "tasks"}`}
-              meta="Edit before they land in your inbox. Nothing is saved until you confirm."
+              title={
+                emptyReview
+                  ? "No tasks to review"
+                  : `Review ${proposals.length} ${proposals.length === 1 ? "task" : "tasks"}`
+              }
+              meta={
+                emptyReview
+                  ? "Nothing actionable came out of this dump"
+                  : "Edit before they land in your inbox. Nothing is saved until you confirm."
+              }
             />
 
             {provisionalOnly ? (
@@ -309,12 +381,28 @@ export default function BrainDumpOperationScreen() {
                   }
                 />
               ))}
-              {proposals.length === 0 ? (
-                <View style={styles.card}>
-                  <BBText variant="body" color={colors.fg5}>
-                    No tasks were proposed from this dump.
-                  </BBText>
-                </View>
+              {emptyReview ? (
+                <>
+                  <View style={styles.card}>
+                    <BBText variant="body" color={colors.fg5}>
+                      No tasks were proposed from this dump. Discard it to record again.
+                    </BBText>
+                  </View>
+                  <View style={styles.heard}>
+                    <BBText variant="label">What was heard</BBText>
+                    {heard.length > 0 ? (
+                      heard.map((segment) => (
+                        <BBText key={segment.id} variant="body">
+                          {segment.text}
+                        </BBText>
+                      ))
+                    ) : (
+                      <BBText variant="body" color={colors.fg5}>
+                        No transcript was captured for this recording.
+                      </BBText>
+                    )}
+                  </View>
+                </>
               ) : null}
             </View>
 
@@ -329,7 +417,7 @@ export default function BrainDumpOperationScreen() {
                 </View>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Delete recording"
+                  accessibilityLabel="Delete retained audio"
                   onPress={() => runCommand("delete_raw_audio")}
                   style={styles.audioDelete}
                 >
@@ -349,17 +437,19 @@ export default function BrainDumpOperationScreen() {
           </ScrollView>
 
           <View style={[styles.sheet, { paddingBottom: insets.bottom + space.s5 }]}>
-            <Button
-              onPress={() => runCommand("commit")}
-              disabled={!commitReady}
-              loading={actionPending}
-              style={styles.sheetButton}
-            >
-              {`Confirm ${proposals.length} ${proposals.length === 1 ? "addition" : "additions"}`}
-            </Button>
+            {emptyReview ? null : (
+              <Button
+                onPress={() => runCommand("commit")}
+                disabled={!commitReady}
+                loading={actionPending}
+                style={styles.sheetButton}
+              >
+                {`Confirm ${proposals.length} ${proposals.length === 1 ? "addition" : "additions"}`}
+              </Button>
+            )}
             <Pressable
               accessibilityRole="button"
-              onPress={() => runCommand("cancel")}
+              onPress={discardReview}
               disabled={actionPending}
               style={styles.ghostAction}
             >
@@ -413,7 +503,24 @@ export default function BrainDumpOperationScreen() {
                 Review provisional tasks
               </Button>
             ) : null}
-            <Button variant="ghost" onPress={() => runCommand("cancel")} disabled={actionPending}>
+            {recoveryActions.includes("reconcile_preview") ? (
+              // Offered only when the server still holds a browser-preview
+              // transcript — a dump started on the web and resumed here.
+              <View style={styles.recoveryOption}>
+                <Button
+                  variant="secondary"
+                  onPress={() => runCommand("reconcile_preview")}
+                  disabled={actionPending}
+                >
+                  Extract tasks from the browser transcript
+                </Button>
+                <BBText variant="caption" color={colors.fg5} style={styles.recoveryHint}>
+                  Sends the browser transcript to the consented task-extraction provider. The result
+                  is provisional and is reviewed before anything is saved.
+                </BBText>
+              </View>
+            ) : null}
+            <Button variant="ghost" onPress={discardRecording} disabled={actionPending}>
               Discard everything
             </Button>
           </View>
@@ -433,7 +540,9 @@ function describeFailure(operation: BrainDumpOperationResponse): string {
   if (failed?.error_code) {
     return failed.error_code;
   }
-  return "The audio was kept — you can retry, review the provisional tasks, or discard.";
+  // Which recoveries apply is the server's call (`available_recovery_actions`),
+  // so this line points at the buttons instead of enumerating them.
+  return "The audio was kept — choose one of the options below, or discard everything.";
 }
 
 function ProposalCard({
@@ -570,6 +679,10 @@ const styles = StyleSheet.create({
   proposalList: {
     gap: 10,
   },
+  heard: {
+    gap: space.s2,
+    paddingHorizontal: space.s1,
+  },
   proposalRow: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -624,6 +737,13 @@ const styles = StyleSheet.create({
   recoveryActions: {
     alignSelf: "stretch",
     gap: space.s2,
+  },
+  recoveryOption: {
+    gap: space.s2,
+  },
+  recoveryHint: {
+    textAlign: "center",
+    paddingHorizontal: space.s2,
   },
   sheet: {
     alignItems: "center",

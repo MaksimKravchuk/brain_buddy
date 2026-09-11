@@ -22,6 +22,7 @@ from pydantic import (
     Field,
     field_serializer,
     field_validator,
+    model_validator,
 )
 
 load_dotenv()
@@ -479,8 +480,15 @@ class TaskTitleAutocompleteSettings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
-AGENT_EVENTS_PATH = "/agent-events"
-"""The relay endpoint path below the application's configured API prefix."""
+AGENT_PUSH_PATH = "/a2a/push"
+"""The A2A push-notification callback path below the configured API prefix.
+
+Spec 014 (FR-007, FR-008). Agents append ``/{run_id}/{token}``. A verified push
+only *schedules* an authenticated observation BrainBuddy would perform anyway
+within the observation interval — nothing in a push body ever becomes run
+state — which is what bounds the exposure of a token that necessarily travels
+in a URL an agent may log.
+"""
 
 
 def _canonical_public_base_url(raw: str, *, environment: AppEnvironment) -> str:
@@ -671,7 +679,50 @@ class AgentRelaySettings(BaseModel):
     connector_max_response_bytes: int = Field(default=64_000, ge=1_024, le=1_048_576)
     allow_private_destinations: bool = Field(default=False)
 
+    # --- A2A wire contract (spec 014, data-model.md §9) --------------------
+    #
+    # Three separately bounded pools, not one: a cancel is what resolves a
+    # blocked exchange on some agents, so a cancel queued behind the very
+    # exchanges it ends would wait out the whole reply window while the UI
+    # could not tell pool saturation from agent behaviour.
+
+    observation_interval_seconds: int = Field(default=60, ge=5, le=3_600)
+    #: Never below 300 s. FR-007 promises the agent a five-minute reply window;
+    #: a shorter one would make BrainBuddy the party that gave up first while
+    #: the run's label told the user the agent had.
+    reply_window_seconds: int = Field(default=300, ge=300, le=3_600)
+    #: How long the API thread waits on a submitted exchange before answering
+    #: with an honest projection. Zero is legitimate: it means "never block the
+    #: request", not "assume it was sent".
+    dispatch_wait_seconds: int = Field(default=5, ge=0, le=30)
+    exchange_workers: int = Field(default=8, ge=1, le=64)
+    #: Exchange workers one connection may hold at once. This is the bound that
+    #: stops one hostile or broken agent from exhausting the shared pool for
+    #: every owner; excess exchanges stay queued and nothing has left
+    #: BrainBuddy while they do.
+    max_exchanges_per_connection: int = Field(default=2, ge=1, le=64)
+    observer_workers: int = Field(default=4, ge=1, le=64)
+    control_workers: int = Field(default=2, ge=1, le=16)
+    #: Larger than the card cap because ``GetTask`` has no ``includeArtifacts``
+    #: switch. 1 MiB is a hard ceiling, not a default to raise: an unbounded
+    #: task read is an unbounded allocation driven by an agent we do not run.
+    a2a_task_max_response_bytes: int = Field(default=262_144, ge=1_024, le=1_048_576)
+
     model_config = ConfigDict(frozen=True)
+
+    @model_validator(mode="after")
+    def _exchange_bound_fits_the_pool(self) -> AgentRelaySettings:
+        """A per-connection bound above the pool size bounds nothing."""
+
+        if self.max_exchanges_per_connection > self.exchange_workers:
+            raise ValueError(
+                "BRAIN_BUDDY_AGENT_MAX_EXCHANGES_PER_CONNECTION "
+                f"({self.max_exchanges_per_connection}) cannot exceed "
+                f"BRAIN_BUDDY_AGENT_EXCHANGE_WORKERS ({self.exchange_workers}): "
+                "a per-connection bound above the pool size lets one connection "
+                "hold every worker."
+            )
+        return self
 
 
 class AppConfig(BaseModel):
@@ -702,12 +753,19 @@ class AppConfig(BaseModel):
         return self.logging.normalized_level
 
     @property
-    def agent_relay_callback_url(self) -> str:
-        """Build the callback from the same prefix mounted by FastAPI."""
+    def agent_relay_push_base_url(self) -> str:
+        """Base of the per-run A2A push callback (spec 014, FR-007/FR-008).
+
+        Derived from the prefix FastAPI actually mounts rather than restated,
+        for the same reason the 007 callback is: this string is registered with
+        a third-party agent and cannot be recalled, so a drift between what
+        BrainBuddy advertises and what it serves would be discovered only as
+        silence. Callers append ``/{run_id}/{token}``.
+        """
 
         return (
             f"{self.agent_relay.public_base_url.rstrip('/')}"
-            f"{self.api_prefix.rstrip('/')}{AGENT_EVENTS_PATH}"
+            f"{self.api_prefix.rstrip('/')}{AGENT_PUSH_PATH}"
         )
 
 
@@ -1028,6 +1086,24 @@ def _build_config() -> AppConfig:
         allow_private_destinations=(
             os.getenv("BRAIN_BUDDY_AGENT_ALLOW_PRIVATE_DESTINATIONS", "").strip() == "1"
             and environment is not AppEnvironment.PRODUCTION
+        ),
+        observation_interval_seconds=int(
+            os.getenv("BRAIN_BUDDY_AGENT_OBSERVATION_INTERVAL_SECONDS", "60")
+        ),
+        reply_window_seconds=int(
+            os.getenv("BRAIN_BUDDY_AGENT_REPLY_WINDOW_SECONDS", "300")
+        ),
+        dispatch_wait_seconds=int(
+            os.getenv("BRAIN_BUDDY_AGENT_DISPATCH_WAIT_SECONDS", "5")
+        ),
+        exchange_workers=int(os.getenv("BRAIN_BUDDY_AGENT_EXCHANGE_WORKERS", "8")),
+        max_exchanges_per_connection=int(
+            os.getenv("BRAIN_BUDDY_AGENT_MAX_EXCHANGES_PER_CONNECTION", "2")
+        ),
+        observer_workers=int(os.getenv("BRAIN_BUDDY_AGENT_OBSERVER_WORKERS", "4")),
+        control_workers=int(os.getenv("BRAIN_BUDDY_AGENT_CONTROL_WORKERS", "2")),
+        a2a_task_max_response_bytes=int(
+            os.getenv("BRAIN_BUDDY_AGENT_A2A_TASK_MAX_RESPONSE_BYTES", "262144")
         ),
     )
 

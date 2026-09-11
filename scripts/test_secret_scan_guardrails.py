@@ -30,8 +30,13 @@ dependency is installed.
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import secrets
+import shlex
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -262,6 +267,9 @@ class SecretScanWorkflowTest(unittest.TestCase):
         self.assertEqual(self.text.count("gitleaks git --redact"), 2)
         self.assertIn("permissions:\n  contents: read", self.text)
         self.assertNotIn("contents: write", self.text)
+        self.assertEqual(
+            self.text.count("LOG_OPTS: ${{ steps.range.outputs.log_opts }}"), 2
+        )
 
 
 class RequiredGraphTest(unittest.TestCase):
@@ -294,6 +302,13 @@ class ScanRangeTest(unittest.TestCase):
         cls.script = _step_script(
             SECRET_SCAN_WORKFLOW.read_text(encoding="utf-8"), RANGE_STEP
         )
+        cls.scan_scripts = {
+            mode: _step_script(SECRET_SCAN_WORKFLOW.read_text(), name)
+            for mode, name in (
+                ("range", "Scan changed commit range"),
+                ("full", "Scan full history"),
+            )
+        }
         cls._tmp = tempfile.TemporaryDirectory()
         repo = Path(cls._tmp.name) / "repo"
         repo.mkdir()
@@ -303,8 +318,11 @@ class ScanRangeTest(unittest.TestCase):
         run("init", "--quiet")
         run("config", "user.email", "test@example.invalid")
         run("config", "user.name", "Range Test")
-        run("commit", "--quiet", "--allow-empty", "-m", "base")
-        run("commit", "--quiet", "--allow-empty", "-m", "head")
+        (repo / "README.txt").write_text("base\n")
+        run("add", "README.txt")
+        run("commit", "--quiet", "-m", "base")
+        (repo / "README.txt").write_text("candidate\n")
+        run("commit", "--quiet", "-am", "head")
         cls.repo = repo
         cls.head = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=repo, check=True,
@@ -314,6 +332,19 @@ class ScanRangeTest(unittest.TestCase):
             ["git", "rev-parse", "HEAD~1"], cwd=repo, check=True,
             capture_output=True, text=True,
         ).stdout.strip()
+        # A fetched sibling ref contains a synthetic, never-issued credential.
+        # Its tip removes the file, so scanning only a final tree also fails
+        # the ancestor-history regression.
+        run("checkout", "--quiet", "-b", "unmerged", cls.base)
+        (repo / "credential.txt").write_text("token = ghp_" + secrets.token_hex(18) + "\n")
+        run("add", "credential.txt")
+        run("commit", "--quiet", "-m", "synthetic ancestor credential")
+        cls.leaked = run("rev-parse", "HEAD").stdout.strip()
+        run("rm", "credential.txt")
+        (repo / "README.txt").write_text("credential removed\n")
+        run("commit", "--quiet", "-am", "remove credential")
+        cls.cleaned = run("rev-parse", "HEAD").stdout.strip()
+        run("checkout", "--quiet", "--detach", cls.head)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -346,6 +377,40 @@ class ScanRangeTest(unittest.TestCase):
         finally:
             output.unlink(missing_ok=True)
 
+    def _scanned_commits(self, output: dict[str, str]) -> set[str]:
+        """Execute the workflow scan command, then Git with its actual opts.
+
+        The shim only records argv; it does not simulate secret detection.
+        The pinned Gitleaks source forwards nonempty log opts to `git log`
+        (v8.30.1/sources/git.go, NewGitLogCmdContext).
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            shim = Path(directory) / "gitleaks"
+            shim.write_text(
+                f"#!{sys.executable}\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n"
+            )
+            shim.chmod(0o755)
+            proc = subprocess.run(
+                ["bash", "-c", self.scan_scripts[output["mode"]]],
+                cwd=self.repo, capture_output=True, text=True, check=True,
+                env={**os.environ, "PATH": f"{directory}:{os.environ['PATH']}",
+                     "LOG_OPTS": output.get("log_opts", "")},
+            )
+        argv = json.loads(proc.stdout)
+        self.assertEqual(argv[:3], ["git", "--redact", "--verbose"])
+        self.assertEqual(len(argv), 4)
+        self.assertTrue(argv[3].startswith("--log-opts="))
+        opts = shlex.split(argv[3].removeprefix("--log-opts="))
+        self.assertTrue(opts, "an empty option silently falls back to every ref")
+        if output["mode"] == "full":
+            self.assertIn("--full-history", opts)
+            self.assertIn("--diff-filter=tuxdb", opts)
+        history = subprocess.run(
+            ["git", "log", "--format=%H", *opts], cwd=self.repo,
+            check=True, capture_output=True, text=True,
+        ).stdout
+        return set(history.splitlines())
+
     def test_created_candidate_ref_scans_full_history(self) -> None:
         """The regression: `before` is the null SHA on a candidate's push."""
 
@@ -354,11 +419,44 @@ class ScanRangeTest(unittest.TestCase):
         )
         self.assertEqual(code, 0, "a created ref must not fail the required scan")
         self.assertEqual(out.get("mode"), "full")
+        self.assertEqual(self._scanned_commits(out), {self.base, self.head})
+
+    def test_full_history_uses_event_head_not_the_checkout(self) -> None:
+        code, out = self._derive(
+            EVENT_NAME="push", PUSH_BEFORE=NULL_SHA, EVENT_HEAD=self.base
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(self._scanned_commits(out), {self.base})
+
+    def test_deleted_secret_in_candidate_ancestor_remains_in_scan_scope(self) -> None:
+        code, out = self._derive(
+            EVENT_NAME="push", PUSH_BEFORE=NULL_SHA, EVENT_HEAD=self.cleaned
+        )
+        self.assertEqual(code, 0)
+        tree = subprocess.run(
+            ["git", "ls-tree", "--name-only", self.cleaned], cwd=self.repo,
+            check=True, capture_output=True, text=True,
+        ).stdout
+        self.assertNotIn("credential.txt", tree)
+        self.assertEqual(
+            self._scanned_commits(out), {self.base, self.leaked, self.cleaned}
+        )
+
+    def test_secret_at_candidate_tip_remains_in_scan_scope(self) -> None:
+        code, out = self._derive(
+            EVENT_NAME="push", PUSH_BEFORE=NULL_SHA, EVENT_HEAD=self.leaked
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(self._scanned_commits(out), {self.base, self.leaked})
 
     def test_manual_dispatch_scans_full_history(self) -> None:
         code, out = self._derive(EVENT_NAME="workflow_dispatch")
         self.assertEqual(code, 0)
         self.assertEqual(out.get("mode"), "full")
+        self.assertEqual(
+            self._scanned_commits(out),
+            {self.base, self.head, self.leaked, self.cleaned},
+        )
 
     def test_push_derives_the_incremental_range(self) -> None:
         code, out = self._derive(
@@ -367,6 +465,7 @@ class ScanRangeTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out.get("mode"), "range")
         self.assertEqual(out.get("log_opts"), f"{self.base}..{self.head}")
+        self.assertEqual(self._scanned_commits(out), {self.head})
 
     def test_pull_request_derives_the_incremental_range(self) -> None:
         code, out = self._derive(
@@ -375,6 +474,7 @@ class ScanRangeTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out.get("mode"), "range")
         self.assertEqual(out.get("log_opts"), f"{self.base}..{self.head}")
+        self.assertEqual(self._scanned_commits(out), {self.head})
 
     def test_unsafe_ranges_fail_closed(self) -> None:
         cases = {
@@ -399,6 +499,15 @@ class ScanRangeTest(unittest.TestCase):
             with self.subTest(label):
                 code, out = self._derive(**env)
                 self.assertNotEqual(code, 0, "an unsafe range must fail the scan")
+                self.assertNotIn("mode", out)
+
+    def test_created_ref_requires_a_verified_head_commit(self) -> None:
+        for head in ("", "HEAD", "--all", "f" * 40, NULL_SHA):
+            with self.subTest(head=head):
+                code, out = self._derive(
+                    EVENT_NAME="push", PUSH_BEFORE=NULL_SHA, EVENT_HEAD=head
+                )
+                self.assertNotEqual(code, 0)
                 self.assertNotIn("mode", out)
 
 

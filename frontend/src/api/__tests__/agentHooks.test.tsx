@@ -20,16 +20,29 @@ import { apiClient, setUnauthorizedHandler } from "../client";
 import { bindRelaySession } from "../relaySession";
 import { ProtectedRoute } from "../../components/auth/ProtectedRoute";
 import { useAuthStore } from "../../stores/authStore";
+import { useIntentKey } from "../../utils/idempotency";
 
 const connection: AgentConnectionResponse = {
   id: "conn-1",
   name: "Hermes",
-  endpoint_url: "https://agent.example.com/hooks",
-  auth_header_name: "Authorization",
+  agent_address: "https://agent.example.com",
+  auth_scheme: "bearer",
+  auth_header_name: null,
   status: "ready",
   stale: false,
   ready_for_handoff: true,
-  capabilities: { progress: true, reply: true, cancel: false },
+  capabilities: { streaming: true, push_notifications: false },
+  controls_offered: { reply: true, cancel: true },
+  card: null,
+  guarantee_tier: "best_effort",
+  tier_disclosure: "Best-effort single start.",
+  tier_disclosure_url: "https://example.invalid/single-start/v1.md",
+  cancellation_disclosure: "Cancellation depends on the agent.",
+  agent_changed: false,
+  best_effort_acknowledged_at: null,
+  correlation_id_honoured: null,
+  disconnect_reason: null,
+  last_test_error_detail: null,
   last_test_error_code: null,
   last_contact_at: "2026-08-09T10:00:00Z",
   last_tested_at: "2026-08-09T10:00:00Z",
@@ -73,7 +86,23 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     content_expires_at: "2026-09-08T12:00:00Z",
     last_contact_at: null,
     reporting_window_seconds: 3600,
-    capabilities: { progress: true, reply: true, cancel: true },
+    capabilities: { reply: true, cancel: true },
+    guarantee_tier: null,
+    message_id: null,
+    correlation_id: null,
+    agent_task_id: null,
+    exchange_open: false,
+    exchange_state: "none",
+    exchange_kind: null,
+    push_registration: "unregistered",
+    agent_task_missing: false,
+    cancel_outcome: "none",
+    blocked_reason: null,
+    artifacts_summary: [],
+    result_availability: null,
+    last_observed_at: null,
+    observation_interval_seconds: 60,
+    identifiers_expired: false,
     manifest: null,
     events: [],
     commands: [],
@@ -403,6 +432,32 @@ describe("run polling", () => {
     expect(isRunPollable(makeRun({ dispatch_state: "not_sent" }))).toBe(false);
   });
 
+  it("014-FR-006 keeps polling a queued exchange and stops on one that never left", () => {
+    // A queued exchange is the one state whose label is guaranteed to change
+    // without the user doing anything, so it is exactly the state polling
+    // exists for. A run settled as restarted-before-send is the opposite: it
+    // will never move again on its own.
+    expect(
+      isRunPollable(
+        makeRun({ dispatch_state: "delivery_unconfirmed", exchange_state: "queued", exchange_open: true })
+      )
+    ).toBe(true);
+    expect(
+      isRunPollable(
+        makeRun({ dispatch_state: "delivery_unconfirmed", exchange_state: "open", exchange_open: true })
+      )
+    ).toBe(true);
+    expect(
+      isRunPollable(
+        makeRun({
+          dispatch_state: "not_sent",
+          dispatch_error_code: "restarted_before_send",
+          exchange_state: "closed"
+        })
+      )
+    ).toBe(false);
+  });
+
   it("backs off from 1.5s and never past the 8s cap", () => {
     expect(runPollDelay(0)).toBe(1500);
     expect(runPollDelay(1)).toBe(3000);
@@ -587,5 +642,47 @@ describe("run polling", () => {
     expect(result.current.isRefetchError).toBe(false);
 
     unmount();
+  });
+});
+
+describe("014-FR-008 the run client follows the server's own schedule", () => {
+  it("caps the poll ladder at the run's observation interval", () => {
+    // Polling faster than the server observes cannot produce new information,
+    // so a deployment that looks every five seconds is asked every five.
+    expect(runPollDelay(0, 5)).toBe(1500);
+    expect(runPollDelay(1, 5)).toBe(3000);
+    expect(runPollDelay(2, 5)).toBe(5000);
+    expect(runPollDelay(9, 5)).toBe(5000);
+  });
+
+  it("keeps the client cap when the server observes less often than it", () => {
+    // A read also resets the server's backoff, and a reply's own answer can
+    // land between two observations, so the client stays responsive.
+    expect(runPollDelay(9, 60)).toBe(8000);
+    expect(runPollDelay(9)).toBe(8000);
+    expect(runPollDelay(9, 0)).toBe(8000);
+  });
+});
+
+describe("014-FR-010 command keys survive a retry and settle on an answer", () => {
+  it("holds one key across an ambiguous retry and mints a new one after", () => {
+    const key = renderHook(() => useIntentKey("agent-cancel-run-1")).result.current;
+
+    const first = key.current();
+    expect(key.current()).toBe(first);
+
+    // A definitive answer settles the intent; the *next* cancel is a new
+    // request under a new key, while the server reuses its own command id so
+    // the agent can never be asked twice (AC-029).
+    key.settle();
+    expect(key.current()).not.toBe(first);
+  });
+
+  it("treats a different reply message as a different intent", () => {
+    const key = renderHook(() => useIntentKey("agent-reply-run-1")).result.current;
+
+    const staging = key.current("q1:Use staging.");
+    expect(key.current("q1:Use staging.")).toBe(staging);
+    expect(key.current("q1:Use production.")).not.toBe(staging);
   });
 });

@@ -12,17 +12,23 @@ import type {
   TaskState,
   TaskSubtaskResponse
 } from "../../../api/taskTypes";
-import { apiClient } from "../../../api/client";
+import { apiClient, getApiBaseUrl } from "../../../api/client";
 import { ShellToastContext } from "../../../components/shell/shellToast";
 import { useAuthStore } from "../../../stores/authStore";
-import { TaskDetailEmptyPanel, TaskDetailPanel } from "../TaskDetailPanel";
+import type { AgentRunResponse } from "../../../api/agentTypes";
+import { canCancelRun, canReplyToRun } from "../../agents/agentCopy";
+import { TaskDetailPanel } from "../TaskDetailPanel";
+import { taskAgentPreferenceKey } from "../taskAgentPreference";
 
+// Stubbed so this suite is about the *panel* — but the stub asks the same two
+// guard functions the real section does, so a control the agent withdrew can
+// never be shown here while being hidden there.
 vi.mock("../../agents/AgentRunSection", () => ({
-  AgentRunSection: ({ runs }: { runs: Array<{ capabilities?: { reply: boolean; cancel: boolean }; reported_state?: string }> }) => (
+  AgentRunSection: ({ runs }: { runs: AgentRunResponse[] }) => (
     <div data-testid="agent-run-count">
       {runs.length}
-      {runs.some((run) => run.reported_state === "blocked" && run.capabilities?.reply) ? <button>Send answer</button> : null}
-      {runs.some((run) => run.capabilities?.cancel) ? <button>Request cancellation</button> : null}
+      {runs.some((run) => canReplyToRun(run)) ? <button>Send answer</button> : null}
+      {runs.some((run) => canCancelRun(run)) ? <button>Request cancellation</button> : null}
     </div>
   )
 }));
@@ -35,12 +41,12 @@ vi.mock("../../agents/AgentHandoffOverlay", () => ({
     onClose: () => void;
     onDispatched: (run: never) => void;
   }) => (
-    <div>
+    <div role="dialog" aria-modal="true" aria-label="Agent handoff">
       <h2>Hand this task to an agent</h2>
       <button type="button" onClick={onClose}>
         Close handoff
       </button>
-      <button type="button" onClick={() => onDispatched({} as never)}>
+      <button type="button" onClick={() => onDispatched({ connection_id: "agent-confirmed" } as never)}>
         Simulate dispatch
       </button>
     </div>
@@ -112,7 +118,7 @@ function renderPanel(overrides: Partial<PanelProps> = {}) {
   const notify = vi.fn();
   const headingRef = createRef<HTMLHeadingElement>();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = render(
+  const tree = (nextOverrides = overrides) => (
     <QueryClientProvider client={queryClient}>
       <ShellToastContext.Provider value={notify}>
         <TaskDetailPanel
@@ -123,28 +129,20 @@ function renderPanel(overrides: Partial<PanelProps> = {}) {
           error={null}
           headingRef={headingRef}
           {...handlers}
-          {...overrides}
+          {...nextOverrides}
         />
       </ShellToastContext.Provider>
     </QueryClientProvider>
   );
-  return { ...view, ...handlers, notify, headingRef };
+  const view = render(tree());
+  return { ...view, ...handlers, notify, headingRef, rerenderPanel: (nextOverrides: Partial<PanelProps>) => view.rerender(tree({ ...overrides, ...nextOverrides })) };
 }
 
 afterEach(() => {
   vi.restoreAllMocks();
+  window.localStorage.clear();
   act(() => {
     useAuthStore.setState({ user: null, status: "loading", deletionCancelledNotice: false });
-  });
-});
-
-describe("TaskDetailEmptyPanel", () => {
-  it("invites the reader to pick a task instead of showing an empty form", () => {
-    render(<TaskDetailEmptyPanel />);
-
-    const panel = screen.getByRole("complementary", { name: "Task detail" });
-    expect(within(panel).getByText("Nothing selected")).toBeInTheDocument();
-    expect(within(panel).getByText("Pick a task to see its details.")).toBeInTheDocument();
   });
 });
 
@@ -240,13 +238,28 @@ describe("TaskDetailPanel chrome", () => {
     expect(
       screen.getByText("Review exactly what would be sent before anything leaves BrainBuddy.")
     ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Task menu" }));
     await user.click(handoff);
     expect(await screen.findByRole("heading", { name: "Hand this task to an agent" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Agent handoff" }).parentElement).toBe(document.body);
+    expect(fireEvent.keyDown(screen.getByRole("button", { name: "Close handoff" }), { key: "Escape" })).toBe(true);
+    expect(screen.getByRole("button", { name: "Task menu" })).toHaveAttribute("aria-expanded", "true");
     await user.click(screen.getByRole("button", { name: "Close handoff" }));
     expect(screen.queryByRole("heading", { name: "Hand this task to an agent" })).not.toBeInTheDocument();
+    expect(handoff).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Hand to agent" }));
     await user.click(screen.getByRole("button", { name: "Simulate dispatch" }));
     expect(screen.queryByRole("heading", { name: "Hand this task to an agent" })).not.toBeInTheDocument();
+    expect(
+      JSON.parse(window.localStorage.getItem(taskAgentPreferenceKey({ ownerId: "user-1", apiOrigin: getApiBaseUrl() })) ?? "null")
+    ).toMatchObject({ connectionId: "agent-confirmed" });
+    await user.click(handoff);
+    const titleNode = screen.getByLabelText("Title");
+    open.rerenderPanel({ active: false });
+    expect(screen.queryByRole("dialog", { name: "Agent handoff" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Title")).toBe(titleNode);
+    open.rerenderPanel({ active: true });
+    expect(screen.queryByRole("dialog", { name: "Agent handoff" })).not.toBeInTheDocument();
 
     open.unmount();
     const terminalEmpty = renderPanel({
@@ -260,7 +273,19 @@ describe("TaskDetailPanel chrome", () => {
     expect(screen.queryByRole("heading", { name: "External agent" })).not.toBeInTheDocument();
 
     terminalEmpty.unmount();
-    vi.mocked(apiClient.listAgentRuns).mockResolvedValue([{} as never]);
+    vi.mocked(apiClient.listAgentRuns).mockResolvedValue([
+      // A real run shape, because the stub now asks the shared guards about it
+      // and a bare `{}` would only prove that an empty object has no controls.
+      {
+        id: "agentrun_terminal",
+        primary_state_label: "Agent reported complete",
+        reported_state: "completed",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "none",
+        agent_task_missing: false,
+        capabilities: { reply: false, cancel: false }
+      } as never
+    ]);
     renderPanel({
       task: taskFixture({
         state: "completed",
@@ -271,6 +296,31 @@ describe("TaskDetailPanel chrome", () => {
     expect(screen.getByTestId("agent-run-count")).toHaveTextContent("1");
     expect(screen.queryByRole("button", { name: "Hand to agent" })).not.toBeInTheDocument();
     expect(screen.queryByText("Review exactly what would be sent before anything leaves BrainBuddy.")).not.toBeInTheDocument();
+  });
+
+  it("waits for a trustworthy empty run history before offering a handoff", async () => {
+    let resolveRuns: (runs: AgentRunResponse[]) => void = () => undefined;
+    const pendingRuns = new Promise<AgentRunResponse[]>((resolve) => {
+      resolveRuns = resolve;
+    });
+    vi.spyOn(apiClient, "listAgentRuns").mockReturnValue(pendingRuns);
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { external_agent_relay: true }
+        },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    expect(screen.queryByRole("button", { name: "Hand to agent" })).not.toBeInTheDocument();
+    act(() => resolveRuns([]));
+    expect(await screen.findByRole("button", { name: "Hand to agent" })).toBeInTheDocument();
   });
 
   it("keeps an existing actionable run visible while rollout is off without exposing a new handoff", async () => {
@@ -314,18 +364,14 @@ describe("TaskDetailPanel chrome", () => {
     expect(screen.getByTestId("agent-run-count")).toHaveTextContent("0");
   });
 
-  it("closes on the chevron and routes the placeholder canvas through the shell toast", async () => {
+  it("closes on the X without exposing placeholder thinking actions", async () => {
     const user = userEvent.setup();
-    const { onClose, notify } = renderPanel();
+    const { onClose } = renderPanel();
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Close task" }));
     expect(onClose).toHaveBeenCalledTimes(1);
-
-    await user.click(screen.getByRole("button", { name: "Thinking canvas" }));
-    expect(notify).toHaveBeenCalledWith("Thinking canvas isn't built yet — placeholder");
-
-    await user.click(screen.getByRole("button", { name: "Think" }));
-    expect(notify).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "Thinking canvas" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Think" })).not.toBeInTheDocument();
   });
 
   it("opens the overflow menu, cancels the task from it, and closes it again on a second click", async () => {
@@ -382,6 +428,20 @@ describe("TaskDetailPanel chrome", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Task detail is unavailable.");
     expect(screen.queryByText("Loading task detail…")).not.toBeInTheDocument();
+  });
+
+  it("lets native selection and composition own Escape before dismissing the task menu", async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderPanel();
+    const menu = screen.getByRole("button", { name: "Task menu" });
+    await user.click(menu);
+    fireEvent.keyDown(screen.getByLabelText("List"), { key: "Escape" });
+    fireEvent.keyDown(menu, { key: "Escape", isComposing: true });
+    expect(menu).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{Escape}");
+    expect(menu).toHaveAttribute("aria-expanded", "false");
+    expect(menu).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("closes an open menu when the panel switches to another task", async () => {
@@ -644,6 +704,20 @@ describe("TaskDetailPanel transitions", () => {
     expect(second.onTransition).toHaveBeenCalledWith(cancelled, "reopen", "inbox");
   });
 
+  it("promotes an Inbox task through an explicit next-action control", async () => {
+    const user = userEvent.setup();
+    const task = taskFixture({ state: "inbox" });
+    const { onTransition } = renderPanel({ task });
+
+    const action = screen.getByRole("button", { name: "Move to Next actions" });
+    action.focus();
+    await user.keyboard("{Enter}");
+
+    expect(onTransition).toHaveBeenCalledWith(task, "move", "next");
+    expect(screen.getByLabelText("List")).toHaveValue("next");
+    expect(screen.queryByRole("button", { name: "Move to Next actions" })).not.toBeInTheDocument();
+  });
+
   it("moves an open task between lists and carries the live waiting-for value into a waiting move", async () => {
     const user = userEvent.setup();
     const task = taskFixture();
@@ -784,5 +858,121 @@ describe("TaskDetailPanel terminal presentation", () => {
 
     expect(screen.getByLabelText("Title")).toHaveClass("line-through");
     expect(within(screen.getByLabelText("List")).getByRole("option", { name: label })).toBeInTheDocument();
+  });
+});
+
+describe("014-SC-004 the compact Task surface says what the full one says", () => {
+  it("014-FR-013 shows the guarantee tier in full and the withdrawn cancellation", async () => {
+    // D-03-S21. Spelled out rather than abbreviated: the tier is a statement
+    // about duplicate risk, and a code the user has to learn is a warning
+    // nobody reads.
+    vi.spyOn(apiClient, "listAgentRuns").mockResolvedValue([
+      {
+        id: "agentrun_1",
+        primary_state_label: "Running",
+        reported_state: "running",
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "not_cancelable",
+        agent_task_missing: false,
+        capabilities: { reply: true, cancel: true },
+        events: [],
+        commands: [],
+        artifacts_summary: []
+      } as never
+    ]);
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "user-1", email: "max@example.test", feature_flags: {} },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    const line = await screen.findByTestId("agent-run-summary-line");
+    expect(line).toHaveTextContent("Running · Guaranteed single start · Cancellation not supported");
+    expect(screen.queryByRole("button", { name: "Request cancellation" })).not.toBeInTheDocument();
+  });
+
+  it("014-FR-013 describes the newest run when a task has more than one", async () => {
+    // The API answers a task's runs newest first (repository.py orders by
+    // created_at DESC, id DESC), so reading the last element described the
+    // *oldest* hand-off — a failed attempt from yesterday shown as the state of
+    // the run that is running right now.
+    vi.spyOn(apiClient, "listAgentRuns").mockResolvedValue([
+      {
+        id: "agentrun_new",
+        primary_state_label: "Running",
+        reported_state: "running",
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "none",
+        agent_task_missing: false,
+        capabilities: { reply: true, cancel: true },
+        created_at: "2026-08-09T12:00:00Z",
+        events: [],
+        commands: [],
+        artifacts_summary: []
+      } as never,
+      {
+        id: "agentrun_old",
+        primary_state_label: "Failed",
+        reported_state: "failed",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "none",
+        agent_task_missing: false,
+        capabilities: { reply: true, cancel: true },
+        created_at: "2026-08-08T09:00:00Z",
+        events: [],
+        commands: [],
+        artifacts_summary: []
+      } as never
+    ]);
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "user-1", email: "max@example.test", feature_flags: {} },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    const line = await screen.findByTestId("agent-run-summary-line");
+    expect(line).toHaveTextContent("Running · Guaranteed single start");
+    expect(line).not.toHaveTextContent("Failed");
+  });
+
+  it("014-FR-013 shows the missing-task label and withdraws both controls", async () => {
+    vi.spyOn(apiClient, "listAgentRuns").mockResolvedValue([
+      {
+        id: "agentrun_1",
+        primary_state_label: "Agent no longer reports this run",
+        reported_state: "blocked",
+        needs_user: true,
+        question_text: "Which environment?",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "none",
+        agent_task_missing: true,
+        capabilities: { reply: true, cancel: true },
+        events: [],
+        commands: [],
+        artifacts_summary: []
+      } as never
+    ]);
+    act(() => {
+      useAuthStore.setState({
+        user: { id: "user-1", email: "max@example.test", feature_flags: {} },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    const line = await screen.findByTestId("agent-run-summary-line");
+    expect(line).toHaveTextContent("Agent no longer reports this run · Best-effort single start");
+    expect(screen.queryByRole("button", { name: "Send answer" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request cancellation" })).not.toBeInTheDocument();
   });
 });

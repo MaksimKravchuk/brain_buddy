@@ -27,12 +27,9 @@ import { useApi, useSession } from "@/auth/SessionProvider";
 import type {
   ProjectResponse,
   AgentConnectionCreateRequest,
-  AgentConnectionCreatedResponse,
+  AgentCheckDeliveryRequest,
   AgentConnectionDisconnectRequest,
-  AgentConnectionResponse,
   AgentConnectionRotateRequest,
-  AgentConnectionRotateSigningSecretRequest,
-  AgentConnectionSigningSecretResponse,
   AgentConnectionUpdateRequest,
   AgentHandoffConfirmRequest,
   AgentHandoffPreviewRequest,
@@ -634,26 +631,25 @@ export function useAgentConnection(connectionId: string, enabled = true) {
 }
 
 /**
- * The 201 body carries the inbound signing secret exactly once. It is returned
- * to the caller for a one-time panel and deliberately never written into the
- * query cache.
+ * Registration. The 201 carries no secret, so nothing has to be consumed.
+ *
+ * 007 returned an inbound signing secret here exactly once, which is why this
+ * hook used to strip it before the response reached the query cache. The A2A
+ * wire has no inbound secret at all (FR-012), so the response is the connection
+ * and nothing else.
  */
-export function useCreateAgentConnection(options?: { onSigningSecret(secret: string): void }) {
+export function useCreateAgentConnection() {
   const { api, owner } = useAgentContext();
   const invalidate = useInvalidateAgents(owner);
-  return useRelayMutation<AgentConnectionCreatedResponse, AgentConnectionResponse, {
-    payload: AgentConnectionCreateRequest;
-    idempotencyKey: string;
-  }>({
+  return useRelayMutation({
     mutationKey: agentKeys.mutation(owner, "create-connection"),
-    mutationFn: (input) => api.createAgentConnection(
+    mutationFn: (input: {
+      payload: AgentConnectionCreateRequest;
+      idempotencyKey: string;
+    }) => api.createAgentConnection(
       input.payload,
       requireIdempotencyKey("useCreateAgentConnection", input.idempotencyKey),
     ),
-    consume: ({ inbound_signing_secret: secret, ...connection }) => {
-      options?.onSigningSecret(secret);
-      return connection;
-    },
     onSuccess: invalidate,
   });
 }
@@ -714,33 +710,6 @@ export function useRotateAgentCredential() {
         input.payload,
         requireIdempotencyKey("useRotateAgentCredential", input.idempotencyKey),
       ),
-    onSuccess: invalidate,
-    onError: (error: unknown) => {
-      if (error instanceof ApiError && error.status === 409) {
-        invalidate();
-      }
-    },
-  });
-}
-
-export function useRotateAgentSigningSecret(options?: { onSigningSecret(secret: string): void }) {
-  const { api, owner } = useAgentContext();
-  const invalidate = useInvalidateAgents(owner);
-  return useRelayMutation<AgentConnectionSigningSecretResponse, AgentConnectionResponse, {
-    connectionId: string;
-    payload: AgentConnectionRotateSigningSecretRequest;
-    idempotencyKey: string;
-  }>({
-    mutationKey: agentKeys.mutation(owner, "rotate-signing-secret"),
-    mutationFn: (input) => api.rotateAgentSigningSecret(
-      input.connectionId,
-      input.payload,
-      requireIdempotencyKey("useRotateAgentSigningSecret", input.idempotencyKey),
-    ),
-    consume: ({ inbound_signing_secret: secret, ...connection }) => {
-      options?.onSigningSecret(secret);
-      return connection;
-    },
     onSuccess: invalidate,
     onError: (error: unknown) => {
       if (error instanceof ApiError && error.status === 409) {
@@ -936,6 +905,25 @@ export function useReplyToAgentRun() {
         input.runId,
         input.payload,
         requireIdempotencyKey("useReplyToAgentRun", input.idempotencyKey),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useCheckAgentRunDelivery() {
+  const { api, owner } = useAgentContext();
+  const invalidate = useInvalidateAgents(owner);
+  return useRelayMutation({
+    mutationKey: agentKeys.mutation(owner, "check-delivery"),
+    mutationFn: (input: {
+      runId: string;
+      payload: AgentCheckDeliveryRequest;
+      idempotencyKey: string;
+    }) =>
+      api.checkAgentRunDelivery(
+        input.runId,
+        input.payload,
+        requireIdempotencyKey("useCheckAgentRunDelivery", input.idempotencyKey),
       ),
     onSuccess: invalidate,
   });

@@ -1,5 +1,6 @@
 import type {
   AgentCapabilities,
+  AgentControls,
   AgentConnectionResponse,
   AgentRunEvent,
   AgentRunResponse,
@@ -8,8 +9,10 @@ import { ApiError } from "../../api/client";
 import {
   applyRun,
   applyRuns,
+  authSchemeLabel,
   buildContextCandidates,
   capabilityDisclosure,
+  connectionStatusDetail,
   connectionStatusLabel,
   errorReasonCode,
   eventLabel,
@@ -24,11 +27,21 @@ import {
   MAX_POLL_DELAY_MS,
   nextPollDelay,
   projectRunAt,
+  artifactPlaceholderCopy,
+  canCheckDelivery,
+  canRetryHandoff,
+  cancelOutcomeCopy,
+  compactRunLabel,
+  dispatchStateDetail,
+  resultAvailabilityCopy,
+  timelineRowLabel,
+  rateLimitRetryCopy,
   runsNewestFirst,
   sortedEvents,
 } from "../machine";
 
-const CAPS: AgentCapabilities = { progress: true, reply: true, cancel: true };
+const CARD_CAPS: AgentCapabilities = { streaming: true, push_notifications: false };
+const CONTROLS: AgentControls = { reply: true, cancel: true };
 
 function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
   return {
@@ -56,7 +69,23 @@ function makeRun(overrides: Partial<AgentRunResponse> = {}): AgentRunResponse {
     content_expires_at: "2026-09-08T00:00:00Z",
     last_contact_at: "2026-08-09T12:00:00Z",
     reporting_window_seconds: 900,
-    capabilities: { ...CAPS },
+    capabilities: { ...CONTROLS },
+    guarantee_tier: "best_effort",
+    message_id: "run1:start",
+    correlation_id: "run1",
+    agent_task_id: null,
+    exchange_open: false,
+    exchange_state: "closed",
+    exchange_kind: "start",
+    push_registration: "unregistered",
+    agent_task_missing: false,
+    cancel_outcome: "none",
+    blocked_reason: null,
+    artifacts_summary: [],
+    result_availability: null,
+    last_observed_at: null,
+    observation_interval_seconds: 60,
+    identifiers_expired: false,
     manifest: null,
     events: [],
     commands: [],
@@ -72,13 +101,25 @@ function makeConnection(
   return {
     id: "conn1",
     name: "Hermes",
-    endpoint_url: "https://agent.example.test/hook",
-    auth_header_name: "Authorization",
+    agent_address: "https://agent.example.test",
+    auth_scheme: "bearer",
+    auth_header_name: null,
     status: "ready",
     stale: false,
     ready_for_handoff: true,
-    capabilities: { ...CAPS },
+    capabilities: { ...CARD_CAPS },
+    controls_offered: { ...CONTROLS },
+    card: null,
+    guarantee_tier: "best_effort",
+    tier_disclosure: "Best-effort single start.",
+    tier_disclosure_url: "https://example.invalid/single-start/v1.md",
+    cancellation_disclosure: "Cancellation depends on the agent.",
+    agent_changed: false,
+    best_effort_acknowledged_at: null,
+    correlation_id_honoured: null,
+    disconnect_reason: null,
     last_test_error_code: null,
+    last_test_error_detail: null,
     last_contact_at: "2026-08-09T12:00:00Z",
     last_tested_at: "2026-08-09T12:00:00Z",
     stale_after_seconds: 86_400,
@@ -95,6 +136,10 @@ function makeEvent(overrides: Partial<AgentRunEvent> = {}): AgentRunEvent {
     run_version: 1,
     received_at: "2026-08-09T11:00:00Z",
     summary: null,
+    trigger: "schedule",
+    kind: "observation",
+    previous_agent_task_id: null,
+    new_agent_task_id: null,
     ...overrides,
   };
 }
@@ -163,23 +208,18 @@ describe("applyRun / applyRuns", () => {
         agent_name: "Hermes",
         title: "Private task title",
         details: "Private task details",
-        context_items: [{ label: "Private context", body: "Private body" }],
-        reporting: {
-          callback_url: "https://brain.example.test/callback",
-          connection_id: "conn1",
-          connection_header: "X-BrainBuddy-Connection",
-          timestamp_header: "X-BrainBuddy-Timestamp",
-          signature_header: "X-BrainBuddy-Signature",
-          timestamp_format: "ascii-base-10-unix-seconds-no-sign-space-or-leading-zero",
-          signature_algorithm: "hmac-sha256",
-          signing_bytes: "timestamp_bytes + b'.' + raw_body",
-          signature_format: "v1=<lowercase hex>",
-          body_envelope_version: "1",
-        },
-        reporting_instructions: "Private instructions",
-        instructions_version: "1",
-        protocol_version: "1",
-        destination_endpoint: "https://agent.example.test/relay",
+        supporting_items: [{ label: "Private context", body: "Private body" }],
+        message_id: "run1:start",
+        correlation_id: "run1",
+        destination_interface: "https://agent.example.test/a2a",
+        guarantee_tier: "best_effort",
+        tier_disclosure: "Best-effort single start.",
+        tier_disclosure_url: "https://example.invalid/single-start/v1.md",
+        acknowledgement_required: false,
+        cancellation_disclosure: "Cancellation depends on the agent.",
+        push_callback: null,
+        parts_preview: ["Private task title"],
+        protocol_version: "1.0",
         external_copy_notice: "Private notice",
         reauthentication_required: false,
       },
@@ -189,6 +229,7 @@ describe("applyRun / applyRuns", () => {
         kind: "reply",
         body: "Private reply",
         delivery: "confirmed",
+        outcome_code: null,
         created_at: "2026-08-09T11:30:00Z",
         confirmed_at: "2026-08-09T11:31:00Z",
       }],
@@ -208,6 +249,36 @@ describe("applyRun / applyRuns", () => {
     });
     expect(expired.events[0].summary).toBeNull();
     expect(expired.commands[0].body).toBeNull();
+  });
+
+  it("014-FR-015 redacts the 014 content-tier fields at the same deadline", () => {
+    // data-model.md §8 puts blocked_reason, artifacts_summary and
+    // result_availability in the 30-day content tier. The projection feeds the
+    // cached snapshot as well as the network answer, so leaving them behind
+    // keeps an agent's words and the names of its private artifacts on the
+    // device past the bound the product promises.
+    const run = makeRun({
+      content_expires_at: "2026-08-09T12:00:00Z",
+      content_expired: false,
+      blocked_reason: "Agent needs additional authentication",
+      artifacts_summary: [
+        { name: "private-report.pdf", media_type: "application/pdf", kind: "file" },
+      ],
+      result_availability: "too_large",
+    });
+
+    expect(projectRunAt(run, Date.parse("2026-08-09T11:59:59.999Z"))).toBe(run);
+    const expired = projectRunAt(run, Date.parse("2026-08-09T12:00:00Z"));
+    expect(expired).toMatchObject({
+      content_expired: true,
+      blocked_reason: null,
+      artifacts_summary: [],
+      result_availability: null,
+    });
+    // Nothing an agent said survives anywhere in the snapshot, not merely in
+    // the fields the run card happens to read.
+    expect(JSON.stringify(expired)).not.toContain("private-report.pdf");
+    expect(JSON.stringify(expired)).not.toContain("Agent needs additional authentication");
   });
 
   it("never rolls the projection back to a stale revision", () => {
@@ -298,9 +369,7 @@ describe("connection disclosure", () => {
       "Invalid credentials",
     );
     expect(connectionStatusLabel(makeConnection({ status: "unreachable" }))).toBe("Unreachable");
-    expect(connectionStatusLabel(makeConnection({ status: "unsupported" }))).toBe(
-      "Connector not supported",
-    );
+    expect(connectionStatusLabel(makeConnection({ status: "unsupported" }))).toBe("Unsupported");
     expect(connectionStatusLabel(makeConnection({ status: "disconnected" }))).toBe("Disconnected");
   });
 
@@ -314,19 +383,137 @@ describe("connection disclosure", () => {
     );
   });
 
-  it("names the unsupported capabilities explicitly", () => {
-    expect(capabilityDisclosure({ progress: true, reply: true, cancel: true })).toEqual({
-      supported: ["progress updates", "replies", "cancellation"],
+  it("014-FR-002 names only what the agent card declares, supported or not", () => {
+    // Replies and cancellation are absent by design: no A2A card advertises
+    // either, so listing them would render a Brain Buddy decision as an agent
+    // promise (FR-010).
+    expect(capabilityDisclosure({ streaming: true, push_notifications: true })).toEqual({
+      supported: ["streaming updates", "push notifications"],
       unsupported: [],
     });
-    expect(capabilityDisclosure({ progress: false, reply: false, cancel: false })).toEqual({
+    expect(capabilityDisclosure({ streaming: false, push_notifications: false })).toEqual({
       supported: [],
-      unsupported: ["progress updates", "replies", "cancellation"],
+      unsupported: ["streaming updates", "push notifications"],
     });
-    expect(capabilityDisclosure({ progress: true, reply: false, cancel: true })).toEqual({
-      supported: ["progress updates", "cancellation"],
-      unsupported: ["replies"],
+    expect(capabilityDisclosure({ streaming: true, push_notifications: false })).toEqual({
+      supported: ["streaming updates"],
+      unsupported: ["push notifications"],
     });
+  });
+
+  it("014-FR-002 lets a changed or rate-limited agent override the stored status", () => {
+    expect(
+      connectionStatusLabel(makeConnection({ status: "untested", agent_changed: true })),
+    ).toBe("Agent changed");
+    expect(
+      connectionStatusLabel(
+        makeConnection({ status: "untested", last_test_error_code: "a2a_rate_limited" }),
+      ),
+    ).toBe("Rate limited");
+    expect(
+      connectionStatusLabel(
+        makeConnection({ status: "disconnected", disconnect_reason: "superseded_wire_contract" }),
+      ),
+    ).toBe("Superseded wire contract");
+    expect(connectionStatusLabel(makeConnection({ status: "disconnected" }))).toBe("Disconnected");
+  });
+
+  it("014-FR-002 gives each unsupported category its own sentence", () => {
+    const unsupported = { status: "unsupported" as const, ready_for_handoff: false, card: null };
+    expect(
+      connectionStatusDetail(
+        makeConnection({ ...unsupported, last_test_error_code: "a2a_not_an_agent" }),
+      ),
+    ).toMatch(/well-known location/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({
+          ...unsupported,
+          last_test_error_code: "a2a_protocol_version_unsupported",
+          last_test_error_detail: { found_version: "0.9.4" },
+        }),
+      ),
+    ).toMatch(/declares A2A 0\.9\.4/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({
+          ...unsupported,
+          last_test_error_code: "a2a_protocol_version_unsupported",
+        }),
+      ),
+    ).toMatch(/outside 1\.0\.x/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({
+          ...unsupported,
+          last_test_error_code: "a2a_auth_scheme_unsupported",
+          last_test_error_detail: { scheme: "oauth2" },
+        }),
+      ),
+    ).toMatch(/requires oauth2/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({ ...unsupported, last_test_error_code: "a2a_auth_scheme_unsupported" }),
+      ),
+    ).toMatch(/does not support/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({ ...unsupported, last_test_error_code: "a2a_no_supported_interface" }),
+      ),
+    ).toMatch(/No JSON-RPC interface/i);
+    expect(connectionStatusDetail(makeConnection({ status: "untested" }))).toMatch(
+      /has not contacted this agent yet/i,
+    );
+    expect(connectionStatusDetail(makeConnection({ status: "invalid_credentials" }))).toMatch(
+      /rejected the credential/i,
+    );
+    expect(connectionStatusDetail(makeConnection({ status: "unreachable" }))).toMatch(
+      /Nothing was sent/i,
+    );
+    expect(connectionStatusDetail(makeConnection({ stale: true }))).toMatch(/staleness threshold/i);
+    expect(connectionStatusDetail(makeConnection())).toMatch(/it authenticated/i);
+    expect(
+      connectionStatusDetail(
+        makeConnection({ status: "disconnected", disconnect_reason: "superseded_wire_contract" }),
+      ),
+    ).toMatch(/previous agent wire/i);
+    expect(connectionStatusDetail(makeConnection({ status: "disconnected" }))).toMatch(
+      /were destroyed/i,
+    );
+    expect(connectionStatusDetail(makeConnection({ agent_changed: true }))).toMatch(
+      /destination you have not tested/i,
+    );
+    expect(
+      connectionStatusDetail(makeConnection({ last_test_error_code: "a2a_rate_limited" })),
+    ).toMatch(/answered the test by refusing it/i);
+  });
+
+  it("014-FR-002 never invents a retry countdown the agent did not give", () => {
+    expect(
+      rateLimitRetryCopy(makeConnection({ last_test_error_detail: { retry_after_seconds: 1 } })),
+    ).toBe("Test again in about 1 second.");
+    expect(
+      rateLimitRetryCopy(makeConnection({ last_test_error_detail: { retry_after_seconds: 30 } })),
+    ).toBe("Test again in about 30 seconds.");
+    expect(
+      rateLimitRetryCopy(makeConnection({ last_test_error_detail: { retry_after_seconds: null } })),
+    ).toBe("Test again shortly.");
+    expect(rateLimitRetryCopy(makeConnection({ last_test_error_detail: null }))).toBe(
+      "Test again shortly.",
+    );
+    expect(
+      rateLimitRetryCopy(makeConnection({ last_test_error_detail: { scheme: "oauth2" } })),
+    ).toBe("Test again shortly.");
+  });
+
+  it("014-FR-001 names the credential scheme without ever naming the credential", () => {
+    expect(authSchemeLabel(makeConnection())).toBe("Bearer token · stored sealed");
+    expect(
+      authSchemeLabel(makeConnection({ auth_scheme: "api_key", auth_header_name: "X-API-Key" })),
+    ).toBe("API key in X-API-Key · stored sealed");
+    expect(
+      authSchemeLabel(makeConnection({ auth_scheme: "api_key", auth_header_name: null })),
+    ).toBe("API key · stored sealed");
   });
 
   it("reports last contact without inventing one", () => {
@@ -426,5 +613,208 @@ describe("buildContextCandidates", () => {
     });
     expect(item.body).toHaveLength(MAX_CONTEXT_BODY_CHARS);
     expect(item.body.endsWith("…")).toBe(true);
+  });
+});
+
+describe("dispatch state detail", () => {
+  it("014-FR-006 keeps Queued and Sent apart", () => {
+    // The whole point of the queued state: the identifiers are reserved, the
+    // content is frozen, and nothing has left. Saying "Sent" here would be the
+    // one claim this projection exists to avoid making.
+    expect(
+      dispatchStateDetail(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "queued",
+          exchange_open: true,
+          reported_state: null,
+        }),
+      ),
+    ).toBe("Waiting for a free connection slot; nothing has been sent yet");
+    expect(
+      dispatchStateDetail(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "open",
+          exchange_open: true,
+          reported_state: null,
+        }),
+      ),
+    ).toBe("Some agents answer only when the work is finished.");
+  });
+
+  it("014-FR-006 separates a restart that never sent from an ambiguous delivery", () => {
+    expect(
+      dispatchStateDetail(
+        makeRun({
+          dispatch_state: "not_sent",
+          dispatch_error_code: "restarted_before_send",
+          reported_state: null,
+        }),
+      ),
+    ).toBe("Brain Buddy restarted before this hand-off was sent. Nothing left Brain Buddy.");
+    expect(
+      dispatchStateDetail(
+        makeRun({
+          dispatch_state: "not_sent",
+          dispatch_error_code: "a2a_rate_limited",
+          reported_state: null,
+        }),
+      ),
+    ).toBe("The agent is rate limiting.");
+    expect(
+      dispatchStateDetail(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "closed",
+          reported_state: null,
+        }),
+      ),
+    ).toBe("Brain Buddy could not confirm the agent received this hand-off. It was not re-sent.");
+  });
+
+  it("014-FR-014 says nothing about dispatch once the agent has reported", () => {
+    expect(dispatchStateDetail(makeRun({ reported_state: "running" }))).toBeNull();
+    expect(
+      dispatchStateDetail(
+        makeRun({ dispatch_state: "not_sent", dispatch_error_code: null, reported_state: null }),
+      ),
+    ).toBeNull();
+  });
+
+  it("014-FR-006 offers Check again only where Brain Buddy genuinely does not know", () => {
+    expect(
+      canCheckDelivery(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "closed",
+          reported_state: null,
+        }),
+      ),
+    ).toBe(true);
+    // Queued has provably not been sent, so there is nothing at the agent.
+    expect(
+      canCheckDelivery(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "queued",
+          reported_state: null,
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      canCheckDelivery(
+        makeRun({
+          dispatch_state: "delivery_unconfirmed",
+          exchange_state: "closed",
+          reported_state: null,
+          connection_disconnected: true,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("014-FR-005 re-offers a hand-off only while its frozen review still exists", () => {
+    const frozen = makeRun({ dispatch_state: "not_sent", reported_state: null }).manifest;
+    expect(
+      canRetryHandoff({ dispatch_state: "not_sent", manifest: frozen, content_expired: false }),
+    ).toBe(frozen !== null);
+    expect(
+      canRetryHandoff({ dispatch_state: "not_sent", manifest: null, content_expired: false }),
+    ).toBe(false);
+    expect(
+      canRetryHandoff({ dispatch_state: "sent", manifest: frozen, content_expired: false }),
+    ).toBe(false);
+  });
+});
+
+describe("014-SC-004 the compact row says what the detail screen says", () => {
+  it("014-FR-013 spells the guarantee tier out in full", () => {
+    // M-03-S24. A code the user has to learn is a warning nobody reads, and
+    // the tier is a statement about duplicate risk.
+    expect(
+      compactRunLabel({
+        primary_state_label: "Running",
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "none",
+      }),
+    ).toBe("Running · Guaranteed single start");
+    expect(
+      compactRunLabel({
+        primary_state_label: "Needs you",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "none",
+      }),
+    ).toBe("Needs you · Best-effort single start");
+    expect(
+      compactRunLabel({
+        primary_state_label: "Queued",
+        guarantee_tier: null,
+        cancel_outcome: "none",
+      }),
+    ).toBe("Queued");
+  });
+
+  it("014-FR-013 repeats a withdrawn cancellation on the compact row", () => {
+    expect(
+      compactRunLabel({
+        primary_state_label: "Running",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "not_cancelable",
+      }),
+    ).toBe("Running · Best-effort single start · Cancellation not supported");
+    // An ambiguous outcome is not a refusal, so the row does not report one.
+    expect(
+      compactRunLabel({
+        primary_state_label: "Running",
+        guarantee_tier: "best_effort",
+        cancel_outcome: "unconfirmed",
+      }),
+    ).toBe("Running · Best-effort single start");
+  });
+
+  it("014-FR-014 keeps the cancel outcome a secondary line, never the label", () => {
+    expect(cancelOutcomeCopy({ cancel_outcome: "unsupported" })).toBe(
+      "Cancellation not supported by this agent.",
+    );
+    expect(cancelOutcomeCopy({ cancel_outcome: "unconfirmed" })).toBe(
+      "Cancellation request unconfirmed — you can try again.",
+    );
+    expect(cancelOutcomeCopy({ cancel_outcome: "accepted" })).toBeNull();
+    expect(cancelOutcomeCopy({ cancel_outcome: "none" })).toBeNull();
+  });
+
+  it("014-FR-013 marks a too-large result rather than blaming the agent", () => {
+    expect(resultAvailabilityCopy({ result_availability: "too_large" })).toBe(
+      "Result too large to store.",
+    );
+    expect(resultAvailabilityCopy({ result_availability: "available" })).toBeNull();
+    expect(resultAvailabilityCopy({ result_availability: null })).toBeNull();
+  });
+
+  it("014-FR-010 names a succession row for what it is", () => {
+    const succession = makeEvent({
+      kind: "task_succession",
+      trigger: "command",
+      previous_agent_task_id: "task-a1",
+      new_agent_task_id: "task-b2",
+    });
+
+    expect(timelineRowLabel(succession)).toBe("The agent continued this run in a new task");
+    // An ordinary observation still reads as its state.
+    expect(timelineRowLabel(makeEvent({ type: "running" }))).toBe("Running");
+  });
+
+  it("014-FR-013 names an artifact's content type and never a download", () => {
+    expect(
+      artifactPlaceholderCopy({
+        name: "report.pdf",
+        media_type: "application/pdf",
+        kind: "file",
+      }),
+    ).toBe("report.pdf · application/pdf");
+    expect(
+      artifactPlaceholderCopy({ name: null, media_type: null, kind: "data" }),
+    ).toBe("Untitled data");
   });
 });

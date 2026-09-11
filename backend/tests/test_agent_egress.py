@@ -7,14 +7,21 @@ injected resolver rather than touching the network.
 
 from __future__ import annotations
 
+import gzip
 import socket
 import traceback
+import zlib
+from typing import Any
 
+import httpx
 import pytest
 
 from app.modules.agents.egress import (
     DestinationRejected,
+    EgressDeadlineExceeded,
+    _bounded_response_body,
     interactive_result_link,
+    pinned_request,
     validate_destination,
 )
 
@@ -526,3 +533,703 @@ class TestInteractiveResultLink:
         monkeypatch.setattr(socket, "getaddrinfo", exploding_getaddrinfo)
 
         assert interactive_result_link("https://results.example.com/run/1") is False
+
+
+# ---------------------------------------------------------------------------
+# Bounded response bodies over a pinned connection.
+#
+# These cases were written for spec 007 against ``test_agent_connector.py`` but
+# they never exercised the connector: every one of them drives ``pinned_request``
+# and ``_bounded_response_body`` directly. Spec 014 deletes the bespoke connector
+# (FR-012), and a decompression-bomb budget is not a thing to delete with it, so
+# they move here to the module that actually owns the behaviour.
+# ---------------------------------------------------------------------------
+
+
+def _pinned_resolver(host: str, port: int) -> list[str]:
+    return {"agent.example.com": ["93.184.216.34"]}[host]
+
+
+@pytest.mark.parametrize(
+    ("encoding", "content"),
+    [
+        ("gzip", gzip.compress(b"complete response")[:-1]),
+        ("gzip", gzip.compress(b"complete response") + b"trailing"),
+        ("gzip", gzip.compress(b"first") + gzip.compress(b"second")),
+        ("br", b"opaque"),
+        ("gzip", gzip.compress(b"x" * 1_000_000)),
+    ],
+)
+def test_preloaded_encoded_response_fails_closed(encoding: str, content: bytes) -> None:
+    """Decoded/preloaded bytes cannot bypass encoding-integrity and bomb checks."""
+
+    destination = validate_destination(
+        "https://agent.example.com/hooks", resolver=_pinned_resolver
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": encoding},
+            content=content,
+        )
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with pytest.raises(DestinationRejected) as excinfo:
+        pinned_request(
+            method="GET",
+            destination=destination,
+            headers={},
+            json_body=None,
+            timeout_seconds=5,
+            max_response_bytes=4096,
+            client_factory=factory,
+        )
+
+    assert excinfo.value.code == "destination_invalid"
+    assert str(excinfo.value) == "The agent response body is not valid."
+
+
+def test_preloaded_unencoded_response_above_cap_is_rejected_not_truncated() -> None:
+    destination = validate_destination(
+        "https://agent.example.com/hooks", resolver=_pinned_resolver
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"sixsix")
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with pytest.raises(DestinationRejected) as excinfo:
+        pinned_request(
+            method="GET",
+            destination=destination,
+            headers={},
+            json_body=None,
+            timeout_seconds=5,
+            max_response_bytes=5,
+            client_factory=factory,
+        )
+
+    assert excinfo.value.code == "destination_invalid"
+    assert str(excinfo.value) == "The agent response body is not valid."
+
+
+def test_raw_compressed_network_work_is_bounded_when_output_limit_is_zero() -> None:
+    """Arbitrarily many empty deflate blocks cannot cause unbounded reads/calls."""
+
+    destination = validate_destination(
+        "https://agent.example.com/hooks", resolver=_pinned_resolver
+    )
+    chunks_requested = 0
+
+    class EndlessEmptyDeflateBlocks(httpx.SyncByteStream):
+        def __iter__(self):
+            nonlocal chunks_requested
+            while True:
+                chunks_requested += 1
+                yield b"\x00\x00\x00\xff\xff"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "deflate"},
+            stream=EndlessEmptyDeflateBlocks(),
+        )
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with pytest.raises(DestinationRejected) as excinfo:
+        pinned_request(
+            method="GET",
+            destination=destination,
+            headers={},
+            json_body=None,
+            timeout_seconds=5,
+            max_response_bytes=0,
+            client_factory=factory,
+        )
+
+    assert excinfo.value.code == "destination_invalid"
+    # The raw-byte budget, not sender-chosen partitioning, bounds the read.
+    assert chunks_requested <= (64 * 1024) // 5 + 1
+
+
+def test_valid_compressed_response_accepts_more_than_128_network_partitions() -> None:
+    compressed = gzip.compress(b"bounded response")
+
+    class HighlyPartitionedStream(httpx.SyncByteStream):
+        def __iter__(self):
+            for byte in compressed:
+                yield bytes([byte])
+            for _ in range(129):
+                yield b""
+
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "gzip"},
+        stream=HighlyPartitionedStream(),
+    )
+
+    assert (
+        _bounded_response_body(response, max_response_bytes=4096, decoder_factory=None)
+        == b"bounded response"
+    )
+
+
+def test_compressed_raw_byte_budget_is_independent_of_decoded_output() -> None:
+    destination = validate_destination(
+        "https://agent.example.com/hooks", resolver=_pinned_resolver
+    )
+    chunks_requested = 0
+
+    class OversizedRawStream(httpx.SyncByteStream):
+        def __iter__(self):
+            nonlocal chunks_requested
+            while True:
+                chunks_requested += 1
+                yield b"\x00" * 1024
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "deflate"},
+            stream=OversizedRawStream(),
+        )
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with pytest.raises(DestinationRejected):
+        pinned_request(
+            method="GET",
+            destination=destination,
+            headers={},
+            json_body=None,
+            timeout_seconds=5,
+            max_response_bytes=0,
+            client_factory=factory,
+        )
+
+    assert chunks_requested <= 65
+
+
+@pytest.mark.parametrize("failure", ["unused_data", "incomplete", "flush_overflow"])
+def test_compressed_integrity_terminal_failures_are_rejected(failure: str) -> None:
+    """Each terminal framing check independently fails closed."""
+
+    class TerminalDecoder:
+        unconsumed_tail = b""
+
+        @property
+        def unused_data(self) -> bytes:
+            return b"trailing" if failure == "unused_data" else b""
+
+        @property
+        def eof(self) -> bool:
+            return failure != "incomplete"
+
+        def decompress(self, data: bytes, max_length: int) -> bytes:
+            return b""
+
+        def flush(self, length: int) -> bytes:
+            return b"x" if failure == "flush_overflow" else b""
+
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "deflate"},
+        stream=httpx.ByteStream(b"encoded"),
+    )
+
+    with pytest.raises(DestinationRejected):
+        _bounded_response_body(
+            response,
+            max_response_bytes=0,
+            decoder_factory=lambda encoding: TerminalDecoder(),
+        )
+
+
+def test_decompress_call_budget_rejects_nonprogressing_decoder() -> None:
+    class NonProgressingDecoder:
+        unused_data = b""
+        eof = False
+
+        def __init__(self) -> None:
+            self.unconsumed_tail = b""
+
+        def decompress(self, data: bytes, max_length: int) -> bytes:
+            self.unconsumed_tail = data
+            return b""
+
+        def flush(self, length: int) -> bytes:
+            return b""
+
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "deflate"},
+        stream=httpx.ByteStream(b"encoded"),
+    )
+
+    with pytest.raises(DestinationRejected):
+        _bounded_response_body(
+            response,
+            max_response_bytes=0,
+            decoder_factory=lambda encoding: NonProgressingDecoder(),
+        )
+
+
+def test_zlib_error_translation_has_no_exception_chain() -> None:
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "gzip"},
+        stream=httpx.ByteStream(b"not-gzip"),
+    )
+
+    with pytest.raises(DestinationRejected) as excinfo:
+        _bounded_response_body(response, max_response_bytes=4096, decoder_factory=None)
+
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__context__ is None
+
+
+@pytest.mark.parametrize("limit", [0, 4096])
+def test_compressed_response_over_limit_stops_in_constant_decoder_calls(
+    limit: int,
+) -> None:
+    """A compressed bomb is rejected without draining expansion byte by byte."""
+
+    compressed = gzip.compress(b"x" * 1_000_000)
+
+    class TrackingDecoder:
+        def __init__(self) -> None:
+            import zlib
+
+            self.inner = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            self.largest_requested = 0
+            self.calls = 0
+
+        @property
+        def unconsumed_tail(self) -> bytes:
+            return self.inner.unconsumed_tail
+
+        @property
+        def unused_data(self) -> bytes:
+            return self.inner.unused_data
+
+        @property
+        def eof(self) -> bool:
+            return self.inner.eof
+
+        def decompress(self, data: bytes, max_length: int) -> bytes:
+            self.calls += 1
+            self.largest_requested = max(self.largest_requested, max_length)
+            return self.inner.decompress(data, max_length)
+
+        def flush(self, length: int) -> bytes:
+            self.largest_requested = max(self.largest_requested, length)
+            return self.inner.flush(length)
+
+    decoder = TrackingDecoder()
+    destination = validate_destination(
+        "https://agent.example.com/hooks", resolver=_pinned_resolver
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "gzip"},
+            stream=httpx.ByteStream(compressed),
+        )
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with pytest.raises(DestinationRejected) as excinfo:
+        pinned_request(
+            method="GET",
+            destination=destination,
+            headers={},
+            json_body=None,
+            timeout_seconds=5,
+            max_response_bytes=limit,
+            client_factory=factory,
+            decoder_factory=lambda encoding: decoder,
+        )
+
+    assert excinfo.value.code == "destination_invalid"
+    assert decoder.calls <= 2
+    assert decoder.largest_requested <= limit + 1
+
+
+@pytest.mark.parametrize(
+    ("encoding", "compressed"),
+    [
+        ("gzip", gzip.compress(b"bounded response")),
+        ("deflate", __import__("zlib").compress(b"bounded response")),
+    ],
+)
+def test_supported_stream_encodings_decode_normally(
+    encoding: str, compressed: bytes
+) -> None:
+    destination = validate_destination(
+        "https://agent.example.com/hooks", resolver=_pinned_resolver
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": encoding},
+            stream=httpx.ByteStream(compressed),
+        )
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    response = pinned_request(
+        method="GET",
+        destination=destination,
+        headers={},
+        json_body=None,
+        timeout_seconds=5,
+        max_response_bytes=4096,
+        client_factory=factory,
+    )
+
+    assert response.body == b"bounded response"
+
+
+@pytest.mark.parametrize(
+    ("encoding", "compressed"),
+    [
+        ("gzip", gzip.compress(b"complete response")[:-1]),
+        ("deflate", zlib.compress(b"complete response")[:-1]),
+        ("gzip", gzip.compress(b"complete response") + b"trailing"),
+        ("deflate", zlib.compress(b"complete response") + b"trailing"),
+        ("gzip", gzip.compress(b"first") + gzip.compress(b"second")),
+    ],
+)
+def test_compressed_response_requires_one_complete_stream(
+    encoding: str, compressed: bytes
+) -> None:
+    """Truncation, trailing bytes, and concatenated gzip members fail closed."""
+
+    destination = validate_destination(
+        "https://agent.example.com/hooks", resolver=_pinned_resolver
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": encoding},
+            stream=httpx.ByteStream(compressed),
+        )
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with pytest.raises(DestinationRejected) as excinfo:
+        pinned_request(
+            method="GET",
+            destination=destination,
+            headers={},
+            json_body=None,
+            timeout_seconds=5,
+            max_response_bytes=4,
+            client_factory=factory,
+        )
+
+    assert excinfo.value.code == "destination_invalid"
+    assert str(excinfo.value) == "The agent response body is not valid."
+
+
+def test_unsupported_stream_encoding_is_rejected() -> None:
+    destination = validate_destination(
+        "https://agent.example.com/hooks", resolver=_pinned_resolver
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "br"},
+            stream=httpx.ByteStream(b"opaque"),
+        )
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with pytest.raises(DestinationRejected):
+        pinned_request(
+            method="GET",
+            destination=destination,
+            headers={},
+            json_body=None,
+            timeout_seconds=5,
+            max_response_bytes=4096,
+            client_factory=factory,
+        )
+
+
+@pytest.mark.parametrize("limit", [0, 5])
+@pytest.mark.parametrize("encoding", [None, "identity"])
+def test_unencoded_stream_is_bounded_before_accumulation(
+    limit: int, encoding: str | None
+) -> None:
+    destination = validate_destination(
+        "https://agent.example.com/hooks", resolver=_pinned_resolver
+    )
+
+    class ChunkStream(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"first"
+            yield b"second"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        headers = {} if encoding is None else {"Content-Encoding": encoding}
+        return httpx.Response(200, headers=headers, stream=ChunkStream())
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with pytest.raises(DestinationRejected) as excinfo:
+        pinned_request(
+            method="GET",
+            destination=destination,
+            headers={},
+            json_body=None,
+            timeout_seconds=5,
+            max_response_bytes=limit,
+            client_factory=factory,
+        )
+
+    assert excinfo.value.code == "destination_invalid"
+
+
+# ---------------------------------------------------------------------------
+# The absolute wall-clock deadline (spec 014 FR-007, FR-008; AC-034).
+#
+# httpx's read timeout is per *chunk*, so a server that emits one byte every few
+# hundred seconds never trips it, and ``_bounded_response_body``'s budget bounds
+# bytes rather than time. Between them a drip-feeding agent can hold a worker
+# open indefinitely while every configured limit reports itself satisfied — the
+# exchange pool drains, the cancel that would end it queues behind the exchanges
+# it is meant to end, and the product cannot tell pool saturation from agent
+# behaviour. The deadline is the bound that actually closes the socket.
+#
+# The clock is injected rather than slept through: a timing test that waits is a
+# flaky test, and 315 s of real waiting is not a suite anyone runs.
+# ---------------------------------------------------------------------------
+
+
+def _clock(*values: float):
+    """A monotonic stand-in that returns each value once, then repeats the last.
+
+    The first value is what ``pinned_request`` records as its start; the rest
+    are what each successive deadline check sees.
+    """
+
+    remaining = list(values)
+    last = [0.0]
+
+    def now() -> float:
+        if remaining:
+            last[0] = remaining.pop(0)
+        return last[0]
+
+    return now
+
+
+class _RecordingStream(httpx.SyncByteStream):
+    """A stream that never ends, and remembers whether it was closed."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.chunks_yielded = 0
+
+    def __iter__(self):
+        while True:
+            self.chunks_yielded += 1
+            yield b"x"
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _deadline_destination():
+    return validate_destination(
+        "https://agent.example.com/rpc", resolver=_pinned_resolver
+    )
+
+
+def test_014_FR_007_the_deadline_trips_while_still_waiting_for_headers() -> None:
+    """An agent that accepts the connection and then says nothing.
+
+    AC-034: without this check the request would sit in the header phase for as
+    long as the read timeout allows on every chunk that never comes, holding an
+    exchange worker that one connection is only allowed two of.
+    """
+
+    stream = _RecordingStream()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=stream)
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with pytest.raises(EgressDeadlineExceeded) as excinfo:
+        pinned_request(
+            method="POST",
+            destination=_deadline_destination(),
+            headers={},
+            json_body={"jsonrpc": "2.0"},
+            timeout_seconds=5,
+            max_response_bytes=4096,
+            client_factory=factory,
+            deadline_seconds=1.0,
+            monotonic=_clock(0.0, 100.0),
+        )
+
+    assert excinfo.value.deadline_seconds == 1.0
+    assert stream.chunks_yielded == 0, "the body must not be read after a breach"
+
+
+def test_014_FR_008_a_drip_feeding_body_trips_the_deadline_and_closes_the_stream() -> (
+    None
+):
+    """One byte per interval satisfies every per-chunk timeout forever.
+
+    AC-034: this is the shape the byte budget cannot catch — the response stays
+    far under the cap while the socket stays open. The stream is closed on
+    breach rather than left to a garbage collector, because the resource being
+    protected is a bounded worker, not memory.
+    """
+
+    stream = _RecordingStream()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=stream)
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with pytest.raises(EgressDeadlineExceeded):
+        pinned_request(
+            method="POST",
+            destination=_deadline_destination(),
+            headers={},
+            json_body={"jsonrpc": "2.0"},
+            timeout_seconds=5,
+            max_response_bytes=1_000_000,
+            client_factory=factory,
+            deadline_seconds=1.0,
+            monotonic=_clock(0.0, 0.1, 0.2, 100.0),
+        )
+
+    assert stream.chunks_yielded >= 1, "the breach must happen inside the body loop"
+    assert stream.closed is True
+
+
+def test_014_FR_007_an_answer_inside_the_deadline_is_still_received() -> None:
+    """SC-006: an agent replying at the very edge of its window is on time.
+
+    A deadline that fired early would report a compliant agent as unreachable —
+    a false claim about someone else's system caused by BrainBuddy's own clock.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": "1", "result": {}})
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    response = pinned_request(
+        method="POST",
+        destination=_deadline_destination(),
+        headers={},
+        json_body={"jsonrpc": "2.0"},
+        timeout_seconds=5,
+        max_response_bytes=4096,
+        client_factory=factory,
+        deadline_seconds=10.0,
+        # Every check lands exactly on the deadline: on time is not late.
+        monotonic=_clock(0.0, 10.0, 10.0, 10.0),
+    )
+
+    assert response.status_code == 200
+
+
+def test_014_FR_008_without_a_deadline_the_per_chunk_timeout_behaviour_is_unchanged() -> (
+    None
+):
+    """The deadline is additive. Every 007 caller passes no deadline and must
+    keep the exact behaviour it has today, including the byte cap."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"x" * 10)
+
+    def factory(**kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(handler), **kwargs)
+
+    assert (
+        pinned_request(
+            method="GET",
+            destination=_deadline_destination(),
+            headers={},
+            json_body=None,
+            timeout_seconds=5,
+            max_response_bytes=4096,
+            client_factory=factory,
+        ).body
+        == b"x" * 10
+    )
+
+    with pytest.raises(DestinationRejected) as excinfo:
+        pinned_request(
+            method="GET",
+            destination=_deadline_destination(),
+            headers={},
+            json_body=None,
+            timeout_seconds=5,
+            max_response_bytes=5,
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "destination_invalid"
+
+
+def test_014_FR_016_a_deadline_breach_is_not_a_destination_rejection() -> None:
+    """They mean different things and map to different run states.
+
+    A destination rejection says BrainBuddy refused to talk to the address; a
+    deadline breach says it talked and got no answer in time. Collapsing them
+    would let an exchange timeout be reported as "not sent" — the one claim that
+    must never be made when a message may already be at the agent.
+    """
+
+    assert not issubclass(EgressDeadlineExceeded, DestinationRejected)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://agent.example.com/result",
+        "https://public.example/looks-fine",
+        "http://169.254.169.254/latest/meta-data/",
+        "javascript:alert(1)",
+    ],
+)
+def test_014_FR_016_result_links_are_never_interactive_under_the_deadline_work(
+    url: str,
+) -> None:
+    """AC-016 (product-owner decision, 2026-09-04): unchanged by feature 014.
+
+    Only syntax is available server-side, and syntax cannot answer where the
+    browser lands when the user clicks minutes later — a publicly-named host can
+    resolve to a private or metadata address at click time. The link is shown as
+    inert text the user copies deliberately.
+    """
+
+    assert interactive_result_link(url) is False

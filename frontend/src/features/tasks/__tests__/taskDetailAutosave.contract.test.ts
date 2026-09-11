@@ -179,6 +179,126 @@ describe("contract-complete task detail autosave controller", () => {
     });
   });
 
+  it("accepts independently revised child projections and reordered parent JSON without pausing edits", async () => {
+    const child = { id: "subtask-1", title: "Check navigation", state: "open" as const, order_key: 1, revision: 1 };
+    const comment = { id: "comment-1", body: "Ready for review", actor_id: "account-a", created_at: "2026-01-01T00:00:00Z", edited_at: null, revision: 1 };
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task({ tag_ids: ["a", "b"] }));
+    controller.change("details", "Local notes", 500);
+    const refreshed = task({ tag_ids: ["b", "a"], subtasks: [child], comments: [comment] });
+    controller.sync(Object.fromEntries(Object.entries(refreshed).reverse()) as unknown as TaskResponse);
+
+    expect(controller.getSnapshot()).toMatchObject({ status: "queued", error: null, draft: { details: "Local notes" }, baseline: { subtasks: [child], comments: [comment] } });
+    controller.discard();
+  });
+
+  it("stays saved when a parent acknowledgement is followed by the full detail projection", async () => {
+    const child = { id: "subtask-1", title: "Check navigation", state: "open" as const, order_key: 1, revision: 1 };
+    const update = vi.spyOn(apiClient, "updateTask").mockResolvedValue(task({ revision: 2, priority: "high" }));
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task({ subtasks: [child] }), () => {
+      controller.sync(task({ revision: 2, priority: "high", subtasks: [child] }));
+    });
+    controller.change("priority", "high");
+    await controller.whenIdle();
+
+    expect(update).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot()).toMatchObject({ status: "saved", error: null, dirtyFields: [], baseline: { subtasks: [child] } });
+    expect(controller.recover()).toBeNull();
+  });
+
+  it.each([false, true])("reconciles a legacy false-protocol journal while preserving later edits: %s", async (hasLaterEdit) => {
+    const origin = "https://api.example.test/api";
+    const key = taskAutosaveStorageKey("account-a", origin, "task-1");
+    sessionStorage.setItem(key, JSON.stringify({
+      version: 1, identity: { accountId: "account-a", apiOrigin: origin, taskId: "task-1" },
+      baseline: task({ revision: 2, priority: "high" }),
+      draft: draft({ priority: "high", details: hasLaterEdit ? "Later edit" : "notes" }),
+      dirty: hasLaterEdit ? { details: { baseValue: "notes", generation: 2, value: "Later edit" } } : {},
+      inFlight: null, barriers: [], status: "failed", conflict: null, retrying: false,
+      error: { kind: "protocol", message: "Server returned contradictory canonical task data", retryAllowed: false, offline: false }
+    }));
+    const update = vi.spyOn(apiClient, "updateTask").mockResolvedValue(task({ revision: 3, priority: "high", details: "Later edit" }));
+    const controller = createTaskDetailAutosaveController("account-a", origin, task({ revision: 2, priority: "high", subtasks: [{ id: "subtask-1", title: "Check navigation", state: "open", order_key: 1, revision: 1 }] }));
+
+    expect(controller.getSnapshot().error).toBeNull();
+    expect(update).not.toHaveBeenCalled();
+    if (hasLaterEdit) {
+      expect(controller.getSnapshot()).toMatchObject({ status: "queued", draft: { details: "Later edit" }, dirtyFields: ["details"] });
+      await controller.resumeRecovery();
+      expect(update).toHaveBeenCalledWith("task-1", { details: "Later edit", expected_revision: 2 }, expect.any(String));
+    }
+    expect(sessionStorage.getItem(key)).toBeNull();
+  });
+
+  it("keeps a protocol refetch paused when parent data contradicts the same revision and preserves the draft", async () => {
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+    controller.change("details", "Local notes", 500);
+    controller.sync(task({ title: "Contradiction" }));
+    const get = vi.spyOn(apiClient, "getTask").mockResolvedValueOnce(task({ title: "Contradiction" })).mockResolvedValueOnce(task());
+    await controller.retryRefetch();
+    expect(controller.getSnapshot()).toMatchObject({ status: "failed", error: { kind: "protocol" }, draft: { details: "Local notes" } });
+    await controller.retryRefetch();
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(controller.getSnapshot()).toMatchObject({ status: "conflicted", error: null, conflict: { latestServerTask: { title: "Task" } }, draft: { details: "Local notes" } });
+    controller.discard();
+  });
+
+  it("returns a recovery failure instead of leaving Retry pending forever", async () => {
+    const update = vi.spyOn(apiClient, "updateTask").mockRejectedValue(new ApiError("invalid", 422, { detail: "Bad input" }));
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+    controller.change("details", "Local notes");
+    await controller.whenPaused();
+    await expect(controller.resumeRecovery()).rejects.toThrow("Bad input");
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(controller.getSnapshot().draft.details).toBe("Local notes");
+  });
+
+  it("publishes a verified newer task after a protocol check with no local edits", async () => {
+    const accepted = vi.fn();
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task(), accepted);
+    controller.sync(task({ title: "Contradiction" }));
+    const canonical = task({ revision: 2, state: "completed", completed_at: "2026-01-02T00:00:00Z" });
+    vi.spyOn(apiClient, "getTask").mockResolvedValue(canonical);
+    await controller.retryRefetch();
+
+    expect(accepted).toHaveBeenCalledWith(canonical);
+    expect(controller.getSnapshot()).toMatchObject({ status: "clean", error: null, baseline: canonical });
+    expect(controller.recover()).toBeNull();
+  });
+
+  it("keeps a queued lifecycle action behind explicit retry after a protocol check", async () => {
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+    controller.sync(task({ title: "Contradiction" }));
+    controller.barrier("complete");
+    const transition = vi.spyOn(apiClient, "transitionTask").mockResolvedValue(task({ revision: 2, state: "completed", completed_at: "2026-01-02T00:00:00Z" }));
+    vi.spyOn(apiClient, "getTask").mockResolvedValue(task());
+    await controller.retryRefetch();
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(controller.getSnapshot()).toMatchObject({ status: "conflicted", conflict: { rejectedCommandKind: "transition" }, barriers: [{ action: "complete" }] });
+    controller.retry();
+    await controller.whenIdle();
+    expect(transition).toHaveBeenCalledWith("task-1", { action: "complete", expected_revision: 1 }, expect.any(String));
+  });
+
+  it("reports a blocked recovery without exposing the protocol diagnostic in the recovery banner", async () => {
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+    controller.sync(task({ title: "Contradiction" }));
+    await expect(controller.resumeRecovery()).rejects.toThrow("The saved version could not be verified. Check it in the task details.");
+    expect(controller.getSnapshot().error?.message).toBe("Server returned contradictory canonical task data");
+  });
+
+  it("does not revive an error when Discard wins a pending protocol check failure", async () => {
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+    controller.sync(task({ title: "Contradiction" }));
+    const refetch = deferred<TaskResponse>();
+    vi.spyOn(apiClient, "getTask").mockReturnValue(refetch.promise);
+    const checking = controller.retryRefetch();
+    controller.discard();
+    refetch.reject(new TypeError("offline"));
+    await checking;
+    expect(controller.getSnapshot()).toMatchObject({ status: "clean", error: null, conflict: null });
+  });
+
   it("rebases only clean fields after 409, keeps dirty base values, and uses a fresh key for explicit retry", async () => {
     const canonical = task({ revision: 2, title: "Server title", project_id: "project-server" });
     const update = vi.spyOn(apiClient, "updateTask")

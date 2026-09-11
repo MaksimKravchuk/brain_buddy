@@ -75,8 +75,34 @@ export function isRunPollable(run: AgentRunResponse): boolean {
   return !run.connection_disconnected && run.dispatch_state !== "not_sent";
 }
 
-export function runPollDelay(pollsSinceChange: number): number {
-  return Math.min(INITIAL_RUN_POLL_MS * 2 ** Math.max(0, pollsSinceChange), MAX_RUN_POLL_MS);
+/**
+ * How long to wait before asking again, given how long nothing has changed.
+ *
+ * The ladder climbs so a quiet run costs less, and the ceiling is the *lower*
+ * of the client's own cap and the server's observation interval. A deployment
+ * that observes every five seconds should be polled every five, not eight —
+ * and one that observes every sixty is still polled at the client cap, because
+ * a read also resets the server's own backoff and a reply's answer can land
+ * between two observations.
+ */
+export function runPollDelay(
+  pollsSinceChange: number,
+  observationIntervalSeconds?: number
+): number {
+  const ceiling =
+    observationIntervalSeconds && observationIntervalSeconds > 0
+      ? Math.min(MAX_RUN_POLL_MS, observationIntervalSeconds * 1000)
+      : MAX_RUN_POLL_MS;
+  return Math.min(INITIAL_RUN_POLL_MS * 2 ** Math.max(0, pollsSinceChange), ceiling);
+}
+
+/** The tightest interval any pollable run in the list asks for. */
+function pollCeilingSeconds(runs: AgentRunResponse[]): number | undefined {
+  const intervals = runs
+    .filter(isRunPollable)
+    .map((run) => run.observation_interval_seconds)
+    .filter((seconds) => typeof seconds === "number" && seconds > 0);
+  return intervals.length ? Math.min(...intervals) : undefined;
 }
 
 function runsSignature(runs: AgentRunResponse[]): string {
@@ -127,7 +153,10 @@ export function useAgentRuns(taskId: string | undefined, enabled: boolean) {
       if (!ladder.current || ladder.current.signature !== signature) {
         ladder.current = { signature, atUpdateCount: query.state.dataUpdateCount };
       }
-      return runPollDelay(query.state.dataUpdateCount - ladder.current.atUpdateCount);
+      return runPollDelay(
+        query.state.dataUpdateCount - ladder.current.atUpdateCount,
+        pollCeilingSeconds(runs)
+      );
     },
     refetchIntervalInBackground: false
   });

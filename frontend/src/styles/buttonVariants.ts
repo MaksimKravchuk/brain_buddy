@@ -5,13 +5,14 @@ export const buttonVariants = cva(
     "inline-flex items-center justify-center gap-2 rounded-lg font-medium",
     "transition-[background-color,border-color,color,box-shadow,transform]",
     "duration-200 ease-smooth",
-    "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60"
+    "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60",
+    "focus-visible:shadow-ring-focus"
   ].join(" "),
   {
     variants: {
       variant: {
         primary:
-          "bg-brand-primary text-white shadow-soft hover:bg-sky-400 hover:shadow-raised",
+          "bg-sky-700 text-white shadow-soft hover:bg-sky-800 hover:shadow-raised",
         secondary:
           "border border-slate-200 bg-white text-slate-700 shadow-soft hover:border-slate-300 hover:text-slate-900 hover:shadow-raised",
         danger:

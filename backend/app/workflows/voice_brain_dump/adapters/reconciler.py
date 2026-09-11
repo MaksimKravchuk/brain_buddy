@@ -12,7 +12,7 @@ import json
 import re
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Literal
 
 import httpx
@@ -23,7 +23,12 @@ from app.exceptions import (
     ProviderTerminalError,
     ValidationFailure,
 )
-from app.workflows.voice_brain_dump.domain import ProposalPatch, ReconciledProposal
+from app.workflows.voice_brain_dump.domain import (
+    PatchOperation,
+    ProposalPatch,
+    ReconciledProposal,
+    normalized_title,
+)
 from app.workflows.voice_brain_dump.language_fidelity import title_is_language_faithful
 from app.workflows.voice_brain_dump.providers import (
     ReconcileResult,
@@ -32,6 +37,9 @@ from app.workflows.voice_brain_dump.providers import (
 
 _DEFAULT_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 _Operation = Literal["add", "update", "split", "merge", "remove", "supersede"]
+_STRUCTURAL_OPERATIONS: frozenset[str] = frozenset(
+    {"add", "split", "merge", "supersede"}
+)
 
 
 class _SemanticGroundingFailure(ValidationFailure):
@@ -133,6 +141,18 @@ def _strict_response_schema(
 Completion = Callable[[dict[str, object]], dict[str, object]]
 
 
+@dataclass(frozen=True, slots=True)
+class _DuplicateOf:
+    """A structural draft that restates a title this envelope already minted.
+
+    Carries the index of the surviving patch so the duplicate's cited segments
+    can be folded into it: the second utterance keeps its provenance even though
+    it does not become a second card.
+    """
+
+    patch_index: int
+
+
 @dataclass(slots=True)
 class _MaterializedOperations:
     """Surviving patches, their originating drafts, and skipped-op reasons.
@@ -153,8 +173,12 @@ class OpenAITextReconciler:
 
     api_key: str = field(repr=False)
     model: str = "gpt-4o"
-    template_version: str = "brain-dump-reconciler-v2"
+    template_version: str = "brain-dump-reconciler-v3"
     """Safe, configured identifier for the system prompt in ``_payload``.
+
+    v3 phrases every title as a GTD next action (verb first, discourse fillers
+    dropped, one proposal per distinct action) and pairs that with the
+    server-side filler/duplicate guards in ``_materialize``.
 
     Bump this whenever the system/response-schema prompt text materially
     changes, so persisted provider runs and receipts (ADR-0002 audit
@@ -282,8 +306,17 @@ class OpenAITextReconciler:
                         "a filler or self-correction, or modifies an existing proposal. "
                         "Reminder and note phrasings (for example «напомни…», "
                         '"remind me…", «запиши…») are actionable task '
-                        "creates. Keep each title concise: the core action and its "
-                        "object, phrased as in the source. Do not append deadlines, "
+                        "creates. Phrase every title as a GTD next action: it starts with the "
+                        "concrete action verb (Russian infinitive, English base form) followed "
+                        "by its object, for example «Купить молоко», «Сходить в магазин», "
+                        '"Call the dentist". Drop discourse fillers, hesitations and modal '
+                        "scaffolding that carry no action («так», «ну», «значит», «надо», "
+                        '«нужно», "so", "um", "I need to"); a fragment with no action, such as '
+                        "«Так» or «Надо», is never a task. Emit each distinct action once: when "
+                        "the transcript repeats or rephrases the same action and object, produce "
+                        "one proposal citing every segment that states it, never a duplicate. "
+                        "Keep each title concise: the core action and its "
+                        "object, using the words spoken in the source. Do not append deadlines, "
                         "dates, times, contexts, tags, labels, project names, or note "
                         "text to the title unless the title would be meaningless "
                         "without them. New "
@@ -374,18 +407,45 @@ class OpenAITextReconciler:
         drafts: list[_OperationDraft] = []
         skipped: list[str] = []
         allocated_ids: set[str] = set(existing)
+        # One proposal per distinct action. ``active_titles`` follows what each
+        # active proposal is titled *as this envelope unfolds* (an earlier
+        # update renames it, an earlier remove or structural predecessor
+        # retires it); ``minted`` pairs each title this envelope produced with
+        # its patch index so a later duplicate can hand over its provenance.
+        active_titles: dict[str, str] = {
+            proposal_id: proposal.title
+            for proposal_id, proposal in existing.items()
+            if not proposal.tombstoned
+        }
+        minted: list[tuple[str, int]] = []
 
         for index, draft in enumerate(operations):
             try:
                 self._validate_draft(draft, existing, known_segments, source_text_by_id)
+                outcome = self._dedupe_draft(draft, active_titles, minted)
             except _SemanticGroundingFailure as exc:
                 # One hallucinated/ungrounded task: drop it and keep its
                 # well-formed siblings. Protocol violations are not caught here
                 # and still fail the whole call below.
                 skipped.append(str(exc))
                 continue
+            if isinstance(outcome, _DuplicateOf):
+                patches[outcome.patch_index] = self._fold_duplicate(
+                    patches[outcome.patch_index], draft
+                )
+                skipped.append(
+                    "duplicate task title within one reconciliation; its cited "
+                    + (
+                        "segments and predecessors"
+                        if draft.predecessor_ids
+                        else "segments"
+                    )
+                    + " were folded into the surviving proposal."
+                )
+                continue
+            draft = outcome
             proposal_id = draft.proposal_id
-            if draft.operation in {"add", "split", "merge", "supersede"}:
+            if draft.operation in _STRUCTURAL_OPERATIONS:
                 collision_offset = 0
                 proposal_id = self._server_id(
                     request.operation_id, index + collision_offset, draft
@@ -409,6 +469,16 @@ class OpenAITextReconciler:
                 )
             )
             drafts.append(draft)
+            if draft.operation == "remove":
+                # A removal retires a title; it never claims one.
+                continue
+            minted_title = (
+                draft.title
+                if draft.title is not None
+                else (existing[proposal_id].title if proposal_id in existing else None)
+            )
+            if minted_title is not None:
+                minted.append((minted_title, len(patches) - 1))
         if not patches and skipped:
             raise ValidationFailure(
                 "All reconciler operations were dropped as ungrounded: "
@@ -417,13 +487,163 @@ class OpenAITextReconciler:
         return _MaterializedOperations(patches=patches, drafts=drafts, skipped=skipped)
 
     @staticmethod
+    def _fold_duplicate(
+        survivor: ProposalPatch, draft: _OperationDraft
+    ) -> ProposalPatch:
+        """Fold a duplicate's provenance -- and its lineage -- into the survivor.
+
+        A duplicate ``add`` only contributes the segments it cited. A duplicate
+        structural operation also names the predecessors the model meant to
+        retire; dropping them with the operation would leave those proposals
+        active beside the survivor, so the survivor inherits them: an ``add``
+        survivor becomes the structural operation itself, and two structural
+        operations converging on one title become a ``merge`` of every
+        predecessor either of them named. The projection tombstones every
+        predecessor a patch lists, whatever its operation.
+        """
+
+        source_segment_ids = [
+            *survivor.source_segment_ids,
+            *(
+                segment_id
+                for segment_id in draft.source_segment_ids
+                if segment_id not in survivor.source_segment_ids
+            ),
+        ]
+        predecessor_ids = [
+            *survivor.predecessor_ids,
+            *(
+                predecessor_id
+                for predecessor_id in draft.predecessor_ids
+                if predecessor_id not in survivor.predecessor_ids
+            ),
+        ]
+        operation: PatchOperation = survivor.operation
+        if (
+            draft.operation in _STRUCTURAL_OPERATIONS
+            and predecessor_ids != survivor.predecessor_ids
+        ):
+            if survivor.operation == "add":
+                operation = draft.operation
+            elif len(predecessor_ids) >= 2:
+                operation = "merge"
+        return replace(
+            survivor,
+            operation=operation,
+            source_segment_ids=source_segment_ids,
+            predecessor_ids=predecessor_ids,
+        )
+
+    @staticmethod
+    def _dedupe_draft(
+        draft: _OperationDraft,
+        active_titles: dict[str, str],
+        minted: list[tuple[str, int]],
+    ) -> _OperationDraft | _DuplicateOf:
+        """Enforce one proposal per distinct action across the whole envelope.
+
+        ``active_titles`` is kept current as operations are accepted, so an
+        earlier rename or removal is honoured by later operations. A structural
+        operation restating a title this envelope already minted is a
+        ``_DuplicateOf`` the survivor (its provenance is folded in). An ``add``
+        whose title an untouched active proposal already carries is not a new
+        task but the model re-deriving that proposal from the accurate
+        transcript: it is rewritten into an ``update`` that affirms the existing
+        proposal (reconciler-touched, citing the accurate segments) instead of
+        minting a twin -- or failing the whole call when it was the only
+        operation. Any other collision with an active title is dropped.
+        """
+
+        if draft.operation == "remove":
+            active_titles.pop(draft.proposal_id or "", None)
+            return draft
+        if draft.title is None:
+            return draft
+        equivalent = OpenAITextReconciler._titles_equivalent
+        duplicate_reason = (
+            "duplicate task title within one reconciliation; the same action "
+            "and object is proposed only once."
+        )
+        if draft.operation == "update":
+            if any(
+                proposal_id != draft.proposal_id and equivalent(title, draft.title)
+                for proposal_id, title in active_titles.items()
+            ):
+                raise _SemanticGroundingFailure(duplicate_reason)
+            if draft.proposal_id is not None:
+                active_titles[draft.proposal_id] = draft.title
+            return draft
+        for predecessor_id in draft.predecessor_ids:
+            active_titles.pop(predecessor_id, None)
+        for title, patch_index in minted:
+            if equivalent(title, draft.title):
+                return _DuplicateOf(patch_index)
+        twin = next(
+            (
+                proposal_id
+                for proposal_id, title in active_titles.items()
+                if equivalent(title, draft.title)
+            ),
+            None,
+        )
+        if twin is None:
+            return draft
+        if draft.operation == "add":
+            return draft.model_copy(
+                update={
+                    "operation": "update",
+                    "proposal_id": twin,
+                    "title": None,
+                    "predecessor_ids": [],
+                    "base_revision": None,
+                }
+            )
+        raise _SemanticGroundingFailure(duplicate_reason)
+
+    @staticmethod
+    def _title_content_tokens(title: str) -> list[str]:
+        """The tokens of a title that carry its action and object.
+
+        Negation markers are kept (they change meaning); modal/prefix
+        scaffolding, discourse fillers and bare articles are not content.
+        """
+
+        skip = (
+            OpenAITextReconciler._ACTION_PREFIX_TERMS
+            | OpenAITextReconciler._DISCOURSE_FILLER_TERMS
+            | {"a", "an", "the"}
+        )
+        return [
+            token
+            for token in re.findall(r"[^\W\d_]+", title.casefold(), flags=re.UNICODE)
+            if token not in skip
+        ]
+
+    @staticmethod
+    def _titles_equivalent(first: str, second: str) -> bool:
+        """Whether two titles name the same action and object.
+
+        Exact content tokens after dropping scaffolding, fillers, articles,
+        quotes, punctuation and case -- «Купить молоко.», «купить  молоко» and
+        "Call the dentist"/"Call dentist" are one task. Deliberately not
+        morphology-tolerant: a wrongly merged task is lost, a wrongly kept one
+        is merely a second card.
+        """
+
+        left = OpenAITextReconciler._title_content_tokens(first)
+        right = OpenAITextReconciler._title_content_tokens(second)
+        if left and right:
+            return left == right
+        return normalized_title(first) == normalized_title(second)
+
+    @staticmethod
     def _validate_draft(
         draft: _OperationDraft,
         existing: dict[str, ReconciledProposal],
         known_segments: set[str],
         source_text_by_id: dict[str, str],
     ) -> None:
-        structural = {"add", "split", "merge", "supersede"}
+        structural = _STRUCTURAL_OPERATIONS
         if draft.operation in structural and draft.proposal_id is not None:
             raise ValidationFailure("New reconciler proposal IDs are server-owned.")
         if (
@@ -465,8 +685,20 @@ class OpenAITextReconciler:
             raise ValidationFailure("Reconciler used unknown transcript provenance.")
         if draft.operation == "add" and draft.predecessor_ids:
             raise ValidationFailure("Add cannot carry predecessors.")
+        # Protocol checks above fail the whole call; from here on a defect is
+        # one hallucinated task and only that operation is dropped.
+        if not OpenAITextReconciler._title_names_an_action(draft.title):
+            # A discourse fragment («Так», «Надо», "so um") names no action or
+            # object. It can pass token grounding because the same filler is
+            # spoken in the cited utterance, so it is rejected here as its own
+            # skip reason; well-formed siblings in the same envelope survive.
+            raise _SemanticGroundingFailure(
+                "unsupported task title carries no action or object; a discourse "
+                "filler is never a task."
+            )
         if draft.operation in structural and any(
-            proposal.tombstoned and proposal.title.casefold() == draft.title.casefold()
+            proposal.tombstoned
+            and OpenAITextReconciler._titles_equivalent(proposal.title, draft.title)
             for proposal in existing.values()
         ):
             raise _SemanticGroundingFailure(
@@ -635,6 +867,43 @@ class OpenAITextReconciler:
         }
     )
 
+    # Discourse fillers, hesitations and sequencing words that open a spoken
+    # clause («Так, надо купить молоко», "so um call the dentist", «потом
+    # позвонить маме»). Consulted only by ``_title_names_an_action``: a title
+    # made of nothing but these (plus negation/prefix scaffolding) names no
+    # action or object and is never a task. Deliberately NOT folded into
+    # ``_ACTION_PREFIX_TERMS`` -- that set also decides which clause token is
+    # the predicate for grounding's identity anchors, and widening it there
+    # changes what grounds.
+    _DISCOURSE_FILLER_TERMS = frozenset(
+        {
+            "so",
+            "okay",
+            "ok",
+            "well",
+            "um",
+            "uh",
+            "hmm",
+            "yeah",
+            "also",
+            "then",
+            "and",
+            "так",
+            "ну",
+            "вот",
+            "значит",
+            "итак",
+            "ладно",
+            "короче",
+            "ещё",
+            "еще",
+            "потом",
+            "затем",
+            "и",
+            "а",
+        }
+    )
+
     # Action changes are material intent changes. The reconciler may normalize
     # only an explicitly listed equivalent, never infer that matching objects
     # make arbitrary verbs interchangeable. Action recognition itself must not
@@ -664,6 +933,20 @@ class OpenAITextReconciler:
         ("так", "нет"),
         ("то", "есть"),
     )
+
+    @staticmethod
+    def _title_names_an_action(title: str) -> bool:
+        """Whether a title carries any lexical predicate or object at all.
+
+        Negation markers, the modal/prefix scaffolding and discourse fillers are
+        not content; a title made only of those («Так», «Ну надо», "so um") has
+        nothing left to bind to a spoken action and is not a task.
+        """
+
+        action, _, _ = OpenAITextReconciler._action_predicate(
+            OpenAITextReconciler._title_content_tokens(title)
+        )
+        return action is not None
 
     @staticmethod
     def _tokens_equivalent(first: str, second: str) -> bool:

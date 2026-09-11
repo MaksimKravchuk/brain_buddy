@@ -21,8 +21,8 @@ import {
   X
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
-import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from "react";
+import { Link, NavLink, useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router-dom";
 
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
 import { useAuthStore } from "../../stores/authStore";
@@ -30,8 +30,9 @@ import { ShellToastContext } from "./shellToast";
 
 interface AppShellProps {
   children: ReactNode;
-  /** Right-side detail panel (prototype `bbs-detail`), rendered beside the content pane. */
+  /** Overlay detail surface, outside the inert workspace. */
   panel?: ReactNode;
+  panelModal?: boolean;
   counts: TaskCounts;
   projects: ProjectResponse[];
   tags: TagResponse[];
@@ -46,10 +47,7 @@ interface AppShellProps {
   onDeleteTag?: (tag: TagResponse) => void;
 }
 
-type SidebarProps = AppShellProps & {
-  weeklyReviewOpen: boolean;
-  onOpenWeeklyReview: () => void;
-};
+type SidebarProps = AppShellProps;
 
 const listItems: Array<{ state: OpenTaskState; label: string; icon: ComponentType<{ className?: string }> }> = [
   { state: "inbox", label: "Inbox", icon: Inbox },
@@ -84,12 +82,16 @@ export function SoonChip(): React.JSX.Element {
 }
 
 export function AppShell(props: AppShellProps): React.JSX.Element {
-  const { children, panel } = props;
+  const { children, panel, panelModal } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navigationTriggerRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
+  const closeDrawer = useCallback(() => {
+    setIsDrawerOpen(false);
+    navigationTriggerRef.current?.focus();
+  }, []);
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -108,30 +110,28 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    setWeeklyReviewOpen(false);
-  }, [location.pathname, location.search]);
-
-  const sidebarProps: SidebarProps = {
-    ...props,
-    weeklyReviewOpen,
-    onOpenWeeklyReview: () => setWeeklyReviewOpen(true)
-  };
+    // Browser history can select a task while navigation is open. Do not leave
+    // that drawer active behind the sheet; typing a search keeps it open.
+    setIsDrawerOpen(false);
+  }, [location.pathname]);
 
   return (
     <ShellToastContext.Provider value={notify}>
       <div className="min-h-screen bg-surface-base text-slate-900">
-        <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} />
-        <DeletionCancelledBanner />
-        <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
-          <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
-            <Sidebar {...sidebarProps} />
-          </aside>
-          <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 lg:pb-16 lg:pt-8">
-            {weeklyReviewOpen ? <WeeklyReviewPlaceholder /> : children}
-          </main>
-          {weeklyReviewOpen ? null : panel}
+        <div inert={panelModal}>
+          <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} navigationTriggerRef={navigationTriggerRef} />
+          <DeletionCancelledBanner />
+          <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
+            <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
+              <Sidebar {...props} />
+            </aside>
+            <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 lg:pb-16 lg:pt-8">
+              {children}
+            </main>
+          </div>
+          <NavigationDrawer {...props} open={isDrawerOpen} onClose={closeDrawer} />
         </div>
-        <NavigationDrawer {...sidebarProps} open={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
+        {panel}
         {toast ? (
           <div
             role="status"
@@ -145,27 +145,6 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
   );
 }
 
-function WeeklyReviewPlaceholder(): React.JSX.Element {
-  return (
-    <section aria-label="Weekly review placeholder" className="mx-auto max-w-[760px]">
-      <div className="flex flex-col items-center gap-2 rounded-xl border-[1.5px] border-dashed border-slate-300 px-8 py-14 text-center">
-        <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-info-bg text-brand-primary">
-          <RotateCcw className="h-[26px] w-[26px]" aria-hidden />
-        </div>
-        <h2 className="m-0 text-[28px] font-semibold leading-[1.15] tracking-[-0.02em] text-slate-900">
-          Weekly review — coming soon
-        </h2>
-        <p className="m-0 max-w-[400px] text-sm leading-normal text-slate-500">
-          A guided pass over your lists — empty the inbox, refresh next actions, decide on the somedays. We&apos;re
-          still building this one.
-        </p>
-        <span className="mt-3 rounded-full bg-surface-sunken px-2.5 py-[3px] text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
-          Placeholder — not designed yet
-        </span>
-      </div>
-    </section>
-  );
-}
 
 function DeletionCancelledBanner(): React.JSX.Element | null {
   const notice = useAuthStore((state) => state.deletionCancelledNotice);
@@ -313,13 +292,25 @@ function AccountMenu(): React.JSX.Element {
   );
 }
 
-function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): React.JSX.Element {
+function TaskSearch({ className, onSubmit }: { className: string; onSubmit?: () => void }): React.JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const searchQuery = searchParams.get("q") ?? "";
+  const navigationType = useNavigationType();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [searchValue, setSearchValue] = useState(searchQuery);
+
+  useEffect(() => {
+    // Router transitions must not replace text still being typed. History
+    // navigation and the inactive search surface still follow the URL.
+    if (navigationType !== "REPLACE" || document.activeElement !== searchInputRef.current) {
+      setSearchValue(searchQuery);
+    }
+  }, [searchQuery, navigationType]);
 
   const updateSearch = (value: string) => {
+    setSearchValue(value);
     const next = new URLSearchParams(searchParams);
     if (value.trim()) {
       next.set("q", value.trim());
@@ -330,37 +321,65 @@ function TopBar({ onOpenDrawer }: { onOpenDrawer: () => void }): React.JSX.Eleme
   };
 
   return (
+    <form
+      role="search"
+      className={className}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit?.();
+      }}
+    >
+      <label className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-lg border border-transparent bg-surface-sunken px-3 text-slate-500 transition-colors duration-200 ease-smooth focus-within:border-sky-700 focus-within:bg-white md:h-[34px]">
+        <Search className="h-[15px] w-[15px] shrink-0" aria-hidden />
+        <input
+          ref={searchInputRef}
+          type="search"
+          placeholder="Search tasks"
+          aria-label="Search tasks"
+          value={searchValue}
+          onChange={(event) => updateSearch(event.currentTarget.value)}
+          className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 placeholder:text-slate-500"
+        />
+      </label>
+      {onSubmit ? (
+        <button type="submit" className="h-11 rounded-lg bg-sky-700 px-3 text-sm font-medium text-white hover:bg-sky-800">
+          Search
+        </button>
+      ) : null}
+    </form>
+  );
+}
+
+function TopBar({ onOpenDrawer, navigationTriggerRef }: {
+  onOpenDrawer: () => void;
+  navigationTriggerRef: RefObject<HTMLButtonElement | null>;
+}): React.JSX.Element {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  return (
     <header
-      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:gap-4 sm:px-5"
+      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
       style={{ height: "56px" }}
     >
       <button
+        ref={navigationTriggerRef}
         type="button"
-        className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 lg:hidden"
+        className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 max-[359px]:shrink-0 lg:hidden"
         aria-label="Open task navigation"
         onClick={onOpenDrawer}
       >
         <Menu className="h-5 w-5" />
       </button>
       <Link to="/tasks/next" className="flex shrink-0 items-center gap-2 whitespace-nowrap text-sm font-semibold tracking-[-0.005em] text-slate-900 sm:text-[15px]">
-        <Sprout className="h-[22px] w-[22px] text-brand-primary" aria-hidden />
-        <span>Brain Buddy</span>
+        <Sprout className="h-[22px] w-[22px] text-brand-primary max-[359px]:hidden" aria-hidden />
+        <span>BrainBuddy</span>
       </Link>
-      <label className="hidden h-[34px] w-[340px] max-w-[32vw] items-center gap-2 rounded-lg border border-transparent bg-surface-sunken px-3 text-slate-400 transition-colors duration-200 ease-smooth focus-within:border-brand-primary focus-within:bg-white md:flex">
-        <Search className="h-[15px] w-[15px] shrink-0" aria-hidden />
-        <input
-          type="search"
-          placeholder="Search tasks"
-          aria-label="Search tasks"
-          value={searchQuery}
-          onChange={(event) => updateSearch(event.currentTarget.value)}
-          className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 placeholder:text-slate-400"
-        />
-      </label>
-      <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+      <TaskSearch className="hidden w-[340px] max-w-[32vw] md:flex" />
+      <div className="ml-auto flex shrink-0 items-center gap-2 max-[359px]:gap-1 sm:gap-3">
         <button
           type="button"
-          className="inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-brand-primary px-3 text-sm font-medium text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-brand-primary-hover active:scale-[0.98] sm:px-4"
+          className="inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-sky-700 px-3 text-sm font-medium text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-sky-800 active:scale-[0.98] max-[359px]:px-2 sm:px-4"
           // Stamping the current location makes brain dump open as a modal over
           // this view instead of replacing it — see AppRoutes.
           onClick={() => navigate("/brain-dump/new", { state: { backgroundLocation: location } })}
@@ -413,11 +432,12 @@ function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): R
             <X className="h-5 w-5" />
           </button>
         </div>
+        <TaskSearch className="mb-3 flex gap-2 px-2 md:hidden" onSubmit={onClose} />
         <div
           className="min-h-0 flex-1 overflow-y-auto"
           onClick={(event) => {
             const target = event.target as HTMLElement;
-            if (target.closest("a, [data-drawer-dismiss]")) {
+            if (target.closest("a")) {
               onClose();
             }
           }}
@@ -441,9 +461,7 @@ function Sidebar({
   onArchiveProject,
   onCreateTag,
   onRenameTag,
-  onDeleteTag,
-  weeklyReviewOpen,
-  onOpenWeeklyReview
+  onDeleteTag
 }: SidebarProps): React.JSX.Element {
   const [newProjectName, setNewProjectName] = useState("");
   const [projectEdits, setProjectEdits] = useState<Record<string, string>>({});
@@ -466,13 +484,13 @@ function Sidebar({
           <li key={item.state}>
             <NavLink
               to={`/tasks/${item.state}`}
-              className={({ isActive }) => navRowClass(!weeklyReviewOpen && (isActive || activeState === item.state))}
+              className={({ isActive }) => navRowClass(isActive || activeState === item.state)}
             >
               <item.icon className="h-4 w-4 shrink-0" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
               {item.state === "inbox" ? (
                 counts.inbox > 0 ? (
-                  <span className="inline-flex h-[18px] min-w-[20px] items-center justify-center rounded-full bg-brand-primary px-1.5 text-[11px] font-semibold text-white">
+                  <span className="inline-flex h-[18px] min-w-[20px] items-center justify-center rounded-full bg-sky-700 px-1.5 text-[11px] font-semibold text-white">
                     {counts.inbox}
                   </span>
                 ) : null
@@ -485,10 +503,9 @@ function Sidebar({
         <li>
           <button
             type="button"
-            aria-label="Weekly review"
-            data-drawer-dismiss
-            className={navRowClass(weeklyReviewOpen)}
-            onClick={onOpenWeeklyReview}
+            disabled
+            aria-label="Weekly review — Coming soon"
+            className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
           >
             <RotateCcw className="h-4 w-4 shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 truncate">Weekly review</span>
@@ -514,7 +531,7 @@ function Sidebar({
         <ul className="space-y-0.5">
           {dateItems.map((item) => (
             <li key={item.path}>
-              <NavLink to={item.path} className={({ isActive }) => navRowClass(!weeklyReviewOpen && isActive)}>
+              <NavLink to={item.path} className={({ isActive }) => navRowClass(isActive)}>
                 <item.icon className="h-4 w-4 shrink-0" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </NavLink>
@@ -535,7 +552,7 @@ function Sidebar({
                   <NavLink
                     to={`/projects/${project.id}`}
                     className={`flex min-h-[34px] w-full items-start gap-2.5 rounded-lg px-2.5 py-[7px] pr-7 text-sm font-medium transition-colors duration-200 ease-smooth ${
-                      !weeklyReviewOpen && activeProjectId === project.id
+                      activeProjectId === project.id
                         ? "bg-white text-slate-900 shadow-soft"
                         : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
                     }`}
@@ -582,7 +599,7 @@ function Sidebar({
                               }}
                             />
                             <div className="flex gap-1.5">
-                              <button type="submit" className="flex-1 rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white">
+                              <button type="submit" className="flex-1 rounded-md bg-sky-700 px-2 py-1.5 text-xs font-semibold text-white">
                                 Rename
                               </button>
                               <button
@@ -613,7 +630,7 @@ function Sidebar({
                 type="button"
                 aria-label="New project"
                 aria-expanded={openPopover === "new-project"}
-                className="flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-600"
+                className="flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900"
                 onClick={() => setOpenPopover(openPopover === "new-project" ? null : "new-project")}
               >
                 <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -647,7 +664,7 @@ function Sidebar({
                     />
                     <button
                       type="submit"
-                      className="rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      className="rounded-md bg-sky-700 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
                       disabled={!newProjectName.trim()}
                     >
                       Add
@@ -677,7 +694,7 @@ function Sidebar({
                       to={`/tags/${tag.id}`}
                       title={tag.name}
                       className={`max-w-full truncate rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors duration-200 ease-smooth ${
-                        !weeklyReviewOpen && activeTagId === tag.id
+                        activeTagId === tag.id
                           ? "border-brand-primary bg-info-bg text-info-fg"
                           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
                       }`}
@@ -725,7 +742,7 @@ function Sidebar({
                               }}
                             />
                             <div className="flex gap-1.5">
-                              <button type="submit" className="flex-1 rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white">
+                              <button type="submit" className="flex-1 rounded-md bg-sky-700 px-2 py-1.5 text-xs font-semibold text-white">
                                 Rename
                               </button>
                               <button
@@ -755,7 +772,7 @@ function Sidebar({
                 type="button"
                 aria-label="New tag"
                 aria-expanded={openPopover === "new-tag"}
-                className="rounded-full border border-dashed border-slate-300 bg-transparent px-2.5 py-[3px] text-xs font-medium text-slate-400 transition-colors duration-200 ease-smooth hover:border-slate-400 hover:text-slate-600"
+                className="rounded-full border border-dashed border-slate-300 bg-transparent px-2.5 py-[3px] text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:border-slate-400 hover:text-slate-900"
                 onClick={() => setOpenPopover(openPopover === "new-tag" ? null : "new-tag")}
               >
                 New tag
@@ -788,7 +805,7 @@ function Sidebar({
                     />
                     <button
                       type="submit"
-                      className="rounded-md bg-brand-primary px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      className="rounded-md bg-sky-700 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
                       disabled={!newTagName.trim()}
                     >
                       Add
