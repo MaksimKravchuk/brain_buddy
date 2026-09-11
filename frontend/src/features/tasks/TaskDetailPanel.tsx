@@ -664,13 +664,11 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
       if (trigger?.isConnected && !trigger.closest("[inert]")) trigger.focus({ preventScroll: true });
     });
   };
-  const dispatchedHandoff = (run: AgentRunResponse) => {
-    if (user) {
-      rememberTaskAgentPreference(
-        { ownerId: user.id, apiOrigin: getTaskCacheScope(user.id).apiOrigin },
-        run.connection_id
-      );
-    }
+  const dispatchedHandoff = (ownerId: string, run: AgentRunResponse) => {
+    rememberTaskAgentPreference(
+      { ownerId, apiOrigin: getTaskCacheScope(ownerId).apiOrigin },
+      run.connection_id
+    );
     closeHandoff();
   };
   const runsQuery = useAgentRuns(task.id, Boolean(user));
@@ -683,7 +681,7 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
   // read is rolling out independently. Fail closed to an empty monitor rather
   // than crashing the entire task panel.
   const runs = Array.isArray(runsQuery.data) ? runsQuery.data : [];
-  const canStartHandoff = handoffEnabled && !isTerminal;
+  const canStartHandoff = handoffEnabled && !isTerminal && runsQuery.isSuccess && runs.length === 0;
   const latestRun = newestRun(runs);
 
   return (
@@ -735,12 +733,12 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
         handoffEnabled={handoffEnabled}
       />
 
-      {active && reviewing && canStartHandoff ? createPortal(
+      {user && active && reviewing && canStartHandoff ? createPortal(
         <AgentHandoffOverlay
           taskId={task.id}
           taskTitle={task.title}
           onClose={closeHandoff}
-          onDispatched={dispatchedHandoff}
+          onDispatched={(run) => dispatchedHandoff(user.id, run)}
         />, document.body
       ) : null}
     </>

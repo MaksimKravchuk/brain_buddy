@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { useAgentConnections, useAgentRunSummaries } from "../../api/agentHooks";
+import { useAgentConnections, useAgentKeys, useAgentRunSummaries } from "../../api/agentHooks";
 import { hasFeatureFlag } from "../../api/auth";
 import type { AgentConnectionResponse, AgentRunResponse, AgentRunSummaryResponse } from "../../api/agentTypes";
 
@@ -176,6 +176,16 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const detailQuery = useTaskDetail(taskId);
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
+  const projects = projectsQuery.data ?? emptyProjects;
+  const tags = tagsQuery.data ?? emptyTags;
+  const tasks = taskQuery.data?.items ?? [];
+  const openTasks = tasks.filter((task) => task.state !== "completed" && task.state !== "cancelled");
+  const completedTasks = tasks.filter((task) => task.state === "completed");
+  const cancelledTasks = tasks.filter((task) => task.state === "cancelled");
+  const openGroups = groupByProject ? groupTasksByProject(openTasks, projects) : [];
+  const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
+  const selectedTaskVisible = Boolean(taskId && tasks.some((task) => task.id === taskId));
+  const projectsRecoveryPending = projectsQuery.isLoading || (projectsQuery.isError && projectsQuery.data === undefined);
 
   useEffect(() => {
     const previousTaskId = previousTaskIdRef.current;
@@ -191,7 +201,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         if (requestedControl && !requestedControl.disabled) requestedControl.focus({ preventScroll: true });
         else detailHeadingRef.current?.parentElement?.querySelector<HTMLButtonElement>("[data-task-navigation]:not(:disabled)")?.focus({ preventScroll: true });
         focusSettledTaskIdRef.current = taskId;
-      } else if (focusSettledTaskIdRef.current !== taskId && detailHeadingRef.current) {
+      } else if (selectedTaskVisible && focusSettledTaskIdRef.current !== taskId && detailHeadingRef.current) {
         detailHeadingRef.current?.focus({ preventScroll: true });
         focusSettledTaskIdRef.current = taskId;
       }
@@ -205,16 +215,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       focusSettledTaskIdRef.current = undefined;
     }
     previousTaskIdRef.current = taskId;
-  }, [detailQuery.data, taskId]);
-
-  const projects = projectsQuery.data ?? emptyProjects;
-  const tags = tagsQuery.data ?? emptyTags;
-  const tasks = taskQuery.data?.items ?? [];
-  const openTasks = tasks.filter((task) => task.state !== "completed" && task.state !== "cancelled");
-  const completedTasks = tasks.filter((task) => task.state === "completed");
-  const cancelledTasks = tasks.filter((task) => task.state === "cancelled");
-  const openGroups = groupByProject ? groupTasksByProject(openTasks, projects) : [];
-  const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
+  }, [detailQuery.data, selectedTaskVisible, taskId]);
 
   const user = useAuthStore((store) => store.user);
   const accountId = user?.id;
@@ -478,6 +479,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   // an unknown assigned task could be dispatched twice.
   const hasOwner = Boolean(user);
   const relayEnabled = hasFeatureFlag(user, "external_agent_relay");
+  const agentKeys = useAgentKeys();
   const agentRunSummariesQuery = useAgentRunSummaries(tasks.map((task) => task.id), hasOwner);
   const agentRunSummaries = agentRunSummariesQuery.data ?? emptyAgentRunSummaries;
   const agentHandoffEnabled = relayEnabled && agentRunSummariesQuery.isSuccess;
@@ -510,7 +512,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     const taskToFocus = rowHandoff?.task.id;
     setRowHandoff(null);
     setAgentFocusTaskId(taskToFocus ?? null);
-    void queryClient.invalidateQueries({ queryKey: ["agents"] });
+    void queryClient.invalidateQueries({ queryKey: agentKeys.connections() });
   };
 
   // Shared by the flat list and by every project group, so the two render paths
@@ -603,7 +605,6 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   ) : null;
 
   const currentRouteKey = `${listPath}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
-  const selectedTaskVisible = Boolean(taskId && tasks.some((task) => task.id === taskId));
 
   useEffect(() => {
     if (!taskId || selectedTaskVisible) {
@@ -646,7 +647,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         recoveryAttemptRef.current = attempt;
       }
     }
-    if (attempt.stopped || taskQueryIsLoading || taskQueryIsFetchingNextPage || projectsQuery.isLoading) return;
+    if (attempt.stopped || taskQueryIsLoading || taskQueryIsFetchingNextPage || projectsRecoveryPending) return;
 
     if (!attempt.redirected) {
       const target = canonicalTaskTarget({
@@ -698,7 +699,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     navigate,
     projectId,
     projects,
-    projectsQuery.isLoading,
+    projectsRecoveryPending,
     searchParams,
     state,
     tagId,

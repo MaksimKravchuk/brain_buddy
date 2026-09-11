@@ -98,7 +98,7 @@ function renderOverlay(onDispatched = vi.fn(), onClose = vi.fn()) {
       />
     </QueryClientProvider>
   );
-  return { onClose, onDispatched };
+  return { client, onClose, onDispatched };
 }
 
 async function selectReadyAgent(user: ReturnType<typeof userEvent.setup>): Promise<void> {
@@ -465,8 +465,16 @@ describe("AgentHandoffOverlay", () => {
   it("dispatches exactly the reviewed manifest token under an idempotency key", async () => {
     const confirm = vi.spyOn(apiClient, "confirmAgentHandoff").mockResolvedValue(dispatchedRun);
     const user = userEvent.setup();
-    const { onDispatched } = renderOverlay();
+    const { client, onDispatched } = renderOverlay();
     await selectReadyAgent(user);
+    const connectionKey = client.getQueryCache().getAll()
+      .find((query) => query.queryKey[2] === "connections")?.queryKey;
+    expect(connectionKey).toBeDefined();
+    const runKey = ["agents", connectionKey?.[1], "runs", "task-1"];
+    const loadingSummaryKey = ["agents", connectionKey?.[1], "summaries", ["task-1", "task-2"]];
+    client.getQueryCache().build(client, { queryKey: loadingSummaryKey, queryFn: async () => ({}) });
+    const olderRun = { ...dispatchedRun, id: "run-older" };
+    client.setQueryData(runKey, [dispatchedRun, olderRun]);
 
     expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
     await act(async () => {
@@ -488,6 +496,8 @@ describe("AgentHandoffOverlay", () => {
       )
     );
     await waitFor(() => expect(onDispatched).toHaveBeenCalledWith(dispatchedRun));
+    expect(client.getQueryData(runKey)).toEqual([dispatchedRun, olderRun]);
+    expect(client.getQueryData(loadingSummaryKey)).toBeUndefined();
   });
 
   it("re-opens the review when the manifest no longer matches what was reviewed", async () => {

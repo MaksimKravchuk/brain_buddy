@@ -716,11 +716,12 @@ describe("TaskListPage rows", () => {
         ready_for_handoff: true
       } as Awaited<ReturnType<typeof apiClient.listAgentConnections>>[number]
     ]);
-    let dispatched = false;
-    mocked.listAgentRunSummaries.mockImplementation(async () => (dispatched ? {
-      "task-1": {
+    mocked.listAgentRunSummaries.mockResolvedValue({});
+    mocked.confirmAgentHandoff.mockImplementation(async () => {
+      return {
         id: "run-row",
         task_id: "task-1",
+        connection_id: "agent-hermes",
         agent_name: "Hermes",
         primary_state_label: "Queued",
         needs_user: false,
@@ -729,14 +730,6 @@ describe("TaskListPage rows", () => {
         guarantee_tier: "guaranteed",
         cancel_outcome: "none",
         agent_task_missing: false
-      }
-    } : {}) as Awaited<ReturnType<typeof apiClient.listAgentRunSummaries>>);
-    mocked.confirmAgentHandoff.mockImplementation(async () => {
-      dispatched = true;
-      return {
-        id: "run-row",
-        task_id: "task-1",
-        connection_id: "agent-hermes"
       } as Awaited<ReturnType<typeof apiClient.confirmAgentHandoff>>;
     });
     renderPage("/tasks/next?group=off");
@@ -753,9 +746,9 @@ describe("TaskListPage rows", () => {
     expect(await screen.findByRole("heading", { name: "What will be sent" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Send to agent" }));
     const assigned = await screen.findByRole("button", { name: /Hermes.*Queued.*Guaranteed single start/i });
+    expect(screen.queryByRole("button", { name: "Hand Fix onboarding drop-off to Hermes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose agent for Fix onboarding drop-off" })).not.toBeInTheDocument();
     await waitFor(() => expect(assigned).toHaveFocus());
-    await user.click(assigned);
-    expect(await screen.findByLabelText("Title")).toHaveValue("Fix onboarding drop-off");
   });
 
   it("renders due dates, subtask progress, tags and who a task waits on", async () => {
@@ -1591,6 +1584,37 @@ describe("TaskListPage detail wiring", () => {
 
     await act(async () => resolveProjects(projects));
     await waitFor(() => expect(currentLocation()).toBe("/projects/project-launch/task-1"));
+  });
+
+  it("017-FR-005 retries project discovery before choosing a canonical fallback", async () => {
+    const moved = taskFixture({ state: "waiting", project_id: "project-launch" });
+    mocked.getTask.mockResolvedValue(moved);
+    mocked.listTasks.mockImplementation(async (filters) =>
+      filters?.projectId === "project-launch" ? listResponse([moved]) : listResponse([])
+    );
+    mocked.listProjects.mockRejectedValueOnce(new Error("Projects are unavailable."));
+
+    renderPage("/tasks/next/task-1");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Projects are unavailable.");
+    expect(currentLocation()).toBe("/tasks/next/task-1");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(currentLocation()).toBe("/projects/project-launch/task-1"));
+  });
+
+  it("017-FR-004 focuses inline detail after its row finishes loading", async () => {
+    let resolveTasks: (response: TaskListResponse) => void = () => undefined;
+    mocked.listTasks.mockImplementation((filters) => filters?.limit
+      ? Promise.resolve(listResponse([]))
+      : new Promise((resolve) => { resolveTasks = resolve; }));
+
+    renderPage("/tasks/next/task-1");
+
+    await waitFor(() => expect(mocked.getTask).toHaveBeenCalled());
+    expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument();
+    await act(async () => resolveTasks(listResponse([taskFixture()])));
+    const heading = await screen.findByRole("heading", { name: "Task detail" });
+    await waitFor(() => expect(heading).toHaveFocus());
   });
 
   it("017-FR-005 redirects an Inbox-state task with a project to that project", async () => {

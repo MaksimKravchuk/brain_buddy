@@ -298,6 +298,31 @@ describe("TaskDetailPanel chrome", () => {
     expect(screen.queryByText("Review exactly what would be sent before anything leaves BrainBuddy.")).not.toBeInTheDocument();
   });
 
+  it("waits for a trustworthy empty run history before offering a handoff", async () => {
+    let resolveRuns: (runs: AgentRunResponse[]) => void = () => undefined;
+    const pendingRuns = new Promise<AgentRunResponse[]>((resolve) => {
+      resolveRuns = resolve;
+    });
+    vi.spyOn(apiClient, "listAgentRuns").mockReturnValue(pendingRuns);
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { external_agent_relay: true }
+        },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    expect(screen.queryByRole("button", { name: "Hand to agent" })).not.toBeInTheDocument();
+    act(() => resolveRuns([]));
+    expect(await screen.findByRole("button", { name: "Hand to agent" })).toBeInTheDocument();
+  });
+
   it("keeps an existing actionable run visible while rollout is off without exposing a new handoff", async () => {
     vi.spyOn(apiClient, "listAgentRuns").mockResolvedValue([
       { reported_state: "blocked", capabilities: { progress: true, reply: true, cancel: true } } as never
