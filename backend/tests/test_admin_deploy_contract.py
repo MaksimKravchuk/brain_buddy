@@ -54,9 +54,12 @@ from app.core.config import (
 )
 
 _BASH_EXECUTABLE = shutil.which("bash")
-assert _BASH_EXECUTABLE, "bash must be on PATH to run the extracted workflow steps"
 _GIT_EXECUTABLE = shutil.which("git")
-assert _GIT_EXECUTABLE, "git must be on PATH to build the synthetic marker repo"
+if _BASH_EXECUTABLE is None or _GIT_EXECUTABLE is None:
+    pytest.skip(
+        "bash and git are required for deploy-contract shell fixtures",
+        allow_module_level=True,
+    )
 
 #: The image a rollback actually restores, identified the only way that is
 #: verifiable: by the release image ref, not by a source SHA. The default-OFF
@@ -323,21 +326,25 @@ def _step_script(workflow_text: str, validator: ModuleType, step_name: str) -> s
 
 @pytest.fixture()
 def fake_flyctl(tmp_path: Path) -> Path:
-    """A stub ``flyctl`` that records every invocation's arguments and exits 0.
+    """Local command stubs keep extracted deploy steps hermetic.
 
-    Placed first on PATH so the extracted script's real ``flyctl secrets
-    set --stage`` calls are observable without touching Fly.
+    The flyctl stub records invocations. The curl stub returns the unauthenticated
+    status expected by reachability checks and prevents rollback tests from
+    contacting production.
     """
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls_file = tmp_path / "flyctl_calls.txt"
-    stub = bin_dir / "flyctl"
-    stub.write_text(
+    flyctl_stub = bin_dir / "flyctl"
+    flyctl_stub.write_text(
         "#!/bin/sh\n" f'printf "%s\\n" "$*" >> "{calls_file}"\n' "exit 0\n",
         encoding="utf-8",
     )
-    stub.chmod(0o755)
+    flyctl_stub.chmod(0o755)
+    curl_stub = bin_dir / "curl"
+    curl_stub.write_text("#!/bin/sh\nprintf '401'\nexit 0\n", encoding="utf-8")
+    curl_stub.chmod(0o755)
     return bin_dir
 
 
