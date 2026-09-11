@@ -27,13 +27,17 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 | **Admin access records** (an operator looked up, or revoked sessions for, one account; or changed a runtime feature flag's mode, cleared its override, or added or removed one selected account; or read the flag list, resolving its cohorts: operator account id, resolved target account id where the operation names one, flag name, action, outcome, and per-read flag and resolved-account counts — no email, display name, or request body) | process stdout / Fly logs | Fly's log retention | Platform |
 | Mobile pending classification queue (task, project and tag **ids**) | device `AsyncStorage`, key `bb.pendingClassification.<server>.<account>` | 30 days from last edit, or immediately on a deliberate identity transition | Mobile client sweep across all stored identities (spec 006, FR-011/FR-018) |
 | Mobile cached project and Tag lists (user-authored **names**) | device `AsyncStorage`, key `bb.classificationCache.<server>.<account>` | 30 days from last fetch, or immediately on a deliberate identity transition — including when the queue is empty | Mobile client sweep (spec 006, FR-011/FR-018) |
+| Web last-used agent preference (connection **id** and confirmation timestamp only; no Task content, address, or credential) | browser `localStorage`, key `bb.taskAgent.lastUsed.v1.<server>.<account>` | Eligible for 30 days from last confirmed hand-off; removed on sign-out/identity transition, invalid eligibility, and by a cross-identity startup/focus/interval sweep after expiry | Web preference lifecycle binding (spec 017, FR-008/FR-017) |
 
-The two device rows are the only entries in this table an account purge cannot
-reach: the server can revoke every session, but it cannot delete bytes on a
-phone. The sweep is the compensating control, so the maximum window in which
-erased content survives on a device is 30 days. Both stores are unencrypted at
-rest and are captured by device backups — see spec 006's Assumptions for why
-that was accepted rather than moved to the Keychain.
+The three device/browser rows are the only entries in this table an account purge cannot
+reach: the server can revoke every session, but it cannot delete bytes on a phone or
+in a browser. The native sweep provides the device stores' 30-day physical bound as
+specified by feature 006. The web preference becomes unusable at 30 days and its
+cross-identity sweep removes expired bytes whenever BrainBuddy next starts, regains
+focus, or reaches its sweep interval. If BrainBuddy is never run again, the user must
+clear BrainBuddy site data in the browser to remove those residual local bytes; the
+server cannot honestly do that. These stores are unencrypted at rest and may be
+captured by device backups — see spec 006's Assumptions for the native stores.
 
 One external-agent artifact is missing from the table because it is not ours to
 delete: the **push callback address Brain Buddy registered with the agent**. It
@@ -155,6 +159,13 @@ complete with respect to what the server has. The consequence is worth naming
 rather than burying: an export taken while a phone holds unsent changes will
 not match what that phone displays, and the mobile client shows no per-change
 marker that would explain the difference (spec 006, FR-007).
+
+Also excluded: the **web last-used agent preference**. The controller never receives
+this connection ID/timestamp pair, so the export is complete with respect to what the
+server holds. The web client erases it on identity transition or invalid eligibility;
+after 30 days it is unusable and is physically swept the next time BrainBuddy runs or
+regains focus. Clearing BrainBuddy site data removes it without reopening the app
+(spec 017, FR-008/FR-017).
 
 ## Maintainer checklist (manual, one-time / periodic)
 

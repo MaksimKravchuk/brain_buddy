@@ -221,7 +221,8 @@ describe("AppRoutes", () => {
     const rowTitle = await screen.findByText("Fix onboarding drop-off");
     const row = rowTitle.closest("article");
     expect(row).not.toBeNull();
-    expect(row).toHaveClass("rounded-[12px]", "px-3.5", "py-[7px]", "transition-colors", "duration-200", "ease-smooth");
+    expect(row).toHaveClass("border-b", "border-slate-200", "bg-white");
+    expect(within(row as HTMLElement).getByTestId("task-row-header")).toHaveClass("h-11");
 
     // The per-row project column is gone (prototype default); the group heading
     // carries the project name instead.
@@ -733,12 +734,20 @@ describe("AppRoutes", () => {
     });
   });
 
-  it("keeps direct task detail visible when the task is absent from the active projection", async () => {
+  it("recovers a direct task into its canonical projection before showing inline detail", async () => {
     const directTask = taskFixture("task-direct", "Shared task outside Next", "waiting");
     vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/tasks/task-direct")) {
         return Promise.resolve(jsonResponse(directTask));
+      }
+      if (url.includes("/tasks?") && url.includes("state=waiting")) {
+        return Promise.resolve(jsonResponse({
+          items: [directTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 0, waiting: 1, someday: 0 }
+        }));
       }
       if (url.includes("/tasks?")) {
         return Promise.resolve(jsonResponse({
@@ -761,7 +770,7 @@ describe("AppRoutes", () => {
 
     expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
     expect(await screen.findByDisplayValue("Shared task outside Next")).toBeInTheDocument();
-    expect(screen.getByText("Next actions is clear")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Waiting for" })).toBeInTheDocument();
   });
 
   it("keeps terminal recovery explicit in task detail", async () => {
@@ -828,7 +837,7 @@ describe("AppRoutes", () => {
     });
   });
 
-  it("opens task detail from a click on the noninteractive card body but not from interactive descendants", async () => {
+  it("opens task detail from the compact row header but not from interactive descendants", async () => {
     const user = userEvent.setup();
     renderRoutes("/tasks/next");
 
@@ -839,7 +848,7 @@ describe("AppRoutes", () => {
     await user.click(within(row as HTMLElement).getByRole("button", { name: "Complete Fix onboarding drop-off" }));
     expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument();
 
-    await user.click(row as HTMLElement);
+    await user.click(within(row as HTMLElement).getByTestId("task-row-header"));
     expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
   });
 
@@ -892,7 +901,7 @@ describe("AppRoutes", () => {
     expect(screen.getByLabelText("Sort tasks")).toHaveValue("due");
   });
 
-  it("restores focus to the list heading when the originating row is absent on close", async () => {
+  it("restores focus to the canonical list heading when recovery cannot find a row", async () => {
     const user = userEvent.setup();
     const directTask = taskFixture("task-direct", "Shared task outside Next", "waiting");
     vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
@@ -918,11 +927,10 @@ describe("AppRoutes", () => {
     });
 
     renderRoutes("/tasks/next/task-direct");
-    await screen.findByRole("heading", { name: "Task detail" });
+    expect(await screen.findByText(/not in this list/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Close task" }));
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus());
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Waiting for" })).toHaveFocus());
   });
 
   it("keeps unbuilt task-bound thinking actions out of the task workspace", async () => {

@@ -43,8 +43,11 @@ vi.mock("../../../api/client", async () => {
       createTag: vi.fn(),
       updateTag: vi.fn(),
       deleteTag: vi.fn(),
+      listAgentConnections: vi.fn(),
       listAgentRunSummaries: vi.fn(),
-      listAgentRuns: vi.fn()
+      listAgentRuns: vi.fn(),
+      previewAgentHandoff: vi.fn(),
+      confirmAgentHandoff: vi.fn()
     }
   };
 });
@@ -187,8 +190,37 @@ beforeEach(() => {
   mocked.createTag.mockResolvedValue(tags[0]);
   mocked.updateTag.mockResolvedValue(tags[0]);
   mocked.deleteTag.mockResolvedValue({ ...tags[0], state: "deleted" });
+  mocked.listAgentConnections.mockResolvedValue([]);
   mocked.listAgentRunSummaries.mockResolvedValue({});
   mocked.listAgentRuns.mockResolvedValue([]);
+  mocked.previewAgentHandoff.mockResolvedValue({
+    token: "a".repeat(64),
+    run_id: "run-row",
+    task_id: "task-1",
+    connection_id: "agent-hermes",
+    agent_name: "Hermes",
+    title: "Fix onboarding drop-off",
+    details: null,
+    supporting_items: [],
+    message_id: "run-row:start",
+    correlation_id: "run-row",
+    destination_interface: "https://hermes.example.test/a2a",
+    protocol_version: "1.0",
+    guarantee_tier: "guaranteed",
+    tier_disclosure: "Guaranteed single start.",
+    tier_disclosure_url: "https://example.test/guarantee",
+    acknowledgement_required: false,
+    cancellation_disclosure: "Cancellation is supported.",
+    push_callback: null,
+    external_copy_notice: "The agent keeps its own copy.",
+    reauthentication_required: false,
+    parts_preview: ["Fix onboarding drop-off"]
+  });
+  mocked.confirmAgentHandoff.mockResolvedValue({
+    id: "run-row",
+    task_id: "task-1",
+    connection_id: "agent-hermes"
+  } as Awaited<ReturnType<typeof apiClient.confirmAgentHandoff>>);
 });
 
 afterEach(() => {
@@ -202,7 +234,7 @@ afterEach(() => {
 });
 
 describe("TaskListPage projections", () => {
-  it("shows honest agent and needs-you chips and still queries them when rollout is off", async () => {
+  it("017-FR-014 017-FR-015 shows existing runs through the existing summary read while rollout is off", async () => {
     act(() => {
       useAuthStore.setState({
         user: {
@@ -252,15 +284,52 @@ describe("TaskListPage projections", () => {
     // repeats a withdrawn cancellation, so the list and the detail cannot
     // disagree about what the user may still do.
     expect(
-      await screen.findByText("Running · Guaranteed single start")
-    ).toBeInTheDocument();
+      await screen.findByRole("button", { name: /Hermes.*Running.*Guaranteed single start/i })
+    ).toHaveClass("w-[184px]");
     expect(
-      screen.getByText("Needs you · Best-effort single start · Cancellation not supported")
-    ).toBeInTheDocument();
+      screen.getByRole("button", { name: /Hermes.*Needs you.*Best-effort single start.*Cancellation not supported/i })
+    ).toHaveClass("w-[184px]");
     expect(mocked.listAgentRunSummaries).toHaveBeenCalledWith(
       ["task-1", "task-2"],
       expect.any(AbortSignal)
     );
+    expect(mocked.listAgentConnections).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Choose agent/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps a cached agent status readable when refresh fails and retries without reopening an already selected row", async () => {
+    const user = userEvent.setup();
+    const summary = {
+      "task-1": {
+        id: "agentrun-1",
+        task_id: "task-1",
+        agent_name: "Hermes",
+        primary_state_label: "Running",
+        needs_user: false,
+        stopped_reporting: false,
+        last_contact_at: "2026-08-11T12:00:00Z",
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "none",
+        agent_task_missing: false
+      }
+    } as Awaited<ReturnType<typeof apiClient.listAgentRunSummaries>>;
+    mocked.listAgentRunSummaries.mockResolvedValue(summary);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage("/tasks/next/task-1?group=off", client);
+
+    const assigned = await screen.findByRole("button", { name: /Hermes.*Running.*Guaranteed single start/i });
+    await user.click(assigned);
+    expect(currentLocation()).toBe("/tasks/next/task-1?group=off");
+
+    mocked.listAgentRunSummaries.mockRejectedValueOnce(new Error("Status refresh unavailable."));
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["agents"] });
+    });
+    expect(await screen.findByText("Agent statuses may be out of date.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByText("Agent statuses may be out of date.")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /Hermes.*Running.*Guaranteed single start/i })).toBeInTheDocument();
   });
 
   it("titles each projection from the route and groups tasks by project by default", async () => {
@@ -457,6 +526,8 @@ describe("TaskListPage list controls", () => {
     await user.click(screen.getByRole("checkbox", { name: "Show cancelled" }));
     await waitFor(() => expect(lastListFilters().includeCompleted).toBe(true));
     expect(lastListFilters().includeCancelled).toBe(true);
+    await user.click(screen.getByRole("checkbox", { name: "Show cancelled" }));
+    await waitFor(() => expect(lastListFilters().includeCancelled).toBe(false));
   });
 
   it("reads an unknown sort in the URL as manual order", async () => {
@@ -488,6 +559,112 @@ describe("TaskListPage list controls", () => {
 });
 
 describe("TaskListPage rows", () => {
+  it("017-FR-001 017-FR-002 renders a flat 44px header with tags but no project label", async () => {
+    mocked.listTasks.mockImplementation(async () => listResponse([taskFixture()]));
+    renderPage("/tasks/next?group=off");
+
+    const row = (await screen.findByRole("link", { name: "Fix onboarding drop-off" })).closest("article") as HTMLElement;
+    const header = within(row).getByTestId("task-row-header");
+    expect(header).toHaveClass("h-11");
+    expect(row).not.toHaveClass("rounded-[12px]");
+    expect(within(row).getByText("#deep-work")).toBeInTheDocument();
+    expect(within(row).queryByText("Launch v2")).not.toBeInTheDocument();
+  });
+
+  it("017-FR-004 017-FR-005 opens detail inline and uses the URL as collapse-only state", async () => {
+    const user = userEvent.setup();
+    renderPage("/tasks/next/task-1?group=off");
+
+    const title = await screen.findByLabelText("Title");
+    const row = screen.getByRole("link", { name: "Fix onboarding drop-off" }).closest("article") as HTMLElement;
+    expect(row).toContainElement(title);
+    expect(screen.getByRole("complementary", { name: "Task detail" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Task detail" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Details"));
+    expect(currentLocation()).toBe("/tasks/next/task-1?group=off");
+
+    await user.click(screen.getByRole("link", { name: "Fix onboarding drop-off" }));
+    expect(currentLocation()).toBe("/tasks/next?group=off");
+    await user.click(within(row).getByTestId("task-row-header"));
+    expect(currentLocation()).toBe("/tasks/next/task-1?group=off");
+
+    await user.click(await screen.findByLabelText("List"));
+    await user.keyboard("{Escape}");
+    expect(currentLocation()).toBe("/tasks/next/task-1?group=off");
+
+    await user.click(within(row).getByTestId("task-row-header"));
+    expect(currentLocation()).toBe("/tasks/next?group=off");
+    expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+
+    await user.keyboard("{Control>}\\{/Control}");
+    expect(currentLocation()).toBe("/tasks/next?group=off");
+  });
+
+  it("017-FR-010 017-FR-011 aligns row agent controls, reviews first, then focuses the confirmed run", async () => {
+    const user = userEvent.setup();
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { external_agent_relay: true }
+        },
+        status: "authed"
+      });
+    });
+    mocked.listAgentConnections.mockResolvedValue([
+      {
+        id: "agent-hermes",
+        name: "Hermes",
+        agent_address: "https://hermes.example.test/a2a",
+        status: "ready",
+        stale: false,
+        ready_for_handoff: true
+      } as Awaited<ReturnType<typeof apiClient.listAgentConnections>>[number]
+    ]);
+    let dispatched = false;
+    mocked.listAgentRunSummaries.mockImplementation(async () => (dispatched ? {
+      "task-1": {
+        id: "run-row",
+        task_id: "task-1",
+        agent_name: "Hermes",
+        primary_state_label: "Queued",
+        needs_user: false,
+        stopped_reporting: false,
+        last_contact_at: null,
+        guarantee_tier: "guaranteed",
+        cancel_outcome: "none",
+        agent_task_missing: false
+      }
+    } : {}) as Awaited<ReturnType<typeof apiClient.listAgentRunSummaries>>);
+    mocked.confirmAgentHandoff.mockImplementation(async () => {
+      dispatched = true;
+      return {
+        id: "run-row",
+        task_id: "task-1",
+        connection_id: "agent-hermes"
+      } as Awaited<ReturnType<typeof apiClient.confirmAgentHandoff>>;
+    });
+    renderPage("/tasks/next?group=off");
+
+    const handoff = await screen.findByRole("button", { name: "Hand Fix onboarding drop-off to Hermes" });
+    await user.click(handoff);
+    expect(await screen.findByRole("dialog", { name: "Hand this task to an agent" })).toBeInTheDocument();
+    expect(currentLocation()).toBe("/tasks/next?group=off");
+    expect(mocked.confirmAgentHandoff).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Hand this task to an agent" })).not.toBeInTheDocument();
+
+    await user.click(handoff);
+    expect(await screen.findByRole("heading", { name: "What will be sent" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send to agent" }));
+    const assigned = await screen.findByRole("button", { name: /Hermes.*Queued.*Guaranteed single start/i });
+    await waitFor(() => expect(assigned).toHaveFocus());
+    await user.click(assigned);
+    expect(await screen.findByLabelText("Title")).toHaveValue("Fix onboarding drop-off");
+  });
+
   it("renders due dates, subtask progress, tags and who a task waits on", async () => {
     mocked.listTasks.mockImplementation(async () =>
       listResponse([
@@ -566,7 +743,7 @@ describe("TaskListPage rows", () => {
     );
     expect(currentLocation()).toBe("/tasks/next");
 
-    await user.click((screen.getByText("Fix onboarding drop-off").closest("article") as HTMLElement));
+    await user.click(within(screen.getByText("Fix onboarding drop-off").closest("article") as HTMLElement).getByTestId("task-row-header"));
     expect(currentLocation()).toBe("/tasks/next/task-1");
   });
 
@@ -695,7 +872,9 @@ describe("016 completed task presentation", () => {
     mocked.getTask.mockResolvedValue(done);
     await act(async () => resolveSave(done));
     expect(await screen.findByRole("list", { name: "Completed" })).toHaveTextContent(done.title);
-    expect(await screen.findByRole("button", { name: "Reopen task" })).toBeEnabled();
+    await waitFor(() => expect(currentLocation()).toBe("/tasks/next"));
+    expect(screen.queryByRole("button", { name: "Reopen task" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: done.title })).toHaveFocus();
     expect(mocked.transitionTask).toHaveBeenCalledTimes(1);
   });
 
@@ -860,13 +1039,48 @@ describe("TaskListPage capture", () => {
     expect(mocked.smartAddTask).not.toHaveBeenCalled();
   });
 
+  it("announces title-completion loading while the provider response is pending", async () => {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { task_title_autocomplete: true }
+        },
+        status: "authed"
+      });
+    });
+    let resolveCompletions!: (value: Awaited<ReturnType<typeof apiClient.generateTitleCompletions>>) => void;
+    mocked.generateTitleCompletions.mockReturnValueOnce(new Promise((resolve) => {
+      resolveCompletions = resolve;
+    }));
+    const user = userEvent.setup();
+    renderPage("/tasks/next");
+
+    const field = await screen.findByRole("combobox", { name: "New task title" });
+    await user.type(field, "Prepare launch notes");
+    await user.click(await screen.findByRole("checkbox", { name: /Allow deterministic/ }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Finding title suggestions…");
+
+    await act(async () => resolveCompletions({
+      request_id: "8f3d2f73-0e55-4f47-9f9b-1a0b6c7a9c6e",
+      candidates: [
+        "Prepare launch notes today",
+        "Prepare launch notes this week",
+        "Prepare launch notes tomorrow"
+      ]
+    }));
+    expect(await screen.findByRole("listbox", { name: "Task title suggestions" })).toBeInTheDocument();
+  });
+
   it("creates a plain task in the current list and clears the field", async () => {
     const user = userEvent.setup();
     renderPage("/tasks/next");
 
     const field = await screen.findByLabelText("New task title");
     await user.type(field, "Write the release note");
-    await user.click(screen.getByRole("button", { name: "Add task" }));
+    field.blur();
+    fireEvent.submit(field.closest("form") as HTMLFormElement);
 
     await waitFor(() =>
       expect(mocked.createTask).toHaveBeenCalledWith(
@@ -1228,6 +1442,136 @@ describe("TaskListPage smart-add suggestions", () => {
 });
 
 describe("TaskListPage detail wiring", () => {
+  it("017-FR-005 clears excluding filters once and expands the real row in the retained state route", async () => {
+    mocked.listTasks.mockImplementation(async (filters) => {
+      if (filters?.limit) return listResponse([]);
+      return filters?.q
+        ? listResponse([taskFixture({ id: "other", title: "Other task" })])
+        : listResponse([taskFixture()]);
+    });
+    renderPage("/tasks/next/task-1?q=hidden&group=off");
+
+    await waitFor(() => expect(currentLocation()).toBe("/tasks/next/task-1"));
+    const title = await screen.findByLabelText("Title");
+    expect(screen.getByRole("link", { name: "Fix onboarding drop-off" }).closest("article")).toContainElement(title);
+  });
+
+  it("017-FR-005 prefers a resolvable project, then uses terminal fallback with cancelled visibility", async () => {
+    const moved = taskFixture({ state: "waiting", project_id: "project-launch" });
+    mocked.getTask.mockResolvedValue(moved);
+    mocked.listTasks.mockImplementation(async (filters) =>
+      filters?.projectId === "project-launch" ? listResponse([moved]) : listResponse([])
+    );
+    const first = renderPage("/tasks/next/task-1");
+    await waitFor(() => expect(currentLocation()).toBe("/projects/project-launch/task-1"));
+    expect(await screen.findByLabelText("Title")).toHaveValue(moved.title);
+    first.unmount();
+
+    const cancelled = taskFixture({ state: "cancelled", project_id: null });
+    mocked.getTask.mockResolvedValue(cancelled);
+    mocked.listTasks.mockImplementation(async (filters) =>
+      filters?.includeCancelled ? listResponse([cancelled]) : listResponse([])
+    );
+    renderPage("/tasks/waiting/task-1");
+    await waitFor(() => expect(currentLocation()).toBe("/tasks/next/task-1?showCancelled=1"));
+    expect(await screen.findByLabelText("Title")).toHaveValue(cancelled.title);
+  });
+
+  it("017-FR-005 redirects an Inbox-state task with a project to that project", async () => {
+    const classifiedInboxTask = taskFixture({ state: "inbox", project_id: "project-launch" });
+    mocked.getTask.mockResolvedValue(classifiedInboxTask);
+    mocked.listTasks.mockImplementation(async (filters) =>
+      filters?.projectId === "project-launch" ? listResponse([classifiedInboxTask]) : listResponse([])
+    );
+
+    renderPage("/tasks/inbox/task-1");
+
+    await waitFor(() => expect(currentLocation()).toBe("/projects/project-launch/task-1"));
+    expect(await screen.findByLabelText("Title")).toHaveValue(classifiedInboxTask.title);
+  });
+
+  it("017-FR-005 loads bounded pages until the selected real row exists", async () => {
+    mocked.listTasks.mockImplementation(async (filters) => {
+      if (filters?.limit) return listResponse([]);
+      if (filters?.cursor === "page-2") return listResponse([taskFixture()]);
+      return listResponse([taskFixture({ id: "other", title: "Other task" })], {
+        next_cursor: "page-2",
+        has_more: true
+      });
+    });
+    renderPage("/tasks/next/task-1");
+
+    expect(await screen.findByLabelText("Title")).toHaveValue("Fix onboarding drop-off");
+    expect(lastListFilters().cursor).toBe("page-2");
+  });
+
+  it("017-FR-005 retains matching project and tag routes while removing excluding filters", async () => {
+    mocked.listTasks.mockResolvedValue(listResponse([]));
+    mocked.getTask.mockResolvedValue(taskFixture({ project_id: "project-launch", state: "waiting" }));
+    const projectView = renderPage("/projects/project-launch/task-1?sort=due&q=hidden");
+    await waitFor(() => expect(currentLocation()).toBe("/projects/project-launch/task-1?sort=due"));
+    expect(await screen.findByText(/not in this list/i)).toBeInTheDocument();
+    projectView.unmount();
+
+    mocked.getTask.mockResolvedValue(taskFixture({ project_id: null, tag_ids: ["tag-deep-work"], state: "waiting" }));
+    renderPage("/tags/tag-deep-work/task-1?q=hidden");
+    await waitFor(() => expect(currentLocation()).toBe("/tags/tag-deep-work/task-1"));
+    expect(await screen.findByText(/not in this list/i)).toBeInTheDocument();
+  });
+
+  it("017-FR-005 reports a failed automatic page and retries it on request", async () => {
+    let pageAttempts = 0;
+    mocked.listTasks.mockImplementation(async (filters) => {
+      if (filters?.limit) return listResponse([]);
+      if (filters?.cursor) {
+        pageAttempts += 1;
+        if (pageAttempts === 1) throw new Error("Page unavailable.");
+        return listResponse([taskFixture()]);
+      }
+      return listResponse([taskFixture({ id: "other", title: "Other task" })], {
+        next_cursor: "page-2",
+        has_more: true
+      });
+    });
+    const user = userEvent.setup();
+    renderPage("/tasks/next/task-1");
+
+    expect(await screen.findByText(/Could not load the row/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry / load more" }));
+    expect(await screen.findByLabelText("Title")).toHaveValue("Fix onboarding drop-off");
+    expect(pageAttempts).toBe(2);
+  });
+
+  it("017-FR-005 stops automatic recovery after ten additional pages", async () => {
+    mocked.listTasks.mockImplementation(async (filters) => {
+      if (filters?.limit) return listResponse([]);
+      const current = filters?.cursor ? Number(filters.cursor.replace("page-", "")) : 0;
+      return listResponse([taskFixture({ id: `other-${current}`, title: `Other task ${current}` })], {
+        next_cursor: `page-${current + 1}`,
+        has_more: true
+      });
+    });
+    renderPage("/tasks/next/task-1");
+
+    expect(await screen.findByText(/beyond the automatic 10-page limit/i)).toBeInTheDocument();
+    const automaticPageCalls = mocked.listTasks.mock.calls.filter(([filters]) => Boolean(filters?.cursor));
+    expect(automaticPageCalls).toHaveLength(10);
+    expect(automaticPageCalls.some(([filters]) => filters?.cursor === "page-11")).toBe(false);
+    expect(lastListFilters().cursor).toBe("page-10");
+  });
+
+  it("017-FR-005 keeps an indistinguishable missing-task error at list level without redirecting", async () => {
+    mocked.getTask.mockRejectedValueOnce(new Error("Task not found."));
+    mocked.listTasks.mockImplementation(async () => listResponse([taskFixture({ id: "other", title: "Other task" })]));
+    renderPage("/tasks/next/missing-task?q=private");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Task not found.");
+    expect(currentLocation()).toBe("/tasks/next/missing-task?q=private");
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(mocked.getTask.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
   it("saves a detail edit and keeps the panel on the refreshed revision", async () => {
     const user = userEvent.setup();
     renderPage("/tasks/next/task-1");
@@ -1356,7 +1700,7 @@ describe("TaskListPage detail wiring", () => {
     await waitFor(() => expect(screen.getByText("Comment rejected.")).toBeInTheDocument());
   });
 
-  it("navigates the displayed grouped tasks in a stationary modal and returns to the opening row", async () => {
+  it("navigates the displayed grouped tasks through inline detail and returns to the opening row", async () => {
     const user = userEvent.setup();
     const items = [
       taskFixture(),
@@ -1369,20 +1713,26 @@ describe("TaskListPage detail wiring", () => {
     renderPage("/tasks/next?sort=priority&q=launch");
     const origin = await screen.findByRole("link", { name: items[0].title });
     await user.click(origin);
-    const sheet = screen.getByRole("dialog", { name: "Task detail" });
+    const firstDetail = screen.getByRole("complementary", { name: "Task detail" });
+    expect(origin.closest("article")).toContainElement(firstDetail);
     expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus();
     expect(screen.getByRole("button", { name: "Previous task" })).toBeDisabled();
     expect(screen.getByText("1 of 4")).toBeInTheDocument();
-    const next = screen.getByRole("button", { name: "Next task" });
+    let next = screen.getByRole("button", { name: "Next task" });
     await user.click(next);
     await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(items[2].title));
     expect(currentLocation()).toBe("/tasks/next/task-2?sort=priority&q=launch");
-    expect(screen.getByRole("dialog", { name: "Task detail" })).toBe(sheet);
+    expect(screen.getByRole("link", { name: items[2].title }).closest("article")).toContainElement(
+      screen.getByRole("complementary", { name: "Task detail" })
+    );
+    next = screen.getByRole("button", { name: "Next task" });
     expect(next).toHaveFocus();
     await user.click(next);
+    next = screen.getByRole("button", { name: "Next task" });
     await user.click(next);
     await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(items[1].title));
     expect(screen.getByText("4 of 4")).toBeInTheDocument();
+    next = screen.getByRole("button", { name: "Next task" });
     expect(next).toBeDisabled();
     const previous = screen.getByRole("button", { name: "Previous task" });
     expect(previous).toHaveFocus();
@@ -1391,6 +1741,7 @@ describe("TaskListPage detail wiring", () => {
     // Assistive activation and some pointer browsers do not focus a clicked
     // button. In that case the new task gets heading focus, not a stale field.
     screen.getByLabelText("Title").focus();
+    next = screen.getByRole("button", { name: "Next task" });
     fireEvent.click(next);
     await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue(items[1].title));
     expect(screen.getByRole("heading", { name: "Task detail" })).toHaveFocus();
@@ -1412,7 +1763,17 @@ describe("TaskListPage detail wiring", () => {
     expect(screen.queryByRole("complementary", { name: "Task detail" })).not.toBeInTheDocument();
   });
 
-  it("returns focus to the row that opened the panel, or to the heading when that row is gone", async () => {
+  it("starts a fresh bounded recovery attempt after the selected list filters change", async () => {
+    const user = userEvent.setup();
+    renderPage("/tasks/next/task-1");
+
+    expect(await screen.findByLabelText("Title")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Show cancelled" }));
+    await waitFor(() => expect(currentLocation()).toBe("/tasks/next/task-1?showCancelled=1"));
+    expect(screen.getByRole("complementary", { name: "Task detail" })).toBeInTheDocument();
+  });
+
+  it("returns focus to the row that opened inline detail", async () => {
     const user = userEvent.setup();
     const { unmount } = renderPage("/tasks/next");
 
@@ -1421,19 +1782,9 @@ describe("TaskListPage detail wiring", () => {
     await user.click(screen.getByRole("button", { name: "Close task" }));
     await waitFor(() => expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toHaveFocus());
     unmount();
-
-    // A task opened by URL that the current list does not contain has no row to
-    // return to, so focus lands on the list heading instead of nowhere.
-    mocked.listTasks.mockImplementation(async () =>
-      listResponse([taskFixture({ id: "task-other", title: "Some other task" })])
-    );
-    renderPage("/tasks/next/task-1");
-    await user.click(await screen.findByRole("button", { name: "Close task" }));
-
-    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Next actions" })).toHaveFocus());
   });
 
-  it("toggles the whole panel with the keyboard shortcut", async () => {
+  it("collapses inline detail with the keyboard shortcut and never reopens hidden state", async () => {
     const user = userEvent.setup();
     renderPage("/tasks/next/task-1");
 
@@ -1441,9 +1792,11 @@ describe("TaskListPage detail wiring", () => {
 
     await user.keyboard("{Meta>}\\{/Meta}");
     await waitFor(() => expect(screen.queryByLabelText("Title")).not.toBeInTheDocument());
+    expect(currentLocation()).toBe("/tasks/next");
 
     await user.keyboard("{Control>}\\{/Control}");
-    expect(await screen.findByLabelText("Title")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+    expect(currentLocation()).toBe("/tasks/next");
   });
 
   it("closes on Escape from a plain details field and flushes its pending edit", async () => {
@@ -1475,7 +1828,7 @@ describe("TaskListPage detail wiring", () => {
     document.body.append(modal);
     try {
       await user.keyboard("{Control>}\\{/Control}");
-      expect(screen.getByRole("dialog", { name: "Task detail" })).toBeInTheDocument();
+      expect(screen.getByRole("complementary", { name: "Task detail" })).toBeInTheDocument();
       await user.keyboard("{Escape}");
       expect(currentLocation()).toBe("/tasks/next/task-1");
     } finally {
@@ -1678,7 +2031,6 @@ describe("TaskListPage canonical Discard paths", () => {
   });
 
   it("recovery-only Discard restores canonical fields without remount or focus regression", async () => {
-    const user = userEvent.setup();
     mocked.getTask.mockResolvedValue(taskFixture({
       title: "Canonical recovery title", details: "Canonical recovery details", state: "waiting",
       waiting_for: "Canonical recovery owner", waiting_since: "2026-01-01T00:00:00Z", revision: 5
@@ -1714,9 +2066,12 @@ describe("TaskListPage canonical Discard paths", () => {
     fireEvent.change(within(panel).getByLabelText("Waiting for"), { target: { value: "Dirty owner" } });
     const titleNode = title;
     const discard = await screen.findByRole("button", { name: "Discard" });
+    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    fireEvent.click(discard);
+    expect(sessionStorage.getItem(recoveryKey)).not.toBeNull();
+    title.focus();
     fireEvent.mouseDown(discard);
-    discard.focus();
-    await user.keyboard("{Enter}");
+    fireEvent.click(discard);
     const recoveryPanel = await screen.findByRole("complementary", { name: "Task detail" });
     await waitFor(() => {
       expect(within(recoveryPanel).getByLabelText("Title")).toHaveValue("Canonical recovery title");
@@ -1728,7 +2083,7 @@ describe("TaskListPage canonical Discard paths", () => {
     expect(screen.getByText("5 tasks")).toBeInTheDocument();
     expect(sessionStorage.getItem(recoveryKey)).toBeNull();
     expect(screen.getByLabelText("Title")).toBe(titleNode);
-    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Task detail" }));
+    expect(document.activeElement).toBe(titleNode);
   });
 
   it("retries a persisted failed edit from the list alert", async () => {

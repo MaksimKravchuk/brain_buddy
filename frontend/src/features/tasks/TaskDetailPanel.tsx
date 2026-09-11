@@ -4,8 +4,10 @@ import type { ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { useAgentRuns } from "../../api/agentHooks";
+import type { AgentRunResponse } from "../../api/agentTypes";
 import { hasFeatureFlag } from "../../api/auth";
 import { apiClient } from "../../api/client";
+import { getTaskCacheScope } from "../../api/taskHooks";
 import { AgentHandoffOverlay } from "../agents/AgentHandoffOverlay";
 import { AgentRunSection } from "../agents/AgentRunSection";
 import { compactRunLabel, newestRun } from "../agents/agentCopy";
@@ -20,6 +22,7 @@ import type {
 } from "../../api/taskTypes";
 import { Button } from "../../components/ui/Button";
 import { getErrorMessage } from "../../utils/error";
+import { rememberTaskAgentPreference } from "./taskAgentPreference";
 import type { AutosaveSnapshot, EditableField, TaskDetailAutosaveController } from "./taskDetailAutosave";
 
 type TaskDetailSavePayload = Parameters<typeof apiClient.updateTask>[1];
@@ -35,6 +38,8 @@ const openStateOptions: OpenTaskState[] = ["inbox", "next", "waiting", "someday"
 
 const activePanelClass =
   "flex h-full w-full min-w-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-l border-slate-200 bg-white";
+const inlinePanelClass =
+  "flex w-full min-w-0 flex-col overflow-x-hidden bg-white";
 
 const iconButtonClass =
   "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-600 transition-colors duration-200 ease-smooth hover:bg-slate-100 hover:text-slate-800 disabled:cursor-default disabled:text-slate-300 disabled:hover:bg-transparent";
@@ -49,6 +54,7 @@ const dashedInputClass =
 
 export function TaskDetailPanel({
   active = true,
+  layout = "sheet",
   task,
   autosave,
   resetKey,
@@ -67,6 +73,7 @@ export function TaskDetailPanel({
   onCreateComment
 }: {
   active?: boolean;
+  layout?: "sheet" | "inline";
   task?: TaskResponse;
   autosave?: TaskDetailAutosaveController;
   resetKey?: number;
@@ -98,7 +105,7 @@ export function TaskDetailPanel({
   }, [task?.id]);
 
   return (
-    <aside aria-labelledby="task-detail-title" className={activePanelClass} onKeyDown={(event) => {
+    <aside aria-labelledby="task-detail-title" className={layout === "inline" ? inlinePanelClass : activePanelClass} onKeyDown={(event) => {
       const target = event.target as HTMLElement;
       if (event.key === "Escape" && menuOpen && !event.defaultPrevented && !event.nativeEvent.isComposing && !target.closest('select, [role="combobox"], [role="listbox"]') && target.closest('[role="dialog"]') === event.currentTarget.closest('[role="dialog"]')) {
         event.preventDefault();
@@ -657,6 +664,15 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
       if (trigger?.isConnected && !trigger.closest("[inert]")) trigger.focus({ preventScroll: true });
     });
   };
+  const dispatchedHandoff = (run: AgentRunResponse) => {
+    if (user) {
+      rememberTaskAgentPreference(
+        { ownerId: user.id, apiOrigin: getTaskCacheScope(user.id).apiOrigin },
+        run.connection_id
+      );
+    }
+    closeHandoff();
+  };
   const runsQuery = useAgentRuns(task.id, Boolean(user));
 
   useEffect(() => {
@@ -724,7 +740,7 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
           taskId={task.id}
           taskTitle={task.title}
           onClose={closeHandoff}
-          onDispatched={closeHandoff}
+          onDispatched={dispatchedHandoff}
         />, document.body
       ) : null}
     </>

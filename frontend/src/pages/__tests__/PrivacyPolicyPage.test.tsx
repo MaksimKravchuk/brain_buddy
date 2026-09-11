@@ -106,9 +106,22 @@ describe("PrivacyPolicyPage", () => {
     expect(retention).toHaveTextContent(/only the agent can delete its copy/i);
   });
 
+  it("017-FR-017 017-SC-008 discloses the browser-local last-used agent record and cleanup limits", () => {
+    renderPolicy();
+    const retention = screen.getByRole("heading", { name: /how long we keep it/i }).closest("section");
+
+    expect(retention).toHaveTextContent(/last-used agent preference/i);
+    expect(retention).toHaveTextContent(/connection ID and confirmation time/i);
+    expect(retention).toHaveTextContent(/never sent to our server/i);
+    expect(retention).toHaveTextContent(/not included in your data export/i);
+    expect(retention).toHaveTextContent(/eligible for 30 days/i);
+    expect(retention).toHaveTextContent(/sign out.*account changes.*starts.*regains focus/i);
+    expect(retention).toHaveTextContent(/clear Brain Buddy site data/i);
+  });
+
   it("records the date the policy last changed", () => {
     renderPolicy();
-    expect(screen.getByText(/September 4, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/September 11, 2026/)).toBeInTheDocument();
   });
 
   it("links back to sign in", () => {

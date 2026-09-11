@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentConnectionResponse } from "../../../api/agentTypes";
 import type { AgentRunResponse } from "../../../api/agentTypes";
 import {
+  compactTaskRunStateLabel,
   artifactPlaceholderCopy,
   authSchemeLabel,
   cancelOutcomeCopy,
@@ -350,5 +351,26 @@ describe("014-FR-013 the observation-side copy", () => {
     expect(newestRun([{ ...newer, id: "first" }, { ...newer, id: "second" }])?.id).toBe("first");
     // No runs is not "the oldest run": there is nothing to describe.
     expect(newestRun([])).toBeNull();
+  });
+
+  it.each([
+    ["Not sent", "Not sent"],
+    ["Queued", "Queued"],
+    ["Sent", "Sent"],
+    ["Delivery unconfirmed", "Unconfirmed"],
+    ["Accepted", "Accepted"],
+    ["Running", "Running"],
+    ["Needs you", "Needs you"],
+    ["Cancellation requested", "Cancelling"],
+    ["Agent reported complete", "Reported"],
+    ["Failed", "Failed"],
+    ["Cancelled", "Cancelled"],
+    ["Stopped reporting", "Stopped"],
+    ["Agent no longer reports this run", "Lost contact"],
+    ["Connection disconnected", "Disconnected"],
+    ["Content expired under retention policy", "Expired"]
+  ])("017-FR-010 017-FR-013 shortens %s to %s without saying Done", (serverLabel, compactLabel) => {
+    expect(compactTaskRunStateLabel(serverLabel)).toBe(compactLabel);
+    expect(compactTaskRunStateLabel(serverLabel)).not.toBe("Done");
   });
 });
