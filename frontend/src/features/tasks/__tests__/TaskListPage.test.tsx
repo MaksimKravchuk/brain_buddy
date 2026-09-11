@@ -1602,6 +1602,38 @@ describe("TaskListPage detail wiring", () => {
     await waitFor(() => expect(currentLocation()).toBe("/projects/project-launch/task-1"));
   });
 
+  it("017-FR-005 pauses canonical recovery when a cached project refresh fails", async () => {
+    const newProject: ProjectResponse = {
+      id: "project-new",
+      name: "New home",
+      color: null,
+      state: "active",
+      revision: 1,
+      open_task_count: 1
+    };
+    const moved = taskFixture({ state: "waiting", project_id: newProject.id });
+    let resolveTask: (task: TaskResponse) => void = () => undefined;
+    mocked.getTask.mockImplementation(() => new Promise((resolve) => {
+      resolveTask = resolve;
+    }));
+    mocked.listTasks.mockImplementation(async (filters) =>
+      filters?.projectId === newProject.id ? listResponse([moved]) : listResponse([])
+    );
+    mocked.listProjects
+      .mockRejectedValueOnce(new Error("Projects are unavailable."))
+      .mockResolvedValueOnce([...projects, newProject]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(taskKeys.projects(), projects);
+
+    renderPage("/tasks/next/task-1", client);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Projects are unavailable.");
+    await act(async () => resolveTask(moved));
+    expect(currentLocation()).toBe("/tasks/next/task-1");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(currentLocation()).toBe("/projects/project-new/task-1"));
+  });
+
   it("017-FR-004 focuses inline detail after its row finishes loading", async () => {
     let resolveTasks: (response: TaskListResponse) => void = () => undefined;
     mocked.listTasks.mockImplementation((filters) => filters?.limit

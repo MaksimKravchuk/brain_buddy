@@ -188,14 +188,19 @@ export function AgentHandoffOverlay({
         `agent-handoff-${manifest.token}`
       );
     },
-    onSuccess: (run) => {
+    onSuccess: async (run) => {
       setError(null);
       setReReviewNotice(null);
       setAgentChanged(false);
       // Confirmation is the authoritative creation response. Project it into
       // every mounted list that contains this task before the overlay closes,
       // so a previously successful empty batch cannot briefly re-offer a
-      // second hand-off while its next poll is still pending.
+      // second hand-off. Cancel older reads first: otherwise a pre-dispatch
+      // response can arrive after this write and erase the guard.
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: [...keys.all, "summaries"] }),
+        queryClient.cancelQueries({ queryKey: keys.runs(taskId) })
+      ]);
       queryClient.setQueriesData<Record<string, AgentRunSummaryResponse>>(
         { queryKey: [...keys.all, "summaries"] },
         (current) => current ? { ...current, [taskId]: compactSummary(run) } : current

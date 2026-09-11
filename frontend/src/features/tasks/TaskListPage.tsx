@@ -185,7 +185,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const openGroups = groupByProject ? groupTasksByProject(openTasks, projects) : [];
   const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
   const selectedTaskVisible = Boolean(taskId && tasks.some((task) => task.id === taskId));
-  const projectsRecoveryPending = projectsQuery.isLoading || (projectsQuery.isError && projectsQuery.data === undefined);
+  const projectsRecoveryPending = projectsQuery.isLoading || projectsQuery.isError;
 
   useEffect(() => {
     const previousTaskId = previousTaskIdRef.current;

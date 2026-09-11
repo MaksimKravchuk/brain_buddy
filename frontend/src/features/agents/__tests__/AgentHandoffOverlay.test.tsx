@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentConnectionResponse,
   AgentManifestResponse,
-  AgentRunResponse
+  AgentRunResponse,
+  AgentRunSummaryResponse
 } from "../../../api/agentTypes";
 import { ApiError, apiClient } from "../../../api/client";
 import { AgentHandoffOverlay } from "../AgentHandoffOverlay";
@@ -472,9 +473,25 @@ describe("AgentHandoffOverlay", () => {
     expect(connectionKey).toBeDefined();
     const runKey = ["agents", connectionKey?.[1], "runs", "task-1"];
     const loadingSummaryKey = ["agents", connectionKey?.[1], "summaries", ["task-1", "task-2"]];
-    client.getQueryCache().build(client, { queryKey: loadingSummaryKey, queryFn: async () => ({}) });
     const olderRun = { ...dispatchedRun, id: "run-older" };
-    client.setQueryData(runKey, [dispatchedRun, olderRun]);
+    client.setQueryData(loadingSummaryKey, {});
+    client.setQueryData(runKey, [olderRun]);
+    let resolveStaleSummary: (summaries: Record<string, AgentRunSummaryResponse>) => void = () => undefined;
+    let resolveStaleRuns: (runs: AgentRunResponse[]) => void = () => undefined;
+    const staleSummaryFetch = client.fetchQuery({
+      queryKey: loadingSummaryKey,
+      queryFn: () => new Promise<Record<string, AgentRunSummaryResponse>>((resolve) => {
+        resolveStaleSummary = resolve;
+      })
+    }).catch(() => undefined);
+    const staleRunsFetch = client.fetchQuery({
+      queryKey: runKey,
+      queryFn: () => new Promise<AgentRunResponse[]>((resolve) => {
+        resolveStaleRuns = resolve;
+      })
+    }).catch(() => undefined);
+    await waitFor(() => expect(client.getQueryState(loadingSummaryKey)?.fetchStatus).toBe("fetching"));
+    await waitFor(() => expect(client.getQueryState(runKey)?.fetchStatus).toBe("fetching"));
 
     expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
     await act(async () => {
@@ -496,8 +513,11 @@ describe("AgentHandoffOverlay", () => {
       )
     );
     await waitFor(() => expect(onDispatched).toHaveBeenCalledWith(dispatchedRun));
+    resolveStaleSummary({});
+    resolveStaleRuns([]);
+    await Promise.all([staleSummaryFetch, staleRunsFetch]);
     expect(client.getQueryData(runKey)).toEqual([dispatchedRun, olderRun]);
-    expect(client.getQueryData(loadingSummaryKey)).toBeUndefined();
+    expect(client.getQueryData(loadingSummaryKey)).toMatchObject({ "task-1": { id: "run-77" } });
   });
 
   it("re-opens the review when the manifest no longer matches what was reviewed", async () => {
