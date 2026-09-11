@@ -17,6 +17,14 @@ than carried forward. Two of the six closed defects that were live violations of
 requirements this matrix had already marked `covered`, and that my first-pass
 spot-checks did not catch — recorded honestly in the affected rows.
 
+**Narrow desktop-web supersession, approved 2026-09-10**: 017-FR-010 through
+017-FR-012 replace only the collapsed desktop-web copy/geometry evidence previously
+claimed here for 014-FR-013 and 014-SC-004. Full tier and cancellation-withdrawal
+disclosure move to the fixed control's Task-disambiguated accessible name and inline
+detail; the server projection, web detail, and native iOS evidence remain binding.
+Until feature 017 acceptance names its current tests and exact deployed SHA, those new
+desktop-row clauses are planned evidence rather than a new `covered` claim.
+
 One row per criterion: 17 `FR`, 10 `SC`, 37 `AC` = **64 rows**. No row is blank and no
 two criteria share a row.
 

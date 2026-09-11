@@ -12,12 +12,13 @@ import type {
   TaskState,
   TaskSubtaskResponse
 } from "../../../api/taskTypes";
-import { apiClient } from "../../../api/client";
+import { apiClient, getApiBaseUrl } from "../../../api/client";
 import { ShellToastContext } from "../../../components/shell/shellToast";
 import { useAuthStore } from "../../../stores/authStore";
 import type { AgentRunResponse } from "../../../api/agentTypes";
 import { canCancelRun, canReplyToRun } from "../../agents/agentCopy";
 import { TaskDetailPanel } from "../TaskDetailPanel";
+import { taskAgentPreferenceKey } from "../taskAgentPreference";
 
 // Stubbed so this suite is about the *panel* — but the stub asks the same two
 // guard functions the real section does, so a control the agent withdrew can
@@ -45,7 +46,7 @@ vi.mock("../../agents/AgentHandoffOverlay", () => ({
       <button type="button" onClick={onClose}>
         Close handoff
       </button>
-      <button type="button" onClick={() => onDispatched({} as never)}>
+      <button type="button" onClick={() => onDispatched({ connection_id: "agent-confirmed" } as never)}>
         Simulate dispatch
       </button>
     </div>
@@ -139,6 +140,7 @@ function renderPanel(overrides: Partial<PanelProps> = {}) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  window.localStorage.clear();
   act(() => {
     useAuthStore.setState({ user: null, status: "loading", deletionCancelledNotice: false });
   });
@@ -248,6 +250,9 @@ describe("TaskDetailPanel chrome", () => {
     await user.click(screen.getByRole("button", { name: "Hand to agent" }));
     await user.click(screen.getByRole("button", { name: "Simulate dispatch" }));
     expect(screen.queryByRole("heading", { name: "Hand this task to an agent" })).not.toBeInTheDocument();
+    expect(
+      JSON.parse(window.localStorage.getItem(taskAgentPreferenceKey({ ownerId: "user-1", apiOrigin: getApiBaseUrl() })) ?? "null")
+    ).toMatchObject({ connectionId: "agent-confirmed" });
     await user.click(handoff);
     const titleNode = screen.getByLabelText("Title");
     open.rerenderPanel({ active: false });
@@ -291,6 +296,31 @@ describe("TaskDetailPanel chrome", () => {
     expect(screen.getByTestId("agent-run-count")).toHaveTextContent("1");
     expect(screen.queryByRole("button", { name: "Hand to agent" })).not.toBeInTheDocument();
     expect(screen.queryByText("Review exactly what would be sent before anything leaves BrainBuddy.")).not.toBeInTheDocument();
+  });
+
+  it("waits for a trustworthy empty run history before offering a handoff", async () => {
+    let resolveRuns: (runs: AgentRunResponse[]) => void = () => undefined;
+    const pendingRuns = new Promise<AgentRunResponse[]>((resolve) => {
+      resolveRuns = resolve;
+    });
+    vi.spyOn(apiClient, "listAgentRuns").mockReturnValue(pendingRuns);
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { external_agent_relay: true }
+        },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    expect(screen.queryByRole("button", { name: "Hand to agent" })).not.toBeInTheDocument();
+    act(() => resolveRuns([]));
+    expect(await screen.findByRole("button", { name: "Hand to agent" })).toBeInTheDocument();
   });
 
   it("keeps an existing actionable run visible while rollout is off without exposing a new handoff", async () => {

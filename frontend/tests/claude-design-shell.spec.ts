@@ -279,7 +279,7 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
   });
 });
 
-test("task side sheet preserves desktop list geometry and scroll through open and close", async ({ page }) => {
+test("017-FR-004 017-SC-007 inline task detail preserves desktop list width and scroll through open and close", async ({ page }) => {
   await page.setViewportSize({ width: 1117, height: 780 });
   await page.route(/\/api\/tasks\?/, async (route) => route.fulfill({ json: {
     ...taskResponse,
@@ -303,13 +303,14 @@ test("task side sheet preserves desktop list geometry and scroll through open an
   await expect(page.getByLabel("New subtask title")).toBeVisible();
   await expect(page.getByLabel("New comment")).toBeVisible();
 
-  await test.step("keep the list stationary and make the background inert while the sheet owns focus", async () => {
+  await test.step("keep the list width stationary without making sibling tasks inert", async () => {
     const during = await list.boundingBox();
     const scrollDuring = await page.locator("main").evaluate((main) => main.scrollTop);
     await attachment("List geometry during task opening", JSON.stringify({ before, during, scrollBefore, scrollDuring }), ContentType.JSON);
-    if (!before || !during || before.x !== during.x || before.width !== during.width || scrollBefore !== scrollDuring) throw new Error("Opening the sheet moved or resized the list");
-    await expect(page.locator("main").locator("xpath=../..")).toHaveAttribute("inert", "");
-    await expect(page.getByRole("dialog", { name: "Task detail" })).toHaveAttribute("aria-modal", "true");
+    if (!before || !during || before.x !== during.x || before.width !== during.width || scrollBefore !== scrollDuring) throw new Error("Opening inline detail moved or resized the list");
+    await expect(page.locator("main").locator("xpath=../..")).not.toHaveAttribute("inert", "");
+    await expect(page.getByRole("dialog", { name: "Task detail" })).toHaveCount(0);
+    await expect(page.getByRole("listitem").filter({ has: page.getByRole("link", { name: "Fix onboarding drop-off" }) }).getByRole("complementary", { name: "Task detail" })).toBeVisible();
   });
 
   await test.step("give task content room before secondary properties without overflowing the workspace", async () => {
@@ -319,7 +320,7 @@ test("task side sheet preserves desktop list geometry and scroll through open an
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     await attachment("Task content geometry", JSON.stringify({ panel, details, properties, overflow }), ContentType.JSON);
     if (!panel || !details || !properties) throw new Error("Expected visible task content and property geometry");
-    if (panel.width < 380) throw new Error(`Expected a detail panel at least 380px wide, received ${panel.width}px`);
+    if (panel.width < 600) throw new Error(`Expected inline detail to use the task-list width, received ${panel.width}px`);
     if (details.y + details.height > properties.y) throw new Error("Expected task details before secondary properties");
     if (overflow !== 0) throw new Error(`Expected no workspace horizontal overflow, received ${overflow}px`);
   });
@@ -332,7 +333,7 @@ test("task side sheet preserves desktop list geometry and scroll through open an
     const after = await list.boundingBox();
     const scrollAfter = await page.locator("main").evaluate((main) => main.scrollTop);
     await attachment("List geometry after task closing", JSON.stringify({ before, after, scrollBefore, scrollAfter }), ContentType.JSON);
-    if (!before || !after || before.x !== after.x || before.width !== after.width || scrollBefore !== scrollAfter) throw new Error("Closing the sheet moved or resized the list");
+    if (!before || !after || before.x !== after.x || before.width !== after.width || scrollBefore !== scrollAfter) throw new Error("Closing inline detail moved or resized the list");
   });
 });
 
@@ -358,8 +359,8 @@ test("task detail preserves the filtered route, focus, and Back history after de
   await expect(originLink).toBeFocused();
 });
 
-test("mobile task detail slides over the list and browser back restores it", async ({ page }) => {
-  await test.step("Open mobile task detail and restore the list with browser Back", async () => {
+test("017-FR-004 mobile task detail expands inline and browser back restores it", async ({ page }) => {
+  await test.step("Open mobile inline task detail and restore the list with browser Back", async () => {
     await page.setViewportSize({ width: 402, height: 874 });
     await page.goto("/tasks/next");
 
@@ -367,6 +368,8 @@ test("mobile task detail slides over the list and browser back restores it", asy
     await expect(page.getByRole("heading", { name: "Task detail" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Fix onboarding drop-off");
     await expect(page.getByRole("heading", { name: "Comments" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Task detail" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Take car in for the flat tire" })).toBeVisible();
     await expect(page.locator("body")).toHaveScreenshot("claude-design-task-detail-mobile-402x874.png", {
       animations: "disabled",
       maxDiffPixelRatio: 0.08

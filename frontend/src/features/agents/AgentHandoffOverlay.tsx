@@ -6,7 +6,8 @@ import { useRelayMutation, useRelayOnline } from "../../api/agentLifecycle";
 import type {
   AgentConnectionResponse,
   AgentContextItem,
-  AgentRunResponse
+  AgentRunResponse,
+  AgentRunSummaryResponse
 } from "../../api/agentTypes";
 import { ApiError, apiClient } from "../../api/client";
 import { Button } from "../../components/ui/Button";
@@ -16,6 +17,21 @@ import { getErrorMessage } from "../../utils/error";
 import { connectionStatusDetail, connectionStatusLabel } from "./agentCopy";
 
 const ADDITIONAL_INSTRUCTIONS_LABEL = "Additional instructions";
+
+function compactSummary(run: AgentRunResponse): AgentRunSummaryResponse {
+  return {
+    id: run.id,
+    task_id: run.task_id,
+    agent_name: run.agent_name,
+    primary_state_label: run.primary_state_label,
+    needs_user: run.needs_user,
+    stopped_reporting: run.stopped_reporting,
+    last_contact_at: run.last_contact_at,
+    guarantee_tier: run.guarantee_tier,
+    cancel_outcome: run.cancel_outcome,
+    agent_task_missing: run.agent_task_missing
+  };
+}
 
 /** The server's own machine-readable refusal reason, or nothing. */
 function refusalReason(caught: unknown): string | null {
@@ -172,11 +188,32 @@ export function AgentHandoffOverlay({
         `agent-handoff-${manifest.token}`
       );
     },
-    onSuccess: (run) => {
+    onSuccess: async (run) => {
       setError(null);
       setReReviewNotice(null);
       setAgentChanged(false);
-      void queryClient.invalidateQueries({ queryKey: keys.runs(taskId) });
+      // Confirmation is the authoritative creation response. Project it into
+      // every mounted list that contains this task before the overlay closes,
+      // so a previously successful empty batch cannot briefly re-offer a
+      // second hand-off. Cancel older reads first: otherwise a pre-dispatch
+      // response can arrive after this write and erase the guard.
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: [...keys.all, "summaries"] }),
+        queryClient.cancelQueries({ queryKey: keys.runs(taskId) })
+      ]);
+      queryClient.setQueriesData<Record<string, AgentRunSummaryResponse>>(
+        { queryKey: [...keys.all, "summaries"] },
+        (current) => current ? { ...current, [taskId]: compactSummary(run) } : current
+      );
+      queryClient.setQueryData<AgentRunResponse[]>(keys.runs(taskId), (current) => [
+        run,
+        ...(Array.isArray(current) ? current.filter((item) => item.id !== run.id) : [])
+      ]);
+      // A first-load summary has no trustworthy values for the other rows, so
+      // do not turn a one-task optimistic projection into a successful batch.
+      // Replace every active batch from the committed server state instead;
+      // the mutation remains pending until those rows can render safely.
+      await queryClient.refetchQueries({ queryKey: [...keys.all, "summaries"], type: "active" });
       onDispatched(run);
     },
     onError: (caught: unknown) => {

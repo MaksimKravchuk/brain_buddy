@@ -420,9 +420,10 @@ test("minimal task management creates, edits, moves, completes, reopens and pers
     await detailTitle.press("Enter");
     await expect(page.getByRole("link", { name: "Book dentist checkup" })).toBeVisible();
     await page.getByLabel("List").selectOption("next");
-    await expect(page.getByRole("link", { name: "Book dentist checkup" })).toHaveCount(0);
-    await page.goto("/tasks/next");
-    await expect(page.getByText("Book dentist checkup")).toBeVisible();
+    await expect(page).toHaveURL(/\/tasks\/next\/task_[^/?]+$/);
+    await expect(page.getByRole("link", { name: "Book dentist checkup" })).toBeVisible();
+    await page.getByRole("button", { name: "Close task" }).click();
+    await expect(page).toHaveURL(/\/tasks\/next$/);
   });
 
   await test.step("complete and reopen the task through the panel list selector", async () => {

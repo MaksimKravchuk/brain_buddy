@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver, onlineManager } from "@tanstack/react-query";
 import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentConnectionResponse,
   AgentManifestResponse,
-  AgentRunResponse
+  AgentRunResponse,
+  AgentRunSummaryResponse
 } from "../../../api/agentTypes";
 import { ApiError, apiClient } from "../../../api/client";
 import { AgentHandoffOverlay } from "../AgentHandoffOverlay";
@@ -98,7 +99,7 @@ function renderOverlay(onDispatched = vi.fn(), onClose = vi.fn()) {
       />
     </QueryClientProvider>
   );
-  return { onClose, onDispatched };
+  return { client, onClose, onDispatched };
 }
 
 async function selectReadyAgent(user: ReturnType<typeof userEvent.setup>): Promise<void> {
@@ -465,8 +466,39 @@ describe("AgentHandoffOverlay", () => {
   it("dispatches exactly the reviewed manifest token under an idempotency key", async () => {
     const confirm = vi.spyOn(apiClient, "confirmAgentHandoff").mockResolvedValue(dispatchedRun);
     const user = userEvent.setup();
-    const { onDispatched } = renderOverlay();
+    const { client, onDispatched } = renderOverlay();
     await selectReadyAgent(user);
+    const connectionKey = client.getQueryCache().getAll()
+      .find((query) => query.queryKey[2] === "connections")?.queryKey;
+    expect(connectionKey).toBeDefined();
+    const runKey = ["agents", connectionKey?.[1], "runs", "task-1"];
+    const loadingSummaryKey = ["agents", connectionKey?.[1], "summaries", ["task-1", "task-2"]];
+    const olderRun = { ...dispatchedRun, id: "run-older" };
+    client.setQueryData(runKey, [olderRun]);
+    let resolveStaleSummary: (summaries: Record<string, AgentRunSummaryResponse>) => void = () => undefined;
+    let resolveStaleRuns: (runs: AgentRunResponse[]) => void = () => undefined;
+    let summaryRequestCount = 0;
+    const summaryObserver = new QueryObserver<Record<string, AgentRunSummaryResponse>>(client, {
+      queryKey: loadingSummaryKey,
+      queryFn: () => {
+        summaryRequestCount += 1;
+        if (summaryRequestCount > 1) {
+          return Promise.resolve({ "task-1": { id: "run-77" } as AgentRunSummaryResponse });
+        }
+        return new Promise<Record<string, AgentRunSummaryResponse>>((resolve) => {
+          resolveStaleSummary = resolve;
+        });
+      }
+    });
+    const unsubscribeSummary = summaryObserver.subscribe(() => undefined);
+    const staleRunsFetch = client.fetchQuery({
+      queryKey: runKey,
+      queryFn: () => new Promise<AgentRunResponse[]>((resolve) => {
+        resolveStaleRuns = resolve;
+      })
+    }).catch(() => undefined);
+    await waitFor(() => expect(client.getQueryState(loadingSummaryKey)?.fetchStatus).toBe("fetching"));
+    await waitFor(() => expect(client.getQueryState(runKey)?.fetchStatus).toBe("fetching"));
 
     expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
     await act(async () => {
@@ -488,6 +520,14 @@ describe("AgentHandoffOverlay", () => {
       )
     );
     await waitFor(() => expect(onDispatched).toHaveBeenCalledWith(dispatchedRun));
+    resolveStaleSummary({});
+    resolveStaleRuns([]);
+    await staleRunsFetch;
+    await act(async () => Promise.resolve());
+    unsubscribeSummary();
+    expect(summaryRequestCount).toBe(2);
+    expect(client.getQueryData(runKey)).toEqual([dispatchedRun, olderRun]);
+    expect(client.getQueryData(loadingSummaryKey)).toMatchObject({ "task-1": { id: "run-77" } });
   });
 
   it("re-opens the review when the manifest no longer matches what was reviewed", async () => {

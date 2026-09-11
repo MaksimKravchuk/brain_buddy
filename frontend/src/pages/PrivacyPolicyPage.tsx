@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 // Update these two constants when the policy text changes or the contact moves.
 const CONTACT_EMAIL = "maksim.v.kravchuk@gmail.com";
-const LAST_UPDATED = "September 4, 2026";
+const LAST_UPDATED = "September 11, 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -130,6 +130,16 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             run: the agent keeps its own copy. It stops working the moment the run ends, you
             disconnect, or your account is deleted — but only the agent can delete its copy, so
             we tell you rather than imply otherwise.
+          </p>
+          <p>
+            The web app keeps a last-used agent preference in your browser: the connection
+            ID and confirmation time only, never task content, an address, or a credential.
+            It is never sent to our server and is not included in your data export. The
+            preference is eligible for 30 days after a confirmed hand-off. It is removed
+            when you sign out or your account changes, when the connection is no longer
+            eligible, and by cleanup when Brain Buddy starts, regains focus, or reaches its
+            cleanup interval after expiry. If you never open Brain Buddy again, clear Brain
+            Buddy site data in your browser to remove any residual local bytes.
           </p>
         </Section>
 

@@ -26,7 +26,7 @@ FRONTEND_PORT="${BRAIN_BUDDY_E2E_FRONTEND_PORT:-${DEFAULT_FRONTEND_PORT}}"
 # on the host, outside the Compose network — can ask the agent directly what it
 # holds. The card the backend reads still advertises `hermes-a2a:9900`.
 HERMES_PORT="${BRAIN_BUDDY_E2E_HERMES_PORT:-${DEFAULT_HERMES_PORT}}"
-if [ "$(printf '%s\n' "${BACKEND_PORT}" "${FRONTEND_PORT}" "${HERMES_PORT}" | sort -u | wc -l)" != "3" ]; then
+if [ "$(printf '%s\n' "${BACKEND_PORT}" "${FRONTEND_PORT}" "${HERMES_PORT}" | sort -u | wc -l | tr -d '[:space:]')" != "3" ]; then
   echo "[e2e] The backend, frontend and Hermes ports must all differ" \
     "(got ${BACKEND_PORT}, ${FRONTEND_PORT}, ${HERMES_PORT})." >&2
   exit 1

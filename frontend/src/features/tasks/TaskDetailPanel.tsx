@@ -4,8 +4,10 @@ import type { ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { useAgentRuns } from "../../api/agentHooks";
+import type { AgentRunResponse } from "../../api/agentTypes";
 import { hasFeatureFlag } from "../../api/auth";
 import { apiClient } from "../../api/client";
+import { getTaskCacheScope } from "../../api/taskHooks";
 import { AgentHandoffOverlay } from "../agents/AgentHandoffOverlay";
 import { AgentRunSection } from "../agents/AgentRunSection";
 import { compactRunLabel, newestRun } from "../agents/agentCopy";
@@ -20,6 +22,7 @@ import type {
 } from "../../api/taskTypes";
 import { Button } from "../../components/ui/Button";
 import { getErrorMessage } from "../../utils/error";
+import { rememberTaskAgentPreference } from "./taskAgentPreference";
 import type { AutosaveSnapshot, EditableField, TaskDetailAutosaveController } from "./taskDetailAutosave";
 
 type TaskDetailSavePayload = Parameters<typeof apiClient.updateTask>[1];
@@ -35,6 +38,8 @@ const openStateOptions: OpenTaskState[] = ["inbox", "next", "waiting", "someday"
 
 const activePanelClass =
   "flex h-full w-full min-w-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-l border-slate-200 bg-white";
+const inlinePanelClass =
+  "flex w-full min-w-0 flex-col overflow-x-hidden bg-white";
 
 const iconButtonClass =
   "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-600 transition-colors duration-200 ease-smooth hover:bg-slate-100 hover:text-slate-800 disabled:cursor-default disabled:text-slate-300 disabled:hover:bg-transparent";
@@ -49,6 +54,7 @@ const dashedInputClass =
 
 export function TaskDetailPanel({
   active = true,
+  layout = "sheet",
   task,
   autosave,
   resetKey,
@@ -64,9 +70,11 @@ export function TaskDetailPanel({
   onTransition,
   onCreateSubtask,
   onTransitionSubtask,
-  onCreateComment
+  onCreateComment,
+  onAgentDispatched
 }: {
   active?: boolean;
+  layout?: "sheet" | "inline";
   task?: TaskResponse;
   autosave?: TaskDetailAutosaveController;
   resetKey?: number;
@@ -83,6 +91,7 @@ export function TaskDetailPanel({
   onCreateSubtask: (task: TaskResponse, title: string) => void;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
+  onAgentDispatched?: (run: AgentRunResponse) => void;
 }): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLButtonElement>(null);
@@ -98,7 +107,7 @@ export function TaskDetailPanel({
   }, [task?.id]);
 
   return (
-    <aside aria-labelledby="task-detail-title" className={activePanelClass} onKeyDown={(event) => {
+    <aside aria-labelledby="task-detail-title" className={layout === "inline" ? inlinePanelClass : activePanelClass} onKeyDown={(event) => {
       const target = event.target as HTMLElement;
       if (event.key === "Escape" && menuOpen && !event.defaultPrevented && !event.nativeEvent.isComposing && !target.closest('select, [role="combobox"], [role="listbox"]') && target.closest('[role="dialog"]') === event.currentTarget.closest('[role="dialog"]')) {
         event.preventDefault();
@@ -175,6 +184,7 @@ export function TaskDetailPanel({
           onCreateSubtask={onCreateSubtask}
           onTransitionSubtask={onTransitionSubtask}
           onCreateComment={onCreateComment}
+          onAgentDispatched={onAgentDispatched}
         />
       ) : null}
     </aside>
@@ -274,7 +284,8 @@ function TaskDetailBody({
   onTransition,
   onCreateSubtask,
   onTransitionSubtask,
-  onCreateComment
+  onCreateComment,
+  onAgentDispatched
 }: {
   active: boolean;
   task: TaskResponse;
@@ -289,6 +300,7 @@ function TaskDetailBody({
   onCreateSubtask: (task: TaskResponse, title: string) => void;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
   onCreateComment: (task: TaskResponse, body: string) => void;
+  onAgentDispatched?: (run: AgentRunResponse) => void;
 }): React.JSX.Element {
   // Live value shared between the "waiting" prop row and list moves into
   // Waiting for, which require a non-empty waiting_for on the transition.
@@ -556,7 +568,7 @@ function TaskDetailBody({
         {waitingRequired ? <span className="col-start-2 text-xs text-[#92400e]">Add who or what you’re waiting for</span> : null}
       </section>
 
-      <AgentTaskRelay task={task} isTerminal={isTerminal} active={active} />
+      <AgentTaskRelay task={task} isTerminal={isTerminal} active={active} onDispatched={onAgentDispatched} />
 
       <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
         <div className="flex items-center gap-2">
@@ -645,7 +657,17 @@ function TaskDetailBody({
  * The flag gates only creation of new hand-offs; it must not strand work that
  * already left BrainBuddy.
  */
-function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTerminal: boolean; active: boolean }): React.JSX.Element | null {
+function AgentTaskRelay({
+  task,
+  isTerminal,
+  active,
+  onDispatched
+}: {
+  task: TaskResponse;
+  isTerminal: boolean;
+  active: boolean;
+  onDispatched?: (run: AgentRunResponse) => void;
+}): React.JSX.Element | null {
   const user = useAuthStore((state) => state.user);
   const handoffEnabled = hasFeatureFlag(user, "external_agent_relay");
   const [reviewing, setReviewing] = useState(false);
@@ -657,6 +679,14 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
       if (trigger?.isConnected && !trigger.closest("[inert]")) trigger.focus({ preventScroll: true });
     });
   };
+  const dispatchedHandoff = (ownerId: string, run: AgentRunResponse) => {
+    rememberTaskAgentPreference(
+      { ownerId, apiOrigin: getTaskCacheScope(ownerId).apiOrigin },
+      run.connection_id
+    );
+    closeHandoff();
+    onDispatched?.(run);
+  };
   const runsQuery = useAgentRuns(task.id, Boolean(user));
 
   useEffect(() => {
@@ -667,7 +697,7 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
   // read is rolling out independently. Fail closed to an empty monitor rather
   // than crashing the entire task panel.
   const runs = Array.isArray(runsQuery.data) ? runsQuery.data : [];
-  const canStartHandoff = handoffEnabled && !isTerminal;
+  const canStartHandoff = handoffEnabled && !isTerminal && runsQuery.isSuccess && runs.length === 0;
   const latestRun = newestRun(runs);
 
   return (
@@ -719,12 +749,12 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
         handoffEnabled={handoffEnabled}
       />
 
-      {active && reviewing && canStartHandoff ? createPortal(
+      {user && active && reviewing && canStartHandoff ? createPortal(
         <AgentHandoffOverlay
           taskId={task.id}
           taskTitle={task.title}
           onClose={closeHandoff}
-          onDispatched={closeHandoff}
+          onDispatched={(run) => dispatchedHandoff(user.id, run)}
         />, document.body
       ) : null}
     </>
