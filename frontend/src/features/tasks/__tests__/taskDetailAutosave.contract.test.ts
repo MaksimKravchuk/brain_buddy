@@ -891,11 +891,14 @@ describe("contract-complete task detail autosave controller", () => {
 
   it("does not dispatch retry backoff work after controller reset", async () => {
     vi.useFakeTimers();
+    const failure = deferred<never>();
     const update = vi.spyOn(apiClient, "updateTask")
-      .mockRejectedValueOnce(new TypeError("offline"))
+      .mockReturnValueOnce(failure.promise)
       .mockResolvedValue(task({ title: "Changed", revision: 2 }));
     const controller = getTaskDetailAutosaveController("account-a", "https://brainbuddy.test/api", task());
     controller.save({ kind: "patch", payload: { title: "Changed" } }, "retry-key");
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    failure.reject(new TypeError("offline"));
     await vi.advanceTimersByTimeAsync(0);
     expect(update).toHaveBeenCalledTimes(1);
     resetTaskDetailAutosaveControllersForTests();
