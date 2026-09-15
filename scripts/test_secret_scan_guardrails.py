@@ -470,6 +470,22 @@ class ScanRangeTest(unittest.TestCase):
         self.assertEqual(out.get("log_opts"), f"{self.base}..{self.head}")
         self.assertEqual(self._scanned_commits(out), {self.head})
 
+    def test_force_push_with_unreachable_before_scans_head_history(self) -> None:
+        code, out = self._derive(
+            EVENT_NAME="push", PUSH_BEFORE="f" * 40, EVENT_HEAD=self.head
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(out.get("mode"), "full")
+        self.assertEqual(self._scanned_commits(out), {self.base, self.head})
+
+    def test_force_push_with_unrelated_before_scans_head_history(self) -> None:
+        code, out = self._derive(
+            EVENT_NAME="push", PUSH_BEFORE=self.cleaned, EVENT_HEAD=self.head
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(out.get("mode"), "full")
+        self.assertEqual(self._scanned_commits(out), {self.base, self.head})
+
     def test_pull_request_derives_the_incremental_range(self) -> None:
         code, out = self._derive(
             EVENT_NAME="pull_request", PR_BASE=self.base, EVENT_HEAD=self.head
@@ -487,14 +503,9 @@ class ScanRangeTest(unittest.TestCase):
                 "PUSH_BEFORE": "not-a-sha",
                 "EVENT_HEAD": self.head,
             },
-            "unknown commit": {
-                "EVENT_NAME": "push",
-                "PUSH_BEFORE": "f" * 40,
-                "EVENT_HEAD": self.head,
-            },
-            "base is not an ancestor": {
-                "EVENT_NAME": "push",
-                "PUSH_BEFORE": self.head,
+            "pull request base is not an ancestor": {
+                "EVENT_NAME": "pull_request",
+                "PR_BASE": self.head,
                 "EVENT_HEAD": self.base,
             },
         }

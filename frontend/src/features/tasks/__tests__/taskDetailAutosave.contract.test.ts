@@ -892,14 +892,25 @@ describe("contract-complete task detail autosave controller", () => {
   it("does not dispatch retry backoff work after controller reset", async () => {
     vi.useFakeTimers();
     const failure = deferred<never>();
+    const started = deferred<void>();
     const update = vi.spyOn(apiClient, "updateTask")
-      .mockReturnValueOnce(failure.promise)
+      .mockImplementationOnce(() => {
+        started.resolve();
+        return failure.promise;
+      })
       .mockResolvedValue(task({ title: "Changed", revision: 2 }));
     const controller = getTaskDetailAutosaveController("account-a", "https://brainbuddy.test/api", task());
+    const retrying = new Promise<void>((resolve) => {
+      const unsubscribe = controller.subscribe(() => {
+        if (!controller.getSnapshot().retrying) return;
+        unsubscribe();
+        resolve();
+      });
+    });
     controller.save({ kind: "patch", payload: { title: "Changed" } }, "retry-key");
-    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    await started.promise;
     failure.reject(new TypeError("offline"));
-    await settle();
+    await retrying;
     expect(controller.getSnapshot()).toMatchObject({ status: "retrying", retrying: true });
     expect(update).toHaveBeenCalledTimes(1);
 
