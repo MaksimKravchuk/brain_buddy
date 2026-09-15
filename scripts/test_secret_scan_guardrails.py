@@ -404,7 +404,10 @@ class ScanRangeTest(unittest.TestCase):
         self.assertTrue(opts, "an empty option silently falls back to every ref")
         if output["mode"] == "full":
             self.assertIn("--full-history", opts)
-            self.assertIn("--diff-filter=tuxdb", opts)
+            self.assertFalse(
+                any(option.startswith("--diff-filter") for option in opts),
+                "a full-history secret scan must not filter out commit change types",
+            )
         history = subprocess.run(
             ["git", "log", "--format=%H", *opts], cwd=self.repo,
             check=True, capture_output=True, text=True,
