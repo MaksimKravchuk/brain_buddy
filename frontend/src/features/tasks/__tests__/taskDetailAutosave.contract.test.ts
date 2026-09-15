@@ -46,6 +46,70 @@ afterEach(() => {
 });
 
 describe("contract-complete task detail autosave controller", () => {
+  it("settles an immediate edit when its controller is reset before dispatch", async () => {
+    const update = vi.spyOn(apiClient, "updateTask");
+    const controller = getTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+
+    controller.change("title", "Changed", 0);
+    resetTaskDetailAutosaveControllersForTests();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("stops processing an acknowledgement after disposal during an in-flight request", async () => {
+    const response = deferred<TaskResponse>();
+    const update = vi.spyOn(apiClient, "updateTask").mockReturnValue(response.promise);
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+
+    controller.change("title", "Changed", 0);
+    await settle();
+    controller.dispose();
+    response.resolve(task({ revision: 2, title: "Changed" }));
+    await settle();
+
+    expect(update).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot().baseline).toEqual(task());
+    controller.dispose();
+  });
+
+  it("ignores a rejected acknowledgement after disposal during an in-flight request", async () => {
+    const response = deferred<TaskResponse>();
+    const update = vi.spyOn(apiClient, "updateTask").mockReturnValue(response.promise);
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+
+    controller.change("title", "Changed", 0);
+    await settle();
+    controller.dispose();
+    response.reject(new TypeError("offline"));
+    await settle();
+
+    expect(update).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot().error).toBeNull();
+  });
+
+  it("does not apply a conflict refetch after disposal", async () => {
+    const refetch = deferred<TaskResponse>();
+    const update = vi.spyOn(apiClient, "updateTask").mockRejectedValue(new ApiError("stale", 409, {}));
+    vi.spyOn(apiClient, "getTask").mockReturnValue(refetch.promise);
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+
+    controller.change("title", "Changed", 0);
+    await settle();
+    expect(update).toHaveBeenCalledOnce();
+    expect(apiClient.getTask).toHaveBeenCalledOnce();
+
+    controller.dispose();
+    refetch.resolve(task({ revision: 2, title: "Server wins" }));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await settle();
+
+    expect(controller.task).toEqual(task());
+    expect(controller.getSnapshot().baseline).toEqual(task());
+    expect(controller.getSnapshot().conflict?.latestServerTask).toBeNull();
+    expect(update).toHaveBeenCalledOnce();
+  });
+
   it("coalesces successor fields, publishes queued state, and never reports an older acknowledgement as saved", async () => {
     const first = deferred<TaskResponse>();
     const second = deferred<TaskResponse>();
@@ -807,5 +871,39 @@ describe("contract-complete task detail autosave controller", () => {
 
     expect(update).not.toHaveBeenCalled();
     expect(controller.getSnapshot()).toMatchObject({ status: "clean", dirtyFields: [] });
+  });
+
+  it("does not let a reset controller persist after its request settles", async () => {
+    const origin = "https://brainbuddy.test/api";
+    const response = deferred<TaskResponse>();
+    vi.spyOn(apiClient, "updateTask").mockReturnValueOnce(response.promise as ReturnType<typeof apiClient.updateTask>);
+    const controller = getTaskDetailAutosaveController("account-a", origin, task());
+    controller.change("title", "Changed", 0);
+    await vi.waitFor(() => expect(apiClient.updateTask).toHaveBeenCalledTimes(1));
+
+    resetTaskDetailAutosaveControllersForTests();
+    sessionStorage.clear();
+    response.resolve(task({ title: "Changed", revision: 2 }));
+    await settle();
+
+    expect(sessionStorage.getItem(taskAutosaveStorageKey("account-a", origin, "task-1"))).toBeNull();
+  });
+
+  it("does not dispatch retry backoff work after controller reset", async () => {
+    vi.useFakeTimers();
+    const failure = deferred<never>();
+    const update = vi.spyOn(apiClient, "updateTask")
+      .mockReturnValueOnce(failure.promise)
+      .mockResolvedValue(task({ title: "Changed", revision: 2 }));
+    const controller = getTaskDetailAutosaveController("account-a", "https://brainbuddy.test/api", task());
+    controller.save({ kind: "patch", payload: { title: "Changed" } }, "retry-key");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(update).toHaveBeenCalledTimes(1);
+    failure.reject(new TypeError("offline"));
+    await settle();
+    expect(controller.getSnapshot()).toMatchObject({ retrying: true, inFlight: { attempt: 2 } });
+    resetTaskDetailAutosaveControllersForTests();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(update).toHaveBeenCalledTimes(1);
   });
 });

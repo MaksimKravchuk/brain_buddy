@@ -65,7 +65,6 @@ const normalize = (field: EditableField, value: TaskDraft[EditableField]): TaskD
   return value;
 };
 const randomKey = () => globalThis.crypto?.randomUUID?.() ?? `autosave-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 // Subtasks and comments have their own revisions. GET includes those projections,
 // while parent mutation acknowledgements leave them empty; neither changes the
 // parent revision. Compare only parent-owned data, independently of JSON key order.
@@ -205,6 +204,9 @@ export function createTaskDetailAutosaveController(
   if (restored?.status === "saving" || restored?.status === "retrying") state = { ...state, status: "queued", retrying: false };
   const listeners = new Set<() => void>();
   const timers = new Map<EditableField, ReturnType<typeof setTimeout>>();
+  let disposed = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let releaseRetry: (() => void) | null = null;
   let snapshot: AutosaveSnapshot;
   let running: Promise<void> | null = null;
   let requestedKey: string | undefined;
@@ -223,6 +225,7 @@ export function createTaskDetailAutosaveController(
     snapshot = { ...state, dirty: { ...state.dirty }, draft: { ...state.draft, tag_ids: [...state.draft.tag_ids] }, dirtyFields, queuedCount };
   };
   const persistAndEmit = () => {
+    if (disposed) return;
     derive();
     if (typeof sessionStorage !== "undefined") {
       const key = taskAutosaveStorageKey(accountId, apiOrigin, suppliedTask.id);
@@ -319,7 +322,9 @@ export function createTaskDetailAutosaveController(
     state.status = "conflicted";
     persistAndEmit();
     try {
-      const canonical = validateTaskResponse(await apiClient.getTask(suppliedTask.id), suppliedTask.id, state.baseline.revision, undefined, false);
+      const fetched = await apiClient.getTask(suppliedTask.id);
+      if (disposed) return;
+      const canonical = validateTaskResponse(fetched, suppliedTask.id, state.baseline.revision, undefined, false);
       if (canonical.revision < state.baseline.revision || canonical.revision === state.baseline.revision && !taskEqual(canonical, state.baseline)) throw new Error("Server returned contradictory canonical task data");
       mergeCanonical(canonical);
       const conflict = state.conflict;
@@ -332,6 +337,7 @@ export function createTaskDetailAutosaveController(
   };
 
   const dispatch = async (command: InFlight) => {
+    if (disposed) return;
     state.inFlight = command;
     state.error = null;
     persistAndEmit();
@@ -340,6 +346,7 @@ export function createTaskDetailAutosaveController(
         const response = command.kind === "patch"
           ? await apiClient.updateTask(suppliedTask.id, command.body as TaskUpdateRequest, command.idempotencyKey)
           : await apiClient.transitionTask(suppliedTask.id, command.body as TaskTransitionRequest, command.idempotencyKey);
+        if (disposed) return;
         const previousState = state.baseline.state;
         const payload = Object.fromEntries(Object.entries(command.body).filter(([key]) => key !== "expected_revision"));
         const accepted = validateTaskResponse(response, suppliedTask.id, Math.max(state.baseline.revision, Number(command.body.expected_revision)), { kind: command.kind, payload } as AutosaveCommand, true, previousState);
@@ -361,6 +368,7 @@ export function createTaskDetailAutosaveController(
         persistAndEmit();
         return;
       } catch (error) {
+        if (disposed) return;
         if (error instanceof ApiError && error.status === 409) { await handleConflict(command, error); return; }
         if (retryable(error) && command.attempt < 3) {
           command = { ...command, attempt: command.attempt + 1 };
@@ -369,7 +377,11 @@ export function createTaskDetailAutosaveController(
           persistAndEmit();
           const fallback = command.attempt === 2 ? 500 : 1500;
           const delay = error instanceof ApiError && error.status === 429 && error.retryAfterMs !== undefined ? Math.min(Math.max(error.retryAfterMs, 0), 10_000) : fallback;
-          await wait(delay);
+          await new Promise<void>((resolve) => {
+            releaseRetry = resolve;
+            retryTimer = setTimeout(() => { retryTimer = null; releaseRetry = null; resolve(); }, delay);
+          });
+          if (disposed) return;
           continue;
         }
         state.inFlight = command;
@@ -383,15 +395,16 @@ export function createTaskDetailAutosaveController(
   const drain = async () => {
     if (running || state.inFlight || state.conflict || state.error) return;
     running = (async () => {
-      while (!state.conflict && !state.error) {
+      while (!disposed && !state.conflict && !state.error) {
         const next = build();
         if (!next) break;
         await dispatch(next);
-        if (state.inFlight || state.conflict || state.error) break;
+        if (disposed || state.inFlight || state.conflict || state.error) break;
       }
     })();
     await running;
     running = null;
+    if (disposed) return;
     if (!state.inFlight && !state.conflict && !state.error && !build()) {
       if (fields.every((field) => !state.dirty[field])) {
         state.status = "saved";
@@ -411,6 +424,15 @@ export function createTaskDetailAutosaveController(
   const flushTimers = () => { timers.forEach(clearTimeout); timers.clear(); };
 
   const controller = {
+    dispose() {
+      disposed = true;
+      flushTimers();
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+      releaseRetry?.();
+      releaseRetry = null;
+      if (savedTimer) { clearTimeout(savedTimer); savedTimer = null; }
+      listeners.clear();
+    },
     subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener); },
     getSnapshot() { return snapshot; },
     get task() { return state.baseline; },
@@ -534,6 +556,7 @@ export function createTaskDetailAutosaveController(
 const controllers = new Map<string, ReturnType<typeof createTaskDetailAutosaveController>>();
 export type TaskDetailAutosaveController = ReturnType<typeof createTaskDetailAutosaveController>;
 export function resetTaskDetailAutosaveControllersForTests(): void {
+  controllers.forEach((controller) => controller.dispose());
   controllers.clear();
 }
 export function getTaskDetailAutosaveController(
