@@ -574,6 +574,7 @@ export function getTaskDetailAutosaveController(
     const recoveryStillExists = typeof sessionStorage !== "undefined" && sessionStorage.getItem(taskAutosaveStorageKey(accountId, apiOrigin, task.id)) !== null;
     const snapshot = existing.getSnapshot();
     if ((snapshot.dirtyFields.length || snapshot.inFlight || snapshot.error || snapshot.conflict) && !recoveryStillExists) {
+      existing.dispose();
       controllers.delete(key);
     } else {
       queueMicrotask(() => existing.sync(task));
