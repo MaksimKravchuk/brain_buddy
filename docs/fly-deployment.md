@@ -1,8 +1,11 @@
 # Fly.io Deployment Runbook
 
-> **Production release policy:** [ADR-0003](decisions/0003-autonomous-delivery-guardrails.md)
-> requires production deployment only through the reviewed PR -> green CI -> merge to
-> `main` -> successful `main` CI -> production workflow path. The setup commands below are
+> **Production release policy:** [ADR-0008](decisions/0008-verified-trunk-serial-landing.md),
+> as amended by [ADR-0023](decisions/0023-proportionate-fast-lane-for-test-stage-ship-show.md),
+> sends eligible SHIP/SHOW work through PR-less verified trunk: exact-SHA candidate CI,
+> serial landing, deploy-time main-head proof, and authenticated production smoke. ASK
+> work retains explicit approval, exact-SHA green CI, review evidence, and the audited
+> landing intervention in the autonomous delivery runbook. The setup commands below are
 > bootstrap/reference material, not authority for an agent or operator to perform an ad-hoc
 > production deploy. Follow the
 > [autonomous delivery runbook](autonomous-delivery-runbook.md) for release, incident, and

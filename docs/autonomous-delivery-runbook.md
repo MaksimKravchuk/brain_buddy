@@ -2,7 +2,9 @@
 
 This runbook operationalizes
 [ADR-0003](decisions/0003-autonomous-delivery-guardrails.md) and
-[ADR-0008](decisions/0008-verified-trunk-serial-landing.md). It is the authority for
+[ADR-0008](decisions/0008-verified-trunk-serial-landing.md), as amended for bounded
+SHIP/SHOW work by [ADR-0023](decisions/0023-proportionate-fast-lane-for-test-stage-ship-show.md).
+It is the authority for
 verified trunk landings, agent-created PRs (ASK class), visual review apps, normal
 production releases, and incidents involving those paths. It does not grant authority to
 mutate remote resources.
@@ -19,15 +21,44 @@ lowercase implementation SHA, changed-path inventory, and each stable writer gat
 the exact command, observation, and evidence. Missing, failed, unverified,
 duplicate, unknown, malformed-SHA, or unjustified-N/A entries are rejected.
 
-These are only local pre-freeze writer gates. Independent review and QA, exact-SHA
-CI, landing, deployment, and production smoke are post-freeze obligations; they
-remain governed by ADR-0008 and cannot be claimed or replaced by this receipt.
+These are only local pre-freeze writer gates. The risk-selected independent review
+or QA gate, exact-SHA CI, landing, deployment, and production smoke are post-freeze
+obligations; they remain governed by ADR-0008 and ADR-0023 and cannot be claimed or
+replaced by this receipt.
 
 `scripts/submit_to_trunk.sh` requires the explicit, non-secret environment
 variable `SUBMIT_TRUNK_PRE_FREEZE_RECEIPT`, pointing to that local JSON file.
 It freezes `HEAD`, then invokes the validator with that exact SHA before path
 classification or any candidate-ref push. The variable has no default: an
 absent, unreadable, malformed, or SHA-mismatched receipt fails closed.
+
+## Balanced fast lane (eligible SHIP/SHOW changes)
+
+ADR-0023 is the default for a bounded change mechanically proven non-ASK and explicitly
+classified semantically as SHIP or SHOW. The full path applies to a significant new
+capability, a cross-surface contract change, a persistence/schema change, a materially
+changed workflow/state-machine boundary, or any ASK-class outcome. The path classifier
+enforces ASK versus non-ASK; every user-visible non-ASK change is semantically SHOW.
+
+1. Record the lightweight brief: accepted outcome, non-goals, acceptance evidence,
+   and untouched scope. Do not create a Spec Kit campaign or managed Kanban outcome
+   merely to restate that bounded slice.
+2. Run the smallest relevant deterministic writer checks, then freeze one candidate
+   SHA. `writer.verify_all` may be `NOT_APPLICABLE` only with a concrete receipt
+   justification; full required CI still runs on the exact candidate SHA.
+3. Choose exactly one independent gate by dominant risk: code
+   review for implementation/contract correctness, or QA for rendered interaction and
+   the user journey. The actor must not be the writer. Material mixed risk or a contract
+   requiring both disciplines moves the outcome to the full path; replace an incapable
+   selected gate or escalate instead of accumulating a second fast-lane gate.
+4. After the standard authenticated production smoke, add one bounded production
+   journey only for user-visible SHOW work. A separate protected browser/identity gate
+   is triggered only by changes to auth, permissions, cohort/flag exposure,
+   browser-only behavior, or an explicit accepted criterion.
+
+All ASK changes and ineligible SHIP/SHOW changes use the existing full path. Fast-lane
+eligibility never bypasses path classification, CI, landing proof, smoke, cleanup, or
+rollback.
 
 ## Verified trunk landing (SHIP/SHOW changes)
 
@@ -41,7 +72,9 @@ external effects — never land automatically; they use the ASK landing procedur
 
 1. Implement the slice test-first in an isolated worktree, as one candidate commit whose
    parent is the current `origin/main` (squash an atomic series before submitting).
-2. Run `scripts/submit_to_trunk.sh`. It validates clean state, current base, and a single
+2. Freeze the candidate and obtain ADR-0023's risk-selected independent gate on that
+   exact SHA. On the full path, obtain every gate required by its accepted criteria.
+3. Run `scripts/submit_to_trunk.sh`. It validates clean state, current base, and a single
    non-merge commit, mechanically classifies every changed path with
    `scripts/classify_path_risk.py` fed by `git diff --no-renames --name-only -z`
    (NUL-separated, so non-ASCII paths classify on their real names and a rename away
@@ -53,11 +86,11 @@ external effects — never land automatically; they use the ASK landing procedur
    gate is never skippable), runs fast local checks, pushes the exact SHA to
    `trunk-candidate/<sha>`, and prints the Actions URL. It never pushes `main` and
    never force-pushes.
-3. Full required CI (the same job set as `main`) runs on the candidate ref.
+4. Full required CI (the same job set as `main`) runs on the candidate ref.
    Candidate-controlled CI holds **no write permission and pushes nothing** — it can
    never promote. A skipped required job fails `full-ci`, so a landing can never ride
    on a vacuously green gate.
-4. The completed successful candidate CI run triggers the **default-branch release
+5. The completed successful candidate CI run triggers the **default-branch release
    workflow** (`deploy-fly-production.yml`; `workflow_run` always executes the `main`
    copy of the definition, so a candidate's workflow edits cannot affect its own
    landing). Its `land` job — read-only token (`contents: read`), no PAT, running in
@@ -74,7 +107,7 @@ external effects — never land automatically; they use the ASK landing procedur
    queue**: at most one landing+deploy runs and at most one more stays pending; GitHub
    may cancel additional pending runs. A cancelled run fails closed (nothing lands) —
    resubmit the candidate.
-5. The `deploy` job of the same run starts only after the landing proof
+6. The `deploy` job of the same run starts only after the landing proof
    (`needs: land`), holds the production environment and Fly secrets under
    `contents: read`, and re-verifies for **every** consumed run (candidate and `main`)
    that `origin/main` equals the tested `workflow_run.head_sha` immediately before any
@@ -93,9 +126,10 @@ external effects — never land automatically; they use the ASK landing procedur
    `mobile_task_classification`, `external_agent_relay`) instead roll out
    OFF → SELECTED_USERS → ON through the Admin Portal at runtime, independent
    of this landing/deploy path (ADR-0019).
-6. Evidence for the landing is the candidate push (actor + SHA), the candidate CI run,
-   and the release workflow run (its `land` and `deploy` jobs) — record their URLs
-   where a task requires an evidence packet. No PR object exists for SHIP/SHOW
+7. Evidence for the landing is the selected independent-gate verdict, candidate push
+   (actor + SHA), candidate CI run, and release workflow run (its `land` and `deploy`
+   jobs), plus the bounded production journey for user-visible SHOW work — record their
+   URLs where a task requires an evidence packet. No PR object exists for SHIP/SHOW
    landings.
 
 ASK-class changes never land through automatic promotion. Stated honestly: while the

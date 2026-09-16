@@ -39,8 +39,9 @@ Two former prohibitions in this section no longer apply:
   constitution and `docs/spec-kit-workflow.md` always said. The disabled
   version contradicted all three and stalled any agent that read skills first.
 - **`.specify/workflows/speckit/workflow.yml` is no longer legacy.** ADR-0011
-  makes it the portable spec review gate that runs for every feature, managed
-  or not. Run it via `/speckit-review`.
+  makes it the portable spec review gate for every ADR-0023 full-path feature,
+  managed or not. Eligible fast-lane SHIP/SHOW work does not invoke it. Run it
+  via `/speckit-review`.
 
 ## Create one root outcome
 

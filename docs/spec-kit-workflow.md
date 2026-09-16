@@ -1,7 +1,11 @@
 # BrainBuddy Spec Kit workflow
 
-BrainBuddy uses the official GitHub Spec Kit as the mandatory authoring workflow
-for every new or materially changed feature specification.
+BrainBuddy uses the official GitHub Spec Kit as the mandatory full authoring workflow
+when any canonical ADR-0023 trigger applies: a significant new capability, a cross-
+surface contract change, a persistence/schema change, a materially changed workflow/
+state-machine boundary, or any ASK-class outcome. ADR-0023's lightweight brief replaces
+the full campaign for an eligible bounded SHIP/SHOW correction, refactor, docs/test
+change, or single-surface enhancement.
 
 - Spec Kit version: `github/spec-kit` `v0.15.0`
 - Installed integration: Claude Code skills under `.claude/skills/`. The Codex
@@ -164,7 +168,12 @@ After any future refresh:
 
 ## Canonical feature-spec path
 
-For every new or materially changed BrainBuddy feature:
+Use this path for every BrainBuddy outcome that meets ADR-0023's full-path triggers.
+An eligible fast-lane change records its accepted outcome, non-goals, acceptance
+evidence, and untouched scope instead. If it changes intent already frozen in an
+existing feature spec, amend that spec before implementation.
+
+For a full-path feature:
 
 1. Read `.specify/memory/constitution.md`, `AGENTS.md`, `CLAUDE.md`, and relevant
    ADRs under `docs/decisions/`.

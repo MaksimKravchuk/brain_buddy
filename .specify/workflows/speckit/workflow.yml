@@ -2,9 +2,9 @@ schema_version: "1.0"
 workflow:
   id: "speckit"
   name: "BrainBuddy Portable Spec Review"
-  version: "3.0.0"
+  version: "3.1.0"
   author: "BrainBuddy"
-  description: "Portable spec review gate (ADR-0011): five read-only reviewer lenses fan out over the feature planning artifacts and fan in to one schema-validated verdict. Runs for every feature, with or without a managed outcome. Portable means not tied to a managed runtime — the campaign is a plain script any agent or developer can invoke; the skill wrapper is Claude-only since `.agents/` was removed."
+  description: "Portable full-path spec review gate (ADR-0011/ADR-0023): five read-only reviewer lenses fan out over planning artifacts and fan in to one schema-validated verdict. Runs only when an ADR-0023 full-path trigger applies, with or without a managed outcome. Eligible fast-lane SHIP/SHOW work does not invoke this campaign. Portable means not tied to a managed runtime — the campaign is a plain script any agent or developer can invoke; the skill wrapper is Claude-only since `.agents/` was removed."
 
 requires:
   speckit_version: ">=0.14.2"
