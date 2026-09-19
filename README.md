@@ -27,24 +27,43 @@ See [Product direction: executable next actions](docs/product-direction.md) for 
 ## Quick Start
 
 ### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- Optional: `make`, `uvicorn`, `npm` scripts available on your PATH
+- Python 3.11 with the `venv` module (see `.python-version`)
+- Node.js 20.19.0 for the web frontend; mobile uses 22.13.1 (see each
+  stack's `.nvmrc`)
+- nvm available to the shell, npm, and GNU Make
 
-### Backend
+For a reproducible host setup, runtime selection, and verification commands,
+see [Local development](docs/runbooks/local-deployment.md).
+
+### Install dependencies
+
+From the repository root:
+
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-pip install -e .[dev]
+python3 -m venv backend/.venv
+source backend/.venv/bin/activate
+python -m pip install -e 'backend[dev]'
 
-uvicorn app.main:app --reload
+cd frontend
+nvm use
+npm ci
+cd ..
 ```
 
-### Frontend
+### Run
+
+In one terminal from the repository root:
+
+```bash
+source backend/.venv/bin/activate
+make dev-backend
+```
+
+In a second terminal:
+
 ```bash
 cd frontend
-npm install
+nvm use
 npm run dev
 ```
 
