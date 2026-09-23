@@ -3,6 +3,7 @@
 from .account_service import AccountService
 from .admin_service import AdminService
 from .auth_service import AuthService, InvalidCredentialsError, InvalidInviteError
+from .crt_command_service import CrtCommandService
 from .feature_flag_service import FeatureFlagService, SelectedUserNotFoundError
 from .node_service import NodeService
 from .relation_service import RelationService
@@ -15,6 +16,7 @@ __all__ = [
     "AdminService",
     "AuthService",
     "FeatureFlagService",
+    "CrtCommandService",
     "InvalidCredentialsError",
     "InvalidInviteError",
     "NodeService",

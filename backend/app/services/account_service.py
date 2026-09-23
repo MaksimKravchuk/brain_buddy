@@ -25,6 +25,7 @@ from app.exceptions import (
 from app.modules.agents.repository import AgentRepository
 from app.modules.tasks import TaskRepository
 from app.repositories import (
+    CrtCommandRepository,
     FeatureFlagOverrideRepository,
     InviteRepository,
     SessionRepository,
@@ -70,6 +71,7 @@ class AccountService:
         voice_operation_repo: OperationRepository,
         agent_repo: AgentRepository,
         feature_flag_repo: FeatureFlagOverrideRepository,
+        crt_command_repo: CrtCommandRepository,
         auth_service: AuthService,
         reserved_emails: frozenset[str] = frozenset(),
         deletion_grace: timedelta = DELETION_GRACE,
@@ -84,6 +86,7 @@ class AccountService:
         self.voice_operation_repo = voice_operation_repo
         self.agent_repo = agent_repo
         self.feature_flag_repo = feature_flag_repo
+        self.crt_command_repo = crt_command_repo
         self.auth_service = auth_service
         # Plain configuration values (the normalized operator allow-list), not
         # a service handle: reserving an address is a rule about this
@@ -185,6 +188,22 @@ class AccountService:
     # Data export (GDPR access & portability)
     # ------------------------------------------------------------------
 
+    def _version_account_export(self, version: Any) -> dict[str, Any]:
+        """Project a stored version without exposing its nested domain document."""
+
+        return {
+            "id": version.id,
+            "label": version.label,
+            "captured_at": version.captured_at.isoformat(),
+            "author": version.author,
+            "notes": version.notes,
+            "diff": version.diff.model_dump(mode="json"),
+            "conflicts": [
+                conflict.model_dump(mode="json") for conflict in version.conflicts
+            ],
+            "tree": self.tree_service.to_account_export(version.tree),
+        }
+
     def export_account_data(self, user: User) -> tuple[str, IO[bytes]]:
         """Assemble everything the account owns into one ZIP archive.
 
@@ -217,12 +236,15 @@ class AccountService:
             for entry in self.tree_service.list_trees(owner_id=user.id):
                 tree_count += 1
                 tree = self.tree_service.get_tree_for_owner(entry.id, owner_id=user.id)
-                write_json(f"trees/{entry.id}/tree.json", tree.model_dump(mode="json"))
+                write_json(
+                    f"trees/{entry.id}/tree.json",
+                    self.tree_service.to_account_export(tree),
+                )
                 for version in self.version_repo.list_for_tree(entry.id):
                     slug = _slugify_version_id(version.id)
                     write_json(
                         f"trees/{entry.id}/versions/{slug}.json",
-                        version.model_dump(mode="json"),
+                        self._version_account_export(version),
                     )
                 validation_dir = self.validation_repo.resolve(
                     entry.id, VALIDATION_DIRNAME
@@ -456,16 +478,18 @@ class AccountService:
         # before the task purge because a run references the Task it evidences.
         self.agent_repo.delete_all_for_owner(owner_id=user_id)
         self.task_repo.delete_all_for_owner(owner_id=user_id)
-        for entry in self.tree_service.list_trees(owner_id=user_id):
-            try:
-                self.tree_service.delete_tree(entry.id, owner_id=user_id)
-            except NotFoundError:
-                # A previous purge attempt removed the tree files but died
-                # before the index update — the entry itself still names the
-                # owner, so it must not survive this retry.
-                self.tree_service.remove_stale_tree_state(entry.id)
-        self.invite_repo.scrub_user(user_id)
-        self.user_repo.delete(user_id)
+        with self.crt_command_repo.command_lock(user_id):
+            self.crt_command_repo.delete_all_for_owner_locked(owner_id=user_id)
+            for entry in self.tree_service.list_trees(owner_id=user_id):
+                try:
+                    self.tree_service.delete_tree(entry.id, owner_id=user_id)
+                except NotFoundError:
+                    # A previous purge attempt removed the tree files but died
+                    # before the index update — the entry itself still names
+                    # the owner, so it must not survive this retry.
+                    self.tree_service.remove_stale_tree_state(entry.id)
+            self.invite_repo.scrub_user(user_id)
+            self.user_repo.delete(user_id)
         logger.info("Purged account %s and all owned data", user_id)
 
 

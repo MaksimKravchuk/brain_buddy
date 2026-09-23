@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "candidate_sha": "<40-lowercase-hex-candidate-sha>",
+  "candidate_state": "exact_commit",
+  "fixture": {
+    "card_count_at_load": 200,
+    "relation_count_at_load": 260
+  },
+  "browser": "Chromium",
+  "browser_version": "<pinned-chromium-version>",
+  "supported_widths": [1024, 1280],
+  "operations": {
+    "selection": { "sample_count": 20, "raw_ms": [], "p95_ms": 0, "within_200ms": 0 },
+    "drag": { "sample_count": 20, "raw_ms": [], "p95_ms": 0, "within_200ms": 0 },
+    "enter": { "sample_count": 20, "raw_ms": [], "p95_ms": 0, "within_200ms": 0 },
+    "tab": { "sample_count": 20, "raw_ms": [], "p95_ms": 0, "within_200ms": 0 },
+    "pan": { "sample_count": 20, "raw_ms": [], "p95_ms": 0, "within_200ms": 0 },
+    "zoom": { "sample_count": 20, "raw_ms": [], "p95_ms": 0, "within_200ms": 0 }
+  },
+  "aggregate": {
+    "sample_count": 120,
+    "p95_ms": 0,
+    "within_200ms": 0,
+    "required_within_200ms": 114
+  },
+  "accessibility": {
+    "serious_or_critical_violations": 0
+  },
+  "width_audit": [
+    {
+      "inner_width": 1024,
+      "document_scroll_width": 1024,
+      "horizontal_overflow": false,
+      "clipped_shell": false
+    },
+    {
+      "inner_width": 1280,
+      "document_scroll_width": 1280,
+      "horizontal_overflow": false,
+      "clipped_shell": false
+    }
+  ]
+}

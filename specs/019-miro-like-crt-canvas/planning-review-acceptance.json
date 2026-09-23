@@ -1,0 +1,30 @@
+{
+  "schema_version": "speckit-founder-acceptance/v1",
+  "feature": "019-miro-like-crt-canvas",
+  "planning_review": {
+    "status": "founder-accepted",
+    "risk": "high",
+    "founder_acceptance": {
+      "accepted_by": "Repository owner",
+      "accepted_on": "2026-09-20",
+      "expires_on": "2026-10-20",
+      "rationale": "The repository owner explicitly directed implementation to begin after the second planning campaign stopped converging and planning effort became disproportionate. All concrete findings returned by the five review lenses through the final completed digest were corrected in the specification, design, contracts, ADRs, retention documentation, and task plan. This acceptance does not represent an approved automated verdict and does not waive tests, privacy or owner isolation, exact-SHA verification, independent review, the default-OFF rollout boundary, or ADR-0008 ASK landing controls. It only closes the non-converging planning loop so implementation can proceed test-first.",
+      "campaign_history": [
+        {
+          "run_id": "019-crt-canvas-review-1",
+          "status": "incomplete: requirements review ran; the then-configured unavailable reviewer runtime prevented a complete campaign"
+        },
+        {
+          "run_id": "019-crt-canvas-review-2",
+          "status": "changes-required/non-converging after repeated full-lens reruns; every returned concrete finding was fixed before founder acceptance"
+        }
+      ],
+      "compensating_measures": [
+        "Keep crt_canvas default OFF and expose it only to a selected internal account during implementation and dogfood.",
+        "Use strict failing-test-first vertical slices and run affected plus full required suites before claiming completion.",
+        "Require an independent code and security review against the exact frozen candidate SHA before any release decision.",
+        "Treat all authenticated owner, persistence, privacy and destructive paths as ASK under ADR-0008; do not commit, push, land or deploy without separate approval."
+      ]
+    }
+  }
+}

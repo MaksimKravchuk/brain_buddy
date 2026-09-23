@@ -15,6 +15,7 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 | Trees, versions, AI validation history | `data/<tree_id>/…` + `data/index.json` | Life of account | Account purge |
 | Tasks, projects, tags, subtasks, comments | `data/tasks.sqlite3` + JSON mirrors (`tasks/`, `projects/`, `contexts/`, `task-subtasks/`, `task-comments/`) | Life of account | Account purge |
 | Task idempotency records | `tasks.sqlite3` + `task-commands/` mirrors | 24h rolling (`purge_expired_idempotency`), all on account purge | Maintenance sweep / purge |
+| CRT mutation idempotency receipts (owner/key, route/request fingerprint/status plus the canonical response needed for replay; no raw key) | `data/crt_commands.sqlite3` | Canonical response body exactly 30 days after commit; after expiry, the body and pending snapshot are redacted but an owner-scoped, content-free key/route/request-fingerprint tombstone remains until account purge. Normal tree deletion redacts prior content-bearing receipts and retains the content-free delete tombstone; account purge physically removes every receipt; pending commands reconcile before the 30-day response clock starts | CRT command maintenance sweep / confirmed-delete cleanup / account purge (ADR-0026) |
 | Voice operations (transcripts, consent records) | `data/voice_operations.sqlite3` + `brain-dump-operations/` mirrors | Life of account; uncommitted working artifacts 7 days | Sweep (`purge_expired_working_artifacts`) / purge |
 | Raw voice audio | `data/brain-dump-media/<owner>/…` | 24 hours after processing (`BRAIN_BUDDY_VOICE_RAW_AUDIO_RETENTION_SECONDS`), or immediate user deletion | Sweep (`purge_expired_raw_audio`) / in-app "Delete raw audio" |
 | **External-agent relay content** (the hand-off manifest the user confirmed — Task title, details and the supporting items they kept — plus the agent's progress, question, result and failure text, the blocked reason, artifact summaries, result availability and status text, reply/cancel command bodies, and timeline event summaries) | `data/agents.sqlite3` (SQLite only: this module deliberately writes no JSON mirror) | 30 days from dispatch (`BRAIN_BUDDY_AGENT_CONTENT_RETENTION_SECONDS`, which the settings model refuses to raise above 30 days) | Sweep (`expire_due_content`) / purge. Every read projects a due run as expired first, so the content is already unreachable when the sweep gets to it |
@@ -23,18 +24,22 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 | **A connected agent's discovered card summary and its fingerprint** (the agent's name, version, description, skill names and descriptions, offered authentication schemes, and interface address) | `data/agents.sqlite3`, on the connection row | The connection's lifetime. This is connection configuration, not run content, so no sweep touches it | `disconnect_connection` erases it together with the credential, so a disconnected connection no longer describes where it pointed / purge |
 | Invites | `data/invites/<code>.json` | Indefinite, but `used_by_user_id` is scrubbed to `"deleted-user"` on account purge | Purge (`InviteRepository.scrub_user`) |
 | Runtime feature-flag rollout store (flag modes plus the **account ids** an operator selected — no email, display name, credential or member content) | `data/feature_flags.sqlite3` | Life of the deployment; an account's id is removed from every cohort on account purge | Purge (`FeatureFlagOverrideRepository.scrub_user`) |
-| Server logs (correlation IDs, no content) | process stdout / Fly logs | Fly's log retention | Platform |
+| Server logs (correlation IDs and bounded content-free operation metadata; CRT may include opaque tree id, revision, outcome, error code and duration; never graph text or request/response bodies) | process stdout / Fly logs | Fly's log retention | Platform; application purge cannot erase platform logs |
 | **Admin access records** (an operator looked up, or revoked sessions for, one account; or changed a runtime feature flag's mode, cleared its override, or added or removed one selected account; or read the flag list, resolving its cohorts: operator account id, resolved target account id where the operation names one, flag name, action, outcome, and per-read flag and resolved-account counts — no email, display name, or request body) | process stdout / Fly logs | Fly's log retention | Platform |
 | Mobile pending classification queue (task, project and tag **ids**) | device `AsyncStorage`, key `bb.pendingClassification.<server>.<account>` | 30 days from last edit, or immediately on a deliberate identity transition | Mobile client sweep across all stored identities (spec 006, FR-011/FR-018) |
 | Mobile cached project and Tag lists (user-authored **names**) | device `AsyncStorage`, key `bb.classificationCache.<server>.<account>` | 30 days from last fetch, or immediately on a deliberate identity transition — including when the queue is empty | Mobile client sweep (spec 006, FR-011/FR-018) |
 | Web last-used agent preference (connection **id** and confirmation timestamp only; no Task content, address, or credential) | browser `localStorage`, key `bb.taskAgent.lastUsed.v1.<server>.<account>` | Eligible for 30 days from last confirmed hand-off; removed on sign-out/identity transition, invalid eligibility, and by a cross-identity startup/focus/interval sweep after expiry | Web preference lifecycle binding (spec 017, FR-008/FR-017) |
+| CRT unsynchronized drafts (user-authored graph/layout content, immutable in-flight save snapshot, queued commands and idempotency-key UUID) | browser `localStorage`, namespaced by origin/account/tree or pre-canonical create attempt | Eligible for 30 days from last edit/use; on next startup/focus/interval after expiry the stale draft stays outside the canvas and offers backup, recover (resetting the clock), or discard; all departing-owner keys on the active origin are removed after the pending-work decision on sign-out/account switch/account deletion | Web CRT recovery lifecycle (spec 019, FR-018–FR-020) |
+| CRT last-tree preference (owner id, tree id, origin and last-use timestamp; no graph content) | browser `localStorage`, namespaced by origin/account | 30 days from last use; removed by startup/focus/interval expiry sweep and with all departing-owner CRT keys on same-browser identity transition | Web CRT preference lifecycle (spec 019, FR-003/FR-020) |
 
-The three device/browser rows are the only entries in this table an account purge cannot
+The five device/browser rows are the only entries in this table an account purge cannot
 reach: the server can revoke every session, but it cannot delete bytes on a phone or
 in a browser. The native sweep provides the device stores' 30-day physical bound as
 specified by feature 006. The web preference becomes unusable at 30 days and its
 cross-identity sweep removes expired bytes whenever BrainBuddy next starts, regains
-focus, or reaches its sweep interval. If BrainBuddy is never run again, the user must
+focus, or reaches its sweep interval. CRT drafts likewise become ineligible for automatic
+application at 30 days and require the one stale-recovery decision when the app next runs.
+If BrainBuddy is never run again, the user must
 clear BrainBuddy site data in the browser to remove those residual local bytes; the
 server cannot honestly do that. These stores are unencrypted at rest and may be
 captured by device backups — see spec 006's Assumptions for the native stores.
@@ -70,7 +75,7 @@ user confirms.
    then deletes in a crash-safe, idempotent order — runtime feature-flag
    cohort scrub → sessions → voice (SQLite rows, JSON mirrors, raw audio) →
    external-agent connections/runs → tasks (SQLite rows, JSON mirrors) →
-   trees (directories incl. versions + validation, index entries) → invite
+   CRT command receipts → trees (directories incl. versions + validation, index entries) → invite
    scrub → **user record last**. The cohort scrub runs before every other
    destructive step, not after: it deliberately raises rather than skipping
    when the runtime flag store is degraded, so erasure is always
@@ -130,6 +135,20 @@ Anything beyond this — an append-only audit store, an admin-access history
 UI, or a bounded application-enforced retention window — is explicitly out of
 scope for spec 009 and would need its own decision.
 
+### CRT observability records (spec 019)
+
+CRT operational log lines may contain only correlation id, opaque tree id, operation,
+revision, coarse outcome/retryable error code, and duration. They never contain owner
+email/display name, card labels, graph text, request or response bodies, request hashes,
+idempotency keys, content fingerprints, credentials, cookies, or local paths.
+
+- **Retention:** the hosting platform's stdout/Fly log window; there is no application-side
+  CRT log store.
+- **Purge:** account/tree purge cannot erase platform logs. After purge, opaque identifiers
+  in a retained line no longer resolve to application data.
+- **Export:** excluded from `GET /api/account/export` as controller-side operational and
+  security records, not canonical member content.
+
 ## Export contents
 
 `GET /api/account/export` → one ZIP (`export_manifest.json`, `account.json`,
@@ -153,6 +172,8 @@ store** — controller-side rollout configuration recording only whether an
 operator selected your account id for a flag, never any content of yours. Raw
 audio appears only while it is inside its 24-hour retention window.
 
+CRT mutation receipts are included in the idempotency-record exclusion above: canonical response bodies are transient replay copies retained exactly 30 days, then redacted into content-free owner tombstones. Tree cleanup retains those tombstones to prevent old-key reuse; account purge physically erases them. CRT platform observability lines are also excluded under the disposition documented above.
+
 Also excluded: **mobile pending classification changes that have not yet
 reached the server.** The controller does not hold them, so the export is
 complete with respect to what the server has. The consequence is worth naming
@@ -166,6 +187,15 @@ server holds. The web client erases it on identity transition or invalid eligibi
 after 30 days it is unusable and is physically swept the next time BrainBuddy runs or
 regains focus. Clearing BrainBuddy site data removes it without reopening the app
 (spec 017, FR-008/FR-017).
+
+Also excluded: **CRT browser-local drafts and last-tree preferences**. The controller does
+not hold them. Both become stale after 30 days without edit/use and are swept when the web
+app next starts, regains focus, or reaches its cleanup interval. A stale draft is not loaded
+into the canvas: the app first offers backup, explicit recovery (which starts a new 30-day
+window), or discard. Same-browser identity transitions remove every departing-owner CRT
+record on the active origin after pending-work decisions. Another browser/device can only
+clean its own bytes when the app runs or the user clears BrainBuddy site data; browser or
+device backups may retain residual unencrypted copies.
 
 ## Maintainer checklist (manual, one-time / periodic)
 

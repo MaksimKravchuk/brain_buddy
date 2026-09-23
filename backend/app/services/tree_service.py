@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from threading import RLock
 from typing import Any
 
-from app.exceptions import NotFoundError, ValidationFailure
+from app.exceptions import NotFoundError, StaleRevisionError, ValidationFailure
 from app.repositories import IndexRepository, TreeRepository
 from app.schemas.api import (
     AiFeedbackRequest,
@@ -44,6 +44,8 @@ from app.utils.time import utcnow
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_TREE_SCHEMA_VERSIONS = frozenset({1})
+
 
 class TreeService:
     """High-level operations for managing trees."""
@@ -66,8 +68,36 @@ class TreeService:
             entry for entry in self.index_repo.load_all() if entry.owner_id == owner_id
         ]
 
-    def create_tree(self, payload: TreeCreateRequest, *, owner_id: str) -> TreeDocument:
-        tree_id = generate_tree_id()
+    def validate_snapshot(
+        self,
+        payload: TreeCreateRequest | TreeUpdateRequest,
+        *,
+        owner_id: str,
+        tree_id: str,
+        schema_version: int,
+    ) -> None:
+        """Validate a full graph snapshot without writing tree or index state."""
+
+        metadata = self._resolve_metadata(payload.metadata, owner_id=owner_id)
+        self._build_tree_document(
+            tree_id=tree_id,
+            name=payload.name,
+            metadata=metadata,
+            nodes=payload.nodes,
+            relations=payload.relations,
+            owner_id=owner_id,
+            schema_version=schema_version,
+        )
+
+    def prepare_create_tree(
+        self,
+        payload: TreeCreateRequest,
+        *,
+        owner_id: str,
+        tree_id: str,
+        command_id: str | None = None,
+        schema_version: int | None = None,
+    ) -> TreeDocument:
         metadata = self._resolve_metadata(payload.metadata, owner_id=owner_id)
         tree = self._build_tree_document(
             tree_id=tree_id,
@@ -76,10 +106,35 @@ class TreeService:
             nodes=payload.nodes,
             relations=payload.relations,
             owner_id=owner_id,
+            schema_version=(schema_version if schema_version is not None else 1),
         )
+        if command_id is not None:
+            tree = tree.model_copy(update={"last_command_id": command_id}, deep=True)
+        return tree
+
+    def persist_prepared_create_tree(self, tree: TreeDocument) -> TreeDocument:
         self.tree_repo.create(tree)
         self._sync_index(tree)
         return self._store_and_clone(tree)
+
+    def create_tree(
+        self,
+        payload: TreeCreateRequest,
+        *,
+        owner_id: str,
+        tree_id: str | None = None,
+        command_id: str | None = None,
+        schema_version: int | None = None,
+    ) -> TreeDocument:
+        tree_id = tree_id or generate_tree_id()
+        tree = self.prepare_create_tree(
+            payload,
+            owner_id=owner_id,
+            tree_id=tree_id,
+            command_id=command_id,
+            schema_version=schema_version,
+        )
+        return self.persist_prepared_create_tree(tree)
 
     def get_tree(self, tree_id: str) -> TreeDocument:
         tree = self.tree_repo.read(tree_id, after_load=self._cache_store)
@@ -114,6 +169,8 @@ class TreeService:
         ]
         return TreeDetailResponse(
             id=tree.id,
+            revision=tree.revision,
+            schema_version=tree.schema_version,
             name=tree.title,
             metadata=metadata,
             nodes=node_payloads,
@@ -121,9 +178,86 @@ class TreeService:
             owner_id=tree.owner_id,
         )
 
-    def update_tree(
-        self, tree_id: str, payload: TreeUpdateRequest, *, owner_id: str
+    def to_account_export(self, tree: TreeDocument) -> dict[str, Any]:
+        """Project stored tree data into the account-export public shape."""
+
+        return {
+            "id": tree.id,
+            "revision": tree.revision,
+            "schema_version": tree.schema_version,
+            "title": tree.title,
+            "description": tree.description,
+            "metadata": tree.metadata,
+            "owner_id": tree.owner_id,
+            "created_at": tree.created_at.isoformat(),
+            "updated_at": tree.updated_at.isoformat(),
+            "nodes": [node.model_dump(mode="json") for node in tree.nodes],
+            "relations": [
+                relation.model_dump(mode="json") for relation in tree.relations
+            ],
+            "version_refs": [
+                version_ref.model_dump(mode="json") for version_ref in tree.version_refs
+            ],
+        }
+
+    def prepare_update_tree(
+        self,
+        tree_id: str,
+        payload: TreeUpdateRequest,
+        *,
+        owner_id: str,
+        command_id: str,
+        current_tree: TreeDocument | None = None,
     ) -> TreeDocument:
+        current = current_tree or self.get_tree_for_owner(tree_id, owner_id=owner_id)
+        if payload.expected_revision != current.revision:
+            raise StaleRevisionError(
+                "Tree",
+                tree_id,
+                current_revision=current.revision,
+                current_updated_at=current.updated_at,
+            )
+        metadata = self._resolve_metadata(
+            payload.metadata, owner_id=owner_id, coerce_updated=True
+        )
+        tree = self._build_tree_document(
+            tree_id=tree_id,
+            name=payload.name,
+            metadata=metadata,
+            nodes=payload.nodes,
+            relations=payload.relations,
+            owner_id=owner_id,
+            schema_version=current.schema_version,
+        )
+        tree = self._preserve_unrepresented_tree_data(tree, current)
+        return tree.model_copy(
+            update={
+                "revision": current.revision + 1,
+                "last_command_id": command_id,
+            },
+            deep=True,
+        )
+
+    def persist_prepared_update_tree(self, tree: TreeDocument) -> TreeDocument:
+        persisted = self.tree_repo.replace_if_current(
+            tree.id,
+            expected_revision=tree.revision - 1,
+            replacement=tree,
+            after_save=self._commit_tree_state,
+        )
+        return persisted.model_copy(deep=True)
+
+    def update_tree(
+        self,
+        tree_id: str,
+        payload: TreeUpdateRequest,
+        *,
+        owner_id: str,
+        command_id: str | None = None,
+    ) -> TreeDocument:
+        # revision metadata is safe only for the authenticated owner.
+        self.assert_owner(tree_id, owner_id=owner_id)
+
         def apply_update(existing_tree: TreeDocument) -> TreeDocument:
             if existing_tree.owner_id != owner_id:
                 raise NotFoundError("Tree", tree_id)
@@ -137,40 +271,101 @@ class TreeService:
                 nodes=payload.nodes,
                 relations=payload.relations,
                 owner_id=owner_id,
+                schema_version=existing_tree.schema_version,
             )
             return self._preserve_unrepresented_tree_data(tree, existing_tree)
 
         tree = self.tree_repo.update_if_current(
             tree_id,
             expected_updated_at=payload.metadata.updated_at,
+            expected_revision=payload.expected_revision,
             update=apply_update,
             after_save=self._commit_tree_state,
+            command_id=command_id,
         )
         return tree.model_copy(deep=True)
 
-    def import_tree(
-        self, payload: TreeDetailResponse, *, owner_id: str
+    def prepare_import_tree(
+        self,
+        payload: TreeDetailResponse,
+        *,
+        owner_id: str,
+        tree_id: str,
+        command_id: str | None = None,
     ) -> TreeDocument:
-        # Always stamp the importing user as owner — never trust owner_id
-        # embedded in an uploaded payload.
+        if payload.schema_version not in SUPPORTED_TREE_SCHEMA_VERSIONS:
+            raise ValidationFailure(
+                "Unsupported tree schema version.",
+                detail={
+                    "reason": "unsupported_schema_version",
+                    "schema_version": payload.schema_version,
+                },
+            )
+        if payload.metadata.version != payload.schema_version:
+            raise ValidationFailure(
+                "Tree schema version disagrees with metadata version.",
+                detail={
+                    "reason": "schema_version_mismatch",
+                    "schema_version": payload.schema_version,
+                    "metadata_version": payload.metadata.version,
+                },
+            )
         metadata = self._resolve_metadata(
             payload.metadata, owner_id=owner_id, coerce_updated=False
         )
-        # Use a fresh tree id so an import can never overwrite an
-        # existing tree (which might belong to someone else).
         tree = self._build_tree_document(
-            tree_id=generate_tree_id(),
+            tree_id=tree_id,
             name=payload.name,
             metadata=metadata,
             nodes=payload.nodes,
             relations=payload.relations,
             owner_id=owner_id,
+            schema_version=payload.schema_version,
         )
-        self.tree_repo.save(tree)
+        if command_id is not None:
+            tree = tree.model_copy(update={"last_command_id": command_id}, deep=True)
+        return tree
+
+    def persist_prepared_import_tree(self, tree: TreeDocument) -> TreeDocument:
+        self.tree_repo.create(tree)
         self._sync_index(tree)
         return self._store_and_clone(tree)
 
-    def delete_tree(self, tree_id: str, *, owner_id: str) -> None:
+    def import_tree(
+        self,
+        payload: TreeDetailResponse,
+        *,
+        owner_id: str,
+        tree_id: str | None = None,
+        command_id: str | None = None,
+    ) -> TreeDocument:
+        tree = self.prepare_import_tree(
+            payload,
+            owner_id=owner_id,
+            tree_id=tree_id or generate_tree_id(),
+            command_id=command_id,
+        )
+        return self.persist_prepared_import_tree(tree)
+
+    def delete_tree(
+        self,
+        tree_id: str,
+        *,
+        owner_id: str,
+        expected_revision: int | None = None,
+    ) -> None:
+        def remove_state() -> None:
+            self._remove_tree_state(tree_id)
+
+        if expected_revision is not None:
+            self.tree_repo.delete_if_current(
+                tree_id,
+                owner_id=owner_id,
+                expected_revision=expected_revision,
+                after_delete=remove_state,
+            )
+            return
+
         def verify_owner(tree: TreeDocument) -> None:
             if tree.owner_id != owner_id:
                 raise NotFoundError("Tree", tree_id)
@@ -178,7 +373,7 @@ class TreeService:
         self.tree_repo.delete(
             tree_id,
             before_delete=verify_owner,
-            after_delete=lambda: self._remove_tree_state(tree_id),
+            after_delete=remove_state,
         )
 
     def remove_stale_tree_state(self, tree_id: str) -> None:
@@ -316,17 +511,31 @@ class TreeService:
         nodes: Iterable[NodeResponse | NodeCreateRequest],
         relations: Iterable[RelationResponse | RelationCreateRequest],
         owner_id: str | None,
+        schema_version: int = 1,
     ) -> TreeDocument:
         node_docs = [self._node_to_document(node, metadata) for node in nodes]
-        node_ids = {node.id for node in node_docs}
+        node_id_values = [node.id for node in node_docs]
+        if len(node_id_values) != len(set(node_id_values)):
+            raise ValidationFailure(
+                "Node identifiers must be unique.",
+                detail={"reason": "duplicate_node_id"},
+            )
+        node_ids = set(node_id_values)
         relation_docs = [
             self._relation_to_document(relation, metadata) for relation in relations
         ]
+        relation_id_values = [relation.id for relation in relation_docs]
+        if len(relation_id_values) != len(set(relation_id_values)):
+            raise ValidationFailure(
+                "Relation identifiers must be unique.",
+                detail={"reason": "duplicate_relation_id"},
+            )
         self._validate_relation_targets(relation_docs, node_ids)
 
         tree_metadata = self._prepare_metadata_block(metadata)
         tree = TreeDocument(
             id=tree_id,
+            schema_version=schema_version,
             title=name,
             description=None,
             metadata=tree_metadata,

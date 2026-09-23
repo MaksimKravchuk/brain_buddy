@@ -194,6 +194,21 @@ class TreeDocument(StorageBaseModel):
     """Canonical representation of a tree stored in the filesystem."""
 
     id: str = Field(description="Unique identifier for the tree.")
+    revision: int = Field(
+        default=1,
+        ge=1,
+        description="Monotonic aggregate revision; legacy documents begin at 1.",
+    )
+    schema_version: int = Field(
+        default=1,
+        ge=1,
+        description="Top-level persisted tree schema version.",
+    )
+    last_command_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        description="Internal crash-reconciliation marker; never exposed publicly.",
+    )
     title: str = Field(description="Tree title shown to users.")
     description: str | None = Field(
         default=None, description="Optional narrative description."

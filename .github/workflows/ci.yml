@@ -266,6 +266,7 @@ jobs:
 
       - name: Validate feature specs
         run: |
+          make check-specs
           python3 -m unittest scripts/test_check_spec_kit_specs.py -v
           python3 scripts/check_spec_kit_specs.py
           python3 -m unittest scripts/test_validate_pre_freeze_receipt.py -v

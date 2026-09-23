@@ -89,8 +89,9 @@ Non-negotiables, whether or not that skill is loaded:
   `ux-a11y-reviewer` agent files under `.claude/agents/` are the **single source
   of rubric truth** for their lenses — `spec_kit_planning_review.py` points at
   them rather than restating the rubric. Only the rubric body is used: the
-  reviewers run as headless `claude -p` processes, so the agents' `model:` and
-  `tools:` frontmatter is inert and `ROLE_CONFIGS` decides both.
+  reviewers run as read-only ephemeral `codex exec` processes, so the agents'
+  `model:` and `tools:` frontmatter is inert and `ROLE_CONFIGS` decides the
+  review model and runtime.
 - Feature numbers are reserved across every git ref, not just the checked-out
   `specs/` tree — two branches claiming one `NNN-` merge without a conflict and
   then satisfy each other's requirement-coverage gate. `check_spec_kit_specs.py`

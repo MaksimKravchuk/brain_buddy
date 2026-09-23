@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 // Update these two constants when the policy text changes or the contact moves.
 const CONTACT_EMAIL = "maksim.v.kravchuk@gmail.com";
-const LAST_UPDATED = "September 11, 2026";
+const LAST_UPDATED = "September 20, 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -101,7 +101,7 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
           <p>
             To turn a feature on or off for particular accounts we keep one SQLite store
-            covering four managed flags: it holds only your account id per flag, it is
+            covering five managed flags: it holds only your account id per flag, it is
             scrubbed when your account is purged, and it is excluded from your data export.
           </p>
           <p>
@@ -140,6 +140,34 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             eligible, and by cleanup when Brain Buddy starts, regains focus, or reaches its
             cleanup interval after expiry. If you never open Brain Buddy again, clear Brain
             Buddy site data in your browser to remove any residual local bytes.
+          </p>
+          <p>
+            The web app may also keep an unsynchronized Current Reality Tree (CRT) draft in
+            browser storage: graph/layout content, an immutable in-flight save snapshot, queued
+            commands and idempotency-key UUIDs. These records are owner/origin/tree-scoped (or
+            tied to a pre-canonical create attempt), are not sent to our server, and are not
+            included in your data export. The feature is online-first: if browser storage is
+            unavailable or full, edits remain retryable only in memory on the current page; we
+            claim no reload/crash recovery, and no cross-device offline merge is promised.
+          </p>
+          <p>
+            CRT drafts are eligible for 30 days without edit/use. After that, on the next
+            startup, focus, or cleanup interval, a stale draft stays outside the canvas and the
+            app offers backup, recover, or discard; recovering resets the inactivity window.
+            After pending-work decisions, logout/sign-out, account-switch, and account-deletion
+            cleanup removes all departing-owner CRT keys on the active origin. The server cannot
+            purge bytes on another browser/device or origin. Browser storage is unencrypted at
+            rest, and device backups may retain residual copies; if you never open Brain Buddy
+            again, clear Brain Buddy site data in each browser or device.
+          </p>
+          <p>
+            CRT operational log lines are content-free and contain only a correlation id, opaque
+            tree id, operation, revision, coarse outcome or retryable error code, and duration.
+            They never contain graph text, request or response bodies, request hashes,
+            idempotency keys, credentials, cookies, or local paths. They remain in the hosting
+            platform's stdout/Fly log window; account or tree purge cannot erase platform logs,
+            and these lines are excluded from your data export because they are operational
+            records rather than canonical content.
           </p>
         </Section>
 

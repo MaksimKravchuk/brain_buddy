@@ -320,18 +320,22 @@ function DangerZone(): React.JSX.Element {
 
 function DeleteAccountDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
   const navigate = useNavigate();
-  const clearSession = useAuthStore((state) => state.clearSession);
+  const clearSessionAfterCleanup = useAuthStore((state) => state.clearSessionAfterCleanup);
   const scheduleDeletionNotice = useAuthStore((state) => state.scheduleDeletionNotice);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const mutation = useMutation({
     mutationFn: () => apiClient.requestAccountDeletion({ current_password: password }),
-    onSuccess: (scheduled) => {
-      // Stash the purge date in the store before clearing the session:
-      // ProtectedRoute races us to /login and would drop router state.
+    onSuccess: async (scheduled) => {
+      // Cleanup must finish before the session is cleared: ProtectedRoute races
+      // us to /login and the departing owner's browser-local keys must not be
+      // carried into the next account.
+      if (!(await clearSessionAfterCleanup())) {
+        setError("We couldn't clear this browser's local CRT data. No account transition was made.");
+        return;
+      }
       scheduleDeletionNotice(scheduled.purge_at);
-      clearSession();
       navigate("/login", { replace: true, state: { deletionScheduled: scheduled.purge_at } });
     },
     onError: (caught: unknown) => setError(getErrorMessage(caught))

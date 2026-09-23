@@ -35,29 +35,75 @@ class PlanningReviewCommandTests(unittest.TestCase):
             prompt="Review the planning artifacts.",
             schema_path=ROOT / ".specify" / "workflows" / "speckit" / "review.schema.json",
             config=module.ROLE_CONFIGS["requirements-consistency"],
+            executable="/resolved/codex",
         )
 
-        self.assertEqual(command[0:2], ["codex", "exec"])
+        self.assertEqual(command[0:2], ["/resolved/codex", "exec"])
         self.assertIn("--sandbox", command)
         self.assertEqual(command[command.index("--sandbox") + 1], "read-only")
         self.assertIn("--ephemeral", command)
         self.assertIn("--output-schema", command)
         self.assertNotIn("danger-full-access", command)
 
-    def test_fable_review_command_uses_plan_mode_and_read_only_tools(self) -> None:
+    def test_adversarial_review_command_uses_codex_read_only_mode(self) -> None:
         module = load_module()
-        command, env = module.build_review_command(
+        command, _env = module.build_review_command(
             prompt="Challenge the plan.",
             schema_path=ROOT / ".specify" / "workflows" / "speckit" / "review.schema.json",
             config=module.ROLE_CONFIGS["adversarial-high-risk"],
+            executable="/resolved/codex",
         )
 
-        self.assertEqual(command[0:2], ["claude", "-p"])
-        self.assertEqual(command[command.index("--permission-mode") + 1], "plan")
-        tools = command[command.index("--allowedTools") + 1]
-        self.assertEqual(tools, "Read,Grep,Glob")
-        self.assertNotIn("ANTHROPIC_API_KEY", env)
-        self.assertNotIn("--dangerously-skip-permissions", command)
+        self.assertEqual(command[0:2], ["/resolved/codex", "exec"])
+        self.assertEqual(command[command.index("--sandbox") + 1], "read-only")
+        self.assertIn("--ephemeral", command)
+        self.assertIn("--output-schema", command)
+        self.assertNotIn("claude", command)
+
+    def test_run_review_executes_the_same_resolved_binary_it_records(self) -> None:
+        module = load_module()
+        review = {
+            "role": "requirements-consistency",
+            "verdict": "pass",
+            "summary": "No concerns.",
+            "reviewed_files": ["specs/123-example/spec.md"],
+            "findings": [],
+            "product_decisions": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            feature_dir = root / "specs" / "123-example"
+            feature_dir.mkdir(parents=True)
+            (feature_dir / "spec.md").write_text("# Spec\n", encoding="utf-8")
+            (feature_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+            run_dir = root / ".specify" / "workflows" / "runs" / "run1"
+            run_dir.mkdir(parents=True)
+            (run_dir / "planning-context.json").write_text(
+                json.dumps(
+                    {
+                        "feature_dir": str(feature_dir),
+                        "artifacts_digest": module.review_artifacts_digest(feature_dir),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            resolved = "/opt/review-tools/codex"
+            completed = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=json.dumps(review), stderr=""
+            )
+            with mock.patch.object(module.shutil, "which", return_value=resolved), mock.patch.object(
+                module.subprocess, "run", return_value=completed
+            ) as run:
+                target = module.run_review(
+                    root=root,
+                    run_id="run1",
+                    role="requirements-consistency",
+                )
+
+            self.assertTrue(target.is_file())
+            self.assertEqual(run.call_args.args[0][0], resolved)
+            persisted = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(persisted["oracle"]["executable"], resolved)
 
 
 class PlanningReviewValidationTests(unittest.TestCase):
@@ -253,6 +299,16 @@ class PlanningReviewAggregationTests(unittest.TestCase):
         )
         self.assertEqual(summary["status"], "escalated")
         self.assertIn("ux-accessibility-mobile", summary["architect_action"])
+
+    def test_unknown_reviewer_provenance_escalates_and_never_passes(self) -> None:
+        summary = self.module.aggregate_reviews(
+            self._passing_panel(),
+            risk="medium",
+            unknown_oracle_roles=("privacy-consent-security",),
+        )
+        self.assertEqual(summary["status"], "escalated")
+        self.assertIn("privacy-consent-security", summary["architect_action"])
+        self.assertIn("provenance", summary["architect_action"].lower())
 
     def test_high_risk_without_human_signoff_escalates(self) -> None:
         summary = self.module.aggregate_reviews(self._passing_panel(), risk="high")
@@ -880,41 +936,14 @@ class ReviewerIndependenceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.module = load_module()
 
-    def test_no_model_carries_a_majority_of_the_configured_panel(self) -> None:
-        """The panel as configured. The panel that RUNS may differ.
+    def test_every_configured_lens_uses_the_available_codex_runtime(self) -> None:
+        for role, config in self.module.ROLE_CONFIGS.items():
+            self.assertEqual(config["integration"], "codex", role)
+            self.assertEqual(config["model"], "gpt-5.6-sol", role)
+            self.assertNotIn("fallback", config, role)
 
-        A fallback can turn this into a correlated panel at run time, which is
-        why the assertion is scoped to configuration and why `summarize()`
-        reports `panel_correlated` from the oracles that actually ran.
-        """
-        models: dict[str, int] = {}
-        for role in self.module.STANDARD_ROLES:
-            model = self.module.ROLE_CONFIGS[role]["model"]
-            models[model] = models.get(model, 0) + 1
-        worst = max(models.values())
-        self.assertLessEqual(
-            worst,
-            len(self.module.STANDARD_ROLES) // 2,
-            f"one model covers {worst} of {len(self.module.STANDARD_ROLES)} lenses: {models}",
-        )
-
-    def test_configured_panel_spans_more_than_one_provider(self) -> None:
-        providers = {
-            self.module.ROLE_CONFIGS[role]["integration"]
-            for role in self.module.STANDARD_ROLES
-        }
-        self.assertGreater(len(providers), 1, providers)
-
-    def test_every_codex_lens_has_a_fallback_so_the_gate_can_be_reached(self) -> None:
-        """A lens with no fallback locks the gate when its CLI is absent."""
-        for role in self.module.STANDARD_ROLES:
-            config = self.module.ROLE_CONFIGS[role]
-            if config["integration"] != "codex":
-                continue
-            fallback = config.get("fallback")
-            self.assertIsInstance(fallback, dict, f"{role} has no fallback")
-            assert isinstance(fallback, dict)
-            self.assertIn(fallback["integration"], self.module.INTEGRATION_CLI)
+    def test_claude_is_not_a_supported_review_integration(self) -> None:
+        self.assertEqual(self.module.INTEGRATION_CLI, {"codex": "codex"})
 
     def test_every_claude_lens_points_at_an_existing_rubric_file(self) -> None:
         for role, config in self.module.ROLE_CONFIGS.items():
@@ -974,17 +1003,8 @@ class ReviewerPromptPortabilityTests(unittest.TestCase):
             self.assertIn(f".claude/agents/{agent}.md", prompts[role], role)
 
 
-class OracleFallbackTests(unittest.TestCase):
-    """An absent runtime is routed around; the substitution is never silent.
-
-    Before the fallback existed, two of five lenses shelled out to `codex`, so
-    a machine without that CLI wrote no review for them, `summarize()` counted
-    missing mandatory evidence, and every campaign returned `escalated`. The
-    gate could not be passed rather than merely being hard to pass.
-
-    The danger in fixing that is the opposite failure: a panel quietly running
-    on one oracle while reporting the diversity it was configured with.
-    """
+class OracleRuntimeTests(unittest.TestCase):
+    """Every lens uses the installed Codex CLI and records that provenance."""
 
     def setUp(self) -> None:
         self.module = load_module()
@@ -997,45 +1017,62 @@ class OracleFallbackTests(unittest.TestCase):
             lambda name: f"/usr/bin/{name}" if name in installed else None,
         )
 
-    def test_primary_runtime_is_used_and_not_marked_degraded(self) -> None:
-        with self.which("codex", "claude"):
-            config, oracle = self.module.resolve_oracle("requirements-consistency")
-        self.assertEqual(config["integration"], "codex")
-        self.assertEqual(oracle["model"], "gpt-5.6-sol")
-        self.assertFalse(oracle["degraded"])
-
-    def test_absent_primary_falls_back_and_records_the_substitution(self) -> None:
-        with self.which("claude"):
-            config, oracle = self.module.resolve_oracle("requirements-consistency")
-        self.assertEqual(config["integration"], "claude")
-        self.assertEqual(config["model"], "sonnet")
-        self.assertTrue(oracle["degraded"])
-        self.assertIn("codex", oracle["reason"])
-        # The configured oracle stays on the record. Knowing what a lens was
-        # meant to run on is what makes the substitution auditable later.
-        self.assertEqual(oracle["configured_integration"], "codex")
-        self.assertEqual(oracle["configured_model"], "gpt-5.6-sol")
-
-    def test_the_fallback_keeps_the_lens_focus(self) -> None:
-        """A fallback must review the same thing, not a weaker brief."""
-        with self.which("claude"):
-            config, _oracle = self.module.resolve_oracle("testability-evidence")
-        self.assertEqual(
-            config["focus"],
-            self.module.ROLE_CONFIGS["testability-evidence"]["focus"],
-        )
-
-    def test_a_lens_without_a_fallback_still_raises(self) -> None:
+    def test_every_role_resolves_to_codex_without_degradation(self) -> None:
         with self.which("codex"):
-            with self.assertRaises(self.module.ReviewError) as caught:
-                self.module.resolve_oracle("privacy-consent-security")
-        self.assertIn("not installed", str(caught.exception))
+            for role in self.module.ROLE_CONFIGS:
+                config, oracle = self.module.resolve_oracle(role)
+                self.assertEqual(config["integration"], "codex", role)
+                self.assertEqual(oracle["model"], "gpt-5.6-sol", role)
+                self.assertFalse(oracle["degraded"], role)
+                self.assertEqual(oracle["executable"], "/usr/bin/codex", role)
 
-    def test_raises_when_neither_primary_nor_fallback_is_installed(self) -> None:
+    def test_missing_codex_runtime_fails_closed(self) -> None:
         with self.which():
             with self.assertRaises(self.module.ReviewError) as caught:
                 self.module.resolve_oracle("requirements-consistency")
-        self.assertIn("fallback", str(caught.exception))
+        self.assertIn("codex", str(caught.exception))
+        self.assertIn("not installed", str(caught.exception))
+
+    def test_empty_partial_and_non_codex_oracles_are_rejected(self) -> None:
+        digest = "a" * 64
+        invalid = (
+            {},
+            {"integration": "codex"},
+            {
+                "integration": "claude",
+                "model": "opus",
+                "degraded": False,
+                "executable": "/usr/bin/claude",
+                "artifacts_digest": digest,
+            },
+        )
+        for oracle in invalid:
+            with self.subTest(oracle=oracle):
+                self.assertIsNone(
+                    self.module.validate_oracle_provenance(
+                        oracle,
+                        role="requirements-consistency",
+                        artifacts_digest=digest,
+                    )
+                )
+
+    def test_complete_codex_oracle_is_accepted(self) -> None:
+        digest = "a" * 64
+        oracle = {
+            "integration": "codex",
+            "model": "gpt-5.6-sol",
+            "degraded": False,
+            "executable": "/opt/review-tools/codex",
+            "artifacts_digest": digest,
+        }
+        self.assertEqual(
+            self.module.validate_oracle_provenance(
+                oracle,
+                role="requirements-consistency",
+                artifacts_digest=digest,
+            ),
+            oracle,
+        )
 
     def test_a_reviewer_cannot_author_its_own_provenance(self) -> None:
         """Provenance is stamped by the harness, never by the model.
@@ -1097,7 +1134,7 @@ class DegradationVisibilityTests(unittest.TestCase):
         self.assertIn("fallback oracle", summary["architect_action"])
         self.assertEqual(summary["degraded_lenses"], ["requirements-consistency"])
 
-    def test_an_undegraded_panel_says_nothing_about_fallbacks(self) -> None:
+    def test_an_undegraded_panel_has_no_legacy_fallback_note(self) -> None:
         summary = self.module.aggregate_reviews(self.panel(), risk="medium")
         self.assertNotIn("fallback oracle", summary["architect_action"])
         self.assertEqual(summary["degraded_lenses"], [])
@@ -1110,61 +1147,77 @@ class DegradationVisibilityTests(unittest.TestCase):
         roles: list[str] | None = None,
     ) -> Path:
         root = Path(tmp)
+        feature_dir = root / "specs" / "006-example"
+        feature_dir.mkdir(parents=True, exist_ok=True)
+        spec_path = feature_dir / "spec.md"
+        plan_path = feature_dir / "plan.md"
+        if not spec_path.exists():
+            spec_path.write_text(
+                "# Spec\n\n## User Scenarios & Testing\n\n"
+                "## Requirements\n\n- **FR-001**: Safe.\n\n"
+                "## Success Criteria\n\n- **SC-001**: Safe.\n",
+                encoding="utf-8",
+            )
+        if not plan_path.exists():
+            plan_path.write_text("# Plan\n", encoding="utf-8")
+        checklist_dir = feature_dir / "checklists"
+        checklist_dir.mkdir(exist_ok=True)
+        checklist_path = checklist_dir / "requirements.md"
+        if not checklist_path.exists():
+            checklist_path.write_text("- [x] complete\n", encoding="utf-8")
         run_dir = root / ".specify" / "workflows" / "runs" / "run1"
         (run_dir / "reviews").mkdir(parents=True)
         (run_dir / "inputs.json").write_text(
             json.dumps({"inputs": {"risk": risk}}), encoding="utf-8"
         )
+        digest = self.module.review_artifacts_digest(feature_dir)
+        (run_dir / "planning-context.json").write_text(
+            json.dumps(
+                {
+                    "feature_dir": str(feature_dir),
+                    "derived_risk": None,
+                    "artifacts_digest": digest,
+                }
+            ),
+            encoding="utf-8",
+        )
         for review in self.panel(oracles, roles):
+            oracle = review.get("oracle")
+            if isinstance(oracle, dict):
+                oracle.setdefault("executable", "/usr/bin/codex")
+                oracle.setdefault("artifacts_digest", digest)
             path = run_dir / "reviews" / f"{review['role']}.json"
             path.write_text(json.dumps(review), encoding="utf-8")
         return root
 
-    def all_degraded_to_sonnet(self) -> dict[str, dict]:
-        oracles: dict[str, dict] = {}
-        for role in self.module.STANDARD_ROLES:
-            config = self.module.ROLE_CONFIGS[role]
-            if config["integration"] == "codex":
-                oracles[role] = {
-                    "integration": "claude",
-                    "model": "sonnet",
-                    "degraded": True,
-                    "reason": "the codex CLI is not installed",
-                }
-            else:
-                oracles[role] = {
-                    "integration": "claude",
-                    "model": config["model"],
-                    "degraded": False,
-                }
-        return oracles
+    def historical_degraded_claude_panel(self) -> dict[str, dict]:
+        """Legacy review files remain reportable after runtime policy changes."""
+        return {
+            role: {
+                "integration": "claude",
+                "model": "sonnet",
+                "degraded": True,
+                "reason": "historical fallback record",
+            }
+            for role in self.module.STANDARD_ROLES
+        }
 
-    def test_summarize_reports_degraded_lenses_and_a_correlated_panel(self) -> None:
-        """The end-to-end path: oracle on disk -> facts in the summary.
-
-        Regression for a defect found while implementing this: `summarize()`
-        reloads each review through `validate_review`, which rebuilds the
-        payload from known keys. Without an explicit carry-across the oracle
-        survived to disk and was dropped on the way back in, so degradation
-        vanished from the one artifact meant to report it.
-        """
+    def test_historical_degraded_oracles_do_not_satisfy_current_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = self.build_run(tmp, self.all_degraded_to_sonnet())
+            root = self.build_run(tmp, self.historical_degraded_claude_panel())
             target = self.module.summarize(root=root, run_id="run1")
             summary = json.loads(target.read_text(encoding="utf-8"))
 
-        self.assertEqual(summary["status"], "approved")
+        self.assertEqual(summary["status"], "escalated")
         self.assertEqual(
-            sorted(summary["degraded_lenses"]),
-            ["requirements-consistency", "testability-evidence"],
+            sorted(summary["oracle_unknown_lenses"]),
+            sorted(self.module.STANDARD_ROLES),
         )
-        # opus x2 + sonnet x3 out of five: sonnet holds a strict majority, so
-        # the panel's agreement is worth less than its size suggests.
-        self.assertTrue(summary["panel_correlated"])
-        self.assertEqual(summary["panel_oracles"]["claude/sonnet"], 3)
-        self.assertEqual(summary["oracle_unknown_lenses"], [])
+        self.assertEqual(summary["degraded_lenses"], [])
+        self.assertIsNone(summary["panel_correlated"])
+        self.assertEqual(summary["panel_oracles"], {})
 
-    def test_a_fully_configured_panel_is_not_reported_as_correlated(self) -> None:
+    def test_the_configured_codex_only_panel_is_reported_as_correlated(self) -> None:
         oracles = {
             role: {
                 "integration": self.module.ROLE_CONFIGS[role]["integration"],
@@ -1179,7 +1232,9 @@ class DegradationVisibilityTests(unittest.TestCase):
             summary = json.loads(target.read_text(encoding="utf-8"))
 
         self.assertEqual(summary["degraded_lenses"], [])
-        self.assertFalse(summary["panel_correlated"])
+        self.assertTrue(summary["panel_correlated"])
+        self.assertTrue(summary["single_provider_panel"])
+        self.assertEqual(summary["panel_providers"], {"codex": 5})
 
     def test_a_review_with_no_oracle_is_unknown_not_clean(self) -> None:
         """Silence is not evidence that a lens ran as configured.
@@ -1227,45 +1282,37 @@ class DegradationVisibilityTests(unittest.TestCase):
             target = self.module.summarize(root=root, run_id="run1")
             summary = json.loads(target.read_text(encoding="utf-8"))
 
-        self.assertEqual(summary["panel_providers"], {"claude": 1})
+        self.assertEqual(summary["panel_providers"], {})
         self.assertIsNone(summary["single_provider_panel"])
         self.assertEqual(
             sorted(summary["oracle_unknown_lenses"]),
-            sorted(set(self.module.STANDARD_ROLES) - {role}),
+            sorted(self.module.STANDARD_ROLES),
         )
         # Not claimed as collapsed either — unknown is unknown in both
         # directions, so the action must not assert one vendor.
         self.assertNotIn("one vendor", summary["architect_action"])
 
-    def test_two_providers_are_still_reported_as_not_collapsed(self) -> None:
-        """The true negative the tri-state must preserve."""
+    def test_non_codex_provider_is_rejected_from_current_panel(self) -> None:
         oracles = {
             role: {
-                "integration": self.module.ROLE_CONFIGS[role]["integration"],
-                "model": self.module.ROLE_CONFIGS[role]["model"],
+                "integration": "codex" if index % 2 == 0 else "historical-other",
+                "model": "gpt-5.6-sol" if index % 2 == 0 else "review-model",
                 "degraded": False,
             }
-            for role in self.module.STANDARD_ROLES
+            for index, role in enumerate(self.module.STANDARD_ROLES)
         }
         with tempfile.TemporaryDirectory() as tmp:
             root = self.build_run(tmp, oracles)
             target = self.module.summarize(root=root, run_id="run1")
             summary = json.loads(target.read_text(encoding="utf-8"))
 
-        self.assertGreater(len(summary["panel_providers"]), 1)
-        self.assertIs(summary["single_provider_panel"], False)
-        self.assertEqual(summary["oracle_unknown_lenses"], [])
+        self.assertEqual(summary["status"], "escalated")
+        self.assertEqual(summary["panel_providers"], {"codex": 3})
+        self.assertIs(summary["single_provider_panel"], True)
+        self.assertEqual(len(summary["oracle_unknown_lenses"]), 2)
 
-    def test_a_fully_degraded_high_risk_panel_reports_single_provider(self) -> None:
-        """The 3-of-6 case where a model-majority test reads `false`.
-
-        A high-risk panel is six lenses; fully degraded it is sonnet x3,
-        opus x2, fable x1. Under a strict `> known // 2` majority that is not
-        correlated — the signal inverted at exactly the class where ADR-0012
-        scopes the human sign-off as the increment on top of an uncorrelated
-        mechanism.
-        """
-        oracles = self.all_degraded_to_sonnet()
+    def test_historical_high_risk_panel_cannot_satisfy_current_gate(self) -> None:
+        oracles = self.historical_degraded_claude_panel()
         oracles["adversarial-high-risk"] = {
             "integration": "claude",
             "model": "fable",
@@ -1276,12 +1323,12 @@ class DegradationVisibilityTests(unittest.TestCase):
             target = self.module.summarize(root=root, run_id="run1")
             summary = json.loads(target.read_text(encoding="utf-8"))
 
-        self.assertEqual(sum(summary["panel_oracles"].values()), 6)
-        self.assertEqual(summary["panel_oracles"]["claude/sonnet"], 3)
-        self.assertTrue(summary["panel_correlated"])
-        self.assertTrue(summary["single_provider_panel"])
-        self.assertEqual(summary["panel_providers"], {"claude": 6})
-        self.assertIn("one provider", summary["architect_action"])
+        self.assertEqual(summary["status"], "escalated")
+        self.assertEqual(summary["panel_oracles"], {})
+        self.assertIsNone(summary["panel_correlated"])
+        self.assertIsNone(summary["single_provider_panel"])
+        self.assertEqual(summary["panel_providers"], {})
+        self.assertEqual(len(summary["oracle_unknown_lenses"]), 6)
 
     def test_a_review_stamped_with_another_digest_escalates(self) -> None:
         """Re-running preflight on one run id used to clear the drift flag.
@@ -1296,15 +1343,23 @@ class DegradationVisibilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             feature_dir = root / "specs" / "006-example"
-            feature_dir.mkdir(parents=True)
-            (feature_dir / "spec.md").write_text("# Spec\n", encoding="utf-8")
+            (feature_dir / "checklists").mkdir(parents=True)
+            (feature_dir / "spec.md").write_text(
+                "# Spec\n\n## User Scenarios & Testing\n\n"
+                "## Requirements\n\n- **FR-001**: Safe.\n\n"
+                "## Success Criteria\n\n- **SC-001**: Safe.\n",
+                encoding="utf-8",
+            )
             (feature_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+            (feature_dir / "checklists" / "requirements.md").write_text(
+                "- [x] complete\n", encoding="utf-8"
+            )
             digest = self.module.review_artifacts_digest(feature_dir)
 
             oracles = {
                 role: {
-                    "integration": "claude",
-                    "model": "opus",
+                    "integration": "codex",
+                    "model": "gpt-5.6-sol",
                     "degraded": False,
                     # What a review written before the spec was edited carries.
                     "artifacts_digest": "0" * 64,
@@ -1330,23 +1385,118 @@ class DegradationVisibilityTests(unittest.TestCase):
         )
         self.assertTrue(summary["artifacts_changed_since_preflight"])
 
-    def test_a_cross_provider_panel_is_not_single_provider(self) -> None:
+    def test_cross_provider_oracles_are_not_accepted_by_codex_only_policy(self) -> None:
         oracles = {
             role: {
-                "integration": self.module.ROLE_CONFIGS[role]["integration"],
-                "model": self.module.ROLE_CONFIGS[role]["model"],
+                "integration": "codex" if index % 2 == 0 else "historical-other",
+                "model": "gpt-5.6-sol" if index % 2 == 0 else "review-model",
                 "degraded": False,
             }
-            for role in self.module.STANDARD_ROLES
+            for index, role in enumerate(self.module.STANDARD_ROLES)
         }
         with tempfile.TemporaryDirectory() as tmp:
             root = self.build_run(tmp, oracles)
             target = self.module.summarize(root=root, run_id="run1")
             summary = json.loads(target.read_text(encoding="utf-8"))
 
-        self.assertFalse(summary["single_provider_panel"])
-        self.assertEqual(sorted(summary["panel_providers"]), ["claude", "codex"])
-        self.assertNotIn("one provider", summary["architect_action"])
+        self.assertEqual(summary["status"], "escalated")
+        self.assertEqual(summary["panel_providers"], {"codex": 3})
+        self.assertTrue(summary["single_provider_panel"])
+        self.assertEqual(len(summary["oracle_unknown_lenses"]), 2)
+
+
+class SummarizePreflightBoundaryTests(unittest.TestCase):
+    def test_summarize_rejects_a_run_without_preflight_context(self) -> None:
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / ".specify" / "workflows" / "runs" / "run1"
+            reviews_dir = run_dir / "reviews"
+            reviews_dir.mkdir(parents=True)
+            for role in module.STANDARD_ROLES:
+                (reviews_dir / f"{role}.json").write_text(
+                    json.dumps(
+                        {
+                            "role": role,
+                            "verdict": "pass",
+                            "summary": "No concerns.",
+                            "reviewed_files": ["specs/123-example/spec.md"],
+                            "findings": [],
+                            "product_decisions": [],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            with self.assertRaisesRegex(module.ReviewError, "preflight"):
+                module.summarize(root=root, run_id="run1")
+
+    def test_summarize_recomputes_ask_risk_instead_of_trusting_context(self) -> None:
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            feature_dir = root / "specs" / "123-example"
+            (feature_dir / "checklists").mkdir(parents=True)
+            (feature_dir / "spec.md").write_text(
+                "# Spec\n\n## User Scenarios & Testing\n\n"
+                "## Requirements\n\n- **FR-001**: Safe.\n\n"
+                "## Success Criteria\n\n- **SC-001**: Safe.\n",
+                encoding="utf-8",
+            )
+            (feature_dir / "plan.md").write_text(
+                "# Plan\n\nChange scripts/spec_kit_planning_review.py.\n",
+                encoding="utf-8",
+            )
+            (feature_dir / "checklists" / "requirements.md").write_text(
+                "- [x] complete\n", encoding="utf-8"
+            )
+            digest = module.review_artifacts_digest(feature_dir)
+            run_dir = root / ".specify" / "workflows" / "runs" / "run1"
+            reviews_dir = run_dir / "reviews"
+            reviews_dir.mkdir(parents=True)
+            (run_dir / "inputs.json").write_text(
+                json.dumps({"inputs": {"risk": "low"}}), encoding="utf-8"
+            )
+            (run_dir / "planning-context.json").write_text(
+                json.dumps(
+                    {
+                        "feature_dir": str(feature_dir),
+                        "project_root": str(root),
+                        "derived_risk": None,
+                        "review_artifacts": module.review_artifacts(feature_dir),
+                        "artifacts_digest": digest,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            for role in (*module.STANDARD_ROLES, "adversarial-high-risk"):
+                (reviews_dir / f"{role}.json").write_text(
+                    json.dumps(
+                        {
+                            "role": role,
+                            "verdict": "pass",
+                            "summary": "No concerns.",
+                            "reviewed_files": ["specs/123-example/spec.md"],
+                            "findings": [],
+                            "product_decisions": [],
+                            "oracle": {
+                                "integration": "codex",
+                                "model": "gpt-5.6-sol",
+                                "degraded": False,
+                                "executable": "/usr/bin/codex",
+                                "artifacts_digest": digest,
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            target = module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+
+        self.assertEqual(summary["risk"], "high")
+        self.assertEqual(summary["status"], "escalated")
+        self.assertIn("human sign-off", summary["architect_action"])
 
 
 class DeterministicPreflightTests(unittest.TestCase):

@@ -23,8 +23,8 @@ _VOICE_SWEEP_INTERVAL_SECONDS = float(
 )
 
 
-def _run_privacy_maintenance_sweep(container: Container) -> tuple[int, int]:
-    """Purge due accounts and relay content behind independent error boundaries."""
+def _run_privacy_maintenance_sweep(container: Container) -> tuple[int, int, int]:
+    """Purge due accounts, relay content, and expired CRT receipts."""
 
     purged_accounts = 0
     try:
@@ -37,7 +37,18 @@ def _run_privacy_maintenance_sweep(container: Container) -> tuple[int, int]:
         expired_agent_runs = container.agent_relay_service.run_retention_sweep()
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
         logger.exception("External-agent retention sweep iteration failed")
-    return purged_accounts, expired_agent_runs
+
+    try:
+        container.crt_command_service.reconcile_pending_commands()
+    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
+        logger.exception("CRT command reconciliation sweep iteration failed")
+
+    expired_crt_receipts = 0
+    try:
+        expired_crt_receipts = container.crt_command_repo.purge_expired()
+    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
+        logger.exception("CRT command retention sweep iteration failed")
+    return purged_accounts, expired_agent_runs, expired_crt_receipts
 
 
 def _run_voice_maintenance_sweep(
@@ -81,7 +92,11 @@ def _run_maintenance_sweep(container: Container) -> None:
     never kill the loop that calls this.
     """
 
-    purged_accounts, expired_agent_runs = _run_privacy_maintenance_sweep(container)
+    (
+        purged_accounts,
+        expired_agent_runs,
+        expired_crt_receipts,
+    ) = _run_privacy_maintenance_sweep(container)
     (
         recovered_leases,
         advanced_runs,
@@ -97,11 +112,13 @@ def _run_maintenance_sweep(container: Container) -> None:
         or purged_working_artifacts
         or purged_accounts
         or expired_agent_runs
+        or expired_crt_receipts
     ):
         logger.info(
             "Maintenance sweep: recovered %s lease(s), resumed %s commit(s), "
             "purged %s raw-audio, %s working-artifact operation(s), advanced "
-            "%s provider run(s), purged %s account(s), expired %s agent run(s)",
+            "%s provider run(s), purged %s account(s), expired %s agent run(s), "
+            "purged %s CRT receipt(s)",
             recovered_leases,
             resumed_commits,
             purged_raw_audio,
@@ -109,6 +126,7 @@ def _run_maintenance_sweep(container: Container) -> None:
             advanced_runs,
             purged_accounts,
             expired_agent_runs,
+            expired_crt_receipts,
         )
 
 

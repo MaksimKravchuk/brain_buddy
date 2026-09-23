@@ -64,6 +64,10 @@ class AppEnvironment(str, Enum):
 # must keep being able to report even if the flag is later turned off for its
 # owner, or the user would be left with a run frozen mid-flight.
 #
+# ``crt_canvas`` (ADR-0025) gates the desktop Current Reality Tree workspace.
+# It is runtime-managed, defaults OFF, and is exposure control only; session
+# authentication and owner checks remain mandatory on every CRT route.
+#
 # Runtime-manageable subset (spec 010, DD-1, DD-15, DD-16, superseded
 # 2026-08-15): ``voice_brain_dump``, ``mobile_task_classification`` and
 # ``external_agent_relay`` are managed exclusively by the SQLite-backed
@@ -85,6 +89,7 @@ KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "mobile_task_classification",
     "external_agent_relay",
     "task_title_autocomplete",
+    "crt_canvas",
 )
 
 # Every flag name ``BRAIN_BUDDY_FEATURE_FLAGS`` may configure. There is no

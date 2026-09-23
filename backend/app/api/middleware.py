@@ -38,7 +38,7 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         incoming = request.headers.get(CORRELATION_HEADER) or request.headers.get(
             "X-Request-ID"
         )
-        correlation_id = incoming or uuid.uuid4().hex
+        correlation_id = incoming or str(uuid.uuid4())
         token = set_correlation_id(correlation_id)
         request.state.correlation_id = correlation_id
         start = perf_counter()

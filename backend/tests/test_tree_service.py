@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier, Event
+from threading import Barrier, Event, Thread
 
 import pytest
 
@@ -59,6 +59,71 @@ def test_create_and_retrieve_tree(tree_service) -> None:
     fetched = tree_service.get_tree(tree.id)
     assert fetched.id == tree.id
     assert fetched.title == "Test Tree"
+
+
+def test_019_FR_020_legacy_tree_defaults_revision_and_advances_once(
+    tree_service,
+) -> None:
+    """Legacy trees start at revision/schema 1 and the next write advances once."""
+
+    created = tree_service.create_tree(
+        TreeCreateRequest(name="Legacy revision"), owner_id=TEST_OWNER_ID
+    )
+    assert created.revision == 1
+    assert created.schema_version == 1
+
+    tree_path = tree_service.tree_repo.tree_path(created.id)
+    payload = json.loads(tree_path.read_text(encoding="utf-8"))
+    payload.pop("revision")
+    payload.pop("schema_version")
+    tree_path.write_text(json.dumps(payload), encoding="utf-8")
+    tree_service._cache.clear()
+
+    legacy = tree_service.get_tree(created.id)
+    assert legacy.revision == 1
+    assert legacy.schema_version == 1
+
+    updated = tree_service.mutate_tree(
+        created.id,
+        lambda current: current.model_copy(update={"description": "first write"}),
+    )
+    persisted = json.loads(tree_path.read_text(encoding="utf-8"))
+
+    assert updated.revision == 2
+    assert updated.schema_version == 1
+    assert persisted["revision"] == 2
+    assert persisted["schema_version"] == 1
+    response = tree_service.to_response(updated)
+    assert response.revision == 2
+    assert response.schema_version == 1
+
+
+def test_legacy_update_preserves_existing_schema_version(tree_service) -> None:
+    """A compatibility write must not downgrade a newer persisted schema."""
+    created = tree_service.create_tree(
+        TreeCreateRequest(name="Preserve schema"), owner_id=TEST_OWNER_ID
+    )
+    tree_path = tree_service.tree_repo.tree_path(created.id)
+    payload = json.loads(tree_path.read_text(encoding="utf-8"))
+    payload["schema_version"] = 7
+    tree_path.write_text(json.dumps(payload), encoding="utf-8")
+    tree_service._cache.clear()
+
+    current = tree_service.get_tree(created.id)
+    public = tree_service.to_response(current)
+    updated = tree_service.update_tree(
+        created.id,
+        TreeUpdateRequest(
+            name=public.name,
+            metadata=public.metadata,
+            nodes=public.nodes,
+            relations=public.relations,
+        ),
+        owner_id=TEST_OWNER_ID,
+    )
+
+    assert updated.schema_version == 7
+    assert json.loads(tree_path.read_text(encoding="utf-8"))["schema_version"] == 7
 
 
 def test_list_and_update_tree(tree_service) -> None:
@@ -338,6 +403,53 @@ def test_delete_tree(tree_service) -> None:
 
     entries = tree_service.list_trees(owner_id=TEST_OWNER_ID)
     assert tree.id not in {entry.id for entry in entries}
+
+
+def test_delete_revision_check_and_unlink_share_tree_lock(tree_service) -> None:
+    """A legacy update cannot land between delete validation and unlink."""
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Delete race"), owner_id=TEST_OWNER_ID
+    )
+    update_started = Event()
+    update_finished = Event()
+    update_errors: list[Exception] = []
+    updater_threads: list[Thread] = []
+
+    def legacy_update() -> None:
+        update_started.set()
+        try:
+            tree_service.tree_repo.mutate(
+                tree.id,
+                update=lambda current: current.model_copy(
+                    update={"description": "newer legacy revision"}, deep=True
+                ),
+            )
+        except Exception as exc:  # the expected result is a deleted tree
+            update_errors.append(exc)
+        finally:
+            update_finished.set()
+
+    def after_revision_check(_current) -> None:
+        updater = Thread(target=legacy_update)
+        updater_threads.append(updater)
+        updater.start()
+        assert update_started.wait(timeout=2)
+        assert not update_finished.wait(timeout=0.1)
+
+    tree_service.tree_repo.delete_if_current(
+        tree.id,
+        owner_id=TEST_OWNER_ID,
+        expected_revision=tree.revision,
+        before_delete=after_revision_check,
+    )
+
+    for updater in updater_threads:
+        updater.join(timeout=2)
+    assert update_finished.is_set()
+    assert len(update_errors) == 1
+    assert isinstance(update_errors[0], NotFoundError)
+    with pytest.raises(NotFoundError):
+        tree_service.get_tree(tree.id)
 
 
 def test_get_tree_ignores_unknown_persisted_fields(tree_service) -> None:
