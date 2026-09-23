@@ -236,6 +236,66 @@ class GitleaksAllowlistTest(unittest.TestCase):
         self.assertGreaterEqual(checked, len(self.allowlists))
 
 
+class GitleaksRuleAllowlistTest(unittest.TestCase):
+    """Rule-scoped exemptions pin exact published fixture secrets only."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        config = tomllib.loads(GITLEAKS_CONFIG.read_text(encoding="utf-8"))
+        rule = next(
+            item
+            for item in config.get("rules", [])
+            if item.get("id") == "generic-api-key"
+        )
+        cls.allowlist = next(
+            item
+            for item in rule.get("allowlists", [])
+            if item.get("description") == "Synthetic CRT UUID-shaped idempotency keys"
+        )
+        cls.patterns = [
+            re.compile(pattern) for pattern in cls.allowlist.get("regexes", [])
+        ]
+
+    def test_crt_exemption_targets_only_the_extracted_secret(self) -> None:
+        self.assertEqual(self.allowlist.get("regexTarget"), "secret")
+        self.assertNotIn("paths", self.allowlist)
+        self.assertTrue(self.patterns)
+        for pattern in self.patterns:
+            self.assertTrue(pattern.pattern.startswith("^"))
+            self.assertTrue(pattern.pattern.endswith("$"))
+            self.assertNotIn(".*", pattern.pattern)
+
+    def test_every_allocated_crt_fixture_key_is_exempted(self) -> None:
+        expected = {
+            "123e4567-e89b-42d3-a456-426614174001",
+            *(
+                f"123e4567-e89b-12d3-a456-426614174{suffix:03d}"
+                for suffix in (
+                    *range(1, 28),
+                    *range(97, 107),
+                    199,
+                )
+            ),
+        }
+        for value in expected:
+            self.assertTrue(any(pattern.fullmatch(value) for pattern in self.patterns))
+
+    def test_unallocated_and_correlation_values_remain_scanned(self) -> None:
+        near_misses = {
+            "123e4567-e89b-42d3-a456-426614174000",
+            "123e4567-e89b-42d3-a456-426614174002",
+            "123e4567-e89b-12d3-a456-426614174000",
+            "123e4567-e89b-12d3-a456-426614174028",
+            "123e4567-e89b-12d3-a456-426614174096",
+            "123e4567-e89b-12d3-a456-426614174107",
+            "123e4567-e89b-12d3-a456-426614174198",
+            "123e4567-e89b-12d3-a456-426614174200",
+        }
+
+        for value in near_misses:
+            self.assertFalse(any(pattern.fullmatch(value) for pattern in self.patterns))
+
+
 class SecretScanWorkflowTest(unittest.TestCase):
     """The scan must be reusable, pinned, and run exactly once per event."""
 

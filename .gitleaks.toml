@@ -72,3 +72,14 @@ regexTarget = "line"
 # The PR range includes the original 015 fixture and its 018 renumbering.
 # Pin both complete synthetic lines; any replacement value still gets scanned.
 regexes = ['''^\s*key="(015|018)-cancel-transition",\s*$''']
+
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "Synthetic CRT UUID-shaped idempotency keys"
+  regexTarget = "secret"
+  # Feature 019 deliberately exercises UUID-shaped idempotency keys. Pin only
+  # the published fixture families and allocated numeric suffixes across the PR
+  # commit range; correlation suffix 000 and every other value remain scanned.
+  regexes = ['''^123e4567-e89b-(42d3-a456-426614174001|12d3-a456-426614174(00[1-9]|01[0-9]|02[0-7]|09[7-9]|10[0-6]|199))$''']
