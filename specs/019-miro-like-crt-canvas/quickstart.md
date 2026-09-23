@@ -125,5 +125,3 @@ Before enabling the first internal user:
 - Verify production smoke and feature-flag read-back on the exact deployed SHA.
 - Verify one correlated, content-free successful `crt.canvas_open` product-signal event from the selected-user journey and inspect the `crt.save` conflict/failure guardrail outcome from the recovery journey; confirm only the allowlisted fields appear.
 - To roll back, set `crt_canvas=off`, verify safe boundary/no mutations, preserve local drafts, reconcile every pending CRT receipt, then use only the recorded Stage A compatibility image. Never run a pre-Stage-A writer against migrated tree data.
-
-

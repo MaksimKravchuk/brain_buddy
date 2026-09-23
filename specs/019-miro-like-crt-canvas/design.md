@@ -1,8 +1,8 @@
 # Design: Miro-like CRT Canvas
 
-**Feature**: `specs/019-miro-like-crt-canvas/`  
-**Spec**: `spec.md` (clarifications settled: 2026-09-19)  
-**Screens**: `design/*.html`  
+**Feature**: `specs/019-miro-like-crt-canvas/`
+**Spec**: `spec.md` (clarifications settled: 2026-09-19)
+**Screens**: `design/*.html`
 **Human sign-off**: approved by product owner on 2026-09-19
 
 <!--

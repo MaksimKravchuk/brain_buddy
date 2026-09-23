@@ -31,6 +31,11 @@ from app.schemas.api import (
 from app.schemas.common import Position
 from app.utils.time import utcnow
 
+NODE_A = "node_00000000-0000-4000-8000-000000000001"
+NODE_B = "node_00000000-0000-4000-8000-000000000002"
+NODE_C = "node_00000000-0000-4000-8000-000000000003"
+RELATION_A = "relation_00000000-0000-4000-8000-000000000004"
+
 
 def _enable_crt(api_client) -> None:
     api_client.app.state.container.feature_flag_service.set_mode(
@@ -56,13 +61,13 @@ def test_019_FR_019_crt_import_replays_and_remaps_entities(api_client) -> None:
             "name": "Import source",
             "nodes": [
                 {
-                    "id": "legacy-a",
+                    "id": NODE_A,
                     "label": " Cause ",
                     "type": "child",
                     "position": {"x": 0, "y": 0},
                 },
                 {
-                    "id": "legacy-b",
+                    "id": NODE_B,
                     "label": "Effect",
                     "type": "child",
                     "position": {"x": 10, "y": 10},
@@ -70,9 +75,9 @@ def test_019_FR_019_crt_import_replays_and_remaps_entities(api_client) -> None:
             ],
             "relations": [
                 {
-                    "id": "legacy-relation",
-                    "source_node_id": "legacy-a",
-                    "target_node_id": "legacy-b",
+                    "id": RELATION_A,
+                    "source_node_id": NODE_A,
+                    "target_node_id": NODE_B,
                     "created_at": "2026-01-01T00:00:00Z",
                 }
             ],
@@ -248,7 +253,7 @@ def test_019_FR_019_crt_update_rejects_whitespace_card_without_mutation(
     tree = _create_tree(api_client, name="Whitespace card")
     tree["nodes"] = [
         {
-            "id": "node-existing",
+            "id": NODE_A,
             "label": "Valid card",
             "type": "child",
             "position": {"x": 0, "y": 0},
@@ -388,13 +393,13 @@ def _graph_create_payload(name: str = "Graph matrix") -> TreeCreateRequest:
         name=name,
         nodes=[
             NodeResponse(
-                id="graph-a",
+                id=NODE_A,
                 label="Cause",
                 type="child",
                 position=Position(x=0, y=0),
             ),
             NodeResponse(
-                id="graph-b",
+                id=NODE_B,
                 label="Effect",
                 type="child",
                 position=Position(x=1, y=1),
@@ -402,9 +407,9 @@ def _graph_create_payload(name: str = "Graph matrix") -> TreeCreateRequest:
         ],
         relations=[
             RelationResponse(
-                id="graph-relation",
-                source_node_id="graph-a",
-                target_node_id="graph-b",
+                id=RELATION_A,
+                source_node_id=NODE_A,
+                target_node_id=NODE_B,
                 created_at=now,
             )
         ],
@@ -1064,9 +1069,9 @@ def test_crt_create_rejects_duplicate_ids_before_pending_receipt(
         )
         expected_reason = "duplicate_node_id"
     else:
-        third = payload.nodes[1].model_copy(update={"id": "graph-c"})
+        third = payload.nodes[1].model_copy(update={"id": NODE_C})
         second_relation = payload.relations[0].model_copy(
-            update={"source_node_id": "graph-b", "target_node_id": "graph-c"}
+            update={"source_node_id": NODE_B, "target_node_id": NODE_C}
         )
         payload = payload.model_copy(
             update={
@@ -1121,9 +1126,9 @@ def test_crt_update_rejects_duplicate_ids_before_pending_receipt_or_write(
         )
         expected_reason = "duplicate_node_id"
     else:
-        third = payload.nodes[1].model_copy(update={"id": "graph-c"})
+        third = payload.nodes[1].model_copy(update={"id": NODE_C})
         second_relation = payload.relations[0].model_copy(
-            update={"source_node_id": "graph-b", "target_node_id": "graph-c"}
+            update={"source_node_id": NODE_B, "target_node_id": NODE_C}
         )
         payload = payload.model_copy(
             update={
@@ -1144,6 +1149,198 @@ def test_crt_update_rejects_duplicate_ids_before_pending_receipt_or_write(
 
     assert exc_info.value.detail is not None
     assert exc_info.value.detail["reason"] == expected_reason
+    assert (
+        service.command_repo.get(owner_id=owner_id, key_digest=service._key_digest(key))
+        is None
+    )
+    assert service.tree_service.get_tree(tree.id) == tree
+
+
+@pytest.mark.parametrize(
+    ("invalid_kind", "invalid_id"),
+    [
+        pytest.param("node", "forged-node", id="node-prefix"),
+        pytest.param(
+            "node",
+            "node_A0000000-0000-4000-8000-000000000001",
+            id="node-uppercase-uuid",
+        ),
+        pytest.param(
+            "node",
+            "node_00000000-0000-1000-8000-000000000001",
+            id="node-non-v4-uuid",
+        ),
+        pytest.param("relation", "relation-invalid", id="relation-uuid"),
+    ],
+)
+def test_crt_create_rejects_non_uuid_entity_ids_before_pending_receipt(
+    container, invalid_kind, invalid_id
+):
+    service = container.crt_command_service
+    owner_id = f"owner-invalid-create-{invalid_kind}"
+    payload = _graph_create_payload(name="Stable create identities")
+    if invalid_kind == "node":
+        nodes = [
+            payload.nodes[0].model_copy(update={"id": invalid_id}),
+            payload.nodes[1],
+        ]
+        relations = [
+            payload.relations[0].model_copy(update={"source_node_id": invalid_id})
+        ]
+        expected_reason = "invalid_node_id"
+    else:
+        nodes = payload.nodes
+        relations = [payload.relations[0].model_copy(update={"id": invalid_id})]
+        expected_reason = "invalid_relation_id"
+    payload = payload.model_copy(update={"nodes": nodes, "relations": relations})
+    key = f"invalid-create-{invalid_kind}"
+
+    with pytest.raises(ValidationFailure) as exc_info:
+        service.create_tree(
+            payload,
+            owner_id=owner_id,
+            idempotency_key=key,
+            normalized_route="/api/crt/trees",
+        )
+
+    assert exc_info.value.detail == {"reason": expected_reason}
+    assert (
+        service.command_repo.get(owner_id=owner_id, key_digest=service._key_digest(key))
+        is None
+    )
+    assert not service.tree_service.tree_repo.exists(
+        service._resource_id(owner_id, service._key_digest(key))
+    )
+
+
+def test_crt_update_rejects_a_new_non_uuid_card_id_before_pending_receipt_or_write(
+    container,
+):
+    service = container.crt_command_service
+    owner_id = "owner-invalid-new-node-id"
+    tree = service.tree_service.create_tree(
+        _graph_create_payload(name="Stable identities"), owner_id=owner_id
+    )
+    response = service.tree_service.to_response(tree)
+    forged = response.nodes[0].model_copy(
+        update={
+            "id": "forged-node",
+            "label": "Forged replacement",
+            "position": Position(x=2, y=2),
+        }
+    )
+    payload = TreeUpdateRequest(
+        name=response.name,
+        schema_version=response.schema_version,
+        metadata=response.metadata,
+        nodes=[*response.nodes, forged],
+        relations=response.relations,
+        owner_id=response.owner_id,
+        expected_revision=response.revision,
+    )
+    key = "invalid-new-node-id"
+
+    with pytest.raises(ValidationFailure) as exc_info:
+        service.update_tree(
+            tree.id,
+            payload,
+            owner_id=owner_id,
+            idempotency_key=key,
+            normalized_route="/api/crt/trees",
+        )
+
+    assert exc_info.value.detail == {"reason": "invalid_node_id"}
+    assert (
+        service.command_repo.get(owner_id=owner_id, key_digest=service._key_digest(key))
+        is None
+    )
+    assert service.tree_service.get_tree(tree.id) == tree
+
+
+def test_crt_update_preserves_and_accepts_existing_opaque_legacy_ids(container):
+    service = container.crt_command_service
+    owner_id = "owner-legacy-opaque-ids"
+    base = _graph_create_payload(name="Legacy opaque identities")
+    legacy_nodes = [
+        base.nodes[0].model_copy(update={"id": "legacy-node-a"}),
+        base.nodes[1].model_copy(update={"id": "legacy-node-b"}),
+    ]
+    legacy_relation = base.relations[0].model_copy(
+        update={
+            "id": "legacy-relation",
+            "source_node_id": "legacy-node-a",
+            "target_node_id": "legacy-node-b",
+        }
+    )
+    tree = service.tree_service.create_tree(
+        base.model_copy(update={"nodes": legacy_nodes, "relations": [legacy_relation]}),
+        owner_id=owner_id,
+    )
+    response = service.tree_service.to_response(tree)
+    updated_nodes = [
+        response.nodes[0].model_copy(update={"label": "Edited legacy card"}),
+        response.nodes[1],
+    ]
+
+    updated = service.update_tree(
+        tree.id,
+        TreeUpdateRequest(
+            name="Updated legacy identities",
+            schema_version=response.schema_version,
+            metadata=response.metadata,
+            nodes=updated_nodes,
+            relations=response.relations,
+            owner_id=response.owner_id,
+            expected_revision=response.revision,
+        ),
+        owner_id=owner_id,
+        idempotency_key="update-existing-legacy-ids",
+        normalized_route="/api/crt/trees",
+    )
+
+    assert updated.response is not None
+    assert updated.response.revision == 2
+    assert {node.id for node in updated.response.nodes} == {
+        "legacy-node-a",
+        "legacy-node-b",
+    }
+    assert updated.response.nodes[0].label == "Edited legacy card"
+    assert updated.response.relations[0].id == "legacy-relation"
+    assert updated.response.relations[0].source_node_id == "legacy-node-a"
+    assert updated.response.relations[0].target_node_id == "legacy-node-b"
+
+
+def test_crt_update_rejects_reassigning_an_existing_relation_id(container):
+    service = container.crt_command_service
+    owner_id = "owner-reassigned-relation"
+    tree = service.tree_service.create_tree(
+        _graph_create_payload(name="Stable relation identity"), owner_id=owner_id
+    )
+    response = service.tree_service.to_response(tree)
+    reassigned = response.relations[0].model_copy(
+        update={"source_node_id": NODE_B, "target_node_id": NODE_A}
+    )
+    payload = TreeUpdateRequest(
+        name=response.name,
+        schema_version=response.schema_version,
+        metadata=response.metadata,
+        nodes=response.nodes,
+        relations=[reassigned],
+        owner_id=response.owner_id,
+        expected_revision=response.revision,
+    )
+    key = "reassigned-relation-id"
+
+    with pytest.raises(ValidationFailure) as exc_info:
+        service.update_tree(
+            tree.id,
+            payload,
+            owner_id=owner_id,
+            idempotency_key=key,
+            normalized_route="/api/crt/trees",
+        )
+
+    assert exc_info.value.detail == {"reason": "relation_id_reassigned"}
     assert (
         service.command_repo.get(owner_id=owner_id, key_digest=service._key_digest(key))
         is None

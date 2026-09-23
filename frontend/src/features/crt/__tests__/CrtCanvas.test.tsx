@@ -1339,5 +1339,3 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ relations: expect.arrayContaining([expect.objectContaining({ id: "new-relation" })]) }));
   });
 });
-
-

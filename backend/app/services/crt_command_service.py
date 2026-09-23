@@ -106,6 +106,7 @@ class CrtCommandService:
                 command_id=key_digest,
                 schema_version=schema_version,
             )
+            self._validate_snapshot_id_continuity(target)
             receipt = CrtCommandReceipt(
                 owner_id=owner_id,
                 key_digest=key_digest,
@@ -182,6 +183,7 @@ class CrtCommandService:
                 command_id=key_digest,
                 current_tree=current,
             )
+            self._validate_snapshot_id_continuity(target, current=current)
             receipt = CrtCommandReceipt(
                 owner_id=owner_id,
                 key_digest=key_digest,
@@ -250,6 +252,7 @@ class CrtCommandService:
                 tree_id=resource_id,
                 command_id=key_digest,
             )
+            self._validate_snapshot_id_continuity(target)
             receipt = CrtCommandReceipt(
                 owner_id=owner_id,
                 key_digest=key_digest,
@@ -783,6 +786,55 @@ class CrtCommandService:
         raw[6] = (raw[6] & 0x0F) | 0x40
         raw[8] = (raw[8] & 0x3F) | 0x80
         return str(uuid.UUID(bytes=bytes(raw)))
+
+    @staticmethod
+    def _has_canonical_uuid_v4(value: str, *, prefix: str) -> bool:
+        if not value.startswith(prefix):
+            return False
+        suffix = value[len(prefix) :]
+        try:
+            parsed = uuid.UUID(suffix)
+        except (AttributeError, ValueError):
+            return False
+        return parsed.version == 4 and suffix == str(parsed)
+
+    @classmethod
+    def _validate_snapshot_id_continuity(
+        cls,
+        target: TreeDocument,
+        *,
+        current: TreeDocument | None = None,
+    ) -> None:
+        existing_node_ids = {node.id for node in current.nodes} if current else set()
+        for node in target.nodes:
+            if node.id not in existing_node_ids and not cls._has_canonical_uuid_v4(
+                node.id, prefix="node_"
+            ):
+                raise ValidationFailure(
+                    "New card identifiers must use the CRT UUID-v4 form.",
+                    detail={"reason": "invalid_node_id"},
+                )
+
+        existing_relations = (
+            {relation.id: relation for relation in current.relations} if current else {}
+        )
+        for relation in target.relations:
+            previous = existing_relations.get(relation.id)
+            if previous is None:
+                if not cls._has_canonical_uuid_v4(relation.id, prefix="relation_"):
+                    raise ValidationFailure(
+                        "New relation identifiers must use the CRT UUID-v4 form.",
+                        detail={"reason": "invalid_relation_id"},
+                    )
+                continue
+            if (
+                previous.source_id != relation.source_id
+                or previous.target_id != relation.target_id
+            ):
+                raise ValidationFailure(
+                    "An existing relation identifier cannot replace another link.",
+                    detail={"reason": "relation_id_reassigned"},
+                )
 
     @staticmethod
     def _remap_import_payload(

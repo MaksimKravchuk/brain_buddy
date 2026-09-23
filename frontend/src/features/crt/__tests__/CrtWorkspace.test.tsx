@@ -2568,4 +2568,3 @@ describe("CrtWorkspace tree lifecycle", () => {
     expect(document.body.querySelector("main")).not.toBeInTheDocument();
   });
 });
-
