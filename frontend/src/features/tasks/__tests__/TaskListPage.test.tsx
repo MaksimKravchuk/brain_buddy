@@ -305,6 +305,56 @@ afterEach(() => {
 });
 
 describe("TaskListPage projections", () => {
+  it.each([
+    { label: "New subtask title", endpoint: "createSubtask" as const },
+    { label: "New comment", endpoint: "createComment" as const }
+  ])("reuses the $endpoint command key after an ambiguous failure and rotates it after success", async ({ label, endpoint }) => {
+    const user = userEvent.setup();
+    const mutation = mocked[endpoint];
+    mutation.mockRejectedValueOnce(new Error("Response lost"));
+    renderPage("/tasks/next/task-1?group=off");
+    const field = await screen.findByLabelText(label);
+    const form = field.closest("form");
+    if (!form) throw new Error("Missing task item form");
+
+    await user.type(field, "Draft{Enter}");
+    await waitFor(() => expect(within(form).getByRole("alert")).toHaveTextContent("Response lost"));
+    const firstKey = mutation.mock.calls[0]?.[2];
+    expect(firstKey).toEqual(expect.any(String));
+
+    await user.type(field, "{Enter}");
+    await waitFor(() => expect(field).toHaveValue(""));
+    expect(mutation.mock.calls[1]?.[2]).toBe(firstKey);
+
+    await user.type(field, "Draft{Enter}");
+    await waitFor(() => expect(mutation).toHaveBeenCalledTimes(3));
+    expect(mutation.mock.calls[2]?.[2]).not.toBe(firstKey);
+  });
+
+  it("keeps the comment key for whitespace-only edits but changes it with the payload after failure", async () => {
+    const user = userEvent.setup();
+    mocked.createComment.mockRejectedValueOnce(new Error("Response lost"))
+      .mockRejectedValueOnce(new Error("Response lost again"));
+    renderPage("/tasks/next/task-1?group=off");
+    const field = await screen.findByLabelText("New comment");
+    const form = field.closest("form");
+    if (!form) throw new Error("Missing task item form");
+
+    await user.type(field, "Draft{Enter}");
+    await waitFor(() => expect(mocked.createComment).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(form).getByRole("alert")).toBeInTheDocument());
+    await user.type(field, "  {Enter}");
+    await waitFor(() => expect(mocked.createComment).toHaveBeenCalledTimes(2));
+    expect(mocked.createComment.mock.calls[1]).toEqual(mocked.createComment.mock.calls[0]);
+    await waitFor(() => expect(within(form).getByRole("alert")).toBeInTheDocument());
+
+    await user.clear(field);
+    await user.type(field, "Updated draft{Enter}");
+    await waitFor(() => expect(mocked.createComment).toHaveBeenCalledTimes(3));
+    expect(mocked.createComment.mock.calls[2]?.[1]).toEqual({ body: "Updated draft" });
+    expect(mocked.createComment.mock.calls[2]?.[2]).not.toBe(mocked.createComment.mock.calls[0]?.[2]);
+  });
+
   it("017-FR-014 017-FR-015 shows existing runs through the existing summary read while rollout is off", async () => {
     act(() => {
       useAuthStore.setState({
@@ -662,6 +712,27 @@ describe("TaskListPage projections", () => {
 
     expect(await screen.findByText("Second page task")).toBeInTheDocument();
     await waitFor(() => expect(lastListFilters().cursor).toBe("cursor-2"));
+  });
+
+  it("017-FR-016 keeps loaded rows and offers retry when a later page fails", async () => {
+    const user = userEvent.setup();
+    let attempts = 0;
+    mocked.listTasks.mockImplementation(async (filters) => {
+      if (filters?.limit) return listResponse([]);
+      if (!filters?.cursor) return listResponse([taskFixture()], { next_cursor: "cursor-2", has_more: true });
+      if (++attempts === 1) throw new Error("Next page unavailable");
+      return listResponse([taskFixture({ id: "task-2", title: "Second page task" })]);
+    });
+
+    renderPage("/tasks/next");
+    await user.click(await screen.findByRole("button", { name: "Load more tasks" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Next page unavailable");
+    expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry loading tasks" }));
+    expect(await screen.findByText("Second page task")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(attempts).toBe(2);
   });
 });
 
