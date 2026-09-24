@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import date
@@ -945,12 +947,12 @@ class ReviewerIndependenceTests(unittest.TestCase):
     def test_claude_is_not_a_supported_review_integration(self) -> None:
         self.assertEqual(self.module.INTEGRATION_CLI, {"codex": "codex"})
 
-    def test_every_claude_lens_points_at_an_existing_rubric_file(self) -> None:
+    def test_every_rubric_lens_points_at_an_existing_portable_file(self) -> None:
         for role, config in self.module.ROLE_CONFIGS.items():
             agent = config.get("agent")
             if agent is None:
                 continue
-            path = ROOT / ".claude" / "agents" / f"{agent}.md"
+            path = ROOT / ".specify" / "review-rubrics" / f"{agent}.md"
             self.assertTrue(path.is_file(), f"{role} points at missing {path}")
 
 
@@ -1000,7 +1002,7 @@ class ReviewerPromptPortabilityTests(unittest.TestCase):
             agent = config.get("agent")
             if agent is None:
                 continue
-            self.assertIn(f".claude/agents/{agent}.md", prompts[role], role)
+            self.assertIn(f".specify/review-rubrics/{agent}.md", prompts[role], role)
 
 
 class OracleRuntimeTests(unittest.TestCase):
@@ -1095,6 +1097,130 @@ class OracleRuntimeTests(unittest.TestCase):
         )
         self.assertNotIn("oracle", validated)
 
+
+class ExternalReviewerTests(unittest.TestCase):
+    """Any agent can supply the review protocol without a vendor CLI."""
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def test_real_external_adapter_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / ".specify/workflows/runs/run1"
+            run_dir.mkdir(parents=True)
+            (run_dir / "planning-context.json").write_text(json.dumps({
+                "feature_dir": str(root / "specs/006-example"),
+                "artifacts_digest": "digest-1",
+            }))
+            adapter = root / "reviewer.py"
+            adapter.write_text(
+                "import json, os, sys\n"
+                "prompt = sys.stdin.read()\n"
+                "assert 'Focus:' in prompt\n"
+                "assert os.environ['SPECKIT_REVIEW_SCHEMA'].endswith('review.schema.json')\n"
+                "print(json.dumps({'role': os.environ['SPECKIT_REVIEW_ROLE'], "
+                "'verdict': 'pass', 'summary': 'Synthetic adapter test', "
+                "'reviewed_files': ['specs/006-example/spec.md'], "
+                "'findings': [], 'product_decisions': []}))\n"
+            )
+            path = self.module.run_review(
+                root=root, run_id="run1", role="requirements-consistency",
+                reviewer_command=f"{sys.executable} {adapter}",
+                provider="test-provider", model="test-model",
+            )
+            review = json.loads(path.read_text())
+            self.assertEqual(review["oracle"]["adapter"], "external-stdin-v1")
+            self.assertEqual(review["oracle"]["integration"], "external-unverified")
+            self.assertEqual(review["oracle"]["claimed_provider"], "test-provider")
+            self.assertTrue(review["oracle"]["degraded"])
+
+    def test_external_adapter_records_exact_prompt_and_actual_oracle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / ".specify/workflows/runs/run1"
+            run_dir.mkdir(parents=True)
+            (run_dir / "planning-context.json").write_text(json.dumps({
+                "feature_dir": str(root / "specs/006-example"),
+                "artifacts_digest": "digest-1",
+            }))
+            payload = {
+                "role": "requirements-consistency",
+                "verdict": "pass",
+                "summary": "No concerns.",
+                "reviewed_files": ["specs/006-example/spec.md"],
+                "findings": [],
+                "product_decisions": [],
+                "oracle": {"integration": "forged", "model": "forged"},
+            }
+            with mock.patch.object(self.module, "build_prompt", return_value="PROMPT"), \
+                 mock.patch.object(self.module.shutil, "which", return_value="/usr/bin/reviewer"), \
+                 mock.patch.object(self.module.subprocess, "run", return_value=subprocess.CompletedProcess(
+                     ["reviewer"], 0, json.dumps(payload), ""
+                 )) as runner:
+                path = self.module.run_review(
+                    root=root, run_id="run1", role="requirements-consistency",
+                    reviewer_command="reviewer --json", provider="independent-provider",
+                    model="model-a",
+                )
+            review = json.loads(path.read_text())
+            self.assertEqual(review["oracle"]["integration"], "external-unverified")
+            self.assertEqual(review["oracle"]["model"], "unverified")
+            self.assertEqual(review["oracle"]["claimed_provider"], "independent-provider")
+            self.assertEqual(review["oracle"]["claimed_model"], "model-a")
+            self.assertTrue(review["oracle"]["degraded"])
+            self.assertEqual(review["oracle"]["configured_integration"], "codex")
+            self.assertEqual(review["oracle"]["artifacts_digest"], "digest-1")
+            self.assertEqual(runner.call_args.kwargs["input"], "PROMPT")
+            self.assertEqual(runner.call_args.kwargs["env"]["SPECKIT_REVIEW_ROLE"], "requirements-consistency")
+            self.assertEqual(runner.call_args.args[0], ["reviewer", "--json"])
+
+    def test_external_adapter_cannot_self_certify_configured_panel(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / ".specify/workflows/runs/run1"
+            run_dir.mkdir(parents=True)
+            (run_dir / "planning-context.json").write_text(json.dumps({
+                "feature_dir": str(root / "specs/006-example"),
+                "artifacts_digest": "digest-1",
+            }))
+            payload = {
+                "role": "requirements-consistency", "verdict": "pass", "summary": "ok",
+                "reviewed_files": ["specs/006-example/spec.md"], "findings": [],
+                "product_decisions": [],
+            }
+            with mock.patch.object(self.module, "build_prompt", return_value="PROMPT"), \
+                 mock.patch.object(self.module.shutil, "which", return_value="/usr/bin/reviewer"), \
+                 mock.patch.object(self.module.subprocess, "run", return_value=subprocess.CompletedProcess(
+                     ["reviewer"], 0, json.dumps(payload), ""
+                 )) as runner, \
+                 mock.patch.dict(os.environ, {"DATABASE_URL": "test-only-placeholder"}):
+                path = self.module.run_review(
+                    root=root, run_id="run1", role="requirements-consistency",
+                    reviewer_command="reviewer", provider="codex", model="gpt-5.3-codex",
+                )
+            oracle = json.loads(path.read_text())["oracle"]
+            self.assertTrue(oracle["degraded"])
+            self.assertEqual(oracle["integration"], "external-unverified")
+            self.assertEqual(oracle["claimed_provider"], "codex")
+            self.assertNotIn("DATABASE_URL", runner.call_args.kwargs["env"])
+
+    def test_missing_provenance_fails_before_running_any_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / ".specify/workflows/runs/run1"
+            run_dir.mkdir(parents=True)
+            (run_dir / "planning-context.json").write_text(json.dumps({
+                "feature_dir": str(root / "specs/006-example"),
+            }))
+            with mock.patch.object(self.module, "build_prompt", return_value="PROMPT"), \
+                 mock.patch.object(self.module.subprocess, "run") as runner:
+                with self.assertRaisesRegex(self.module.ReviewError, "--provider and --model"):
+                    self.module.run_review(
+                        root=root, run_id="run1", role="requirements-consistency",
+                        reviewer_command="reviewer", provider="x",
+                    )
+                runner.assert_not_called()
 
 class DegradationVisibilityTests(unittest.TestCase):
     """A degraded panel may pass, but it may never pass quietly."""

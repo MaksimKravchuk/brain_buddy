@@ -141,7 +141,7 @@ See `docs/api_usage.md` for request/response details and examples.
 - **Mutation testing** runs nightly and report-only on both stacks — mutmut over the backend deterministic core (ADR-0004, ADR-0016) and Stryker over the frontend deterministic modules (ADR-0013): `make mutation-backend`, `make mutation-frontend`. Each stack keeps an *observed* scope it measures and a narrower *enforced* scope allowed to gate a pull request once calibrated; neither gate is connected yet.
 
 ## Feature Specs
-GitHub Spec Kit v0.15.0 is mandatory when an ADR-0023 full-path trigger applies: a
+GitHub Spec Kit v1.0.11 is mandatory when an ADR-0023 full-path trigger applies: a
 significant new capability, cross-surface contract change, persistence/schema change,
 materially changed workflow/state-machine boundary, or ASK-class outcome. Eligible
 bounded SHIP/SHOW changes use ADR-0023's lightweight brief and one risk-selected

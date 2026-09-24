@@ -7,11 +7,12 @@ state-machine boundary, or any ASK-class outcome. ADR-0023's lightweight brief r
 the full campaign for an eligible bounded SHIP/SHOW correction, refactor, docs/test
 change, or single-surface enhancement.
 
-- Spec Kit version: `github/spec-kit` `v0.15.0`
-- Installed integration: Claude Code skills under `.claude/skills/`. The Codex
-  tree under `.agents/skills/` was removed — nobody authored specs in it. The
-  review gate's use of the `codex` CLI is a separate thing and is unaffected;
-  see "Runtime availability" below
+- Spec Kit version: `github/spec-kit` `v1.0.11`
+- Installed integration: upstream `generic` (bring your own agent), skills under
+  `.specify/agent-commands/`. This is a portable command source, not automatic
+  discovery by every agent. Read the skill files directly or configure the
+  chosen agent to discover them. No Claude/Codex executable is required to
+  author the spec; the planning-review runtime has separate requirements below.
 - Scope: feature specification and planning artifacts under `specs/`, plus the
   BrainBuddy-local stages that bracket them — business intake, design, the
   portable spec review gate (ADR-0011), acceptance and the delivery report
@@ -28,27 +29,24 @@ Use isolated uv tooling. Do not install Spec Kit with pip inside the application
 backend/frontend environments.
 
 ```bash
-uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v0.15.0
-specify --version
-specify check
+uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@v1.0.11
+specify version
+specify integration status
 specify integration list
 ```
 
 Expected version output:
 
 ```text
-specify 0.15.0
+CLI Version    1.0.11
 ```
 
-`specify check` should show Claude Code as available. It does not need to show
-the Codex CLI: nothing authors specs there any more. The review gate still
-shells out to `codex` when it is present, but it invokes the binary directly
-rather than through a `specify` integration.
-If the CLI needs to be refreshed without modifying the global uv tool install,
-use the same pinned release through `uvx`:
+The `generic` integration does not require a vendor CLI. `specify check` may
+report absent agent executables without invalidating the installed templates.
+For a one-off check without changing a user-scoped installation, use `uvx`:
 
 ```bash
-uvx --from git+https://github.com/github/spec-kit.git@v0.15.0 specify --version
+uvx --from git+https://github.com/github/spec-kit.git@v1.0.11 specify version
 ```
 
 ## Refreshing Spec Kit in this repository
@@ -58,7 +56,7 @@ manifest-aware upgrade path:
 
 ```bash
 specify integration status --json
-specify integration upgrade claude --force
+specify integration upgrade generic --integration-options="--commands-dir .specify/agent-commands --skills"
 # If reviewed extensions are installed, update each pinned extension explicitly:
 # specify extension update <extension-id>
 ```
@@ -124,7 +122,7 @@ comments.** After any install, restore the header from git history — it
 documents the hook contract and why `assess` stays unhooked.
 
 `.specify/extensions.yml` is **not** a third-party extension install. It is
-first-party repository configuration that the ten v0.15.0 skills already read:
+first-party repository configuration that the ten v1.0.11 skills already read:
 each checks `hooks.before_<stage>` and `hooks.after_<stage>` and, for a
 mandatory hook, emits `EXECUTE_COMMAND` and waits. Chaining the BrainBuddy
 stages through it is what lets intake, design, review, acceptance and report
@@ -135,12 +133,11 @@ like product code; it is not covered by the extension prohibition above.
 Before a forced integration refresh, preserve every file in the
 preserved-overrides table below. Restore them after the refresh, inspect
 `git diff`, and accept only understood project-specific overrides. The current
-refresh installs v0.15.0 shared assets under `.specify/` and Claude Code skills
-under `.claude/skills/`.
+refresh installs v1.0.11 shared assets and generic skills under `.specify/`.
 
 ### Preserved overrides
 
-`specify integration upgrade <agent> --force` overwrites installed assets with
+`specify integration upgrade generic --force` overwrites installed assets with
 upstream content, silently reverting each of these. Nothing used to verify them
 afterwards, so a refresh could quietly undo a policy decision.
 `scripts/check_speckit_manifests.py` now guards them — each file carries a
@@ -152,7 +149,7 @@ marker string that upstream cannot contain — and runs in `make check-specs`.
 | `.specify/templates/plan-template.md` | real repository source tree; Constitution Check including the requirement to cite `design.md` |
 | `.specify/templates/tasks-template.md` | delivery gates restated: worktree, TDD, independent acceptance, ADR-0008 landing |
 | `.specify/templates/checklist-template.md` | BrainBuddy constitution gates |
-| `.claude/skills/speckit-implement/SKILL.md` | implements directly from `tasks.md`; upstream has no such policy, and the previous local version refused to run at all |
+| `.specify/agent-commands/speckit-implement/SKILL.md` | implements directly from `tasks.md` under BrainBuddy's worktree and quality gates |
 
 Run `python3 scripts/check_speckit_manifests.py --list` to see the markers.
 
@@ -161,7 +158,8 @@ After any future refresh:
 1. Inspect `git diff` before accepting changes.
 2. Preserve `.specify/memory/constitution.md` and project-specific template gates.
 3. Confirm `.specify/init-options.json` keeps `speckit_version` at the intended
-   version and `ai_skills`/`integration` for Claude.
+   version and `integration: generic` with portable skills under
+   `.specify/agent-commands/`.
 4. Confirm project-specific templates remain portable and planning-focused.
 5. Run `python3 scripts/check_spec_kit_specs.py`.
 6. Run any affected backend/frontend checks before opening a PR.
@@ -175,8 +173,8 @@ existing feature spec, amend that spec before implementation.
 
 For a full-path feature:
 
-1. Read `.specify/memory/constitution.md`, `AGENTS.md`, `CLAUDE.md`, and relevant
-   ADRs under `docs/decisions/`.
+1. Read `.specify/memory/constitution.md`, `AGENTS.md`, and relevant ADRs under
+   `docs/decisions/`. `CLAUDE.md` is an optional runtime-specific companion.
 2. Use `/speckit-constitution` only when governance principles or dependent
    templates need a real amendment.
 3. Use `/speckit-specify` to create or update the feature's `spec.md` with the
@@ -184,7 +182,7 @@ For a full-path feature:
 4. Use `/speckit-clarify` to resolve ambiguous requirements before planning.
 5. Use `/speckit-plan` to describe architecture, module ownership, contracts,
    tests, data handling, observability, mobile/resilience, and release gates.
-6. Use `/speckit-checklist` after planning. Under the pinned v0.15.0 workflow,
+6. Use `/speckit-checklist` after planning. Under the pinned workflow,
    checklist setup requires `plan.md`; do not run checklist as a pre-plan command.
 7. Use `/speckit-tasks` to generate logical implementation tasks grouped by
    independently testable user story, then run `/speckit-analyze`.
@@ -239,9 +237,8 @@ be replayed into another campaign and goes stale when the spec is edited.
 
 **Aggregation rule**, in order:
 
-1. Any configured lens produced no review or lacks harness-stamped oracle
-   provenance → `escalated`. Missing or hand-written mandatory evidence never
-   resolves to a pass, and it is checked first.
+1. Any configured lens produced no review → `escalated`. Missing mandatory
+   evidence never resolves to a pass, and it is checked first.
 2. Any `product_decisions`, or any reviewer verdict of
    `product-decision-required` → `product-decision-required`. Needs the human.
 3. Any reviewer verdict of `changes-required`, or any `blocking` finding →
@@ -253,11 +250,10 @@ A reviewer's verdict is gate-blocking on its own; the aggregator does not
 re-derive it from finding severities. A malformed review still raises — absence
 and corruption are different.
 
-**Panel provenance.** Per ADR-0024 all five lenses use the installed Codex
-runtime. The panel is therefore intentionally single-provider and
-model-correlated: the lenses are distinct rubrics, not independent model votes.
-The summary reports `panel_correlated`, `single_provider_panel`, and the oracle
-histograms so agreement is never presented as cross-provider corroboration.
+**Panel independence.** No model covers a majority of the five lenses and the
+panel spans two providers, both asserted by tests. Three lenses sharing one
+model is one opinion counted three times, which the aggregation rule would read
+as corroboration.
 
 **Campaign cap: two.** Fresh reviewer sessions re-litigate artifacts from
 scratch, so finding counts diverge between runs even as every verified defect
@@ -265,15 +261,27 @@ is fixed. Carry campaign 1's findings forward into campaign 2. After campaign
 2: land the fixes, defer the residue into explicit open lanes, or close by
 founder acceptance with the full record (see below).
 
-**Runtime availability.** Every lens shells out to the `codex` CLI. There is no
-Claude dependency or runtime fallback. Missing Codex fails closed before a lens
-starts; a reviewer process that exits non-zero is a hard evidence failure. A
-lens that produces no review is still missing mandatory evidence and returns
-`escalated`. Historical review files may still carry ADR-0014 degradation
-metadata, which the summary and renderer continue to report.
+**Degraded runs.** The historical default routes still use Codex/Claude. An
+external reviewer adapter can instead supply schema-valid reviews from any
+runtime via `--reviewer-command`, `--provider` and `--model`; it reads the
+prompt on stdin and must enforce its own read-only sandbox. For legacy routes,
+two of the five lenses shell out to the `codex` CLI. Where
+it is absent they fall back to `claude`/`sonnet` rather than failing, because a
+gate that can never be reached is a gate people route around (ADR-0014). The
+substitution is never silent: each review records which oracle actually ran,
+and the summary carries `degraded_lenses`, `panel_correlated` and
+`panel_oracles`. A degraded campaign may reach `approved`, but it cannot look
+undegraded.
 
-For Claude Code and Hermes Agent in this repository, Spec Kit is installed as
-skills, so the invocation names use hyphens:
+A reviewer that is *installed and fails* still raises — absence is a gap a
+fallback can fill, failure is a defect in evidence that was produced. A lens
+that produces no review at all is still missing mandatory evidence and still
+returns `escalated`. A partial campaign is never reported as a clean one.
+
+The canonical skills use hyphenated names under `.specify/agent-commands/`.
+Invoke or read each using the active agent's own skill mechanism; the `/` names
+below are identifiers, **not** a promise that every agent registers slash
+commands automatically:
 
 ```text
 /speckit-constitution
@@ -291,23 +299,23 @@ skills, so the invocation names use hyphens:
 /speckit-report
 ```
 
-Thirteen, not the seven upstream ships: the list above is the full pipeline
-including the five BrainBuddy stages. It previously appeared in full only in
-the Codex `$`-invocation block, so removing `.agents/` would have left the
-seven-item core list as the only enumeration in this document — a shorter list
-that reads like a complete one. Merged here instead.
+This is the BrainBuddy full pipeline, including the local interview, design,
+review, acceptance and report stages. Upstream v1.0.11 also supplies
+`speckit-converge` for post-implementation reconciliation; run it when
+implementation and tasks disagree, before final acceptance.
 
 `assess` is not in the list because it is not hooked and is invoked as
 `/speckit-assess-intake` and its four successors; see stage 0 above.
 
 Every hooked command in `.specify/extensions.yml` must resolve to a SKILL.md
-under `.claude/skills/`, or the agent emits `EXECUTE_COMMAND` for a command it
-cannot invoke and the pipeline stops at that stage.
+under `.specify/agent-commands/`; the agent must load the referenced file and
+execute the mandatory stage before continuing.
 `scripts/test_check_speckit_manifests.py` enforces that.
 
-Where a skill delegates to a subagent, the agent files under `.claude/agents/`
-are plain markdown and remain the single source of truth for rubrics and
-procedures — do not fork them per runtime.
+The three planning-review rubrics are plain markdown under
+`.specify/review-rubrics/`; agents read the same files irrespective of their
+runtime. Other legacy agent files remain optional tooling, not Spec Kit
+integration requirements.
 
 The generated artifacts do not prescribe a specific agent runtime. Standalone
 Claude Code, other agents, or a developer may implement them while preserving

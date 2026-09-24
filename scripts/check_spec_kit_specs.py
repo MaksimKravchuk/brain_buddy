@@ -3,7 +3,7 @@
 
 This check is intentionally deterministic and offline. It does not regenerate
 Spec Kit output; it only rejects new feature-spec directories that omit the
-minimum artifacts BrainBuddy requires with github/spec-kit v0.15.0.
+minimum artifacts BrainBuddy requires with github/spec-kit v1.0.11.
 
 Legacy `hermes-handoff.json` files are validated when present. The repository
 check enforces only the portable Spec Kit minimum; an explicitly managed outcome
