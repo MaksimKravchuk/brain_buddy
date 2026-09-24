@@ -88,9 +88,9 @@ export function TaskDetailPanel({
   notice?: ReactNode;
   onSave: (task: TaskResponse, payload: TaskDetailSavePayload) => void;
   onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
-  onCreateSubtask: (task: TaskResponse, title: string) => void | Promise<unknown>;
+  onCreateSubtask: (task: TaskResponse, title: string, key: string) => void | Promise<unknown>;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
-  onCreateComment: (task: TaskResponse, body: string) => void | Promise<unknown>;
+  onCreateComment: (task: TaskResponse, body: string, key: string) => void | Promise<unknown>;
   onAgentDispatched?: (run: AgentRunResponse) => void;
 }): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -297,9 +297,9 @@ function TaskDetailBody({
   isTerminal: boolean;
   onSave: (task: TaskResponse, payload: TaskDetailSavePayload) => void;
   onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
-  onCreateSubtask: (task: TaskResponse, title: string) => void | Promise<unknown>;
+  onCreateSubtask: (task: TaskResponse, title: string, key: string) => void | Promise<unknown>;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
-  onCreateComment: (task: TaskResponse, body: string) => void | Promise<unknown>;
+  onCreateComment: (task: TaskResponse, body: string, key: string) => void | Promise<unknown>;
   onAgentDispatched?: (run: AgentRunResponse) => void;
 }): React.JSX.Element {
   // Live value shared between the "waiting" prop row and list moves into
@@ -587,7 +587,7 @@ function TaskDetailBody({
             />
           </div>
         ) : null}
-        <CreateTaskItemForm key={`${task.id}-subtask`} name="subtask_title" label="New subtask title" placeholder="Add a subtask" onCreate={(title) => onCreateSubtask(task, title)} />
+        <CreateTaskItemForm key={`${task.id}-subtask`} name="subtask_title" keyAction="subtask-create" label="New subtask title" placeholder="Add a subtask" onCreate={(title, key) => onCreateSubtask(task, title, key)} />
         {subtasks.map((subtask) => {
           const done = subtask.state !== "open";
           return (
@@ -614,7 +614,7 @@ function TaskDetailBody({
 
       <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
         <h3 className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Comments</h3>
-        <CreateTaskItemForm key={`${task.id}-comment`} name="comment_body" label="New comment" placeholder="Add a comment" onCreate={(body) => onCreateComment(task, body)} />
+        <CreateTaskItemForm key={`${task.id}-comment`} name="comment_body" keyAction="comment-create" label="New comment" placeholder="Add a comment" onCreate={(body, key) => onCreateComment(task, body, key)} />
         {comments.map((comment) => (
           <div key={comment.id} className="text-[12.5px] leading-normal text-slate-700">
             {comment.body}
@@ -628,13 +628,15 @@ function TaskDetailBody({
   );
 }
 
-function CreateTaskItemForm({ name, label, placeholder, onCreate }: {
+function CreateTaskItemForm({ name, keyAction, label, placeholder, onCreate }: {
   name: string;
+  keyAction: string;
   label: string;
   placeholder: string;
-  onCreate: (value: string) => void | Promise<unknown>;
+  onCreate: (value: string, key: string) => void | Promise<unknown>;
 }): React.JSX.Element {
   const pendingRef = useRef(false);
+  const attemptRef = useRef<{ value: string; key: string } | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -647,13 +649,17 @@ function CreateTaskItemForm({ name, label, placeholder, onCreate }: {
       const original = input.value;
       const value = original.trim();
       if (!value) return;
+      const previous = attemptRef.current;
+      const key = previous?.value === value ? previous.key : `task-shell-${keyAction}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      attemptRef.current = { value, key };
       pendingRef.current = true;
       setPending(true);
       setError(null);
       void (async () => {
         try {
-          await onCreate(value);
+          await onCreate(value, key);
           if (input.isConnected && input.value === original) input.value = "";
+          if (attemptRef.current?.key === key) attemptRef.current = null;
         } catch (caught: unknown) {
           setError(getErrorMessage(caught));
         } finally {
@@ -662,7 +668,10 @@ function CreateTaskItemForm({ name, label, placeholder, onCreate }: {
         }
       })();
     }}>
-      <input name={name} aria-label={label} data-escape-keeps-draft placeholder={placeholder} className={dashedInputClass} onChange={() => setError(null)} />
+      <input name={name} aria-label={label} data-escape-keeps-draft placeholder={placeholder} className={dashedInputClass} onChange={(event) => {
+        if (attemptRef.current && event.currentTarget.value.trim() !== attemptRef.current.value) attemptRef.current = null;
+        setError(null);
+      }} />
       {pending ? <span role="status" className="mt-1 block text-xs text-slate-600">Adding…</span> : null}
       {error ? <span role="alert" className="mt-1 block text-xs text-rose-700">{error}. Your draft is still here; press Enter to retry.</span> : null}
     </form>

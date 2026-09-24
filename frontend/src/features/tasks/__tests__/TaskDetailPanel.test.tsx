@@ -814,7 +814,7 @@ describe("TaskDetailPanel subtasks and comments", () => {
 
     await user.clear(field);
     await user.type(field, "Draft the copy{Enter}");
-    expect(onCreateSubtask).toHaveBeenCalledWith(task, "Draft the copy");
+    expect(onCreateSubtask).toHaveBeenCalledWith(task, "Draft the copy", expect.any(String));
     expect(field).toHaveValue("");
   });
 
@@ -828,7 +828,7 @@ describe("TaskDetailPanel subtasks and comments", () => {
     expect(onCreateComment).not.toHaveBeenCalled();
 
     await user.type(field, "Blocked on analytics{Enter}");
-    expect(onCreateComment).toHaveBeenCalledWith(task, "Blocked on analytics");
+    expect(onCreateComment).toHaveBeenCalledWith(task, "Blocked on analytics", expect.any(String));
     expect(field).toHaveValue("");
   });
 

@@ -373,8 +373,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   });
 
   const subtaskCreateMutation = useMutation({
-    mutationFn: ({ task, title }: { task: TaskResponse; title: string }) =>
-      apiClient.createSubtask(task.id, { title }, idempotencyKey("subtask-create")),
+    mutationFn: ({ task, title, key }: { task: TaskResponse; title: string; key: string }) =>
+      apiClient.createSubtask(task.id, { title }, key),
     onSuccess: () => {
       setMutationError(null);
       void invalidateTasks();
@@ -393,8 +393,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   });
 
   const commentCreateMutation = useMutation({
-    mutationFn: ({ task, body }: { task: TaskResponse; body: string }) =>
-      apiClient.createComment(task.id, { body }, idempotencyKey("comment-create")),
+    mutationFn: ({ task, body, key }: { task: TaskResponse; body: string; key: string }) =>
+      apiClient.createComment(task.id, { body }, key),
     onSuccess: () => {
       setMutationError(null);
       void invalidateTasks();
@@ -633,9 +633,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       // is nothing to save, so they stay no-ops rather than dead `.save()` calls.
       onSave={() => undefined}
       onTransition={() => undefined}
-      onCreateSubtask={(task, subtaskTitle) => subtaskCreateMutation.mutateAsync({ task, title: subtaskTitle })}
+      onCreateSubtask={(task, subtaskTitle, key) => subtaskCreateMutation.mutateAsync({ task, title: subtaskTitle, key })}
       onTransitionSubtask={(task, subtask, action) => subtaskTransitionMutation.mutate({ task, subtask, action })}
-      onCreateComment={(task, body) => commentCreateMutation.mutateAsync({ task, body })}
+      onCreateComment={(task, body, key) => commentCreateMutation.mutateAsync({ task, body, key })}
       onAgentDispatched={(run) => {
         setAgentFocusTarget({
           taskId: run.task_id,
