@@ -44,6 +44,10 @@ class PreservedOverrideTests(unittest.TestCase):
         """Generic integration refresh must not erase our implementation policy."""
         protected = set(self.module.PRESERVED_OVERRIDES)
         self.assertIn(".specify/agent-commands/speckit-implement/SKILL.md", protected)
+        self.assertIn(".specify/agent-commands/speckit-tasks/SKILL.md", protected)
+        implement = (ROOT / ".specify/agent-commands/speckit-implement/SKILL.md").read_text()
+        self.assertIn("implement all of `tasks.md`", implement)
+        self.assertIn("PR-NN", implement)
         self.assertFalse(any(path.startswith(".claude/") for path in protected))
 
     def test_generic_integration_is_pinned_and_vendor_neutral(self) -> None:

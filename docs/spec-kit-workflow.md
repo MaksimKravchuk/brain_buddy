@@ -149,7 +149,8 @@ marker string that upstream cannot contain — and runs in `make check-specs`.
 | `.specify/templates/plan-template.md` | real repository source tree; Constitution Check including the requirement to cite `design.md` |
 | `.specify/templates/tasks-template.md` | delivery gates restated: worktree, TDD, independent acceptance, ADR-0008 landing |
 | `.specify/templates/checklist-template.md` | BrainBuddy constitution gates |
-| `.specify/agent-commands/speckit-implement/SKILL.md` | implements directly from `tasks.md` under BrainBuddy's worktree and quality gates |
+| `.specify/agent-commands/speckit-implement/SKILL.md` | implements one explicitly selected PR slice from `tasks.md` under BrainBuddy's worktree and quality gates |
+| `.specify/agent-commands/speckit-tasks/SKILL.md` | obtains approval of PR-sized task boundaries before implementation |
 
 Run `python3 scripts/check_speckit_manifests.py --list` to see the markers.
 
@@ -191,6 +192,53 @@ For a full-path feature:
    from `docs/spec-driven-kanban.md`.
 9. Amend spec/plan/tasks and rerun affected validation whenever
     implementation intent changes.
+
+### Multiple PRs for one feature spec
+
+The approved `spec.md`, `plan.md` and `tasks.md` remain one product contract;
+the **unit of coding/review is a PR slice**, not the whole spec. For large
+features or an explicit multi-PR request, `/speckit-tasks` proposes the slice
+boundaries **before** implementation and gets human approval. Record them in
+`specs/NNN-<slug>/delivery-slices.json`:
+
+```json
+{
+  "schema_version": "brainbuddy-pr-slices/v1",
+  "slices": [
+    {"id": "PR-01", "outcome": "A tested foundation for the first journey",
+     "tasks": ["T001", "T002"], "requirements": ["NNN-FR-001"],
+     "paths": ["backend/app/example.py", "backend/tests/test_example.py"],
+     "depends_on": [], "tests": ["pytest backend/tests/test_example.py"],
+     "acceptance": ["First journey contract is independently testable"]},
+    {"id": "PR-02", "outcome": "The next journey consumes that contract",
+     "tasks": ["T003"], "requirements": ["NNN-FR-002"],
+     "paths": ["frontend/src/example.tsx", "frontend/src/example.test.tsx"],
+     "depends_on": ["PR-01"], "tests": ["npm run test -- example"],
+     "acceptance": ["Second journey works against the accepted contract"]}
+  ]
+}
+```
+
+Replace `NNN` and paths with real values; `PR-01` is a slice ID, not a
+GitHub PR number. Every task belongs to exactly one slice; each slice has a
+verifiable outcome, FR/SC coverage, owned write paths,
+checks and dependency/base. `python3 scripts/check_spec_kit_specs.py` rejects
+missing/duplicate tasks, unknown requirements, forward dependencies and
+parallel slices with overlapping paths. Human approval of the boundaries and
+actual CI/review are separate from this structural check. If the file exists,
+`/speckit-implement` requires one explicit `PR-NN` selector and must not
+consume the entire `tasks.md` by default.
+
+Give each slice a fresh task/session, branch and worktree. Open one PR for that
+slice only; its description names the shared spec, slice ID, requirement IDs,
+base/dependency PR, exact SHA and tests. Verify that PR's diff, independent
+review and CI before moving to a dependent slice. Independent slices may run
+in parallel only with disjoint write paths **and** ports, databases and test
+artifacts. Maintain a compact ledger of slice → branch/worktree → PR → SHA →
+checks. After all slices are integrated, run full feature acceptance and
+trace each FR/SC to the PR evidence. A PR is not authorization to merge or
+deploy: ADR-0008 still governs ASK approvals and SHIP/SHOW verified-trunk
+landing; review-only PRs for SHIP/SHOW do not replace that route.
 
 ### BrainBuddy stages around the Spec Kit core
 

@@ -1,7 +1,7 @@
 ---
 name: "speckit-implement"
 description: "Implement a feature directly from its approved tasks.md via an isolated worktree and TDD, preserving the repository's review, CI and landing gates."
-argument-hint: "Optional feature slug or task ids to implement"
+argument-hint: "Feature slug and explicit PR-NN slice when delivery-slices.json exists"
 compatibility: "Requires spec-kit project structure with .specify/ directory"
 metadata:
   author: "github-spec-kit + brainbuddy"
@@ -47,6 +47,13 @@ Stop and report instead of starting if any fails:
    stage. You never overrule the gate.
 3. `/speckit-analyze` reported zero CRITICAL findings.
 4. `plan.md` cites `design.md` when the feature has a user-visible surface.
+5. If `delivery-slices.json` exists, the request names exactly one `PR-NN`
+   slice. Run `python3 scripts/check_spec_kit_specs.py`, read its task IDs,
+   dependencies, paths, tests and acceptance evidence, and stop if that slice
+   is absent, unapproved or blocked by an unfinished dependency. **Never**
+   interpret empty arguments as permission to implement all of `tasks.md`.
+   The user-approved slice map fixes the scope; do not edit it to make a
+   worker's changed files fit.
 
 ## Route
 
@@ -54,6 +61,22 @@ Implement in an isolated git worktree and a dedicated task session. An agent
 may delegate to another implementation worker, but no named agent runtime or
 subagent facility is required. Keep long build/test transcripts out of the
 planning session; report verified results and file paths back to it.
+
+For a multi-PR feature, give each slice its **own session, worktree, branch,
+and PR**. Pass only that slice's tasks and allowed write paths to the worker.
+Before opening the PR, compare the actual diff to its path scope and run the
+slice's tests; a cross-slice file or task requires a revised, reapproved plan.
+The PR body links the same feature spec, slice id, FR/SC IDs, dependency PRs,
+test evidence, and exact head SHA. Verify review and CI for that SHA. Never
+open one PR containing the whole spec in place of the agreed slices. Integrate
+dependent slices sequentially from the accepted base; independent slices can
+run concurrently only when code and test resources really are isolated.
+Full feature acceptance follows integration of **all** slices.
+
+Per ADR-0008, a PR is review evidence, not implicit merge/deploy authority:
+SHIP/SHOW still use verified candidate landing; ASK needs explicit approval
+and the audited landing procedure. Do not merge, push to `main`, or deploy
+merely because slice CI is green.
 
 For tasks marked `[P]`, prefer independent worktrees and short-lived sessions
 over unbounded in-process parallel subagents. Two constraints make fan-out
@@ -78,7 +101,7 @@ Direct implementation removes a routing hop. It removes no gate:
 - **Tests before implementation** — Constitution Principle II. Write the
   failing test, watch it fail for the right reason, then implement.
 - **Independent review** — the implementer does not grade its own work;
-  `/speckit-accept` delegates to `acceptance-auditor`.
+  `/speckit-accept` obtains a separate acceptance audit.
 - **CI** — `make verify-all` green before landing.
 - **ADR-0008 landing** — `scripts/classify_path_risk.py` decides SHIP/SHOW vs
   ASK. ASK-class changes land through a reviewed PR, never automatic trunk
@@ -101,6 +124,7 @@ installation, or `.hermes.md`. Absent explicit activation, implement directly.
 ```
 IMPLEMENTATION: complete | blocked
 feature:  specs/NNN-<slug>     branch: feat/<slug>
+slice:    PR-NN (or single-PR)   PR: <URL or not opened>
 tasks:    <n>/<n>              commits: <shas>
 tests added: <n>
 
@@ -110,5 +134,5 @@ LANDING CLASS: SHIP | SHOW | ASK  (per classify_path_risk.py)
 DEVIATIONS
 - <what differed from plan.md, and why>
 
-NEXT: delivery-verifier, then /speckit-accept
+NEXT: slice review/CI; then next dependent slice, and /speckit-accept after integration
 ```

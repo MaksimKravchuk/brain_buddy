@@ -3,7 +3,7 @@ name: "speckit-tasks"
 description: "Generate an actionable, dependency-ordered tasks.md for the feature based on available design artifacts."
 compatibility: "Requires spec-kit project structure with .specify/ directory"
 metadata:
-  author: "github-spec-kit"
+  author: "github-spec-kit + brainbuddy"
   source: "templates/commands/tasks.md"
 ---
 
@@ -54,6 +54,9 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 ## Outline
 
+> BrainBuddy preserved override: approve PR slice boundaries before coding.
+> Do not remove this section during a Spec Kit integration refresh.
+
 1. **Setup**: Run `.specify/scripts/bash/setup-tasks.sh --json` from repo root and parse FEATURE_DIR, TASKS_TEMPLATE_CONTENT, TASKS_TEMPLATE, and AVAILABLE_DOCS list. `FEATURE_DIR` and `TASKS_TEMPLATE` must be absolute paths when provided. `AVAILABLE_DOCS` is a list of document names/relative paths available under `FEATURE_DIR` (for example `research.md` or `contracts/`). For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
 
 2. **Load design documents**: Read from FEATURE_DIR:
@@ -85,6 +88,19 @@ You **MUST** consider the user input before proceeding (if not empty).
    - Dependencies section showing story completion order
    - Parallel execution examples per story
    - Implementation strategy section (MVP first, incremental delivery)
+
+5. **Set PR boundaries before coding (when the feature warrants multiple PRs or
+   the user requests them)**: Propose an ordered slice map covering every `T###`
+   exactly once, with FR/SC IDs, explicit write paths, dependencies, per-slice
+   runnable tests and acceptance evidence. Ask the human to approve the
+   boundaries; do not silently split or assign the entire task list to one
+   worker. On approval, write `FEATURE_DIR/delivery-slices.json` using the
+   `brainbuddy-pr-slices/v1` contract in the tasks template and run
+   `python3 scripts/check_spec_kit_specs.py`. An unapproved map is a draft,
+   never an instruction to implement. Independent slices may run in parallel
+   only with disjoint writers/resources; dependent slices start from an
+   accepted base, not a speculative parallel branch. A task's `[P]` marker
+   alone does not create a separate PR.
 
 ## Mandatory Post-Execution Hooks
 

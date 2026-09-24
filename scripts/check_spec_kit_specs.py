@@ -122,6 +122,107 @@ GRANDFATHERED = {
 }
 
 FEATURE_DIR_PATTERN = re.compile(r"^\d{3}-[a-z0-9][a-z0-9-]*$")
+TASK_ID_RE = re.compile(r"^\s*- \[[ xX]\] (T\d{3,})\b", re.MULTILINE)
+
+
+def _validate_delivery_slices(spec_dir: Path, failures: list[str]) -> None:
+    """Validate the optional approved PR boundary before implementation."""
+    path = spec_dir / "delivery-slices.json"
+    if not path.exists():
+        return
+    label = _relative(path)
+    if not path.is_file():
+        failures.append(f"{label}: must be a regular file")
+        return
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        failures.append(f"{label}: invalid JSON ({exc})")
+        return
+    if not isinstance(payload, dict) or payload.get("schema_version") != "brainbuddy-pr-slices/v1":
+        failures.append(f"{label}: expected brainbuddy-pr-slices/v1 object")
+        return
+    slices = payload.get("slices")
+    if not isinstance(slices, list) or len(slices) < 2:
+        failures.append(f"{label}: multiple PRs require at least two slices")
+        return
+    tasks_file, spec_file = spec_dir / "tasks.md", spec_dir / "spec.md"
+    if not tasks_file.is_file() or not spec_file.is_file():
+        failures.append(f"{label}: tasks.md and spec.md are required")
+        return
+    all_tasks = TASK_ID_RE.findall(tasks_file.read_text(encoding="utf-8"))
+    spec_text = spec_file.read_text(encoding="utf-8")
+    if not all_tasks or len(all_tasks) != len(set(all_tasks)):
+        failures.append(f"{label}: tasks.md needs unique checklist task IDs")
+        return
+    owners: dict[str, str] = {}
+    earlier: dict[str, set[str]] = {}
+    paths_by_slice: dict[str, list[str]] = {}
+    for index, item in enumerate(slices):
+        if not isinstance(item, dict):
+            failures.append(f"{label}: slice {index + 1} must be an object")
+            continue
+        slice_id = item.get("id")
+        if not isinstance(slice_id, str) or not re.fullmatch(r"PR-\d{2,}", slice_id) or slice_id in earlier:
+            failures.append(f"{label}: slice {index + 1} needs a unique PR-NN id")
+            continue
+        if not isinstance(item.get("outcome"), str) or not item["outcome"].strip():
+            failures.append(f"{label}: {slice_id} needs outcome")
+        for field in ("tasks", "requirements", "paths", "tests", "acceptance"):
+            values = item.get(field)
+            if not isinstance(values, list) or not values or not all(
+                isinstance(value, str) and value.strip() for value in values
+            ):
+                failures.append(f"{label}: {slice_id} needs nonempty {field}")
+        deps = item.get("depends_on")
+        if not isinstance(deps, list) or any(
+            not isinstance(dep, str) or dep not in earlier for dep in deps
+        ) or len(deps) != len({dep for dep in deps if isinstance(dep, str)}):
+            failures.append(f"{label}: {slice_id} depends_on {deps!r} must name unique earlier slices")
+            deps = []
+        ancestors = set(deps)
+        for dep in deps:
+            ancestors.update(earlier[dep])
+        earlier[slice_id] = ancestors
+        for task in item.get("tasks", []) if isinstance(item.get("tasks"), list) else []:
+            if not isinstance(task, str) or task not in all_tasks:
+                failures.append(f"{label}: {slice_id} references unknown task {task!r}")
+            elif task in owners:
+                failures.append(f"{label}: {task} assigned to multiple slices ({owners[task]}, {slice_id})")
+            else:
+                owners[task] = slice_id
+        for requirement in item.get("requirements", []) if isinstance(item.get("requirements"), list) else []:
+            # Spec headings use FR-001/SC-001; the manifest qualifies them
+            # with this feature number to prevent cross-feature confusion.
+            short_id = requirement.split("-", 1)[-1] if isinstance(requirement, str) else ""
+            if not isinstance(requirement, str) or not re.fullmatch(
+                rf"{spec_dir.name[:3]}-(?:FR|SC)-\d{{3,}}", requirement
+            ) or not re.search(rf"(?<![\w-]){re.escape(short_id)}(?![\w-])", spec_text):
+                failures.append(f"{label}: {slice_id} references unknown requirement {requirement!r}")
+        valid_paths = []
+        for scope in item.get("paths", []) if isinstance(item.get("paths"), list) else []:
+            if (
+                not isinstance(scope, str)
+                or not scope.strip()
+                or scope.startswith("/")
+                or ".." in Path(scope).parts
+                or scope in (".", "./")
+                or any(character in scope for character in "*?[]\\")
+            ):
+                failures.append(f"{label}: {slice_id} has unsafe write path {scope!r}")
+            else:
+                valid_paths.append(Path(scope).as_posix().rstrip("/"))
+        for previous_id, previous_paths in paths_by_slice.items():
+            if previous_id in ancestors:
+                continue
+            for left in previous_paths:
+                for right in valid_paths:
+                    if left == right or left.startswith(right + "/") or right.startswith(left + "/"):
+                        failures.append(f"{label}: independent {previous_id} and {slice_id} have overlapping write paths {left!r}, {right!r}")
+        paths_by_slice[slice_id] = valid_paths
+    for task in all_tasks:
+        if task not in owners:
+            failures.append(f"{label}: {task} is unassigned to a PR slice")
 
 
 def _relative(path: Path) -> str:
@@ -299,6 +400,7 @@ def main() -> int:
             )
             continue
 
+        _validate_delivery_slices(spec_dir, failures)
         if name in GRANDFATHERED:
             if _grandfathered_baseline_matches(spec_dir, failures):
                 grandfathered_seen.append(

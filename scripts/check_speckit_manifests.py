@@ -31,6 +31,10 @@ PRESERVED_OVERRIDES: dict[str, tuple[str, str]] = {
         "Hermes; upstream has neither policy.",
         "preserved BrainBuddy override",
     ),
+    ".specify/agent-commands/speckit-tasks/SKILL.md": (
+        "Approves reviewable multi-PR slice boundaries before implementation.",
+        "BrainBuddy preserved override: approve PR slice boundaries",
+    ),
     ".specify/scripts/bash/create-new-feature.sh": (
         "Reserves feature numbers across every git ref, not just the "
         "checked-out specs/ tree; upstream's per-worktree scan lets two "
