@@ -86,7 +86,4 @@ def test_019_T027_compose_evidence_is_bound_to_the_reviewed_candidate() -> None:
         "${{ github.event.pull_request.head.sha || github.sha }}" in e2e_job
     )
     assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in e2e_job
-    assert (
-        'run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"'
-        in e2e_job
-    )
+    assert 'run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"' in e2e_job
