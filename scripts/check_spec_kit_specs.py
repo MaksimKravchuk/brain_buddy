@@ -127,16 +127,23 @@ TASK_ID_RE = re.compile(r"^\s*- \[[ xX]\] (T\d{3,})\b", re.MULTILINE)
 
 def _validate_delivery_slices(spec_dir: Path, failures: list[str]) -> None:
     """Validate the optional approved PR boundary before implementation."""
-    path = spec_dir / "delivery-slices.json"
-    if not path.exists():
+    tasks_file, spec_file = spec_dir / "tasks.md", spec_dir / "spec.md"
+    if not tasks_file.is_file():
         return
-    label = _relative(path)
-    if not path.is_file():
-        failures.append(f"{label}: must be a regular file")
+    task_text = tasks_file.read_text(encoding="utf-8")
+    section = re.search(
+        r"(?ms)^## PR-срезы[ \t]*\n(.*?)(?=^## |\Z)", task_text
+    )
+    if section is None:
+        return  # Single-PR and historical specs are unchanged.
+    label = f"{_relative(tasks_file)}: PR-срезы"
+    fenced = re.search(r"(?s)```json[ \t]*\n(.*?)\n```", section.group(1))
+    if fenced is None:
+        failures.append(f"{label}: expected one fenced JSON slice map")
         return
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+        payload = json.loads(fenced.group(1))
+    except ValueError as exc:
         failures.append(f"{label}: invalid JSON ({exc})")
         return
     if not isinstance(payload, dict) or payload.get("schema_version") != "brainbuddy-pr-slices/v1":
@@ -146,11 +153,10 @@ def _validate_delivery_slices(spec_dir: Path, failures: list[str]) -> None:
     if not isinstance(slices, list) or len(slices) < 2:
         failures.append(f"{label}: multiple PRs require at least two slices")
         return
-    tasks_file, spec_file = spec_dir / "tasks.md", spec_dir / "spec.md"
-    if not tasks_file.is_file() or not spec_file.is_file():
-        failures.append(f"{label}: tasks.md and spec.md are required")
+    if not spec_file.is_file():
+        failures.append(f"{label}: spec.md is required")
         return
-    all_tasks = TASK_ID_RE.findall(tasks_file.read_text(encoding="utf-8"))
+    all_tasks = TASK_ID_RE.findall(task_text)
     spec_text = spec_file.read_text(encoding="utf-8")
     if not all_tasks or len(all_tasks) != len(set(all_tasks)):
         failures.append(f"{label}: tasks.md needs unique checklist task IDs")

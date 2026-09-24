@@ -94,10 +94,12 @@ You **MUST** consider the user input before proceeding (if not empty).
    exactly once, with FR/SC IDs, explicit write paths, dependencies, per-slice
    runnable tests and acceptance evidence. Ask the human to approve the
    boundaries; do not silently split or assign the entire task list to one
-   worker. On approval, write `FEATURE_DIR/delivery-slices.json` using the
-   `brainbuddy-pr-slices/v1` contract in the tasks template and run
-   `python3 scripts/check_spec_kit_specs.py`. An unapproved map is a draft,
-   never an instruction to implement. Independent slices may run in parallel
+   worker. On approval, append `## PR-срезы` to `FEATURE_DIR/tasks.md`
+   with a fenced JSON block using the `brainbuddy-pr-slices/v1` contract in
+   the tasks template, then run `python3 scripts/check_spec_kit_specs.py`.
+   Do not split by technical layer alone when the first PR cannot be tested
+   independently. An unapproved map is a draft, never an instruction to
+   implement. Independent slices may run in parallel
    only with disjoint writers/resources; dependent slices start from an
    accepted base, not a speculative parallel branch. A task's `[P]` marker
    alone does not create a separate PR.

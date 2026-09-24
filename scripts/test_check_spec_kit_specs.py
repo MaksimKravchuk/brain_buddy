@@ -124,9 +124,15 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         ]}
         return feature, payload
 
+    def _write_slice_section(self, feature: Path, payload: dict[str, Any]) -> None:
+        with (feature / "tasks.md").open("a", encoding="utf-8") as tasks:
+            tasks.write("\n## PR-срезы\n\n```json\n")
+            tasks.write(json.dumps(payload, ensure_ascii=False))
+            tasks.write("\n```\n")
+
     def test_valid_pr_slices_cover_every_task_once(self) -> None:
         feature, payload = self._slice_fixture()
-        (feature / "delivery-slices.json").write_text(json.dumps(payload))
+        self._write_slice_section(feature, payload)
         failures: list[str] = []
         check_spec_kit_specs._validate_delivery_slices(feature, failures)
         self.assertEqual(failures, [])
@@ -134,7 +140,7 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
     def test_pr_slices_reject_unassigned_and_duplicate_tasks(self) -> None:
         feature, payload = self._slice_fixture()
         payload["slices"][1]["tasks"] = ["T001"]
-        (feature / "delivery-slices.json").write_text(json.dumps(payload))
+        self._write_slice_section(feature, payload)
         failures: list[str] = []
         check_spec_kit_specs._validate_delivery_slices(feature, failures)
         self.assertTrue(any("T001" in item and "multiple" in item for item in failures))
@@ -144,7 +150,7 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         feature, payload = self._slice_fixture()
         payload["slices"][0]["requirements"] = ["020-FR-999"]
         payload["slices"][0]["depends_on"] = ["PR-02"]
-        (feature / "delivery-slices.json").write_text(json.dumps(payload))
+        self._write_slice_section(feature, payload)
         failures: list[str] = []
         check_spec_kit_specs._validate_delivery_slices(feature, failures)
         self.assertTrue(any("020-FR-999" in item for item in failures))
@@ -154,10 +160,24 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         feature, payload = self._slice_fixture()
         payload["slices"][1]["depends_on"] = []
         payload["slices"][1]["paths"] = ["backend/app/contract.py"]
-        (feature / "delivery-slices.json").write_text(json.dumps(payload))
+        self._write_slice_section(feature, payload)
         failures: list[str] = []
         check_spec_kit_specs._validate_delivery_slices(feature, failures)
         self.assertTrue(any("overlapping" in item for item in failures))
+
+    def test_malformed_pr_section_fails_instead_of_skipping(self) -> None:
+        feature, _payload = self._slice_fixture()
+        with (feature / "tasks.md").open("a", encoding="utf-8") as tasks:
+            tasks.write("\n## PR-срезы\n\nmissing fenced map\n")
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("expected one fenced JSON" in item for item in failures))
+
+    def test_single_pr_task_list_does_not_require_slice_map(self) -> None:
+        feature, _payload = self._slice_fixture()
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertEqual(failures, [])
 
     def test_spec_gate_rejects_a_partial_pr_slice_manifest(self) -> None:
         feature, payload = self._slice_fixture()
@@ -166,7 +186,7 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         (feature / "checklists").mkdir()
         (feature / "checklists/requirements.md").write_text("Checklist\n")
         payload["slices"][1]["tasks"] = ["T001"]
-        (feature / "delivery-slices.json").write_text(json.dumps(payload))
+        self._write_slice_section(feature, payload)
         with mock.patch.object(check_spec_kit_specs, "GRANDFATHERED", {}):
             result, _stdout, stderr = self._run_check()
         self.assertEqual(result, 1)

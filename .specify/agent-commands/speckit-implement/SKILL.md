@@ -1,7 +1,7 @@
 ---
 name: "speckit-implement"
 description: "Implement a feature directly from its approved tasks.md via an isolated worktree and TDD, preserving the repository's review, CI and landing gates."
-argument-hint: "Feature slug and explicit PR-NN slice when delivery-slices.json exists"
+argument-hint: "Feature slug and explicit PR-NN slice when tasks.md has PR-срезы"
 compatibility: "Requires spec-kit project structure with .specify/ directory"
 metadata:
   author: "github-spec-kit + brainbuddy"
@@ -47,7 +47,7 @@ Stop and report instead of starting if any fails:
    stage. You never overrule the gate.
 3. `/speckit-analyze` reported zero CRITICAL findings.
 4. `plan.md` cites `design.md` when the feature has a user-visible surface.
-5. If `delivery-slices.json` exists, the request names exactly one `PR-NN`
+5. If `tasks.md` has a `## PR-срезы` section, the request names exactly one `PR-NN`
    slice. Run `python3 scripts/check_spec_kit_specs.py`, read its task IDs,
    dependencies, paths, tests and acceptance evidence, and stop if that slice
    is absent, unapproved or blocked by an unfinished dependency. **Never**
@@ -71,7 +71,11 @@ test evidence, and exact head SHA. Verify review and CI for that SHA. Never
 open one PR containing the whole spec in place of the agreed slices. Integrate
 dependent slices sequentially from the accepted base; independent slices can
 run concurrently only when code and test resources really are isolated.
-Full feature acceptance follows integration of **all** slices.
+Keep only a short parent ledger: slice, owner, branch/worktree, PR URL, exact
+SHA, CI, review, next action. Do not paste each worker's build logs into the
+parent session. Dependent slices start from an updated `origin/main` after
+their prerequisite lands, as required by BrainBuddy's current-base landing
+rules. Full feature acceptance follows integration of **all** slices.
 
 Per ADR-0008, a PR is review evidence, not implicit merge/deploy authority:
 SHIP/SHOW still use verified candidate landing; ASK needs explicit approval
