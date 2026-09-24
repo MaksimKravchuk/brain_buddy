@@ -73,3 +73,20 @@ def test_008_FR_008_comment_is_truthful_and_actionable() -> None:
         "retained for **7 days** on a pull request and **30 days** on a push"
         in workflow
     )
+
+
+def test_019_T027_compose_evidence_is_bound_to_the_reviewed_candidate() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    e2e_job = workflow[
+        workflow.index("  e2e:\n") : workflow.index("  allure-report:\n")
+    ]
+
+    assert (
+        "BRAIN_BUDDY_CANDIDATE_SHA: "
+        "${{ github.event.pull_request.head.sha || github.sha }}" in e2e_job
+    )
+    assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in e2e_job
+    assert (
+        'run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"'
+        in e2e_job
+    )

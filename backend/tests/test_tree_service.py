@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from threading import Barrier, Event, Thread
 
 import pytest
 
-from app.exceptions import ConflictError, NotFoundError
+from app.exceptions import ConflictError, NotFoundError, StaleRevisionError
 from app.schemas import (
     NodeCreateRequest,
     NodeResponse,
@@ -17,8 +18,14 @@ from app.schemas import (
     TreeMetadata,
     TreeUpdateRequest,
 )
-from app.schemas.common import ValidationState, VisualState
-from app.schemas.domain import TreeVersionRef, VersionDiffSummary
+from app.schemas.common import TimestampMetadata, ValidationState, VisualState
+from app.schemas.domain import (
+    NodeDocument,
+    RelationDocument,
+    RelationMetadata,
+    TreeVersionRef,
+    VersionDiffSummary,
+)
 from tests.conftest import TEST_OWNER_ID
 
 
@@ -111,6 +118,7 @@ def test_legacy_update_preserves_existing_schema_version(tree_service) -> None:
 
     current = tree_service.get_tree(created.id)
     public = tree_service.to_response(current)
+    assert public.metadata.version == 7
     updated = tree_service.update_tree(
         created.id,
         TreeUpdateRequest(
@@ -123,7 +131,101 @@ def test_legacy_update_preserves_existing_schema_version(tree_service) -> None:
     )
 
     assert updated.schema_version == 7
-    assert json.loads(tree_path.read_text(encoding="utf-8"))["schema_version"] == 7
+    persisted = json.loads(tree_path.read_text(encoding="utf-8"))
+    assert persisted["schema_version"] == 7
+    assert persisted["metadata"]["version"] == 7
+    assert tree_service.to_response(updated).metadata.version == 7
+
+
+def test_tree_metadata_owner_is_canonicalized_to_authenticated_owner(
+    tree_service,
+) -> None:
+    metadata = TreeMetadata.from_timestamps(
+        created_at=datetime(2026, 9, 21, 8, tzinfo=UTC),
+        updated_at=datetime(2026, 9, 21, 8, tzinfo=UTC),
+        owner_id="attacker",
+    )
+
+    created = tree_service.create_tree(
+        TreeCreateRequest(name="Owned", metadata=metadata),
+        owner_id=TEST_OWNER_ID,
+    )
+    exported = tree_service.to_account_export(created)
+
+    assert created.metadata["owner_id"] == TEST_OWNER_ID
+    assert tree_service.to_response(created).metadata.owner_id == TEST_OWNER_ID
+    assert exported["metadata"]["owner_id"] == TEST_OWNER_ID
+
+
+def test_account_export_preserves_exact_tree_shape_with_canonical_metadata(
+    tree_service,
+) -> None:
+    timestamp = datetime(2026, 9, 21, 8, tzinfo=UTC)
+    created = tree_service.create_tree(
+        TreeCreateRequest(name="Exported"), owner_id=TEST_OWNER_ID
+    )
+    node_metadata = TimestampMetadata(
+        created_at=timestamp,
+        updated_at=timestamp,
+        author=TEST_OWNER_ID,
+    )
+    node = NodeDocument(
+        id="node_export",
+        label="Export node",
+        position=Position(x=10, y=20),
+        metadata=node_metadata,
+    )
+    relation = RelationDocument(
+        id="relation_export",
+        source_id=node.id,
+        target_id=node.id,
+        metadata=RelationMetadata(
+            created_at=timestamp,
+            updated_at=timestamp,
+            author=TEST_OWNER_ID,
+        ),
+    )
+    version_ref = TreeVersionRef(
+        id="version_export",
+        label="Snapshot",
+        created_at=timestamp,
+    )
+    tree = created.model_copy(
+        update={
+            "schema_version": 3,
+            "description": "Export description",
+            "metadata": {
+                "version": 99,
+                "layout": {"viewport": "wide"},
+                "owner_id": "attacker",
+                "extension": "preserved",
+            },
+            "nodes": [node],
+            "relations": [relation],
+            "version_refs": [version_ref],
+        },
+        deep=True,
+    )
+
+    assert tree_service.to_account_export(tree) == {
+        "id": tree.id,
+        "revision": tree.revision,
+        "schema_version": 3,
+        "title": "Exported",
+        "description": "Export description",
+        "metadata": {
+            "version": 3,
+            "layout": {"viewport": "wide"},
+            "owner_id": TEST_OWNER_ID,
+            "extension": "preserved",
+        },
+        "owner_id": TEST_OWNER_ID,
+        "created_at": tree.created_at.isoformat(),
+        "updated_at": tree.updated_at.isoformat(),
+        "nodes": [node.model_dump(mode="json")],
+        "relations": [relation.model_dump(mode="json")],
+        "version_refs": [version_ref.model_dump(mode="json")],
+    }
 
 
 def test_list_and_update_tree(tree_service) -> None:
@@ -600,7 +702,7 @@ def test_tree_response_preserves_metadata_owner_and_directional_relation_counts(
     assert response.name == "Exact response"
     assert response.owner_id == TEST_OWNER_ID
     assert response.metadata.model_dump(mode="json") == {
-        "version": 4,
+        "version": 1,
         "created_at": persisted.created_at.isoformat().replace("+00:00", "Z"),
         "updated_at": persisted.updated_at.isoformat().replace("+00:00", "Z"),
         "layout": {"viewport": "wide"},
@@ -672,3 +774,187 @@ def test_node_to_response_handles_non_dict_extra(tree_service, caplog) -> None:
     assert response.highlight_state == "none"
     messages = [record.getMessage() for record in caplog.records]
     assert any("non-dict extra" in message for message in messages)
+
+
+def test_create_tree_persists_schema_version_and_command_id(tree_service) -> None:
+    command_id = "a" * 64
+
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Versioned create", schema_version=6),
+        owner_id=TEST_OWNER_ID,
+        command_id=command_id,
+        schema_version=7,
+    )
+    persisted = tree_service.tree_repo.load(tree.id)
+
+    assert tree.schema_version == 7
+    assert tree.metadata == {"version": 7, "owner_id": TEST_OWNER_ID}
+    assert persisted.schema_version == 7
+    assert persisted.metadata == {"version": 7, "owner_id": TEST_OWNER_ID}
+    assert tree.last_command_id == command_id
+    assert persisted.last_command_id == command_id
+
+
+def test_create_tree_uses_payload_schema_version_when_not_overridden(
+    tree_service,
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Payload version", schema_version=7),
+        owner_id=TEST_OWNER_ID,
+    )
+
+    assert tree.schema_version == 7
+    assert tree.metadata == {"version": 7, "owner_id": TEST_OWNER_ID}
+    persisted = tree_service.tree_repo.load(tree.id)
+    assert persisted.schema_version == 7
+    assert persisted.metadata == {"version": 7, "owner_id": TEST_OWNER_ID}
+
+
+def test_create_tree_uses_metadata_schema_version_when_top_level_absent(
+    tree_service,
+) -> None:
+    baseline = tree_service.create_tree(
+        TreeCreateRequest(name="Timestamp source"), owner_id=TEST_OWNER_ID
+    )
+    metadata = TreeMetadata(
+        version=8,
+        created_at=baseline.created_at,
+        updated_at=baseline.updated_at,
+        owner_id=TEST_OWNER_ID,
+    )
+
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Metadata version", metadata=metadata),
+        owner_id=TEST_OWNER_ID,
+    )
+
+    assert tree.schema_version == 8
+    assert tree.metadata == {"version": 8, "owner_id": TEST_OWNER_ID}
+    persisted = tree_service.tree_repo.load(tree.id)
+    assert persisted.schema_version == 8
+    assert persisted.metadata == {"version": 8, "owner_id": TEST_OWNER_ID}
+
+
+def test_prepare_create_tree_deep_copies_request_state(tree_service) -> None:
+    request = TreeCreateRequest(
+        name="Isolated create",
+        nodes=[
+            NodeResponse(
+                id="node-isolated",
+                label="Original",
+                type="child",
+                position=Position(x=1, y=2),
+                highlight_state="none",
+                relation_counts=RelationCounts(up_count=0, down_count=0),
+            )
+        ],
+    )
+
+    prepared = tree_service.prepare_create_tree(
+        request,
+        owner_id=TEST_OWNER_ID,
+        tree_id="tree-isolated",
+        command_id="d" * 64,
+        schema_version=1,
+    )
+    prepared.nodes[0].position.x = 99
+    prepared.nodes[0].extra["type"] = "parent"
+
+    assert request.nodes[0].position.x == 1
+    assert request.nodes[0].type == "child"
+
+
+def test_tree_response_preserves_persisted_schema_version(tree_service) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Versioned response"),
+        owner_id=TEST_OWNER_ID,
+        schema_version=9,
+    )
+
+    response = tree_service.to_response(tree)
+
+    assert response.schema_version == 9
+
+
+def test_update_tree_forwards_revision_and_command_id(tree_service) -> None:
+    command_id = "b" * 64
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Revisioned update"), owner_id=TEST_OWNER_ID
+    )
+    metadata = TreeMetadata.from_timestamps(
+        created_at=tree.created_at,
+        updated_at=tree.updated_at,
+        owner_id=TEST_OWNER_ID,
+    )
+
+    updated = tree_service.update_tree(
+        tree.id,
+        TreeUpdateRequest(
+            name="Revisioned update",
+            expected_revision=tree.revision,
+            metadata=metadata,
+            nodes=[],
+            relations=[],
+        ),
+        owner_id=TEST_OWNER_ID,
+        command_id=command_id,
+    )
+
+    assert updated.revision == tree.revision + 1
+    assert updated.last_command_id == command_id
+    assert tree_service.tree_repo.load(tree.id).last_command_id == command_id
+
+    stale_metadata = TreeMetadata.from_timestamps(
+        created_at=tree.created_at,
+        updated_at=updated.updated_at,
+        owner_id=TEST_OWNER_ID,
+    )
+    with pytest.raises(StaleRevisionError):
+        tree_service.update_tree(
+            tree.id,
+            TreeUpdateRequest(
+                name="Stale revision",
+                expected_revision=tree.revision,
+                metadata=stale_metadata,
+                nodes=[],
+                relations=[],
+            ),
+            owner_id=TEST_OWNER_ID,
+            command_id="c" * 64,
+        )
+
+
+def test_create_tree_resolves_actor_owner_into_metadata(tree_service) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Owner metadata"), owner_id=TEST_OWNER_ID
+    )
+
+    assert tree.owner_id == TEST_OWNER_ID
+    assert tree.metadata is not None
+    assert tree.metadata["owner_id"] == TEST_OWNER_ID
+
+
+def test_resolve_metadata_uses_actor_owner_when_payload_metadata_absent(
+    tree_service,
+) -> None:
+    resolved = tree_service._resolve_metadata(None, owner_id=TEST_OWNER_ID)
+
+    assert resolved.owner_id == TEST_OWNER_ID
+
+
+def test_response_ignores_invalid_legacy_metadata_owner(tree_service) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Invalid legacy owner"), owner_id=TEST_OWNER_ID
+    )
+    legacy = tree.model_copy(
+        update={
+            "owner_id": None,
+            "metadata": {"version": 1, "owner_id": {"legacy": "invalid"}},
+        },
+        deep=True,
+    )
+
+    response = tree_service.to_response(legacy)
+
+    assert response.owner_id is None
+    assert response.metadata.owner_id is None

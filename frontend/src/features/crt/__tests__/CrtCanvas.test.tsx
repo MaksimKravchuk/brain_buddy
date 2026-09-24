@@ -184,6 +184,36 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect(flowHarness.setEdges).not.toHaveBeenCalled();
   });
 
+  it("renders live drag positions without committing durable graph state until drag stop", () => {
+    const onChange = vi.fn();
+    renderCanvas(initialGraph(), onChange);
+
+    const cause = (currentFlowProps().nodes as Array<{ id: string; position: { x: number; y: number } }>).find(
+      (node) => node.id === "cause-1"
+    );
+    expect(cause).toBeDefined();
+
+    act(() => {
+      flowCallback("onNodesChange")([
+        { id: "cause-1", type: "position", position: { x: 320, y: 300 }, dragging: true }
+      ]);
+    });
+
+    expect((currentFlowProps().nodes as Array<{ id: string; position: { x: number; y: number } }>).find(
+      (node) => node.id === "cause-1"
+    )?.position).toEqual({ x: 320, y: 300 });
+    expect(onChange).not.toHaveBeenCalled();
+
+    act(() => {
+      flowCallback("onNodeDragStop")({}, { id: "cause-1", position: { x: 320, y: 300 } });
+    });
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      nodes: expect.arrayContaining([expect.objectContaining({ id: "cause-1", position: { x: 320, y: 300 } })])
+    }));
+  });
+
   it("019-FR-010 hides native handles until Connect mode reveals them", () => {
     renderCanvas();
 

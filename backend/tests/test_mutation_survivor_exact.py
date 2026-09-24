@@ -14,7 +14,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.exceptions import ConflictError, NotFoundError, ValidationFailure
+from app.exceptions import (
+    ConflictError,
+    NotFoundError,
+    StaleRevisionError,
+    ValidationFailure,
+)
 from app.schemas.api import (
     AiFeedbackRequest,
     NodeCreateRequest,
@@ -95,6 +100,85 @@ def test_tree_repository_update_if_current_conflict_carries_exact_fields(
 
     # The newer updated_at must be strictly greater than stale
     assert newer.updated_at > stale
+
+
+def test_tree_repository_mutate_detaches_nodes_from_callback_input(
+    tree_service,
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(
+            name="Repository copy",
+            nodes=[
+                NodeResponse(
+                    id="node_repository_copy",
+                    label="Original",
+                    type="child",
+                    position=Position(x=0, y=0),
+                )
+            ],
+        ),
+        owner_id="owner",
+    )
+    callback_inputs: list[TreeDocument] = []
+
+    def update(current: TreeDocument) -> TreeDocument:
+        callback_inputs.append(current)
+        return current.model_copy(update={"title": "Changed"})
+
+    result = tree_service.tree_repo.mutate(tree.id, update=update)
+    result.nodes[0].label = "Mutated externally"
+
+    assert callback_inputs[0].nodes[0].label == "Original"
+
+
+def test_tree_repository_stale_revision_error_has_exact_fields(tree_service) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Revision fields"), owner_id="owner"
+    )
+    repository = tree_service.tree_repo
+    fresh = repository.mutate(
+        tree.id,
+        update=lambda current: current.model_copy(update={"title": "Newer"}),
+    )
+
+    with pytest.raises(StaleRevisionError) as exc_info:
+        repository.update_if_current(
+            tree.id,
+            expected_revision=tree.revision,
+            update=lambda current: current,
+        )
+
+    error = exc_info.value
+    assert error.resource == "Tree"
+    assert error.identifier == tree.id
+    assert error.current_revision == fresh.revision
+    assert error.current_updated_at == fresh.updated_at
+    assert error.detail == {
+        "reason": "stale_revision",
+        "tree_id": tree.id,
+        "current_revision": fresh.revision,
+        "current_updated_at": fresh.updated_at,
+    }
+
+
+def test_tree_repository_delete_if_current_passes_tree_to_callback(
+    tree_service,
+) -> None:
+    tree = tree_service.create_tree(
+        TreeCreateRequest(name="Delete callback"), owner_id="owner"
+    )
+    callback_inputs: list[TreeDocument] = []
+
+    tree_service.tree_repo.delete_if_current(
+        tree.id,
+        owner_id="owner",
+        expected_revision=tree.revision,
+        before_delete=callback_inputs.append,
+    )
+
+    assert len(callback_inputs) == 1
+    assert callback_inputs[0].id == tree.id
+    assert callback_inputs[0].owner_id == "owner"
 
 
 def test_index_repository_delete_missing_raises_not_found_with_exact_fields(
@@ -936,7 +1020,7 @@ def test_create_tree_preserves_payload_metadata_timestamps_and_layout(
     assert tree.metadata == {
         "version": 7,
         "layout": {"viewport": {"x": 1, "y": 2}},
-        "owner_id": "payload_owner",
+        "owner_id": "actor_owner",
     }
     assert tree.owner_id == "actor_owner"
 
@@ -1227,7 +1311,24 @@ def test_build_tree_metadata_prefers_tree_owner_id_over_metadata(
     meta = tree_service._build_tree_metadata(tree)
 
     assert meta.owner_id == "real_owner"
-    assert meta.version == 2
+    assert meta.version == tree.schema_version
+
+
+def test_resolve_metadata_preserves_explicit_schema_version(tree_service) -> None:
+    from app.schemas.api import TreeMetadata
+
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    metadata = TreeMetadata(
+        version=7,
+        created_at=timestamp,
+        updated_at=timestamp,
+        owner_id="payload_owner",
+    )
+
+    resolved = tree_service._resolve_metadata(metadata, owner_id="actor_owner")
+
+    assert resolved.version == 7
+    assert resolved.owner_id == "actor_owner"
 
 
 def test_build_tree_metadata_falls_back_to_metadata_owner_id(
@@ -1422,6 +1523,7 @@ def test_build_tree_document_keeps_explicit_relation_between_response_nodes(
         nodes=nodes,
         relations=[relation],
         owner_id="owner",
+        schema_version=4,
     )
 
     assert [(node.id, node.label) for node in tree.nodes] == [
@@ -1432,6 +1534,9 @@ def test_build_tree_document_keeps_explicit_relation_between_response_nodes(
         (item.id, item.source_id, item.target_id, item.question_label)
         for item in tree.relations
     ] == [("cause->effect", "cause", "effect", "why")]
+    assert tree.schema_version == 4
+    assert tree.description is None
+    assert tree.version_refs == []
     assert tree.metadata == {"version": 4, "owner_id": "owner"}
 
 
@@ -1615,6 +1720,83 @@ def test_preserve_unrepresented_keeps_all_items_and_merges_matching_data(
         "request": {"preserved": True},
     }
     assert result_relation.notes == "preserve this"
+
+
+def test_preserve_unrepresented_deep_copies_carried_forward_nested_state(
+    tree_service,
+) -> None:
+    from app.schemas.common import Position, TimestampMetadata
+    from app.schemas.domain import (
+        NodeDocument,
+        TreeDocument,
+        TreeVersionRef,
+        VersionDiffSummary,
+    )
+
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    existing = TreeDocument(
+        id="deep-copy-tree",
+        title="Existing",
+        owner_id="owner",
+        created_at=timestamp,
+        updated_at=timestamp,
+        metadata={"nested": {"keep": True}},
+        nodes=[
+            NodeDocument(
+                id="node",
+                label="Existing",
+                position=Position(x=0, y=0),
+                metadata=TimestampMetadata(created_at=timestamp, updated_at=timestamp),
+                extra={"nested": {"keep": True}},
+            )
+        ],
+        relations=[],
+        version_refs=[
+            TreeVersionRef(
+                id="version",
+                label="Snapshot",
+                created_at=timestamp,
+                notes="keep",
+                diff_summary=VersionDiffSummary(
+                    nodes_added=1,
+                    nodes_removed=0,
+                    nodes_modified=0,
+                    relations_added=0,
+                    relations_removed=0,
+                    relations_modified=0,
+                ),
+            )
+        ],
+    )
+    incoming = existing.model_copy(
+        update={
+            "nodes": [
+                existing.nodes[0].model_copy(
+                    update={
+                        "label": "Incoming",
+                        "position": Position(x=1, y=1),
+                        "extra": {"nested": {"incoming": True}},
+                    }
+                )
+            ]
+        }
+    )
+
+    result = tree_service._preserve_unrepresented_tree_data(incoming, existing)
+
+    result.nodes[0].position.x = 999
+    result.nodes[0].extra["nested"]["keep"] = False
+    result.metadata["nested"]["keep"] = False
+    result.version_refs[0].notes = "changed"
+    assert result.version_refs[0].diff_summary is not None
+    result.version_refs[0].diff_summary.nodes_added = 999
+
+    assert incoming.nodes[0].position.x == 1
+    assert existing.nodes[0].extra == {"nested": {"keep": True}}
+    assert existing.metadata == {"nested": {"keep": True}}
+    assert existing.version_refs[0].notes == "keep"
+    assert existing.version_refs[0].diff_summary is not None
+    assert existing.version_refs[0].diff_summary.nodes_added == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1872,6 +2054,67 @@ def test_cache_store_evicts_lru_when_full(tree_service) -> None:
 
     assert tree_service._cache_get("cache_0") is None
     assert tree_service._cache_get("cache_16") is not None
+
+
+def test_cache_store_evicts_oldest_entry_first(tree_service) -> None:
+    service = TreeService(
+        tree_service.tree_repo, tree_service.index_repo, cache_maxsize=2
+    )
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+
+    for identifier in ("first", "second", "third"):
+        service._cache_store(
+            TreeDocument(
+                id=identifier,
+                title=identifier,
+                owner_id="owner",
+                created_at=timestamp,
+                updated_at=timestamp,
+                nodes=[],
+                relations=[],
+            )
+        )
+
+    assert list(service._cache) == ["second", "third"]
+    assert service._cache_get("first") is None
+    assert service._cache_get("second") is not None
+    assert service._cache_get("third") is not None
+
+
+def test_cache_get_refreshes_entry_before_lru_eviction(tree_service) -> None:
+    service = TreeService(
+        tree_service.tree_repo, tree_service.index_repo, cache_maxsize=2
+    )
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+
+    for identifier in ("first", "second"):
+        service._cache_store(
+            TreeDocument(
+                id=identifier,
+                title=identifier,
+                owner_id="owner",
+                created_at=timestamp,
+                updated_at=timestamp,
+                nodes=[],
+                relations=[],
+            )
+        )
+
+    assert service._cache_get("first") is not None
+    service._cache_store(
+        TreeDocument(
+            id="third",
+            title="third",
+            owner_id="owner",
+            created_at=timestamp,
+            updated_at=timestamp,
+            nodes=[],
+            relations=[],
+        )
+    )
+
+    assert list(service._cache) == ["first", "third"]
+    assert service._cache_get("second") is None
 
 
 # ---------------------------------------------------------------------------
@@ -2157,7 +2400,7 @@ def test_update_tree_uses_actor_owner_and_publishes_independent_state(
 
     assert updated.owner_id == "owner"
     assert updated.metadata == {
-        "version": 4,
+        "version": original.schema_version,
         "layout": {"viewport": "wide"},
         "owner_id": "owner",
     }
@@ -2289,6 +2532,26 @@ def test_relation_to_document_preserves_constructed_future_kind_value(
     document = tree_service._relation_to_document(future_relation, metadata)
 
     assert document.question_label == "because"
+
+
+def test_relation_to_response_uses_the_schema_default_kind(tree_service) -> None:
+    from app.schemas.domain import RelationDocument, RelationMetadata
+
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    relation = RelationDocument(
+        id="response",
+        source_id="source",
+        target_id="target",
+        metadata=RelationMetadata(created_at=timestamp, updated_at=timestamp),
+    )
+
+    response = tree_service.relation_to_response(relation)
+
+    assert response.id == "response"
+    assert response.source_node_id == "source"
+    assert response.target_node_id == "target"
+    assert response.kind == "why"
+    assert response.created_at == timestamp
 
 
 # ---------------------------------------------------------------------------

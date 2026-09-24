@@ -1,4 +1,5 @@
 import {
+  applyNodeChanges,
   Background,
   BaseEdge,
   MarkerType,
@@ -11,6 +12,7 @@ import {
   type Edge,
   type EdgeProps,
   type Node,
+  type NodeChange,
   type Viewport
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -363,7 +365,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     [emit]
   );
 
-  const flowNodes = useMemo<CrtCard[]>(
+  const derivedFlowNodes = useMemo<CrtCard[]>(
     () =>
       graph.nodes.map((node) => ({
         id: node.id,
@@ -402,6 +404,18 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
       handleCardFocus
     ]
   );
+
+  const [flowNodes, setFlowNodes] = useState<CrtCard[]>(derivedFlowNodes);
+
+  useEffect(() => {
+    setFlowNodes(derivedFlowNodes);
+  }, [derivedFlowNodes]);
+
+  const handleNodeChanges = useCallback((changes: NodeChange<CrtCard>[]) => {
+    const positionChanges = changes.filter((change) => change.type === "position");
+    if (positionChanges.length === 0) return;
+    setFlowNodes((current) => applyNodeChanges(positionChanges, current));
+  }, []);
 
   const flowEdges = useMemo<CrtEdge[]>(
     () => {
@@ -779,6 +793,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
             edgesFocusable
             minZoom={MIN_CANVAS_ZOOM}
             maxZoom={MAX_CANVAS_ZOOM}
+            onNodesChange={handleNodeChanges}
             onNodeClick={(_, node) => selectNode(node.id)}
             onNodeDragStop={updatePosition}
             onConnect={handleConnection}

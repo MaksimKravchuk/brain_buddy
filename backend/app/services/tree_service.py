@@ -78,7 +78,9 @@ class TreeService:
     ) -> None:
         """Validate a full graph snapshot without writing tree or index state."""
 
-        metadata = self._resolve_metadata(payload.metadata, owner_id=owner_id)
+        metadata = self._resolve_metadata(
+            payload.metadata, owner_id=owner_id
+        ).model_copy(update={"version": schema_version})
         self._build_tree_document(
             tree_id=tree_id,
             name=payload.name,
@@ -98,7 +100,18 @@ class TreeService:
         command_id: str | None = None,
         schema_version: int | None = None,
     ) -> TreeDocument:
-        metadata = self._resolve_metadata(payload.metadata, owner_id=owner_id)
+        effective_schema_version = (
+            schema_version
+            if schema_version is not None
+            else (
+                payload.schema_version
+                if payload.schema_version is not None
+                else payload.metadata.version if payload.metadata is not None else 1
+            )
+        )
+        metadata = self._resolve_metadata(
+            payload.metadata, owner_id=owner_id
+        ).model_copy(update={"version": effective_schema_version})
         tree = self._build_tree_document(
             tree_id=tree_id,
             name=payload.name,
@@ -106,7 +119,7 @@ class TreeService:
             nodes=payload.nodes,
             relations=payload.relations,
             owner_id=owner_id,
-            schema_version=(schema_version if schema_version is not None else 1),
+            schema_version=effective_schema_version,
         )
         if command_id is not None:
             tree = tree.model_copy(update={"last_command_id": command_id}, deep=True)
@@ -181,13 +194,17 @@ class TreeService:
     def to_account_export(self, tree: TreeDocument) -> dict[str, Any]:
         """Project stored tree data into the account-export public shape."""
 
+        metadata = self._merge_metadata(
+            tree.metadata,
+            {"version": tree.schema_version, "owner_id": tree.owner_id},
+        )
         return {
             "id": tree.id,
             "revision": tree.revision,
             "schema_version": tree.schema_version,
             "title": tree.title,
             "description": tree.description,
-            "metadata": tree.metadata,
+            "metadata": metadata,
             "owner_id": tree.owner_id,
             "created_at": tree.created_at.isoformat(),
             "updated_at": tree.updated_at.isoformat(),
@@ -219,7 +236,7 @@ class TreeService:
             )
         metadata = self._resolve_metadata(
             payload.metadata, owner_id=owner_id, coerce_updated=True
-        )
+        ).model_copy(update={"version": current.schema_version})
         tree = self._build_tree_document(
             tree_id=tree_id,
             name=payload.name,
@@ -263,7 +280,7 @@ class TreeService:
                 raise NotFoundError("Tree", tree_id)
             metadata = self._resolve_metadata(
                 payload.metadata, owner_id=owner_id, coerce_updated=True
-            )
+            ).model_copy(update={"version": existing_tree.schema_version})
             tree = self._build_tree_document(
                 tree_id=tree_id,
                 name=payload.name,
@@ -485,7 +502,7 @@ class TreeService:
             self._cache[tree.id] = tree
             self._cache.move_to_end(tree.id)
             if len(self._cache) > self._cache_maxsize:
-                self._cache.popitem(last=False)
+                self._cache.pop(next(iter(self._cache)))
 
     def _cache_get(self, tree_id: str) -> TreeDocument | None:
         with self._cache_lock:
@@ -511,7 +528,7 @@ class TreeService:
         nodes: Iterable[NodeResponse | NodeCreateRequest],
         relations: Iterable[RelationResponse | RelationCreateRequest],
         owner_id: str | None,
-        schema_version: int = 1,
+        schema_version: int,
     ) -> TreeDocument:
         node_docs = [self._node_to_document(node, metadata) for node in nodes]
         node_id_values = [node.id for node in node_docs]
@@ -537,14 +554,12 @@ class TreeService:
             id=tree_id,
             schema_version=schema_version,
             title=name,
-            description=None,
             metadata=tree_metadata,
             owner_id=owner_id,
             created_at=metadata.created_at,
             updated_at=metadata.updated_at,
             nodes=node_docs,
             relations=relation_docs,
-            version_refs=[],
         )
         return tree
 
@@ -594,7 +609,6 @@ class TreeService:
                             update={"updated_at": relation.metadata.updated_at}
                         ),
                     },
-                    deep=True,
                 )
             )
 
@@ -603,7 +617,10 @@ class TreeService:
                 "description": existing_tree.description,
                 "nodes": merged_nodes,
                 "relations": merged_relations,
-                "version_refs": existing_tree.version_refs,
+                "version_refs": [
+                    version_ref.model_copy(deep=True)
+                    for version_ref in existing_tree.version_refs
+                ],
             },
             deep=True,
         )
@@ -627,10 +644,7 @@ class TreeService:
             metadata=TimestampMetadata(
                 created_at=metadata.created_at,
                 updated_at=metadata.updated_at,
-                author=None,
             ),
-            visual=None,
-            validation=None,
             extra={
                 "type": node.type,
                 "highlight_state": getattr(node, "highlight_state", "none"),
@@ -647,9 +661,8 @@ class TreeService:
             source_id=relation.source_node_id,
             target_id=relation.target_node_id,
             question_label=getattr(relation, "kind", "why"),
-            notes=None,
             metadata=RelationMetadata(
-                created_at=created_at, updated_at=metadata.updated_at, author=None
+                created_at=created_at, updated_at=metadata.updated_at
             ),
         )
 
@@ -683,16 +696,14 @@ class TreeService:
         coerce_updated: bool = False,
     ) -> TreeMetadata:
         now = utcnow()
-        base = metadata or TreeMetadata.from_timestamps(
-            created_at=now, updated_at=now, owner_id=owner_id
-        )
+        base = metadata or TreeMetadata.from_timestamps(created_at=now, updated_at=now)
         updated_at = now if coerce_updated else base.updated_at
         return TreeMetadata(
             version=base.version,
             created_at=base.created_at,
             updated_at=updated_at,
             layout=base.layout,
-            owner_id=base.owner_id or owner_id,
+            owner_id=owner_id if owner_id is not None else base.owner_id,
         )
 
     @staticmethod
@@ -705,11 +716,10 @@ class TreeService:
 
     def _build_tree_metadata(self, tree: TreeDocument) -> TreeMetadata:
         meta_dict = tree.metadata or {}
-        version = int(meta_dict.get("version", 1))
         layout = meta_dict.get("layout")
         owner_id = meta_dict.get("owner_id") if tree.owner_id is None else tree.owner_id
         return TreeMetadata(
-            version=version,
+            version=tree.schema_version,
             created_at=tree.created_at,
             updated_at=tree.updated_at,
             layout=layout if isinstance(layout, dict) else None,
@@ -787,6 +797,5 @@ class TreeService:
             id=relation.id,
             source_node_id=relation.source_id,
             target_node_id=relation.target_id,
-            kind="why",
             created_at=relation.metadata.created_at,
         )

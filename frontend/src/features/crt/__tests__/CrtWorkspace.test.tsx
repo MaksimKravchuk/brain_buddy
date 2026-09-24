@@ -2277,7 +2277,9 @@ describe("CrtWorkspace tree lifecycle", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Online other" }));
       expect(await screen.findByRole("dialog", { name: "Resolve unsynced changes before continuing" })).toBeInTheDocument();
       fireEvent.keyDown(document, { key: "Escape" });
-      expect(screen.queryByRole("dialog", { name: "Resolve unsynced changes before continuing" })).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "Resolve unsynced changes before continuing" })).not.toBeInTheDocument();
+      });
     } finally {
       Object.defineProperty(navigator, "onLine", { configurable: true, value: previousOnline });
     }

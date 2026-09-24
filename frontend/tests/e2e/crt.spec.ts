@@ -60,6 +60,24 @@ type WidthAudit = {
   horizontal_overflow: boolean;
   clipped_shell: boolean;
 };
+type InteractionObservation =
+  | { kind: "attribute"; selector: string; name: string; value: string }
+  | { kind: "attribute-change"; selector: string; name: string; before: string | null }
+  | { kind: "text-change"; selector: string; before: string | null }
+  | { kind: "rect-change"; selector: string; before_x: number; before_y: number }
+  | { kind: "focus"; selector: string };
+type InteractionProbeConfig = {
+  event_name: "click" | "pointermove" | "keydown";
+  key?: string;
+  input_selector?: string;
+  observations: InteractionObservation[];
+  timeout_ms?: number;
+};
+type InteractionProbeState = {
+  status: "armed" | "observing" | "complete" | "error";
+  duration_ms: number | null;
+  error: string | null;
+};
 type FixtureOptions = {
   trees?: TreeFixture[];
   exposureStatus?: 204 | 404 | 503;
@@ -320,6 +338,7 @@ class CrtFixture {
 }
 
 const pageErrors = new WeakMap<Page, Error[]>();
+const evidenceArtifacts = new WeakMap<Page, string[]>();
 
 test.beforeEach(async ({ page }) => {
   const errors: Error[] = [];
@@ -327,8 +346,13 @@ test.beforeEach(async ({ page }) => {
   page.on("pageerror", (error) => errors.push(error));
 });
 
-test.afterEach(async ({ page }) => {
+test.afterEach(async ({ page }, testInfo) => {
   const errors = pageErrors.get(page) ?? [];
+  if (errors.length > 0 || testInfo.status !== testInfo.expectedStatus) {
+    await Promise.all(
+      (evidenceArtifacts.get(page) ?? []).map((name) => removeEvidenceArtifact(name))
+    );
+  }
   expect(errors.map((error) => error.message), "The CRT page emitted a browser error").toEqual([]);
 });
 
@@ -361,6 +385,136 @@ function countContentRequests(fixture: CrtFixture): number {
 
 async function nextAnimationFrame(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+}
+
+async function armInteractionProbe(page: Page, config: InteractionProbeConfig): Promise<void> {
+  await page.evaluate((probeConfig) => {
+    const probeWindow = window as typeof window & {
+      __crtInteractionProbe?: InteractionProbeState;
+      __crtInteractionProbeCleanup?: () => void;
+    };
+    const current = probeWindow.__crtInteractionProbe;
+    if (current?.status === "armed" || current?.status === "observing") {
+      throw new Error("A CRT interaction probe is already active");
+    }
+
+    const state: InteractionProbeState = {
+      status: "armed",
+      duration_ms: null,
+      error: null
+    };
+    probeWindow.__crtInteractionProbe = state;
+    const timeoutMs = probeConfig.timeout_ms ?? 2_000;
+
+    const observationIsVisible = (observation: InteractionObservation): boolean => {
+      if (observation.kind === "focus") {
+        return document.activeElement instanceof Element &&
+          document.activeElement.matches(observation.selector);
+      }
+      const element = document.querySelector<HTMLElement>(observation.selector);
+      if (!element) return false;
+      switch (observation.kind) {
+        case "attribute":
+          return element.getAttribute(observation.name) === observation.value;
+        case "attribute-change":
+          return element.getAttribute(observation.name) !== observation.before;
+        case "text-change":
+          return element.textContent !== observation.before;
+        case "rect-change": {
+          const box = element.getBoundingClientRect();
+          return Math.abs(box.x - observation.before_x) > 0.5 ||
+            Math.abs(box.y - observation.before_y) > 0.5;
+        }
+      }
+    };
+
+    let inputTimer = 0;
+    let cancelled = false;
+    const onInput = (event: Event): void => {
+      if (!event.isTrusted) return;
+      if (probeConfig.key !== undefined && (!(event instanceof KeyboardEvent) || event.key !== probeConfig.key)) {
+        return;
+      }
+      if (probeConfig.input_selector !== undefined) {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target?.closest(probeConfig.input_selector)) return;
+      }
+
+      document.removeEventListener(probeConfig.event_name, onInput, true);
+      window.clearTimeout(inputTimer);
+      state.status = "observing";
+      const started = performance.now();
+      const deadline = started + timeoutMs;
+      const observeFrame = (): void => {
+        if (cancelled) return;
+        if (probeConfig.observations.every(observationIsVisible)) {
+          state.duration_ms = performance.now() - started;
+          state.status = "complete";
+          return;
+        }
+        if (performance.now() >= deadline) {
+          state.status = "error";
+          state.error = "Expected interaction state was not observable before the probe timeout";
+          return;
+        }
+        requestAnimationFrame(observeFrame);
+      };
+      requestAnimationFrame(observeFrame);
+    };
+
+    document.addEventListener(probeConfig.event_name, onInput, true);
+    probeWindow.__crtInteractionProbeCleanup = () => {
+      cancelled = true;
+      window.clearTimeout(inputTimer);
+      document.removeEventListener(probeConfig.event_name, onInput, true);
+    };
+    inputTimer = window.setTimeout(() => {
+      if (state.status !== "armed") return;
+      document.removeEventListener(probeConfig.event_name, onInput, true);
+      state.status = "error";
+      state.error = `No ${probeConfig.event_name} input reached the interaction probe`;
+    }, timeoutMs);
+  }, config);
+}
+
+async function discardInteractionProbe(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const probeWindow = window as typeof window & {
+      __crtInteractionProbe?: InteractionProbeState;
+      __crtInteractionProbeCleanup?: () => void;
+    };
+    probeWindow.__crtInteractionProbeCleanup?.();
+    delete probeWindow.__crtInteractionProbeCleanup;
+    delete probeWindow.__crtInteractionProbe;
+  });
+}
+
+async function collectInteractionProbe(page: Page): Promise<number> {
+  await expect.poll(
+    () => page.evaluate(() => {
+      const probeWindow = window as typeof window & {
+        __crtInteractionProbe?: InteractionProbeState;
+      };
+      return probeWindow.__crtInteractionProbe?.status ?? "missing";
+    }),
+    { timeout: 3_000, message: "Browser-side CRT interaction probe must settle" }
+  ).toMatch(/^(complete|error)$/);
+
+  const result = await page.evaluate(() => {
+    const probeWindow = window as typeof window & {
+      __crtInteractionProbe?: InteractionProbeState;
+      __crtInteractionProbeCleanup?: () => void;
+    };
+    const probe = probeWindow.__crtInteractionProbe ?? null;
+    probeWindow.__crtInteractionProbeCleanup?.();
+    delete probeWindow.__crtInteractionProbeCleanup;
+    delete probeWindow.__crtInteractionProbe;
+    return probe;
+  });
+  if (result?.status !== "complete" || result.duration_ms === null) {
+    throw new Error(result?.error ?? "CRT interaction probe did not return a duration");
+  }
+  return result.duration_ms;
 }
 
 async function writeEvidenceArtifact(name: string, value: unknown): Promise<void> {
@@ -627,13 +781,14 @@ test("T024 unsupported width is honest and does not mount or fetch tree content"
   });
 });
 
-test("T027 bounded 200-card Chromium evidence records 20 samples per operation and passes the supported desktop audit", async ({ browser, page }) => {
+test("T027 bounded 200-card Chromium evidence records 20 samples per operation and passes the supported desktop audit", async ({ browser, page }, testInfo) => {
   // Setup, autosave settlement, and undo waits are intentionally outside the
   // measured operation samples and can vary on shared CI workers.
   test.setTimeout(180_000);
   await removeEvidenceArtifact("t027-200-card-performance.json");
   await crtLabels("Bounded 200-card performance and accessibility evidence");
-  const fixture = new CrtFixture({ trees: [twoHundredCardTree()] });
+  const performanceTree = twoHundredCardTree();
+  const fixture = new CrtFixture({ trees: [performanceTree] });
   await fixture.install(page);
   const saveTelemetry: unknown[] = [];
   page.on("console", async (message) => {
@@ -670,27 +825,47 @@ test("T027 bounded 200-card Chromium evidence records 20 samples per operation a
   await test.step("load the 200-card fixture before collecting bounded samples", async () => {
     await expect(cards).toHaveCount(200, { timeout: LARGE_CANVAS_READY_BUDGET_MS });
   });
-  const anchorIndex = await cards.evaluateAll((elements) => {
+  const visibleCardIndexes = await cards.evaluateAll((elements) => {
     const flow = document.querySelector<HTMLElement>("[data-testid='crt-flow-region']")?.getBoundingClientRect();
-    if (!flow) return -1;
-    return elements.findIndex((element, index) => {
+    if (!flow) return [];
+    return elements.flatMap((element, index) => {
       const box = element.getBoundingClientRect();
-      return index > 0 && box.top >= flow.top + 80 && box.bottom <= flow.bottom - 80 &&
+      const visible = index > 0 && box.top >= flow.top + 80 && box.bottom <= flow.bottom - 80 &&
         box.left >= flow.left + 120 && box.right <= flow.right - 120;
-    });
+      return visible ? [index] : [];
+    }).slice(0, 2);
   });
+  expect(visibleCardIndexes).toHaveLength(2);
+  const anchorIndex = visibleCardIndexes[0] ?? -1;
+  const alternateIndex = visibleCardIndexes[1] ?? -1;
   expect(anchorIndex).toBeGreaterThan(0);
+  expect(alternateIndex).toBeGreaterThan(0);
   const anchorCard = cards.nth(anchorIndex);
+  const alternateCard = cards.nth(alternateIndex);
   await expect(anchorCard).toBeVisible();
+  await expect(alternateCard).toBeVisible();
+  const anchorNodeId = await anchorCard.getAttribute("data-node-id");
+  const alternateNodeId = await alternateCard.getAttribute("data-node-id");
+  if (!anchorNodeId || !alternateNodeId) throw new Error("Visible performance cards need stable node identities");
+  const anchorSelector = `[data-node-id="${anchorNodeId}"]`;
+  const alternateSelector = `[data-node-id="${alternateNodeId}"]`;
+  const anchorFlowNodeSelector = `.react-flow__node:has(${anchorSelector})`;
 
   const samples: Record<"selection" | "drag" | "enter" | "tab" | "pan" | "zoom", number[]> = {
     selection: [], drag: [], enter: [], tab: [], pan: [], zoom: []
   };
-  const record = async (operation: keyof typeof samples, action: () => Promise<void>): Promise<void> => {
-    const started = await page.evaluate(() => performance.now());
-    await action();
-    await nextAnimationFrame(page);
-    samples[operation].push(await page.evaluate((start) => performance.now() - start, started));
+  const record = async (
+    operation: keyof typeof samples,
+    probe: InteractionProbeConfig,
+    action: () => Promise<void>
+  ): Promise<void> => {
+    await armInteractionProbe(page, probe);
+    try {
+      await action();
+      samples[operation].push(await collectInteractionProbe(page));
+    } finally {
+      await discardInteractionProbe(page);
+    }
   };
   const selectVisibleCardForShortcut = async (): Promise<void> => {
     const findVisibleIndex = (): Promise<number> => cards.evaluateAll((elements) => {
@@ -724,35 +899,80 @@ test("T027 bounded 200-card Chromium evidence records 20 samples per operation a
   };
 
   for (let index = 0; index < 20; index += 1) {
-    await record("selection", async () => {
-      await anchorCard.click();
-      await expect(anchorCard).toHaveAttribute("aria-pressed", "true");
-    });
+    const targetCard = index % 2 === 0 ? anchorCard : alternateCard;
+    const targetSelector = index % 2 === 0 ? anchorSelector : alternateSelector;
+    await expect(targetCard).toHaveAttribute("aria-pressed", "false");
+    await record(
+      "selection",
+      {
+        event_name: "click",
+        input_selector: targetSelector,
+        observations: [{ kind: "attribute", selector: targetSelector, name: "aria-pressed", value: "true" }]
+      },
+      () => targetCard.click()
+    );
+    await expect(targetCard).toHaveAttribute("aria-pressed", "true");
   }
 
+  // Pointerdown only arms React Flow's gesture; pointermove is the first input
+  // that can move a card. Starting at pointerdown would include the Playwright
+  // protocol gap before the real move and violate the browser-only interval.
   for (let index = 0; index < 20; index += 1) {
     const before = await anchorCard.boundingBox();
     if (!before) throw new Error("Visible card has no box for drag sample");
+    const flowNode = page.locator(anchorFlowNodeSelector);
     const delta = index % 2 === 0 ? 24 : -24;
-    await record("drag", async () => {
-      await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
-      await page.mouse.down();
-      await page.mouse.move(before.x + before.width / 2 + delta, before.y + before.height / 2, { steps: 2 });
+    await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+    await page.mouse.down();
+    try {
+      // The first move crosses React Flow's gesture threshold and arms the
+      // drag. The measured move below is the first one that can change the
+      // already-active node transform.
+      await page.mouse.move(
+        before.x + before.width / 2 + delta / 6,
+        before.y + before.height / 2
+      );
+      await expect(flowNode).toHaveClass(/dragging/);
+      const beforeTransform = await flowNode.getAttribute("style");
+      await record(
+        "drag",
+        {
+          event_name: "pointermove",
+          observations: [{
+            kind: "attribute-change",
+            selector: anchorFlowNodeSelector,
+            name: "style",
+            before: beforeTransform
+          }]
+        },
+        () => page.mouse.move(
+          before.x + before.width / 2 + delta,
+          before.y + before.height / 2
+        )
+      );
+    } finally {
       await page.mouse.up();
-      await expect.poll(async () => (await anchorCard.boundingBox())?.x ?? before.x).not.toBe(before.x);
-    });
+    }
+    await expect.poll(async () => (await anchorCard.boundingBox())?.x ?? before.x).not.toBe(before.x);
   }
 
   for (let index = 0; index < 20; index += 1) {
     await selectVisibleCardForShortcut();
-    const editor = page.locator("input[data-card-editor-id]").last();
-    let createdNodeId = "";
-    await record("enter", async () => {
-      await page.keyboard.press("Enter");
-      await expect(editor).toBeVisible();
-      await expect(editor).toBeFocused();
-      createdNodeId = await editor.getAttribute("data-card-editor-id") ?? "";
-    });
+    const editors = page.locator("input[data-card-editor-id]");
+    await expect(editors).toHaveCount(0);
+    const editor = editors.last();
+    await record(
+      "enter",
+      {
+        event_name: "keydown",
+        key: "Enter",
+        observations: [{ kind: "focus", selector: "input[data-card-editor-id]" }]
+      },
+      () => page.keyboard.press("Enter")
+    );
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+    const createdNodeId = await editor.getAttribute("data-card-editor-id") ?? "";
     if (!createdNodeId) throw new Error("Enter did not expose the created card identity");
     await page.keyboard.press("Escape");
     await expect(page.locator(`[data-node-id="${createdNodeId}"]`)).toBeFocused();
@@ -763,14 +983,21 @@ test("T027 bounded 200-card Chromium evidence records 20 samples per operation a
 
   for (let index = 0; index < 20; index += 1) {
     await selectVisibleCardForShortcut();
-    const editor = page.locator("input[data-card-editor-id]").last();
-    let createdNodeId = "";
-    await record("tab", async () => {
-      await page.keyboard.press("Tab");
-      await expect(editor).toBeVisible();
-      await expect(editor).toBeFocused();
-      createdNodeId = await editor.getAttribute("data-card-editor-id") ?? "";
-    });
+    const editors = page.locator("input[data-card-editor-id]");
+    await expect(editors).toHaveCount(0);
+    const editor = editors.last();
+    await record(
+      "tab",
+      {
+        event_name: "keydown",
+        key: "Tab",
+        observations: [{ kind: "focus", selector: "input[data-card-editor-id]" }]
+      },
+      () => page.keyboard.press("Tab")
+    );
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+    const createdNodeId = await editor.getAttribute("data-card-editor-id") ?? "";
     if (!createdNodeId) throw new Error("Tab did not expose the created card identity");
     await page.keyboard.press("Escape");
     await expect(page.locator(`[data-node-id="${createdNodeId}"]`)).toBeFocused();
@@ -779,8 +1006,6 @@ test("T027 bounded 200-card Chromium evidence records 20 samples per operation a
     expect(fixture.tree("tree-large").nodes).toHaveLength(200);
   }
 
-  await page.getByRole("button", { name: "Pan canvas" }).click();
-  await expect(flowRegion).toHaveAttribute("data-pan-active", "true");
   const findOpenPanePoint = async (): Promise<{ x: number; y: number }> => flowRegion.evaluate((region) => {
     const bounds = region.getBoundingClientRect();
     for (let y = bounds.bottom - 24; y >= bounds.top + 96; y -= 16) {
@@ -793,36 +1018,74 @@ test("T027 bounded 200-card Chromium evidence records 20 samples per operation a
     }
     throw new Error("Canvas has no unobstructed pane point for a real pan sample");
   });
-  for (let index = 0; index < 20; index += 1) {
-    await expect(flowRegion).toBeVisible();
+  await page.getByRole("button", { name: "Pan canvas" }).click();
+  try {
     await expect(flowRegion).toHaveAttribute("data-pan-active", "true");
-    const panPoint = await findOpenPanePoint();
-    const beforeTransform = await page.locator(".react-flow__viewport").getAttribute("style");
-    const delta = index % 2 === 0 ? 24 : -24;
-    await record("pan", async () => {
+    // Pointerdown only arms the gesture. Pointermove is the first input that
+    // changes the viewport, and release happens after the measured frame.
+    for (let index = 0; index < 20; index += 1) {
+      await expect(flowRegion).toBeVisible();
+      await expect(flowRegion).toHaveAttribute("data-pan-active", "true");
+      const panPoint = await findOpenPanePoint();
+      const beforeTransform = await page.locator(".react-flow__viewport").getAttribute("style");
+      const delta = index % 2 === 0 ? 24 : -24;
       await page.mouse.move(panPoint.x, panPoint.y);
       await page.mouse.down();
-      await page.mouse.move(panPoint.x + delta, panPoint.y + 16, { steps: 2 });
-      await page.mouse.up();
+      try {
+        await record(
+          "pan",
+          {
+            event_name: "pointermove",
+            observations: [{
+              kind: "attribute-change",
+              selector: ".react-flow__viewport",
+              name: "style",
+              before: beforeTransform
+            }]
+          },
+          () => page.mouse.move(panPoint.x + delta, panPoint.y + 16)
+        );
+      } finally {
+        await page.mouse.up();
+      }
       await expect.poll(() => page.locator(".react-flow__viewport").getAttribute("style")).not.toBe(beforeTransform);
-    });
+    }
+  } finally {
+    if (await flowRegion.getAttribute("data-pan-active") === "true") {
+      await page.getByRole("button", { name: "Pan canvas" }).click();
+    }
   }
-  await page.getByRole("button", { name: "Pan canvas" }).click();
 
   await page.waitForTimeout(150);
   for (let index = 0; index < 20; index += 1) {
     const zoomLevel = page.locator("[aria-label='Zoom level']");
+    const viewport = page.locator(".react-flow__viewport");
     const beforeZoom = await zoomLevel.textContent();
+    const beforeTransform = await viewport.getAttribute("style");
     const beforePercent = Number.parseInt(beforeZoom ?? "", 10);
     const zoomAction = beforePercent <= 25
       ? "Zoom in"
       : beforePercent >= 100
         ? "Zoom out"
         : index % 2 === 0 ? "Zoom in" : "Zoom out";
-    await record("zoom", async () => {
-      await page.getByRole("button", { name: zoomAction }).click();
-      await expect(zoomLevel).not.toHaveText(beforeZoom ?? "");
-    });
+    await record(
+      "zoom",
+      {
+        event_name: "click",
+        observations: [
+          {
+            kind: "attribute-change",
+            selector: ".react-flow__viewport",
+            name: "style",
+            before: beforeTransform
+          },
+          { kind: "text-change", selector: "[aria-label='Zoom level']", before: beforeZoom }
+        ]
+      },
+      () => page.getByRole("button", { name: zoomAction }).click()
+    );
+    await expect(zoomLevel).not.toHaveText(beforeZoom ?? "");
+    await expect.poll(() => viewport.getAttribute("style")).not.toBe(beforeTransform);
     await page.waitForTimeout(150);
     await expectSaved();
   }
@@ -855,23 +1118,21 @@ test("T027 bounded 200-card Chromium evidence records 20 samples per operation a
     p95_ms: p95(values),
     within_200ms: values.filter((sample) => sample <= 200).length
   }]));
-  expect(allSamples).toHaveLength(120);
-  expect(p95(allSamples)).toBeLessThanOrEqual(200);
-  expect(withinBudget).toBeGreaterThanOrEqual(Math.ceil(allSamples.length * 0.95));
-  for (const [operation, values] of Object.entries(samples)) {
-    expect(values, `${operation} must contain exactly 20 raw samples`).toHaveLength(20);
-    expect(p95(values), `${operation} p95 must stay within 200ms`).toBeLessThanOrEqual(200);
-  }
-  expect(seriousViolations).toEqual([]);
   const candidateSha = process.env.BRAIN_BUDDY_CANDIDATE_SHA ?? null;
-  if (candidateSha !== null) expect(candidateSha).toMatch(/^[0-9a-f]{40}$/);
-  await writeEvidenceArtifact("t027-200-card-performance.json", {
+  const exactShaRequired = process.env.CI === "true" ||
+    process.env.BRAIN_BUDDY_REQUIRE_EXACT_SHA === "1";
+  const evidence = {
     schema_version: 1,
     candidate_sha: candidateSha,
     candidate_state: candidateSha === null ? "uncommitted_worktree" : "exact_commit",
-    fixture: { card_count_at_load: 200, relation_count_at_load: 260, synthetic: true },
+    fixture: {
+      card_count_at_load: performanceTree.nodes.length,
+      relation_count_at_load: performanceTree.relations.length,
+      synthetic: true
+    },
     browser: "Chromium",
     browser_version: browser.version(),
+    measurement: "browser_event_to_first_observable_animation_frame",
     supported_widths: [...SUPPORTED_DESKTOP_WIDTHS],
     operations: operationStats,
     aggregate: { sample_count: allSamples.length, p95_ms: p95(allSamples), within_200ms: withinBudget, required_within_200ms: Math.ceil(allSamples.length * 0.95) },
@@ -885,6 +1146,26 @@ test("T027 bounded 200-card Chromium evidence records 20 samples per operation a
       }))
     },
     width_audit: widthAudits
+  };
+  if (exactShaRequired) {
+    expect(candidateSha, "final T027 evidence must be bound to the exact candidate SHA")
+      .toMatch(/^[0-9a-f]{40}$/);
+  } else if (candidateSha !== null) {
+    expect(candidateSha).toMatch(/^[0-9a-f]{40}$/);
+  }
+  expect(allSamples).toHaveLength(120);
+  for (const [operation, values] of Object.entries(samples)) {
+    expect(values, `${operation} must contain exactly 20 raw samples`).toHaveLength(20);
+    expect(p95(values), `${operation} p95 must stay within 200ms`).toBeLessThanOrEqual(200);
+  }
+  expect(p95(allSamples)).toBeLessThanOrEqual(200);
+  expect(withinBudget).toBeGreaterThanOrEqual(Math.ceil(allSamples.length * 0.95));
+  expect(seriousViolations).toEqual([]);
+  evidenceArtifacts.set(page, ["t027-200-card-performance.json"]);
+  await writeEvidenceArtifact("t027-200-card-performance.json", evidence);
+  await testInfo.attach("t027-200-card-performance.json", {
+    body: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`, "utf8"),
+    contentType: "application/json"
   });
 });
 
@@ -1044,6 +1325,7 @@ test("T024 Compose selected-user Chromium journey proves auth exposure, persiste
   const secondResponseContentFree = secondTreesBody.detail?.reason === "crt_canvas_disabled";
   expect(secondResponseContentFree).toBe(true);
 
+  evidenceArtifacts.set(page, ["t024-compose-auth-isolation.json"]);
   await writeEvidenceArtifact("t024-compose-auth-isolation.json", {
     schema_version: 1,
     synthetic: true,
