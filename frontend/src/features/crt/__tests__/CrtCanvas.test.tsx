@@ -562,6 +562,40 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Disconnected: Focused card" })).toHaveFocus());
   });
 
+  it("returns focus after a delayed controlled editor cancellation", async () => {
+    function EditableCard(): React.JSX.Element {
+      const [editing, setEditing] = useState(true);
+      const props = {
+        id: "delayed-focus-card",
+        data: {
+          label: "Delayed focus card",
+          badge: "Disconnected" as const,
+          selected: true,
+          editing,
+          connectionMode: false,
+          onCancelLabel: () => {
+            window.requestAnimationFrame(() => {
+              window.requestAnimationFrame(() => setEditing(false));
+            });
+          }
+        },
+        selected: true
+      } as unknown as Parameters<typeof CrtCardNode>[0];
+      return <CrtCardNode {...props} />;
+    }
+
+    render(
+      <ReactFlowProvider>
+        <EditableCard />
+      </ReactFlowProvider>
+    );
+    const editor = screen.getByRole("textbox", { name: "Edit card label for Delayed focus card" });
+    expect(editor).toHaveFocus();
+    fireEvent.keyDown(editor, { key: "Escape" });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Disconnected: Delayed focus card" })).toHaveFocus());
+  });
+
   it("undoes keyboard card creation without exposing an invalid blank-label history step", async () => {
     const onChange = vi.fn();
     renderCanvas(initialGraph(), onChange);

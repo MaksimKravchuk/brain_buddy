@@ -918,6 +918,7 @@ test("T027 bounded 200-card Chromium evidence records 20 samples per operation a
   // that can move a card. Starting at pointerdown would include the Playwright
   // protocol gap before the real move and violate the browser-only interval.
   for (let index = 0; index < 20; index += 1) {
+    const completedSaveCount = fixture.mutation("/api/crt/trees/tree-large", "PUT").length;
     const before = await anchorCard.boundingBox();
     if (!before) throw new Error("Visible card has no box for drag sample");
     const flowNode = page.locator(anchorFlowNodeSelector);
@@ -954,6 +955,13 @@ test("T027 bounded 200-card Chromium evidence records 20 samples per operation a
       await page.mouse.up();
     }
     await expect.poll(async () => (await anchorCard.boundingBox())?.x ?? before.x).not.toBe(before.x);
+    // Prove this drag dispatched its own save before accepting Saved. Merely
+    // checking the label can false-pass on the previous operation's state.
+    await expect.poll(
+      () => fixture.mutation("/api/crt/trees/tree-large", "PUT").length,
+      { timeout: 10_000 }
+    ).toBeGreaterThan(completedSaveCount);
+    await expectSaved();
   }
 
   for (let index = 0; index < 20; index += 1) {

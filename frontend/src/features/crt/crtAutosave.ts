@@ -514,7 +514,9 @@ export function createCrtAutosaveController(
       if (disposed) return;
       const nextGraph = queued?.graph ?? localGraph;
       const nextQueued = queued;
-      const durableGeneration = queuedPersistenceGeneration ?? (persisted?.ok ? persisted.generation : undefined);
+      const queuedDurableGeneration = queuedPersistenceGeneration;
+      const generationForClear = (successfulPersistence: Extract<CrtPersistenceResult, { ok: true }>): number =>
+        queuedDurableGeneration ?? successfulPersistence.generation;
       queued = undefined;
       queuedPersistenceGeneration = undefined;
       if (nextQueued && hasIncompleteCard(nextQueued.graph)) {
@@ -536,7 +538,7 @@ export function createCrtAutosaveController(
             const cleared = await persistence.clearAfterCanonicalApplied(
               canonical,
               true,
-              durableGeneration ?? persisted.generation
+              generationForClear(persisted)
             );
             if (cleared && typeof cleared === "object" && "ok" in cleared && cleared.ok === false) {
               pending = command;
@@ -561,7 +563,7 @@ export function createCrtAutosaveController(
             const cleared = await persistence.clearAfterCanonicalApplied(
               canonical,
               true,
-              durableGeneration ?? persisted.generation
+              generationForClear(persisted)
             );
             if (cleared && typeof cleared === "object" && "ok" in cleared && cleared.ok === false) {
               pending = command;
@@ -592,7 +594,7 @@ export function createCrtAutosaveController(
         const cleared = await persistence.clearAfterCanonicalApplied(
           canonical,
           true,
-          durableGeneration ?? persisted.generation
+          generationForClear(persisted)
         );
         if (cleared && typeof cleared === "object" && "ok" in cleared && cleared.ok === false) {
           pending = command;
@@ -758,7 +760,7 @@ export function createCrtAutosaveController(
     syncCanonical(tree: CrtTreeResponse) {
       if (tree.id !== canonical.id) return;
       if (tree.revision < canonical.revision) return;
-      if (tree.revision === canonical.revision && treeFingerprint(tree) !== treeFingerprint(canonical)) return;
+      if (tree.revision === canonical.revision) return;
       canonical = tree;
       if (!active && !pending && !queued && !conflict) return canonicalListener?.(canonical);
     },

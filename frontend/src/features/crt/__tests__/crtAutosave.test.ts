@@ -844,6 +844,28 @@ describe("CRT autosave immutable command queue", () => {
     expect(replacement).toHaveBeenCalledTimes(1);
   });
 
+  it("does not reapply an unchanged canonical tree when persistence recreates the hook controller", async () => {
+    const canonical = tree();
+    const onCanonical = vi.fn();
+    const persistence = () => ({
+      persistBeforeSave: vi.fn(),
+      clearAfterCanonicalApplied: vi.fn()
+    } as unknown as Parameters<typeof createCrtAutosaveController>[3]);
+    const hook = renderHook(({ adapter }) => useCrtAutosave(canonical, onCanonical, adapter), {
+      initialProps: { adapter: persistence() }
+    });
+    await act(async () => { await Promise.resolve(); });
+    onCanonical.mockClear();
+
+    hook.rerender({
+      adapter: persistence()
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(onCanonical).not.toHaveBeenCalled();
+    hook.unmount();
+  });
+
   it("clears an overflow snapshot when the canonical response already contains it", async () => {
     const first = deferred<CrtTreeResponse>();
     const update = vi.fn().mockReturnValue(first.promise);

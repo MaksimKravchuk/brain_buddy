@@ -20,6 +20,7 @@ export type CrtCard = Node<CrtCardNodeData, "crt-card">;
 export function CrtCardNode({ id, data, selected }: NodeProps<CrtCard>): React.JSX.Element {
   const editorRef = useRef<HTMLInputElement>(null);
   const cardRef = useRef<HTMLButtonElement>(null);
+  const restoreCardFocusRef = useRef(false);
   const [draftLabel, setDraftLabel] = useState(data.label);
   const isSelected = selected || data.selected;
 
@@ -28,17 +29,22 @@ export function CrtCardNode({ id, data, selected }: NodeProps<CrtCard>): React.J
   }, [data.editing, data.label]);
 
   useEffect(() => {
-    if (!data.editing) return;
-    editorRef.current?.focus();
-    editorRef.current?.select();
+    if (data.editing) {
+      editorRef.current?.focus();
+      editorRef.current?.select();
+      return;
+    }
+    if (!restoreCardFocusRef.current) return;
+    restoreCardFocusRef.current = false;
+    cardRef.current?.focus();
   }, [data.editing]);
 
   const commitLabel = (restoreCardFocus = false): void => {
+    restoreCardFocusRef.current = restoreCardFocus;
     const committed = data.onCommitLabel?.(id, draftLabel) ?? true;
     if (!committed) {
+      restoreCardFocusRef.current = false;
       window.requestAnimationFrame(() => editorRef.current?.focus());
-    } else if (restoreCardFocus) {
-      window.requestAnimationFrame(() => cardRef.current?.focus());
     }
   };
 
@@ -80,8 +86,8 @@ export function CrtCardNode({ id, data, selected }: NodeProps<CrtCard>): React.J
               commitLabel(true);
             } else if (event.key === "Escape") {
               event.preventDefault();
+              restoreCardFocusRef.current = true;
               data.onCancelLabel?.(id);
-              window.requestAnimationFrame(() => cardRef.current?.focus());
             }
           }}
         />
