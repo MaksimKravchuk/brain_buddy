@@ -832,6 +832,39 @@ describe("TaskDetailPanel subtasks and comments", () => {
     expect(field).toHaveValue("");
   });
 
+  it.each([
+    { label: "New subtask title", draft: "Draft the copy", handler: "onCreateSubtask" as const },
+    { label: "New comment", draft: "Blocked on analytics", handler: "onCreateComment" as const }
+  ])("keeps the $label draft after a failed create and clears it only after retry succeeds", async ({ label, draft, handler }) => {
+    const user = userEvent.setup();
+    const create = vi.fn().mockRejectedValueOnce(new Error("Could not create item")).mockResolvedValue(undefined);
+    renderPanel({ [handler]: create });
+    const field = screen.getByLabelText(label);
+
+    await user.type(field, `${draft}{Enter}`);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not create item");
+    expect(field).toHaveValue(draft);
+    await user.type(field, "{Enter}");
+    await waitFor(() => expect(field).toHaveValue(""));
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not double-submit a pending comment or clear text typed while it saves", async () => {
+    const user = userEvent.setup();
+    let resolveCreate: () => void = () => undefined;
+    const create = vi.fn(() => new Promise<void>((resolve) => { resolveCreate = resolve; }));
+    renderPanel({ onCreateComment: create });
+    const field = screen.getByLabelText("New comment");
+
+    await user.type(field, "First draft{Enter}{Enter}");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status")).toHaveTextContent("Adding");
+    await user.clear(field);
+    await user.type(field, "Newer draft");
+    await act(async () => resolveCreate());
+    expect(field).toHaveValue("Newer draft");
+  });
+
   it("renders each comment with an actor initialism and a readable date, falling back to the raw value", () => {
     renderPanel({
       task: taskFixture({

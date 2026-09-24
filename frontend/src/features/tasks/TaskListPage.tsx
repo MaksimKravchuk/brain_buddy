@@ -633,9 +633,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       // is nothing to save, so they stay no-ops rather than dead `.save()` calls.
       onSave={() => undefined}
       onTransition={() => undefined}
-      onCreateSubtask={(task, subtaskTitle) => subtaskCreateMutation.mutate({ task, title: subtaskTitle })}
+      onCreateSubtask={(task, subtaskTitle) => subtaskCreateMutation.mutateAsync({ task, title: subtaskTitle })}
       onTransitionSubtask={(task, subtask, action) => subtaskTransitionMutation.mutate({ task, subtask, action })}
-      onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
+      onCreateComment={(task, body) => commentCreateMutation.mutateAsync({ task, body })}
       onAgentDispatched={(run) => {
         setAgentFocusTarget({
           taskId: run.task_id,
@@ -967,6 +967,11 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         )}
         </div>
 
+        {taskQuery.isFetchNextPageError ? (
+          <div role="alert" className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            Could not load more tasks: {getErrorMessage(taskQuery.error)}. The tasks above are still available.
+          </div>
+        ) : null}
         {taskQuery.hasNextPage ? (
           <div className="mt-3 flex justify-center">
             <Button
@@ -974,7 +979,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               onClick={() => void taskQuery.fetchNextPage()}
               isLoading={taskQuery.isFetchingNextPage}
             >
-              {taskQuery.isFetchingNextPage ? "Loading more tasks…" : "Load more tasks"}
+              {taskQuery.isFetchingNextPage ? "Loading more tasks…" : taskQuery.isFetchNextPageError ? "Retry loading tasks" : "Load more tasks"}
             </Button>
           </div>
         ) : null}

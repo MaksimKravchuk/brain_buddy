@@ -663,6 +663,27 @@ describe("TaskListPage projections", () => {
     expect(await screen.findByText("Second page task")).toBeInTheDocument();
     await waitFor(() => expect(lastListFilters().cursor).toBe("cursor-2"));
   });
+
+  it("017-FR-016 keeps loaded rows and offers retry when a later page fails", async () => {
+    const user = userEvent.setup();
+    let attempts = 0;
+    mocked.listTasks.mockImplementation(async (filters) => {
+      if (filters?.limit) return listResponse([]);
+      if (!filters?.cursor) return listResponse([taskFixture()], { next_cursor: "cursor-2", has_more: true });
+      if (++attempts === 1) throw new Error("Next page unavailable");
+      return listResponse([taskFixture({ id: "task-2", title: "Second page task" })]);
+    });
+
+    renderPage("/tasks/next");
+    await user.click(await screen.findByRole("button", { name: "Load more tasks" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Next page unavailable");
+    expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry loading tasks" }));
+    expect(await screen.findByText("Second page task")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(attempts).toBe(2);
+  });
 });
 
 describe("TaskListPage list controls", () => {
