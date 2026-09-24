@@ -53,7 +53,8 @@ export function AdminUsersSection(): React.JSX.Element {
     window.addEventListener("resize", update);
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     observer?.observe(scroller);
-    if (scroller.firstElementChild) observer?.observe(scroller.firstElementChild);
+    // The table is always the first child of this mounted scrollport.
+    observer?.observe(scroller.firstElementChild as HTMLTableElement);
     return () => {
       scroller.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
@@ -104,8 +105,9 @@ export function AdminUsersSection(): React.JSX.Element {
             aria-label={tableAtEnd ? "Back to table start" : "Show table actions"}
             className="min-h-11 self-end rounded-md px-2 text-sm font-medium text-sky-800 underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
             onClick={() => {
-              const scroller = tableScrollRef.current;
-              if (scroller) scroller.scrollLeft = tableAtEnd ? 0 : scroller.scrollWidth - scroller.clientWidth;
+              // The cue only renders after the mounted scrollport reports overflow.
+              const scroller = tableScrollRef.current as HTMLDivElement;
+              scroller.scrollLeft = tableAtEnd ? 0 : scroller.scrollWidth - scroller.clientWidth;
             }}
           >
             {tableAtEnd ? "← Back to email" : "More columns and actions →"}
