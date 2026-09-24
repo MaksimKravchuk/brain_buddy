@@ -12,7 +12,9 @@ test-specific Allure metadata:
 * at least one named step.
 
 This validator reads the generated ``*-result.json`` files directly so the gate
-cannot be faked by tagging the source without actually emitting the metadata.
+cannot be faked by tagging the source without actually emitting the metadata. A
+run-start marker supplied with ``--since-file`` additionally prevents results
+left by an earlier run from satisfying a current stack gate.
 It intentionally uses only the Python standard library so it can run in GitHub
 Actions before backend or frontend dependencies are installed.
 """
@@ -92,13 +94,13 @@ def _step_errors(result: dict) -> list[str]:
             continue
         if _is_reporter_scaffolding_step(step):
             continue
+        if _is_placeholder_step_name(name) and not _has_step_evidence(step):
+            errors.append(f"step {path} is an empty placeholder: {name!r}")
+            continue
         if _is_zero_duration_childless_step_without_evidence(step):
-            if _is_placeholder_step_name(name):
-                errors.append(f"step {path} is an empty placeholder: {name!r}")
-            else:
-                errors.append(
-                    f"step {path} is a zero-duration no-op without evidence: {name!r}"
-                )
+            errors.append(
+                f"step {path} is a zero-duration no-op without evidence: {name!r}"
+            )
             continue
         meaningful_steps += 1
     if meaningful_steps == 0:
@@ -126,17 +128,21 @@ def _is_placeholder_step_name(name: str) -> bool:
     return bool(_PLACEHOLDER_STEP_NAME.match(name.strip()))
 
 
+def _has_step_evidence(step: dict) -> bool:
+    for evidence_key in ("steps", "attachments", "parameters"):
+        evidence = step.get(evidence_key)
+        if isinstance(evidence, list) and evidence:
+            return True
+    return False
+
+
 def _is_zero_duration_childless_step_without_evidence(step: dict) -> bool:
     start = step.get("start")
     stop = step.get("stop")
     has_zero_duration = isinstance(start, int) and isinstance(stop, int) and start == stop
     if not has_zero_duration:
         return False
-    for evidence_key in ("steps", "attachments", "parameters"):
-        evidence = step.get(evidence_key)
-        if isinstance(evidence, list) and evidence:
-            return False
-    return True
+    return not _has_step_evidence(step)
 
 
 def _is_reporter_scaffolding_step(step: dict) -> bool:
@@ -180,7 +186,7 @@ def _result_errors(result: dict) -> list[str]:
     return errors
 
 
-def validate(paths: list[Path], label: str) -> int:
+def validate(paths: list[Path], label: str, since_file: Path | None = None) -> int:
     for path in paths:
         if not path.is_dir():
             print(
@@ -188,6 +194,16 @@ def validate(paths: list[Path], label: str) -> int:
                 file=sys.stderr,
             )
             return 1
+
+    since_mtime_ns: int | None = None
+    if since_file is not None:
+        if not since_file.is_file():
+            print(
+                f"error: {label}: freshness marker does not exist: {since_file}",
+                file=sys.stderr,
+            )
+            return 1
+        since_mtime_ns = since_file.stat().st_mtime_ns
 
     result_files: list[Path] = []
     for path in paths:
@@ -200,7 +216,28 @@ def validate(paths: list[Path], label: str) -> int:
         )
         return 1
 
+    if since_mtime_ns is not None:
+        stale_files = [
+            result_file
+            for result_file in result_files
+            if result_file.stat().st_mtime_ns <= since_mtime_ns
+        ]
+        result_files = [
+            result_file
+            for result_file in result_files
+            if result_file.stat().st_mtime_ns > since_mtime_ns
+        ]
+        if not result_files:
+            stale_names = ", ".join(result_file.name for result_file in stale_files[:5])
+            detail = f" ({stale_names})" if stale_names else ""
+            print(
+                f"error: {label}: no fresh Allure result files found after {since_file}{detail}",
+                file=sys.stderr,
+            )
+            return 1
+
     failures = 0
+    executed_results = 0
     for result_file in result_files:
         raw = result_file.read_text(encoding="utf-8").strip()
         if not raw:
@@ -227,6 +264,7 @@ def validate(paths: list[Path], label: str) -> int:
         if result.get("status") not in EXECUTED_STATUSES:
             continue
 
+        executed_results += 1
         errors = _result_errors(result)
         if errors:
             failures += 1
@@ -236,6 +274,14 @@ def validate(paths: list[Path], label: str) -> int:
                     f"error: {label}: {result_file.name} [{display}]: {error}",
                     file=sys.stderr,
                 )
+
+    if executed_results == 0:
+        print(
+            f"error: {label}: no executed Allure results found "
+            f"(expected one of {sorted(EXECUTED_STATUSES)})",
+            file=sys.stderr,
+        )
+        return 1
 
     if failures:
         print(
@@ -263,12 +309,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allure results dir (repeatable; scanned recursively)",
     )
     parser.add_argument("--label", required=True, help="layer label for messages")
+    parser.add_argument(
+        "--since-file",
+        type=Path,
+        help="only validate result files newer than this run-start marker",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return validate(args.path, args.label)
+    return validate(args.path, args.label, args.since_file)
 
 
 if __name__ == "__main__":

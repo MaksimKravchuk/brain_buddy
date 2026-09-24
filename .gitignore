@@ -56,6 +56,12 @@ coverage/
 # Local data
 data/
 
+# Generated backend SQLite databases at the repository root (source fixtures
+# remain trackable in nested test/fixture directories).
+/backend/*.sqlite3
+/backend/*.sqlite3-wal
+/backend/*.sqlite3-shm
+
 # Hermes Kanban worktrees
 .worktrees/
 

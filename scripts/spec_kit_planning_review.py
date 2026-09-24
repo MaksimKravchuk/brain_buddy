@@ -86,36 +86,23 @@ REQUIREMENT_DEFINITION_RE = re.compile(
     r"^\s*[-*]\s*\*\*(FR|SC)-(\d+)\*\*", re.MULTILINE
 )
 UNCHECKED_ITEM_RE = re.compile(r"^\s*[-*]\s*\[ \]", re.MULTILINE)
-# Which executable each integration needs on PATH. Resolved before a lens
-# runs, so an absent runtime is a routing decision rather than a crash.
-INTEGRATION_CLI: dict[str, str] = {"codex": "codex", "claude": "claude"}
-
-# The fallback for both codex lenses. Deliberately `sonnet` rather than
-# `opus`: the opus seats belong to lenses carrying their own rubric files, and
-# a fallback should not dilute the lenses that are still running as
-# configured. With only two review-grade Claude tiers any all-Claude panel of
-# five has a majority — the honest response is to report that in
-# `panel_correlated`, not to pick a model that games the metric.
-CODEX_FALLBACK: dict[str, str] = {"integration": "claude", "model": "sonnet"}
+# The review gate uses the runtime this repository actually provisions. A
+# missing Codex CLI fails closed before a lens starts; there is no hidden
+# dependency on a second vendor CLI and no runtime substitution.
+INTEGRATION_CLI: dict[str, str] = {"codex": "codex"}
 
 ROLE_CONFIGS: dict[str, dict[str, Any]] = {
     "requirements-consistency": {
         "integration": "codex",
         "model": "gpt-5.6-sol",
-        "fallback": CODEX_FALLBACK,
         "focus": (
             "Find contradictions, missing acceptance behavior, unsupported scope, "
             "and mismatches between spec.md and plan.md."
         ),
     },
-    # Moved off codex/gpt-5.6-sol deliberately. Three lenses on one model do
-    # not give three independent opinions — they give one opinion counted three
-    # times, and the aggregation rule would treat correlated blind spots as
-    # corroboration. Moving this lens also means three of five run without the
-    # codex CLI, which is what a single-runtime machine actually has.
     "architecture-consistency": {
-        "integration": "claude",
-        "model": "opus",
+        "integration": "codex",
+        "model": "gpt-5.6-sol",
         "agent": "architecture-consistency-reviewer",
         "focus": (
             "Challenge boundaries, contracts, data ownership, failure handling, "
@@ -125,15 +112,14 @@ ROLE_CONFIGS: dict[str, dict[str, Any]] = {
     "testability-evidence": {
         "integration": "codex",
         "model": "gpt-5.6-sol",
-        "fallback": CODEX_FALLBACK,
         "focus": (
             "Check that every acceptance outcome has proportionate automated or "
             "operational evidence and that tasks can be grouped into independent lanes."
         ),
     },
     "privacy-consent-security": {
-        "integration": "claude",
-        "model": "opus",
+        "integration": "codex",
+        "model": "gpt-5.6-sol",
         "agent": "security-privacy-reviewer",
         "focus": (
             "Audit consent gating, data retention and purge coverage, export "
@@ -142,8 +128,8 @@ ROLE_CONFIGS: dict[str, dict[str, Any]] = {
         ),
     },
     "ux-accessibility-mobile": {
-        "integration": "claude",
-        "model": "sonnet",
+        "integration": "codex",
+        "model": "gpt-5.6-sol",
         "agent": "ux-a11y-reviewer",
         "focus": (
             "Audit that every user-visible surface specifies loading, empty, "
@@ -152,8 +138,8 @@ ROLE_CONFIGS: dict[str, dict[str, Any]] = {
         ),
     },
     "adversarial-high-risk": {
-        "integration": "claude",
-        "model": "fable",
+        "integration": "codex",
+        "model": "gpt-5.6-sol",
         "focus": (
             "Perform an adversarial high-risk review of security, privacy, data loss, "
             "concurrency, public contracts, migrations, and irreversible decisions."
@@ -336,117 +322,77 @@ def parse_review_output(raw: str) -> dict[str, Any]:
 
 
 def resolve_oracle(role: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Choose the runtime that will actually review, and record which one it was.
-
-    Before this, a lens whose CLI was not installed produced no evidence at
-    all: `run_review` raised, no review file was written, and `summarize`
-    counted missing mandatory evidence. Two of five lenses shell out to
-    `codex`, so on a single-runtime machine every campaign returned
-    `escalated` and the gate could never be passed rather than merely being
-    hard to pass.
-
-    The substitution is never silent. What actually ran is stamped onto the
-    review by the harness, and `summarize` reports both which lenses were
-    degraded and whether the effective panel ended up correlated.
-
-    An absent CLI is routed around. A CLI that is present and *fails* is not
-    handled here and still raises — absence is a gap a fallback can fill,
-    failure is a defect in evidence that was produced.
-    """
+    """Resolve the configured Codex runtime and stamp its provenance."""
     try:
         config = ROLE_CONFIGS[role]
     except KeyError as exc:
         raise ReviewError(f"Unknown review role: {role}") from exc
 
-    primary_cli = INTEGRATION_CLI[config["integration"]]
-    primary_path = shutil.which(primary_cli)
-    if primary_path is not None:
-        return config, {
-            "integration": config["integration"],
-            "model": config["model"],
-            "degraded": False,
-            # Resolved path, not just the name. Provenance here is only as
-            # strong as PATH: an actor that controls PATH can hide a runtime to
-            # force a fallback, or shim one to fake a primary. Recording what
-            # was actually executed does not close that, but it makes the two
-            # cases distinguishable after the fact instead of asserted from
-            # config alone.
-            "executable": primary_path,
-        }
-
-    fallback = config.get("fallback")
-    if not isinstance(fallback, dict):
-        raise ReviewError(f"Required reviewer CLI is not installed: {primary_cli}")
-
-    fallback_cli = INTEGRATION_CLI[fallback["integration"]]
-    fallback_path = shutil.which(fallback_cli)
-    if fallback_path is None:
-        raise ReviewError(
-            f"Neither the {primary_cli} CLI nor its {fallback_cli} fallback is "
-            f"installed for {role}"
-        )
-
-    return {**config, **fallback}, {
-        "integration": fallback["integration"],
-        "model": fallback["model"],
-        "degraded": True,
-        "reason": f"the {primary_cli} CLI is not installed",
-        "configured_integration": config["integration"],
-        "configured_model": config["model"],
-        "executable": fallback_path,
+    integration = config["integration"]
+    try:
+        executable = INTEGRATION_CLI[integration]
+    except KeyError as exc:
+        raise ReviewError(f"Unsupported reviewer integration: {integration}") from exc
+    resolved = shutil.which(executable)
+    if resolved is None:
+        raise ReviewError(f"Required reviewer CLI is not installed: {executable}")
+    return config, {
+        "integration": integration,
+        "model": config["model"],
+        "degraded": False,
+        "executable": resolved,
     }
 
 
-# `config` is required rather than defaulted to `ROLE_CONFIGS[role]`. The CLI
-# presence check lives in `resolve_oracle`, so a caller that builds a command
-# without going through it would get a `codex exec` argv with no availability
-# check and no provenance — the pre-fallback behaviour with the guard removed.
-# Requiring the resolved config makes that bypass unwritable rather than merely
-# unused.
+def validate_oracle_provenance(
+    payload: object, *, role: str, artifacts_digest: str
+) -> dict[str, Any] | None:
+    """Accept only harness-shaped provenance for the current Codex-only gate."""
+
+    if not isinstance(payload, dict):
+        return None
+    config = ROLE_CONFIGS.get(role)
+    if config is None:
+        return None
+    executable = payload.get("executable")
+    if (
+        payload.get("integration") != "codex"
+        or payload.get("model") != config["model"]
+        or payload.get("degraded") is not False
+        or not isinstance(executable, str)
+        or not Path(executable).is_absolute()
+        or Path(executable).name != "codex"
+        or not isinstance(payload.get("artifacts_digest"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("artifacts_digest")))
+    ):
+        return None
+    return dict(payload)
+
+
+# `config` is required rather than defaulted to `ROLE_CONFIGS[role]`: callers
+# must pass through `resolve_oracle` so CLI availability and provenance are
+# established before command construction.
 def build_review_command(
-    *, prompt: str, schema_path: Path, config: dict[str, Any]
+    *, prompt: str, schema_path: Path, config: dict[str, Any], executable: str
 ) -> tuple[list[str], dict[str, str]]:
     env = os.environ.copy()
     integration = config["integration"]
-    if integration == "codex":
-        return (
-            [
-                INTEGRATION_CLI["codex"],
-                "exec",
-                "--model",
-                config["model"],
-                "-c",
-                "model_reasoning_effort=xhigh",
-                "--sandbox",
-                "read-only",
-                "--ephemeral",
-                "--skip-git-repo-check",
-                "--output-schema",
-                str(schema_path),
-                prompt,
-            ],
-            env,
-        )
-
-    env.pop("ANTHROPIC_API_KEY", None)
-    schema = schema_path.read_text(encoding="utf-8")
+    if integration != "codex":
+        raise ReviewError(f"Unsupported reviewer integration: {integration}")
     return (
         [
-            INTEGRATION_CLI["claude"],
-            "-p",
+            executable,
+            "exec",
             "--model",
             config["model"],
-            "--effort",
-            "max",
-            "--permission-mode",
-            "plan",
-            "--allowedTools",
-            "Read,Grep,Glob",
-            "--no-session-persistence",
-            "--output-format",
-            "json",
-            "--json-schema",
-            schema,
+            "-c",
+            "model_reasoning_effort=xhigh",
+            "--sandbox",
+            "read-only",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--output-schema",
+            str(schema_path),
             prompt,
         ],
         env,
@@ -552,7 +498,10 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
     prompt = build_prompt(role=role, feature_dir=feature_dir, root=root)
     effective_config, oracle = resolve_oracle(role)
     command, env = build_review_command(
-        prompt=prompt, schema_path=schema_path, config=effective_config
+        prompt=prompt,
+        schema_path=schema_path,
+        config=effective_config,
+        executable=str(oracle["executable"]),
     )
 
     result = subprocess.run(
@@ -568,10 +517,9 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
         timeout=1800,
     )
     if result.returncode != 0:
-        # Deliberately not routed to the fallback. A reviewer that ran and
-        # failed produced a defect in evidence, and retrying it on a different
-        # oracle would launder that into a clean verdict from a lens nobody
-        # chose. Only an absent runtime is substituted, and only visibly.
+        # Reviewer failures stay hard failures. A process that ran and failed
+        # produced a defect in evidence; retrying it away would launder that
+        # defect into a clean verdict.
         detail = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
         raise ReviewError(f"{role} reviewer failed: {detail[-2000:]}")
     review = validate_review(parse_review_output(result.stdout), expected_role=role)
@@ -640,13 +588,22 @@ def aggregate_reviews(
             "the current artifacts; a verdict on superseded content is not "
             "evidence about this one."
         )
-    elif missing_roles:
+    elif missing_roles or unknown_oracle_roles:
         status = "escalated"
+        missing_parts: list[str] = []
+        if missing_roles:
+            missing_parts.append(
+                "missing reviews: " + ", ".join(missing_roles)
+            )
+        if unknown_oracle_roles:
+            missing_parts.append(
+                "missing reviewer provenance: " + ", ".join(unknown_oracle_roles)
+            )
         action = (
-            "Mandatory review evidence is missing for "
-            f"{', '.join(missing_roles)}. This is not a pass: rerun those "
-            "lenses, or record an explicit human decision to proceed without "
-            "them. A partial campaign is never reported as a clean one."
+            "Mandatory review evidence is incomplete ("
+            + "; ".join(missing_parts)
+            + "). This is not a pass: rerun those lenses through the gate. "
+            "A partial or hand-written campaign is never reported as clean."
         )
     elif product_decisions or "product-decision-required" in verdicts:
         status = "product-decision-required"
@@ -972,24 +929,42 @@ def summarize(*, root: Path, run_id: str) -> Path:
     # may not talk the classifier out of a surface it detected in the planning
     # artifacts.
     context_path = run_dir / "planning-context.json"
+    if not context_path.is_file():
+        raise ReviewError("Planning preflight was not completed for this run")
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    feature_dir = Path(str(context.get("feature_dir", ""))).resolve()
+    specs_root = (root / "specs").resolve()
+    if not feature_dir.is_dir() or specs_root not in feature_dir.parents:
+        raise ReviewError("Planning preflight context has an invalid feature directory")
+    recorded_digest_value = context.get("artifacts_digest")
+    if not isinstance(recorded_digest_value, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", recorded_digest_value
+    ):
+        raise ReviewError("Planning preflight context has an invalid artifacts digest")
     declared_risk = risk
-    recorded_digest = ""
-    current_digest = ""
-    if context_path.is_file():
-        context = json.loads(context_path.read_text(encoding="utf-8"))
-        derived = context.get("derived_risk")
-        # Only a derivable (raising) class is honoured. A stored value outside
-        # DERIVABLE_RISKS cannot pull the campaign below what was declared.
-        if isinstance(derived, str) and derived in DERIVABLE_RISKS:
-            risk = stricter_risk(risk, derived)
-        recorded_digest = str(context.get("artifacts_digest", ""))
-        # Recompute from the artifacts as they stand NOW. Trusting the digest
-        # persisted at preflight defeats the mechanism with its own cache: edit
-        # the spec after preflight and the stored digest still matches the
-        # sign-off, so the campaign approves content nobody reviewed.
-        feature_dir = Path(str(context.get("feature_dir", "")))
-        if feature_dir.is_dir():
-            current_digest = review_artifacts_digest(feature_dir)
+    derived = context.get("derived_risk")
+    # Only a derivable (raising) class is honoured. A stored value outside
+    # DERIVABLE_RISKS cannot pull the campaign below what was declared.
+    if isinstance(derived, str) and derived in DERIVABLE_RISKS:
+        risk = stricter_risk(risk, derived)
+    recorded_digest = recorded_digest_value
+    # Recompute from the artifacts as they stand NOW. Trusting the digest
+    # persisted at preflight defeats the mechanism with its own cache: edit
+    # the spec after preflight and the stored digest still matches the
+    # sign-off, so the campaign approves content nobody reviewed.
+    current_digest = review_artifacts_digest(feature_dir)
+    defects = deterministic_defects(feature_dir)
+    if defects:
+        raise ReviewError(
+            "Planning artifacts no longer pass deterministic preflight:\n"
+            + "\n".join(f"  - {defect}" for defect in defects)
+        )
+    # Never trust the cached risk answer from planning-context.json. Recompute
+    # it from the current artifacts so a forged or stale context cannot talk an
+    # ASK-class feature out of high-risk review and human sign-off.
+    derived = derive_risk(feature_dir)
+    if isinstance(derived, str) and derived in DERIVABLE_RISKS:
+        risk = stricter_risk(risk, derived)
     escalated = risk != declared_risk
 
     # The reviews were produced against the artifacts as they stood at
@@ -1031,8 +1006,14 @@ def summarize(*, root: Path, run_id: str) -> Path:
         # Without this the oracle survives to disk and is then dropped on the
         # way back in, which would make degradation invisible in exactly the
         # artifact that exists to report it.
-        if isinstance(payload, dict) and isinstance(payload.get("oracle"), dict):
-            review["oracle"] = payload["oracle"]
+        if isinstance(payload, dict):
+            oracle = validate_oracle_provenance(
+                payload.get("oracle"),
+                role=role,
+                artifacts_digest=current_digest,
+            )
+            if oracle is not None:
+                review["oracle"] = oracle
         reviews.append(review)
 
     degraded: list[str] = []
@@ -1069,9 +1050,9 @@ def summarize(*, root: Path, run_id: str) -> Path:
 
     # Correlation is a property of the lenses that actually produced evidence.
     # A majority on one oracle means the panel's agreement is worth less than
-    # its size suggests: three lenses on one model are one opinion counted three
-    # times, the defect ADR-0012 set out to remove and one a fallback can
-    # reintroduce.
+    # its size suggests. ADR-0024 accepts that the current Codex-only panel is
+    # correlated; this signal keeps that limitation explicit and also renders
+    # historical ADR-0014 fallback records honestly.
     #
     # Rounded up deliberately. `> known // 2` called a 3-of-6 split
     # uncorrelated, and 3-of-6 is exactly the shape of a fully degraded
@@ -1083,9 +1064,9 @@ def summarize(*, root: Path, run_id: str) -> Path:
     panel_correlated: bool | None = bool(oracle_counts) and (
         max(oracle_counts.values()) >= (known_oracles + 1) // 2
     )
-    # The fact the model histogram keeps missing, and it has no arithmetic
-    # edge: a fallback only ever moves lenses onto one provider, so this is
-    # true for every fully degraded campaign at every risk class.
+    # Provider collapse has no arithmetic edge. It is expected for new
+    # Codex-only campaigns and also remains useful for historical fallback
+    # records loaded from older run directories.
     #
     # Tri-state for exactly the reason `panel_correlated` is, six lines down.
     # `len(provider_counts) == 1 and known_oracles > 1` folded two different

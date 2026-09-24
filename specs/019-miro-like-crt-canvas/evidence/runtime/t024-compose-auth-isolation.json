@@ -1,0 +1,30 @@
+{
+  "candidate_sha": null,
+  "candidate_state": "uncommitted_worktree",
+  "schema_version": 1,
+  "synthetic": true,
+  "journey": "unmocked-compose-chromium",
+  "selected_user": {
+    "auth_me_crt_canvas": true,
+    "exposure_status": 204,
+    "persisted_node_count": 10,
+    "persisted_relation_count": 9,
+    "persisted_after_reload": true
+  },
+  "second_user": {
+    "auth_me_crt_canvas": false,
+    "exposure_status": 404,
+    "trees_status": 404,
+    "content_free": true,
+    "frontend_content_requests_suppressed": true
+  },
+  "timed_keyboard_journey": {
+    "includes_thinking_mode_entry": true,
+    "includes_tab": true,
+    "includes_arrow_navigation": true,
+    "branching": true,
+    "card_count": 10,
+    "elapsed_ms": 2776.9000000953674,
+    "budget_ms": 120000
+  }
+}

@@ -1,5 +1,6 @@
 """Filesystem repositories for Brain Buddy domain objects."""
 
+from .crt_command import CrtCommandRepository
 from .feature_flag import FeatureFlagOverrideRepository
 from .index import IndexRepository
 from .invite import InviteRepository
@@ -12,6 +13,7 @@ from .version import VersionRepository
 
 __all__ = [
     "FeatureFlagOverrideRepository",
+    "CrtCommandRepository",
     "IndexRepository",
     "InviteRepository",
     "ProviderRepository",

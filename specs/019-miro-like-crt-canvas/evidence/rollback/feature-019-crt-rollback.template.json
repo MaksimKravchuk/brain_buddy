@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "deployment_claim": "none",
+  "feature": "019-miro-like-crt-canvas",
+  "candidate_sha": "<40-lowercase-hex-candidate-sha>",
+  "stage_a_compatibility_sha": "<40-lowercase-hex-stage-a-sha>",
+  "stage_a_compatibility_image": "<registry/repository@sha256:digest>",
+  "pending_receipt_reconciliation_count": 0,
+  "backup_checkpoint_identity": "<scrubbed-full-data-dir-checkpoint-id>",
+  "drill": {
+    "environment": "local-synthetic",
+    "operator": "<redacted-operator>",
+    "started_at": "<RFC3339-timestamp>",
+    "completed_at": "<RFC3339-timestamp>",
+    "result": "NOT_RUN"
+  },
+  "candidate": {
+    "sha": "<40-lowercase-hex-candidate-sha>",
+    "backend_release_or_image": "<scrubbed-candidate-backend-image>",
+    "frontend_release_or_image": "<scrubbed-candidate-frontend-image>"
+  },
+  "stage_a_compatibility": {
+    "sha": "<40-lowercase-hex-stage-a-sha>",
+    "image": "<registry/repository@sha256:digest>",
+    "recorded_before_first_stage_b_write": false,
+    "exact_target_read_back": false,
+    "permitted_after_stage_b_write": true,
+    "pre_stage_a_image_used": false
+  },
+  "flag_off_readback": {
+    "write_route": "PUT /api/admin/feature-flags/crt_canvas/mode",
+    "read_route": "GET /api/admin/feature-flags",
+    "requested_mode": "off",
+    "read_back_mode": "<off>",
+    "auth_me_crt_canvas": false,
+    "exposure_route": "GET /api/crt/exposure",
+    "exposure_status": 404,
+    "exposure_reason": "crt_canvas_disabled",
+    "representative_crt_routes": [
+      {
+        "route": "GET /api/crt/trees",
+        "status": 404,
+        "content_free": true,
+        "correlation_id_present": true
+      },
+      {
+        "route": "GET /api/crt/trees/<opaque-fixture-tree-id>",
+        "status": 404,
+        "content_free": true,
+        "correlation_id_present": true
+      }
+    ],
+    "readback_complete": false
+  },
+  "no_mutation_proof": {
+    "fixture_tree_id": "<opaque-fixture-tree-id>",
+    "before": {
+      "revision": 0,
+      "schema_version": 1
+    },
+    "disabled_mutation_probe": {
+      "route": "PUT /api/crt/trees/<opaque-fixture-tree-id>",
+      "status": 404,
+      "successful_crt_mutations_after_flag_off": 0,
+      "response_content_free": true
+    },
+    "after": {
+      "revision": 0,
+      "schema_version": 1
+    },
+    "canonical_content_preserved": true,
+    "revision_unchanged": true,
+    "schema_unchanged": true,
+    "proof_complete": false
+  },
+  "draft_preservation_proof": {
+    "scope": "active-owner-and-origin-only",
+    "pending_draft_count_before": 0,
+    "pending_draft_count_after": 0,
+    "queued_command_count_before": 0,
+    "queued_command_count_after": 0,
+    "opaque_record_scope_preserved": true,
+    "exact_in_flight_request_and_key_preserved": true,
+    "clear_or_discard_called": false,
+    "cross_owner_or_origin_read": false,
+    "proof_complete": false
+  },
+  "pending_receipt_reconciliation": {
+    "store": "BRAIN_BUDDY_DATA_DIR/crt_commands.sqlite3",
+    "pending_count_before": 0,
+    "reconciled_count": 0,
+    "reconciliation_errors": [],
+    "pending_count_after": 0,
+    "unreconciled_count": 0,
+    "reconciliation_complete": false
+  },
+  "backup_checkpoint": {
+    "identity": "<scrubbed-full-data-dir-checkpoint-id>",
+    "source": "BRAIN_BUDDY_DATA_DIR",
+    "full_directory_included": true,
+    "included_coordinated_stores": [
+      "tree-json-and-index-files",
+      "tasks.sqlite3",
+      "crt_commands.sqlite3",
+      "sqlite-wal-and-shm-sidecars"
+    ],
+    "writers_quiesced": true,
+    "platform_readback_verified": false,
+    "disposable_restore_verified": false
+  },
+  "schema_revision_compatibility": {
+    "stage_b_fixture_schema_version": 1,
+    "stage_b_fixture_revision_before": 0,
+    "stage_a_reader_booted_from_checkpoint": false,
+    "stage_a_reader_preserved_schema_version": true,
+    "stage_a_reader_preserved_revision": true,
+    "tree_and_index_coherent": true,
+    "receipts_coherent_after_reconciliation": true,
+    "public_projection_omits_last_command_id": true,
+    "compatibility_proof_complete": false
+  },
+  "result": {
+    "status": "NOT_RUN",
+    "rollback_authorized": false,
+    "flag_left_off_on_abort": true,
+    "abort_conditions_observed": [],
+    "notes": "Template only; replace placeholders and NOT_RUN values with scrubbed drill observations. Do not use this file as production deployment evidence."
+  }
+}

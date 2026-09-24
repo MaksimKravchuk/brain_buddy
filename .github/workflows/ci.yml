@@ -266,6 +266,7 @@ jobs:
 
       - name: Validate feature specs
         run: |
+          make check-specs
           python3 -m unittest scripts/test_check_spec_kit_specs.py -v
           python3 scripts/check_spec_kit_specs.py
           python3 -m unittest scripts/test_validate_pre_freeze_receipt.py -v
@@ -1017,9 +1018,17 @@ jobs:
       BRAIN_BUDDY_FRONTEND_IMAGE: brain-buddy-frontend:ci
       BRAIN_BUDDY_A2A_HELLOWORLD_IMAGE: brain-buddy-a2a-helloworld:ci
       BRAIN_BUDDY_HERMES_A2A_IMAGE: brain-buddy-hermes-a2a:ci
+      # Pull-request runs must bind evidence to the reviewed head rather than
+      # GitHub's synthetic merge commit. Non-PR runs bind to github.sha.
+      BRAIN_BUDDY_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact candidate checkout
+        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7

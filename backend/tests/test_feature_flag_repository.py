@@ -136,6 +136,62 @@ def test_010_FR_004_a_fresh_data_directory_reads_healthy_with_all_four_rows(
         assert overlay.flags[flag].selected_users == ()
 
 
+def test_019_FR_001_fresh_store_seeds_crt_canvas_off(tmp_path: Path) -> None:
+    """A fresh runtime store contains the default-OFF CRT rollout row."""
+
+    overlay = _repo(tmp_path).read()
+
+    assert overlay.degraded is False
+    assert overlay.flags["crt_canvas"].mode is FlagMode.OFF
+    assert overlay.flags["crt_canvas"].selected_users == ()
+
+
+def test_019_FR_001_existing_four_row_store_adds_crt_canvas_off(
+    tmp_path: Path,
+) -> None:
+    """An already-migrated deployment gains only the new default-OFF row."""
+
+    repo = _repo(tmp_path)
+    _set_mode(repo, "voice_brain_dump", FlagMode.ON)
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        conn.execute("DELETE FROM feature_flags WHERE flag = ?", ("crt_canvas",))
+        conn.commit()
+
+    upgraded = FeatureFlagOverrideRepository(tmp_path / "data").read()
+
+    assert upgraded.degraded is False
+    assert upgraded.flags["crt_canvas"] == FlagOverride(mode=FlagMode.OFF)
+    assert upgraded.flags["voice_brain_dump"].mode is FlagMode.ON
+
+
+@pytest.mark.parametrize("mode", [FlagMode.OFF, FlagMode.ON], ids=["off", "on"])
+def test_019_FR_001_019_SC_006_reconstruction_accepts_retained_cohort(
+    tmp_path: Path, mode: FlagMode
+) -> None:
+    """019-FR-001 019-SC-006: migration retains a valid cohort in OFF/ON.
+
+    A cohort is intentionally retained when its flag mode changes. Rebuilding
+    the missing CRT row must therefore accept that canonical retained cohort
+    and keep the complete managed inventory healthy.
+    """
+
+    repo = _repo(tmp_path)
+    _set_mode(repo, "voice_brain_dump", FlagMode.SELECTED_USERS)
+    _add_user(repo, "voice_brain_dump", "user_retained")
+    _set_mode(repo, "voice_brain_dump", mode)
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        conn.execute("DELETE FROM feature_flags WHERE flag = ?", ("crt_canvas",))
+        conn.commit()
+
+    reconstructed = FeatureFlagOverrideRepository(tmp_path / "data").read()
+
+    assert reconstructed.degraded is False
+    assert reconstructed.flags["crt_canvas"] == FlagOverride(mode=FlagMode.OFF)
+    assert reconstructed.flags["voice_brain_dump"] == FlagOverride(
+        mode=mode, selected_users=("user_retained",)
+    )
+
+
 def test_012_FR_009_fresh_store_forces_autocomplete_off_despite_environment(
     tmp_path: Path,
 ) -> None:
@@ -153,6 +209,7 @@ def test_012_FR_009_fresh_store_forces_autocomplete_off_despite_environment(
         "mobile_task_classification",
         "external_agent_relay",
         "task_title_autocomplete",
+        "crt_canvas",
     }
     assert overlay.flags["task_title_autocomplete"].mode is FlagMode.OFF
 
@@ -625,17 +682,18 @@ def test_010_FR_001_a_malformed_legacy_entry_falls_back_to_the_env_baseline(
 # ---------------------------------------------------------------------------
 
 
-def test_010_DD_15_migration_seeds_exactly_the_four_managed_flags_plus_a_ledger_row(
+def test_010_DD_15_migration_seeds_exactly_the_managed_flags_plus_a_ledger_row(
     tmp_path: Path,
 ) -> None:
     """A fresh data directory ends up with one SQLite row per managed flag,
-    including the default-OFF autocomplete flag, plus a migration ledger."""
+    including later default-OFF flags, plus a migration ledger."""
 
     assert set(MANAGED_FLAGS) == {
         "voice_brain_dump",
         "mobile_task_classification",
         "external_agent_relay",
         "task_title_autocomplete",
+        "crt_canvas",
     }
 
     _sqlite_repo(tmp_path)

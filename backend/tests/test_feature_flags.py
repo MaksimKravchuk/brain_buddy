@@ -52,6 +52,20 @@ def test_registry_declares_at_least_one_allow_listed_flag() -> None:
     assert "delivery_canary" in KNOWN_FEATURE_FLAGS
 
 
+def test_019_FR_001_crt_canvas_is_a_runtime_managed_flag() -> None:
+    """The CRT rollout flag is server-owned and never environment-owned."""
+
+    with allure.step("Inspect the declared feature-flag ownership sets"):
+        assert "crt_canvas" in KNOWN_FEATURE_FLAGS
+        assert "crt_canvas" in RUNTIME_MANAGED_FLAGS
+        assert "crt_canvas" not in ENVIRONMENT_OWNED_FLAGS
+        allure.attach(
+            "known=true\nruntime_managed=true\nenvironment_owned=false",
+            name="CRT feature-flag ownership evidence",
+            attachment_type=allure.attachment_type.TEXT,
+        )
+
+
 def test_010_DD_15_runtime_states_hold_only_the_environment_owned_flag() -> None:
     """Single authority (DD-15): this configuration is not a second answer.
 

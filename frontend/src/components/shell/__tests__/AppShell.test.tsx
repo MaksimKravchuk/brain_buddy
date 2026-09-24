@@ -476,6 +476,7 @@ describe("AppShell account menu", () => {
     const user = userEvent.setup();
     const logout = vi.fn(async () => {
       useAuthStore.setState({ user: null, status: "anon" });
+      return true;
     });
     act(() => {
       useAuthStore.setState({ logout });

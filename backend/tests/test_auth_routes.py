@@ -283,6 +283,7 @@ def test_010_SC_003_feature_flags_key_set_is_exactly_known_feature_flags(
         "mobile_task_classification",
         "external_agent_relay",
         "task_title_autocomplete",
+        "crt_canvas",
     }
 
 

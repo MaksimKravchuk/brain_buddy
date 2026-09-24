@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D-06 · Destructive conflict confirmation</title>
+<style>
+:root{--sky:#0ea5e9;--sky-700:#0369a1;--base:#f8fafc;--raised:#fff;--sunken:#f1f5f9;--ink:#0f172a;--ink-2:#334155;--muted:#475569;--line:#e2e8f0;--rose:#be123c;--rose-bg:#fff1f2;--rose-line:#fecdd3;--shadow:0 20px 56px rgba(15,23,42,.22);--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5)}
+*{box-sizing:border-box}html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:var(--ink);background:var(--base)}button{font:inherit}button:focus-visible{outline:0;box-shadow:var(--focus)}
+.app{height:100vh;min-width:1024px;display:flex;flex-direction:column;overflow:hidden}.top{height:64px;display:flex;align-items:center;gap:16px;padding:0 20px;background:#fff;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600}.sprout{color:var(--sky)}.divider{height:28px;width:1px;background:var(--line)}.tree{font-size:15px;font-weight:600}.status{margin-left:auto;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:999px;padding:7px 10px;font-size:12px}.avatar{width:32px;height:32px;border:0;border-radius:50%;background:#e0e7ff;color:#3730a3;font-weight:600}
+.main{position:relative;flex:1;background:#fbfdff;background-image:radial-gradient(#cbd5e1 1px,transparent 1px);background-size:20px 20px;overflow:hidden}.node{position:absolute;width:190px;min-height:82px;padding:16px;display:grid;place-items:center;text-align:center;border:1px solid var(--line);border-radius:18px 12px 12px 18px;background:#fff;font-size:13px;font-weight:600}.n1{left:260px;top:180px;background:#ef4444;color:#fff}.n2{left:360px;top:420px}.n3{left:610px;top:420px}.inspector{position:absolute;right:0;top:0;bottom:0;width:320px;border-left:1px solid var(--line);background:var(--sunken);padding:22px}.skeleton{height:38px;border-radius:8px;background:#e2e8f0;margin:10px 0}.scrim{position:fixed;inset:0;background:rgba(15,23,42,.36);backdrop-filter:blur(3px)}
+.dialog{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:540px;border:1px solid var(--line);border-radius:20px;background:var(--raised);box-shadow:var(--shadow);padding:24px}.head{display:flex;align-items:flex-start;gap:12px}.icon{width:36px;height:36px;display:grid;place-items:center;flex:0 0 auto;border:1px solid var(--rose-line);border-radius:10px;background:var(--rose-bg);color:var(--rose);font-weight:700}.dialog h1{margin:0;font-size:21px;line-height:1.25;letter-spacing:-.015em}.intro{margin:6px 0 18px;color:var(--muted);font-size:13px;line-height:1.5}.changes{border:1px solid var(--rose-line);border-radius:12px;background:var(--rose-bg);padding:14px}.changes h2{margin:0 0 8px;color:#9f1239;font-size:12px;text-transform:uppercase;letter-spacing:.06em}.changes ul{margin:0;padding-left:20px;color:#881337;font-size:13px;line-height:1.55}.backup{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--sunken)}.backup p{margin:0;color:var(--muted);font-size:12px;line-height:1.4}.backup button,.actions button{min-height:40px;border-radius:8px;padding:0 14px;font-weight:600;cursor:pointer}.backup button{white-space:nowrap;border:1px solid var(--line);background:#fff;color:var(--ink-2)}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.back{border:1px solid var(--sky-700);background:var(--sky-700);color:#fff}.discard{border:1px solid var(--rose-line);background:#fff;color:#9f1239}.ref{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font:11px ui-monospace,SFMono-Regular,Menlo,monospace}
+</style>
+</head>
+<body>
+<div class="app">
+<header class="top" aria-label="Brain Buddy shell">
+  <div class="brand"><span class="sprout" aria-hidden="true">♧</span><span>Brain Buddy</span></div>
+  <div class="divider" aria-hidden="true"></div>
+  <div class="tree">Supply chain CRT</div>
+  <div class="status">Sync conflict · review complete</div>
+  <button class="avatar" aria-label="Signed in as internal user">I</button>
+</header>
+<main class="main" aria-label="Dimmed CRT canvas">
+  <div class="node n1">Customers churn within 30 days</div>
+  <div class="node n2">Onboarding feels abstract</div>
+  <div class="node n3">First value takes too long</div>
+  <aside class="inspector" aria-hidden="true"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton" style="height:110px"></div></aside>
+</main>
+<div class="scrim" aria-hidden="true"></div>
+<section class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-copy">
+  <div class="head">
+    <div class="icon" aria-hidden="true">!</div>
+    <div>
+      <h1 id="confirm-title">Discard 3 local edits?</h1>
+      <p id="confirm-copy" class="intro">You reviewed the differences and selected server revision 42. Continuing permanently removes these local edits from this browser before the server copy opens.</p>
+    </div>
+  </div>
+  <div class="changes">
+    <h2>Local edits that will be lost</h2>
+    <ul>
+      <li>Renamed “Onboarding is confusing” to “Onboarding feels abstract”</li>
+      <li>Moved “First value takes too long” below the main effect</li>
+      <li>Added the cause “Sample data is not installed on signup”</li>
+    </ul>
+  </div>
+  <div class="backup">
+    <p>Download the local draft first if you may need these edits later.</p>
+    <button type="button">Download local backup</button>
+  </div>
+  <div class="actions">
+    <button type="button" class="back" autofocus>Back to comparison</button>
+    <button type="button" class="discard">Discard 3 local edits &amp; use server copy</button>
+  </div>
+  <div class="ref">Support reference: CRT-7F3A · destructive choice not yet applied</div>
+</section>
+</div>
+</body>
+</html>

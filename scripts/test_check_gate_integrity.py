@@ -131,8 +131,8 @@ class InvariantEnforcementTests(unittest.TestCase):
                 tmp,
                 "scripts/spec_kit_planning_review.py",
                 lambda text: text.replace(
-                    'if missing_roles:\n        status = "escalated"',
-                    'if False:\n        status = "escalated"',
+                    'elif missing_roles or unknown_oracle_roles:\n        status = "escalated"',
+                    'elif False:\n        status = "escalated"',
                 ),
             )
             self.assertIn("missing mandatory evidence escalates", report)
@@ -213,15 +213,106 @@ class InvariantEnforcementTests(unittest.TestCase):
             )
             self.assertIn("check-specs runs the spec and manifest guards", report)
 
-    def test_dropping_the_degraded_marker_from_the_fallback_is_caught(self) -> None:
-        """A silent substitution is a correlated panel wearing its config."""
+    def test_dropping_feature_requirement_coverage_from_check_specs_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "Makefile",
+                lambda text: text.replace(
+                    "\tpython3 scripts/check_requirement_coverage.py specs/019-miro-like-crt-canvas\n",
+                    "",
+                ),
+            )
+            self.assertIn("check-specs runs feature requirement coverage", report)
+
+    def test_adding_claude_to_the_review_integrations_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = self._assert_invariant_fires(
                 tmp,
                 "scripts/spec_kit_planning_review.py",
-                lambda text: text.replace('"degraded": True', '"degraded": False'),
+                lambda text: text.replace(
+                    'INTEGRATION_CLI: dict[str, str] = {"codex": "codex"}',
+                    'INTEGRATION_CLI: dict[str, str] = {"codex": "codex", "claude": "claude"}',
+                ),
             )
-            self.assertIn("recorded as degraded", report)
+            self.assertIn("Codex is the only review integration", report)
+
+    def test_changing_a_review_lens_to_claude_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    '"integration": "codex"', '"integration": "claude"', 1
+                ),
+            )
+            self.assertIn("every review lens uses Codex", report)
+
+    def test_replacing_the_resolved_executable_with_a_bare_name_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    "            executable,\n            \"exec\",",
+                    "            INTEGRATION_CLI[\"codex\"],\n            \"exec\",",
+                ),
+            )
+            self.assertIn("resolved reviewer executable is used", report)
+
+    def test_removing_the_summarize_preflight_boundary_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    "    if not context_path.is_file():\n"
+                    "        raise ReviewError(\"Planning preflight was not completed for this run\")",
+                    "    if False:\n"
+                    "        raise ReviewError(\"Planning preflight was not completed for this run\")",
+                ),
+            )
+            self.assertIn("summarize requires preflight context", report)
+
+    def test_trusting_cached_risk_instead_of_recomputing_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    "    derived = derive_risk(feature_dir)\n"
+                    "    if isinstance(derived, str) and derived in DERIVABLE_RISKS:\n"
+                    "        risk = stricter_risk(risk, derived)",
+                    "    derived = context.get(\"derived_risk\")\n"
+                    "    if isinstance(derived, str) and derived in DERIVABLE_RISKS:\n"
+                    "        risk = stricter_risk(risk, derived)",
+                ),
+            )
+            self.assertIn("summarize recomputes derived risk", report)
+
+    def test_allowing_unknown_oracle_provenance_to_pass_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    "    elif missing_roles or unknown_oracle_roles:",
+                    "    elif missing_roles:",
+                ),
+            )
+            self.assertIn("unknown reviewer provenance escalates", report)
+
+    def test_weakening_codex_oracle_validation_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    'payload.get("integration") != "codex"',
+                    'payload.get("integration") != "claude"',
+                ),
+            )
+            self.assertIn("Codex oracle provenance is validated", report)
 
     def test_dropping_the_provenance_stamp_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -243,25 +334,19 @@ class InvariantEnforcementTests(unittest.TestCase):
             )
             self.assertIn("degradation reaches the summary", report)
 
-    def test_routing_a_failed_reviewer_to_a_fallback_is_caught(self) -> None:
-        """Absence may be substituted. Failure may not.
-
-        The mutation removes only run_review's own failure path. An unanchored
-        invariant would still match the identical guard in resolve_feature_dir
-        and pass, which is why the pattern is anchored inside run_review.
-        """
+    def test_ignoring_a_failed_reviewer_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = self._assert_invariant_fires(
                 tmp,
                 "scripts/spec_kit_planning_review.py",
                 lambda text: text.replace(
                     "    if result.returncode != 0:\n"
-                    "        # Deliberately not routed to the fallback.",
+                    "        # Reviewer failures stay hard failures.",
                     "    if False:\n"
-                    "        # Deliberately not routed to the fallback.",
+                    "        # Reviewer failures stay hard failures.",
                 ),
             )
-            self.assertIn("not routed to a fallback", report)
+            self.assertIn("reviewer failure stays a hard error", report)
 
     def test_dropping_provenance_from_the_report_is_caught(self) -> None:
         """Keep the write, drop the render: the trade ADR-0014 made, undone."""
@@ -296,6 +381,15 @@ class InvariantEnforcementTests(unittest.TestCase):
             )
             self.assertIn("CI runs the preserved-override guard", report)
 
+    def test_dropping_authoritative_check_specs_target_from_ci_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                ".github/workflows/ci.yml",
+                lambda text: text.replace("          make check-specs\n", ""),
+            )
+            self.assertIn("CI runs the authoritative check-specs target", report)
+
     def test_removing_a_mandatory_lens_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = self._assert_invariant_fires(
@@ -304,142 +398,6 @@ class InvariantEnforcementTests(unittest.TestCase):
                 lambda text: text.replace('        "privacy-consent-security",\n', ""),
             )
             self.assertIn("mandatory lenses", report)
-
-
-class BehaviouralMutationTests(unittest.TestCase):
-    """Regexes guard text. These guard the property.
-
-    Some mutations are beyond any pattern. Flip the fallback's `degraded` to
-    `False` and plant the literal `{"degraded": True}` in a comment below it,
-    and every invariant is satisfied while nothing is ever marked degraded.
-    Swap the two return branches and degradation is recorded for exactly the
-    wrong runtime, with all three literals still present. Both are dataflow
-    properties, and the only guard that survives them is running the mutant.
-
-    The harness runs a whole campaign on a simulated claude-only machine and
-    asks the summary what it recorded, which is the fact the gate reports.
-    """
-
-    SOURCE = ROOT / "scripts" / "spec_kit_planning_review.py"
-    EXPECTED = ["requirements-consistency", "testability-evidence"]
-
-    def setUp(self) -> None:
-        self.module = load_module()
-
-    def _load_mutant(self, tmp: Path, mutate):
-        path = tmp / "mutant.py"
-        path.write_text(
-            mutate(self.SOURCE.read_text(encoding="utf-8")), encoding="utf-8"
-        )
-        spec = importlib.util.spec_from_file_location("mutant", path)
-        if spec is None or spec.loader is None:
-            raise RuntimeError("Unable to load the mutant module")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    def _degraded_lenses(self, tmp: Path, mutate) -> list[str]:
-        """Run a campaign where only `claude` is on PATH; report what it saw."""
-        module = self._load_mutant(tmp, mutate)
-        root = tmp / "repo"
-        run_dir = root / ".specify" / "workflows" / "runs" / "run1"
-        (run_dir / "reviews").mkdir(parents=True)
-        (run_dir / "inputs.json").write_text(
-            json.dumps({"inputs": {"risk": "medium"}}), encoding="utf-8"
-        )
-        with mock.patch.object(
-            module.shutil,
-            "which",
-            lambda name: "/usr/bin/claude" if name == "claude" else None,
-        ):
-            for role in module.STANDARD_ROLES:
-                _config, oracle = module.resolve_oracle(role)
-                review = {
-                    "role": role,
-                    "verdict": "pass",
-                    "summary": "No concerns.",
-                    "reviewed_files": ["specs/006-example/spec.md"],
-                    "findings": [],
-                    "product_decisions": [],
-                    "oracle": oracle,
-                }
-                (run_dir / "reviews" / f"{role}.json").write_text(
-                    json.dumps(review), encoding="utf-8"
-                )
-            target = module.summarize(root=root, run_id="run1")
-        summary = json.loads(target.read_text(encoding="utf-8"))
-        return sorted(summary["degraded_lenses"])
-
-    def _mutant_source(self, tmp: Path, mutate) -> Path:
-        """The mutant laid out where `check_invariants` can read it."""
-        fake = tmp / "textcheck"
-        target = fake / "scripts" / "spec_kit_planning_review.py"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            mutate(self.SOURCE.read_text(encoding="utf-8")), encoding="utf-8"
-        )
-        return target
-
-    def _invariants_on(self, tmp: Path, mutate) -> list[str]:
-        source = self._mutant_source(tmp, mutate)
-        return [
-            invariant.name
-            for invariant in self.module.INVARIANTS
-            if invariant.path == "scripts/spec_kit_planning_review.py"
-            and not invariant.check(source.read_text(encoding="utf-8"))
-        ]
-
-    def test_clean_source_records_both_fallbacks(self) -> None:
-        """The harness must pass on an unmutated tree, or it proves nothing."""
-        with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(self._degraded_lenses(Path(tmp), lambda t: t), self.EXPECTED)
-
-    def test_a_planted_literal_cannot_fake_the_degraded_marker(self) -> None:
-        """The mutation no pattern can catch, caught by execution."""
-
-        def mutate(text: str) -> str:
-            return text.replace(
-                '"degraded": True,', '"degraded": False,  # {"degraded": True}'
-            )
-
-        with tempfile.TemporaryDirectory() as tmp:
-            # Stated as an assertion rather than a comment: the text layer is
-            # genuinely blind here, which is the whole argument for this class.
-            self.assertEqual(self._invariants_on(Path(tmp), mutate), [])
-            self.assertNotEqual(self._degraded_lenses(Path(tmp), mutate), self.EXPECTED)
-
-    def test_swapping_the_resolver_branches_is_caught(self) -> None:
-        """Degradation recorded for the runtime that ran as configured."""
-
-        def mutate(text: str) -> str:
-            return text.replace('"degraded": False,', '"degraded": SWAP,').replace(
-                '"degraded": True,', '"degraded": False,'
-            ).replace('"degraded": SWAP,', '"degraded": True,')
-
-        with tempfile.TemporaryDirectory() as tmp:
-            self.assertNotEqual(self._degraded_lenses(Path(tmp), mutate), self.EXPECTED)
-
-    def test_dropping_the_oracle_carry_across_is_caught(self) -> None:
-        """ADR-0014 names this as the easy-to-get-wrong step. Nothing textual
-        guards it: the write to disk stays, only the read back is lost."""
-
-        def mutate(text: str) -> str:
-            return text.replace('            review["oracle"] = payload["oracle"]', "            pass")
-
-        with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(self._invariants_on(Path(tmp), mutate), [])
-            self.assertNotEqual(self._degraded_lenses(Path(tmp), mutate), self.EXPECTED)
-
-    def test_never_collecting_the_degraded_role_is_caught(self) -> None:
-        def mutate(text: str) -> str:
-            return text.replace(
-                "        if oracle.get(\"degraded\") is True:\n"
-                "            degraded.append(role_name)",
-                "        if False:\n            degraded.append(role_name)",
-            )
-
-        with tempfile.TemporaryDirectory() as tmp:
-            self.assertNotEqual(self._degraded_lenses(Path(tmp), mutate), self.EXPECTED)
 
 
 class HashLayerTests(unittest.TestCase):

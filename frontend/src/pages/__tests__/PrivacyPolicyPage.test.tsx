@@ -57,15 +57,14 @@ describe("PrivacyPolicyPage", () => {
     renderPolicy();
 
     // docs/data-retention.md names this page as the user-facing summary that
-    // must stay in sync with it. The runtime store now covers four managed flags.
-    // from a rollout file into one SQLite store; the decided facts pinned
-    // here are what it holds, that purge scrubs it, and that it is outside
-    // the export.
+    // must stay in sync with it. The runtime store now covers five managed flags.
+    // The decided facts pinned here are what it holds, that purge scrubs it,
+    // and that it is outside the export.
     expect(screen.getByText(/one SQLite store/i)).toBeInTheDocument();
-    expect(screen.getByText(/covering four managed flags/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering five managed flags/i)).toBeInTheDocument();
     expect(screen.getByText(/holds only your account id per flag/i)).toBeInTheDocument();
     expect(screen.getByText(/scrubbed when your account is purged/i)).toBeInTheDocument();
-    expect(screen.getByText(/excluded from your data export/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering five managed flags:.*excluded from your data export/i)).toBeInTheDocument();
   });
 
   it("012-FR-007: names OpenAI's title-suggestion processing purpose", () => {
@@ -119,9 +118,41 @@ describe("PrivacyPolicyPage", () => {
     expect(retention).toHaveTextContent(/clear Brain Buddy site data/i);
   });
 
+  it("019-FR-020 discloses CRT browser-local recovery scope, retention, and purge limits", () => {
+    renderPolicy();
+    const retention = screen.getByRole("heading", { name: /how long we keep it/i }).closest("section");
+
+    expect(retention).toHaveTextContent(/graph\/layout content/i);
+    expect(retention).toHaveTextContent(/immutable in-flight save snapshot/i);
+    expect(retention).toHaveTextContent(/queued commands and idempotency-key UUID/i);
+    expect(retention).toHaveTextContent(/owner\/origin\/tree-scoped/i);
+    expect(retention).toHaveTextContent(/not included in your data export/i);
+    expect(retention).toHaveTextContent(/30 days without edit\/use/i);
+    expect(retention).toHaveTextContent(/stale draft stays outside the canvas/i);
+    expect(retention).toHaveTextContent(/backup.*recover.*discard/i);
+    expect(retention).toHaveTextContent(/recovering resets the inactivity window/i);
+    expect(retention).toHaveTextContent(/sign-out.*account-switch.*account-deletion/i);
+    expect(retention).toHaveTextContent(/active origin/i);
+    expect(retention).toHaveTextContent(/server cannot purge.*other browser\/device/i);
+    expect(retention).toHaveTextContent(/unencrypted.*device backups/i);
+    expect(retention).toHaveTextContent(/online-first.*no cross-device offline merge/i);
+  });
+
+  it("019-FR-020 distinguishes content-free CRT observability from exported and purged data", () => {
+    renderPolicy();
+    const retention = screen.getByRole("heading", { name: /how long we keep it/i }).closest("section");
+
+    expect(retention).toHaveTextContent(/CRT operational log lines/);
+    expect(retention).toHaveTextContent(/correlation id.*opaque tree id.*operation.*revision/i);
+    expect(retention).toHaveTextContent(/never.*graph text.*request or response bodies.*idempotency keys/i);
+    expect(retention).toHaveTextContent(/hosting platform.*log window/i);
+    expect(retention).toHaveTextContent(/cannot erase platform logs/i);
+    expect(retention).toHaveTextContent(/excluded from.*data export/i);
+  });
+
   it("records the date the policy last changed", () => {
     renderPolicy();
-    expect(screen.getByText(/September 11, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/September 20, 2026/)).toBeInTheDocument();
   });
 
   it("links back to sign in", () => {

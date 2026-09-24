@@ -63,65 +63,29 @@ Five lenses run in parallel, capped at `max_concurrency: 5`:
 
 | role | lens | runtime |
 |---|---|---|
-| `requirements-consistency` | contradictions, missing acceptance behavior, spec↔plan drift | codex |
-| `architecture-consistency` | boundaries, contracts, data ownership, ADR alignment | Claude subagent |
-| `testability-evidence` | proportionate evidence per acceptance outcome | codex |
-| `privacy-consent-security` | consent, retention, purge, export, owner scoping, PII | Claude subagent |
-| `ux-accessibility-mobile` | states, keyboard/focus, mobile viability, ADR-0002 resume | Claude subagent |
+| `requirements-consistency` | contradictions, missing acceptance behavior, spec↔plan drift | Codex |
+| `architecture-consistency` | boundaries, contracts, data ownership, ADR alignment | Codex |
+| `testability-evidence` | proportionate evidence per acceptance outcome | Codex |
+| `privacy-consent-security` | consent, retention, purge, export, owner scoping, PII | Codex |
+| `ux-accessibility-mobile` | states, keyboard/focus, mobile viability, ADR-0002 resume | Codex |
 
 Plus `adversarial-high-risk` when risk is `high`.
 
-The split is deliberate, not incidental. Three lenses used to share one model,
-which is one opinion counted three times rather than three independent
-opinions; ADR-0012 moved `architecture-consistency` off codex so that no model
-covers a majority of the panel. Tests assert that property rather than leaving
-it to convention — but they assert it of the panel **as configured**. The panel
-that actually runs can differ, which is what the next section is about.
+ADR-0024 intentionally uses the installed Codex runtime for every lens. This is
+a single-provider, model-correlated panel: the lenses are distinct rubrics, not
+independent model votes. The summary must report that provenance honestly. A
+missing Codex CLI or a non-zero reviewer exit fails closed; there is no Claude
+dependency and no runtime fallback.
 
-**The `codex` CLI is not installed everywhere.** `resolve_oracle` routes around
-an absent runtime instead of failing closed on it: the two codex lenses fall
-back to `claude`/`sonnet`, and the campaign can reach `approved` on a
-single-runtime machine (ADR-0014). Before that fallback existed those lenses
-wrote no review, the aggregator counted missing mandatory evidence, and every
-campaign returned `escalated` regardless of the artifacts.
-
-The substitution is recorded, never assumed. Each review carries an `oracle`
-block stamped by the harness — not by the reviewer, which cannot author its own
-provenance — and the summary reports `degraded_lenses`, `panel_correlated` and
-`panel_oracles`. Read them: with both fallbacks active, `sonnet` holds a
-majority of a five-lens panel, so the lenses agreeing with each other is weaker
-corroboration than the panel's size suggests.
-
-Two things the fallback deliberately does not do. A reviewer that is installed
-and **fails** still raises rather than retrying elsewhere — absence is a gap, a
-non-zero exit is a defect in evidence that was produced. And a lens that
-produces no review at all is still missing mandatory evidence and still returns
-**`escalated`**, not a pass — a partial campaign is never reported as a clean
-one.
-
-The three Claude lenses do **not** run as in-session subagents. `build_review_command`
-spawns a separate headless process per lens:
-
-```
-claude -p --model <model> --effort max --permission-mode plan \
-       --allowedTools Read,Grep,Glob --no-session-persistence \
-       --output-format json --json-schema <review.schema.json> <prompt>
-```
-
-This matters when you change a lens. The `.claude/agents/*.md` files supply the
-**rubric body only** — the prompt tells the process to read the file and apply
-it verbatim. Their frontmatter is inert: `--allowedTools` is hardcoded in the
-command above, and the model comes from `ROLE_CONFIGS` in
-`scripts/spec_kit_planning_review.py`, not from the agent's `model:` line. Those
-two places state the model separately and nothing keeps them in sync, so change
-both or neither.
+Each lens runs as a separate read-only, ephemeral `codex exec` process with the
+review JSON schema. Rubric files under `.claude/agents/*.md` remain rubric text
+only — their directory and frontmatter do not select the execution runtime.
 
 The agent files remain the single source of **rubric** truth — the driver points
 reviewers at them rather than restating the rubric, so the rubric cannot drift.
 Three lenses carry one: `architecture-consistency-reviewer`,
-`security-privacy-reviewer`, `ux-a11y-reviewer`. The two codex lenses
-(`requirements-consistency`, `testability-evidence`) have no agent file; their
-whole instruction is the `focus` string in `ROLE_CONFIGS`.
+`security-privacy-reviewer`, `ux-a11y-reviewer`. The other two use the focus
+text in `ROLE_CONFIGS`.
 
 Each reviewer returns JSON valid against
 `.specify/workflows/speckit/review.schema.json`, written to
@@ -135,10 +99,10 @@ python3 scripts/spec_kit_planning_review.py summarize --run-id "<run-id>"
 
 The gate rule, in order (ADR-0012):
 
-1. Any configured lens produced no review → **`escalated`**. Missing mandatory
-   evidence never resolves to a pass, and it is checked first: a campaign that
-   did not fully run cannot be trusted to have surfaced the product decisions
-   either.
+1. Any configured lens produced no review or lacks harness-stamped oracle
+   provenance → **`escalated`**. Missing or hand-written mandatory evidence
+   never resolves to a pass, and it is checked first: a campaign that did not
+   fully run cannot be trusted to have surfaced the product decisions either.
 2. Any `product_decisions`, or any reviewer verdict of
    `product-decision-required` → **`product-decision-required`**. Needs the
    human.

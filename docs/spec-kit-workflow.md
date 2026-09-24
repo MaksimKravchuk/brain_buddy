@@ -11,7 +11,7 @@ change, or single-surface enhancement.
 - Installed integration: Claude Code skills under `.claude/skills/`. The Codex
   tree under `.agents/skills/` was removed — nobody authored specs in it. The
   review gate's use of the `codex` CLI is a separate thing and is unaffected;
-  see "Degraded runs" below
+  see "Runtime availability" below
 - Scope: feature specification and planning artifacts under `specs/`, plus the
   BrainBuddy-local stages that bracket them — business intake, design, the
   portable spec review gate (ADR-0011), acceptance and the delivery report
@@ -239,8 +239,9 @@ be replayed into another campaign and goes stale when the spec is edited.
 
 **Aggregation rule**, in order:
 
-1. Any configured lens produced no review → `escalated`. Missing mandatory
-   evidence never resolves to a pass, and it is checked first.
+1. Any configured lens produced no review or lacks harness-stamped oracle
+   provenance → `escalated`. Missing or hand-written mandatory evidence never
+   resolves to a pass, and it is checked first.
 2. Any `product_decisions`, or any reviewer verdict of
    `product-decision-required` → `product-decision-required`. Needs the human.
 3. Any reviewer verdict of `changes-required`, or any `blocking` finding →
@@ -252,10 +253,11 @@ A reviewer's verdict is gate-blocking on its own; the aggregator does not
 re-derive it from finding severities. A malformed review still raises — absence
 and corruption are different.
 
-**Panel independence.** No model covers a majority of the five lenses and the
-panel spans two providers, both asserted by tests. Three lenses sharing one
-model is one opinion counted three times, which the aggregation rule would read
-as corroboration.
+**Panel provenance.** Per ADR-0024 all five lenses use the installed Codex
+runtime. The panel is therefore intentionally single-provider and
+model-correlated: the lenses are distinct rubrics, not independent model votes.
+The summary reports `panel_correlated`, `single_provider_panel`, and the oracle
+histograms so agreement is never presented as cross-provider corroboration.
 
 **Campaign cap: two.** Fresh reviewer sessions re-litigate artifacts from
 scratch, so finding counts diverge between runs even as every verified defect
@@ -263,18 +265,12 @@ is fixed. Carry campaign 1's findings forward into campaign 2. After campaign
 2: land the fixes, defer the residue into explicit open lanes, or close by
 founder acceptance with the full record (see below).
 
-**Degraded runs.** Two of the five lenses shell out to the `codex` CLI. Where
-it is absent they fall back to `claude`/`sonnet` rather than failing, because a
-gate that can never be reached is a gate people route around (ADR-0014). The
-substitution is never silent: each review records which oracle actually ran,
-and the summary carries `degraded_lenses`, `panel_correlated` and
-`panel_oracles`. A degraded campaign may reach `approved`, but it cannot look
-undegraded.
-
-A reviewer that is *installed and fails* still raises — absence is a gap a
-fallback can fill, failure is a defect in evidence that was produced. A lens
-that produces no review at all is still missing mandatory evidence and still
-returns `escalated`. A partial campaign is never reported as a clean one.
+**Runtime availability.** Every lens shells out to the `codex` CLI. There is no
+Claude dependency or runtime fallback. Missing Codex fails closed before a lens
+starts; a reviewer process that exits non-zero is a hard evidence failure. A
+lens that produces no review is still missing mandatory evidence and returns
+`escalated`. Historical review files may still carry ADR-0014 degradation
+metadata, which the summary and renderer continue to report.
 
 For Claude Code and Hermes Agent in this repository, Spec Kit is installed as
 skills, so the invocation names use hyphens:

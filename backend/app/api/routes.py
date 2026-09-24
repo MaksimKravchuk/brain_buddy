@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+import uuid
+
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 
 from app.api.contracts import error_responses
 from app.api.dependencies import (
+    get_crt_command_service,
     get_current_user,
     get_node_service,
     get_relation_service,
     get_tree_service,
     get_validation_service,
     get_version_service,
+    require_crt_exposure,
+    require_legacy_tree_mutation,
 )
+from app.exceptions import ValidationFailure
 from app.schemas import (
     AiFeedbackRequest,
     AiFeedbackResponse,
@@ -37,6 +43,7 @@ from app.schemas import (
 from app.schemas.auth import User
 from app.schemas.domain import TreeVersionRef
 from app.services import (
+    CrtCommandService,
     NodeService,
     RelationService,
     TreeService,
@@ -47,6 +54,178 @@ from app.services import (
 router = APIRouter(tags=["trees"])
 
 
+@router.get(
+    "/crt/exposure",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(400, 401, 404, 503),
+    tags=["crt"],
+)
+def probe_crt_exposure(
+    _current_user: User = Depends(require_crt_exposure),
+) -> Response:
+    """Return a content-free success only when CRT exposure is effective."""
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/crt/trees",
+    response_model=list[TreeListItem],
+    responses=error_responses(400, 401, 404, 503),
+    tags=["crt"],
+)
+def list_crt_trees(
+    current_user: User = Depends(require_crt_exposure),
+    tree_service: TreeService = Depends(get_tree_service),
+) -> list[TreeListItem]:
+    """List only the authenticated owner's trees behind CRT exposure."""
+
+    entries = tree_service.list_trees(owner_id=current_user.id)
+    return [
+        TreeListItem(
+            id=entry.id,
+            name=entry.title,
+            updated_at=entry.updated_at,
+            owner_id=entry.owner_id,
+        )
+        for entry in entries
+    ]
+
+
+@router.post(
+    "/crt/trees",
+    response_model=TreeDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 404, 409, 422, 503),
+    tags=["crt"],
+)
+def create_crt_tree(
+    payload: TreeCreateRequest,
+    request: Request,
+    current_user: User = Depends(require_crt_exposure),
+    command_service: CrtCommandService = Depends(get_crt_command_service),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> TreeDetailResponse:
+    result = command_service.create_tree(
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=_require_idempotency_key(idempotency_key),
+        normalized_route=request.scope["route"].path,
+        require_live_owner=True,
+    )
+    if result.response is None:  # pragma: no cover - create command invariant
+        raise RuntimeError("CRT create completed without a response body")
+    return result.response
+
+
+@router.post(
+    "/crt/trees/import",
+    response_model=TreeDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 401, 404, 409, 422, 503),
+    tags=["crt"],
+)
+def import_crt_tree(
+    payload: TreeImportRequest,
+    request: Request,
+    current_user: User = Depends(require_crt_exposure),
+    command_service: CrtCommandService = Depends(get_crt_command_service),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> TreeDetailResponse:
+    result = command_service.import_tree(
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=_require_idempotency_key(idempotency_key),
+        normalized_route=request.scope["route"].path,
+        require_live_owner=True,
+    )
+    return result.response  # type: ignore[return-value]
+
+
+@router.get(
+    "/crt/trees/{tree_id}",
+    response_model=TreeDetailResponse,
+    responses=error_responses(400, 401, 404, 422, 503),
+    tags=["crt"],
+)
+def get_crt_tree(
+    tree_id: str,
+    current_user: User = Depends(require_crt_exposure),
+    tree_service: TreeService = Depends(get_tree_service),
+) -> TreeDetailResponse:
+    """Load one owner-scoped tree through the read-only CRT facade."""
+
+    tree = tree_service.get_tree_for_owner(tree_id, owner_id=current_user.id)
+    return tree_service.to_response(tree)
+
+
+@router.put(
+    "/crt/trees/{tree_id}",
+    response_model=TreeDetailResponse,
+    responses=error_responses(400, 401, 404, 409, 422, 503),
+    tags=["crt"],
+)
+def update_crt_tree(
+    tree_id: str,
+    payload: TreeUpdateRequest,
+    request: Request,
+    current_user: User = Depends(require_crt_exposure),
+    command_service: CrtCommandService = Depends(get_crt_command_service),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> TreeDetailResponse:
+    result = command_service.update_tree(
+        tree_id,
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=_require_idempotency_key(idempotency_key),
+        normalized_route=request.scope["route"].path,
+        require_live_owner=True,
+    )
+    if result.response is None:  # pragma: no cover - update command invariant
+        raise RuntimeError("CRT update completed without a response body")
+    return result.response
+
+
+@router.delete(
+    "/crt/trees/{tree_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(400, 401, 404, 409, 422, 503),
+    tags=["crt"],
+)
+def delete_crt_tree(
+    tree_id: str,
+    request: Request,
+    expected_revision: int = Query(..., ge=1),
+    current_user: User = Depends(require_crt_exposure),
+    command_service: CrtCommandService = Depends(get_crt_command_service),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> Response:
+    result = command_service.delete_tree(
+        tree_id,
+        expected_revision=expected_revision,
+        owner_id=current_user.id,
+        idempotency_key=_require_idempotency_key(idempotency_key),
+        normalized_route=request.scope["route"].path,
+        require_live_owner=True,
+    )
+    return Response(status_code=result.status_code)
+
+
+@router.post(
+    "/crt/trees/{tree_id}/export",
+    response_model=TreeExportResponse,
+    responses=error_responses(400, 401, 404, 422, 503),
+    tags=["crt"],
+)
+def export_crt_tree(
+    tree_id: str,
+    current_user: User = Depends(require_crt_exposure),
+    tree_service: TreeService = Depends(get_tree_service),
+) -> TreeExportResponse:
+    tree = tree_service.get_tree_for_owner(tree_id, owner_id=current_user.id)
+    return TreeExportResponse(tree=tree_service.to_response(tree))
+
+
 @router.post(
     "/trees",
     response_model=TreeDetailResponse,
@@ -55,7 +234,7 @@ router = APIRouter(tags=["trees"])
 )
 def create_tree(
     payload: TreeCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> TreeDetailResponse:
     tree = tree_service.create_tree(payload, owner_id=current_user.id)
@@ -103,7 +282,7 @@ def get_tree(
 def update_tree(
     tree_id: str,
     payload: TreeUpdateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> TreeDetailResponse:
     tree = tree_service.update_tree(tree_id, payload, owner_id=current_user.id)
@@ -117,7 +296,7 @@ def update_tree(
 )
 def delete_tree(
     tree_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> None:
     tree_service.delete_tree(tree_id, owner_id=current_user.id)
@@ -131,7 +310,7 @@ def delete_tree(
 )
 def import_tree(
     payload: TreeImportRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> TreeDetailResponse:
     tree = tree_service.import_tree(payload.tree, owner_id=current_user.id)
@@ -176,7 +355,7 @@ def ai_feedback(
 def create_node(
     tree_id: str,
     payload: NodeCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     node_service: NodeService = Depends(get_node_service),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> NodeResponse:
@@ -194,7 +373,7 @@ def update_node(
     tree_id: str,
     node_id: str,
     payload: NodeUpdateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     node_service: NodeService = Depends(get_node_service),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> NodeResponse:
@@ -212,7 +391,7 @@ def delete_node(
     tree_id: str,
     node_id: str,
     cascade: bool = Query(default=False),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     node_service: NodeService = Depends(get_node_service),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> None:
@@ -229,7 +408,7 @@ def delete_node(
 def create_relation(
     tree_id: str,
     payload: RelationCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     relation_service: RelationService = Depends(get_relation_service),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> RelationResponse:
@@ -247,7 +426,7 @@ def update_relation(
     tree_id: str,
     relation_id: str,
     payload: RelationUpdateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     relation_service: RelationService = Depends(get_relation_service),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> RelationResponse:
@@ -264,7 +443,7 @@ def update_relation(
 def delete_relation(
     tree_id: str,
     relation_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     relation_service: RelationService = Depends(get_relation_service),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> None:
@@ -281,7 +460,7 @@ def delete_relation(
 def create_version(
     tree_id: str,
     payload: VersionCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     version_service: VersionService = Depends(get_version_service),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> VersionListItem:
@@ -321,7 +500,7 @@ def list_versions(
 def restore_version(
     tree_id: str,
     version_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     version_service: VersionService = Depends(get_version_service),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> TreeDetailResponse:
@@ -338,7 +517,7 @@ def restore_version(
 def delete_version(
     tree_id: str,
     version_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     version_service: VersionService = Depends(get_version_service),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> None:
@@ -356,7 +535,7 @@ def validate_node(
     tree_id: str,
     node_id: str,
     payload: ValidationRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_legacy_tree_mutation),
     validation_service: ValidationService = Depends(get_validation_service),
     tree_service: TreeService = Depends(get_tree_service),
 ) -> ValidationResponse:
@@ -389,6 +568,27 @@ def get_validation_history(
         for entry in history
     ]
     return ValidationHistoryResponse(items=items)
+
+
+def _require_idempotency_key(value: str | None) -> str:
+    if value is None:
+        raise ValidationFailure(
+            "Idempotency-Key is required for CRT mutations.",
+            detail={"reason": "missing_idempotency_key"},
+        )
+    try:
+        parsed = uuid.UUID(value)
+    except ValueError as exc:
+        raise ValidationFailure(
+            "Idempotency-Key must be a canonical UUID.",
+            detail={"reason": "invalid_idempotency_key"},
+        ) from exc
+    if str(parsed) != value:
+        raise ValidationFailure(
+            "Idempotency-Key must be a canonical UUID.",
+            detail={"reason": "invalid_idempotency_key"},
+        )
+    return value
 
 
 def _version_ref_to_item(ref: TreeVersionRef) -> VersionListItem:

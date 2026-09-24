@@ -1,0 +1,367 @@
+.crt-canvas-shell {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.crt-canvas-definitions {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.crt-canvas-toolbar {
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 1rem 1.25rem;
+}
+
+.crt-canvas-toolbar h1,
+.crt-inspector-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.crt-canvas-eyebrow,
+.crt-inspector-eyebrow {
+  margin: 0 0 0.2rem;
+  color: #0369a1;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.crt-canvas-toolbar-actions,
+.crt-canvas-toolbar-actions button {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.crt-canvas-toolbar-actions button,
+.crt-tool-rail button,
+.crt-zoom-controls button {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.55rem;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.crt-canvas-toolbar-actions button {
+  padding: 0.45rem 0.7rem;
+}
+
+.crt-save-status {
+  color: #047857;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.crt-shortcut-disclosure {
+  z-index: 6;
+  border-bottom: 1px solid #bae6fd;
+  background: #f0f9ff;
+  padding: 0.8rem 1.25rem;
+  color: #0f172a;
+}
+
+.crt-shortcut-disclosure h2 {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.crt-shortcut-disclosure ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.3rem 1.25rem;
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.crt-shortcut-disclosure kbd {
+  border: 1px solid #bae6fd;
+  border-radius: 0.25rem;
+  background: #fff;
+  padding: 0.05rem 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+}
+
+.crt-canvas-workspace {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 3.25rem minmax(0, 1fr) 18rem;
+}
+
+.crt-tool-rail {
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  border-right: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.93);
+  padding: 0.75rem 0.5rem;
+}
+
+.crt-tool-rail button {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  font-size: 1.1rem;
+}
+
+.crt-flow-region {
+  position: relative;
+  min-height: 0;
+}
+
+.crt-flow-region .react-flow__node {
+  visibility: visible !important;
+}
+
+.crt-flow-region .react-flow {
+  background: #f8fafc;
+}
+
+.crt-zoom-controls {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.35rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+}
+
+.crt-zoom-controls button {
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.05rem;
+}
+
+.crt-zoom-controls span {
+  min-width: 3.4rem;
+  color: #475569;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.crt-card-node {
+  position: relative;
+  width: 220px;
+}
+
+.crt-card-button {
+  display: flex;
+  width: 220px;
+  min-height: 92px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.55rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.85rem;
+  background: #fff;
+  padding: 0.9rem 1rem;
+  color: #0f172a;
+  cursor: grab;
+  text-align: left;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.09);
+}
+
+.crt-card-button:active {
+  cursor: grabbing;
+}
+
+.crt-card-editor {
+  display: block;
+  width: 220px;
+  min-height: 92px;
+  border: 2px solid #0284c7;
+  border-radius: 0.85rem;
+  background: #fff;
+  padding: 0.9rem 1rem;
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.9rem;
+  outline: 3px solid rgba(14, 165, 233, 0.18);
+}
+
+.crt-card-connector {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border: 1px solid #0284c7;
+  border-radius: 999px;
+  background: #fff;
+  color: #0369a1;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.crt-card-connector-target {
+  bottom: -0.85rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.crt-card-connector-source {
+  top: -0.85rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.crt-card-connector:focus-visible,
+.crt-card-editor:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+.crt-card-node.is-selected .crt-card-button,
+.crt-card-button[aria-pressed="true"] {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.18), 0 8px 18px rgba(15, 23, 42, 0.09);
+}
+
+.crt-card-badge {
+  border-radius: 999px;
+  background: #e0f2fe;
+  padding: 0.18rem 0.45rem;
+  color: #075985;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.crt-card-label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.crt-card-handle {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  background: #0284c7;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.crt-card-handle.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.crt-inspector {
+  z-index: 5;
+  overflow: auto;
+  border-left: 1px solid #e2e8f0;
+  background: #fff;
+  padding: 1.25rem;
+}
+
+.crt-inspector-label {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 1.25rem;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.crt-inspector-label input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.55rem;
+  padding: 0.6rem 0.7rem;
+  color: #0f172a;
+  font: inherit;
+  font-weight: 400;
+}
+
+.crt-inspector-relations {
+  margin-top: 1.35rem;
+}
+
+.crt-inspector-relations h3 {
+  margin: 0 0 0.45rem;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.crt-inspector-relations ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.crt-inspector-relations button {
+  border: 0;
+  background: transparent;
+  color: #0369a1;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.crt-inspector-empty {
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.crt-canvas-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .crt-canvas-workspace {
+    grid-template-columns: 3.25rem minmax(0, 1fr);
+  }
+
+  .crt-inspector {
+    display: none;
+  }
+}

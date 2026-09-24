@@ -145,6 +145,12 @@ beforeEach(() => {
       if (url.includes("/tags")) {
         return Promise.resolve(jsonResponse(tagsResponse));
       }
+      if (url.includes("/crt/exposure")) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url.endsWith("/crt/trees")) {
+        return Promise.resolve(jsonResponse([]));
+      }
       return Promise.resolve(jsonResponse(null));
     })
   );
@@ -176,6 +182,45 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("button", { name: "Weekly review — Coming soon" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Thinking Mode — Coming soon" })).toBeDisabled();
     expect(screen.queryByRole("link", { name: /CRT.*legacy/i })).not.toBeInTheDocument();
+  });
+
+  it("019-FR-002 exposes Thinking Mode navigation when crt_canvas is enabled", async () => {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "internal-user@example.test",
+          feature_flags: { crt_canvas: true }
+        },
+        status: "authed"
+      });
+    });
+
+    renderRoutes("/");
+
+    const thinkingMode = await screen.findByRole("link", { name: "Thinking Mode" });
+    expect(thinkingMode).toHaveAttribute("href", "/crt");
+  });
+
+  it("019-FR-002 renders the CRT workspace at the protected direct route", async () => {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "internal-user@example.test",
+          feature_flags: { crt_canvas: true }
+        },
+        status: "authed"
+      });
+    });
+
+    renderRoutes("/crt");
+
+    expect(await screen.findByRole("heading", { name: "Start with your first undesired effect" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create first tree" })).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/crt/exposure"), expect.objectContaining({ method: "GET" }));
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/crt/trees"), expect.objectContaining({ method: "GET" }));
+    expect(screen.queryByText("Coming later")).not.toBeInTheDocument();
   });
 
   it("renders projects, tags and task rows from server projections without Context copy", async () => {
@@ -295,11 +340,21 @@ describe("AppRoutes", () => {
     expect(screen.queryByRole("form", { name: /add an agent/i })).not.toBeInTheDocument();
   });
 
-  it("keeps direct CRT routes inert until the feature is available", async () => {
+  it("019-FR-025 019-FR-026 keeps direct CRT routes inert until the feature is available", async () => {
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      if (String(input).includes("/crt/exposure")) {
+        return Promise.resolve(jsonResponse({ detail: { reason: "crt_canvas_disabled" } }, 404));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
     renderRoutes("/crt/demo-tree");
 
-    expect(await screen.findByRole("heading", { name: "Thinking Mode" })).toBeInTheDocument();
-    expect(screen.getByText("Coming later")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Thinking Mode isn't available for this account" })).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/crt/exposure"), expect.objectContaining({ method: "GET" }));
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/crt/trees"), expect.anything());
+    expect(screen.getByText(/existing BrainBuddy work is unchanged/i)).toBeInTheDocument();
+    expect(screen.queryByText("Coming later")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Next actions" })).not.toBeInTheDocument();
     });

@@ -60,6 +60,7 @@ FRONTEND_URL="http://127.0.0.1:${FRONTEND_PORT}"
 # Trailing slash on purpose: the vendored Hermes adapter serves JSON-RPC at `/`.
 HERMES_HOST_URL="http://127.0.0.1:${HERMES_PORT}/"
 COMPOSE_LOG_DIR="${ROOT_DIR}/frontend/test-results/compose"
+CRT_EVIDENCE_DIR="${ROOT_DIR}/specs/019-miro-like-crt-canvas/evidence/runtime"
 PLAYWRIGHT_ALLURE_DIR="${ROOT_DIR}/frontend/allure-results/playwright"
 PLAYWRIGHT_REPORT_DIR="${ROOT_DIR}/frontend/playwright-report"
 
@@ -74,9 +75,21 @@ print(f"e2e-{secrets.token_urlsafe(24)}")
 PY
 )}"
 export BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS="${BRAIN_BUDDY_ADMIN_EMAIL}"
+export BRAIN_BUDDY_E2E_SELECTED_EMAIL="${BRAIN_BUDDY_E2E_SELECTED_EMAIL:-crt-selected-${PROJECT_NAME}@example.com}"
+export BRAIN_BUDDY_E2E_SELECTED_PASSWORD="${BRAIN_BUDDY_E2E_SELECTED_PASSWORD:-$(python3 - <<'PY'
+import secrets
+print(f"crt-selected-{secrets.token_urlsafe(24)}")
+PY
+)}"
+export BRAIN_BUDDY_E2E_SECOND_EMAIL="${BRAIN_BUDDY_E2E_SECOND_EMAIL:-crt-second-${PROJECT_NAME}@example.com}"
+export BRAIN_BUDDY_E2E_SECOND_PASSWORD="${BRAIN_BUDDY_E2E_SECOND_PASSWORD:-$(python3 - <<'PY'
+import secrets
+print(f"crt-second-{secrets.token_urlsafe(24)}")
+PY
+)}"
 
 rm -rf "${PLAYWRIGHT_ALLURE_DIR}" "${PLAYWRIGHT_REPORT_DIR}"
-mkdir -p "${COMPOSE_LOG_DIR}" "${PLAYWRIGHT_ALLURE_DIR}" "${PLAYWRIGHT_REPORT_DIR}"
+mkdir -p "${COMPOSE_LOG_DIR}" "${CRT_EVIDENCE_DIR}" "${PLAYWRIGHT_ALLURE_DIR}" "${PLAYWRIGHT_REPORT_DIR}"
 touch "${PLAYWRIGHT_ALLURE_DIR}/.run-started-at"
 
 cleanup() {
@@ -153,6 +166,40 @@ curl -fsS -b "${OPERATOR_COOKIE_JAR}" -X PUT \
   "${BACKEND_URL}/api/admin/feature-flags/external_agent_relay/mode" \
   -H 'Content-Type: application/json' \
   -d '{"mode":"on"}' >/dev/null
+
+echo "[e2e] Creating two synthetic CRT accounts through the operator API."
+curl -fsS -b "${OPERATOR_COOKIE_JAR}" -X POST \
+  "${BACKEND_URL}/api/admin/accounts" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${BRAIN_BUDDY_E2E_SELECTED_EMAIL}\",\"display_name\":\"CRT Selected Synthetic\",\"password\":\"${BRAIN_BUDDY_E2E_SELECTED_PASSWORD}\"}" \
+  >/dev/null
+curl -fsS -b "${OPERATOR_COOKIE_JAR}" -X POST \
+  "${BACKEND_URL}/api/admin/accounts" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${BRAIN_BUDDY_E2E_SECOND_EMAIL}\",\"display_name\":\"CRT Second Synthetic\",\"password\":\"${BRAIN_BUDDY_E2E_SECOND_PASSWORD}\"}" \
+  >/dev/null
+
+echo "[e2e] Assigning exactly one synthetic account to crt_canvas selected_users."
+curl -fsS -b "${OPERATOR_COOKIE_JAR}" -X PUT \
+  "${BACKEND_URL}/api/admin/feature-flags/crt_canvas/mode" \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"selected_users"}' \
+  >/dev/null
+CRT_FLAGS_RESPONSE="$(curl -fsS -b "${OPERATOR_COOKIE_JAR}" -X POST \
+  "${BACKEND_URL}/api/admin/feature-flags/crt_canvas/selected-users" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${BRAIN_BUDDY_E2E_SELECTED_EMAIL}\"}")"
+CRT_FLAGS_RESPONSE="${CRT_FLAGS_RESPONSE}" \
+CRT_SELECTED_EMAIL="${BRAIN_BUDDY_E2E_SELECTED_EMAIL}" \
+python3 - <<'PY'
+import json
+import os
+
+payload = json.loads(os.environ["CRT_FLAGS_RESPONSE"])
+flag = next(item for item in payload["flags"] if item["name"] == "crt_canvas")
+assert flag["mode"] == "selected_users"
+assert [user["email"] for user in flag["selected_users"]] == [os.environ["CRT_SELECTED_EMAIL"]]
+PY
 rm -f "${OPERATOR_COOKIE_JAR}"
 
 echo "[e2e] Running short Compose API smoke."
@@ -167,5 +214,10 @@ BRAIN_BUDDY_E2E_COMPOSE_PROJECT="${PROJECT_NAME}" \
 BRAIN_BUDDY_E2E_BACKEND_URL="${BACKEND_URL}" \
 BRAIN_BUDDY_E2E_HERMES_TOKEN="${BRAIN_BUDDY_HERMES_A2A_TOKEN}" \
 BRAIN_BUDDY_E2E_HERMES_HOST_URL="${HERMES_HOST_URL}" \
+CRT_EVIDENCE_DIR="${CRT_EVIDENCE_DIR}" \
+BRAIN_BUDDY_E2E_SELECTED_EMAIL="${BRAIN_BUDDY_E2E_SELECTED_EMAIL}" \
+BRAIN_BUDDY_E2E_SELECTED_PASSWORD="${BRAIN_BUDDY_E2E_SELECTED_PASSWORD}" \
+BRAIN_BUDDY_E2E_SECOND_EMAIL="${BRAIN_BUDDY_E2E_SECOND_EMAIL}" \
+BRAIN_BUDDY_E2E_SECOND_PASSWORD="${BRAIN_BUDDY_E2E_SECOND_PASSWORD}" \
 PLAYWRIGHT_BASE_URL="${FRONTEND_URL}" \
 npx playwright test --config playwright.config.ts "$@"

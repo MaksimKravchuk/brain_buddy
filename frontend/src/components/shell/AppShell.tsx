@@ -25,6 +25,7 @@ import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode, Ref
 import { Link, NavLink, useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router-dom";
 
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
+import { hasFeatureFlag } from "../../api/auth";
 import { useAuthStore } from "../../stores/authStore";
 import { ShellToastContext } from "./shellToast";
 
@@ -280,8 +281,7 @@ function AccountMenu(): React.JSX.Element {
             className={itemClass}
             onClick={async () => {
               setOpen(false);
-              await logout();
-              navigate("/login");
+              if (await logout()) navigate("/login");
             }}
           >
             <LogOut className="h-4 w-4 text-slate-500" aria-hidden /> Sign out
@@ -468,6 +468,8 @@ function Sidebar({
   const [newTagName, setNewTagName] = useState("");
   const [tagEdits, setTagEdits] = useState<Record<string, string>>({});
   const [openPopover, setOpenPopover] = useState<string | null>(null);
+  const user = useAuthStore((state) => state.user);
+  const hasCrtCanvas = hasFeatureFlag(user, "crt_canvas");
 
   const closePopover = () => setOpenPopover(null);
   const popoverKeyDown = (event: ReactKeyboardEvent) => {
@@ -513,16 +515,23 @@ function Sidebar({
           </button>
         </li>
         <li>
-          <button
-            type="button"
-            disabled
-            aria-label="Thinking Mode — Coming soon"
-            className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
-          >
-            <Network className="h-4 w-4 shrink-0" aria-hidden />
-            <span className="min-w-0 flex-1 truncate">Thinking Mode</span>
-            <SoonChip />
-          </button>
+          {hasCrtCanvas ? (
+            <NavLink to="/crt" className={({ isActive }) => navRowClass(isActive)}>
+              <Network className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="min-w-0 flex-1 truncate">Thinking Mode</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              disabled
+              aria-label="Thinking Mode — Coming soon"
+              className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
+            >
+              <Network className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="min-w-0 flex-1 truncate">Thinking Mode</span>
+              <SoonChip />
+            </button>
+          )}
         </li>
       </ul>
 

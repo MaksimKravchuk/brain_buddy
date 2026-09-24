@@ -1,9 +1,8 @@
 """SQLite runtime feature-flag store — the sole source of truth (ADR-0019).
 
 One `feature_flags` table on the existing backend data volume holds exactly
-one row per **managed** flag (`voice_brain_dump`, `mobile_task_classification`,
-`external_agent_relay`) — a mode plus, for `selected_users`, a set of immutable
-account IDs. There is no environment fallback and no "deploy default"
+one row per runtime-managed flag — a mode plus, for `selected_users`, a set of
+immutable account IDs. There is no environment fallback and no "deploy default"
 inheritance left after the one-time migration below: every managed flag's
 SQLite row is the entire answer (DD-15).
 
@@ -86,8 +85,9 @@ MANAGED_FLAGS: tuple[str, ...] = (
     "mobile_task_classification",
     "external_agent_relay",
     "task_title_autocomplete",
+    "crt_canvas",
 )
-"""The three runtime-manageable flags after ADR-0019 (DD-1, DD-15, DD-16).
+"""The runtime-manageable flags after ADR-0019 and later inventory ADRs.
 
 `admin_portal` is not excluded — it does not exist as a flag at all (DD-14).
 `delivery_canary` stays a separate, environment-owned release-smoke input.
@@ -95,6 +95,11 @@ MANAGED_FLAGS: tuple[str, ...] = (
 
 _ADR_0019_MANAGED_FLAGS: frozenset[str] = frozenset(
     {"voice_brain_dump", "mobile_task_classification", "external_agent_relay"}
+)
+
+_POST_ADR_0019_DEFAULT_OFF_FLAGS: tuple[str, ...] = (
+    "task_title_autocomplete",
+    "crt_canvas",
 )
 
 _LEGACY_JSON_MANAGED_FLAGS: frozenset[str] = frozenset(
@@ -411,21 +416,27 @@ class FeatureFlagOverrideRepository(BaseRepository):
         for flag in MANAGED_FLAGS:
             entry = (
                 FlagOverride(mode=FlagMode.OFF)
-                if flag == "task_title_autocomplete"
+                if flag in _POST_ADR_0019_DEFAULT_OFF_FLAGS
                 else self._seed_entry(flag, legacy_document, seed)
             )
             self._upsert_row(conn, flag, entry)
 
     def _upgrade_adr_0019_store(self, conn: sqlite3.Connection) -> None:
-        """Add the fourth row only to a complete, healthy ADR-0019 store."""
+        """Add later default-OFF rows only to a complete healthy older store."""
         rows = conn.execute(
             "SELECT flag, mode, selected_users FROM feature_flags"
         ).fetchall()
-        if {row["flag"] for row in rows} != _ADR_0019_MANAGED_FLAGS:
+        present = {row["flag"] for row in rows}
+        valid_upgrade_sources = {
+            _ADR_0019_MANAGED_FLAGS,
+            _ADR_0019_MANAGED_FLAGS | {"task_title_autocomplete"},
+            frozenset(MANAGED_FLAGS),
+        }
+        if frozenset(present) not in valid_upgrade_sources:
             return
         for row in rows:
             try:
-                mode = FlagMode(row["mode"])
+                FlagMode(row["mode"])
                 raw_cohort = json.loads(row["selected_users"])
             except (TypeError, ValueError, json.JSONDecodeError):
                 return
@@ -434,11 +445,9 @@ class FeatureFlagOverrideRepository(BaseRepository):
             cohort = tuple(raw_cohort)
             if not _is_canonical_cohort(cohort):
                 return
-            if mode is not FlagMode.SELECTED_USERS and cohort:
-                return
-        self._upsert_row(
-            conn, "task_title_autocomplete", FlagOverride(mode=FlagMode.OFF)
-        )
+        for flag in _POST_ADR_0019_DEFAULT_OFF_FLAGS:
+            if flag not in present:
+                self._upsert_row(conn, flag, FlagOverride(mode=FlagMode.OFF))
 
     def _load_seed(self) -> ManagedFlagMigrationSeed:
         try:

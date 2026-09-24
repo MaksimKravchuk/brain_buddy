@@ -58,7 +58,10 @@ class VersionService:
                 notes=payload.notes,
                 diff=diff_summary,
                 conflicts=conflicts,
-                tree=tree.model_copy(deep=True),
+                tree=tree.model_copy(
+                    update={"last_command_id": None},
+                    deep=True,
+                ),
             )
             self.version_repo.save(tree_id, version_doc)
             version_ref = TreeVersionRef(
