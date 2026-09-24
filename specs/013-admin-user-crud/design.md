@@ -8,7 +8,7 @@
 |---|---|---|
 | U-01 | Access check | Existing checking/denied/unverified states remain unchanged; no tabpanel mounts before authorization. |
 | U-02 | Users loading | Users tab selected; `Loading users…` status; no stale table. |
-| U-03 | Users table | Compact rows ordered by email/id. Visible columns: Email, Display name, Deletion requested, Actions. |
+| U-03 | Users table | Compact rows ordered by email/id. Visible columns: Email, Display name, Deletion requested, Actions. On a narrow screen, a visible control points to columns/actions outside the scrollport only when the table actually overflows; it scrolls to the end and back without changing the list or hiding keyboard access. |
 | U-04 | Empty | Exact status `No accounts to manage yet.` when the confirmed response contains zero accounts. |
 | U-05 | List unavailable/recovery | Retryable exact `Couldn't load users. Ref: <correlation-id>` when available, otherwise `Couldn't load users.`. An initial failure may have no table; a refetch failure preserves the last confirmed table. `Retry` performs a real refetch, and a successful retry clears the prior list error and renders the recovered response. |
 | U-06 | Create | `Create user` opens a form for email, optional display name, initial password. Password uses `type=password`, is never prefilled and is cleared on success/cancel. |
@@ -21,12 +21,12 @@
 
 ## Interaction and accessibility
 
-- Native tab semantics: two buttons with `role=tab`, `aria-selected`, `aria-controls`; panels use `role=tabpanel`. Left/Right arrows move and select; Tab enters the selected panel.
+- Native tab semantics: two buttons with `role=tab`, `aria-selected`, `aria-controls`; panels use `role=tabpanel`. The selected tab has a visible accent/underline separate from keyboard focus; Left/Right arrows move and select; Tab enters the selected panel.
 - Each action's accessible name includes the row identity (`Edit member@example.com`, `Revoke sessions for member@example.com`, `Delete member@example.com`).
 - Create/edit/delete/revoke overlays follow existing `Overlay` focus trap, Escape and focus-restoration patterns. Destructive default focus is Cancel, never Delete.
 - Mutation feedback is textual (`role=status` or `role=alert`) and never color-only. Raw server internals are not rendered.
-- The list `Retry` control remains available after a confirmed response so the operator can initiate a real refetch; on failure the confirmed rows remain visible alongside the alert, and on success the alert is removed.
-- At 390px, the table becomes stacked row cards or a horizontally safe grid: email and display name wrap, actions wrap vertically, controls retain at least 44px targets, and no page-level horizontal scrolling is introduced.
+- After a confirmed list the compact `Refresh users` control initiates the same real refetch; after a list failure it reads `Retry`. On refetch failure the confirmed rows remain visible alongside the alert, and on success the alert is removed.
+- At 390px, the table remains a horizontally scrollable grid: email and display name wrap, actions wrap vertically, controls retain at least 44px targets, and no page-level horizontal scrolling is introduced. When content overflows the local scrollport, an explicit control makes the off-screen actions discoverable and lets the operator scroll to them and back; the scrollport is keyboard-focusable.
 - Password value is never placed in success copy, DOM after form close, query cache, screenshot fixture or test attachment.
 
 ## Production browser evidence
