@@ -301,6 +301,37 @@ describe("AdminUsersSection CRUD safety", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("013-FR-014 shows compact Refresh users after success and keeps Retry for failures", async () => {
+    const list = vi.spyOn(apiClient, "listAdminAccounts")
+      .mockResolvedValueOnce({ accounts: [member] })
+      .mockRejectedValueOnce(new ApiError("bad", 503, null, "corr-refresh"));
+    renderUsers();
+    await screen.findByText(member.email);
+    const refresh = screen.getByRole("button", { name: "Refresh users" });
+    expect(refresh).toHaveClass("self-start");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    await userEvent.setup().click(refresh);
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(member.email)).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load users. Ref: corr-refresh");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("013-FR-014 keeps Refresh users after a successful explicit refetch", async () => {
+    const updated = { ...member, display_name: "Updated member" };
+    const list = vi.spyOn(apiClient, "listAdminAccounts")
+      .mockResolvedValueOnce({ accounts: [member] })
+      .mockResolvedValueOnce({ accounts: [updated] });
+    renderUsers();
+    await screen.findByText(member.email);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh users" }));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Updated member")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh users" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("013-FR-014 preserves the last confirmed account list when a refetch fails", async () => {
     const list = vi
       .spyOn(apiClient, "listAdminAccounts")
@@ -308,7 +339,7 @@ describe("AdminUsersSection CRUD safety", () => {
       .mockRejectedValueOnce(new ApiError("bad", 503, null, "corr-stale"));
     renderUsers();
     await screen.findByText(member.email);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh users" }));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
     expect(screen.getByText(member.email)).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load users. Ref: corr-stale");

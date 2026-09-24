@@ -21,6 +21,9 @@ export function AdminUsersSection(): React.JSX.Element {
   const [deleting, setDeleting] = useState<AdminAccountResponse | null>(null);
   const [revoking, setRevoking] = useState<AdminAccountResponse | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [tableHasOverflow, setTableHasOverflow] = useState(false);
+  const [tableAtEnd, setTableAtEnd] = useState(false);
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [focusCreateAfterClose, setFocusCreateAfterClose] = useState(false);
   const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -37,6 +40,26 @@ export function AdminUsersSection(): React.JSX.Element {
       setFocusCreateAfterClose(false);
     }
   }, [showCreate, focusCreateAfterClose]);
+  useEffect(() => {
+    const scroller = tableScrollRef.current;
+    if (!scroller) return;
+    const update = () => {
+      const remaining = scroller.scrollWidth - scroller.clientWidth;
+      setTableHasOverflow(remaining > 1);
+      setTableAtEnd(remaining <= 1 || scroller.scrollLeft >= remaining - 1);
+    };
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(scroller);
+    if (scroller.firstElementChild) observer?.observe(scroller.firstElementChild);
+    return () => {
+      scroller.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      observer?.disconnect();
+    };
+  }, [accounts.data]);
   const refresh = () => queryClient.invalidateQueries({ queryKey: adminKeysFor(ownerId).accounts() });
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiClient.deleteAdminAccount(id),
@@ -68,14 +91,34 @@ export function AdminUsersSection(): React.JSX.Element {
           </div>
         ) : null}
         {(accounts.isError || accounts.data) && !accounts.isFetching ? (
-          <Button type="button" variant="secondary" size="sm" onClick={() => void accounts.refetch()}>
-            Retry
+          <Button type="button" variant="secondary" size="sm" className="self-start" onClick={() => void accounts.refetch()}>
+            {accounts.isError ? "Retry" : "Refresh users"}
           </Button>
         ) : null}
         {accounts.data?.accounts.length === 0 && !accounts.isError ? (
           <p role="status">No accounts to manage yet.</p>
         ) : null}
-        <div className="overflow-x-auto">
+        {tableHasOverflow && accounts.data?.accounts.length ? (
+          <button
+            type="button"
+            aria-label={tableAtEnd ? "Back to table start" : "Show table actions"}
+            className="min-h-11 self-end rounded-md px-2 text-sm font-medium text-sky-800 underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
+            onClick={() => {
+              const scroller = tableScrollRef.current;
+              if (scroller) scroller.scrollLeft = tableAtEnd ? 0 : scroller.scrollWidth - scroller.clientWidth;
+            }}
+          >
+            {tableAtEnd ? "← Back to email" : "More columns and actions →"}
+          </button>
+        ) : null}
+        <div
+          ref={tableScrollRef}
+          data-testid="admin-users-table-scroll"
+          className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
+          role={tableHasOverflow ? "region" : undefined}
+          aria-label={tableHasOverflow ? "Users table, horizontally scrollable" : undefined}
+          tabIndex={tableHasOverflow ? 0 : undefined}
+        >
           <table className="w-full text-left text-sm">
             <caption className="sr-only">Admin users</caption>
             <thead><tr><th className="py-2">Email</th><th>Name</th><th>Deletion requested</th><th>Actions</th></tr></thead>
