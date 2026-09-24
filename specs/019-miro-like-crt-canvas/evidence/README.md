@@ -12,7 +12,7 @@ This directory contains **synthetic local pre-candidate evidence** for the Curre
 | Supported-width boundary | PASS at 1024 and 1280 CSS px: no document horizontal overflow or clipped shell at either width | [`runtime/t027-200-card-performance.json`](runtime/t027-200-card-performance.json) |
 | Default-OFF/internal-only rollout | PASS locally: selected user received `crt_canvas=true`; unselected second user received content-free 404 and no frontend content requests | [`runtime/t024-compose-auth-isolation.json`](runtime/t024-compose-auth-isolation.json) |
 | Rollback procedure | Documented but **NOT_RUN**; no deployment or rollback authorization is claimed | [`rollback/feature-019-crt-rollback.template.json`](rollback/feature-019-crt-rollback.template.json), [`../../../../docs/fly-deployment.md`](../../../../docs/fly-deployment.md) |
-| Exact candidate binding | **BLOCKED**: the worktree is intentionally uncommitted; runtime evidence records `candidate_sha: null` and `candidate_state: uncommitted_worktree` | [`runtime/t027-200-card-performance.json`](runtime/t027-200-card-performance.json) |
+| Exact candidate binding | **PENDING PR CI**: checked-in runtime files remain honest local pre-candidate evidence; PR CI attaches fresh T024 and T027 artifacts bound to the explicitly checked-out head SHA | [`runtime/t024-compose-auth-isolation.json`](runtime/t024-compose-auth-isolation.json), [`runtime/t027-200-card-performance.json`](runtime/t027-200-card-performance.json) |
 | Exact deployed-SHA screenshots/recording and production smoke | **NOT_RUN**: commit/push/deploy require separate approval | — |
 
 ## Approved visual-state references

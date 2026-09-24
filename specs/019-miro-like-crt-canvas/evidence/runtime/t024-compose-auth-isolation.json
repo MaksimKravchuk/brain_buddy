@@ -1,4 +1,6 @@
 {
+  "candidate_sha": null,
+  "candidate_state": "uncommitted_worktree",
   "schema_version": 1,
   "synthetic": true,
   "journey": "unmocked-compose-chromium",
@@ -22,7 +24,7 @@
     "includes_arrow_navigation": true,
     "branching": true,
     "card_count": 10,
-    "elapsed_ms": 2770.800000190735,
+    "elapsed_ms": 2776.9000000953674,
     "budget_ms": 120000
   }
 }

@@ -1213,7 +1213,7 @@ test("T024 tree management supports switch, rename, export, cancel, and revision
   expect(fixture.tree("tree-a").id).toBe("tree-a");
 });
 
-test("T024 Compose selected-user Chromium journey proves auth exposure, persistence, and second-account 404 isolation", async ({ page }) => {
+test("T024 Compose selected-user Chromium journey proves auth exposure, persistence, and second-account 404 isolation", async ({ page }, testInfo) => {
   await crtLabels("Unmocked Compose authentication, rollout, persistence, and isolation");
   await removeEvidenceArtifact("t024-compose-auth-isolation.json");
   const selectedEmail = process.env.BRAIN_BUDDY_E2E_SELECTED_EMAIL;
@@ -1325,8 +1325,18 @@ test("T024 Compose selected-user Chromium journey proves auth exposure, persiste
   const secondResponseContentFree = secondTreesBody.detail?.reason === "crt_canvas_disabled";
   expect(secondResponseContentFree).toBe(true);
 
-  evidenceArtifacts.set(page, ["t024-compose-auth-isolation.json"]);
-  await writeEvidenceArtifact("t024-compose-auth-isolation.json", {
+  const candidateSha = process.env.BRAIN_BUDDY_CANDIDATE_SHA ?? null;
+  const exactShaRequired = process.env.CI === "true" ||
+    process.env.BRAIN_BUDDY_REQUIRE_EXACT_SHA === "1";
+  if (exactShaRequired) {
+    expect(candidateSha, "final T024 evidence must be bound to the exact candidate SHA")
+      .toMatch(/^[0-9a-f]{40}$/);
+  } else if (candidateSha !== null) {
+    expect(candidateSha).toMatch(/^[0-9a-f]{40}$/);
+  }
+  const evidence = {
+    candidate_sha: candidateSha,
+    candidate_state: candidateSha === null ? "uncommitted_worktree" : "exact_commit",
     schema_version: 1,
     synthetic: true,
     journey: "unmocked-compose-chromium",
@@ -1339,5 +1349,11 @@ test("T024 Compose selected-user Chromium journey proves auth exposure, persiste
       frontend_content_requests_suppressed: frontendContentRequestsSuppressed
     },
     timed_keyboard_journey: { includes_thinking_mode_entry: true, includes_tab: true, includes_arrow_navigation: true, branching: true, card_count: 10, elapsed_ms: elapsed, budget_ms: 120000 }
+  };
+  evidenceArtifacts.set(page, ["t024-compose-auth-isolation.json"]);
+  await writeEvidenceArtifact("t024-compose-auth-isolation.json", evidence);
+  await testInfo.attach("t024-compose-auth-isolation.json", {
+    body: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`, "utf8"),
+    contentType: "application/json"
   });
 });
