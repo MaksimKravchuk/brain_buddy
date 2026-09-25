@@ -33,6 +33,7 @@ ABSENT = "_not run_"
 PROVENANCE_KEYS = (
     "degraded_lenses",
     "oracle_unknown_lenses",
+    "model_unverified_lenses",
     "panel_correlated",
     "panel_oracles",
     "panel_providers",
@@ -167,6 +168,7 @@ def panel_provenance(summary: dict[str, Any]) -> tuple[str, list[str]]:
     stale = _role_list(summary.get("stale_reviews"))
     degraded = _role_list(summary.get("degraded_lenses"))
     unknown = _role_list(summary.get("oracle_unknown_lenses"))
+    unverified = _role_list(summary.get("model_unverified_lenses"))
     correlated = summary.get("panel_correlated")
     single_provider = summary.get("single_provider_panel")
     recorded = any(key in summary for key in PROVENANCE_KEYS)
@@ -180,6 +182,8 @@ def panel_provenance(summary: dict[str, Any]) -> tuple[str, list[str]]:
         caveats.append("degraded panel")
     if unknown:
         caveats.append("unknown provenance")
+    if unverified:
+        caveats.append("external model identity unverified")
     if single_provider is True:
         caveats.append("single-provider panel")
     if correlated is True:
@@ -221,11 +225,12 @@ def panel_provenance(summary: dict[str, Any]) -> tuple[str, list[str]]:
 
     if degraded:
         lines.append(
-            "**Lenses that ran on a fallback oracle**: "
+            "**Lenses using a nondefault or unverified oracle**: "
             + ", ".join(f"`{role}`" for role in degraded)
-            + ". These lenses produced a review, but not from the oracle they "
-            "are configured for. The same verdict from this panel is a weaker "
-            "result than it would be from a clean one.\n"
+            + ". These reviews did not run on the configured oracle. This may "
+            "be a historical fallback or an explicitly selected external "
+            "adapter; inspect each stamped reason. The same verdict from this "
+            "panel is weaker evidence than a verified independent one.\n"
         )
         for role in degraded:
             oracle = summary_oracle(summary, role)
@@ -258,6 +263,15 @@ def panel_provenance(summary: dict[str, Any]) -> tuple[str, list[str]]:
             "lens ran as configured.\n"
         )
 
+    if unverified:
+        lines.append(
+            "**External reviewer model identity unverified**: "
+            + ", ".join(f"`{role}`" for role in unverified)
+            + ". Executable hashes are recorded, but claimed providers and models "
+            "do not establish cross-provider independence. These lenses are "
+            "excluded from the verified-provider histogram.\n"
+        )
+
     if single_provider is True:
         lines.append(
             "**The panel collapsed to a single provider.** Every lens whose "
@@ -276,9 +290,9 @@ def panel_provenance(summary: dict[str, Any]) -> tuple[str, list[str]]:
         # panel, and the reader must not be left to infer a diverse panel
         # from an absent line.
         lines.append(
-            "**Single-provider panel**: not recorded — fewer than two lenses "
-            "carry provenance, so whether the panel spanned providers was "
-            "never measured. Not a panel found to span them.\n"
+            "**Single-provider panel**: undetermined — there are fewer than two "
+            "verified oracles, or some lenses have unverified model identity. "
+            "Not evidence of a multi-provider panel.\n"
         )
 
     # The histograms are printed with the correlation claim rather than instead

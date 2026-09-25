@@ -2,20 +2,20 @@
   "comment": "Hashes of the files that define this repository's delivery gates. Regenerate deliberately with `python3 scripts/check_gate_integrity.py --update`, and expect a reviewer to ask what changed and why.",
   "files": {
     ".claude/settings.json": "7403cc5fe4badc4a3be5550cbc8f6a345c02a2cc453996ba7db83a78be894015",
-    ".specify/extensions.yml": "e66f8dc51ca47e9d40550ab3bd9dc53b6be411ee9a00dd4064a9879e7c898817",
+    ".specify/extensions.yml": "fa7d9ee179b86d2dc349938557aa4e97eec963fb358c794154cce37a5d78b7e8",
     ".specify/templates/pre-freeze-receipt.schema.json": "44abf5960fd42e7130f889ecda463c186c46953b461e3abbeed043f78050ca8d",
     ".specify/workflows/speckit/handoff.schema.json": "089076b6df81ada79d7ba596b873c686a9d1748b8a921c592cce31f98dc82bf1",
     ".specify/workflows/speckit/review.schema.json": "59ddb9c1a8b3bdf2c0a572c12131426a7beea5fd68673d5d12a91251ee24b3c0",
-    ".specify/workflows/speckit/workflow.yml": "240c2325cb358dfd08f3188e24b206c5cde4caa5d75c1f6204e29ee7379fc862",
+    ".specify/workflows/speckit/workflow.yml": "007e515aabc33bb3f6fc57fe0e4383d5bfba0eb237f997cd8fbb595079df54bc",
     "Makefile": "6267be5756bdebc31b37b8c6133a4bfc18cd13b45ab54c770052915b63acf65f",
     "backend/mutation-enforced-scope.txt": "6d301c35b52b2366d4b3df01116c7fc44a7e0e10fef700ebdec4169cc10e5a5d",
-    "scripts/check_gate_integrity.py": "13b089f032a61a7e288ccd6f6a6c56100f7910119b53df77ef9889b30273a81a",
+    "scripts/check_gate_integrity.py": "986936a8a1465f081694ec888d8add199ce040e1987dd6712453396f661badfa",
     "scripts/check_requirement_coverage.py": "755229af528cd0a1ca678cca0a5403b58669d1383577c1d5e8cf929f51c92b70",
-    "scripts/check_spec_kit_specs.py": "dc56ef6f5d3a7eef316483fb856f751934daf4ca8a89c726dba80503fe8d0c5b",
-    "scripts/check_speckit_manifests.py": "ebe37a8f292c657b89d6c1ada252d6453ca1561f8d5dce209a25ed65a3cdef7a",
+    "scripts/check_spec_kit_specs.py": "1b9c607e4df2b129226d1f92e07338cf4a39a81af8e1ef1625edf349a0e8dacb",
+    "scripts/check_speckit_manifests.py": "16db34acb64062ddd075a14ee096d4ad96e780feeacee47d8ed454cd65a2f18b",
     "scripts/classify_path_risk.py": "332fc4fd01c3d222ac800312fe33be7fe60032d543d549c909b89ce52acb291c",
     "scripts/mutation_gate.py": "4452787971ea6bcfa9bbf1c10df97bf1f3d172711098f69e1b2cf6e8f57ed96a",
-    "scripts/spec_kit_planning_review.py": "0176e90993f814d0d719ad8ea6ec75c7a8c97830c3b62eceb48d2aaa62804cfd",
+    "scripts/spec_kit_planning_review.py": "8abd94d00cccfdf9800b3cdb508e850b95d63e7f06a1bdc8c1d186bc8fa3b4e5",
     "scripts/validate_pre_freeze_receipt.py": "4ef19b7f397f4b0a1b2964548e4de00d82b9c8b514466304764b81bbc6cf9e02"
   }
 }
