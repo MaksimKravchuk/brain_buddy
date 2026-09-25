@@ -1090,6 +1090,25 @@ describe("TaskListPage rows", () => {
 });
 
 describe("016 completed task presentation", () => {
+  it("outlines and rounds task lists without doubling the bottom row border", async () => {
+    mocked.listTasks.mockResolvedValue(listResponse([
+      taskFixture({ id: "active", title: "Active task" }),
+      taskFixture({ id: "done-1", title: "First completed", state: "completed" }),
+      taskFixture({ id: "done-2", title: "Last completed", state: "completed" })
+    ]));
+    renderPage("/tasks/next");
+
+    const completed = await screen.findByRole("list", { name: "Completed" });
+    const active = screen.getByRole("list", { name: "Launch v2" });
+    for (const list of [active, completed]) {
+      expect(list).toHaveClass("rounded-xl", "border", "border-slate-200", "overflow-hidden");
+    }
+    const rows = within(completed).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveClass("border-b");
+    expect(rows[1]).toHaveClass("last:border-b-0");
+  });
+
   it.each(["/tasks/next", "/projects/project-launch", "/tags/tag-deep-work", "/tasks/next?q=shared", "/tasks/today"])(
     "016-FR-001 016-SC-001 016-SC-003 includes completed work after all open groups in %s",
     async (route) => {

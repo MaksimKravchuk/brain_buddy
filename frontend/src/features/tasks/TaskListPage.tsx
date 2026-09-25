@@ -1143,7 +1143,7 @@ function TaskList({
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
 
   return (
-    <div className="border-t border-slate-200" role="list" aria-label={label ?? "Tasks"}>
+    <div className="overflow-hidden rounded-xl border border-slate-200" role="list" aria-label={label ?? "Tasks"}>
       {tasks.map((task) => (
         <TaskRow
           key={task.id}
@@ -1208,7 +1208,7 @@ function TaskRow({
 
   return (
     <article
-      className="group border-b border-slate-200 bg-white"
+      className="group border-b border-slate-200 bg-white last:border-b-0"
       role="listitem"
       data-task-id={task.id}
       data-task-state={task.state}
