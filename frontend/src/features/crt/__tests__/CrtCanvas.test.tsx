@@ -1487,6 +1487,39 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     }));
   });
 
+  it("connects a pointer drag from a target connector back to a source connector", () => {
+    const onChange = vi.fn();
+    renderCanvas(createGraphState({ ...initialGraph(), relations: [] }), onChange);
+    fireEvent.click(screen.getByRole("button", { name: "Connect cards" }));
+    const source = document.querySelector<HTMLButtonElement>('[data-connector-node-id="cause-1"][data-connector-side="source"]');
+    const target = document.querySelector<HTMLButtonElement>('[data-connector-node-id="effect-1"][data-connector-side="target"]');
+    if (!source || !target) throw new Error("pointer connector buttons were not rendered");
+    const elementFromPoint = vi.fn(() => source);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
+
+    dispatchPointer(target, "pointerdown", 20, 20);
+    dispatchPointer(window, "pointermove", 25, 20);
+    dispatchPointer(window, "pointerup", 25, 20);
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      relations: [{ id: "new-relation", sourceId: "cause-1", targetId: "effect-1" }]
+    }));
+  });
+
+  it("announces when connector navigation reaches a missing card", async () => {
+    renderCanvas(createGraphState({
+      nodes: [{ id: "cause", label: "Cause", position: { x: 100, y: 280 } }],
+      relations: [{ id: "dangling", sourceId: "cause", targetId: "missing" }],
+      selectedRelationId: "dangling"
+    }));
+
+    act(() => flowCallback("onEdgeClick")(null, { id: "dangling" }));
+    const toolbar = await screen.findByRole("toolbar", { name: "Selected relation actions" });
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Go to Effect" }));
+
+    expect(screen.getByText("Cannot navigate to the relation effect; card is missing.")).toBeInTheDocument();
+  });
+
   it("fails closed for pointer cancellation, same-side drops, invalid targets, and connection errors", async () => {
     const onChange = vi.fn();
     renderCanvas(initialGraph(), onChange);
