@@ -1760,7 +1760,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Other" }));
     await screen.findByRole("dialog", { name: "Resolve unsynced changes before continuing" });
     fireEvent.click(screen.getByRole("button", { name: "Discard and continue" }));
-    expect((await screen.findAllByRole("alert")).some((alert) => alert.textContent?.includes("verify every unsynced change"))).toBe(true);
+    await waitFor(() => expect(screen.getAllByRole("alert").some((alert) => alert.textContent?.includes("verify every unsynced change"))).toBe(true));
 
     cleanup();
     vi.restoreAllMocks();
@@ -1775,7 +1775,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Other" }));
     await screen.findByRole("dialog", { name: "Resolve unsynced changes before continuing" });
     fireEvent.click(screen.getByRole("button", { name: "Discard and continue" }));
-    expect((await screen.findAllByRole("alert")).some((alert) => alert.textContent?.includes("couldn't discard the local changes"))).toBe(true);
+    await waitFor(() => expect(screen.getAllByRole("alert").some((alert) => alert.textContent?.includes("couldn't discard the local changes"))).toBe(true));
   });
 
   it("covers generic startup failure, retry, and unauthenticated owner handling", async () => {
