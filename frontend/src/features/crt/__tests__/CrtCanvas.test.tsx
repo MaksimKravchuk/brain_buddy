@@ -90,6 +90,12 @@ function currentFlowProps(): Record<string, unknown> {
   return flowHarness.props;
 }
 
+function dispatchPointer(target: EventTarget, type: "pointerdown" | "pointermove" | "pointerup", clientX: number, clientY: number): void {
+  const event = new Event(type, { bubbles: true });
+  Object.defineProperties(event, { clientX: { value: clientX }, clientY: { value: clientY } });
+  act(() => target.dispatchEvent(event));
+}
+
 beforeEach(() => {
   flowHarness.fitView.mockClear();
   flowHarness.setEdges.mockClear();
@@ -1453,5 +1459,120 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
 
     expect(screen.getByText("That directed relation already exists.")).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ relations: expect.arrayContaining([expect.objectContaining({ id: "new-relation" })]) }));
+  });
+
+  it("connects a pointer drag after crossing the movement threshold and preserves click behavior below it", () => {
+    const onChange = vi.fn();
+    renderCanvas(createGraphState({ ...initialGraph(), relations: [] }), onChange);
+    fireEvent.click(screen.getByRole("button", { name: "Connect cards" }));
+    const source = document.querySelector<HTMLButtonElement>('[data-connector-node-id="cause-1"][data-connector-side="source"]');
+    const target = document.querySelector<HTMLButtonElement>('[data-connector-node-id="effect-1"][data-connector-side="target"]');
+    if (!source || !target) throw new Error("pointer connector buttons were not rendered");
+    const elementFromPoint = vi.fn(() => target);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
+
+    dispatchPointer(source, "pointerdown", 10, 10);
+    dispatchPointer(window, "pointermove", 12, 13);
+    dispatchPointer(window, "pointerup", 12, 13);
+    expect(onChange).not.toHaveBeenCalled();
+
+    dispatchPointer(source, "pointerdown", 10, 10);
+    dispatchPointer(window, "pointermove", 14, 10);
+    dispatchPointer(window, "pointermove", 20, 18);
+    dispatchPointer(window, "pointerup", 20, 18);
+
+    expect(elementFromPoint).toHaveBeenCalledWith(20, 18);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      relations: [{ id: "new-relation", sourceId: "cause-1", targetId: "effect-1" }]
+    }));
+  });
+
+  it("connects a pointer drag from a target connector back to a source connector", () => {
+    const onChange = vi.fn();
+    renderCanvas(createGraphState({ ...initialGraph(), relations: [] }), onChange);
+    fireEvent.click(screen.getByRole("button", { name: "Connect cards" }));
+    const source = document.querySelector<HTMLButtonElement>('[data-connector-node-id="cause-1"][data-connector-side="source"]');
+    const target = document.querySelector<HTMLButtonElement>('[data-connector-node-id="effect-1"][data-connector-side="target"]');
+    if (!source || !target) throw new Error("pointer connector buttons were not rendered");
+    const elementFromPoint = vi.fn(() => source);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
+
+    dispatchPointer(target, "pointerdown", 20, 20);
+    dispatchPointer(window, "pointermove", 25, 20);
+    dispatchPointer(window, "pointerup", 25, 20);
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      relations: [{ id: "new-relation", sourceId: "cause-1", targetId: "effect-1" }]
+    }));
+  });
+
+  it("announces when connector navigation reaches a missing card", async () => {
+    renderCanvas(createGraphState({
+      nodes: [{ id: "cause", label: "Cause", position: { x: 100, y: 280 } }],
+      relations: [{ id: "dangling", sourceId: "cause", targetId: "missing" }],
+      selectedRelationId: "dangling"
+    }));
+
+    act(() => flowCallback("onEdgeClick")(null, { id: "dangling" }));
+    const toolbar = await screen.findByRole("toolbar", { name: "Selected relation actions" });
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Go to Effect" }));
+
+    expect(screen.getByText("Cannot navigate to the relation effect; card is missing.")).toBeInTheDocument();
+  });
+
+  it("fails closed for pointer cancellation, same-side drops, invalid targets, and connection errors", async () => {
+    const onChange = vi.fn();
+    renderCanvas(initialGraph(), onChange);
+    fireEvent.click(screen.getByRole("button", { name: "Connect cards" }));
+    const source = screen.getByRole("button", { name: "Connect from top of Deployments are rushed" });
+    const target = screen.getByRole("button", { name: "Connect into bottom of Server is unreliable" });
+    const elementFromPoint = vi.fn();
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
+
+    dispatchPointer(source, "pointerdown", 0, 0);
+    dispatchPointer(window, "pointerup", 0, 0);
+    dispatchPointer(window, "pointerup", 1, 1);
+
+    dispatchPointer(source, "pointerdown", 0, 0);
+    dispatchPointer(window, "pointermove", 10, 0);
+    elementFromPoint.mockReturnValue(null);
+    dispatchPointer(window, "pointerup", 10, 0);
+
+    dispatchPointer(source, "pointerdown", 0, 0);
+    dispatchPointer(window, "pointermove", 10, 0);
+    elementFromPoint.mockReturnValue(source);
+    dispatchPointer(window, "pointerup", 10, 0);
+
+    dispatchPointer(target, "pointerdown", 0, 0);
+    dispatchPointer(window, "pointermove", 10, 0);
+    elementFromPoint.mockReturnValue(source);
+    dispatchPointer(window, "pointerup", 10, 0);
+
+    dispatchPointer(source, "pointerdown", 0, 0);
+    dispatchPointer(window, "pointermove", 10, 0);
+    elementFromPoint.mockReturnValue(target);
+    dispatchPointer(window, "pointerup", 10, 0);
+    await waitFor(() => expect(screen.getByText("That directed relation already exists.")).toBeInTheDocument());
+
+    dispatchPointer(source, "pointerdown", 0, 0);
+    dispatchPointer(window, "pointermove", 10, 0);
+    elementFromPoint.mockReturnValue({ closest: () => ({ dataset: { connectorSide: "target" } }) } as unknown as Element);
+    dispatchPointer(window, "pointerup", 10, 0);
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("removes pointer listeners when the canvas unmounts", () => {
+    const view = renderCanvas();
+    fireEvent.click(screen.getByRole("button", { name: "Connect cards" }));
+    const source = screen.getByRole("button", { name: "Connect from top of Deployments are rushed" });
+    dispatchPointer(source, "pointerdown", 0, 0);
+    view.unmount();
+
+    const elementFromPoint = vi.fn(() => null);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: elementFromPoint });
+    fireEvent.pointerMove(window, { clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(window, { clientX: 20, clientY: 20 });
+    expect(elementFromPoint).not.toHaveBeenCalled();
   });
 });

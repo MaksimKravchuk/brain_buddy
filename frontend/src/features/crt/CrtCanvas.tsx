@@ -208,6 +208,13 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
   const canvasRef = useRef<HTMLElement>(null);
   const flowRegionRef = useRef<HTMLDivElement>(null);
   const pendingConnectionRef = useRef<{ nodeId: string; side: "source" | "target" } | null>(null);
+  const pointerConnectionRef = useRef<{
+    nodeId: string;
+    side: "source" | "target";
+    startX: number;
+    startY: number;
+    dragging: boolean;
+  } | null>(null);
   const pendingCompositeEntryRef = useRef(false);
   const programmaticFocusRef = useRef(false);
   onChangeRef.current = onChange;
@@ -335,6 +342,54 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     [emit, makeIds]
   );
 
+  const startPointerConnection = useCallback((nodeId: string, side: "source" | "target", event: React.PointerEvent<HTMLButtonElement>) => {
+    pointerConnectionRef.current = { nodeId, side, startX: event.clientX, startY: event.clientY, dragging: false };
+  }, []);
+
+  const finishPointerConnection = useCallback((destination: { nodeId: string; side: "source" | "target" } | null) => {
+    const pointerConnection = pointerConnectionRef.current;
+    pointerConnectionRef.current = null;
+    if (!pointerConnection?.dragging) return;
+    // A drag is a complete connection gesture, independent of any earlier
+    // click-to-connect selection. Never leave that older selection armed.
+    pendingConnectionRef.current = null;
+    if (!destination || destination.side === pointerConnection.side) return;
+    const sourceId = pointerConnection.side === "source" ? pointerConnection.nodeId : destination.nodeId;
+    const targetId = pointerConnection.side === "source" ? destination.nodeId : pointerConnection.nodeId;
+    const result = connectRelation(graphRef.current, { id: makeIds().relationId, sourceId, targetId });
+    if (result.error) setAnnouncement(result.error.message);
+    else if (result.changed) emit(result.state, { message: "Directed relation added." });
+  }, [emit, makeIds]);
+
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent): void => {
+      const current = pointerConnectionRef.current;
+      if (!current || current.dragging) return;
+      if (Math.hypot(event.clientX - current.startX, event.clientY - current.startY) < 4) return;
+      pointerConnectionRef.current = { ...current, dragging: true };
+    };
+    const onPointerUp = (event: PointerEvent): void => {
+      const current = pointerConnectionRef.current;
+      if (!current) return;
+      if (!current.dragging) {
+        pointerConnectionRef.current = null;
+        return;
+      }
+      const element = document.elementFromPoint(event.clientX, event.clientY);
+      const button = element?.closest<HTMLButtonElement>(".crt-card-connector[data-connector-node-id]");
+      finishPointerConnection(button ? {
+        nodeId: button.dataset.connectorNodeId ?? "",
+        side: button.dataset.connectorSide as "source" | "target"
+      } : null);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [finishPointerConnection]);
+
   const handleCardFocus = useCallback((nodeId: string) => {
     if (graphRef.current.selectedNodeId !== nodeId) return;
     if (programmaticFocusRef.current) {
@@ -389,7 +444,8 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
           onFocusCard: handleCardFocus,
           onCommitLabel: commitCardLabel,
           onCancelLabel: cancelCardLabel,
-          onConnectorActivate: activateConnector
+          onConnectorActivate: activateConnector,
+          onConnectorPointerDown: startPointerConnection
         }
       })),
     [
@@ -401,7 +457,8 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
       graph.nodes,
       graph.relations,
       graph.selectedNodeId,
-      handleCardFocus
+      handleCardFocus,
+      startPointerConnection
     ]
   );
 

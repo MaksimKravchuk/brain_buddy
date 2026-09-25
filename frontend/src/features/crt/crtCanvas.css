@@ -276,7 +276,7 @@
 
 .crt-card-connector {
   position: absolute;
-  z-index: 3;
+  z-index: 5;
   display: grid;
   width: 1.75rem;
   height: 1.75rem;
@@ -288,6 +288,7 @@
   cursor: pointer;
   font: inherit;
   font-weight: 700;
+  pointer-events: auto;
 }
 
 .crt-card-connector-target {
@@ -332,9 +333,11 @@
 }
 
 .crt-card-handle {
-  width: 10px;
-  height: 10px;
+  z-index: 4;
+  width: 1.75rem;
+  height: 1.75rem;
   border: 2px solid #fff;
+  border-radius: 999px;
   background: #0284c7;
   opacity: 0;
   pointer-events: none;
@@ -342,7 +345,7 @@
 
 .crt-card-handle.is-visible {
   opacity: 1;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .crt-inspector {
