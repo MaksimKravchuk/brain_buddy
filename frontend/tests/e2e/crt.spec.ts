@@ -592,6 +592,36 @@ test("T024 first run creates a truthful tree and exposes accessible tree menu ac
   });
 });
 
+test("T024 inline label editing cancels with Escape, persists on Enter, and undoes with Ctrl+Z", async ({ page }) => {
+  await crtLabels("Inline label commit, cancellation, and undo");
+  const fixture = new CrtFixture({ trees: [oneCardTree()] });
+  await openCrt(page, fixture);
+  await expect(page.getByRole("heading", { name: "Current Reality Tree" })).toBeVisible();
+
+  const original = page.getByRole("button", { name: /Synthetic effect/ });
+  await original.dblclick();
+  const escapeEditor = page.locator("input[data-card-editor-id]").last();
+  await expect(escapeEditor).toBeFocused();
+  await escapeEditor.fill("Should not persist");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: /Synthetic effect/ })).toBeVisible();
+  expect(fixture.mutation("/api/crt/trees/tree-one", "PUT")).toHaveLength(0);
+
+  await page.getByRole("button", { name: /Synthetic effect/ }).dblclick();
+  const enterEditor = page.locator("input[data-card-editor-id]").last();
+  await enterEditor.fill("Persisted inline label");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: /Persisted inline label/ })).toBeVisible();
+  await expect.poll(() => fixture.mutation("/api/crt/trees/tree-one", "PUT").length).toBe(1);
+  expect(fixture.tree("tree-one").nodes.some((node) => node.label === "Persisted inline label")).toBe(true);
+
+  await page.getByRole("group", { name: "Current Reality Tree canvas" }).click();
+  await page.keyboard.press("Control+z");
+  await expect(page.getByRole("button", { name: /Synthetic effect/ })).toBeVisible();
+  await expect.poll(() => fixture.mutation("/api/crt/trees/tree-one", "PUT").length).toBe(2);
+  expect(fixture.tree("tree-one").nodes.some((node) => node.label === "Synthetic effect")).toBe(true);
+});
+
 test("T024 keyboard-only bottom-up creation reaches a persisted branching ten-card graph under two minutes", async ({ page }) => {
   await crtLabels("Keyboard-only branching ten-card creation and persistence");
   const fixture = new CrtFixture({ trees: [tenCardSeed()] });

@@ -855,6 +855,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Changed locally" } });
+    fireEvent.keyDown(label, { key: "Enter" });
 
     expect(screen.getByText("Unsaved", { selector: ".crt-save-status" })).toBeInTheDocument();
     expect(updateTree).not.toHaveBeenCalled();
@@ -885,13 +886,14 @@ describe("CrtWorkspace tree lifecycle", () => {
     const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Local copy" } });
+    fireEvent.keyDown(label, { key: "Enter" });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
 
     expect(screen.getByText(/server changed this tree/i)).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: /^Edit card label/ })).toHaveValue("Local copy");
+    expect(screen.getByRole("button", { name: "Root cause: Local copy" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh server copy" }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(screen.getByRole("textbox", { name: /^Edit card label/ })).toHaveValue("Local copy");
+    expect(screen.getByRole("button", { name: "Root cause: Local copy" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save local changes" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save local changes" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
@@ -908,6 +910,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Local copy" } });
+    fireEvent.keyDown(label, { key: "Enter" });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh server copy" }));
@@ -931,6 +934,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Local copy" } });
+    fireEvent.keyDown(label, { key: "Enter" });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh server copy" }));
@@ -954,6 +958,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Still local" } });
+    fireEvent.keyDown(label, { key: "Enter" });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(300);
@@ -963,7 +968,7 @@ describe("CrtWorkspace tree lifecycle", () => {
 
     expect(updateTree).toHaveBeenCalledOnce();
     expect(screen.getByText("Save failed", { selector: ".crt-save-status" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: /^Edit card label/ })).toHaveValue("Still local");
+    expect(screen.getByRole("button", { name: "Root cause: Still local" })).toBeInTheDocument();
   });
 
   it("019-FR-017 keeps dispatched saves immutable and queues newer edits", async () => {
@@ -977,11 +982,16 @@ describe("CrtWorkspace tree lifecycle", () => {
     const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "First local" } });
+    fireEvent.keyDown(label, { key: "Enter" });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
     const firstSignal = updateTree.mock.calls[0]?.[2]?.signal;
     expect(firstSignal).toBeInstanceOf(AbortSignal);
 
-    fireEvent.change(label, { target: { value: "Second local" } });
+    const secondCard = screen.getByRole("button", { name: "Root cause: First local" });
+    fireEvent.doubleClick(secondCard);
+    const secondLabel = screen.getByRole("textbox", { name: /^Edit card label/ });
+    fireEvent.change(secondLabel, { target: { value: "Second local" } });
+    fireEvent.keyDown(secondLabel, { key: "Enter" });
     expect(firstSignal?.aborted).toBe(false);
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
     expect(updateTree).toHaveBeenCalledTimes(1);
@@ -1965,6 +1975,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
     const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Persisted change" } });
+    fireEvent.keyDown(label, { key: "Enter" });
     await waitFor(() => expect(coordinator.persistCommand).toHaveBeenCalled(), { timeout: 2000 });
   });
   it("covers pending enumeration entries, generic backup failure, and external ownership loss", async () => {
@@ -2061,6 +2072,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Local save" } });
+    fireEvent.keyDown(label, { key: "Enter" });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
     expect(screen.getByText("Save failed", { selector: ".crt-save-status" })).toBeInTheDocument();
     expect(screen.getByText("Support reference: save-reference")).toBeInTheDocument();
@@ -2269,6 +2281,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Local conflict" } });
+    fireEvent.keyDown(label, { key: "Enter" });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
     expect(screen.getByText(/server changed this tree/i)).toBeInTheDocument();
     expect(screen.queryByText(/Support reference:/)).not.toBeInTheDocument();
@@ -2292,6 +2305,7 @@ describe("CrtWorkspace tree lifecycle", () => {
       const label = await inlineCardEditor();
       vi.useFakeTimers();
       fireEvent.change(label, { target: { value: "Online-only edit" } });
+      fireEvent.keyDown(label, { key: "Enter" });
       await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
       vi.useRealTimers();
       expect(screen.getByText("Saved online only")).toBeInTheDocument();
