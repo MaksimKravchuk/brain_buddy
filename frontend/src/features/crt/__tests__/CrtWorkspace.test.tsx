@@ -230,6 +230,21 @@ describe("CrtWorkspace tree lifecycle", () => {
     expect(Object.keys(canvasEvents[0]?.[0]?.details ?? {}).sort()).toEqual(["outcome", "revision"]);
   });
 
+  it("keeps one clear tree title while preserving the selector, save status, and shortcuts", async () => {
+    vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([
+      { id: "tree-heading", name: "Heading tree", updated_at: "2026-09-20T10:00:00Z", owner_id: "owner-1" }
+    ]);
+    vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(tree("tree-heading", "Heading tree", "2026-09-20T10:00:00Z"));
+
+    render(<CrtWorkspace />);
+
+    expect(await screen.findByRole("button", { name: "Current tree: Heading tree" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Current Reality Tree" })).toHaveClass("sr-only");
+    expect(screen.queryByText("Thinking Mode", { selector: "p" })).not.toBeInTheDocument();
+    expect(screen.getByText("Saved", { selector: "span[role='status']" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Shortcuts" })).toBeInTheDocument();
+  });
+
   it("bounds the canvas to the viewport space remaining below the tree menu", async () => {
     vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([
       { id: "tree-layout", name: "Layout tree", updated_at: "2026-09-20T10:00:00Z", owner_id: "owner-1" }
@@ -721,7 +736,8 @@ describe("CrtWorkspace tree lifecycle", () => {
 
     expect(await screen.findByRole("button", { name: "Effect: The server is unreliable" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Effect: The server is unreliable" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Current Reality Tree" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Current tree: Newest tree" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Current Reality Tree" })).toHaveClass("sr-only");
     expect(screen.getByRole("button", { name: "Root cause: Deployments are rushed" })).toBeInTheDocument();
     expect(await screen.findByTestId("crt-edge-tree-new-relation")).toBeInTheDocument();
     expect(screen.getByText("Saved", { selector: ".crt-save-status" })).toBeInTheDocument();

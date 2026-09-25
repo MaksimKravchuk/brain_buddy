@@ -736,10 +736,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
       onBlur={() => setSpacePressed(false)}
     >
       <header className="crt-canvas-toolbar">
-        <div>
-          <p className="crt-canvas-eyebrow">Thinking Mode</p>
-          <h1>Current Reality Tree</h1>
-        </div>
+        <h1 className="sr-only">Current Reality Tree</h1>
         <div className="crt-canvas-toolbar-actions">
           <span className="crt-save-status" role="status">{saveStatus}</span>
           <button

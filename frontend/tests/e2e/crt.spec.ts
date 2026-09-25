@@ -569,7 +569,7 @@ test("T024 first run creates a truthful tree and exposes accessible tree menu ac
 
   await test.step("create the first tree and inspect the keyboard-addressable menu", async () => {
     await page.getByRole("button", { name: "Create first tree" }).click();
-    await expect(page.getByRole("heading", { name: "Current Reality Tree" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Current Reality Tree" })).toHaveClass(/sr-only/);
     const createRequest = await expect.poll(() => fixture.mutation("/api/crt/trees", "POST").length).toBe(1).then(() => latestMutation(fixture, "/api/crt/trees", "POST"));
     assertMutationHeaders(createRequest);
     expect(createRequest.body).toEqual({ name: "My first tree" });
@@ -1253,7 +1253,7 @@ test("T024 Compose selected-user Chromium journey proves auth exposure, persiste
   await page.getByRole("link", { name: "Thinking Mode" }).click();
   await expect(page.getByRole("heading", { name: "Start with your first undesired effect" })).toBeVisible();
   await page.getByRole("button", { name: "Create first tree" }).click();
-  await expect(page.getByRole("heading", { name: "Current Reality Tree" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Current Reality Tree" })).toHaveClass(/sr-only/);
   await page.getByRole("button", { name: "Add card" }).click();
   const effectEditor = page.locator("input[data-card-editor-id]").last();
   await expect(effectEditor).toBeFocused();
