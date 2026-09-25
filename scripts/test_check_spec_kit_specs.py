@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, cast
+from unittest import mock
 
 SCRIPT_PATH = Path(__file__).with_name("check_spec_kit_specs.py")
 spec = importlib.util.spec_from_file_location("check_spec_kit_specs", SCRIPT_PATH)
@@ -102,6 +103,153 @@ def _high_risk_handoff() -> dict[str, Any]:
 
 
 class CheckSpecKitSpecsTests(unittest.TestCase):
+    def _slice_fixture(self) -> tuple[Path, dict[str, Any]]:
+        feature = self.specs_dir / "020-multi-pr"
+        feature.mkdir()
+        (feature / "tasks.md").write_text(
+            "- [ ] T001 Build a contract\n- [ ] T002 Build the UI\n"
+        )
+        (feature / "spec.md").write_text(
+            "## Requirements\n\n- **FR-001**: Contract exists.\n"
+            "- **FR-002**: UI consumes contract.\n"
+        )
+        payload = {"schema_version": "brainbuddy-pr-slices/v1", "slices": [
+            {"id": "PR-01", "outcome": "Contract is verifiable", "tasks": ["T001"],
+             "requirements": ["020-FR-001"], "paths": ["backend/app/contract.py"],
+             "depends_on": [], "tests": ["pytest backend/tests/test_contract.py"],
+             "acceptance": ["Contract test passes"]},
+            {"id": "PR-02", "outcome": "UI consumes contract", "tasks": ["T002"],
+             "requirements": ["020-FR-002"], "paths": ["frontend/src/flow.tsx"],
+             "depends_on": ["PR-01"], "tests": ["npm run test -- flow"],
+             "acceptance": ["UI journey passes"]},
+        ]}
+        return feature, payload
+
+    def _write_slice_section(self, feature: Path, payload: dict[str, Any]) -> None:
+        with (feature / "tasks.md").open("a", encoding="utf-8") as tasks:
+            tasks.write("\n## PR-срезы\n\n```json\n")
+            tasks.write(json.dumps(payload, ensure_ascii=False))
+            tasks.write("\n```\n")
+
+    def test_pr_slices_reject_two_json_maps_in_one_section(self) -> None:
+        feature, payload = self._slice_fixture()
+        self._write_slice_section(feature, payload)
+        with (feature / "tasks.md").open("a", encoding="utf-8") as tasks:
+            tasks.write("\n```json\n")
+            tasks.write(json.dumps(payload, ensure_ascii=False))
+            tasks.write("\n```\n")
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("exactly one fenced JSON" in item for item in failures))
+
+    def test_pr_slices_reject_an_unlabelled_second_json_map(self) -> None:
+        feature, payload = self._slice_fixture()
+        self._write_slice_section(feature, payload)
+        with (feature / "tasks.md").open("a", encoding="utf-8") as tasks:
+            tasks.write("\n```\n")
+            tasks.write(json.dumps(payload, ensure_ascii=False))
+            tasks.write("\n```\n")
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("exactly one fenced JSON" in item for item in failures))
+
+    def test_pr_slices_reject_repeated_section_heading(self) -> None:
+        feature, payload = self._slice_fixture()
+        self._write_slice_section(feature, payload)
+        with (feature / "tasks.md").open("a", encoding="utf-8") as tasks:
+            tasks.write("\n## PR-срезы\n\n```json\n")
+            tasks.write(json.dumps(payload, ensure_ascii=False))
+            tasks.write("\n```\n")
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("exactly one PR-срезы heading" in item for item in failures))
+
+    def test_valid_pr_slices_cover_every_task_once(self) -> None:
+        feature, payload = self._slice_fixture()
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertEqual(failures, [])
+
+    def test_pr_slices_reject_unassigned_and_duplicate_tasks(self) -> None:
+        feature, payload = self._slice_fixture()
+        payload["slices"][1]["tasks"] = ["T001"]
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("T001" in item and "multiple" in item for item in failures))
+        self.assertTrue(any("T002" in item and "unassigned" in item for item in failures))
+
+    def test_pr_slices_reject_unapproved_requirement_and_forward_dependency(self) -> None:
+        feature, payload = self._slice_fixture()
+        payload["slices"][0]["requirements"] = ["020-FR-999"]
+        payload["slices"][0]["depends_on"] = ["PR-02"]
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("020-FR-999" in item for item in failures))
+        self.assertTrue(any("PR-02" in item and "earlier" in item for item in failures))
+
+    def test_pr_slices_require_defined_requirement_not_a_prose_mention(self) -> None:
+        feature, payload = self._slice_fixture()
+        (feature / "spec.md").write_text(
+            "## Requirements\n\n- **FR-002**: UI consumes contract.\n"
+            "Removed FR-001 from the definition list; trace note retains FR-001.\n"
+        )
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("unknown requirement '020-FR-001'" in item for item in failures))
+
+    def test_pr_slices_require_defined_success_criterion_not_a_prose_mention(self) -> None:
+        feature, payload = self._slice_fixture()
+        (feature / "spec.md").write_text(
+            "## Requirements\n\n- **FR-001**: Contract exists.\n"
+            "- **FR-002**: UI consumes contract.\n"
+            "Trace note: SC-001 was removed, but text remains.\n"
+        )
+        payload["slices"][0]["requirements"].append("020-SC-001")
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("unknown requirement '020-SC-001'" in item for item in failures))
+
+    def test_parallel_pr_slices_may_not_claim_the_same_write_path(self) -> None:
+        feature, payload = self._slice_fixture()
+        payload["slices"][1]["depends_on"] = []
+        payload["slices"][1]["paths"] = ["backend/app/contract.py"]
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("overlapping" in item for item in failures))
+
+    def test_malformed_pr_section_fails_instead_of_skipping(self) -> None:
+        feature, _payload = self._slice_fixture()
+        with (feature / "tasks.md").open("a", encoding="utf-8") as tasks:
+            tasks.write("\n## PR-срезы\n\nmissing fenced map\n")
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("expected exactly one fenced JSON" in item for item in failures))
+
+    def test_single_pr_task_list_does_not_require_slice_map(self) -> None:
+        feature, _payload = self._slice_fixture()
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertEqual(failures, [])
+
+    def test_spec_gate_rejects_a_partial_pr_slice_manifest(self) -> None:
+        feature, payload = self._slice_fixture()
+        for name in ("intake.md", "design.md", "plan.md"):
+            (feature / name).write_text("Planning evidence\n")
+        (feature / "checklists").mkdir()
+        (feature / "checklists/requirements.md").write_text("Checklist\n")
+        payload["slices"][1]["tasks"] = ["T001"]
+        self._write_slice_section(feature, payload)
+        with mock.patch.object(check_spec_kit_specs, "GRANDFATHERED", {}):
+            result, _stdout, stderr = self._run_check()
+        self.assertEqual(result, 1)
+        self.assertIn("T002 is unassigned", stderr)
+
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.repo_root = Path(self.temp_dir.name)

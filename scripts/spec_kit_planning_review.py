@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -347,7 +348,7 @@ def resolve_oracle(role: str) -> tuple[dict[str, Any], dict[str, Any]]:
 def validate_oracle_provenance(
     payload: object, *, role: str, artifacts_digest: str
 ) -> dict[str, Any] | None:
-    """Accept only harness-shaped provenance for the current Codex-only gate."""
+    """Accept shaped, measured provenance without treating labels as model proof."""
 
     if not isinstance(payload, dict):
         return None
@@ -355,6 +356,28 @@ def validate_oracle_provenance(
     if config is None:
         return None
     executable = payload.get("executable")
+    digest = payload.get("artifacts_digest")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        return None
+    if payload.get("integration") == "external-unverified":
+        adapter_hash = payload.get("adapter_sha256")
+        if (
+            payload.get("adapter") != "external-stdin-v1"
+            or payload.get("model") != "unverified"
+            or payload.get("degraded") is not True
+            or payload.get("configured_integration") != config["integration"]
+            or payload.get("configured_model") != config["model"]
+            or not isinstance(payload.get("claimed_provider"), str)
+            or not payload["claimed_provider"].strip()
+            or not isinstance(payload.get("claimed_model"), str)
+            or not payload["claimed_model"].strip()
+            or not isinstance(adapter_hash, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", adapter_hash)
+            or not isinstance(executable, str)
+            or not Path(executable).is_absolute()
+        ):
+            return None
+        return dict(payload)
     if (
         payload.get("integration") != "codex"
         or payload.get("model") != config["model"]
@@ -362,8 +385,6 @@ def validate_oracle_provenance(
         or not isinstance(executable, str)
         or not Path(executable).is_absolute()
         or Path(executable).name != "codex"
-        or not isinstance(payload.get("artifacts_digest"), str)
-        or not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("artifacts_digest")))
     ):
         return None
     return dict(payload)
@@ -457,7 +478,7 @@ def build_prompt(*, role: str, feature_dir: Path, root: Path) -> str:
     )
     agent_name = config.get("agent")
     rubric = (
-        f"\nRubric: apply the review rubric in .claude/agents/{agent_name}.md "
+        f"\nRubric: apply the review rubric in .specify/review-rubrics/{agent_name}.md "
         "verbatim. That file is the single source of truth for this lens; do "
         "not substitute your own checklist.\n"
         if agent_name
@@ -484,7 +505,13 @@ Hard boundaries:
 """
 
 
-def run_review(*, root: Path, run_id: str, role: str) -> Path:
+def run_review(
+    *, root: Path, run_id: str, role: str,
+    reviewer_command: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    adapter_sha256: str | None = None,
+) -> Path:
     run_dir = run_directory(root, run_id)
     context_path = run_dir / "planning-context.json"
     if not context_path.is_file():
@@ -496,13 +523,65 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
 
     schema_path = root / ".specify" / "workflows" / "speckit" / "review.schema.json"
     prompt = build_prompt(role=role, feature_dir=feature_dir, root=root)
-    effective_config, oracle = resolve_oracle(role)
-    command, env = build_review_command(
-        prompt=prompt,
-        schema_path=schema_path,
-        config=effective_config,
-        executable=str(oracle["executable"]),
-    )
+    if reviewer_command is not None:
+        if not provider or not model or not provider.strip() or not model.strip():
+            raise ReviewError("External reviewer requires --provider and --model")
+        if not adapter_sha256 or not re.fullmatch(r"[0-9a-f]{64}", adapter_sha256):
+            raise ReviewError("External reviewer requires a pinned --adapter-sha256")
+        argv = shlex.split(reviewer_command)
+        if len(argv) != 1:
+            raise ReviewError("External reviewer command must be one executable, without arguments")
+        resolved = shutil.which(argv[0])
+        if resolved is None:
+            raise ReviewError("External reviewer executable is not installed")
+        executable = Path(resolved).resolve()
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise ReviewError("External reviewer executable is not runnable")
+        measured = hashlib.sha256(executable.read_bytes()).hexdigest()
+        if measured != adapter_sha256:
+            raise ReviewError("External reviewer executable differs from pinned SHA-256")
+        command = [str(executable)]
+        # Do not inherit unrelated application credentials. The adapter is
+        # trusted code, not an OS sandbox; it must enforce read-only access.
+        env = {
+            key: os.environ[key]
+            for key in ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")
+            if key in os.environ
+        }
+        env["SPECKIT_REVIEW_ROLE"] = role
+        env["SPECKIT_REVIEW_SCHEMA"] = str(schema_path)
+        config = ROLE_CONFIGS[role]
+        oracle = {
+            "integration": "external-unverified",
+            "model": "unverified",
+            "claimed_provider": provider.strip(),
+            "claimed_model": model.strip(),
+            "degraded": True,
+            "reason": "external reviewer model identity is not verified",
+            "configured_integration": config["integration"],
+            "configured_model": config["model"],
+            "executable": str(executable),
+            "adapter": "external-stdin-v1",
+            "adapter_sha256": measured,
+        }
+    else:
+        if provider is not None or model is not None or adapter_sha256 is not None:
+            raise ReviewError("--provider, --model and --adapter-sha256 require --reviewer-command")
+        effective_config, oracle = resolve_oracle(role)
+        command, env = build_review_command(
+            prompt=prompt,
+            schema_path=schema_path,
+            config=effective_config,
+            executable=str(oracle["executable"]),
+        )
+
+    # Resolve the artifact snapshot immediately before starting a lens. The
+    # preflight digest alone cannot prove what a long-running adapter read.
+    expected_digest = context.get("artifacts_digest")
+    if not isinstance(expected_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+        raise ReviewError("Planning preflight context has an invalid artifacts digest")
+    if review_artifacts_digest(feature_dir) != expected_digest:
+        raise ReviewError("Planning artifacts changed after preflight; rerun the campaign")
 
     result = subprocess.run(
         command,
@@ -510,12 +589,15 @@ def run_review(*, root: Path, run_id: str, role: str) -> Path:
         env=env,
         text=True,
         capture_output=True,
+        input=prompt if reviewer_command is not None else None,
         # A maximum-effort lens over a feature with a dozen artifacts and a
         # 125-state design took 10-15 minutes on the two runs that finished
         # and timed out twice at 900 s; the cap bounds a hung runtime, not a
         # slow honest review.
         timeout=1800,
     )
+    if review_artifacts_digest(feature_dir) != expected_digest:
+        raise ReviewError("Planning artifacts changed during review; discard the verdict")
     if result.returncode != 0:
         # Reviewer failures stay hard failures. A process that ran and failed
         # produced a defect in evidence; retrying it away would launder that
@@ -641,9 +723,9 @@ def aggregate_reviews(
     if degraded_roles:
         action += (
             f" Panel note: {', '.join(degraded_roles)} ran on a fallback oracle "
-            "because the configured runtime was unavailable. Those lenses are "
-            "less independent than configured; treat their agreement with the "
-            "other Claude lenses as weaker corroboration than it looks."
+            "or an explicitly selected external adapter. Check the stamped "
+            "provenance: a claimed provider/model is not verified independent "
+            "evidence, and no unavailable default runtime was silently replaced."
         )
     if single_provider_panel:
         action += (
@@ -1018,6 +1100,7 @@ def summarize(*, root: Path, run_id: str) -> Path:
 
     degraded: list[str] = []
     unknown_oracle: list[str] = []
+    unverified_model_roles: list[str] = []
     stale_reviews: list[str] = []
     oracle_counts: dict[str, int] = {}
     provider_counts: dict[str, int] = {}
@@ -1035,6 +1118,11 @@ def summarize(*, root: Path, run_id: str) -> Path:
         stamped = str(oracle.get("artifacts_digest", ""))
         if stamped and current_digest and stamped != current_digest:
             stale_reviews.append(role_name)
+        if oracle.get("integration") == "external-unverified":
+            # The executable is measured, but the remote provider/model is
+            # caller-declared. Never count this as a verified second provider.
+            unverified_model_roles.append(role_name)
+            continue
         key = f"{oracle.get('integration')}/{oracle.get('model')}"
         oracle_counts[key] = oracle_counts.get(key, 0) + 1
         provider = str(oracle.get("integration"))
@@ -1082,8 +1170,9 @@ def summarize(*, root: Path, run_id: str) -> Path:
     # majority is computed over a subset, so the honest answer is "unknown"
     # rather than a confident `false` that reads identically to a verified
     # diverse panel.
-    if unknown_oracle:
+    if unknown_oracle or unverified_model_roles:
         panel_correlated = None
+        single_provider_panel = None
 
     summary = aggregate_reviews(
         reviews,
@@ -1101,6 +1190,7 @@ def summarize(*, root: Path, run_id: str) -> Path:
     summary["missing_reviewers"] = missing
     summary["degraded_lenses"] = degraded
     summary["oracle_unknown_lenses"] = unknown_oracle
+    summary["model_unverified_lenses"] = unverified_model_roles
     summary["panel_correlated"] = panel_correlated
     summary["panel_oracles"] = oracle_counts
     summary["panel_providers"] = provider_counts
@@ -1502,6 +1592,10 @@ def build_parser() -> argparse.ArgumentParser:
     review = subparsers.add_parser("review")
     review.add_argument("--run-id", required=True)
     review.add_argument("--role", required=True, choices=sorted(ROLE_CONFIGS))
+    review.add_argument("--reviewer-command", help="Single executable reading prompt on stdin and writing review JSON on stdout")
+    review.add_argument("--provider", help="Claimed external review provider (not attested)")
+    review.add_argument("--model", help="Claimed external review model (not attested)")
+    review.add_argument("--adapter-sha256", help="Pinned SHA-256 of the external executable")
     subparsers.add_parser("validate-handoff")
     return parser
 
@@ -1513,7 +1607,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "preflight":
             print(preflight(root=root, run_id=args.run_id))
         elif args.command == "review":
-            print(run_review(root=root, run_id=args.run_id, role=args.role))
+            print(run_review(
+                root=root, run_id=args.run_id, role=args.role,
+                reviewer_command=args.reviewer_command,
+                provider=args.provider, model=args.model,
+                adapter_sha256=args.adapter_sha256,
+            ))
         elif args.command == "summarize":
             summarize(root=root, run_id=args.run_id)
         else:

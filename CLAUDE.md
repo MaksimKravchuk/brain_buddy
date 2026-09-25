@@ -19,7 +19,7 @@ and `mobile/package.json`. Only the things those files don't tell you:
   provider, feature-flag, cost-cap and retention variables, not just the basics.
 - Mobile has its own notes in `mobile/CLAUDE.md`.
 - Spec Kit CLI installs with isolated `uv` tooling, never inside the application
-  backend/frontend environments — see the `speckit-pipeline` skill.
+  backend/frontend environments — see `docs/spec-kit-workflow.md`.
 - Editing `.claude/settings.json`, the `Makefile`, or anything else in
   `GUARDED_FILES` in `scripts/check_gate_integrity.py` fails CI's **Spec Kit
   artifacts** job until you re-record the hash in the same commit with
@@ -70,10 +70,10 @@ Reach for Bash where it is genuinely the right tool: `make` targets, git, the
 
 ## Spec Kit and the delivery pipeline
 
-Use GitHub Spec Kit v0.15.0 for every new or materially changed feature spec.
-The stage-by-stage chain, its human gates and the `assess` front door are in the
-**`speckit-pipeline`** skill. Read `docs/spec-kit-workflow.md` before authoring
-specs; versioned artifacts live under `specs/`.
+Use GitHub Spec Kit v1.0.11 for every new or materially changed feature spec.
+The stage-by-stage chain and human gates are in the canonical, vendor-neutral
+`.specify/agent-commands/speckit-pipeline/SKILL.md`. Read
+`docs/spec-kit-workflow.md` before authoring specs; artifacts live under `specs/`.
 
 Non-negotiables, whether or not that skill is loaded:
 
@@ -86,12 +86,11 @@ Non-negotiables, whether or not that skill is loaded:
 - The interview cannot be a subagent: `AskUserQuestion` is stripped from every
   subagent, so human elicitation must run in the main session.
 - The `architecture-consistency-reviewer`, `security-privacy-reviewer` and
-  `ux-a11y-reviewer` agent files under `.claude/agents/` are the **single source
+  `ux-a11y-reviewer` rubrics under `.specify/review-rubrics/` are the **single source
   of rubric truth** for their lenses — `spec_kit_planning_review.py` points at
-  them rather than restating the rubric. Only the rubric body is used: the
-  reviewers run as read-only ephemeral `codex exec` processes, so the agents'
-  `model:` and `tools:` frontmatter is inert and `ROLE_CONFIGS` decides the
-  review model and runtime.
+  them rather than restating the rubric. `ROLE_CONFIGS` defines the legacy
+  Codex review path; the agent-neutral adapter is specified in
+  `docs/spec-kit-workflow.md`. Rubric frontmatter does not choose a runtime.
 - Feature numbers are reserved across every git ref, not just the checked-out
   `specs/` tree — two branches claiming one `NNN-` merge without a conflict and
   then satisfy each other's requirement-coverage gate. `check_spec_kit_specs.py`

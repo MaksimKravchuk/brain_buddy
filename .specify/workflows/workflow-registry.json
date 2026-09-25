@@ -3,8 +3,8 @@
   "workflows": {
     "speckit": {
       "name": "BrainBuddy Portable Spec Review",
-      "version": "3.2.0",
-      "description": "Portable full-path spec review gate (ADR-0011/ADR-0023/ADR-0024): five read-only Codex reviewer lenses fan out over planning artifacts and fan in to one schema-validated verdict. Runs only when an ADR-0023 full-path trigger applies, with or without a managed outcome; eligible fast-lane SHIP/SHOW work does not invoke it.",
+      "version": "3.3.0",
+      "description": "Portable full-path spec review gate (ADR-0011/ADR-0023/ADR-0025): five read-only reviewer lenses use the default Codex route or an explicitly pinned external adapter and fan in to one schema-validated verdict. Runs only when an ADR-0023 full-path trigger applies, with or without a managed outcome; eligible fast-lane SHIP/SHOW work does not invoke it.",
       "source": "bundled",
       "installed_at": "2026-07-16T21:45:36.739772+00:00",
       "updated_at": "2026-09-19T23:10:00+02:00"

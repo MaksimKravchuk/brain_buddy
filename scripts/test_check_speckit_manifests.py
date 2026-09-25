@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,16 +31,45 @@ class PreservedOverrideTests(unittest.TestCase):
     def test_repository_overrides_are_all_intact(self) -> None:
         self.assertEqual(self.module.check(ROOT), [])
 
-    def test_the_implement_policy_is_protected(self) -> None:
-        """One tree now. The Codex twin was removed with `.agents/`.
+    def test_generated_feature_scripts_remain_directly_executable(self) -> None:
+        for name in (
+            "check-prerequisites.sh", "common.sh", "create-new-feature.sh",
+            "resolve-template.sh", "setup-plan.sh", "setup-tasks.sh",
+            "update-agent-context.sh",
+        ):
+            path = ROOT / ".specify/scripts/bash" / name
+            self.assertTrue(path.stat().st_mode & stat.S_IXUSR, str(path))
 
-        The override still matters for the same reason it always did: it is
-        the implement-directly policy, and `specify integration upgrade
-        claude --force` would silently restore upstream's refuse-and-route.
-        """
+    def test_the_implement_policy_is_protected(self) -> None:
+        """Generic integration refresh must not erase our implementation policy."""
         protected = set(self.module.PRESERVED_OVERRIDES)
-        self.assertIn(".claude/skills/speckit-implement/SKILL.md", protected)
-        self.assertNotIn(".agents/skills/speckit-implement/SKILL.md", protected)
+        self.assertIn(".specify/agent-commands/speckit-implement/SKILL.md", protected)
+        self.assertIn(".specify/agent-commands/speckit-tasks/SKILL.md", protected)
+        implement = (ROOT / ".specify/agent-commands/speckit-implement/SKILL.md").read_text()
+        self.assertIn("implement all of `tasks.md`", implement)
+        self.assertIn("PR-NN", implement)
+        self.assertFalse(any(path.startswith(".claude/") for path in protected))
+
+    def test_generic_integration_is_pinned_and_vendor_neutral(self) -> None:
+        opts = json.loads((ROOT / ".specify/init-options.json").read_text())
+        integration = json.loads((ROOT / ".specify/integration.json").read_text())
+        self.assertEqual(opts["speckit_version"], "1.0.11")
+        self.assertEqual(opts["integration"], "generic")
+        self.assertEqual(integration["version"], "1.0.11")
+        self.assertEqual(integration["installed_integrations"], ["generic"])
+        self.assertEqual(
+            integration["integration_settings"]["generic"]["parsed_options"],
+            {"commands_dir": ".specify/agent-commands", "skills": True},
+        )
+        manifest = json.loads(
+            (ROOT / ".specify/integrations/generic.manifest.json").read_text()
+        )
+        self.assertEqual(manifest["version"], "1.0.11")
+        self.assertTrue((ROOT / ".specify/agent-commands/speckit-converge/SKILL.md").is_file())
+        for stage in ("intake", "research", "define", "shape", "decide"):
+            self.assertTrue(
+                (ROOT / ".specify/agent-commands" / f"speckit-assess-{stage}" / "SKILL.md").is_file()
+            )
 
     def test_all_four_customized_templates_are_protected(self) -> None:
         protected = set(self.module.PRESERVED_OVERRIDES)
@@ -105,7 +135,7 @@ class PreservedOverrideTests(unittest.TestCase):
             failures = self.module.check(fake_root)
             self.assertTrue(all("MISSING" in item for item in failures))
 
-    def test_every_hooked_command_resolves_to_an_installed_skill(self) -> None:
+    def test_every_hooked_command_resolves_to_a_portable_skill(self) -> None:
         """A hook naming a skill that does not exist stops the pipeline.
 
         This was a two-tree parity check while `.agents/` existed. Removing
@@ -130,10 +160,10 @@ class PreservedOverrideTests(unittest.TestCase):
         self.assertTrue(commands, "extensions.yml registers no hook commands")
 
         missing = [
-            f".claude/skills/{command.replace('.', '-')}/SKILL.md (hook `{command}`)"
+            f".specify/agent-commands/{command.replace('.', '-')}/SKILL.md (hook `{command}`)"
             for command in commands
             if not (
-                ROOT / ".claude/skills" / command.replace(".", "-") / "SKILL.md"
+                ROOT / ".specify/agent-commands" / command.replace(".", "-") / "SKILL.md"
             ).is_file()
         ]
 
@@ -157,10 +187,15 @@ class PreservedOverrideTests(unittest.TestCase):
         integration = json.loads(
             (ROOT / ".specify" / "integration.json").read_text(encoding="utf-8")
         )
-        self.assertNotIn("codex", integration["installed_integrations"])
+        self.assertEqual(integration["installed_integrations"], ["generic"])
+        self.assertEqual(integration["default_integration"], "generic")
+        self.assertNotIn("claude", integration["integration_settings"])
         self.assertNotIn("codex", integration["integration_settings"])
         self.assertFalse(
             (ROOT / ".specify" / "integrations" / "codex.manifest.json").exists()
+        )
+        self.assertFalse(
+            (ROOT / ".specify" / "integrations" / "claude.manifest.json").exists()
         )
 
     def test_the_workflow_registry_describes_the_workflow_it_registers(self) -> None:
@@ -257,7 +292,7 @@ class PreservedOverrideTests(unittest.TestCase):
         the artifacts may be implemented directly, so a disabled skill left an
         agent that reads skills first with no legal way to proceed.
         """
-        relative = ".claude/skills/speckit-implement/SKILL.md"
+        relative = ".specify/agent-commands/speckit-implement/SKILL.md"
         text = (ROOT / relative).read_text(encoding="utf-8")
         self.assertNotIn("user-invocable: false", text, relative)
         self.assertNotIn("disable-model-invocation: true", text, relative)
