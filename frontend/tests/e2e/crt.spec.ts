@@ -604,6 +604,7 @@ test("T024 relation actions remain reachable at the minimum supported viewport",
     node("effect", "Effect", { x: 0, y: 180 })
   ], [{ id: "relation-one", source_node_id: "cause", target_node_id: "effect", kind: "why", created_at: FIXED_TIME }])] });
   await openCrt(page, fixture);
+  await test.step("select a relation and reach every action within the supported viewport", async () => {
   const edge = page.locator("[data-testid='crt-edge-relation-one']");
   await expect(edge).toHaveCount(1);
   await edge.dispatchEvent("click");
@@ -620,12 +621,14 @@ test("T024 relation actions remain reachable at the minimum supported viewport",
   }
   await toolbar.getByRole("button", { name: "Delete relation" }).click();
   await expect(page.locator("[data-testid='crt-edge-relation-one']")).toHaveCount(0);
+  });
 });
 
 test("T024 inline label editing cancels with Escape, persists on Enter, and undoes with Ctrl+Z", async ({ page }) => {
   await crtLabels("Inline label commit, cancellation, and undo");
   const fixture = new CrtFixture({ trees: [oneCardTree()] });
   await openCrt(page, fixture);
+  await test.step("cancel a draft, persist a confirmed label, and undo it", async () => {
   await expect(page.getByRole("heading", { name: "Current Reality Tree", includeHidden: true })).toHaveClass(/sr-only/);
 
   const original = page.getByRole("button", { name: /Synthetic effect/ });
@@ -650,6 +653,7 @@ test("T024 inline label editing cancels with Escape, persists on Enter, and undo
   await expect(page.getByRole("button", { name: /Synthetic effect/ })).toBeVisible();
   await expect.poll(() => fixture.mutation("/api/crt/trees/tree-one", "PUT").length).toBe(2);
   expect(fixture.tree("tree-one").nodes.some((node) => node.label === "Synthetic effect")).toBe(true);
+  });
 });
 
 test("T024 keyboard-only bottom-up creation reaches a persisted branching ten-card graph under two minutes", async ({ page }) => {
