@@ -575,6 +575,14 @@ def run_review(
             executable=str(oracle["executable"]),
         )
 
+    # Resolve the artifact snapshot immediately before starting a lens. The
+    # preflight digest alone cannot prove what a long-running adapter read.
+    expected_digest = context.get("artifacts_digest")
+    if not isinstance(expected_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+        raise ReviewError("Planning preflight context has an invalid artifacts digest")
+    if review_artifacts_digest(feature_dir) != expected_digest:
+        raise ReviewError("Planning artifacts changed after preflight; rerun the campaign")
+
     result = subprocess.run(
         command,
         cwd=root,
@@ -588,6 +596,8 @@ def run_review(
         # slow honest review.
         timeout=1800,
     )
+    if review_artifacts_digest(feature_dir) != expected_digest:
+        raise ReviewError("Planning artifacts changed during review; discard the verdict")
     if result.returncode != 0:
         # Reviewer failures stay hard failures. A process that ran and failed
         # produced a defect in evidence; retrying it away would launder that
@@ -713,9 +723,9 @@ def aggregate_reviews(
     if degraded_roles:
         action += (
             f" Panel note: {', '.join(degraded_roles)} ran on a fallback oracle "
-            "because the configured runtime was unavailable. Those lenses are "
-            "less independent than configured; treat their agreement with the "
-            "other Claude lenses as weaker corroboration than it looks."
+            "or an explicitly selected external adapter. Check the stamped "
+            "provenance: a claimed provider/model is not verified independent "
+            "evidence, and no unavailable default runtime was silently replaced."
         )
     if single_provider_panel:
         action += (
@@ -1090,6 +1100,7 @@ def summarize(*, root: Path, run_id: str) -> Path:
 
     degraded: list[str] = []
     unknown_oracle: list[str] = []
+    unverified_model_roles: list[str] = []
     stale_reviews: list[str] = []
     oracle_counts: dict[str, int] = {}
     provider_counts: dict[str, int] = {}
@@ -1107,6 +1118,11 @@ def summarize(*, root: Path, run_id: str) -> Path:
         stamped = str(oracle.get("artifacts_digest", ""))
         if stamped and current_digest and stamped != current_digest:
             stale_reviews.append(role_name)
+        if oracle.get("integration") == "external-unverified":
+            # The executable is measured, but the remote provider/model is
+            # caller-declared. Never count this as a verified second provider.
+            unverified_model_roles.append(role_name)
+            continue
         key = f"{oracle.get('integration')}/{oracle.get('model')}"
         oracle_counts[key] = oracle_counts.get(key, 0) + 1
         provider = str(oracle.get("integration"))
@@ -1154,8 +1170,9 @@ def summarize(*, root: Path, run_id: str) -> Path:
     # majority is computed over a subset, so the honest answer is "unknown"
     # rather than a confident `false` that reads identically to a verified
     # diverse panel.
-    if unknown_oracle:
+    if unknown_oracle or unverified_model_roles:
         panel_correlated = None
+        single_provider_panel = None
 
     summary = aggregate_reviews(
         reviews,
@@ -1173,6 +1190,7 @@ def summarize(*, root: Path, run_id: str) -> Path:
     summary["missing_reviewers"] = missing
     summary["degraded_lenses"] = degraded
     summary["oracle_unknown_lenses"] = unknown_oracle
+    summary["model_unverified_lenses"] = unverified_model_roles
     summary["panel_correlated"] = panel_correlated
     summary["panel_oracles"] = oracle_counts
     summary["panel_providers"] = provider_counts

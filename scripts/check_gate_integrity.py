@@ -288,6 +288,29 @@ INVARIANTS: tuple[Invariant, ...] = (
     ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
+        "review snapshot is checked before and after reviewer execution",
+        r'if review_artifacts_digest\(feature_dir\) != expected_digest:'
+        r'(?:(?!\ndef ).)*?result\s*=\s*subprocess\.run\('
+        r'(?:(?!\ndef ).)*?if review_artifacts_digest\(feature_dir\) != expected_digest:',
+        "An adapter that reads or changes a moving spec cannot stamp a trustworthy verdict.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "unverified models are excluded from provider statistics",
+        r'if oracle\.get\("integration"\) == "external-unverified":'
+        r'(?:(?!\ndef ).)*?unverified_model_roles\.append\(role_name\)'
+        r'(?:(?!\ndef ).)*?continue',
+        "Caller-declared labels must never count as a verified second provider.",
+    ),
+    MustMatch(
+        "scripts/render_feature_report.py",
+        "unverified model identity is visible in the report",
+        r'if unverified:\s*lines\.append\('
+        r'(?:(?!\ndef ).)*?External reviewer model identity unverified',
+        "The report must show why external reviews do not prove model independence.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
         "resolved reviewer executable is used",
         r'def build_review_command\((?:(?!\ndef ).)*?\[\s*executable,\s*"exec"',
         "The subprocess must execute the same absolute path recorded in reviewer provenance.",
@@ -386,7 +409,7 @@ INVARIANTS: tuple[Invariant, ...] = (
     MustMatch(
         "scripts/render_feature_report.py",
         "an unmeasurable provider question is rendered, not skipped",
-        r"\*\*Single-provider panel\*\*: not recorded",
+        r"\*\*Single-provider panel\*\*: undetermined",
         "Silence on the third state leaves the reader to infer a diverse "
         "panel from an absent line, which is the false claim this branch "
         "exists to replace.",

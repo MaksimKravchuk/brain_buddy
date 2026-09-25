@@ -333,7 +333,9 @@ The command must be **one executable without arguments**; for scripts, pin
 the executable script itself rather than an interpreter with a mutable script
 argument. The harness rejects hash mismatches before execution, passes only a
 small environment allowlist, validates the JSON, and stamps the measured hash,
-resolved path, current artifact digest and claimed provider/model. The adapter
+resolved path, current artifact digest and claimed provider/model. The artifact
+digest must match the preflight snapshot both before and after execution; a
+changed spec discards that review. The adapter
 must independently enforce read-only behavior; the subprocess is **not** an OS
 sandbox, and a pinned executable does not prove the remote model's identity.
 External lenses are always marked degraded and `external-unverified`; their

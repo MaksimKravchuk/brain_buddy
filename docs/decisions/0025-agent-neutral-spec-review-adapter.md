@@ -24,8 +24,9 @@ must supply a SHA-256 pin for the reviewed executable and a declared provider
 and model; the harness resolves and hashes the executable **before** running it,
 rejects any mismatch, and passes only a minimal environment allowlist. It
 validates the review and stamps the executable path, measured hash, artifact
-digest, and caller-declared labels. A non-zero exit fails the lens; there is no
-silent runtime fallback.
+digest, and caller-declared labels. The harness recomputes the reviewed
+artifact digest both before and after every lens; changed content discards the
+verdict. A non-zero exit fails the lens; there is no silent runtime fallback.
 
 The pin measures local adapter bytes, **not** the provider's actual model or the
 safety of the adapter. Declared provider/model are explicitly unverified; these

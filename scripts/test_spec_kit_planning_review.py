@@ -1108,11 +1108,15 @@ class ExternalReviewerTests(unittest.TestCase):
     def test_real_external_adapter_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            feature_dir = root / "specs/006-example"
+            feature_dir.mkdir(parents=True)
+            (feature_dir / "spec.md").write_text("# Spec\n")
+            (feature_dir / "plan.md").write_text("# Plan\n")
             run_dir = root / ".specify/workflows/runs/run1"
             run_dir.mkdir(parents=True)
             (run_dir / "planning-context.json").write_text(json.dumps({
-                "feature_dir": str(root / "specs/006-example"),
-                "artifacts_digest": "digest-1",
+                "feature_dir": str(feature_dir),
+                "artifacts_digest": self.module.review_artifacts_digest(feature_dir),
             }))
             adapter = root / "reviewer.py"
             adapter.write_text(
@@ -1143,11 +1147,15 @@ class ExternalReviewerTests(unittest.TestCase):
     def test_external_adapter_records_exact_prompt_and_actual_oracle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            feature_dir = root / "specs/006-example"
+            feature_dir.mkdir(parents=True)
+            (feature_dir / "spec.md").write_text("# Spec\n")
+            (feature_dir / "plan.md").write_text("# Plan\n")
             run_dir = root / ".specify/workflows/runs/run1"
             run_dir.mkdir(parents=True)
             (run_dir / "planning-context.json").write_text(json.dumps({
-                "feature_dir": str(root / "specs/006-example"),
-                "artifacts_digest": "digest-1",
+                "feature_dir": str(feature_dir),
+                "artifacts_digest": self.module.review_artifacts_digest(feature_dir),
             }))
             payload = {
                 "role": "requirements-consistency",
@@ -1178,7 +1186,7 @@ class ExternalReviewerTests(unittest.TestCase):
             self.assertEqual(review["oracle"]["claimed_model"], "model-a")
             self.assertTrue(review["oracle"]["degraded"])
             self.assertEqual(review["oracle"]["configured_integration"], "codex")
-            self.assertEqual(review["oracle"]["artifacts_digest"], "digest-1")
+            self.assertEqual(review["oracle"]["artifacts_digest"], self.module.review_artifacts_digest(feature_dir))
             self.assertEqual(runner.call_args.kwargs["input"], "PROMPT")
             self.assertEqual(runner.call_args.kwargs["env"]["SPECKIT_REVIEW_ROLE"], "requirements-consistency")
             self.assertEqual(runner.call_args.args[0], [str(adapter.resolve())])
@@ -1186,11 +1194,15 @@ class ExternalReviewerTests(unittest.TestCase):
     def test_external_adapter_cannot_self_certify_configured_panel(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            feature_dir = root / "specs/006-example"
+            feature_dir.mkdir(parents=True)
+            (feature_dir / "spec.md").write_text("# Spec\n")
+            (feature_dir / "plan.md").write_text("# Plan\n")
             run_dir = root / ".specify/workflows/runs/run1"
             run_dir.mkdir(parents=True)
             (run_dir / "planning-context.json").write_text(json.dumps({
-                "feature_dir": str(root / "specs/006-example"),
-                "artifacts_digest": "digest-1",
+                "feature_dir": str(feature_dir),
+                "artifacts_digest": self.module.review_artifacts_digest(feature_dir),
             }))
             payload = {
                 "role": "requirements-consistency", "verdict": "pass", "summary": "ok",
@@ -1216,6 +1228,38 @@ class ExternalReviewerTests(unittest.TestCase):
             self.assertEqual(oracle["integration"], "external-unverified")
             self.assertEqual(oracle["claimed_provider"], "codex")
             self.assertNotIn("DATABASE_URL", runner.call_args.kwargs["env"])
+
+    def test_adapter_mutating_reviewed_artifacts_discards_verdict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            feature_dir = root / "specs/006-example"
+            feature_dir.mkdir(parents=True)
+            (feature_dir / "spec.md").write_text("# Spec\n")
+            (feature_dir / "plan.md").write_text("# Plan\n")
+            run_dir = root / ".specify/workflows/runs/run1"
+            run_dir.mkdir(parents=True)
+            (run_dir / "planning-context.json").write_text(json.dumps({
+                "feature_dir": str(feature_dir),
+                "artifacts_digest": self.module.review_artifacts_digest(feature_dir),
+            }))
+            adapter = root / "reviewer"
+            adapter.write_text(
+                "#!/usr/bin/env python3\nimport json, os, sys\n"
+                "sys.stdin.read()\n"
+                f"open({str(feature_dir / 'spec.md')!r}, 'a').write('changed\\n')\n"
+                "print(json.dumps({'role': os.environ['SPECKIT_REVIEW_ROLE'], "
+                "'verdict': 'pass', 'summary': 'Not valid', "
+                "'reviewed_files': ['specs/006-example/spec.md'], "
+                "'findings': [], 'product_decisions': []}))\n"
+            )
+            adapter.chmod(0o700)
+            with self.assertRaisesRegex(self.module.ReviewError, "changed during review"):
+                self.module.run_review(
+                    root=root, run_id="run1", role="requirements-consistency",
+                    reviewer_command=str(adapter), provider="x", model="y",
+                    adapter_sha256=hashlib.sha256(adapter.read_bytes()).hexdigest(),
+                )
+            self.assertFalse((run_dir / "reviews/requirements-consistency.json").exists())
 
     def test_mismatched_adapter_pin_fails_before_execution(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1423,6 +1467,36 @@ class DegradationVisibilityTests(unittest.TestCase):
         self.assertTrue(summary["single_provider_panel"])
         self.assertEqual(summary["panel_providers"], {"codex": 5})
 
+    def test_external_lens_is_not_counted_as_a_verified_second_provider(self) -> None:
+        roles = list(self.module.STANDARD_ROLES)
+        oracles = {
+            role: {
+                "integration": "codex", "model": self.module.ROLE_CONFIGS[role]["model"],
+                "degraded": False,
+            }
+            for role in roles
+        }
+        external = roles[0]
+        oracles[external] = {
+            "integration": "external-unverified", "model": "unverified",
+            "adapter": "external-stdin-v1", "adapter_sha256": "b" * 64,
+            "executable": "/opt/review-adapter", "degraded": True,
+            "claimed_provider": "another-provider", "claimed_model": "other-model",
+            "configured_integration": "codex",
+            "configured_model": self.module.ROLE_CONFIGS[external]["model"],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.build_run(tmp, oracles)
+            target = self.module.summarize(root=root, run_id="run1")
+            summary = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(summary["model_unverified_lenses"], [external])
+        self.assertEqual(summary["degraded_lenses"], [external])
+        self.assertEqual(summary["panel_providers"], {"codex": 4})
+        self.assertNotIn("external-unverified/unverified", summary["panel_oracles"])
+        self.assertIsNone(summary["panel_correlated"])
+        self.assertIsNone(summary["single_provider_panel"])
+        self.assertEqual(summary["status"], "approved")
+
     def test_a_review_with_no_oracle_is_unknown_not_clean(self) -> None:
         """Silence is not evidence that a lens ran as configured.
 
@@ -1495,7 +1569,7 @@ class DegradationVisibilityTests(unittest.TestCase):
 
         self.assertEqual(summary["status"], "escalated")
         self.assertEqual(summary["panel_providers"], {"codex": 3})
-        self.assertIs(summary["single_provider_panel"], True)
+        self.assertIsNone(summary["single_provider_panel"])
         self.assertEqual(len(summary["oracle_unknown_lenses"]), 2)
 
     def test_historical_high_risk_panel_cannot_satisfy_current_gate(self) -> None:
@@ -1588,7 +1662,7 @@ class DegradationVisibilityTests(unittest.TestCase):
 
         self.assertEqual(summary["status"], "escalated")
         self.assertEqual(summary["panel_providers"], {"codex": 3})
-        self.assertTrue(summary["single_provider_panel"])
+        self.assertIsNone(summary["single_provider_panel"])
         self.assertEqual(len(summary["oracle_unknown_lenses"]), 2)
 
 

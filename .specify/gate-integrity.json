@@ -6,16 +6,16 @@
     ".specify/templates/pre-freeze-receipt.schema.json": "44abf5960fd42e7130f889ecda463c186c46953b461e3abbeed043f78050ca8d",
     ".specify/workflows/speckit/handoff.schema.json": "089076b6df81ada79d7ba596b873c686a9d1748b8a921c592cce31f98dc82bf1",
     ".specify/workflows/speckit/review.schema.json": "59ddb9c1a8b3bdf2c0a572c12131426a7beea5fd68673d5d12a91251ee24b3c0",
-    ".specify/workflows/speckit/workflow.yml": "240c2325cb358dfd08f3188e24b206c5cde4caa5d75c1f6204e29ee7379fc862",
+    ".specify/workflows/speckit/workflow.yml": "007e515aabc33bb3f6fc57fe0e4383d5bfba0eb237f997cd8fbb595079df54bc",
     "Makefile": "6267be5756bdebc31b37b8c6133a4bfc18cd13b45ab54c770052915b63acf65f",
     "backend/mutation-enforced-scope.txt": "6d301c35b52b2366d4b3df01116c7fc44a7e0e10fef700ebdec4169cc10e5a5d",
-    "scripts/check_gate_integrity.py": "a63ae7510ebe37ba84c61aaef4c36c66db2f1c5010a61ac76c3b5481c4ce8496",
+    "scripts/check_gate_integrity.py": "986936a8a1465f081694ec888d8add199ce040e1987dd6712453396f661badfa",
     "scripts/check_requirement_coverage.py": "755229af528cd0a1ca678cca0a5403b58669d1383577c1d5e8cf929f51c92b70",
     "scripts/check_spec_kit_specs.py": "c4ae0e71644f56d194488ca29455ecefe7a347d97d65d79ac69736c3d76df21c",
     "scripts/check_speckit_manifests.py": "16db34acb64062ddd075a14ee096d4ad96e780feeacee47d8ed454cd65a2f18b",
     "scripts/classify_path_risk.py": "332fc4fd01c3d222ac800312fe33be7fe60032d543d549c909b89ce52acb291c",
     "scripts/mutation_gate.py": "4452787971ea6bcfa9bbf1c10df97bf1f3d172711098f69e1b2cf6e8f57ed96a",
-    "scripts/spec_kit_planning_review.py": "5ce7a9eb26340afb864d8faf91d3761d56c552c3bc23b23e1e7f3fad4c78e82b",
+    "scripts/spec_kit_planning_review.py": "8abd94d00cccfdf9800b3cdb508e850b95d63e7f06a1bdc8c1d186bc8fa3b4e5",
     "scripts/validate_pre_freeze_receipt.py": "4ef19b7f397f4b0a1b2964548e4de00d82b9c8b514466304764b81bbc6cf9e02"
   }
 }

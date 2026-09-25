@@ -248,6 +248,31 @@ class InvariantEnforcementTests(unittest.TestCase):
             )
             self.assertIn("external model identity is marked unverified", report)
 
+    def test_dropping_post_review_digest_check_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    '    if review_artifacts_digest(feature_dir) != expected_digest:\n'
+                    '        raise ReviewError("Planning artifacts changed during review; discard the verdict")',
+                    '',
+                ),
+            )
+            self.assertIn("review snapshot is checked before and after reviewer execution", report)
+
+    def test_counting_unverified_adapter_as_verified_provider_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "scripts/spec_kit_planning_review.py",
+                lambda text: text.replace(
+                    '            unverified_model_roles.append(role_name)\n            continue',
+                    '            unverified_model_roles.append(role_name)',
+                ),
+            )
+            self.assertIn("unverified models are excluded from provider statistics", report)
+
     def test_replacing_the_resolved_executable_with_a_bare_name_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = self._assert_invariant_fires(
