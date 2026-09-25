@@ -13,6 +13,7 @@ export type CrtCardNodeData = {
   onCommitLabel?: (nodeId: string, label: string) => boolean;
   onCancelLabel?: (nodeId: string) => void;
   onConnectorActivate?: (nodeId: string, side: "source" | "target") => void;
+  onConnectorPointerDown?: (nodeId: string, side: "source" | "target", event: React.PointerEvent<HTMLButtonElement>) => void;
 };
 
 export type CrtCard = Node<CrtCardNodeData, "crt-card">;
@@ -53,17 +54,25 @@ export function CrtCardNode({ id, data, selected }: NodeProps<CrtCard>): React.J
     data.onConnectorActivate?.(id, side);
   };
 
+  const startConnectorPointer = (side: "source" | "target", event: React.PointerEvent<HTMLButtonElement>): void => {
+    event.stopPropagation();
+    data.onConnectorPointerDown?.(id, side, event);
+  };
+
   return (
     <div className={`crt-card-node${isSelected ? " is-selected" : ""}`}>
-      <Handle className={`crt-card-handle${data.connectionMode ? " is-visible" : ""}`} type="target" position={Position.Bottom} aria-hidden="true" />
+      <Handle className={`crt-card-handle crt-card-handle-target${data.connectionMode ? " is-visible" : ""}`} type="target" position={Position.Bottom} aria-hidden="true" />
       {data.connectionMode ? (
         <button
           type="button"
           className="crt-card-connector crt-card-connector-target"
           data-crt-native="true"
+          data-connector-node-id={id}
+          data-connector-side="target"
           aria-label={`Connect into bottom of ${data.label || "Untitled card"}`}
           title={`Connect into bottom of ${data.label || "Untitled card"}`}
           onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => startConnectorPointer("target", event)}
           onClick={(event) => activateConnector("target", event)}
         >
           ↧
@@ -112,15 +121,18 @@ export function CrtCardNode({ id, data, selected }: NodeProps<CrtCard>): React.J
           type="button"
           className="crt-card-connector crt-card-connector-source"
           data-crt-native="true"
+          data-connector-node-id={id}
+          data-connector-side="source"
           aria-label={`Connect from top of ${data.label || "Untitled card"}`}
           title={`Connect from top of ${data.label || "Untitled card"}`}
           onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => startConnectorPointer("source", event)}
           onClick={(event) => activateConnector("source", event)}
         >
           ↥
         </button>
       ) : null}
-      <Handle className={`crt-card-handle${data.connectionMode ? " is-visible" : ""}`} type="source" position={Position.Top} aria-hidden="true" />
+      <Handle className={`crt-card-handle crt-card-handle-source${data.connectionMode ? " is-visible" : ""}`} type="source" position={Position.Top} aria-hidden="true" />
     </div>
   );
 }

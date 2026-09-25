@@ -209,6 +209,10 @@ class CrtFixture {
   async install(page: Page): Promise<void> {
     await page.route("**/api/**", async (route) => {
       const { path, request } = this.record(route);
+      if (!path.startsWith("/api/")) {
+        await route.continue();
+        return;
+      }
       if (path === "/api/auth/me") {
         await fulfill(route, 200, {
           id: OWNER_ID,
@@ -1219,6 +1223,60 @@ test("T024 tree management supports switch, rename, export, cancel, and revision
   const deletion = latestMutation(fixture, "/api/crt/trees/tree-b?expected_revision=2", "DELETE");
   assertMutationHeaders(deletion);
   expect(fixture.tree("tree-a").id).toBe("tree-a");
+});
+
+test("T010 real connector drag links cause to effect without moving cards", async ({ page }) => {
+  await crtLabels("Real pointer connector drag preserves cause-to-effect direction");
+  const fixture = new CrtFixture({
+    trees: [treeFixture("tree-connectors", "Connector tree", [
+      node("node-cause", "Cause", { x: 0, y: 220 }),
+      node("node-effect", "Effect", { x: 0, y: 0 })
+    ])]
+  });
+  await openCrt(page, fixture);
+
+  await expect(page.locator('[data-node-id="node-cause"]')).toContainText("Cause");
+  await page.getByRole("button", { name: "Connect cards" }).click();
+  const target = page.getByRole("button", { name: "Connect into bottom of Effect" });
+  const source = page.getByRole("button", { name: "Connect from top of Cause" });
+  await expect(target).toBeVisible();
+  await expect(source).toBeVisible();
+  const causeCard = page.locator('[data-node-id="node-cause"]');
+  const effectCard = page.locator('[data-node-id="node-effect"]');
+  const causeBefore = await causeCard.boundingBox();
+  const effectBefore = await effectCard.boundingBox();
+  if (!causeBefore || !effectBefore) throw new Error("Connector cards must have visible bounds");
+  const targetBox = await target.boundingBox();
+  const sourceBox = await source.boundingBox();
+  if (!targetBox || !sourceBox) throw new Error("Connector controls must have visible bounds");
+
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2);
+  await page.mouse.up();
+
+  await expect.poll(() => fixture.tree("tree-connectors").relations.length).toBe(1);
+  expect(fixture.tree("tree-connectors").relations[0]).toMatchObject({
+    source_node_id: "node-cause",
+    target_node_id: "node-effect"
+  });
+  const causeAfter = await causeCard.boundingBox();
+  const effectAfter = await effectCard.boundingBox();
+  expect(causeAfter?.y).toBeCloseTo(causeBefore.y, 1);
+  expect(effectAfter?.y).toBeCloseTo(effectBefore.y, 1);
+});
+
+test("T010 target-first visible connector click still adds a relation", async ({ page }) => {
+  const fixture = new CrtFixture({ trees: [treeFixture("tree-click", "Click connectors", [
+    node("node-cause", "Cause", { x: 0, y: 220 }),
+    node("node-effect", "Effect", { x: 0, y: 0 })
+  ])] });
+  await openCrt(page, fixture);
+  await page.getByRole("button", { name: "Connect cards" }).click();
+  await page.getByRole("button", { name: "Connect into bottom of Effect" }).click();
+  await page.getByRole("button", { name: "Connect from top of Cause" }).click();
+  await expect.poll(() => fixture.tree("tree-click").relations.length).toBe(1);
+  expect(fixture.tree("tree-click").relations[0]).toMatchObject({ source_node_id: "node-cause", target_node_id: "node-effect" });
 });
 
 test("T024 Compose selected-user Chromium journey proves auth exposure, persistence, and second-account 404 isolation", async ({ page }, testInfo) => {
