@@ -982,7 +982,7 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
             serverCopy={{ label: "Server copy", revision: tree.revision, updatedAt: tree.metadata.updated_at, summary: "The latest canonical tree remains unchanged." }}
             localCopy={{ label: "Local draft", revision: draft.base_revision ?? undefined, updatedAt: draft.local_updated_at, summary: "Your browser draft remains preserved.", differences: recoverySummary(draft) }}
             localEditCount={Math.max(1, draft.dirty_operations.length)}
-            comparisonStatus={conflictRefreshReference ? "error" : conflictRefetched ? "ready" : "ready"}
+            comparisonStatus={conflictRefreshReference ? "error" : "ready"}
             comparisonError={conflictRefreshReference ? `We couldn't compare these versions. Support reference: ${conflictRefreshReference}` : undefined}
             onRetryComparison={() => refetchConflict()}
             onKeepLocalAndRetry={keepLocalConflict}

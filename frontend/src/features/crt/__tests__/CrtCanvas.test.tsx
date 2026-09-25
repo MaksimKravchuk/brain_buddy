@@ -959,6 +959,15 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     defaultCancelled.unmount();
 
+    const defaultConfirmedChange = vi.fn();
+    const defaultConfirmed = render(<CrtCanvas graph={relationGraph} onChange={defaultConfirmedChange} />);
+    fireEvent.keyDown(screen.getByRole("group", { name: "Current Reality Tree canvas" }), { key: "Delete" });
+    fireEvent.click(screen.getByRole("button", { name: "Delete card" }));
+    await waitFor(() => expect(defaultConfirmedChange).toHaveBeenCalledWith(expect.objectContaining({
+      nodes: [{ id: "effect-1", label: "Server is unreliable", position: { x: 260, y: 40 } }]
+    })));
+    defaultConfirmed.unmount();
+
     const cancelled = render(
       <CrtCanvas graph={relationGraph} onChange={vi.fn()} confirmDelete={() => false} />
     );
