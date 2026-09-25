@@ -1652,7 +1652,18 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
 
   it("resets history when controlled node or relation identity changes", async () => {
     const onChange = vi.fn();
-    const view = render(<CrtCanvas graph={initialGraph()} onChange={onChange} />);
+    let replaceGraph: ((next: GraphState) => void) | null = null;
+    function ExternalGraphCanvas() {
+      const [graph, setGraph] = useState(initialGraph);
+      replaceGraph = setGraph;
+      return <CrtCanvas graph={graph} onChange={(next) => { setGraph(next); onChange(next); }} />;
+    }
+    render(<ExternalGraphCanvas />);
+    const editor = await inlineEditor("effect-1");
+    fireEvent.change(editor, { target: { value: "Temporary local label" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Temporary local label"));
+    onChange.mockClear();
     const changedNode = createGraphState({
       ...initialGraph(),
       nodes: [
@@ -1662,15 +1673,31 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
       viewportCenter: { x: 260, y: 160 },
       selectedNodeId: "cause-1"
     });
-    view.rerender(<CrtCanvas graph={changedNode} onChange={onChange} />);
+    act(() => { replaceGraph?.(changedNode); });
     await act(async () => { await Promise.resolve(); });
 
     const changedRelation = createGraphState({
       ...changedNode,
       relations: [{ id: "replacement-relation", sourceId: "cause-1", targetId: "effect-1" }]
     });
-    view.rerender(<CrtCanvas graph={changedRelation} onChange={onChange} />);
+    act(() => { replaceGraph?.(changedRelation); });
     await act(async () => { await Promise.resolve(); });
+
+    const movedViewport = createGraphState({
+      ...changedRelation,
+      viewportCenter: { x: 500, y: 160 }
+    });
+    act(() => { replaceGraph?.(movedViewport); });
+    await act(async () => { await Promise.resolve(); });
+
+    const replacedNode = createGraphState({
+      ...movedViewport,
+      nodes: movedViewport.nodes.map((node) => node.id === "effect-1" ? { ...node, id: "effect-2" } : node),
+      relations: [{ id: "replacement-relation", sourceId: "cause-1", targetId: "effect-2" }]
+    });
+    act(() => { replaceGraph?.(replacedNode); });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole("button", { name: "Effect: Replacement" })).toBeInTheDocument();
 
     fireEvent.keyDown(screen.getByRole("group", { name: "Current Reality Tree canvas" }), { key: "z", ctrlKey: true });
     expect(onChange).not.toHaveBeenCalled();

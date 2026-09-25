@@ -220,7 +220,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     const current = historyRef.current;
     const historyKeyChanged = historyKeyRef.current !== historyKey;
     if (historyKeyChanged || current.present !== graph) {
-      const pendingCreation = pendingCreationRef.current === graph.editingNodeId;
+      const pendingCreation = pendingCreationRef.current !== null && pendingCreationRef.current === graph.editingNodeId;
       const nextHistory = !historyKeyChanged && pendingCreation
         ? current
         : !historyKeyChanged && graphsAreEquivalent(current.present, graph)
