@@ -787,6 +787,34 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     }));
     expect(screen.getByTestId("crt-edge-fallback")).toHaveAccessibleName("Relation from Untitled card to Untitled card");
     fallbackEdge.unmount();
+    const highOffset = render(createElement(edgeComponent, {
+      id: "high-offset",
+      sourceX: 40,
+      sourceY: 200,
+      targetX: 40,
+      targetY: 40,
+      routeOffset: 999,
+      selected: false,
+      data: undefined,
+      markerEnd: undefined,
+      style: undefined
+    }));
+    const lowOffset = render(createElement(edgeComponent, {
+      id: "low-offset",
+      sourceX: 40,
+      sourceY: 200,
+      targetX: 40,
+      targetY: 40,
+      routeOffset: -999,
+      selected: false,
+      data: undefined,
+      markerEnd: undefined,
+      style: undefined
+    }));
+    expect(screen.getByTestId("crt-edge-high-offset")).toBeInTheDocument();
+    expect(screen.getByTestId("crt-edge-low-offset")).toBeInTheDocument();
+    highOffset.unmount();
+    lowOffset.unmount();
     consoleError.mockRestore();
     fireEvent.keyDown(screen.getByRole("img", { name: "Directed relation" }), { key: "Escape" });
 
@@ -1511,18 +1539,45 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     }));
   });
 
-  it("announces when connector navigation reaches a missing card", async () => {
-    renderCanvas(createGraphState({
-      nodes: [{ id: "cause", label: "Cause", position: { x: 100, y: 280 } }],
-      relations: [{ id: "dangling", sourceId: "cause", targetId: "missing" }],
-      selectedRelationId: "dangling"
+  it("keeps inline editing cancel, blur commit, and one-step undo meaningful", async () => {
+    const onChange = vi.fn();
+    renderCanvas(initialGraph(), onChange);
+
+    const editor = await inlineEditor("effect-1");
+    fireEvent.change(editor, { target: { value: "Discarded draft" } });
+    fireEvent.keyDown(editor, { key: "Escape" });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Server is unreliable"));
+
+    const blurredEditor = await inlineEditor("effect-1");
+    fireEvent.change(blurredEditor, { target: { value: "Stable service" } });
+    fireEvent.blur(blurredEditor);
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Stable service"));
+    expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({
+      nodes: expect.arrayContaining([expect.objectContaining({ label: "Discarded draft" })])
     }));
 
-    act(() => flowCallback("onEdgeClick")(null, { id: "dangling" }));
+    fireEvent.keyDown(screen.getByRole("group", { name: "Current Reality Tree canvas" }), { key: "z", ctrlKey: true });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Server is unreliable"));
+
+    const blankEditor = await inlineEditor("effect-1");
+    fireEvent.change(blankEditor, { target: { value: "   " } });
+    fireEvent.blur(blankEditor);
+    expect(screen.getByText("Card labels cannot be blank.")).toBeInTheDocument();
+  });
+
+  it("fails safely when a selected relation points to a missing card", async () => {
+    const onChange = vi.fn();
+    renderCanvas(createGraphState({
+      nodes: [{ id: "cause", label: "Cause", position: { x: 0, y: 0 } }],
+      relations: [{ id: "dangling", sourceId: "cause", targetId: "missing" }],
+      selectedRelationId: "dangling"
+    }), onChange);
+
     const toolbar = await screen.findByRole("toolbar", { name: "Selected relation actions" });
     fireEvent.click(within(toolbar).getByRole("button", { name: "Go to Effect" }));
 
     expect(screen.getByText("Cannot navigate to the relation effect; card is missing.")).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ selectedNodeId: "missing" }));
   });
 
   it("fails closed for pointer cancellation, same-side drops, invalid targets, and connection errors", async () => {
@@ -1579,5 +1634,45 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     fireEvent.pointerMove(window, { clientX: 20, clientY: 20 });
     fireEvent.pointerUp(window, { clientX: 20, clientY: 20 });
     expect(elementFromPoint).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when a relation action targets an already-removed relation", async () => {
+    const onChange = vi.fn();
+    renderCanvas(createGraphState({
+      nodes: [{ id: "cause", label: "Cause", position: { x: 0, y: 0 } }],
+      selectedRelationId: "removed"
+    }), onChange);
+
+    fireEvent.click(within(await screen.findByRole("toolbar", { name: "Selected relation actions" })).getByRole("button", { name: "Go to Cause" }));
+    fireEvent.click(within(screen.getByRole("toolbar", { name: "Selected relation actions" })).getByRole("button", { name: "Delete relation" }));
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByText("The relation to delete no longer exists.")).toBeInTheDocument();
+  });
+
+  it("resets history when controlled node or relation identity changes", async () => {
+    const onChange = vi.fn();
+    const view = render(<CrtCanvas graph={initialGraph()} onChange={onChange} />);
+    const changedNode = createGraphState({
+      ...initialGraph(),
+      nodes: [
+        { id: "effect-1", label: "Replacement", position: { x: 260, y: 40 } },
+        { id: "cause-1", label: "Deployments are rushed", position: { x: 260, y: 260 } }
+      ],
+      viewportCenter: { x: 260, y: 160 },
+      selectedNodeId: "cause-1"
+    });
+    view.rerender(<CrtCanvas graph={changedNode} onChange={onChange} />);
+    await act(async () => { await Promise.resolve(); });
+
+    const changedRelation = createGraphState({
+      ...changedNode,
+      relations: [{ id: "replacement-relation", sourceId: "cause-1", targetId: "effect-1" }]
+    });
+    view.rerender(<CrtCanvas graph={changedRelation} onChange={onChange} />);
+    await act(async () => { await Promise.resolve(); });
+
+    fireEvent.keyDown(screen.getByRole("group", { name: "Current Reality Tree canvas" }), { key: "z", ctrlKey: true });
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
