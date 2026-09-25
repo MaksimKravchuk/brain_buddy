@@ -208,6 +208,10 @@ class CrtFixture {
 
   async install(page: Page): Promise<void> {
     await page.route("**/api/**", async (route) => {
+      if (!new URL(route.request().url()).pathname.startsWith("/api/")) {
+        await route.continue();
+        return;
+      }
       const { path, request } = this.record(route);
       if (!path.startsWith("/api/")) {
         await route.continue();
@@ -596,7 +600,7 @@ test("T024 inline label editing cancels with Escape, persists on Enter, and undo
   await crtLabels("Inline label commit, cancellation, and undo");
   const fixture = new CrtFixture({ trees: [oneCardTree()] });
   await openCrt(page, fixture);
-  await expect(page.getByRole("heading", { name: "Current Reality Tree" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Current Reality Tree", includeHidden: true })).toHaveClass(/sr-only/);
 
   const original = page.getByRole("button", { name: /Synthetic effect/ });
   await original.dblclick();
