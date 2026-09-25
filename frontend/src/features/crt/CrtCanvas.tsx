@@ -466,6 +466,20 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     [emit]
   );
 
+  const navigateSelectedRelation = useCallback(
+    (endpoint: "cause" | "effect") => {
+      const relation = graphRef.current.relations.find((candidate) => candidate.id === graphRef.current.selectedRelationId);
+      if (!relation) return;
+      const nodeId = endpoint === "cause" ? relation.sourceId : relation.targetId;
+      if (!graphRef.current.nodes.some((node) => node.id === nodeId)) {
+        setAnnouncement(`Cannot navigate to the relation ${endpoint}; card is missing.`);
+        return;
+      }
+      selectNode(nodeId);
+    },
+    [selectNode]
+  );
+
   const focusRelated = useCallback(
     (direction: "up" | "down" | "left" | "right") => {
       const current = graphRef.current.nodes.find((node) => node.id === graphRef.current.selectedNodeId);
@@ -722,6 +736,8 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     else setZoom(nextViewport.zoom);
   }, [persistViewport]);
 
+  const selectedRelationId = graph.selectedRelationId;
+
   return (
     <section
       ref={canvasRef}
@@ -815,6 +831,38 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
           >
             <Background color="#dbe4ee" gap={24} size={1} />
           </ReactFlow>
+
+          {selectedRelationId ? (
+            <div
+              className="crt-relation-action-toolbar"
+              data-testid="crt-relation-action-toolbar"
+              role="toolbar"
+              aria-label="Selected relation actions"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                data-crt-native="true"
+                onClick={() => navigateSelectedRelation("cause")}
+              >
+                Go to Cause
+              </button>
+              <button
+                type="button"
+                data-crt-native="true"
+                onClick={() => navigateSelectedRelation("effect")}
+              >
+                Go to Effect
+              </button>
+              <button
+                type="button"
+                data-crt-native="true"
+                onClick={() => removeRelation(selectedRelationId)}
+              >
+                Delete relation
+              </button>
+            </div>
+          ) : null}
 
           <div className="crt-zoom-controls" aria-label="Canvas zoom controls">
             <button type="button" data-crt-native="true" aria-label="Fit all cards" onClick={fitAll}>⌗</button>

@@ -166,6 +166,44 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect(screen.queryByText("Disconnected")).not.toBeInTheDocument();
   });
 
+  it("shows an accessible canvas toolbar for the selected relation and preserves its cause-to-effect direction", async () => {
+    const onChange = vi.fn();
+    renderCanvas(initialGraph(), onChange);
+
+    fireEvent.click(await screen.findByTestId("crt-edge-relation-1"));
+
+    const toolbar = await screen.findByRole("toolbar", { name: "Selected relation actions" });
+    expect(within(toolbar).getByRole("button", { name: "Go to Cause" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "Go to Effect" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "Delete relation" })).toBeInTheDocument();
+
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Go to Cause" }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      selectedNodeId: "cause-1",
+      selectedRelationId: null
+    }));
+
+    fireEvent.click(await screen.findByTestId("crt-edge-relation-1"));
+    fireEvent.click(within(await screen.findByRole("toolbar", { name: "Selected relation actions" })).getByRole("button", { name: "Go to Effect" }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      selectedNodeId: "effect-1",
+      selectedRelationId: null
+    }));
+  });
+
+  it("deletes a selected relation from the canvas toolbar", async () => {
+    const onChange = vi.fn();
+    renderCanvas(initialGraph(), onChange);
+
+    fireEvent.click(await screen.findByTestId("crt-edge-relation-1"));
+    fireEvent.click(within(await screen.findByRole("toolbar", { name: "Selected relation actions" })).getByRole("button", { name: "Delete relation" }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      relations: [],
+      selectedRelationId: null
+    }));
+  });
+
   it("keeps the canvas zoom at a legible maximum and leaves React Flow attribution visible", () => {
     renderCanvas();
 
@@ -407,7 +445,7 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     onChange.mockClear();
     firstRender.unmount();
     renderCanvas(graph, onChange);
-    fireEvent.click(screen.getByRole("button", { name: /Delete relation/ }));
+    fireEvent.click(within(screen.getByRole("toolbar", { name: "Selected relation actions" })).getByRole("button", { name: "Delete relation" }));
     expect((onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as GraphState).relations).toEqual([]);
   });
 

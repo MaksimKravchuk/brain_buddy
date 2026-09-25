@@ -150,6 +150,61 @@
   background: #f8fafc;
 }
 
+.crt-relation-action-toolbar {
+  position: absolute;
+  top: 0.9rem;
+  left: 50%;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  width: max-content;
+  max-width: calc(100% - 1rem);
+  box-sizing: border-box;
+  border: 1px solid #bae6fd;
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.97);
+  padding: 0.4rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  transform: translateX(-50%);
+}
+
+.crt-relation-action-toolbar button {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.45rem;
+  background: #fff;
+  padding: 0.4rem 0.65rem;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  min-width: 0;
+  flex: 1 1 8rem;
+  white-space: normal;
+}
+
+.crt-relation-action-toolbar button:hover {
+  border-color: #0284c7;
+  color: #0369a1;
+}
+
+.crt-relation-action-toolbar button:focus-visible,
+.crt-canvas-toolbar-actions button:focus-visible,
+.crt-tool-rail button:focus-visible,
+.crt-zoom-controls button:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+/* The SVG group receives focus on edge click; its browser rectangle would
+   draw two black bars beside the curved path. Selection already turns the
+   relation stroke blue, including when it is focused by keyboard. */
+.react-flow__edge g[data-testid^="crt-edge-"]:focus {
+  outline: none;
+}
+
 .crt-zoom-controls {
   position: absolute;
   right: 1rem;
