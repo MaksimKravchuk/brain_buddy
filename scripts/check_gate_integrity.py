@@ -268,20 +268,23 @@ INVARIANTS: tuple[Invariant, ...] = (
         "The privacy and UX lenses cover constitution principles I and V. "
         "Removing either leaves a principle with no reviewer.",
     ),
-    # ADR-0024 binds every lens to the runtime this repository provisions.
-    # Reintroducing a second provider silently recreates the unavailable-CLI
-    # deadlock that made the gate unusable in this environment.
+    # ADR-0025 keeps Codex as a default without making it mandatory. An
+    # external adapter must be measured before execution and its declared
+    # provider/model must never become proof of reviewer independence.
     MustMatch(
         "scripts/spec_kit_planning_review.py",
-        "Codex is the only review integration",
-        r'INTEGRATION_CLI:\s*dict\[str,\s*str\]\s*=\s*\{"codex":\s*"codex"\}',
-        "The planning gate must not depend on an unprovisioned second-vendor CLI.",
+        "external adapter rejects a wrong executable hash",
+        r'measured\s*=\s*hashlib\.sha256\(executable\.read_bytes\(\)\)\.hexdigest\(\)'
+        r'(?:(?!\ndef ).)*?if measured != adapter_sha256:'
+        r'(?:(?!\ndef ).)*?raise ReviewError',
+        "The reviewed adapter pin must be checked before a lens executes.",
     ),
-    MustNotMatch(
+    MustMatch(
         "scripts/spec_kit_planning_review.py",
-        "every review lens uses Codex",
-        r'"integration":\s*"(?!codex")[^"]+"',
-        "Every configured review lens must execute through the available Codex runtime.",
+        "external model identity is marked unverified",
+        r'"integration":\s*"external-unverified"\s*,\s*"model":\s*"unverified"'
+        r'(?:(?!\ndef ).)*?"degraded":\s*True',
+        "Caller-supplied labels do not attest provider identity or independence.",
     ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
@@ -314,9 +317,8 @@ INVARIANTS: tuple[Invariant, ...] = (
         "Codex oracle provenance is validated",
         r'def validate_oracle_provenance\((?:(?!\ndef ).)*?payload\.get\("integration"\) != "codex"'
         r'(?:(?!\ndef ).)*?payload\.get\("degraded"\) is not False'
-        r'(?:(?!\ndef ).)*?Path\(executable\)\.is_absolute\(\)'
-        r'(?:(?!\ndef ).)*?artifacts_digest',
-        "A dictionary-shaped oracle is not evidence unless it matches the current Codex harness shape.",
+        r'(?:(?!\ndef ).)*?Path\(executable\)\.is_absolute\(\)',
+        "The default Codex route still requires the exact harness provenance shape.",
     ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",

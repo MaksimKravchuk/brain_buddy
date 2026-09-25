@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 import re
@@ -1115,7 +1116,7 @@ class ExternalReviewerTests(unittest.TestCase):
             }))
             adapter = root / "reviewer.py"
             adapter.write_text(
-                "import json, os, sys\n"
+                "#!/usr/bin/env python3\nimport json, os, sys\n"
                 "prompt = sys.stdin.read()\n"
                 "assert 'Focus:' in prompt\n"
                 "assert os.environ['SPECKIT_REVIEW_SCHEMA'].endswith('review.schema.json')\n"
@@ -1124,13 +1125,17 @@ class ExternalReviewerTests(unittest.TestCase):
                 "'reviewed_files': ['specs/006-example/spec.md'], "
                 "'findings': [], 'product_decisions': []}))\n"
             )
+            adapter.chmod(0o700)
+            pin = hashlib.sha256(adapter.read_bytes()).hexdigest()
             path = self.module.run_review(
                 root=root, run_id="run1", role="requirements-consistency",
-                reviewer_command=f"{sys.executable} {adapter}",
+                reviewer_command=str(adapter),
                 provider="test-provider", model="test-model",
+                adapter_sha256=pin,
             )
             review = json.loads(path.read_text())
             self.assertEqual(review["oracle"]["adapter"], "external-stdin-v1")
+            self.assertEqual(review["oracle"]["adapter_sha256"], pin)
             self.assertEqual(review["oracle"]["integration"], "external-unverified")
             self.assertEqual(review["oracle"]["claimed_provider"], "test-provider")
             self.assertTrue(review["oracle"]["degraded"])
@@ -1153,15 +1158,18 @@ class ExternalReviewerTests(unittest.TestCase):
                 "product_decisions": [],
                 "oracle": {"integration": "forged", "model": "forged"},
             }
+            adapter = root / "reviewer"
+            adapter.write_text("#!/usr/bin/env python3\n")
+            adapter.chmod(0o700)
+            pin = hashlib.sha256(adapter.read_bytes()).hexdigest()
             with mock.patch.object(self.module, "build_prompt", return_value="PROMPT"), \
-                 mock.patch.object(self.module.shutil, "which", return_value="/usr/bin/reviewer"), \
                  mock.patch.object(self.module.subprocess, "run", return_value=subprocess.CompletedProcess(
-                     ["reviewer"], 0, json.dumps(payload), ""
+                     [str(adapter)], 0, json.dumps(payload), ""
                  )) as runner:
                 path = self.module.run_review(
                     root=root, run_id="run1", role="requirements-consistency",
-                    reviewer_command="reviewer --json", provider="independent-provider",
-                    model="model-a",
+                    reviewer_command=str(adapter), provider="independent-provider",
+                    model="model-a", adapter_sha256=pin,
                 )
             review = json.loads(path.read_text())
             self.assertEqual(review["oracle"]["integration"], "external-unverified")
@@ -1173,7 +1181,7 @@ class ExternalReviewerTests(unittest.TestCase):
             self.assertEqual(review["oracle"]["artifacts_digest"], "digest-1")
             self.assertEqual(runner.call_args.kwargs["input"], "PROMPT")
             self.assertEqual(runner.call_args.kwargs["env"]["SPECKIT_REVIEW_ROLE"], "requirements-consistency")
-            self.assertEqual(runner.call_args.args[0], ["reviewer", "--json"])
+            self.assertEqual(runner.call_args.args[0], [str(adapter.resolve())])
 
     def test_external_adapter_cannot_self_certify_configured_panel(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1189,21 +1197,74 @@ class ExternalReviewerTests(unittest.TestCase):
                 "reviewed_files": ["specs/006-example/spec.md"], "findings": [],
                 "product_decisions": [],
             }
+            adapter = root / "reviewer"
+            adapter.write_text("#!/usr/bin/env python3\n")
+            adapter.chmod(0o700)
+            pin = hashlib.sha256(adapter.read_bytes()).hexdigest()
             with mock.patch.object(self.module, "build_prompt", return_value="PROMPT"), \
-                 mock.patch.object(self.module.shutil, "which", return_value="/usr/bin/reviewer"), \
                  mock.patch.object(self.module.subprocess, "run", return_value=subprocess.CompletedProcess(
-                     ["reviewer"], 0, json.dumps(payload), ""
+                     [str(adapter)], 0, json.dumps(payload), ""
                  )) as runner, \
                  mock.patch.dict(os.environ, {"DATABASE_URL": "test-only-placeholder"}):
                 path = self.module.run_review(
                     root=root, run_id="run1", role="requirements-consistency",
-                    reviewer_command="reviewer", provider="codex", model="gpt-5.3-codex",
+                    reviewer_command=str(adapter), provider="codex", model="gpt-5.3-codex",
+                    adapter_sha256=pin,
                 )
             oracle = json.loads(path.read_text())["oracle"]
             self.assertTrue(oracle["degraded"])
             self.assertEqual(oracle["integration"], "external-unverified")
             self.assertEqual(oracle["claimed_provider"], "codex")
             self.assertNotIn("DATABASE_URL", runner.call_args.kwargs["env"])
+
+    def test_mismatched_adapter_pin_fails_before_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / ".specify/workflows/runs/run1"
+            run_dir.mkdir(parents=True)
+            (run_dir / "planning-context.json").write_text(json.dumps({
+                "feature_dir": str(root / "specs/006-example"),
+                "artifacts_digest": "a" * 64,
+            }))
+            adapter = root / "reviewer"
+            adapter.write_text("#!/usr/bin/env python3\n")
+            adapter.chmod(0o700)
+            with mock.patch.object(self.module, "build_prompt", return_value="PROMPT"), \
+                 mock.patch.object(self.module.subprocess, "run") as runner:
+                with self.assertRaisesRegex(self.module.ReviewError, "differs from pinned"):
+                    self.module.run_review(
+                        root=root, run_id="run1", role="requirements-consistency",
+                        reviewer_command=str(adapter), provider="x", model="y",
+                        adapter_sha256="0" * 64,
+                    )
+                runner.assert_not_called()
+                with self.assertRaisesRegex(self.module.ReviewError, "one executable"):
+                    self.module.run_review(
+                        root=root, run_id="run1", role="requirements-consistency",
+                        reviewer_command=f"{sys.executable} {adapter}", provider="x", model="y",
+                        adapter_sha256=hashlib.sha256(adapter.read_bytes()).hexdigest(),
+                    )
+                runner.assert_not_called()
+
+    def test_external_provenance_requires_measured_adapter_fields(self) -> None:
+        digest = "a" * 64
+        oracle = {
+            "integration": "external-unverified", "model": "unverified",
+            "degraded": True, "adapter": "external-stdin-v1",
+            "adapter_sha256": "b" * 64, "executable": "/opt/review-adapter",
+            "claimed_provider": "p", "claimed_model": "m",
+            "configured_integration": "codex", "configured_model": "gpt-5.6-sol",
+            "artifacts_digest": digest,
+        }
+        self.assertEqual(self.module.validate_oracle_provenance(
+            oracle, role="requirements-consistency", artifacts_digest=digest,
+        ), oracle)
+        for key in ("adapter_sha256", "claimed_model", "executable"):
+            with self.subTest(missing=key):
+                invalid = {k: v for k, v in oracle.items() if k != key}
+                self.assertIsNone(self.module.validate_oracle_provenance(
+                    invalid, role="requirements-consistency", artifacts_digest=digest,
+                ))
 
     def test_missing_provenance_fails_before_running_any_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

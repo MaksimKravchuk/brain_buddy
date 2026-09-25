@@ -225,28 +225,28 @@ class InvariantEnforcementTests(unittest.TestCase):
             )
             self.assertIn("check-specs runs feature requirement coverage", report)
 
-    def test_adding_claude_to_the_review_integrations_is_caught(self) -> None:
+    def test_skipping_external_adapter_pin_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = self._assert_invariant_fires(
                 tmp,
                 "scripts/spec_kit_planning_review.py",
                 lambda text: text.replace(
-                    'INTEGRATION_CLI: dict[str, str] = {"codex": "codex"}',
-                    'INTEGRATION_CLI: dict[str, str] = {"codex": "codex", "claude": "claude"}',
+                    "if measured != adapter_sha256:", "if False:",
                 ),
             )
-            self.assertIn("Codex is the only review integration", report)
+            self.assertIn("external adapter rejects a wrong executable hash", report)
 
-    def test_changing_a_review_lens_to_claude_is_caught(self) -> None:
+    def test_claiming_verified_model_identity_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = self._assert_invariant_fires(
                 tmp,
                 "scripts/spec_kit_planning_review.py",
                 lambda text: text.replace(
-                    '"integration": "codex"', '"integration": "claude"', 1
+                    '"integration": "external-unverified",\n            "model": "unverified",',
+                    '"integration": "external",\n            "model": model,',
                 ),
             )
-            self.assertIn("every review lens uses Codex", report)
+            self.assertIn("external model identity is marked unverified", report)
 
     def test_replacing_the_resolved_executable_with_a_bare_name_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

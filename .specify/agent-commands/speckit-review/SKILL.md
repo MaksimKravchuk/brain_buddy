@@ -27,10 +27,10 @@ ADR-0011 governs this stage. It is a **portable** gate: it runs for every
 feature, with or without a managed outcome. The old "never run the legacy
 workflow.yml campaign" rule was superseded.
 
-The campaign is a plain script any agent or developer can run. The historical
-Claude/Codex CLI routes remain optional; the external adapter below does not
-require either executable. A model adapter must still produce real review
-evidence under the same validation and independence reporting rules.
+The campaign is a plain script any agent or developer can run. Codex is the
+default CLI route, not a mandatory agent. A reviewed external adapter can run
+without it, subject to executable hash pinning, schema validation, and honest
+unverified-model provenance (ADR-0025).
 
 ## Preconditions
 
@@ -65,30 +65,34 @@ Use genuinely independent reviewers where available; do not present five
 runs of one model as independent agreement. The summary records actual
 provider/model correlation.
 
-The gate accepts a reviewer adapter that follows its JSON protocol. External
-adapters are **always recorded as unverified and degraded**; caller-supplied
-provider/model labels are claims, not proof of independent providers:
+The gate accepts a reviewed single-executable adapter implementing the JSON
+protocol. Its SHA-256 must match the pin before execution. External adapters
+are **always marked degraded with unverified model identity**: the executable
+hash is measured, but provider/model labels are claims, not proof of separate
+providers. Use a separate pin for each reviewed adapter binary:
 
 ```bash
 python3 scripts/spec_kit_planning_review.py review \
   --run-id "<run-id>" --role "<role>" \
-  --reviewer-command "/path/to/read-only-review-adapter" \
-  --provider "<actual-provider>" --model "<actual-model>"
+  --reviewer-command "/absolute/path/to/read-only-review-adapter" \
+  --adapter-sha256 "<reviewed SHA-256>" \
+  --provider "<claimed-provider>" --model "<claimed-model>"
 ```
 
-The adapter reads the complete prompt on **stdin** and writes **only** review
-JSON to stdout. `SPECKIT_REVIEW_ROLE` and `SPECKIT_REVIEW_SCHEMA` plus only a
-small allowlist of process environment variables are passed. The adapter must
-enforce read-only access itself; the generic subprocess cannot guarantee a
-sandbox, and the adapter can still read files accessible to the current user.
-Do not fabricate provider/model labels or pass a prewritten generic approval.
-The harness stamps the executable, **claimed** provider/model, degraded
-provenance and artifact digest, validates the JSON, and rejects missing evidence.
+The command must be one executable without arguments, not an interpreter with
+a mutable script argument. It reads the complete prompt on **stdin** and writes
+**only** review JSON to stdout. `SPECKIT_REVIEW_ROLE` and
+`SPECKIT_REVIEW_SCHEMA` plus a small process environment allowlist are passed.
+The adapter must enforce read-only access itself; a subprocess cannot guarantee
+an OS sandbox and can still read files accessible to the current user. The
+harness stamps the measured executable and hash, **claimed** provider/model,
+degraded provenance and artifact digest, validates JSON, and rejects missing
+evidence. Never pass a prewritten generic approval as a review.
 
-For backwards compatibility, omitting `--reviewer-command` uses the original
-Codex/Claude CLI routing with its recorded fallback. Neither CLI is required
-when a suitable external adapter is supplied. The three rubric documents
-live at `.specify/review-rubrics/` and are shared across runtimes.
+Without `--reviewer-command`, the default is the Codex-only CLI route with no
+fallback (ADR-0024); missing Codex fails closed. An external adapter does not
+require Codex or Claude. The three rubric documents live at
+`.specify/review-rubrics/` and are shared across runtimes.
 
 ## Step 3 — aggregate
 

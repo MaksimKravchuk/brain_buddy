@@ -303,10 +303,11 @@ A reviewer's verdict is gate-blocking on its own; the aggregator does not
 re-derive it from finding severities. A malformed review still raises — absence
 and corruption are different.
 
-**Panel independence.** No model covers a majority of the five lenses and the
-panel spans two providers, both asserted by tests. Three lenses sharing one
-model is one opinion counted three times, which the aggregation rule would read
-as corroboration.
+**Panel independence.** The default Codex panel is single-provider and
+correlated (ADR-0024). The report must show that limitation. A custom adapter's
+provider/model labels are claims, not attestation of independent providers;
+its executable is measured against a caller-pinned SHA-256 but the model identity
+remains unverified. Never present an external panel as proven independent.
 
 **Campaign cap: two.** Fresh reviewer sessions re-litigate artifacts from
 scratch, so finding counts diverge between runs even as every verified defect
@@ -314,22 +315,32 @@ is fixed. Carry campaign 1's findings forward into campaign 2. After campaign
 2: land the fixes, defer the residue into explicit open lanes, or close by
 founder acceptance with the full record (see below).
 
-**Degraded runs.** The historical default routes still use Codex/Claude. An
-external reviewer adapter can instead supply schema-valid reviews from any
-runtime via `--reviewer-command`, `--provider` and `--model`; it reads the
-prompt on stdin and must enforce its own read-only sandbox. For legacy routes,
-two of the five lenses shell out to the `codex` CLI. Where
-it is absent they fall back to `claude`/`sonnet` rather than failing, because a
-gate that can never be reached is a gate people route around (ADR-0014). The
-substitution is never silent: each review records which oracle actually ran,
-and the summary carries `degraded_lenses`, `panel_correlated` and
-`panel_oracles`. A degraded campaign may reach `approved`, but it cannot look
-undegraded.
+**Agent-neutral reviewer adapter.** The default legacy route uses the Codex CLI
+(ADR-0024). To run without it, provide a reviewed, executable adapter pinned
+by SHA-256. It reads the prompt on stdin and returns one schema-valid review
+JSON object on stdout, with no diagnostic text there:
 
-A reviewer that is *installed and fails* still raises — absence is a gap a
-fallback can fill, failure is a defect in evidence that was produced. A lens
-that produces no review at all is still missing mandatory evidence and still
-returns `escalated`. A partial campaign is never reported as a clean one.
+```bash
+sha256sum /absolute/path/to/read-only-review-adapter
+python3 scripts/spec_kit_planning_review.py review \
+  --run-id "<run-id>" --role "<role>" \
+  --reviewer-command "/absolute/path/to/read-only-review-adapter" \
+  --adapter-sha256 "<the reviewed executable's 64-character hash>" \
+  --provider "<claimed provider>" --model "<claimed model>"
+```
+
+The command must be **one executable without arguments**; for scripts, pin
+the executable script itself rather than an interpreter with a mutable script
+argument. The harness rejects hash mismatches before execution, passes only a
+small environment allowlist, validates the JSON, and stamps the measured hash,
+resolved path, current artifact digest and claimed provider/model. The adapter
+must independently enforce read-only behavior; the subprocess is **not** an OS
+sandbox, and a pinned executable does not prove the remote model's identity.
+External lenses are always marked degraded and `external-unverified`; their
+claimed providers do not count as verified independent evidence. Their
+provenance still has to pass the fail-closed summary validation. An installed
+reviewer that fails is a hard error; no alternate runtime silently takes over.
+Missing lenses escalate, and a partial campaign can never appear approved.
 
 The canonical skills use hyphenated names under `.specify/agent-commands/`.
 Invoke or read each using the active agent's own skill mechanism; the `/` names
