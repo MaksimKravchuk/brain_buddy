@@ -1,11 +1,11 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
 
-export type CrtCardBadge = "Effect" | "Root cause" | "Intermediate" | "Disconnected";
+export type CrtCardBadge = "Effect" | "Root cause" | "Intermediate";
 
 export type CrtCardNodeData = {
   label: string;
-  badge: CrtCardBadge;
+  badge?: CrtCardBadge;
   selected: boolean;
   editing: boolean;
   connectionMode: boolean;
@@ -98,12 +98,12 @@ export function CrtCardNode({ id, data, selected }: NodeProps<CrtCard>): React.J
           className="crt-card-button"
           data-crt-card="true"
           data-node-id={id}
-          aria-label={`${data.badge}: ${data.label || "Untitled card"}`}
+          aria-label={`${data.badge ? `${data.badge}: ` : ""}${data.label || "Untitled card"}`}
           aria-pressed={isSelected}
           tabIndex={isSelected ? 0 : -1}
           onFocus={() => data.onFocusCard?.(id)}
         >
-          <span className="crt-card-badge">{data.badge}</span>
+          {data.badge ? <span className="crt-card-badge">{data.badge}</span> : null}
           <span className="crt-card-label">{data.label || "Untitled card"}</span>
         </button>
       )}

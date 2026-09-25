@@ -404,7 +404,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     expect(await screen.findByRole("heading", { name: "Recover local draft" })).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Current Reality Tree canvas" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Recover draft" }));
-    expect(await screen.findByRole("button", { name: "Disconnected: Local draft" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Local draft" })).toBeInTheDocument();
   });
 
   it("opens the stale D-06 recovery choice without applying or deleting the draft", async () => {

@@ -664,7 +664,7 @@ test("T024 failed PUT recovery replays the durable request exactly and revision 
   await crtLabels("Durable save recovery and revision conflict choices");
   const fixture = new CrtFixture({ trees: [oneCardTree()], failNextPut: true });
   await openCrt(page, fixture);
-  const effect = page.getByRole("button", { name: "Disconnected: Synthetic effect" });
+  const effect = page.getByRole("button", { name: "Synthetic effect" });
   await effect.focus();
   await page.keyboard.press("Enter");
   const editor = page.locator("input[data-card-editor-id]").last();
@@ -722,7 +722,7 @@ test("T024 server-rejected import leaves graph and local draft bytes unchanged",
   await crtLabels("Atomic import rejection");
   const fixture = new CrtFixture({ trees: [oneCardTree()], rejectImport: true });
   await openCrt(page, fixture);
-  await expect(page.getByRole("button", { name: "Disconnected: Synthetic effect" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Synthetic effect" })).toBeVisible();
   const beforeGraph = await page.locator("[data-crt-card='true']").allTextContents();
   const beforeStorage = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
   const validExport = { tree: clone(fixture.tree("tree-one")) };
@@ -1184,7 +1184,7 @@ test("T024 tree management supports switch, rename, export, cancel, and revision
   const fixture = new CrtFixture({ trees: [first, second] });
   await openCrt(page, fixture);
   await test.step("load the first synthetic tree before managing the tree set", async () => {
-    await expect(page.getByRole("button", { name: "Disconnected: Synthetic effect" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Synthetic effect" })).toBeVisible();
   });
 
   await page.getByRole("button", { name: /Current tree: Tree A/ }).click();
@@ -1260,7 +1260,7 @@ test("T024 Compose selected-user Chromium journey proves auth exposure, persiste
   await page.keyboard.type("Synthetic undesired effect");
   await page.keyboard.press("Enter");
 
-  const effect = page.getByRole("button", { name: "Disconnected: Synthetic undesired effect" });
+  const effect = page.getByRole("button", { name: "Synthetic undesired effect" });
   await addCardWithKeyboard(page, effect, "Enter", "Cause A");
   await addCardWithKeyboard(page, page.getByRole("button", { name: "Root cause: Cause A" }), "Tab", "Cause B");
   const effectButton = page.getByRole("button", { name: "Effect: Synthetic undesired effect" });

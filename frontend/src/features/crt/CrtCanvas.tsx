@@ -104,10 +104,10 @@ function graphsAreEquivalent(left: GraphState, right: GraphState): boolean {
   });
 }
 
-function badgeForNode(nodeId: string, relations: readonly GraphRelation[]): CrtCardBadge {
+function badgeForNode(nodeId: string, relations: readonly GraphRelation[]): CrtCardBadge | undefined {
   const hasIncoming = relations.some((relation) => relation.targetId === nodeId);
   const hasOutgoing = relations.some((relation) => relation.sourceId === nodeId);
-  if (!hasIncoming && !hasOutgoing) return "Disconnected";
+  if (!hasIncoming && !hasOutgoing) return undefined;
   if (!hasIncoming) return "Root cause";
   if (!hasOutgoing) return "Effect";
   return "Intermediate";
