@@ -1235,7 +1235,8 @@ test("T010 real connector drag links cause to effect without moving cards", asyn
   });
   await openCrt(page, fixture);
 
-  await expect(page.locator('[data-node-id="node-cause"]')).toContainText("Cause");
+  await test.step("drag the visible connector and verify persisted direction without card movement", async () => {
+    await expect(page.locator('[data-node-id="node-cause"]')).toContainText("Cause");
   await page.getByRole("button", { name: "Connect cards" }).click();
   const target = page.getByRole("button", { name: "Connect into bottom of Effect" });
   const source = page.getByRole("button", { name: "Connect from top of Cause" });
@@ -1264,9 +1265,12 @@ test("T010 real connector drag links cause to effect without moving cards", asyn
   const effectAfter = await effectCard.boundingBox();
   expect(causeAfter?.y).toBeCloseTo(causeBefore.y, 1);
   expect(effectAfter?.y).toBeCloseTo(effectBefore.y, 1);
+  });
 });
 
 test("T010 target-first visible connector click still adds a relation", async ({ page }) => {
+  await crtLabels("Target-first connector click preserves the two-click path");
+  await test.step("select the effect first and connect the cause", async () => {
   const fixture = new CrtFixture({ trees: [treeFixture("tree-click", "Click connectors", [
     node("node-cause", "Cause", { x: 0, y: 220 }),
     node("node-effect", "Effect", { x: 0, y: 0 })
@@ -1277,6 +1281,7 @@ test("T010 target-first visible connector click still adds a relation", async ({
   await page.getByRole("button", { name: "Connect from top of Cause" }).click();
   await expect.poll(() => fixture.tree("tree-click").relations.length).toBe(1);
   expect(fixture.tree("tree-click").relations[0]).toMatchObject({ source_node_id: "node-cause", target_node_id: "node-effect" });
+  });
 });
 
 test("T024 Compose selected-user Chromium journey proves auth exposure, persistence, and second-account 404 isolation", async ({ page }, testInfo) => {
