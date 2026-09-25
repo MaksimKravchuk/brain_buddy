@@ -110,7 +110,8 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
             "- [ ] T001 Build a contract\n- [ ] T002 Build the UI\n"
         )
         (feature / "spec.md").write_text(
-            "Requirements: FR-001, FR-002\n"
+            "## Requirements\n\n- **FR-001**: Contract exists.\n"
+            "- **FR-002**: UI consumes contract.\n"
         )
         payload = {"schema_version": "brainbuddy-pr-slices/v1", "slices": [
             {"id": "PR-01", "outcome": "Contract is verifiable", "tasks": ["T001"],
@@ -129,6 +130,39 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
             tasks.write("\n## PR-срезы\n\n```json\n")
             tasks.write(json.dumps(payload, ensure_ascii=False))
             tasks.write("\n```\n")
+
+    def test_pr_slices_reject_two_json_maps_in_one_section(self) -> None:
+        feature, payload = self._slice_fixture()
+        self._write_slice_section(feature, payload)
+        with (feature / "tasks.md").open("a", encoding="utf-8") as tasks:
+            tasks.write("\n```json\n")
+            tasks.write(json.dumps(payload, ensure_ascii=False))
+            tasks.write("\n```\n")
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("exactly one fenced JSON" in item for item in failures))
+
+    def test_pr_slices_reject_an_unlabelled_second_json_map(self) -> None:
+        feature, payload = self._slice_fixture()
+        self._write_slice_section(feature, payload)
+        with (feature / "tasks.md").open("a", encoding="utf-8") as tasks:
+            tasks.write("\n```\n")
+            tasks.write(json.dumps(payload, ensure_ascii=False))
+            tasks.write("\n```\n")
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("exactly one fenced JSON" in item for item in failures))
+
+    def test_pr_slices_reject_repeated_section_heading(self) -> None:
+        feature, payload = self._slice_fixture()
+        self._write_slice_section(feature, payload)
+        with (feature / "tasks.md").open("a", encoding="utf-8") as tasks:
+            tasks.write("\n## PR-срезы\n\n```json\n")
+            tasks.write(json.dumps(payload, ensure_ascii=False))
+            tasks.write("\n```\n")
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("exactly one PR-срезы heading" in item for item in failures))
 
     def test_valid_pr_slices_cover_every_task_once(self) -> None:
         feature, payload = self._slice_fixture()
@@ -156,6 +190,30 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         self.assertTrue(any("020-FR-999" in item for item in failures))
         self.assertTrue(any("PR-02" in item and "earlier" in item for item in failures))
 
+    def test_pr_slices_require_defined_requirement_not_a_prose_mention(self) -> None:
+        feature, payload = self._slice_fixture()
+        (feature / "spec.md").write_text(
+            "## Requirements\n\n- **FR-002**: UI consumes contract.\n"
+            "Removed FR-001 from the definition list; trace note retains FR-001.\n"
+        )
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("unknown requirement '020-FR-001'" in item for item in failures))
+
+    def test_pr_slices_require_defined_success_criterion_not_a_prose_mention(self) -> None:
+        feature, payload = self._slice_fixture()
+        (feature / "spec.md").write_text(
+            "## Requirements\n\n- **FR-001**: Contract exists.\n"
+            "- **FR-002**: UI consumes contract.\n"
+            "Trace note: SC-001 was removed, but text remains.\n"
+        )
+        payload["slices"][0]["requirements"].append("020-SC-001")
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("unknown requirement '020-SC-001'" in item for item in failures))
+
     def test_parallel_pr_slices_may_not_claim_the_same_write_path(self) -> None:
         feature, payload = self._slice_fixture()
         payload["slices"][1]["depends_on"] = []
@@ -171,7 +229,7 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
             tasks.write("\n## PR-срезы\n\nmissing fenced map\n")
         failures: list[str] = []
         check_spec_kit_specs._validate_delivery_slices(feature, failures)
-        self.assertTrue(any("expected one fenced JSON" in item for item in failures))
+        self.assertTrue(any("expected exactly one fenced JSON" in item for item in failures))
 
     def test_single_pr_task_list_does_not_require_slice_map(self) -> None:
         feature, _payload = self._slice_fixture()

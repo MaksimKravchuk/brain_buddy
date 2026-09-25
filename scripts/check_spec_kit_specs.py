@@ -137,12 +137,16 @@ def _validate_delivery_slices(spec_dir: Path, failures: list[str]) -> None:
     if section is None:
         return  # Single-PR and historical specs are unchanged.
     label = f"{_relative(tasks_file)}: PR-срезы"
-    fenced = re.search(r"(?s)```json[ \t]*\n(.*?)\n```", section.group(1))
-    if fenced is None:
-        failures.append(f"{label}: expected one fenced JSON slice map")
+    if len(re.findall(r"(?m)^## PR-срезы[ \t]*$", task_text)) != 1:
+        failures.append(f"{label}: expected exactly one PR-срезы heading")
+        return
+    fenced = re.findall(r"(?ms)^```json[ \t]*\n(.*?)\n```[ \t]*$", section.group(1))
+    fence_lines = re.findall(r"(?m)^(?:```|~~~)", section.group(1))
+    if len(fenced) != 1 or len(fence_lines) != 2:
+        failures.append(f"{label}: expected exactly one fenced JSON slice map")
         return
     try:
-        payload = json.loads(fenced.group(1))
+        payload = json.loads(fenced[0])
     except ValueError as exc:
         failures.append(f"{label}: invalid JSON ({exc})")
         return
@@ -158,6 +162,10 @@ def _validate_delivery_slices(spec_dir: Path, failures: list[str]) -> None:
         return
     all_tasks = TASK_ID_RE.findall(task_text)
     spec_text = spec_file.read_text(encoding="utf-8")
+    defined_requirements = set(re.findall(
+        r"(?m)^[ \t]*[-*][ \t]+\*\*((?:FR|SC)-\d{3,})\*\*:[ \t]*\S",
+        spec_text,
+    ))
     if not all_tasks or len(all_tasks) != len(set(all_tasks)):
         failures.append(f"{label}: tasks.md needs unique checklist task IDs")
         return
@@ -203,7 +211,7 @@ def _validate_delivery_slices(spec_dir: Path, failures: list[str]) -> None:
             short_id = requirement.split("-", 1)[-1] if isinstance(requirement, str) else ""
             if not isinstance(requirement, str) or not re.fullmatch(
                 rf"{spec_dir.name[:3]}-(?:FR|SC)-\d{{3,}}", requirement
-            ) or not re.search(rf"(?<![\w-]){re.escape(short_id)}(?![\w-])", spec_text):
+            ) or short_id not in defined_requirements:
                 failures.append(f"{label}: {slice_id} references unknown requirement {requirement!r}")
         valid_paths = []
         for scope in item.get("paths", []) if isinstance(item.get("paths"), list) else []:

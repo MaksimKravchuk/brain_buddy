@@ -11,7 +11,7 @@
     "backend/mutation-enforced-scope.txt": "6d301c35b52b2366d4b3df01116c7fc44a7e0e10fef700ebdec4169cc10e5a5d",
     "scripts/check_gate_integrity.py": "986936a8a1465f081694ec888d8add199ce040e1987dd6712453396f661badfa",
     "scripts/check_requirement_coverage.py": "755229af528cd0a1ca678cca0a5403b58669d1383577c1d5e8cf929f51c92b70",
-    "scripts/check_spec_kit_specs.py": "c4ae0e71644f56d194488ca29455ecefe7a347d97d65d79ac69736c3d76df21c",
+    "scripts/check_spec_kit_specs.py": "1b9c607e4df2b129226d1f92e07338cf4a39a81af8e1ef1625edf349a0e8dacb",
     "scripts/check_speckit_manifests.py": "16db34acb64062ddd075a14ee096d4ad96e780feeacee47d8ed454cd65a2f18b",
     "scripts/classify_path_risk.py": "332fc4fd01c3d222ac800312fe33be7fe60032d543d549c909b89ce52acb291c",
     "scripts/mutation_gate.py": "4452787971ea6bcfa9bbf1c10df97bf1f3d172711098f69e1b2cf6e8f57ed96a",
