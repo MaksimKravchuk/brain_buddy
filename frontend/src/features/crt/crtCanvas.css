@@ -156,9 +156,12 @@
   left: 50%;
   z-index: 4;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.45rem;
-  max-width: calc(100% - 2rem);
+  width: max-content;
+  max-width: calc(100% - 1rem);
+  box-sizing: border-box;
   border: 1px solid #bae6fd;
   border-radius: 0.7rem;
   background: rgba(255, 255, 255, 0.97);
@@ -177,7 +180,9 @@
   font: inherit;
   font-size: 0.78rem;
   font-weight: 700;
-  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 8rem;
+  white-space: normal;
 }
 
 .crt-relation-action-toolbar button:hover {
