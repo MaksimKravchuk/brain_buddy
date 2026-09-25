@@ -208,6 +208,10 @@ class CrtFixture {
 
   async install(page: Page): Promise<void> {
     await page.route("**/api/**", async (route) => {
+      if (!new URL(route.request().url()).pathname.startsWith("/api/")) {
+        await route.continue();
+        return;
+      }
       const { path, request } = this.record(route);
       if (!path.startsWith("/api/")) {
         await route.continue();
@@ -589,6 +593,66 @@ test("T024 first run creates a truthful tree and exposes accessible tree menu ac
     await expect(menu.getByText("No other trees yet")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: /Current tree: My first tree/ })).toBeFocused();
+  });
+});
+
+test("T024 relation actions remain reachable at the minimum supported viewport", async ({ page }) => {
+  await crtLabels("Minimum viewport relation actions");
+  await page.setViewportSize({ width: 1024, height: 720 });
+  const fixture = new CrtFixture({ trees: [treeFixture("tree-one", "Narrow tree", [
+    node("cause", "Cause", { x: 0, y: -180 }),
+    node("effect", "Effect", { x: 0, y: 180 })
+  ], [{ id: "relation-one", source_node_id: "cause", target_node_id: "effect", kind: "why", created_at: FIXED_TIME }])] });
+  await openCrt(page, fixture);
+  await test.step("select a relation and reach every action within the supported viewport", async () => {
+  const edge = page.locator("[data-testid='crt-edge-relation-one']");
+  await expect(edge).toHaveCount(1);
+  await edge.dispatchEvent("click");
+  const toolbar = page.getByRole("toolbar", { name: /relation/i });
+  await expect(toolbar).toBeVisible();
+  for (const name of ["Go to Cause", "Go to Effect", "Delete relation"]) {
+    const button = toolbar.getByRole("button", { name });
+    await expect(button).toBeVisible();
+    const bounds = await button.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1024);
+    await expect(button).toBeEnabled();
+  }
+  await toolbar.getByRole("button", { name: "Delete relation" }).click();
+  await expect(page.locator("[data-testid='crt-edge-relation-one']")).toHaveCount(0);
+  });
+});
+
+test("T024 inline label editing cancels with Escape, persists on Enter, and undoes with Ctrl+Z", async ({ page }) => {
+  await crtLabels("Inline label commit, cancellation, and undo");
+  const fixture = new CrtFixture({ trees: [oneCardTree()] });
+  await openCrt(page, fixture);
+  await test.step("cancel a draft, persist a confirmed label, and undo it", async () => {
+  await expect(page.getByRole("heading", { name: "Current Reality Tree", includeHidden: true })).toHaveClass(/sr-only/);
+
+  const original = page.getByRole("button", { name: /Synthetic effect/ });
+  await original.dblclick();
+  const escapeEditor = page.locator("input[data-card-editor-id]").last();
+  await expect(escapeEditor).toBeFocused();
+  await escapeEditor.fill("Should not persist");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: /Synthetic effect/ })).toBeVisible();
+  expect(fixture.mutation("/api/crt/trees/tree-one", "PUT")).toHaveLength(0);
+
+  await page.getByRole("button", { name: /Synthetic effect/ }).dblclick();
+  const enterEditor = page.locator("input[data-card-editor-id]").last();
+  await enterEditor.fill("Persisted inline label");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: /Persisted inline label/ })).toBeVisible();
+  await expect.poll(() => fixture.mutation("/api/crt/trees/tree-one", "PUT").length).toBe(1);
+  expect(fixture.tree("tree-one").nodes.some((node) => node.label === "Persisted inline label")).toBe(true);
+
+  await page.getByRole("group", { name: "Current Reality Tree canvas" }).click();
+  await page.keyboard.press("Control+z");
+  await expect(page.getByRole("button", { name: /Synthetic effect/ })).toBeVisible();
+  await expect.poll(() => fixture.mutation("/api/crt/trees/tree-one", "PUT").length).toBe(2);
+  expect(fixture.tree("tree-one").nodes.some((node) => node.label === "Synthetic effect")).toBe(true);
   });
 });
 

@@ -6,7 +6,6 @@ import { createGraphState, type GraphState, type NewNodeIds } from "../graphMode
 import { ReactFlowProvider } from "@xyflow/react";
 import { CrtCanvas } from "../CrtCanvas";
 import { CrtCardNode } from "../CrtCardNode";
-import { CrtInspector } from "../CrtInspector";
 
 const flowHarness = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
@@ -79,6 +78,11 @@ function cardButton(nodeId: string): HTMLButtonElement {
   return button;
 }
 
+async function inlineEditor(nodeId = "cause-1"): Promise<HTMLInputElement> {
+  fireEvent.doubleClick(cardButton(nodeId));
+  return screen.findByRole("textbox", { name: /^Edit card label/ });
+}
+
 function flowCallback(name: string): (...args: unknown[]) => unknown {
   const callback = flowHarness.props?.[name];
   if (typeof callback !== "function") throw new Error(`React Flow callback ${name} was not captured`);
@@ -133,13 +137,14 @@ vi.stubGlobal("ResizeObserver", class {
 });
 
 describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
-  it("019-FR-005 019-FR-006 019-FR-022 019-FR-023 019-FR-024 019-SC-007 renders native cards, semantic badges, a directed curved arrow, and the selected-card inspector", async () => {
+  it("019-FR-005 019-FR-006 019-FR-022 019-FR-023 019-FR-024 019-SC-007 renders native cards, semantic badges, a directed curved arrow, and inline card editing", async () => {
     renderCanvas();
 
     expect(screen.getByRole("group", { name: "Current Reality Tree canvas" })).toBeInTheDocument();
     expect(cardButton("effect-1")).toHaveAttribute("aria-label", "Effect: Server is unreliable");
     expect(cardButton("cause-1")).toHaveAttribute("aria-label", "Root cause: Deployments are rushed");
     expect(cardButton("cause-1")).toHaveAttribute("aria-pressed", "true");
+    expect(cardButton("cause-1")).toHaveAttribute("title", "Double-click to edit card label");
     const edge = await screen.findByTestId("crt-edge-relation-1");
     expect(edge).toHaveAttribute("aria-label", "Relation from Deployments are rushed to Server is unreliable");
     const relationPath = within(edge).getByRole("img", { name: "Directed relation" });
@@ -151,8 +156,8 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect(markers.some((marker) => marker.id === markerId)).toBe(true);
     expect(relationPath.getAttribute("d")).toMatch(/C/);
     expect(document.querySelectorAll("[data-testid='crt-edge-relation-1']")).toHaveLength(1);
-    expect(screen.getByRole("complementary", { name: "Card inspector" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Card label" })).toHaveValue("Deployments are rushed");
+    expect(document.querySelector("[aria-label=\"Card inspector\"]")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /^Edit card label/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Fit all cards" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Zoom out" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
@@ -364,18 +369,19 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect(next.relations).toContainEqual({ sourceId: "new-card", targetId: "effect-1", id: "new-relation" });
   });
 
-  it("019-FR-013 preserves native inspector input keys instead of creating a card", () => {
+  it("019-FR-013 preserves native inline editor keys instead of creating a card", async () => {
     const onChange = vi.fn();
     renderCanvas(initialGraph(), onChange);
-    const input = screen.getByRole("textbox", { name: "Card label" });
+    const input = await inlineEditor();
+    onChange.mockClear();
     const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
 
     input.dispatchEvent(tab);
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(tab.defaultPrevented).toBe(false);
-    expect(onChange).not.toHaveBeenCalled();
-    expect(within(screen.getByRole("complementary", { name: "Card inspector" })).getByText("Incoming causes")).toBeInTheDocument();
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ nodes: expect.not.arrayContaining([expect.objectContaining({ id: "new-card" })]) }));
+    expect(screen.getByRole("button", { name: "Root cause: Deployments are rushed" })).toHaveFocus();
   });
 
   it.each([
@@ -455,7 +461,7 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect((onChange.mock.calls[onChange.mock.calls.length - 1]?.[0] as GraphState).relations).toEqual([]);
   });
 
-  it("019-FR-012 activates Space-held canvas panning without hijacking native inputs", () => {
+  it("019-FR-012 activates Space-held canvas panning without hijacking native inputs", async () => {
     renderCanvas();
     const canvas = screen.getByRole("group", { name: "Current Reality Tree canvas" });
     const space = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
@@ -463,7 +469,7 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect(space.defaultPrevented).toBe(true);
     expect(screen.getByTestId("crt-flow-region")).toHaveAttribute("data-pan-active", "true");
 
-    const input = screen.getByRole("textbox", { name: "Card label" });
+    const input = await inlineEditor();
     const nativeSpace = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
     act(() => input.dispatchEvent(nativeSpace));
     expect(nativeSpace.defaultPrevented).toBe(false);
@@ -675,50 +681,48 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     });
   });
 
-  it("inspects incoming and outgoing lists, ignores blank labels, and selects related cards", () => {
+  it("edits an existing card inline and keeps relation controls available on the canvas", async () => {
     const onChange = vi.fn();
     renderCanvas(createGraphState({ ...initialGraph(), selectedNodeId: "effect-1" }), onChange);
 
-    const inspector = screen.getByRole("complementary", { name: "Card inspector" });
-    expect(within(inspector).getByText("Incoming causes")).toBeInTheDocument();
-    expect(within(inspector).getByRole("button", { name: "Deployments are rushed" })).toBeInTheDocument();
-    const label = within(inspector).getByRole("textbox", { name: "Card label" });
-    fireEvent.focus(label);
-    fireEvent.change(label, { target: { value: "   " } });
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ editingNodeId: "effect-1" }));
-    onChange.mockClear();
+    const label = await inlineEditor("effect-1");
     fireEvent.change(label, { target: { value: "Reliable service" } });
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-      nodes: expect.arrayContaining([expect.objectContaining({ id: "effect-1", label: "Reliable service" })])
-    }));
+    fireEvent.keyDown(label, { key: "Enter" });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Reliable service"));
 
-    fireEvent.click(within(inspector).getByRole("button", { name: "Deployments are rushed" }));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ selectedNodeId: "cause-1", selectedRelationId: null }));
+    fireEvent.click(screen.getByRole("button", { name: /Connect cards/ }));
+    expect(screen.getByRole("button", { name: "Connect from top of Deployments are rushed" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Relation from Deployments are rushed to Reliable service/ }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /Relation from Deployments are rushed to Reliable service/ }), { key: "Delete" });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ relations: [] }));
+  });
 
-    cleanup();
-    const deleteRelation = vi.fn();
-    render(
-      <CrtInspector
-        graph={createGraphState({ ...initialGraph(), selectedNodeId: "effect-1" })}
-        onChange={onChange}
-        onDeleteRelation={deleteRelation}
-      />
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Delete relation from Deployments are rushed to Server is unreliable" }));
-    expect(deleteRelation).toHaveBeenCalledWith("relation-1");
+  it("cancels an existing-card draft without emitting the draft label", async () => {
+    const onChange = vi.fn();
+    renderCanvas(initialGraph(), onChange);
 
-    cleanup();
-    render(
-      <CrtInspector
-        graph={createGraphState({
-          relations: [{ id: "orphan", sourceId: "missing-source", targetId: "missing-target" }],
-          selectedRelationId: "orphan"
-        })}
-        onChange={onChange}
-        onDeleteRelation={deleteRelation}
-      />
-    );
-    expect(screen.getByText("Selected relation from Untitled card to Untitled card")).toBeInTheDocument();
+    const editor = await inlineEditor("effect-1");
+    fireEvent.change(editor, { target: { value: "Canceled label" } });
+    fireEvent.keyDown(editor, { key: "Escape" });
+
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Server is unreliable"));
+    expect(onChange.mock.calls.some(([next]) => (next as GraphState).nodes.some((node) => node.label === "Canceled label"))).toBe(false);
+  });
+
+  it("commits an existing-card label as one undoable step with working redo", async () => {
+    const onChange = vi.fn();
+    renderCanvas(initialGraph(), onChange);
+    const canvas = screen.getByRole("group", { name: "Current Reality Tree canvas" });
+
+    const editor = await inlineEditor("effect-1");
+    fireEvent.change(editor, { target: { value: "Reliable service" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Reliable service"));
+
+    fireEvent.keyDown(canvas, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Server is unreliable"));
+    fireEvent.keyDown(canvas, { key: "z", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Reliable service"));
   });
 
   it("covers pending composite Tab exit, missing relation deletion, and generated IDs", async () => {
@@ -783,6 +787,34 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     }));
     expect(screen.getByTestId("crt-edge-fallback")).toHaveAccessibleName("Relation from Untitled card to Untitled card");
     fallbackEdge.unmount();
+    const highOffset = render(createElement(edgeComponent, {
+      id: "high-offset",
+      sourceX: 40,
+      sourceY: 200,
+      targetX: 40,
+      targetY: 40,
+      routeOffset: 999,
+      selected: false,
+      data: undefined,
+      markerEnd: undefined,
+      style: undefined
+    }));
+    const lowOffset = render(createElement(edgeComponent, {
+      id: "low-offset",
+      sourceX: 40,
+      sourceY: 200,
+      targetX: 40,
+      targetY: 40,
+      routeOffset: -999,
+      selected: false,
+      data: undefined,
+      markerEnd: undefined,
+      style: undefined
+    }));
+    expect(screen.getByTestId("crt-edge-high-offset")).toBeInTheDocument();
+    expect(screen.getByTestId("crt-edge-low-offset")).toBeInTheDocument();
+    highOffset.unmount();
+    lowOffset.unmount();
     consoleError.mockRestore();
     fireEvent.keyDown(screen.getByRole("img", { name: "Directed relation" }), { key: "Escape" });
 
@@ -926,6 +958,15 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     defaultCancelled.unmount();
+
+    const defaultConfirmedChange = vi.fn();
+    const defaultConfirmed = render(<CrtCanvas graph={relationGraph} onChange={defaultConfirmedChange} />);
+    fireEvent.keyDown(screen.getByRole("group", { name: "Current Reality Tree canvas" }), { key: "Delete" });
+    fireEvent.click(screen.getByRole("button", { name: "Delete card" }));
+    await waitFor(() => expect(defaultConfirmedChange).toHaveBeenCalledWith(expect.objectContaining({
+      nodes: [{ id: "effect-1", label: "Server is unreliable", position: { x: 260, y: 40 } }]
+    })));
+    defaultConfirmed.unmount();
 
     const cancelled = render(
       <CrtCanvas graph={relationGraph} onChange={vi.fn()} confirmDelete={() => false} />
@@ -1329,12 +1370,13 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     await waitFor(() => expect(flowHarness.setViewport).toHaveBeenCalled());
   });
 
-  it("announces and preserves the inspector label after whitespace-only rejection", () => {
+  it("announces and preserves the inline label after whitespace-only rejection", async () => {
     renderCanvas(initialGraph());
-    const input = screen.getByRole("textbox", { name: "Card label" });
+    const input = await inlineEditor();
     fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
     expect(input).toHaveValue("Deployments are rushed");
-    expect(screen.getByText("Card label cannot be blank; existing value preserved.")).toBeInTheDocument();
+    expect(screen.getByText("Card labels cannot be blank.")).toBeInTheDocument();
   });
 
   it("resets undo history when a controlled graph changes node content", async () => {
@@ -1506,18 +1548,45 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     }));
   });
 
-  it("announces when connector navigation reaches a missing card", async () => {
-    renderCanvas(createGraphState({
-      nodes: [{ id: "cause", label: "Cause", position: { x: 100, y: 280 } }],
-      relations: [{ id: "dangling", sourceId: "cause", targetId: "missing" }],
-      selectedRelationId: "dangling"
+  it("keeps inline editing cancel, blur commit, and one-step undo meaningful", async () => {
+    const onChange = vi.fn();
+    renderCanvas(initialGraph(), onChange);
+
+    const editor = await inlineEditor("effect-1");
+    fireEvent.change(editor, { target: { value: "Discarded draft" } });
+    fireEvent.keyDown(editor, { key: "Escape" });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Server is unreliable"));
+
+    const blurredEditor = await inlineEditor("effect-1");
+    fireEvent.change(blurredEditor, { target: { value: "Stable service" } });
+    fireEvent.blur(blurredEditor);
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Stable service"));
+    expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({
+      nodes: expect.arrayContaining([expect.objectContaining({ label: "Discarded draft" })])
     }));
 
-    act(() => flowCallback("onEdgeClick")(null, { id: "dangling" }));
+    fireEvent.keyDown(screen.getByRole("group", { name: "Current Reality Tree canvas" }), { key: "z", ctrlKey: true });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Server is unreliable"));
+
+    const blankEditor = await inlineEditor("effect-1");
+    fireEvent.change(blankEditor, { target: { value: "   " } });
+    fireEvent.blur(blankEditor);
+    expect(screen.getByText("Card labels cannot be blank.")).toBeInTheDocument();
+  });
+
+  it("fails safely when a selected relation points to a missing card", async () => {
+    const onChange = vi.fn();
+    renderCanvas(createGraphState({
+      nodes: [{ id: "cause", label: "Cause", position: { x: 0, y: 0 } }],
+      relations: [{ id: "dangling", sourceId: "cause", targetId: "missing" }],
+      selectedRelationId: "dangling"
+    }), onChange);
+
     const toolbar = await screen.findByRole("toolbar", { name: "Selected relation actions" });
     fireEvent.click(within(toolbar).getByRole("button", { name: "Go to Effect" }));
 
     expect(screen.getByText("Cannot navigate to the relation effect; card is missing.")).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ selectedNodeId: "missing" }));
   });
 
   it("fails closed for pointer cancellation, same-side drops, invalid targets, and connection errors", async () => {
@@ -1574,5 +1643,72 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     fireEvent.pointerMove(window, { clientX: 20, clientY: 20 });
     fireEvent.pointerUp(window, { clientX: 20, clientY: 20 });
     expect(elementFromPoint).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when a relation action targets an already-removed relation", async () => {
+    const onChange = vi.fn();
+    renderCanvas(createGraphState({
+      nodes: [{ id: "cause", label: "Cause", position: { x: 0, y: 0 } }],
+      selectedRelationId: "removed"
+    }), onChange);
+
+    fireEvent.click(within(await screen.findByRole("toolbar", { name: "Selected relation actions" })).getByRole("button", { name: "Go to Cause" }));
+    fireEvent.click(within(screen.getByRole("toolbar", { name: "Selected relation actions" })).getByRole("button", { name: "Delete relation" }));
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByText("The relation to delete no longer exists.")).toBeInTheDocument();
+  });
+
+  it("resets history when controlled node or relation identity changes", async () => {
+    const onChange = vi.fn();
+    let replaceGraph: ((next: GraphState) => void) | null = null;
+    function ExternalGraphCanvas() {
+      const [graph, setGraph] = useState(initialGraph);
+      replaceGraph = setGraph;
+      return <CrtCanvas graph={graph} onChange={(next) => { setGraph(next); onChange(next); }} />;
+    }
+    render(<ExternalGraphCanvas />);
+    const editor = await inlineEditor("effect-1");
+    fireEvent.change(editor, { target: { value: "Temporary local label" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Temporary local label"));
+    onChange.mockClear();
+    const changedNode = createGraphState({
+      ...initialGraph(),
+      nodes: [
+        { id: "effect-1", label: "Replacement", position: { x: 260, y: 40 } },
+        { id: "cause-1", label: "Deployments are rushed", position: { x: 260, y: 260 } }
+      ],
+      viewportCenter: { x: 260, y: 160 },
+      selectedNodeId: "cause-1"
+    });
+    act(() => { replaceGraph?.(changedNode); });
+    await act(async () => { await Promise.resolve(); });
+
+    const changedRelation = createGraphState({
+      ...changedNode,
+      relations: [{ id: "replacement-relation", sourceId: "cause-1", targetId: "effect-1" }]
+    });
+    act(() => { replaceGraph?.(changedRelation); });
+    await act(async () => { await Promise.resolve(); });
+
+    const movedViewport = createGraphState({
+      ...changedRelation,
+      viewportCenter: { x: 500, y: 160 }
+    });
+    act(() => { replaceGraph?.(movedViewport); });
+    await act(async () => { await Promise.resolve(); });
+
+    const replacedNode = createGraphState({
+      ...movedViewport,
+      nodes: movedViewport.nodes.map((node) => node.id === "effect-1" ? { ...node, id: "effect-2" } : node),
+      relations: [{ id: "replacement-relation", sourceId: "cause-1", targetId: "effect-2" }]
+    });
+    act(() => { replaceGraph?.(replacedNode); });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole("button", { name: "Effect: Replacement" })).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByRole("group", { name: "Current Reality Tree canvas" }), { key: "z", ctrlKey: true });
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

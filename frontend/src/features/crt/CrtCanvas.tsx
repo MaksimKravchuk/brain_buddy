@@ -35,7 +35,6 @@ import {
 } from "./graphModel";
 import { CrtCardNode, type CrtCard, type CrtCardBadge } from "./CrtCardNode";
 import { CrtCardDeleteConfirmation } from "./CrtCardDeleteConfirmation";
-import { CrtInspector } from "./CrtInspector";
 import "@xyflow/react/dist/style.css";
 import "./crtCanvas.css";
 
@@ -76,9 +75,6 @@ const CRT_EDGE_MARKER = {
 
 function graphsAreEquivalent(left: GraphState, right: GraphState): boolean {
   if (
-    left.selectedNodeId !== right.selectedNodeId ||
-    left.editingNodeId !== right.editingNodeId ||
-    left.selectedRelationId !== right.selectedRelationId ||
     left.viewportCenter.x !== right.viewportCenter.x ||
     left.viewportCenter.y !== right.viewportCenter.y ||
     left.viewportZoom !== right.viewportZoom ||
@@ -215,6 +211,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     startY: number;
     dragging: boolean;
   } | null>(null);
+  const pendingCreationRef = useRef<string | null>(null);
   const pendingCompositeEntryRef = useRef(false);
   const programmaticFocusRef = useRef(false);
   onChangeRef.current = onChange;
@@ -223,9 +220,12 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     const current = historyRef.current;
     const historyKeyChanged = historyKeyRef.current !== historyKey;
     if (historyKeyChanged || current.present !== graph) {
-      const nextHistory = !historyKeyChanged && graphsAreEquivalent(current.present, graph)
-        ? { ...current, present: graph }
-        : createHistory(graph);
+      const pendingCreation = pendingCreationRef.current !== null && pendingCreationRef.current === graph.editingNodeId;
+      const nextHistory = !historyKeyChanged && pendingCreation
+        ? current
+        : !historyKeyChanged && graphsAreEquivalent(current.present, graph)
+          ? { ...current, present: graph }
+          : createHistory(graph);
       historyRef.current = nextHistory;
       setHistory(nextHistory);
     }
@@ -255,11 +255,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
           return updated;
         });
       } else {
-        setHistory((current) => {
-          const updated = { ...current, present: next };
-          historyRef.current = updated;
-          return updated;
-        });
+        setHistory((current) => current);
       }
       if (options.message) setAnnouncement(options.message);
       onChangeRef.current(next);
@@ -274,6 +270,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
         return;
       }
       if (!result.changed) return;
+      if (result.editingNodeId) pendingCreationRef.current = result.editingNodeId;
       emit(result.state, { message: successMessage });
       if (result.focusNodeId || result.editingNodeId) {
         window.requestAnimationFrame(() => {
@@ -301,13 +298,25 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
       }
       const current = graphRef.current.nodes.find((node) => node.id === nodeId);
       if (!current) return false;
+      const previousHistoryState = historyRef.current.past[historyRef.current.past.length - 1];
+      if (previousHistoryState && !previousHistoryState.nodes.some((node) => node.id === nodeId)) {
+        historyRef.current = { ...historyRef.current, present: previousHistoryState };
+        setHistory(historyRef.current);
+      } else if (historyRef.current.present.nodes.some((node) => node.id === nodeId)) {
+        historyRef.current = {
+          ...historyRef.current,
+          present: { ...historyRef.current.present, editingNodeId: null }
+        };
+        setHistory(historyRef.current);
+      }
+      pendingCreationRef.current = null;
       emit(
         {
           ...graphRef.current,
           nodes: graphRef.current.nodes.map((node) => (node.id === nodeId ? { ...node, label } : node)),
           editingNodeId: null
         },
-        { history: false, message: "Card label updated." }
+        { message: "Card label updated." }
       );
       return true;
     },
@@ -320,6 +329,17 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     },
     [emit]
   );
+
+  const editCardLabel = useCallback(
+    (nodeId: string) => {
+      emit(
+        { ...graphRef.current, selectedNodeId: nodeId, selectedRelationId: null, editingNodeId: nodeId },
+        { history: false, message: "Editing card label." }
+      );
+    },
+    [emit]
+  );
+
 
   const activateConnector = useCallback(
     (nodeId: string, side: "source" | "target") => {
@@ -444,6 +464,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
           onFocusCard: handleCardFocus,
           onCommitLabel: commitCardLabel,
           onCancelLabel: cancelCardLabel,
+          onEditCard: editCardLabel,
           onConnectorActivate: activateConnector,
           onConnectorPointerDown: startPointerConnection
         }
@@ -453,6 +474,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
       cancelCardLabel,
       commitCardLabel,
       connectMode,
+      editCardLabel,
       graph.editingNodeId,
       graph.nodes,
       graph.relations,
@@ -844,10 +866,10 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
       ) : null}
       <div className="crt-canvas-workspace">
         <nav className="crt-tool-rail" aria-label="Canvas tools">
-          <button type="button" data-crt-native="true" aria-label="Select tool" onClick={() => { setPanMode(false); setAnnouncement("Select tool active."); }}>↖</button>
-          <button type="button" data-crt-native="true" aria-label="Add card" onClick={() => applyCommand(enterCreate(graphRef.current, makeIds()), "Card added.")}>＋</button>
-          <button type="button" data-crt-native="true" aria-label="Connect cards" aria-pressed={connectMode} onClick={() => { setConnectMode((active) => !active); setAnnouncement(connectMode ? "Connect mode closed." : "Connect mode active. Drag from a cause handle to an effect handle."); }}>⌁</button>
-          <button type="button" data-crt-native="true" aria-label="Pan canvas" aria-pressed={panMode} onClick={() => { setPanMode((active) => !active); setAnnouncement(panMode ? "Pan mode closed." : "Pan mode active."); }}>✋</button>
+          <button type="button" data-crt-native="true" aria-label="Select tool" title="Select cards and relations" onClick={() => { setPanMode(false); setAnnouncement("Select tool active."); }}>Select</button>
+          <button type="button" data-crt-native="true" aria-label="Add card" title="Add a cause card" onClick={() => applyCommand(enterCreate(graphRef.current, makeIds()), "Card added.")}>Add</button>
+          <button type="button" data-crt-native="true" aria-label="Connect cards" title="Connect cause and effect cards" aria-pressed={connectMode} onClick={() => { setConnectMode((active) => !active); setAnnouncement(connectMode ? "Connect mode closed." : "Connect mode active. Drag from a cause handle to an effect handle."); }}>Connect</button>
+          <button type="button" data-crt-native="true" aria-label="Pan canvas" title="Pan the canvas" aria-pressed={panMode} onClick={() => { setPanMode((active) => !active); setAnnouncement(panMode ? "Pan mode closed." : "Pan mode active."); }}>Pan</button>
         </nav>
         <div ref={flowRegionRef} className="crt-flow-region" data-testid="crt-flow-region" data-pan-active={panMode || spacePressed ? "true" : "false"}>
           <ReactFlow
@@ -928,11 +950,6 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
             <button type="button" data-crt-native="true" aria-label="Zoom in" onClick={() => { void reactFlow.zoomIn({ duration: 120 }); commitZoom(zoom + 0.1); }}>＋</button>
           </div>
         </div>
-        <CrtInspector
-          graph={graph}
-          onChange={(next) => emit(next, { message: "Card label updated." })}
-          onDeleteRelation={removeRelation}
-        />
       </div>
       <p className="crt-canvas-announcement" role="status" aria-live="polite" aria-atomic="true">{announcement}</p>
       {pendingDelete ? (
