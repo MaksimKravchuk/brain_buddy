@@ -152,6 +152,20 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
   });
 
+  it("does not show or expose a disconnected badge for an isolated card", () => {
+    renderCanvas(createGraphState({
+      nodes: [{ id: "isolated", label: "Unconnected idea", position: { x: 0, y: 0 } }],
+      relations: [],
+      selectedNodeId: "isolated",
+      viewportCenter: { x: 0, y: 0 }
+    }));
+
+    const card = cardButton("isolated");
+    expect(card).toHaveAccessibleName("Unconnected idea");
+    expect(card).not.toHaveAccessibleName(/Disconnected/);
+    expect(screen.queryByText("Disconnected")).not.toBeInTheDocument();
+  });
+
   it("keeps the canvas zoom at a legible maximum and leaves React Flow attribution visible", () => {
     renderCanvas();
 
@@ -504,7 +518,7 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
       id: "standalone",
       data: {
         label: "",
-        badge: "Disconnected" as const,
+        badge: undefined,
         selected: false,
         editing: true,
         connectionMode: true
@@ -524,7 +538,7 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
         <CrtCardNode {...props} data={{ ...props.data, editing: false }} />
       </ReactFlowProvider>
     );
-    fireEvent.focus(screen.getByRole("button", { name: "Disconnected: Untitled card" }));
+    fireEvent.focus(screen.getByRole("button", { name: "Untitled card" }));
     fireEvent.click(screen.getByRole("button", { name: "Connect into bottom of Untitled card" }));
     fireEvent.click(screen.getByRole("button", { name: "Connect from top of Untitled card" }));
   });
@@ -536,7 +550,7 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
         id: "focus-card",
         data: {
           label: "Focused card",
-          badge: "Disconnected" as const,
+          badge: undefined,
           selected: true,
           editing,
           connectionMode: false,
@@ -559,7 +573,7 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect(editor).toHaveFocus();
     fireEvent.keyDown(editor, { key: "Enter" });
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Disconnected: Focused card" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Focused card" })).toHaveFocus());
   });
 
   it("returns focus after a delayed controlled editor cancellation", async () => {
@@ -569,7 +583,7 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
         id: "delayed-focus-card",
         data: {
           label: "Delayed focus card",
-          badge: "Disconnected" as const,
+          badge: undefined,
           selected: true,
           editing,
           connectionMode: false,
@@ -593,7 +607,7 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect(editor).toHaveFocus();
     fireEvent.keyDown(editor, { key: "Escape" });
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Disconnected: Delayed focus card" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delayed focus card" })).toHaveFocus());
   });
 
   it("undoes keyboard card creation without exposing an invalid blank-label history step", async () => {
@@ -1060,7 +1074,7 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
       id: "standalone-mouse",
       data: {
         label: "Card",
-        badge: "Disconnected" as const,
+        badge: undefined,
         selected: false,
         editing: true,
         connectionMode: true,
