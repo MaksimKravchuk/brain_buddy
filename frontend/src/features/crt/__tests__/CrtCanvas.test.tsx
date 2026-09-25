@@ -697,6 +697,34 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ relations: [] }));
   });
 
+  it("cancels an existing-card draft without emitting the draft label", async () => {
+    const onChange = vi.fn();
+    renderCanvas(initialGraph(), onChange);
+
+    const editor = await inlineEditor("effect-1");
+    fireEvent.change(editor, { target: { value: "Canceled label" } });
+    fireEvent.keyDown(editor, { key: "Escape" });
+
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Server is unreliable"));
+    expect(onChange.mock.calls.some(([next]) => (next as GraphState).nodes.some((node) => node.label === "Canceled label"))).toBe(false);
+  });
+
+  it("commits an existing-card label as one undoable step with working redo", async () => {
+    const onChange = vi.fn();
+    renderCanvas(initialGraph(), onChange);
+    const canvas = screen.getByRole("group", { name: "Current Reality Tree canvas" });
+
+    const editor = await inlineEditor("effect-1");
+    fireEvent.change(editor, { target: { value: "Reliable service" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Reliable service"));
+
+    fireEvent.keyDown(canvas, { key: "z", ctrlKey: true });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Server is unreliable"));
+    fireEvent.keyDown(canvas, { key: "z", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(cardButton("effect-1")).toHaveAccessibleName("Effect: Reliable service"));
+  });
+
   it("covers pending composite Tab exit, missing relation deletion, and generated IDs", async () => {
     const onChange = vi.fn();
     renderCanvas();

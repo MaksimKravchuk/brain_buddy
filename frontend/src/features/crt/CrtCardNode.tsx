@@ -12,7 +12,6 @@ export type CrtCardNodeData = {
   onFocusCard?: (nodeId: string) => void;
   onEditCard?: (nodeId: string) => void;
   onCommitLabel?: (nodeId: string, label: string) => boolean;
-  onDraftLabelChange?: (nodeId: string, label: string) => void;
   onCancelLabel?: (nodeId: string) => void;
   onConnectorActivate?: (nodeId: string, side: "source" | "target") => void;
   onConnectorPointerDown?: (nodeId: string, side: "source" | "target", event: React.PointerEvent<HTMLButtonElement>) => void;
@@ -93,7 +92,6 @@ export function CrtCardNode({ id, data, selected }: NodeProps<CrtCard>): React.J
           onChange={(event) => {
             const nextLabel = event.currentTarget.value;
             setDraftLabel(nextLabel);
-            if (nextLabel.trim()) data.onDraftLabelChange?.(id, nextLabel);
           }}
           onBlur={() => commitLabel()}
           onKeyDown={(event) => {

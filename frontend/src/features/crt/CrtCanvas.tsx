@@ -75,9 +75,6 @@ const CRT_EDGE_MARKER = {
 
 function graphsAreEquivalent(left: GraphState, right: GraphState): boolean {
   if (
-    left.selectedNodeId !== right.selectedNodeId ||
-    left.editingNodeId !== right.editingNodeId ||
-    left.selectedRelationId !== right.selectedRelationId ||
     left.viewportCenter.x !== right.viewportCenter.x ||
     left.viewportCenter.y !== right.viewportCenter.y ||
     left.viewportZoom !== right.viewportZoom ||
@@ -214,6 +211,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     startY: number;
     dragging: boolean;
   } | null>(null);
+  const pendingCreationRef = useRef<string | null>(null);
   const pendingCompositeEntryRef = useRef(false);
   const programmaticFocusRef = useRef(false);
   onChangeRef.current = onChange;
@@ -222,9 +220,12 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     const current = historyRef.current;
     const historyKeyChanged = historyKeyRef.current !== historyKey;
     if (historyKeyChanged || current.present !== graph) {
-      const nextHistory = !historyKeyChanged && graphsAreEquivalent(current.present, graph)
-        ? { ...current, present: graph }
-        : createHistory(graph);
+      const pendingCreation = pendingCreationRef.current === graph.editingNodeId;
+      const nextHistory = !historyKeyChanged && pendingCreation
+        ? current
+        : !historyKeyChanged && graphsAreEquivalent(current.present, graph)
+          ? { ...current, present: graph }
+          : createHistory(graph);
       historyRef.current = nextHistory;
       setHistory(nextHistory);
     }
@@ -254,11 +255,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
           return updated;
         });
       } else {
-        setHistory((current) => {
-          const updated = { ...current, present: next };
-          historyRef.current = updated;
-          return updated;
-        });
+        setHistory((current) => current);
       }
       if (options.message) setAnnouncement(options.message);
       onChangeRef.current(next);
@@ -273,6 +270,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
         return;
       }
       if (!result.changed) return;
+      if (result.editingNodeId) pendingCreationRef.current = result.editingNodeId;
       emit(result.state, { message: successMessage });
       if (result.focusNodeId || result.editingNodeId) {
         window.requestAnimationFrame(() => {
@@ -300,13 +298,25 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
       }
       const current = graphRef.current.nodes.find((node) => node.id === nodeId);
       if (!current) return false;
+      const previousHistoryState = historyRef.current.past[historyRef.current.past.length - 1];
+      if (previousHistoryState && !previousHistoryState.nodes.some((node) => node.id === nodeId)) {
+        historyRef.current = { ...historyRef.current, present: previousHistoryState };
+        setHistory(historyRef.current);
+      } else if (historyRef.current.present.nodes.some((node) => node.id === nodeId)) {
+        historyRef.current = {
+          ...historyRef.current,
+          present: { ...historyRef.current.present, editingNodeId: null }
+        };
+        setHistory(historyRef.current);
+      }
+      pendingCreationRef.current = null;
       emit(
         {
           ...graphRef.current,
           nodes: graphRef.current.nodes.map((node) => (node.id === nodeId ? { ...node, label } : node)),
           editingNodeId: null
         },
-        { history: false, message: "Card label updated." }
+        { message: "Card label updated." }
       );
       return true;
     },
@@ -330,15 +340,6 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     [emit]
   );
 
-  const draftCardLabelChange = useCallback(
-    (nodeId: string, label: string) => {
-      emit(
-        { ...graphRef.current, nodes: graphRef.current.nodes.map((node) => node.id === nodeId ? { ...node, label } : node) },
-        { history: false }
-      );
-    },
-    [emit]
-  );
 
   const activateConnector = useCallback(
     (nodeId: string, side: "source" | "target") => {
@@ -464,7 +465,6 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
           onCommitLabel: commitCardLabel,
           onCancelLabel: cancelCardLabel,
           onEditCard: editCardLabel,
-          onDraftLabelChange: draftCardLabelChange,
           onConnectorActivate: activateConnector,
           onConnectorPointerDown: startPointerConnection
         }
@@ -474,7 +474,6 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
       cancelCardLabel,
       commitCardLabel,
       connectMode,
-      draftCardLabelChange,
       editCardLabel,
       graph.editingNodeId,
       graph.nodes,
