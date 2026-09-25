@@ -53,6 +53,10 @@
   gap: 0.65rem;
 }
 
+.crt-canvas-toolbar-actions {
+  margin-left: auto;
+}
+
 .crt-canvas-toolbar-actions button,
 .crt-tool-rail button,
 .crt-zoom-controls button {
