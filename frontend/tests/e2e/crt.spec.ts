@@ -596,6 +596,32 @@ test("T024 first run creates a truthful tree and exposes accessible tree menu ac
   });
 });
 
+test("T024 relation actions remain reachable at the minimum supported viewport", async ({ page }) => {
+  await crtLabels("Minimum viewport relation actions");
+  await page.setViewportSize({ width: 1024, height: 720 });
+  const fixture = new CrtFixture({ trees: [treeFixture("tree-one", "Narrow tree", [
+    node("cause", "Cause", { x: 0, y: -180 }),
+    node("effect", "Effect", { x: 0, y: 180 })
+  ], [{ id: "relation-one", source_node_id: "cause", target_node_id: "effect", kind: "why", created_at: FIXED_TIME }])] });
+  await openCrt(page, fixture);
+  const edge = page.locator("[data-testid='crt-edge-relation-one']");
+  await expect(edge).toHaveCount(1);
+  await edge.dispatchEvent("click");
+  const toolbar = page.getByRole("toolbar", { name: /relation/i });
+  await expect(toolbar).toBeVisible();
+  for (const name of ["Go to Cause", "Go to Effect", "Delete relation"]) {
+    const button = toolbar.getByRole("button", { name });
+    await expect(button).toBeVisible();
+    const bounds = await button.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1024);
+    await expect(button).toBeEnabled();
+  }
+  await toolbar.getByRole("button", { name: "Delete relation" }).click();
+  await expect(page.locator("[data-testid='crt-edge-relation-one']")).toHaveCount(0);
+});
+
 test("T024 inline label editing cancels with Escape, persists on Enter, and undoes with Ctrl+Z", async ({ page }) => {
   await crtLabels("Inline label commit, cancellation, and undo");
   const fixture = new CrtFixture({ trees: [oneCardTree()] });
