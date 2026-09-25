@@ -35,7 +35,6 @@ import {
 } from "./graphModel";
 import { CrtCardNode, type CrtCard, type CrtCardBadge } from "./CrtCardNode";
 import { CrtCardDeleteConfirmation } from "./CrtCardDeleteConfirmation";
-import { CrtInspector } from "./CrtInspector";
 import "@xyflow/react/dist/style.css";
 import "./crtCanvas.css";
 
@@ -321,6 +320,26 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     [emit]
   );
 
+  const editCardLabel = useCallback(
+    (nodeId: string) => {
+      emit(
+        { ...graphRef.current, selectedNodeId: nodeId, selectedRelationId: null, editingNodeId: nodeId },
+        { history: false, message: "Editing card label." }
+      );
+    },
+    [emit]
+  );
+
+  const draftCardLabelChange = useCallback(
+    (nodeId: string, label: string) => {
+      emit(
+        { ...graphRef.current, nodes: graphRef.current.nodes.map((node) => node.id === nodeId ? { ...node, label } : node) },
+        { history: false }
+      );
+    },
+    [emit]
+  );
+
   const activateConnector = useCallback(
     (nodeId: string, side: "source" | "target") => {
       const pending = pendingConnectionRef.current;
@@ -444,6 +463,8 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
           onFocusCard: handleCardFocus,
           onCommitLabel: commitCardLabel,
           onCancelLabel: cancelCardLabel,
+          onEditCard: editCardLabel,
+          onDraftLabelChange: draftCardLabelChange,
           onConnectorActivate: activateConnector,
           onConnectorPointerDown: startPointerConnection
         }
@@ -453,6 +474,8 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
       cancelCardLabel,
       commitCardLabel,
       connectMode,
+      draftCardLabelChange,
+      editCardLabel,
       graph.editingNodeId,
       graph.nodes,
       graph.relations,
@@ -844,10 +867,10 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
       ) : null}
       <div className="crt-canvas-workspace">
         <nav className="crt-tool-rail" aria-label="Canvas tools">
-          <button type="button" data-crt-native="true" aria-label="Select tool" onClick={() => { setPanMode(false); setAnnouncement("Select tool active."); }}>↖</button>
-          <button type="button" data-crt-native="true" aria-label="Add card" onClick={() => applyCommand(enterCreate(graphRef.current, makeIds()), "Card added.")}>＋</button>
-          <button type="button" data-crt-native="true" aria-label="Connect cards" aria-pressed={connectMode} onClick={() => { setConnectMode((active) => !active); setAnnouncement(connectMode ? "Connect mode closed." : "Connect mode active. Drag from a cause handle to an effect handle."); }}>⌁</button>
-          <button type="button" data-crt-native="true" aria-label="Pan canvas" aria-pressed={panMode} onClick={() => { setPanMode((active) => !active); setAnnouncement(panMode ? "Pan mode closed." : "Pan mode active."); }}>✋</button>
+          <button type="button" data-crt-native="true" aria-label="Select tool" title="Select cards and relations" onClick={() => { setPanMode(false); setAnnouncement("Select tool active."); }}>Select</button>
+          <button type="button" data-crt-native="true" aria-label="Add card" title="Add a cause card" onClick={() => applyCommand(enterCreate(graphRef.current, makeIds()), "Card added.")}>Add</button>
+          <button type="button" data-crt-native="true" aria-label="Connect cards" title="Connect cause and effect cards" aria-pressed={connectMode} onClick={() => { setConnectMode((active) => !active); setAnnouncement(connectMode ? "Connect mode closed." : "Connect mode active. Drag from a cause handle to an effect handle."); }}>Connect</button>
+          <button type="button" data-crt-native="true" aria-label="Pan canvas" title="Pan the canvas" aria-pressed={panMode} onClick={() => { setPanMode((active) => !active); setAnnouncement(panMode ? "Pan mode closed." : "Pan mode active."); }}>Pan</button>
         </nav>
         <div ref={flowRegionRef} className="crt-flow-region" data-testid="crt-flow-region" data-pan-active={panMode || spacePressed ? "true" : "false"}>
           <ReactFlow
@@ -928,11 +951,6 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
             <button type="button" data-crt-native="true" aria-label="Zoom in" onClick={() => { void reactFlow.zoomIn({ duration: 120 }); commitZoom(zoom + 0.1); }}>＋</button>
           </div>
         </div>
-        <CrtInspector
-          graph={graph}
-          onChange={(next) => emit(next, { message: "Card label updated." })}
-          onDeleteRelation={removeRelation}
-        />
       </div>
       <p className="crt-canvas-announcement" role="status" aria-live="polite" aria-atomic="true">{announcement}</p>
       {pendingDelete ? (

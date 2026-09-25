@@ -29,15 +29,13 @@
   padding: 1rem 1.25rem;
 }
 
-.crt-canvas-toolbar h1,
-.crt-inspector-title {
+.crt-canvas-toolbar h1 {
   margin: 0;
   font-size: 1.1rem;
   font-weight: 700;
 }
 
-.crt-canvas-eyebrow,
-.crt-inspector-eyebrow {
+.crt-canvas-eyebrow {
   margin: 0 0 0.2rem;
   color: #0369a1;
   font-size: 0.7rem;
@@ -116,7 +114,7 @@
   display: grid;
   min-height: 0;
   flex: 1;
-  grid-template-columns: 3.25rem minmax(0, 1fr) 18rem;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
 }
 
 .crt-tool-rail {
@@ -131,10 +129,10 @@
 
 .crt-tool-rail button {
   display: grid;
-  width: 2.25rem;
-  height: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.25rem;
   place-items: center;
-  font-size: 1.1rem;
+  font-size: 0.72rem;
 }
 
 .crt-flow-region {
@@ -348,67 +346,6 @@
   pointer-events: none;
 }
 
-.crt-inspector {
-  z-index: 5;
-  overflow: auto;
-  border-left: 1px solid #e2e8f0;
-  background: #fff;
-  padding: 1.25rem;
-}
-
-.crt-inspector-label {
-  display: grid;
-  gap: 0.4rem;
-  margin-top: 1.25rem;
-  color: #475569;
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.crt-inspector-label input {
-  width: 100%;
-  border: 1px solid #cbd5e1;
-  border-radius: 0.55rem;
-  padding: 0.6rem 0.7rem;
-  color: #0f172a;
-  font: inherit;
-  font-weight: 400;
-}
-
-.crt-inspector-relations {
-  margin-top: 1.35rem;
-}
-
-.crt-inspector-relations h3 {
-  margin: 0 0 0.45rem;
-  color: #475569;
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-
-.crt-inspector-relations ul {
-  display: grid;
-  gap: 0.35rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.crt-inspector-relations button {
-  border: 0;
-  background: transparent;
-  color: #0369a1;
-  cursor: pointer;
-  padding: 0;
-  text-align: left;
-}
-
-.crt-inspector-empty {
-  color: #64748b;
-  font-size: 0.78rem;
-  line-height: 1.5;
-}
-
 .crt-canvas-announcement {
   position: absolute;
   width: 1px;
@@ -420,10 +357,6 @@
 
 @media (max-width: 900px) {
   .crt-canvas-workspace {
-    grid-template-columns: 3.25rem minmax(0, 1fr);
-  }
-
-  .crt-inspector {
-    display: none;
+    grid-template-columns: 5.5rem minmax(0, 1fr);
   }
 }

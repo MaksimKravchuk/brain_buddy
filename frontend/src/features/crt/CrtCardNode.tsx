@@ -10,7 +10,9 @@ export type CrtCardNodeData = {
   editing: boolean;
   connectionMode: boolean;
   onFocusCard?: (nodeId: string) => void;
+  onEditCard?: (nodeId: string) => void;
   onCommitLabel?: (nodeId: string, label: string) => boolean;
+  onDraftLabelChange?: (nodeId: string, label: string) => void;
   onCancelLabel?: (nodeId: string) => void;
   onConnectorActivate?: (nodeId: string, side: "source" | "target") => void;
   onConnectorPointerDown?: (nodeId: string, side: "source" | "target", event: React.PointerEvent<HTMLButtonElement>) => void;
@@ -45,6 +47,7 @@ export function CrtCardNode({ id, data, selected }: NodeProps<CrtCard>): React.J
     const committed = data.onCommitLabel?.(id, draftLabel) ?? true;
     if (!committed) {
       restoreCardFocusRef.current = false;
+      setDraftLabel(data.label);
       window.requestAnimationFrame(() => editorRef.current?.focus());
     }
   };
@@ -87,7 +90,11 @@ export function CrtCardNode({ id, data, selected }: NodeProps<CrtCard>): React.J
           data-crt-native="true"
           aria-label={`Edit card label${data.label ? ` for ${data.label}` : ""}`}
           value={draftLabel}
-          onChange={(event) => setDraftLabel(event.currentTarget.value)}
+          onChange={(event) => {
+            const nextLabel = event.currentTarget.value;
+            setDraftLabel(nextLabel);
+            if (nextLabel.trim()) data.onDraftLabelChange?.(id, nextLabel);
+          }}
           onBlur={() => commitLabel()}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
@@ -108,9 +115,11 @@ export function CrtCardNode({ id, data, selected }: NodeProps<CrtCard>): React.J
           data-crt-card="true"
           data-node-id={id}
           aria-label={`${data.badge ? `${data.badge}: ` : ""}${data.label || "Untitled card"}`}
+          title="Double-click to edit card label"
           aria-pressed={isSelected}
           tabIndex={isSelected ? 0 : -1}
           onFocus={() => data.onFocusCard?.(id)}
+          onDoubleClick={() => data.onEditCard?.(id)}
         >
           {data.badge ? <span className="crt-card-badge">{data.badge}</span> : null}
           <span className="crt-card-label">{data.label || "Untitled card"}</span>

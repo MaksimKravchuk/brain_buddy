@@ -83,6 +83,12 @@ function emptyTree(id: string, name: string): CrtTreeResponse {
   };
 }
 
+async function inlineCardEditor(): Promise<HTMLInputElement> {
+  const card = await screen.findByRole("button", { name: /Root cause:/ });
+  fireEvent.doubleClick(card);
+  return screen.findByRole("textbox", { name: /^Edit card label/ });
+}
+
 class DraftMemoryStorage implements DraftStorage {
   private readonly values = new Map<string, string>();
   get length(): number { return this.values.size; }
@@ -565,7 +571,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     const getTree = vi.spyOn(crtApi, "getCrtTree").mockResolvedValueOnce(tree("tree-new", "Newest tree", "2026-09-20T10:00:00Z")).mockResolvedValueOnce(tree("tree-old", "Older tree", "2026-09-19T10:00:00Z"));
 
     render(<CrtWorkspace />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved local edit" } });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /current tree: newest tree/i })); });
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Older tree" }));
@@ -584,7 +590,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(tree("tree-new", "Newest tree", "2026-09-20T10:00:00Z"));
 
     render(<CrtWorkspace />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved local edit" } });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /current tree: newest tree/i })); });
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete tree" }));
@@ -606,7 +612,7 @@ describe("CrtWorkspace tree lifecycle", () => {
       .mockResolvedValueOnce(tree("tree-old", "Older tree", "2026-09-19T10:00:00Z"));
 
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved local edit" } });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /current tree: newest tree/i })); });
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Older tree" }));
@@ -653,7 +659,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValueOnce(tree("tree-active", "Active tree", "2026-09-20T10:00:00Z")).mockResolvedValueOnce(remaining);
 
     render(<CrtWorkspace createDraftCoordinator={(options) => createCrtDraftCoordinator({ ...options, storage, lock_manager: draftLockManager })} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Active draft" } });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /current tree: active tree/i })); });
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Remaining tree" }));
@@ -675,7 +681,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     const getTree = vi.spyOn(crtApi, "getCrtTree").mockResolvedValueOnce(tree("tree-active", "Active tree", "2026-09-20T10:00:00Z")).mockResolvedValueOnce(remaining);
 
     render(<CrtWorkspace createDraftCoordinator={(options) => createCrtDraftCoordinator({ ...options, storage, lock_manager: draftLockManager })} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Active draft" } });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /current tree: active tree/i })); });
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Remaining tree" }));
@@ -716,7 +722,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     const exportTree = vi.spyOn(crtApi, "exportCrtTree");
 
     render(<CrtWorkspace downloadBackup={downloadBackup} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved local edit" } });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /current tree: newest tree/i })); });
     fireEvent.click(screen.getByRole("menuitem", { name: "Export saved server copy" }));
@@ -846,7 +852,7 @@ describe("CrtWorkspace tree lifecycle", () => {
 
     render(<CrtWorkspace />);
 
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Changed locally" } });
 
@@ -876,16 +882,16 @@ describe("CrtWorkspace tree lifecycle", () => {
     const updateTree = vi.spyOn(crtApi, "updateCrtTree").mockRejectedValue(new ApiError("Conflict", 409, { detail: { reason: "stale_revision" } }, "corr-conflict"));
 
     render(<CrtWorkspace />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Local copy" } });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
 
     expect(screen.getByText(/server changed this tree/i)).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Card label" })).toHaveValue("Local copy");
+    expect(screen.getByRole("textbox", { name: /^Edit card label/ })).toHaveValue("Local copy");
     fireEvent.click(screen.getByRole("button", { name: "Refresh server copy" }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(screen.getByRole("textbox", { name: "Card label" })).toHaveValue("Local copy");
+    expect(screen.getByRole("textbox", { name: /^Edit card label/ })).toHaveValue("Local copy");
     expect(screen.getByRole("button", { name: "Save local changes" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save local changes" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
@@ -899,7 +905,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "updateCrtTree").mockRejectedValue(new ApiError("Conflict", 409, { detail: { reason: "stale_revision" } }, "corr-conflict"));
 
     render(<CrtWorkspace />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Local copy" } });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
@@ -922,7 +928,7 @@ describe("CrtWorkspace tree lifecycle", () => {
       .mockRejectedValueOnce(new ApiError("Conflict", 409, { detail: { reason: "stale_revision" } }, "corr-second"));
 
     render(<CrtWorkspace />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Local copy" } });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
@@ -945,7 +951,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     const updateTree = vi.spyOn(crtApi, "updateCrtTree").mockRejectedValue(new Error("network down"));
 
     render(<CrtWorkspace />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Still local" } });
 
@@ -957,7 +963,7 @@ describe("CrtWorkspace tree lifecycle", () => {
 
     expect(updateTree).toHaveBeenCalledOnce();
     expect(screen.getByText("Save failed", { selector: ".crt-save-status" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Card label" })).toHaveValue("Still local");
+    expect(screen.getByRole("textbox", { name: /^Edit card label/ })).toHaveValue("Still local");
   });
 
   it("019-FR-017 keeps dispatched saves immutable and queues newer edits", async () => {
@@ -968,7 +974,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     const updateTree = vi.spyOn(crtApi, "updateCrtTree").mockReturnValueOnce(first).mockResolvedValueOnce(tree("tree-order", "Order tree", "2026-09-20T10:02:00Z", 3, "The server is unreliable", "Second local"));
 
     render(<CrtWorkspace />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "First local" } });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
@@ -1186,7 +1192,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([{ id: loaded.id, name: loaded.name, updated_at: loaded.metadata.updated_at, owner_id: "owner-1" }]);
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: backup error tree/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Export saved server copy" }));
@@ -1282,7 +1288,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "updateCrtTree").mockResolvedValue(loaded);
     vi.spyOn(crtApi, "importCrtTree").mockResolvedValue(imported);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Pending local edit" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: pending import/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Import tree JSON" }));
@@ -1300,7 +1306,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     vi.spyOn(crtApi, "updateCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Pending local edit" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: pending delete/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete tree" }));
@@ -1348,7 +1354,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([{ id: loaded.id, name: loaded.name, updated_at: loaded.metadata.updated_at, owner_id: "owner-1" }]);
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinatorStub()} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     void label;
     fireEvent.click(screen.getByRole("button", { name: /current tree: parse tree/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Import tree JSON" }));
@@ -1549,7 +1555,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([{ id: loaded.id, name: loaded.name, updated_at: loaded.metadata.updated_at, owner_id: "owner-1" }]);
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     risk = true;
     fireEvent.change(label, { target: { value: "Risky edit" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: risk transition/i }));
@@ -1567,7 +1573,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     vi.spyOn(crtApi, "exportCrtTree").mockResolvedValue({ tree: loaded });
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} downloadBackup={downloadBackup} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved export" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: export cancel/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Export saved server copy" }));
@@ -1714,7 +1720,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([{ id: loaded.id, name: loaded.name, updated_at: loaded.metadata.updated_at, owner_id: "owner-1" }, { id: "tree-other", name: "Other", updated_at: "2026-09-19T10:00:00Z", owner_id: "owner-1" }]);
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Pending edit" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: pending actions/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Other" }));
@@ -1738,7 +1744,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([{ id: loaded.id, name: loaded.name, updated_at: loaded.metadata.updated_at, owner_id: "owner-1" }, { id: "tree-other", name: "Other", updated_at: "2026-09-19T10:00:00Z", owner_id: "owner-1" }]);
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Pending edit" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: pending errors/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Other" }));
@@ -1753,7 +1759,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([{ id: loaded.id, name: loaded.name, updated_at: loaded.metadata.updated_at, owner_id: "owner-1" }, { id: "tree-other", name: "Other", updated_at: "2026-09-19T10:00:00Z", owner_id: "owner-1" }]);
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => discardCoordinator} />);
-    const discardLabel = await screen.findByRole("textbox", { name: "Card label" });
+    const discardLabel = await inlineCardEditor();
     fireEvent.change(discardLabel, { target: { value: "Discard error" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: pending errors/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Other" }));
@@ -1856,7 +1862,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Export saved server copy" }));
     await waitFor(() => expect(downloadBackup).toHaveBeenCalledWith(expect.objectContaining({ filename: "crt-tree.json" })));
 
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved backup" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: !!!/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Export saved server copy" }));
@@ -1911,7 +1917,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([{ id: loaded.id, name: loaded.name, updated_at: loaded.metadata.updated_at, owner_id: "owner-1" }, { id: "tree-other", name: "Other", updated_at: "2026-09-19T10:00:00Z", owner_id: "owner-1" }]);
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: enumeration transition/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Other" }));
@@ -1957,7 +1963,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     vi.spyOn(crtApi, "updateCrtTree").mockResolvedValue({ ...loaded, revision: 2 });
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Persisted change" } });
     await waitFor(() => expect(coordinator.persistCommand).toHaveBeenCalled(), { timeout: 2000 });
   });
@@ -1977,7 +1983,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
     expect(await screen.findByRole("button", { name: /current tree: pending enumerated/i })).toBeInTheDocument();
-    const label = screen.getByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: pending enumerated/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Other" }));
@@ -2039,7 +2045,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     ]);
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved current" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: in-flight pending/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Other in-flight" }));
@@ -2052,7 +2058,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     vi.spyOn(crtApi, "updateCrtTree").mockRejectedValue(new ApiError("Save failed", 503, { detail: "unavailable" }, "save-reference"));
     render(<CrtWorkspace />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Local save" } });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
@@ -2260,7 +2266,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     vi.spyOn(crtApi, "updateCrtTree").mockRejectedValue(new ApiError("Conflict", 409, { detail: { reason: "stale_revision" } }));
     render(<CrtWorkspace />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     vi.useFakeTimers();
     fireEvent.change(label, { target: { value: "Local conflict" } });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
@@ -2283,7 +2289,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
     try {
       render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-      const label = await screen.findByRole("textbox", { name: "Card label" });
+      const label = await inlineCardEditor();
       vi.useFakeTimers();
       fireEvent.change(label, { target: { value: "Online-only edit" } });
       await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
@@ -2329,7 +2335,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     vi.stubGlobal("prompt", vi.fn().mockReturnValue("Renamed locally"));
     render(<CrtWorkspace />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved rename barrier" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: rename barrier/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename tree" }));
@@ -2344,7 +2350,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     vi.stubGlobal("prompt", vi.fn().mockReturnValue("Blocked create"));
     render(<CrtWorkspace />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Unsaved create barrier" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: create barrier/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Create a new tree" }));
@@ -2445,7 +2451,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     ]);
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Pending edit" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: pending unmounted/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Pending other" }));
@@ -2563,7 +2569,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([{ id: loaded.id, name: loaded.name, updated_at: loaded.metadata.updated_at, owner_id: "owner-1" }, { id: "tree-online-other", name: "Online other", updated_at: "2026-09-19T10:00:00Z", owner_id: "owner-1" }]);
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
-    const label = await screen.findByRole("textbox", { name: "Card label" });
+    const label = await inlineCardEditor();
     fireEvent.change(label, { target: { value: "Online-only local edit" } });
     fireEvent.click(screen.getByRole("button", { name: /current tree: online-only mode/i }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Online other" }));
