@@ -802,8 +802,8 @@ final class BrainBuddyModel: ObservableObject {
             _ = try await store.archiveProject(project, idempotencyKey: key)
             pendingCollectionChange.removeValue(forKey: operation)
             await loadCollections()
-            if destination == .project(id) { destination = .list(.next) }
-            await reload()
+            if destination == .project(id) { await choose(.list(.next)) }
+            else { await reload() }
             return true
         } catch {
             handleRequestFailure(error)
@@ -878,8 +878,8 @@ final class BrainBuddyModel: ObservableObject {
             _ = try await store.deleteTag(tag, idempotencyKey: key)
             pendingCollectionChange.removeValue(forKey: operation)
             await loadCollections()
-            if destination == .tag(id) { destination = .list(.next) }
-            await reload()
+            if destination == .tag(id) { await choose(.list(.next)) }
+            else { await reload() }
             return true
         } catch {
             if let apiError = error as? APIError, apiError.statusCode == 409 {

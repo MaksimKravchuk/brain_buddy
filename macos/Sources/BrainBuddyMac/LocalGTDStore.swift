@@ -462,7 +462,7 @@ extension LocalGTDStore {
                     }
                     projectID = id
                 case .name(let name):
-                    let clean = try Self.text(name, label: "Project name", max: 120)
+                    let clean = try Self.text(name, label: "Project name", max: 500)
                     if let found = data.projects.first(where: { $0.state == "active" && $0.name.localizedCaseInsensitiveCompare(clean) == .orderedSame }) {
                         projectID = found.id
                     } else {
@@ -486,7 +486,7 @@ extension LocalGTDStore {
                     }
                     id = supplied
                 case .name(let name):
-                    let clean = try Self.text(name, label: "Tag name", max: 80)
+                    let clean = try Self.text(name, label: "Tag name", max: 500)
                     if let found = data.tags.first(where: { $0.state == "active" && $0.name.localizedCaseInsensitiveCompare(clean) == .orderedSame }) {
                         id = found.id
                     } else {
@@ -791,7 +791,7 @@ extension LocalGTDStore {
     func createComment(
         taskID: String, body: String, idempotencyKey: UUID
     ) async throws -> BrainBuddyComment {
-        let clean = try Self.text(body, label: "Comment", max: 10_000)
+        let clean = try Self.text(body, label: "Comment", max: 20_000)
         let key = idempotencyKey.uuidString
         let fingerprint = try Self.fingerprint("comment.create/\(taskID)", body: CommentCreateBody(body: body))
         try checkLoaded()
@@ -818,7 +818,7 @@ extension LocalGTDStore {
     func updateComment(
         taskID: String, comment: BrainBuddyComment, body: String, idempotencyKey: UUID
     ) async throws -> BrainBuddyComment {
-        let clean = try Self.text(body, label: "Comment", max: 10_000)
+        let clean = try Self.text(body, label: "Comment", max: 20_000)
         let key = idempotencyKey.uuidString
         let fingerprint = try Self.fingerprint("comment.update/\(taskID)/\(comment.id)", body:
             CommentUpdateBody(body: body, expected_revision: comment.revision))
@@ -870,7 +870,7 @@ extension LocalGTDStore {
     }
 
     func createProject(name: String, idempotencyKey: UUID) async throws -> BrainBuddyProject {
-        let clean = try Self.text(name, label: "Project name", max: 120)
+        let clean = try Self.text(name, label: "Project name", max: 500)
         let key = idempotencyKey.uuidString
         let fingerprint = try Self.fingerprint("project.create", body: CreateProjectBody(name: name))
         try checkLoaded()
@@ -890,7 +890,7 @@ extension LocalGTDStore {
     }
 
     func createTag(name: String, idempotencyKey: UUID) async throws -> BrainBuddyTag {
-        let clean = try Self.text(name, label: "Tag name", max: 80)
+        let clean = try Self.text(name, label: "Tag name", max: 500)
         let key = idempotencyKey.uuidString
         let fingerprint = try Self.fingerprint("tag.create", body: CreateTagBody(name: name))
         try checkLoaded()
@@ -912,7 +912,7 @@ extension LocalGTDStore {
     func renameProject(
         _ project: BrainBuddyProject, to name: String, idempotencyKey: UUID
     ) async throws -> BrainBuddyProject {
-        let clean = try Self.text(name, label: "Project name", max: 120)
+        let clean = try Self.text(name, label: "Project name", max: 500)
         let key = idempotencyKey.uuidString
         let fingerprint = try Self.fingerprint(
             "project.rename/\(project.id)", body: RenameCollectionBody(name: name, expected_revision: project.revision)
@@ -941,7 +941,7 @@ extension LocalGTDStore {
     func renameTag(
         _ tag: BrainBuddyTag, to name: String, idempotencyKey: UUID
     ) async throws -> BrainBuddyTag {
-        let clean = try Self.text(name, label: "Tag name", max: 80)
+        let clean = try Self.text(name, label: "Tag name", max: 500)
         let key = idempotencyKey.uuidString
         let fingerprint = try Self.fingerprint(
             "tag.rename/\(tag.id)", body: RenameCollectionBody(name: name, expected_revision: tag.revision)

@@ -224,6 +224,48 @@ final class LocalGTDStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), fileBeforeReplay)
     }
 
+    func testLocalCollectionAndCommentLengthsMatchEditorLimits() async throws {
+        let store = LocalGTDStore(fileURL: try makeURL())
+        let projectName = String(repeating: "P", count: 500)
+        let tagName = String(repeating: "T", count: 500)
+        let project = try await store.createProject(name: projectName, idempotencyKey: UUID())
+        let tag = try await store.createTag(name: tagName, idempotencyKey: UUID())
+        XCTAssertEqual(project.name.count, 500)
+        XCTAssertEqual(tag.name.count, 500)
+        let renamedProject = try await store.renameProject(
+            project, to: String(repeating: "Q", count: 500), idempotencyKey: UUID()
+        )
+        let renamedTag = try await store.renameTag(
+            tag, to: String(repeating: "U", count: 500), idempotencyKey: UUID()
+        )
+        XCTAssertEqual(renamedProject.name.count, 500)
+        XCTAssertEqual(renamedTag.name.count, 500)
+
+        let task = try await store.smartAddTask(
+            title: "Capture", state: .next,
+            project: .name(String(repeating: "R", count: 500)),
+            tags: [.name(String(repeating: "V", count: 500))],
+            idempotencyKey: UUID()
+        ).task
+        let comment = try await store.createComment(
+            taskID: task.id, body: String(repeating: "a", count: 20_000), idempotencyKey: UUID()
+        )
+        XCTAssertEqual(comment.body.count, 20_000)
+        let updated = try await store.updateComment(
+            taskID: task.id, comment: comment,
+            body: String(repeating: "b", count: 20_000), idempotencyKey: UUID()
+        )
+        XCTAssertEqual(updated.body.count, 20_000)
+        do {
+            _ = try await store.createComment(
+                taskID: task.id, body: String(repeating: "c", count: 20_001), idempotencyKey: UUID()
+            )
+            XCTFail("Local comments must keep the UI's 20,000-character upper bound")
+        } catch let error as APIError {
+            XCTAssertTrue(error.message.contains("20000"))
+        }
+    }
+
     func testSecondOpenStoreCannotOverwriteNewerOfflineTasks() async throws {
         let url = try makeURL()
         let first = LocalGTDStore(fileURL: url)

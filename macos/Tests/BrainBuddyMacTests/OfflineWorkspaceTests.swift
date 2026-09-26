@@ -128,6 +128,12 @@ final class OfflineWorkspaceTests: XCTestCase {
 
         let archived = await model.archiveProject(project.id)
         XCTAssertTrue(archived)
+        XCTAssertEqual(model.destination, .list(.next))
+        XCTAssertEqual(model.selectedList, .next)
+        model.draft = "Review moving plan"
+        await model.createTask()
+        XCTAssertNil(model.error)
+        XCTAssertEqual(model.tasks.first(where: { $0.title == "Review moving plan" })?.state, "next")
         XCTAssertTrue(model.projects.isEmpty)
         XCTAssertEqual(model.archivedProjects.map(\.id), [project.id])
         await model.choose(.project(project.id))
@@ -143,5 +149,28 @@ final class OfflineWorkspaceTests: XCTestCase {
         XCTAssertTrue(restored)
         XCTAssertEqual(model.projects.map(\.id), [project.id])
         XCTAssertTrue(model.archivedProjects.isEmpty)
+    }
+
+    @MainActor
+    func testDeletingViewedTagKeepsQuickCaptureInNextActions() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-delete-tag-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = LocalGTDStore(fileURL: directory.appendingPathComponent("tasks.json"))
+        let tag = try await store.createTag(name: "home", idempotencyKey: UUID())
+        let model = BrainBuddyModel(store: store)
+        await model.restore()
+        await model.choose(.tag(tag.id))
+        XCTAssertEqual(model.selectedList, .inbox)
+
+        let deleted = await model.deleteTag(tag.id)
+        XCTAssertTrue(deleted)
+        XCTAssertEqual(model.destination, .list(.next))
+        XCTAssertEqual(model.selectedList, .next)
+        model.draft = "Call the landlord"
+        await model.createTask()
+        XCTAssertNil(model.error)
+        XCTAssertEqual(model.tasks.first?.title, "Call the landlord")
+        XCTAssertEqual(model.tasks.first?.state, "next")
     }
 }

@@ -37,11 +37,12 @@
   check used the local app with network available to its process; it did not
   exercise a web request or create a Task.
 
-The macOS package's 49 Swift tests passed, including atomic local persistence,
+The macOS package's 51 Swift tests passed, including atomic local persistence,
 failed-write and corrupt-file protection, idempotent replay and changed-payload
 rejection after restart, protection from a stale second store, project Inbox
-capture, archive membership across all task states, sidebar counts, and
-Waiting for completion/reopen after restart.
+capture, collection and comment length bounds, redirect after project archive
+or tag deletion, archive membership across all task states, sidebar counts,
+and Waiting for completion/reopen after restart.
 
 ## Limits
 
@@ -51,5 +52,6 @@ Waiting for completion/reopen after restart.
   does not establish transcription accuracy for spoken tasks.
 - Automatic multi-task extraction remains deferred; see
   [local extraction feasibility](local-extraction-feasibility.md).
-- Repository-wide `make verify-all` stopped at the existing modified
-  `specs/019-macos-native-gtd` artifact set because `tasks.md` is missing.
+- The clean PR checkout passed the specification and CI-config stages of
+  `make verify-all`, then stopped at backend lint because `ruff` is not installed
+  in the local environment. GitHub CI passed on the initial PR commit.
