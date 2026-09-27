@@ -4,6 +4,34 @@ import XCTest
 
 final class OfflineWorkspaceTests: XCTestCase {
     @MainActor
+    func testQuickOpenDistinguishesTypesAndFindsTaskBeyondFirstPage() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-quick-open-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = LocalGTDStore(fileURL: directory.appendingPathComponent("tasks.json"))
+        let project = try await store.createProject(name: "Review", idempotencyKey: UUID())
+        let tag = try await store.createTag(name: "Review", idempotencyKey: UUID())
+        var lastTask: BrainBuddyTask?
+        for index in 0..<101 {
+            lastTask = try await store.createTask(
+                title: "Review item \(index)", state: .next,
+                waitingFor: nil, idempotencyKey: UUID()
+            )
+        }
+        let model = BrainBuddyModel(store: store)
+        await model.restore()
+
+        let results = try await model.quickOpenResults("Review")
+        XCTAssertEqual(results.count, 103)
+        XCTAssertEqual(results.first(where: { $0.id == "project:\(project.id)" })?.subtitle, "Project")
+        XCTAssertEqual(results.first(where: { $0.id == "tag:\(tag.id)" })?.subtitle, "Tag")
+        let task = try XCTUnwrap(lastTask)
+        XCTAssertEqual(results.first(where: { $0.id == "task:\(task.id)" })?.subtitle, "Task · Next actions")
+        let opened = await model.quickOpenTask(task.id)
+        XCTAssertEqual(opened?.id, task.id)
+    }
+
+    @MainActor
     func testLocalWorkspaceOpensAndKeepsTaskAfterRestartWithoutWebSession() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("brainbuddy-offline-\(UUID().uuidString)", isDirectory: true)
