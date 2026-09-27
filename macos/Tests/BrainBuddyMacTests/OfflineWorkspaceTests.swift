@@ -332,6 +332,103 @@ final class OfflineWorkspaceTests: XCTestCase {
     }
 
     @MainActor
+    func testSomedayReviewResumesAcrossPagesRestartAndTaskChange() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-someday-review-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let source = try await store.createTask(
+            title: "Build a small greenhouse", state: .someday,
+            waitingFor: nil, idempotencyKey: UUID()
+        )
+        for index in 0..<100 {
+            _ = try await store.createTask(
+                title: "Future idea \(index)", state: .someday,
+                waitingFor: nil, idempotencyKey: UUID()
+            )
+        }
+        let model = BrainBuddyModel(store: store)
+        await model.restore()
+        let initialReview = await model.loadSomedayReviewTasks()
+        XCTAssertEqual(try XCTUnwrap(initialReview).count, 101)
+        let key = UUID()
+        let reviewed = try await store.markSomedayReviewed(source, idempotencyKey: key)
+        let replay = try await store.markSomedayReviewed(source, idempotencyKey: key)
+        XCTAssertEqual(replay.revision, reviewed.revision)
+        XCTAssertEqual(reviewed.revision, source.revision)
+        XCTAssertEqual(reviewed.state, TaskList.someday.rawValue)
+        XCTAssertFalse(store.somedayReviewDue(source, before: Date().addingTimeInterval(-7 * 24 * 60 * 60)))
+        XCTAssertTrue(store.somedayReviewDue(source, before: Date().addingTimeInterval(1)))
+
+        let reopenedStore = LocalGTDStore(fileURL: fileURL)
+        let reopened = BrainBuddyModel(store: reopenedStore)
+        await reopened.restore()
+        let afterRestart = await reopened.loadSomedayReviewTasks()
+        XCTAssertEqual(try XCTUnwrap(afterRestart).count, 100)
+        let changed = try await reopenedStore.updateTask(
+            source, changes: TaskChanges(title: .set("Build a greenhouse next spring")),
+            idempotencyKey: UUID()
+        )
+        let afterChange = await reopened.loadSomedayReviewTasks()
+        XCTAssertEqual(try XCTUnwrap(afterChange).count, 101)
+        do {
+            _ = try await reopenedStore.markSomedayReviewed(source, idempotencyKey: UUID())
+            XCTFail("A stale Someday review must not be accepted")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+        let kept = await reopened.keepSomeday(changed)
+        XCTAssertTrue(kept)
+        let afterSecondReview = await reopened.loadSomedayReviewTasks()
+        XCTAssertEqual(try XCTUnwrap(afterSecondReview).count, 100)
+        let current = try await reopenedStore.getTask(source.id)
+        XCTAssertEqual(current.revision, changed.revision)
+    }
+
+    @MainActor
+    func testSomedayActivationIsAtomicAndReplaySafe() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-someday-activation-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let project = try await store.createProject(name: "Garden", idempotencyKey: UUID())
+        let tag = try await store.createTag(name: "outside", idempotencyKey: UUID())
+        let source = try await store.smartAddTask(
+            title: "Garden redesign", state: .someday,
+            project: .id(project.id), tags: [.id(tag.id)], idempotencyKey: UUID()
+        ).task
+        let key = UUID()
+        let first = try await store.activateSomedayTask(
+            source, title: "  Sketch the first garden bed  ", idempotencyKey: key
+        )
+        let replay = try await store.activateSomedayTask(
+            source, title: "Sketch the first garden bed", idempotencyKey: key
+        )
+        XCTAssertEqual(replay.id, first.id)
+        XCTAssertEqual(first.title, "Sketch the first garden bed")
+        XCTAssertEqual(first.state, TaskList.next.rawValue)
+        XCTAssertEqual(first.revision, source.revision + 1)
+        XCTAssertEqual(first.project_id, project.id)
+        XCTAssertEqual(first.tag_ids, [tag.id])
+        let reopenedStore = LocalGTDStore(fileURL: fileURL)
+        let reopened = try await reopenedStore.getTask(source.id)
+        XCTAssertEqual(reopened.state, TaskList.next.rawValue)
+        XCTAssertEqual(reopened.title, first.title)
+        let next = try await reopenedStore.listTasks(query: TaskQuery(state: .next))
+        XCTAssertEqual(next.items.map(\.id), [source.id])
+        do {
+            _ = try await reopenedStore.activateSomedayTask(
+                source, title: "Another action", idempotencyKey: UUID()
+            )
+            XCTFail("A stale Someday activation must not be accepted")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+    }
+
+    @MainActor
     func testSidebarCountsStayGlobalWhileBrowsingOneProject() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("brainbuddy-counts-\(UUID().uuidString)", isDirectory: true)
