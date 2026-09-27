@@ -390,6 +390,20 @@ final class BrainBuddyModel: ObservableObject {
         }
     }
 
+    func quickCaptureInbox(_ rawTitle: String, idempotencyKey: UUID) async throws {
+        guard isLocalWorkspace else {
+            throw APIError(message: "Quick Capture is available in the local workspace.")
+        }
+        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title.count <= 500 else {
+            throw APIError(message: "Enter a task title of 500 characters or fewer.")
+        }
+        _ = try await store.createTask(
+            title: title, state: .inbox, waitingFor: nil, idempotencyKey: idempotencyKey
+        )
+        await reload()
+    }
+
     func loadProjectReview() async -> [ProjectReviewItem]? {
         error = nil
         do {
@@ -1327,6 +1341,7 @@ private extension TaskChanges {
 
 struct ContentView: View {
     @StateObject private var model = BrainBuddyModel()
+    @StateObject private var quickCapture = QuickCaptureController()
     @State private var email = ""
     @State private var password = ""
     @State private var voicePresented = false
@@ -1387,6 +1402,13 @@ struct ContentView: View {
                         }
                         .keyboardShortcut("o", modifiers: [.command])
                         Button {
+                            quickCapture.show()
+                        } label: {
+                            Label("Quick Capture", systemImage: "square.and.pencil")
+                        }
+                        .keyboardShortcut("b", modifiers: [.control, .option, .shift])
+                        .help("Capture to Inbox from anywhere with ⌃⌥⇧B")
+                        Button {
                             voicePresented = true
                         } label: {
                             Label("Voice to task draft", systemImage: "mic")
@@ -1429,6 +1451,8 @@ struct ContentView: View {
             }
         }
         .task { await model.restore() }
+        .onAppear { quickCapture.start(model: model) }
+        .onDisappear { quickCapture.stop() }
         .sheet(isPresented: $quickOpenPresented, onDismiss: {
             if let target = pendingQuickOpenTarget {
                 pendingQuickOpenTarget = nil
@@ -2155,6 +2179,14 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 12)
+            }
+
+            if let error = quickCapture.registrationError {
+                Label(error, systemImage: "keyboard.badge.exclamationmark")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 12)
             }
 
             if let taskID = model.syncConflictTaskID {
