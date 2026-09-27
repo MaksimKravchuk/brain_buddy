@@ -1376,7 +1376,12 @@ struct ContentView: View {
     @State private var quickOpenPresented = false
     @State private var pendingQuickOpenTarget: QuickOpenTarget?
     @State private var quickOpenedTask: BrainBuddyTask?
+    @State private var renamingTask: BrainBuddyTask?
+    @State private var quickRenameTitle = ""
+    @State private var quickRenameError: String?
+    @State private var quickRenameConflict = false
     @FocusState private var addFocused: Bool
+    @FocusState private var quickRenameFocused: Bool
 
     var body: some View {
         Group {
@@ -1465,6 +1470,48 @@ struct ContentView: View {
             } onClose: {
                 quickOpenPresented = false
             }
+        }
+        .sheet(item: $renamingTask) { task in
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Rename task").font(.title2.bold())
+                TextField("Task title", text: $quickRenameTitle)
+                    .focused($quickRenameFocused)
+                    .onSubmit {
+                        guard !quickRenameConflict else { return }
+                        Task { await saveQuickRename(task) }
+                    }
+                if quickRenameTitle.count > 500 {
+                    Text("Use 500 characters or fewer.")
+                        .font(.caption).foregroundStyle(.red)
+                }
+                if let quickRenameError {
+                    Text(quickRenameError).font(.caption).foregroundStyle(.red)
+                }
+                if quickRenameConflict,
+                   let current = model.taskDetails[task.id] {
+                    Text("Current title: \(current.title)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Use my title on the current task") {
+                        Task { await saveQuickRename(current) }
+                    }
+                    .disabled(model.busy || quickRenameTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              || quickRenameTitle.count > 500)
+                }
+                HStack {
+                    Spacer()
+                    Button("Cancel") { cancelQuickRename(task.id) }
+                        .keyboardShortcut(.cancelAction)
+                    Button("Save title") { Task { await saveQuickRename(task) } }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(model.busy || quickRenameConflict
+                                  || quickRenameTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                  || quickRenameTitle.count > 500)
+                }
+            }
+            .padding(24)
+            .frame(width: 420)
+            .onAppear { quickRenameFocused = true }
         }
         .onChange(of: model.account?.id) { previousID, accountID in
             if accountID != nil {
@@ -2424,6 +2471,39 @@ struct ContentView: View {
         )
     }
 
+    private func beginQuickRename(_ task: BrainBuddyTask) {
+        guard selectedTaskID == nil, !model.busy else { return }
+        quickRenameTitle = task.title
+        quickRenameError = nil
+        quickRenameConflict = false
+        model.error = nil
+        renamingTask = task
+    }
+
+    private func cancelQuickRename(_ taskID: String) {
+        model.clearSyncConflict(for: taskID)
+        renamingTask = nil
+        quickRenameError = nil
+        quickRenameConflict = false
+    }
+
+    private func saveQuickRename(_ task: BrainBuddyTask) async {
+        let title = quickRenameTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.busy, !title.isEmpty, title.count <= 500 else { return }
+        if title == task.title {
+            cancelQuickRename(task.id)
+            return
+        }
+        if await model.saveTask(task, changes: TaskChanges(title: .set(title)), destinationState: nil) {
+            cancelQuickRename(task.id)
+        } else if model.syncConflictTaskID == task.id {
+            quickRenameConflict = true
+            quickRenameError = "This task changed elsewhere. Review its current title before applying yours."
+        } else {
+            quickRenameError = model.error ?? "The task title could not be saved. Try again."
+        }
+    }
+
     private func taskCard(_ task: BrainBuddyTask) -> some View {
         let terminal = task.state == "completed" || task.state == "cancelled"
         return VStack(spacing: 0) {
@@ -2469,6 +2549,10 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Edit \(task.title)")
                         .accessibilityValue(selectedTaskID == task.id ? "Expanded" : "Collapsed")
+                        .contextMenu {
+                            Button("Rename title…") { beginQuickRename(task) }
+                                .disabled(selectedTaskID != nil || model.busy)
+                        }
                     }
                 }
                 Spacer(minLength: 8)
