@@ -98,12 +98,15 @@ replacing an existing quick-capture draft.
 
 The Waiting for list has a one-item-at-a-time review. It loads every Waiting
 page, shows the awaited person/event and the date waiting began, then asks for
-an explicit decision: keep waiting for this review, create a separate Next
+an explicit decision: keep waiting, create a separate Next
 follow-up in the same project, return the task to Next with an editable action
 title, or cancel it. Follow-up creation leaves the original Waiting task in
 place. Returning it to Next clears the active waiting fields. The review does
-not send messages, schedule a due date, or persist a "reviewed" marker; starting
-a new review shows the current Waiting list again.
+not send messages or schedule a due date. In the local workspace, Keep waiting
+and Create follow-up store a review receipt separately from the Waiting task:
+the item returns to the review after seven days or immediately when its task
+revision changes, while its GTD state and waiting date remain intact. Follow-up
+creation and its review receipt are one atomic local write.
 
 Completed and cancelled tasks reopen into a chosen open list; Waiting for
 requires a person, event, or condition. The local store records the last open
