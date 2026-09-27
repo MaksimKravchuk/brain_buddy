@@ -327,6 +327,69 @@ final class BrainBuddyModel: ObservableObject {
         }
     }
 
+    func quickOpenResults(_ input: String) async throws -> [QuickOpenResult] {
+        let term = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        func matches(_ value: String) -> Bool {
+            term.isEmpty || value.localizedStandardContains(term)
+        }
+        var results: [QuickOpenResult] = []
+        for list in TaskList.allCases where matches(list.title) {
+            results.append(QuickOpenResult(
+                id: "list:\(list.rawValue)", title: list.title,
+                subtitle: "GTD list", symbol: list.symbol, target: .list(list)
+            ))
+        }
+        for state in [HistoryState.completed, .cancelled] where matches(state.title) {
+            results.append(QuickOpenResult(
+                id: "history:\(state.rawValue)", title: state.title,
+                subtitle: "History", symbol: state.symbol, target: .history(state)
+            ))
+        }
+        let allProjects = projects + archivedProjects
+        for project in allProjects where matches(project.name) {
+            results.append(QuickOpenResult(
+                id: "project:\(project.id)", title: project.name,
+                subtitle: project.state == "archived" ? "Archived project" : "Project",
+                symbol: "square.stack", target: .project(project.id)
+            ))
+        }
+        for tag in tags where matches(tag.name) {
+            results.append(QuickOpenResult(
+                id: "tag:\(tag.id)", title: "#\(tag.name)",
+                subtitle: "Tag", symbol: "tag", target: .tag(tag.id)
+            ))
+        }
+        guard !term.isEmpty else { return results }
+        var cursor: String?
+        var seenTaskIDs: Set<String> = []
+        repeat {
+            try Task.checkCancellation()
+            let page = try await store.listTasks(
+                query: TaskQuery(includeCompleted: true, includeCancelled: true, q: term),
+                cursor: cursor
+            )
+            for task in page.items where seenTaskIDs.insert(task.id).inserted {
+                let state = TaskList(rawValue: task.state)?.title ?? task.state.capitalized
+                let project = allProjects.first(where: { $0.id == task.project_id })?.name
+                let subtitle = (["Task", state] + [project].compactMap { $0 }).joined(separator: " · ")
+                results.append(QuickOpenResult(
+                    id: "task:\(task.id)", title: task.title,
+                    subtitle: subtitle, symbol: "checkmark.circle", target: .task(task.id)
+                ))
+            }
+            cursor = page.next_cursor
+        } while cursor != nil
+        return results
+    }
+
+    func quickOpenTask(_ id: String) async -> BrainBuddyTask? {
+        do { return try await store.getTask(id) }
+        catch {
+            handleRequestFailure(error)
+            return nil
+        }
+    }
+
     func loadProjectReview() async -> [ProjectReviewItem]? {
         error = nil
         do {
@@ -1220,6 +1283,7 @@ enum HistoryState: String, Hashable {
 
 private enum PendingEditorNavigation {
     case destination(WorkspaceDestination)
+    case quickOpen(QuickOpenTarget)
     case task(String?)
     case complete(BrainBuddyTask)
     case move(BrainBuddyTask, TaskList)
@@ -1294,6 +1358,9 @@ struct ContentView: View {
     @State private var reviewingWaiting = false
     @State private var reviewingProjects = false
     @State private var clarifyingInbox = false
+    @State private var quickOpenPresented = false
+    @State private var pendingQuickOpenTarget: QuickOpenTarget?
+    @State private var quickOpenedTask: BrainBuddyTask?
     @FocusState private var addFocused: Bool
 
     var body: some View {
@@ -1313,6 +1380,12 @@ struct ContentView: View {
                             Label("New task", systemImage: "plus")
                         }
                         .keyboardShortcut("n", modifiers: [.command])
+                        Button {
+                            quickOpenPresented = true
+                        } label: {
+                            Label("Quick Open", systemImage: "magnifyingglass.circle")
+                        }
+                        .keyboardShortcut("o", modifiers: [.command])
                         Button {
                             voicePresented = true
                         } label: {
@@ -1356,6 +1429,19 @@ struct ContentView: View {
             }
         }
         .task { await model.restore() }
+        .sheet(isPresented: $quickOpenPresented, onDismiss: {
+            if let target = pendingQuickOpenTarget {
+                pendingQuickOpenTarget = nil
+                requestNavigation(.quickOpen(target))
+            }
+        }) {
+            QuickOpenView(model: model) { target in
+                pendingQuickOpenTarget = target
+                quickOpenPresented = false
+            } onClose: {
+                quickOpenPresented = false
+            }
+        }
         .onChange(of: model.account?.id) { previousID, accountID in
             if accountID != nil {
                 password = ""
@@ -1365,6 +1451,8 @@ struct ContentView: View {
                 }
             } else {
                 voicePresented = false
+                quickOpenPresented = false
+                pendingQuickOpenTarget = nil
                 selectedTaskID = nil
             }
         }
@@ -1856,6 +1944,7 @@ struct ContentView: View {
     private func changesCaptureContext(_ next: PendingEditorNavigation) -> Bool {
         switch next {
         case .destination(let destination): destination != model.destination
+        case .quickOpen: true
         case .newTask: isDateDestination || model.destination.isHistory || isArchivedProjectDestination
         case .signOut: true
         default: false
@@ -1870,8 +1959,14 @@ struct ContentView: View {
         switch pendingEditorNavigation {
         case .destination(let destination):
             selectedTaskID = nil
+            quickOpenedTask = nil
             Task { await model.choose(destination) }
+        case .quickOpen(let target):
+            selectedTaskID = nil
+            quickOpenedTask = nil
+            Task { await openQuickOpenTarget(target) }
         case .task(let id):
+            if id != quickOpenedTask?.id { quickOpenedTask = nil }
             selectedTaskID = id
             if let id {
                 model.taskDetails.removeValue(forKey: id)
@@ -1954,6 +2049,40 @@ struct ContentView: View {
         case .sort(let value):
             selectedTaskID = nil
             model.sort = value
+        }
+    }
+
+    private func openQuickOpenTarget(_ target: QuickOpenTarget) async {
+        guard model.account != nil else { return }
+        model.searchText = ""
+        model.priorityFilter = .all
+        switch target {
+        case .list(let list):
+            await model.choose(.list(list))
+        case .history(let state):
+            await model.choose(.history(state))
+        case .project(let id):
+            await model.choose(.project(id))
+        case .tag(let id):
+            await model.choose(.tag(id))
+        case .task(let id):
+            guard let task = await model.quickOpenTask(id) else { return }
+            let destination: WorkspaceDestination
+            if task.state == HistoryState.completed.rawValue {
+                destination = .history(.completed)
+            } else if task.state == HistoryState.cancelled.rawValue {
+                destination = .history(.cancelled)
+            } else if task.state == TaskList.inbox.rawValue, let projectID = task.project_id {
+                destination = .project(projectID)
+            } else if let list = TaskList(rawValue: task.state) {
+                destination = .list(list)
+            } else {
+                model.error = "This task has an unknown GTD state."
+                return
+            }
+            await model.choose(destination)
+            quickOpenedTask = task
+            applyNavigation(.task(id))
         }
     }
 
@@ -2057,6 +2186,13 @@ struct ContentView: View {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if case .project(let id) = model.destination {
                         projectOverviewCard(id)
+                    }
+                    if let quickOpenedTask, selectedTaskID == quickOpenedTask.id {
+                        Text("OPENED FROM QUICK OPEN")
+                            .font(.caption.bold())
+                            .tracking(1.5)
+                            .foregroundStyle(.secondary)
+                        taskCard(model.taskDetails[quickOpenedTask.id] ?? quickOpenedTask)
                     }
                     ForEach(taskSections, id: \.name) { section in
                         if !section.name.isEmpty {
@@ -2212,15 +2348,20 @@ struct ContentView: View {
     }
 
     private var openTasks: [BrainBuddyTask] {
-        model.tasks.filter { $0.state != "completed" && $0.state != "cancelled" }
+        visibleTasks.filter { $0.state != "completed" && $0.state != "cancelled" }
     }
 
     private var completedTasks: [BrainBuddyTask] {
-        model.tasks.filter { $0.state == "completed" }
+        visibleTasks.filter { $0.state == "completed" }
     }
 
     private var cancelledTasks: [BrainBuddyTask] {
-        model.tasks.filter { $0.state == "cancelled" }
+        visibleTasks.filter { $0.state == "cancelled" }
+    }
+
+    private var visibleTasks: [BrainBuddyTask] {
+        guard let pinned = quickOpenedTask, selectedTaskID == pinned.id else { return model.tasks }
+        return model.tasks.filter { $0.id != pinned.id }
     }
 
     private var taskSections: [(name: String, tasks: [BrainBuddyTask])] {
@@ -2431,7 +2572,7 @@ struct ContentView: View {
                 .strokeBorder(selectedTaskID == task.id ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.12))
                 .allowsHitTesting(false)
         }
-        .id("\(task.id):\(task.revision):\(task.state)")
+        .id("\(task.id):\(task.revision):\(task.state):\(selectedTaskID == task.id)")
     }
 
     private func terminalDetail(_ detail: BrainBuddyTask) -> some View {
