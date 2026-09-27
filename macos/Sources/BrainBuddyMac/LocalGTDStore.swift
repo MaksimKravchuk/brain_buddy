@@ -57,11 +57,22 @@ final class LocalGTDStore: GTDStore {
         var tags: [StoredTag] = []
         var idempotency: [String: String] = [:]
         var idempotencyReceipts: [String: IdempotencyReceipt]?
+        var waitingReviews: [String: WaitingReviewReceipt]?
     }
 
     private struct IdempotencyReceipt: Codable {
         let fingerprint: String
         let response: Data
+    }
+
+    private struct WaitingReviewReceipt: Codable {
+        let taskRevision: Int
+        let reviewedAt: String
+    }
+
+    private struct FollowUpReviewBody: Encodable {
+        let title: String
+        let expectedRevision: Int
     }
 
     private struct StoredTask: Codable {
@@ -888,6 +899,84 @@ extension LocalGTDStore {
 }
 
 extension LocalGTDStore {
+    private static func recordWaitingReview(_ task: StoredTask, in data: inout Snapshot, at now: String) {
+        if data.waitingReviews == nil { data.waitingReviews = [:] }
+        data.waitingReviews?[task.id] = WaitingReviewReceipt(taskRevision: task.revision, reviewedAt: now)
+    }
+
+    func waitingReviewDue(_ task: BrainBuddyTask, before cutoff: Date) -> Bool {
+        guard task.state == TaskList.waiting.rawValue,
+              let receipt = snapshot.waitingReviews?[task.id],
+              receipt.taskRevision == task.revision,
+              let reviewed = ISO8601DateFormatter().date(from: receipt.reviewedAt) else {
+            return true
+        }
+        return reviewed < cutoff
+    }
+
+    func markWaitingReviewed(_ task: BrainBuddyTask, idempotencyKey: UUID) async throws -> BrainBuddyTask {
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "waiting.review/\(task.id)", body: ["expectedRevision": task.revision]
+        )
+        try checkLoaded()
+        if let replay: StoredTask = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return replay.publicValue()
+        }
+        let reviewed = try mutate { data -> StoredTask in
+            guard let current = data.tasks.first(where: { $0.id == task.id }) else { throw Self.missing("Task") }
+            guard current.revision == task.revision else { throw Self.conflict("Task") }
+            guard current.state == TaskList.waiting.rawValue else {
+                throw APIError(message: "Only Waiting tasks can be marked reviewed.")
+            }
+            Self.recordWaitingReview(current, in: &data, at: Self.now())
+            try Self.record(in: &data, key: key, objectID: task.id, fingerprint: fingerprint, response: current)
+            return current
+        }
+        return reviewed.publicValue()
+    }
+
+    func createReviewedFollowUp(
+        for task: BrainBuddyTask, title: String, idempotencyKey: UUID
+    ) async throws -> BrainBuddyTask {
+        let cleanTitle = try Self.text(title, label: "Follow-up action", max: 500)
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "waiting.follow-up/\(task.id)",
+            body: FollowUpReviewBody(title: cleanTitle, expectedRevision: task.revision)
+        )
+        try checkLoaded()
+        if let replay: StoredTask = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return replay.publicValue()
+        }
+        let created = try mutate { data -> StoredTask in
+            guard let source = data.tasks.first(where: { $0.id == task.id }) else { throw Self.missing("Task") }
+            guard source.revision == task.revision else { throw Self.conflict("Task") }
+            guard source.state == TaskList.waiting.rawValue else {
+                throw APIError(message: "This task is no longer in Waiting for.")
+            }
+            if let projectID = source.projectID,
+               !data.projects.contains(where: { $0.id == projectID && $0.state == "active" }) {
+                throw APIError(message: "Restore this project before creating a follow-up in it.")
+            }
+            let now = Self.now()
+            let followUp = StoredTask(
+                id: Self.id("task"), title: cleanTitle, details: nil,
+                state: TaskList.next.rawValue, lastOpenState: nil, revision: 1,
+                projectID: source.projectID, tagIDs: [], dueDate: nil, priority: .none,
+                waitingFor: nil, waitingSince: nil, completedAt: nil, cancelledAt: nil,
+                orderKey: (data.tasks.filter { $0.state == TaskList.next.rawValue }.map(\.orderKey).max() ?? 0) + 1,
+                createdAt: now, subtasks: [], comments: []
+            )
+            data.tasks.append(followUp)
+            Self.recordWaitingReview(source, in: &data, at: now)
+            try Self.record(in: &data, key: key, objectID: followUp.id,
+                            fingerprint: fingerprint, response: followUp)
+            return followUp
+        }
+        return created.publicValue()
+    }
+
     func clarifyInboxAsProject(
         _ task: BrainBuddyTask, projectName: String, desiredOutcome: String,
         firstAction: String, idempotencyKey: UUID
