@@ -74,6 +74,8 @@ final class BrainBuddyModel: ObservableObject {
     private var pendingCommentCreate: [String: (body: String, key: UUID)] = [:]
     private var pendingFollowUpCreate: [String: (revision: Int, title: String, key: UUID)] = [:]
     private var pendingWaitingReview: [String: (revision: Int, key: UUID)] = [:]
+    private var pendingSomedayReview: [String: (revision: Int, key: UUID)] = [:]
+    private var pendingSomedayActivation: [String: (revision: Int, title: String, key: UUID)] = [:]
     private var pendingInboxProject: [String: (signature: String, key: UUID)] = [:]
     private var pendingCollectionCreate: [String: (name: String, key: UUID)] = [:]
     private var pendingCollectionChange: [String: (signature: String, key: UUID)] = [:]
@@ -147,6 +149,8 @@ final class BrainBuddyModel: ObservableObject {
         pendingCommentCreate.removeAll()
         pendingFollowUpCreate.removeAll()
         pendingWaitingReview.removeAll()
+        pendingSomedayReview.removeAll()
+        pendingSomedayActivation.removeAll()
         pendingInboxProject.removeAll()
         pendingCollectionCreate.removeAll()
         pendingCollectionChange.removeAll()
@@ -608,6 +612,77 @@ final class BrainBuddyModel: ObservableObject {
             if let apiError = error as? APIError, apiError.statusCode == 409 {
                 pendingWaitingReview.removeValue(forKey: task.id)
                 self.error = "This Waiting task changed. Reopen the review to inspect it."
+            } else { handleRequestFailure(error) }
+            return false
+        }
+    }
+
+    func loadSomedayReviewTasks() async -> [BrainBuddyTask]? {
+        guard let localStore = store as? LocalGTDStore else { return [] }
+        error = nil
+        do {
+            var result: [BrainBuddyTask] = []
+            var cursor: String?
+            let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+            repeat {
+                let page = try await store.listTasks(query: TaskQuery(state: .someday), cursor: cursor)
+                result.append(contentsOf: page.items.filter {
+                    $0.state == TaskList.someday.rawValue && localStore.somedayReviewDue($0, before: cutoff)
+                })
+                cursor = page.next_cursor
+            } while cursor != nil
+            return result
+        } catch {
+            handleRequestFailure(error)
+            return nil
+        }
+    }
+
+    func keepSomeday(_ task: BrainBuddyTask) async -> Bool {
+        guard !busy, let localStore = store as? LocalGTDStore else { return false }
+        let pending = pendingSomedayReview[task.id]
+        let key = pending?.revision == task.revision ? pending!.key : UUID()
+        pendingSomedayReview[task.id] = (task.revision, key)
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            _ = try await localStore.markSomedayReviewed(task, idempotencyKey: key)
+            pendingSomedayReview.removeValue(forKey: task.id)
+            await reload()
+            return true
+        } catch {
+            if let apiError = error as? APIError, apiError.statusCode == 409 {
+                pendingSomedayReview.removeValue(forKey: task.id)
+                self.error = "This Someday task changed. Reopen the review to inspect it."
+            } else { handleRequestFailure(error) }
+            return false
+        }
+    }
+
+    func activateSomeday(_ task: BrainBuddyTask, title: String) async -> Bool {
+        guard !busy, let localStore = store as? LocalGTDStore else { return false }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 500 else {
+            error = "Enter a concrete next action of 500 characters or fewer."
+            return false
+        }
+        let pending = pendingSomedayActivation[task.id]
+        let key = pending?.revision == task.revision && pending?.title == trimmed ? pending!.key : UUID()
+        pendingSomedayActivation[task.id] = (task.revision, trimmed, key)
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            let updated = try await localStore.activateSomedayTask(task, title: trimmed, idempotencyKey: key)
+            pendingSomedayActivation.removeValue(forKey: task.id)
+            taskDetails[task.id] = updated
+            await reload()
+            return true
+        } catch {
+            if let apiError = error as? APIError, apiError.statusCode == 409 {
+                pendingSomedayActivation.removeValue(forKey: task.id)
+                self.error = "This Someday task changed. Reopen the review to inspect it."
             } else { handleRequestFailure(error) }
             return false
         }
@@ -1350,6 +1425,7 @@ private enum PendingEditorNavigation {
     case signOut
     case createTask
     case reviewWaiting
+    case reviewSomeday
     case reviewProjects
     case clarifyInbox
     case groupByProject(Bool)
@@ -1412,6 +1488,7 @@ struct ContentView: View {
     @State private var movingTask: BrainBuddyTask?
     @State private var moveWaitingFor = ""
     @State private var reviewingWaiting = false
+    @State private var reviewingSomeday = false
     @State private var reviewingProjects = false
     @State private var clarifyingInbox = false
     @State private var quickOpenPresented = false
@@ -1806,6 +1883,9 @@ struct ContentView: View {
         .sheet(isPresented: $reviewingWaiting) {
             WaitingReviewView(model: model)
         }
+        .sheet(isPresented: $reviewingSomeday) {
+            SomedayReviewView(model: model)
+        }
         .sheet(isPresented: $reviewingProjects) {
             ProjectReviewView(model: model) { id in
                 reviewingProjects = false
@@ -2143,6 +2223,9 @@ struct ContentView: View {
         case .reviewWaiting:
             selectedTaskID = nil
             reviewingWaiting = true
+        case .reviewSomeday:
+            selectedTaskID = nil
+            reviewingSomeday = true
         case .reviewProjects:
             selectedTaskID = nil
             reviewingProjects = true
@@ -2222,6 +2305,13 @@ struct ContentView: View {
                     if model.destination == .list(.waiting) {
                         Button("Review Waiting for") {
                             requestNavigation(.reviewWaiting)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.busy)
+                    }
+                    if model.isLocalWorkspace && model.destination == .list(.someday) {
+                        Button("Review Someday") {
+                            requestNavigation(.reviewSomeday)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(model.busy)
@@ -3396,6 +3486,166 @@ private struct WaitingReviewView: View {
         if let date = formatter.date(from: value) { return date }
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)
+    }
+}
+
+private struct SomedayReviewView: View {
+    @ObservedObject var model: BrainBuddyModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [BrainBuddyTask] = []
+    @State private var index = 0
+    @State private var loading = true
+    @State private var loaded = false
+    @State private var enteringNext = false
+    @State private var actionTitle = ""
+    @State private var confirmingCancel = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Review Someday").font(.title2.bold())
+                    Text(loaded ? (items.isEmpty ? "No items due" : "\(min(index + 1, items.count)) of \(items.count)")
+                                : "One item at a time")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Close review") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(model.busy)
+            }
+
+            if loading {
+                ProgressView("Loading Someday tasks…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !loaded {
+                ContentUnavailableView("Could not load review", systemImage: "arrow.clockwise",
+                                       description: Text(model.error ?? "Try again."))
+                Button("Retry") { Task { await load() } }
+            } else if items.isEmpty {
+                ContentUnavailableView("Someday review is up to date", systemImage: "calendar.badge.checkmark",
+                                       description: Text("Reviewed items return after seven days or when their task changes."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if index >= items.count {
+                ContentUnavailableView("Someday review complete", systemImage: "checkmark.circle",
+                                       description: Text("Deferred items stay in Someday; selected next actions move to Next."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                let item = items[index]
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(item.title).font(.title3.weight(.semibold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let details = item.details, !details.isEmpty {
+                        Text(details)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(4)
+                    }
+                    if let projectID = item.project_id {
+                        Text("Project · \((model.projects + model.archivedProjects).first(where: { $0.id == projectID })?.name ?? "Unknown project")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+
+                if enteringNext {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("What is the concrete next action?").font(.headline)
+                        TextField("Concrete next action", text: $actionTitle)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityLabel("Concrete next action")
+                            .onSubmit { Task { await activate(item) } }
+                        Text(isArchivedProject(item)
+                             ? "Restore this archived project before moving its task to Next actions."
+                             : "The title and GTD list change together. Project, tags, notes, and due date remain attached.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            Button("Back") { enteringNext = false }
+                            Spacer()
+                            Button("Move to Next actions") { Task { await activate(item) } }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.busy || !validActionTitle || isArchivedProject(item))
+                        }
+                    }
+                } else {
+                    Text("Is this relevant now?").font(.headline)
+                    HStack(spacing: 10) {
+                        Button("Keep in Someday") {
+                            Task { if await model.keepSomeday(item) { advance() } }
+                        }
+                        .help("Review again after seven days or when this task changes")
+                        Button("Make it a Next action…") {
+                            actionTitle = item.title
+                            enteringNext = true
+                        }
+                        .disabled(isArchivedProject(item))
+                        Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
+                    }
+                    .disabled(model.busy)
+                    if isArchivedProject(item) {
+                        Text("Restore the archived project to activate this task.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let error = model.error {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(24)
+        .frame(width: 640, height: 440)
+        .task { await load() }
+        .confirmationDialog("Cancel this task?", isPresented: $confirmingCancel) {
+            Button("Cancel task", role: .destructive) {
+                guard index < items.count else { return }
+                let item = items[index]
+                Task { if await model.cancelTask(item) { advance() } }
+            }
+            Button("Keep task", role: .cancel) {}
+        } message: {
+            Text("The task will move to history. No message will be sent.")
+        }
+    }
+
+    private var validActionTitle: Bool {
+        let title = actionTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !title.isEmpty && title.count <= 500
+    }
+
+    private func isArchivedProject(_ task: BrainBuddyTask) -> Bool {
+        guard let projectID = task.project_id else { return false }
+        return model.archivedProjects.contains { $0.id == projectID }
+    }
+
+    private func load() async {
+        loading = true
+        if let fetched = await model.loadSomedayReviewTasks() {
+            items = fetched
+            index = 0
+            loaded = true
+            enteringNext = false
+        } else {
+            loaded = false
+        }
+        loading = false
+    }
+
+    private func activate(_ task: BrainBuddyTask) async {
+        guard validActionTitle, !isArchivedProject(task) else { return }
+        if await model.activateSomeday(task, title: actionTitle) { advance() }
+    }
+
+    private func advance() {
+        index += 1
+        enteringNext = false
+        actionTitle = ""
+        model.error = nil
     }
 }
 

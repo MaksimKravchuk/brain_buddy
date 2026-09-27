@@ -108,6 +108,14 @@ the item returns to the review after seven days or immediately when its task
 revision changes, while its GTD state and waiting date remain intact. Follow-up
 creation and its review receipt are one atomic local write.
 
+The local Someday list also has a one-item-at-a-time review. Keep in Someday
+records a review receipt without editing the task; the item returns after seven
+days or when its revision changes. Moving an item to Next asks for a concrete
+action title and saves the title and GTD state atomically while preserving its
+project, tags, notes, and due date. Irrelevant items can be cancelled. Tasks in
+archived projects can remain deferred, but their project must be restored before
+moving them to Next. The review never schedules a due date automatically.
+
 Completed and cancelled tasks reopen into a chosen open list; Waiting for
 requires a person, event, or condition. The local store records the last open
 list on terminal transitions, so each list shows its own history. This POC has
