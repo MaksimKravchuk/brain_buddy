@@ -9,7 +9,7 @@ import Foundation
 /// extension, as controls that open the app require). `perform` then opens
 /// `brainbuddy://capture`, which the app routes to the capture sheet in
 /// `.onOpenURL`, so every entry point shares one deep link.
-nonisolated struct OpenCaptureIntent: AppIntent {
+struct OpenCaptureIntent: AppIntent {
     static let title: LocalizedStringResource = "Open capture"
 
     static let description = IntentDescription("Opens Brain Buddy ready to capture a task.")

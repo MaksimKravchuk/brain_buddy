@@ -3,7 +3,7 @@ import BrainBuddyCore
 
 /// `OpenList` for Siri and Shortcuts. Raw values match `OpenList` (the
 /// server's task states); titles are the design system's list names, verbatim.
-nonisolated enum OpenListAppEnum: String, AppEnum, CaseIterable {
+enum OpenListAppEnum: String, AppEnum, CaseIterable {
     case inbox, next, waiting, someday
 
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "List")

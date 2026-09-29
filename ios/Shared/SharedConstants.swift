@@ -8,7 +8,7 @@ import Foundation
 /// set from a build setting so TestFlight builds can use their own team's
 /// group). Both targets must carry the same value, or the widget and the app
 /// open different files.
-nonisolated enum SharedConstants {
+enum SharedConstants {
     static let fallbackAppGroupID = "group.com.brainbuddy.ios"
 
     /// App Group holding the shared store document.

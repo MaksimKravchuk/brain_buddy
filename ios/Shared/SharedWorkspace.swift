@@ -64,7 +64,7 @@ enum SharedWorkspace {
 /// An error whose message Siri, Shortcuts and widgets show as written. GTD
 /// rule failures carry `GTDValidationError.message`, which is already
 /// user-facing copy.
-nonisolated struct BrainBuddyIntentError: Error, LocalizedError, CustomLocalizedStringResourceConvertible {
+struct BrainBuddyIntentError: Error, LocalizedError, CustomLocalizedStringResourceConvertible {
     let message: String
 
     init(message: String) {

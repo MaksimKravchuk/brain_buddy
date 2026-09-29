@@ -9,7 +9,7 @@ import Foundation
 /// the device; projects and tags that don't exist yet are created.
 ///
 /// It runs without opening the app (`openAppWhenRun` keeps its default, false).
-nonisolated struct CaptureTaskIntent: AppIntent {
+struct CaptureTaskIntent: AppIntent {
     static let title: LocalizedStringResource = "Add to Brain Buddy"
 
     static let description = IntentDescription(

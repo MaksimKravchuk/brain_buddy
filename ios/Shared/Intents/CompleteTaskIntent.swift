@@ -6,7 +6,7 @@ import Foundation
 /// Completes a task, fully offline. Siri and Shortcuts pick the task through
 /// `TaskEntityQuery`; widget rows run it from their completion button, in the
 /// widget extension's process.
-nonisolated struct CompleteTaskIntent: AppIntent {
+struct CompleteTaskIntent: AppIntent {
     static let title: LocalizedStringResource = "Complete task"
 
     static let description = IntentDescription("Marks a Brain Buddy task as complete, even offline.")

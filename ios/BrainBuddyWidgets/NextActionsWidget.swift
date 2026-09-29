@@ -8,7 +8,7 @@ import WidgetKit
 
 /// Which list the widget shows. Today puts overdue tasks first, as the Today
 /// tab does, so nothing slips past its date unseen.
-nonisolated enum TaskListChoice: String, AppEnum, CaseIterable {
+enum TaskListChoice: String, AppEnum, CaseIterable {
     case next, today
 
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "List")
@@ -54,7 +54,7 @@ nonisolated enum TaskListChoice: String, AppEnum, CaseIterable {
     }
 }
 
-nonisolated struct NextActionsConfigurationIntent: WidgetConfigurationIntent {
+struct NextActionsConfigurationIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Choose a list"
 
     static let description = IntentDescription("Show your next actions or what's due today.")
@@ -72,7 +72,7 @@ nonisolated struct NextActionsConfigurationIntent: WidgetConfigurationIntent {
 // MARK: - Timeline
 
 /// A task row, copied out of the store so the entry stays small and `Sendable`.
-nonisolated struct WidgetTask: Identifiable, Hashable, Sendable {
+struct WidgetTask: Identifiable, Hashable, Sendable {
     let id: String
     let title: String
     let listName: String
@@ -100,7 +100,7 @@ nonisolated struct WidgetTask: Identifiable, Hashable, Sendable {
     }
 }
 
-nonisolated struct NextActionsEntry: TimelineEntry, Sendable {
+struct NextActionsEntry: TimelineEntry, Sendable {
     let date: Date
     let choice: TaskListChoice
     /// Up to `NextActionsLoader.rowLimit` open tasks, in list order.
@@ -139,7 +139,7 @@ nonisolated struct NextActionsEntry: TimelineEntry, Sendable {
 }
 
 /// A row's due label: relative near today, a short date otherwise.
-nonisolated struct DueLabel: Hashable, Sendable {
+struct DueLabel: Hashable, Sendable {
     let text: String
     /// Due today or overdue.
     let isUrgent: Bool
@@ -159,7 +159,7 @@ nonisolated struct DueLabel: Hashable, Sendable {
 }
 
 /// Refresh policy for every widget in the extension.
-nonisolated enum WidgetSchedule {
+enum WidgetSchedule {
     /// Date views change at midnight. Writes from the app, App Intents and
     /// widget buttons reload timelines sooner through `WidgetCenter`.
     static func nextMidnight(after date: Date, calendar: Calendar = .current) -> Date {
@@ -203,7 +203,7 @@ enum NextActionsLoader {
     }
 }
 
-nonisolated struct NextActionsProvider: AppIntentTimelineProvider {
+struct NextActionsProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> NextActionsEntry {
         .sample(.next)
     }

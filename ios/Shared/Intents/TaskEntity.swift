@@ -3,12 +3,9 @@ import BrainBuddyCore
 import BrainBuddyWorkspace
 import Foundation
 
-// App Intents types are declared `nonisolated` so the system can use them from
-// any thread whether or not a target turns on main-actor default isolation.
-
 /// A task as Siri, Shortcuts, Spotlight and widgets see it. `id` is the
 /// permanent client id (`TaskID.rawValue`), so it stays valid across sync.
-nonisolated struct TaskEntity: AppEntity {
+struct TaskEntity: AppEntity {
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Task")
 
     static let defaultQuery = TaskEntityQuery()
@@ -64,7 +61,7 @@ nonisolated struct TaskEntity: AppEntity {
 
 /// Resolves tasks for Siri and Shortcuts: by id, suggestions (due today or
 /// earlier, then next actions), and title search over open tasks.
-nonisolated struct TaskEntityQuery: EntityStringQuery {
+struct TaskEntityQuery: EntityStringQuery {
     init() {}
 
     func entities(for identifiers: [TaskEntity.ID]) async throws -> [TaskEntity] {

@@ -8,7 +8,7 @@ import WidgetKit
 /// configuration anyway because that gives it WidgetKit's async timeline
 /// provider; the static provider hands out completion handlers, which do not
 /// cross into the main-actor store cleanly under Swift 6 checking.
-nonisolated struct InboxConfigurationIntent: WidgetConfigurationIntent {
+struct InboxConfigurationIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Inbox"
 
     static let description = IntentDescription("Shows how many items wait in your inbox.")
@@ -16,7 +16,7 @@ nonisolated struct InboxConfigurationIntent: WidgetConfigurationIntent {
     init() {}
 }
 
-nonisolated struct InboxEntry: TimelineEntry, Sendable {
+struct InboxEntry: TimelineEntry, Sendable {
     let date: Date
     /// Projectless Inbox tasks, the same number as the app's Inbox badge.
     let count: Int
@@ -39,7 +39,7 @@ enum InboxLoader {
     }
 }
 
-nonisolated struct InboxProvider: AppIntentTimelineProvider {
+struct InboxProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> InboxEntry {
         .sample()
     }

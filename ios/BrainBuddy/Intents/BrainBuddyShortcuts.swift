@@ -3,7 +3,7 @@ import AppIntents
 /// App Shortcuts: available in Siri, Spotlight, Shortcuts and the Action
 /// button as soon as the app is installed. App target only; the intents
 /// themselves live in `Shared/` so widgets and controls can run them too.
-nonisolated struct BrainBuddyShortcuts: AppShortcutsProvider {
+struct BrainBuddyShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: CaptureTaskIntent(),
