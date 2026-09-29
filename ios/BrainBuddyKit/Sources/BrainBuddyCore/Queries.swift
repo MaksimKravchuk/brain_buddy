@@ -30,26 +30,37 @@ public enum HistoryKind: String, CaseIterable, Codable, Sendable, Hashable {
 
 /// A screen that lists tasks.
 public enum Destination: Hashable, Codable, Sendable {
-    /// Inbox shows only projectless inbox tasks (`docs/projectless-inbox-contract.md`).
+    /// Open tasks in the list, any project — except Inbox, which shows only
+    /// projectless inbox tasks (`docs/projectless-inbox-contract.md`).
     case list(OpenList)
-    /// Overdue, Today and Upcoming as three sections.
+    /// Open dated tasks as Overdue, Today and Upcoming sections (empty ones
+    /// omitted), in due order unless another sort is chosen.
     case agenda
+    /// One of the agenda's sections on its own screen.
     case dateView(DateView)
+    /// Open tasks in the project, one section per list in
+    /// `GTDQueries.projectListOrder`. Works for archived projects too.
     case project(ProjectID)
+    /// Open tasks carrying the tag, any list.
     case tag(TagID)
+    /// Completed or cancelled tasks, most recent first.
     case history(HistoryKind)
-    /// Title and notes, NFKC + case- and diacritic-insensitive, all states.
+    /// Title and notes, NFKC + case- and diacritic-insensitive, all states:
+    /// open matches first, then completed, then cancelled. A blank query
+    /// matches nothing.
     case search(String)
 }
 
 public enum TaskSort: String, CaseIterable, Codable, Sendable, Hashable {
-    /// `orderKey`, `createdAt`, `id`.
+    /// `orderKey`, `createdAt`, `id`. Date views use `.due` instead, and
+    /// history most recent first.
     case manual
     /// Dated first by date, then manual.
     case due
     /// high → none, then manual.
     case priority
-    /// Localized title order, then `id`.
+    /// Title ignoring case, diacritics and width (the same on every
+    /// platform), then `id`.
     case title
 
     public var title: String {
@@ -64,12 +75,18 @@ public enum TaskSort: String, CaseIterable, Codable, Sendable, Hashable {
 
 public struct ListOptions: Hashable, Codable, Sendable {
     public var sort: TaskSort
-    /// Sections per project, sorted by name, with tasks without a project last.
-    /// Ignored in Inbox (always projectless) and project views.
+    /// Sections per project, sorted by name, with tasks without a project last
+    /// ("No project"). Applies to open tasks; the Completed and Cancelled
+    /// sections stay flat. Ignored in Inbox (always projectless), project
+    /// views and the agenda (already sectioned by date).
     public var groupByProject: Bool
     /// Append this list's completed tasks as a section (tasks whose
     /// `lastOpenList` is the list; unknown origins only appear in History).
+    /// Project, tag and date screens append the completed tasks in that
+    /// project, with that tag or due in that range. Search always includes
+    /// them; History ignores it.
     public var showCompleted: Bool
+    /// As `showCompleted`, for cancelled tasks.
     public var showCancelled: Bool
     /// Empty means every priority.
     public var priorities: Set<TaskPriority>
@@ -99,7 +116,9 @@ public struct TaskSection: Identifiable, Hashable, Sendable {
         case cancelled
     }
 
-    /// Stable across recomputation, for SwiftUI diffing.
+    /// Stable across recomputation, for SwiftUI diffing: `open`,
+    /// `project:<id>`, `none` (no project), `date:<overdue|today|upcoming>`,
+    /// `list:<inbox|next|waiting|someday>`, `completed`, `cancelled`.
     public var id: String
     /// Section header, or nil for a single unnamed section.
     public var title: String?
@@ -159,8 +178,8 @@ public struct ProjectSummary: Identifiable, Hashable, Sendable {
     public var project: ProjectRecord
     public var openTaskCount: Int
     public var nextActionCount: Int
-    /// An active project with open tasks but no next action — the GTD signal
-    /// that a project is stuck.
+    /// An active project without an open next action (including one with no
+    /// open tasks at all) — the GTD signal that a project is stuck.
     public var needsNextAction: Bool { project.state == .active && nextActionCount == 0 }
 
     public var id: ProjectID { project.id }
@@ -184,25 +203,74 @@ public struct TagSummary: Identifiable, Hashable, Sendable {
 }
 
 /// Pure read model over `GTDState`. `today` is injected so date views are
-/// deterministic and follow the device's local calendar day.
+/// deterministic and follow the device's local calendar day. It mirrors the
+/// server's list semantics (`backend/app/modules/tasks/service.py`) and the
+/// web task list; every call is O(n log n) in the number of tasks.
 public enum GTDQueries {
+    /// The tasks a screen shows. Sections are never empty (an empty result
+    /// has none); open sections come first, then "Completed", then
+    /// "Cancelled". `options.priorities` and `options.tagFilter` apply to
+    /// every section.
     public static func list(
         _ destination: Destination, options: ListOptions, in state: GTDState, today: CalendarDay
     ) -> TaskListResult {
-        fatalError("GTDQueries.list is not implemented yet")
+        TaskListBuilder(state: state, options: options, today: today).build(destination)
     }
 
+    /// Sidebar and badge counts over open tasks: Inbox counts projectless
+    /// inbox tasks, the other lists count every project.
     public static func counts(in state: GTDState, today: CalendarDay) -> ListCounts {
-        fatalError("GTDQueries.counts is not implemented yet")
+        var counts = ListCounts()
+        for task in state.tasks.values {
+            switch task.state {
+            case .inbox: if task.projectID == nil { counts.inbox += 1 }
+            case .next: counts.next += 1
+            case .waiting: counts.waiting += 1
+            case .someday: counts.someday += 1
+            case .completed, .cancelled: continue
+            }
+            switch DateView(due: task.dueDate, today: today) {
+            case .overdue: counts.overdue += 1
+            case .today: counts.today += 1
+            case .upcoming, nil: break
+            }
+        }
+        return counts
     }
 
-    /// Active projects by name (archived ones when `archived` is true).
+    /// Active projects by name (archived ones when `archived` is true): the
+    /// normalized name ignoring diacritics, then the display name.
     public static func projects(in state: GTDState, archived: Bool = false) -> [ProjectSummary] {
-        fatalError("GTDQueries.projects is not implemented yet")
+        let wanted: ProjectState = archived ? .archived : .active
+        var openCounts: [ProjectID: Int] = [:]
+        var nextCounts: [ProjectID: Int] = [:]
+        for task in state.tasks.values where task.isOpen {
+            guard let id = task.projectID else { continue }
+            openCounts[id, default: 0] += 1
+            if task.state == .next { nextCounts[id, default: 0] += 1 }
+        }
+        return state.projects.values
+            .filter { $0.state == wanted }
+            .map { (key: $0.nameSortKey, project: $0) }
+            .sorted { $0.key < $1.key }
+            .map {
+                ProjectSummary(
+                    project: $0.project, openTaskCount: openCounts[$0.project.id] ?? 0,
+                    nextActionCount: nextCounts[$0.project.id] ?? 0)
+            }
     }
 
-    /// Active tags by name.
+    /// Active tags by name (ignoring a leading `@` and diacritics), with the
+    /// number of open tasks carrying each.
     public static func tags(in state: GTDState) -> [TagSummary] {
-        fatalError("GTDQueries.tags is not implemented yet")
+        var openCounts: [TagID: Int] = [:]
+        for task in state.tasks.values where task.isOpen {
+            for id in Set(task.tagIDs) { openCounts[id, default: 0] += 1 }
+        }
+        return state.tags.values
+            .filter { $0.state == .active }
+            .map { (key: $0.nameSortKey, tag: $0) }
+            .sorted { $0.key < $1.key }
+            .map { TagSummary(tag: $0.tag, openTaskCount: openCounts[$0.tag.id] ?? 0) }
     }
 }
