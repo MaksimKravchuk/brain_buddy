@@ -1,0 +1,272 @@
+import BrainBuddyCore
+import BrainBuddyWorkspace
+import SwiftUI
+import UIKit
+
+/// Account, sync and about. Everything here reads the workspace; the only
+/// network actions are signing in and out and "Sync now".
+struct SettingsScreen: View {
+    @Environment(Workspace.self) private var workspace
+    @Environment(ToastCenter.self) private var toasts
+
+    @State private var signInRequest: SignInRequest?
+    @State private var isConfirmingSignOut = false
+    @State private var unsyncedCount = 0
+    @State private var isSigningOut = false
+
+    init() {}
+
+    var body: some View {
+        List {
+            accountSection
+            if workspace.account != nil {
+                syncSection
+            } else if !workspace.issues.isEmpty {
+                Section { syncIssuesLink }
+            }
+            aboutSection
+        }
+        .navigationTitle("Settings")
+        .sheet(item: $signInRequest) { request in
+            SignInSheet(email: request.email, serverURL: request.serverURL)
+        }
+        .confirmationDialog(
+            WorkspaceError.unsyncedChanges(count: unsyncedCount).message,
+            isPresented: $isConfirmingSignOut,
+            titleVisibility: .visible
+        ) {
+            Button("Sign out and remove", role: .destructive) { signOut(discardingUnsyncedChanges: true) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(signOutWarning)
+        }
+    }
+
+    // MARK: Account
+
+    @ViewBuilder private var accountSection: some View {
+        if let account = workspace.account {
+            Section {
+                if let name = account.displayName, !name.isEmpty {
+                    LabeledContent("Name", value: name)
+                }
+                LabeledContent("Email", value: account.email)
+                LabeledContent("Server", value: Self.hostDescription(account.serverURL))
+                if workspace.syncStatus == .needsSignIn {
+                    Button("Sign in again") {
+                        signInRequest = SignInRequest(email: account.email, serverURL: account.serverURL)
+                    }
+                }
+                signOutButton
+            } header: {
+                Text("Account")
+            } footer: {
+                Text(signedInFooter)
+            }
+        } else {
+            Section {
+                Text(localOnlyExplanation)
+                Button("Sign in") {
+                    signInRequest = SignInRequest(email: "", serverURL: nil)
+                }
+            } header: {
+                Text("Account")
+            }
+        }
+    }
+
+    private var signOutButton: some View {
+        Button(role: .destructive) {
+            requestSignOut()
+        } label: {
+            HStack {
+                Text("Sign out")
+                if isSigningOut {
+                    Spacer()
+                    ProgressView()
+                }
+            }
+        }
+        .disabled(isSigningOut)
+    }
+
+    private var localOnlyExplanation: String {
+        "Your tasks are stored on this \(ThisDevice.name). Sign in to sync with Brain Buddy on the web."
+    }
+
+    private var signedInFooter: String {
+        "Signing out removes your tasks from this \(ThisDevice.name). They stay in your account."
+    }
+
+    private var signOutWarning: String {
+        let pronoun = unsyncedCount == 1 ? "it" : "them"
+        return "Sign out and remove \(pronoun) from this \(ThisDevice.name)?"
+    }
+
+    // MARK: Sync
+
+    private var syncSection: some View {
+        Section {
+            SyncStatusLabel()
+            LabeledContent("Waiting to sync", value: Self.pendingDescription(workspace.pendingChangeCount))
+            if let lastSyncedAt {
+                TimelineView(.periodic(from: .now, by: 60)) { _ in
+                    LabeledContent("Last synced", value: lastSyncedAt.formatted(.relative(presentation: .named)))
+                }
+            }
+            if let referenceID = failureReferenceID {
+                LabeledContent("Reference ID") {
+                    Text(referenceID)
+                        .font(.footnote.monospaced())
+                        .textSelection(.enabled)
+                }
+            }
+            syncNowButton
+            if !workspace.issues.isEmpty {
+                syncIssuesLink
+            }
+        } header: {
+            Text("Sync")
+        }
+    }
+
+    private var syncNowButton: some View {
+        Button {
+            Task { await workspace.syncNow() }
+        } label: {
+            HStack {
+                Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
+                Spacer()
+                if isSyncing {
+                    ProgressView()
+                }
+            }
+        }
+        .disabled(isSyncing)
+    }
+
+    private var syncIssuesLink: some View {
+        NavigationLink(value: AppRoute.syncIssues) {
+            HStack {
+                Label("Sync issues", systemImage: "exclamationmark.triangle")
+                Spacer(minLength: 8)
+                Text(workspace.issues.count, format: .number)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var isSyncing: Bool { workspace.syncStatus == .syncing }
+
+    private var lastSyncedAt: Date? {
+        switch workspace.syncStatus {
+        case .idle(let date), .offline(let date): return date
+        case .failing(_, _, let date): return date
+        case .localOnly, .syncing, .needsSignIn: return nil
+        }
+    }
+
+    private var failureReferenceID: String? {
+        if case .failing(_, let referenceID, _) = workspace.syncStatus { return referenceID }
+        return nil
+    }
+
+    // MARK: About
+
+    private var aboutSection: some View {
+        Section {
+            LabeledContent("Version", value: Self.versionDescription)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Works offline")
+                Text(offlineExplanation)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+        } header: {
+            Text("About")
+        }
+    }
+
+    private var offlineExplanation: String {
+        "Everything you do is saved on this \(ThisDevice.name) first, so capture, lists and search work without a connection. When you're signed in, changes sync as soon as you're back online."
+    }
+
+    // MARK: Actions
+
+    private func requestSignOut() {
+        let pending = workspace.pendingChangeCount
+        if pending > 0 {
+            unsyncedCount = pending
+            isConfirmingSignOut = true
+        } else {
+            signOut(discardingUnsyncedChanges: false)
+        }
+    }
+
+    private func signOut(discardingUnsyncedChanges discard: Bool) {
+        guard !isSigningOut else { return }
+        isSigningOut = true
+        Task {
+            do {
+                try await workspace.signOut(discardUnsyncedChanges: discard)
+                isSigningOut = false
+                // Recent searches can hold words from the account's tasks.
+                UserDefaults.standard.removeObject(forKey: RecentSearches.storageKey)
+                toasts.show("Signed out", actionTitle: nil, action: nil)
+            } catch let error as WorkspaceError {
+                isSigningOut = false
+                if case .unsyncedChanges(let count) = error {
+                    // Changes arrived after the check; ask again with the real count.
+                    unsyncedCount = count
+                    isConfirmingSignOut = true
+                } else {
+                    toasts.show("\(error.message)", actionTitle: nil, action: nil)
+                }
+            } catch {
+                isSigningOut = false
+                toasts.show("Couldn't sign out. Try again.", actionTitle: nil, action: nil)
+            }
+        }
+    }
+
+    // MARK: Formatting
+
+    static func pendingDescription(_ count: Int) -> String {
+        switch count {
+        case 0: return "Nothing"
+        case 1: return "1 change"
+        default: return "\(count) changes"
+        }
+    }
+
+    static func hostDescription(_ url: URL) -> String {
+        guard let host = url.host(), !host.isEmpty else { return url.absoluteString }
+        if let port = url.port { return "\(host):\(port)" }
+        return host
+    }
+
+    static var versionDescription: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        if let build = info?["CFBundleVersion"] as? String, build != version {
+            return "\(version) (\(build))"
+        }
+        return version
+    }
+}
+
+private struct SignInRequest: Identifiable {
+    let id = UUID()
+    let email: String
+    let serverURL: URL?
+}
+
+/// "iPhone" or "iPad", for copy such as "stored on this iPhone".
+enum ThisDevice {
+    @MainActor static var name: String {
+        UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+    }
+}
