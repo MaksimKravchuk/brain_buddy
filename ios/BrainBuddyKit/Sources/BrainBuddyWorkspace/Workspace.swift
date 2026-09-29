@@ -158,9 +158,16 @@ public final class Workspace {
     /// When nothing changed it only reads the stored generation (no decode of
     /// the document, no replay). Changes not written yet stay applied on top.
     /// Before the first successful load it loads instead.
+    ///
+    /// Changes the other process queued are local changes of this device, and
+    /// only the app syncs, so they get the same debounced sync as the app's own.
     public func reloadIfChangedExternally() async {
         guard isLoaded, loadError == nil else { return await load() }
-        await refreshFromStore()
+        let known = Set((document.outbox + unpersisted).map(\.id))
+        guard let reloaded = await refreshFromStore() else { return }
+        if let sync, account != nil, reloaded.outbox.contains(where: { !known.contains($0.id) }) {
+            await sync.request(.localChange)
+        }
     }
 
     /// Waits until every change applied so far is on disk. When the last
@@ -612,22 +619,25 @@ extension Workspace {
         }
     }
 
-    /// Adopts the stored document when it is newer than the held one.
-    private func refreshFromStore() async {
+    /// Adopts the stored document when it is newer than the held one, and
+    /// returns it (nil when there was nothing newer to read).
+    @discardableResult
+    private func refreshFromStore() async -> StoreDocument? {
         let storedGeneration: Int?
         do {
             storedGeneration = try await store.generation()
         } catch {
-            return
+            return nil
         }
-        guard let storedGeneration, storedGeneration > document.generation else { return }
+        guard let storedGeneration, storedGeneration > document.generation else { return nil }
         let loaded: StoreDocument?
         do {
             loaded = try await store.load()
         } catch {
-            return
+            return nil
         }
         if let loaded { receive(loaded) }
+        return loaded
     }
 
     private func performLoad() async {

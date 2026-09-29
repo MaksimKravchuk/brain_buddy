@@ -370,6 +370,45 @@ import Testing
         #expect(await session.sync.calls == [.start(Fixture.account), .refreshTask("server-1")])
     }
 
+    @Test func changesQueuedByAnotherProcessAskForASync() async throws {
+        let session = await signedIn()
+        // A widget (another process, sync disabled) completes a task in the shared store.
+        let widget = await loadedWorkspace(store: session.store.base, ids: IDSequence(namespace: 2))
+        try widget.completeTask("server-1")
+        await widget.flush()
+
+        await session.workspace.reloadIfChangedExternally()
+
+        #expect(session.workspace.task("server-1")?.state == .completed)
+        #expect(await session.sync.calls == [.start(Fixture.account), .request(.localChange)])
+    }
+
+    @Test func aReloadWithoutNewChangesDoesNotAskForASync() async throws {
+        let session = await signedIn()
+        let pulledAt = Fixture.epoch.addingTimeInterval(60)
+        // A write by the engine whose event this workspace missed.
+        _ = try await session.store.base.update { $0.sync.lastPullAt = pulledAt }
+
+        await session.workspace.reloadIfChangedExternally()
+
+        #expect(session.workspace.document.sync.lastPullAt == pulledAt)
+        #expect(await session.sync.calls == [.start(Fixture.account)])
+    }
+
+    @Test func withoutAnAccountAReloadAsksForNoSync() async throws {
+        let store = InMemoryDocumentStore()
+        let sync = FakeSyncService(store: store)
+        let app = await loadedWorkspace(store: store, sync: sync)
+        let widget = await loadedWorkspace(store: store, ids: IDSequence(namespace: 2))
+        let id = try widget.capture(CaptureDraft(text: "From the widget"))
+        await widget.flush()
+
+        await app.reloadIfChangedExternally()
+
+        #expect(app.task(id) != nil)
+        #expect(await sync.calls.isEmpty)
+    }
+
     @Test func networkChangesReachTheSyncServiceInOrder() async {
         let session = await signedIn()
 
