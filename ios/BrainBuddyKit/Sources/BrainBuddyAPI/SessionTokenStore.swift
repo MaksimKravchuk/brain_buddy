@@ -56,9 +56,10 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
     }
 
     /// Keychain-backed store: a generic password per server host, service
-    /// `app.brainbuddy.session`, readable after first unlock so widgets and
-    /// App Intents can sync in the background. Pass the shared keychain access
-    /// group to share the session with the widget extension.
+    /// `app.brainbuddy.session`, readable after first unlock so the app's own
+    /// background refresh can sync while the device is locked. Only the app
+    /// uses it: widgets and App Intents never sync and never read the session,
+    /// and there is no keychain sharing, so `accessGroup` stays nil.
     public final class KeychainSessionTokenStore: SessionTokenStore {
         public static let defaultService = "app.brainbuddy.session"
 
