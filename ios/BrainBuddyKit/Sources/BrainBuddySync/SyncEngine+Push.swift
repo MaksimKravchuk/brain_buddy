@@ -339,22 +339,17 @@ extension SyncEngine {
         case tag(TagID, into: TagID)
     }
 
-    // TODO(merge-helper): switch the body to Core's OutboxReplayer.rewritingAfterMerge(_:project:into:)
-    // / rewritingAfterMerge(_:tag:into:) once it lands; that no longer retargets archiveProject,
-    // deleteTag or renames at the adopted record. Until then this keeps the old behaviour.
-    /// The queued operations after an adoption: every reference to the local
-    /// record now names the adopted one. The only place the adoption path
-    /// rewrites the outbox.
+    /// The queued operations after an adoption, rewritten exactly as a replay
+    /// merge rewrites them (`OutboxReplayer.rewritingAfterMerge`): task
+    /// references follow the adopted record, but a rename, recolour, archive
+    /// or delete of the local record never reaches the account's record. None
+    /// of those can have been sent, because they queue behind the refused create.
     private static func rewritingOutbox(_ outbox: [PendingOperation], adopting adoption: Adoption) -> [PendingOperation] {
-        outbox.map { operation in
-            var operation = operation
-            switch adoption {
-            case .project(let local, let survivor):
-                operation.command = operation.command.replacing(project: local, with: survivor)
-            case .tag(let local, let survivor):
-                operation.command = operation.command.replacing(tag: local, with: survivor)
-            }
-            return operation
+        switch adoption {
+        case .project(let local, let survivor):
+            OutboxReplayer.rewritingAfterMerge(outbox, project: local, into: survivor)
+        case .tag(let local, let survivor):
+            OutboxReplayer.rewritingAfterMerge(outbox, tag: local, into: survivor)
         }
     }
 }
