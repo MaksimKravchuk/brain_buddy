@@ -101,7 +101,9 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
             let data = Data(token.utf8)
             let attributes: [String: Any] = [
                 kSecValueData as String: data,
-                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+                // Background sync needs it after first unlock; a 30-day
+                // session must not travel to another device in a backup.
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             ]
             let status = SecItemUpdate(query(for: serverURL) as CFDictionary, attributes as CFDictionary)
             switch status {
