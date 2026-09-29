@@ -97,36 +97,38 @@ function ProfileSection(): React.JSX.Element {
       title="Profile"
       description="The name shown in the app. Leave it empty to go by your email."
     >
-      {countError ? (
-        <p role="alert" className="text-sm text-red-700">
-          Completed tasks unavailable. Refresh the page to try again.
-          {countError.referenceId ? ` (ref: ${countError.referenceId})` : ""}
-        </p>
-      ) : account.data ? (
-        <p aria-live="polite" aria-atomic="true" className="text-sm text-slate-600">
-          Completed tasks: {account.data.completed_task_count}
-        </p>
-      ) : (
-        <p role="status" aria-live="polite" className="text-sm text-slate-600">
-          Completed tasks: …
-        </p>
-      )}
-      <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
-        <Field
-          label="Display name"
-          name="display_name"
-          type="text"
-          value={displayName}
-          onChange={(value) => setDraft(value)}
-          autoComplete="name"
-        />
-        <Feedback error={error} success={success} />
-        <div>
-          <Button type="submit" variant="primary" size="md" isLoading={mutation.isPending}>
-            Save profile
-          </Button>
-        </div>
-      </form>
+      <div className="flex flex-col gap-4">
+        {countError ? (
+          <p role="alert" className="text-sm text-red-700">
+            Completed tasks unavailable. Refresh the page to try again.
+            {countError.referenceId ? ` (ref: ${countError.referenceId})` : ""}
+          </p>
+        ) : account.data ? (
+          <p aria-live="polite" aria-atomic="true" className="text-sm text-slate-600">
+            Completed tasks: {account.data.completed_task_count}
+          </p>
+        ) : (
+          <p role="status" aria-live="polite" className="text-sm text-slate-600">
+            Completed tasks: …
+          </p>
+        )}
+        <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
+          <Field
+            label="Display name"
+            name="display_name"
+            type="text"
+            value={displayName}
+            onChange={(value) => setDraft(value)}
+            autoComplete="name"
+          />
+          <Feedback error={error} success={success} />
+          <div>
+            <Button type="submit" variant="primary" size="md" isLoading={mutation.isPending}>
+              Save profile
+            </Button>
+          </div>
+        </form>
+      </div>
     </SectionCard>
   );
 }

@@ -15,7 +15,9 @@ import {
   type NodeChange,
   type Viewport
 } from "@xyflow/react";
+import { Maximize2, Minus, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import {
   commitHistory,
@@ -46,6 +48,10 @@ type CrtCanvasProps = {
   createIds?: () => NewNodeIds;
   idFactory?: () => NewNodeIds;
   confirmDelete?: (node: GraphNode) => boolean | Promise<boolean>;
+  /** Leading toolbar content (exit link, tree menu), so the canvas has one bar rather than two. */
+  toolbarStart?: ReactNode;
+  /** Centred over an empty canvas; the first card replaces it. */
+  emptyHint?: string;
 };
 
 type CrtEdge = Edge<{
@@ -175,7 +181,7 @@ function isNativeControl(target: EventTarget | null): boolean {
   return Boolean(target.closest("input, textarea, select, button, [role='dialog'], [role='alertdialog'], [role='menu'], [data-crt-native='true']"));
 }
 
-function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", createIds, idFactory, confirmDelete }: CrtCanvasProps): React.JSX.Element {
+function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", createIds, idFactory, confirmDelete, toolbarStart, emptyHint }: CrtCanvasProps): React.JSX.Element {
   const reactFlow = useReactFlow();
   const setFlowEdges = reactFlow.setEdges;
   const updateNodeInternals = useUpdateNodeInternals();
@@ -832,6 +838,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
     >
       <header className="crt-canvas-toolbar">
         <h1 className="sr-only">Current Reality Tree</h1>
+        {toolbarStart ? <div className="crt-canvas-toolbar-start">{toolbarStart}</div> : null}
         <div className="crt-canvas-toolbar-actions">
           <span className="crt-save-status" role="status">{saveStatus}</span>
           <button
@@ -908,8 +915,10 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
             deleteKeyCode={null}
             selectionOnDrag={!panMode && !spacePressed}
           >
-            <Background color="#dbe4ee" gap={24} size={1} />
+            <Background color="#cbd5e1" gap={24} size={1} />
           </ReactFlow>
+
+          {emptyHint ? <p className="crt-canvas-empty-hint">{emptyHint}</p> : null}
 
           {selectedRelationId ? (
             <div
@@ -944,10 +953,10 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
           ) : null}
 
           <div className="crt-zoom-controls" aria-label="Canvas zoom controls">
-            <button type="button" data-crt-native="true" aria-label="Fit all cards" onClick={fitAll}>⌗</button>
-            <button type="button" data-crt-native="true" aria-label="Zoom out" onClick={() => { void reactFlow.zoomOut({ duration: 120 }); commitZoom(zoom - 0.1); }}>−</button>
+            <button type="button" data-crt-native="true" aria-label="Fit all cards" title="Fit all cards" onClick={fitAll}><Maximize2 aria-hidden /></button>
+            <button type="button" data-crt-native="true" aria-label="Zoom out" title="Zoom out" onClick={() => { void reactFlow.zoomOut({ duration: 120 }); commitZoom(zoom - 0.1); }}><Minus aria-hidden /></button>
             <span aria-label="Zoom level">{Math.round(zoom * 100)}%</span>
-            <button type="button" data-crt-native="true" aria-label="Zoom in" onClick={() => { void reactFlow.zoomIn({ duration: 120 }); commitZoom(zoom + 0.1); }}>＋</button>
+            <button type="button" data-crt-native="true" aria-label="Zoom in" title="Zoom in" onClick={() => { void reactFlow.zoomIn({ duration: 120 }); commitZoom(zoom + 0.1); }}><Plus aria-hidden /></button>
           </div>
         </div>
       </div>

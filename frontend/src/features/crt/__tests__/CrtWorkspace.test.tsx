@@ -251,6 +251,35 @@ describe("CrtWorkspace tree lifecycle", () => {
     expect(screen.getByRole("button", { name: "Shortcuts" })).toBeInTheDocument();
   });
 
+  it("puts the way back to tasks and the tree menu in the canvas toolbar", async () => {
+    vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([
+      { id: "tree-exit", name: "Exit tree", updated_at: "2026-09-20T10:00:00Z", owner_id: "owner-1" }
+    ]);
+    vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(tree("tree-exit", "Exit tree", "2026-09-20T10:00:00Z"));
+    const onExit = vi.fn();
+
+    render(<CrtWorkspace onExit={onExit} />);
+
+    const menu = await screen.findByRole("button", { name: "Current tree: Exit tree" });
+    const back = screen.getByRole("button", { name: "Tasks" });
+    // One bar: both live in the canvas header beside the save state.
+    expect(menu.closest("header")).toBe(back.closest("header"));
+    expect(menu.closest("header")).toContainElement(screen.getByRole("button", { name: "Shortcuts" }));
+    fireEvent.click(back);
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers the way back to tasks before the first tree exists", async () => {
+    vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([]);
+    const onExit = vi.fn();
+
+    render(<CrtWorkspace onExit={onExit} />);
+
+    expect(await screen.findByText("No demo content is added for you.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
   it("bounds the canvas to the viewport space remaining below the tree menu", async () => {
     vi.spyOn(crtApi, "listCrtTrees").mockResolvedValue([
       { id: "tree-layout", name: "Layout tree", updated_at: "2026-09-20T10:00:00Z", owner_id: "owner-1" }

@@ -1,8 +1,10 @@
+import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError } from "../../api/client";
 import { crtApi, type CrtTreeListItem, type CrtTreeResponse } from "../../api/crt";
 import { useAuthStore } from "../../stores/authStore";
+import { buttonVariants } from "../../styles/buttonVariants";
 import { recordTelemetry } from "../../utils/telemetry";
 import { CrtCanvas } from "./CrtCanvas";
 import { CrtDeleteTreeDialog, CrtPendingWorkDialog } from "./CrtDeleteConfirmation";
@@ -17,6 +19,14 @@ import {
 } from "./crtDraftCoordinator";
 import { type GraphState } from "./graphModel";
 import { CrtTreeMenu } from "./CrtTreeMenu";
+import {
+  stateBodyClass,
+  stateCardClass,
+  stateEyebrowClass,
+  stateExitClass,
+  stateScreenClass,
+  stateTitleClass
+} from "./crtStateScreen";
 import {
   clearCrtLastTreePreference,
   readCrtLastTreePreference,
@@ -60,6 +70,8 @@ export type CrtDraftBackupDownload = (backup: {
 export type CrtWorkspaceProps = Readonly<{
   createDraftCoordinator?: (options: CrtDraftCoordinatorOptions) => CrtDraftCoordinator;
   downloadBackup?: CrtDraftBackupDownload;
+  /** The canvas is full-screen with no app shell, so this is its way back to the task lists. */
+  onExit?: () => void;
 }>;
 
 let workspaceIdSequence = 0;
@@ -151,7 +163,18 @@ function preCanonicalTree(ownerId: string, createKey: string): CrtTreeResponse {
   };
 }
 
-export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinator, downloadBackup = defaultDownloadBackup }: CrtWorkspaceProps = {}): React.JSX.Element {
+export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinator, downloadBackup = defaultDownloadBackup, onExit }: CrtWorkspaceProps = {}): React.JSX.Element {
+  const exitLink = onExit ? (
+    <button
+      type="button"
+      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-slate-100 hover:text-slate-900"
+      onClick={onExit}
+    >
+      <ArrowLeft className="h-4 w-4" aria-hidden />
+      Tasks
+    </button>
+  ) : null;
+  const exitCorner = exitLink ? <div className={stateExitClass}>{exitLink}</div> : null;
   const userId = useAuthStore((state) => state.user?.id ?? null);
   const [retryCount, setRetryCount] = useState(0);
   const [phase, setPhase] = useState<"loading" | "empty" | "error" | "recovery" | "ready">("loading");
@@ -910,13 +933,14 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
 
   if (phase === "error") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface-base px-6 text-center">
-        <section aria-live="polite" className="rounded-2xl border border-rose-200 bg-white px-8 py-10 shadow-raised">
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-brand-primary">Thinking Mode</p>
-          <h1 className="mt-2 text-title font-semibold text-slate-900">{ownerError ? "We couldn't verify this tree" : ownershipLost ? "This tree is open in another tab" : createError ? "We couldn't create this tree" : "We couldn't load this tree"}</h1>
-          <p className="mt-2 max-w-md text-sm text-slate-600">{ownerError ? "The authenticated owner could not be verified, so no tree content was opened." : ownershipLost ? "Editing is blocked until this tab owns the tree again." : createError ? "Your first-tree request is still safe to retry." : "Your route is unchanged. Retry loading to try again."}</p>
-          {loadReference ? <p className="mt-3 font-mono text-xs text-slate-500">Support reference: {loadReference}</p> : null}
-          <button type="button" className="mt-6 rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-white" onClick={() => ownershipLost ? setRetryCount((count) => count + 1) : createError ? void createFirstTree() : setRetryCount((count) => count + 1)}>
+      <main className={stateScreenClass}>
+        {exitCorner}
+        <section aria-live="polite" className={`${stateCardClass} border-rose-200`}>
+          <p className={stateEyebrowClass}>Thinking Mode</p>
+          <h1 className={stateTitleClass}>{ownerError ? "We couldn't verify this tree" : ownershipLost ? "This tree is open in another tab" : createError ? "We couldn't create this tree" : "We couldn't load this tree"}</h1>
+          <p className={stateBodyClass}>{ownerError ? "The authenticated owner could not be verified, so no tree content was opened." : ownershipLost ? "Editing is blocked until this tab owns the tree again." : createError ? "Your first-tree request is still safe to retry." : "Your route is unchanged. Retry loading to try again."}</p>
+          {loadReference ? <p className="mt-3 break-all font-mono text-xs text-slate-500">Support reference: {loadReference}</p> : null}
+          <button type="button" className={buttonVariants({ variant: "primary", className: "mt-6" })} onClick={() => ownershipLost ? setRetryCount((count) => count + 1) : createError ? void createFirstTree() : setRetryCount((count) => count + 1)}>
             {ownershipLost ? "Retry ownership" : createError ? "Retry creating tree" : "Retry loading"}
           </button>
         </section>
@@ -926,9 +950,10 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
 
   if (phase === "empty") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface-base px-6 text-center">
+      <main className={stateScreenClass}>
+        {exitCorner}
         {onlineOnlyRisk ? <CrtStorageUnavailableAlert /> : null}
-        <section className="rounded-2xl border border-slate-200 bg-white px-8 py-10 shadow-raised">
+        <section className={`${stateCardClass} border-slate-200`}>
           <div className="mb-6 flex justify-center">
             <CrtTreeMenu
               currentTree={null}
@@ -943,10 +968,10 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
               onSelectTree={selectManagedTree}
             />
           </div>
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-brand-primary">Thinking Mode</p>
-          <h1 className="mt-2 text-title font-semibold text-slate-900">Start with your first undesired effect</h1>
-          <p className="mt-2 max-w-md text-sm text-slate-600">No demo content is added for you.</p>
-          <button type="button" className="mt-6 rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-white" onClick={() => void createFirstTree()}>Create first tree</button>
+          <p className={stateEyebrowClass}>Thinking Mode</p>
+          <h1 className={stateTitleClass}>Start with your first undesired effect</h1>
+          <p className={stateBodyClass}>No demo content is added for you.</p>
+          <button type="button" className={buttonVariants({ variant: "primary", className: "mt-6" })} onClick={() => void createFirstTree()}>Create first tree</button>
         </section>
       </main>
     );
@@ -954,12 +979,13 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
 
   if (phase === "recovery" && recovery?.kind === "invalid") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface-base px-6 text-center">
-        <section role="alert" className="rounded-2xl border border-rose-200 bg-white px-8 py-10 shadow-raised">
-          <h1 className="text-title font-semibold text-slate-900">We couldn't verify the local draft</h1>
-          <p className="mt-3 max-w-md text-sm text-slate-600">The draft was preserved and has not been applied or deleted. Retry loading to review it again.</p>
-          {recovery.reason ? <p className="mt-3 font-mono text-xs text-slate-500">Recovery reference: {recovery.reason}</p> : null}
-          <button type="button" className="mt-6 rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-white" onClick={() => setRetryCount((count) => count + 1)}>Retry loading</button>
+      <main className={stateScreenClass}>
+        {exitCorner}
+        <section role="alert" className={`${stateCardClass} border-rose-200`}>
+          <h1 className="text-balance text-title font-semibold text-slate-900">We couldn't verify the local draft</h1>
+          <p className={stateBodyClass}>The draft was preserved and has not been applied or deleted. Retry loading to review it again.</p>
+          {recovery.reason ? <p className="mt-3 break-all font-mono text-xs text-slate-500">Recovery reference: {recovery.reason}</p> : null}
+          <button type="button" className={buttonVariants({ variant: "primary", className: "mt-6" })} onClick={() => setRetryCount((count) => count + 1)}>Retry loading</button>
         </section>
       </main>
     );
@@ -1010,20 +1036,6 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
   return (
     <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-surface-base text-slate-900">
       {onlineOnlyRisk ? <CrtStorageUnavailableAlert onRetry={autosave.retry} /> : null}
-      <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-3">
-        <CrtTreeMenu
-          currentTree={tree}
-          trees={trees}
-          busy={managementBusy}
-          error={managementError}
-          onCreate={createManagedTree}
-          onRename={renameManagedTree}
-          onImport={importManagedTree}
-          onExport={exportManagedTree}
-          onDelete={openDeleteManagedTree}
-          onSelectTree={selectManagedTree}
-        />
-      </div>
       {exportNeedsResolution ? (
         <div className="border-b border-amber-200 bg-amber-50 px-6 py-3 text-center text-sm text-amber-950" role="alert">
           Unsynchronized changes are excluded from the saved server copy.
@@ -1040,10 +1052,27 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
         </div>
       ) : null}
       <p className="sr-only" aria-live="polite">{tree.name}</p>
-      {graph.nodes.length === 0 ? <p className="px-6 pt-4 text-center text-sm text-slate-600">Start with your first undesired effect</p> : null}
       <CrtCanvas
         graph={graph}
         historyKey={tree.id}
+        toolbarStart={
+          <>
+            {exitLink}
+            <CrtTreeMenu
+              currentTree={tree}
+              trees={trees}
+              busy={managementBusy}
+              error={managementError}
+              onCreate={createManagedTree}
+              onRename={renameManagedTree}
+              onImport={importManagedTree}
+              onExport={exportManagedTree}
+              onDelete={openDeleteManagedTree}
+              onSelectTree={selectManagedTree}
+            />
+          </>
+        }
+        emptyHint={graph.nodes.length === 0 ? "Start with your first undesired effect" : undefined}
         saveStatus={autosave.status as "Saved" | "Unsaved changes"}
         onChange={(next) => {
           setGraph(next);
