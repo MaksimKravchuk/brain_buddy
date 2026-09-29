@@ -158,15 +158,25 @@ are server-minted, idempotency keys live **24 hours**, and
 | Response | Action |
 |---|---|
 | 2xx | Apply the returned record to `base` (server id, revision, server timestamps), drop the operation, replay |
-| Network error, timeout, 5xx, 503, 429 | Keep the operation *and its key*; retry with exponential backoff (2 s → 5 min, jitter). The outcome may be unknown, so the same key makes the retry safe |
+| Network error, timeout, 429, 5xx | Keep the operation *and its key*; retry with exponential backoff (2 s → 5 min, jitter). The outcome may be unknown, so the same key makes the retry safe |
+| 5xx (or a 2xx the app can't read) for the same operation 8 times in a row, or twice in a row once it has been failing for 24 h | Set it aside as a sync issue ("The server kept rejecting this change.") so the changes behind it go out |
+| 3xx | Never followed (that would resend the session cookie elsewhere). Nothing processed the request: keep the operation and its key, back off, never set it aside. After two failed cycles the status reads "The server redirected the request, which Brain Buddy doesn't follow." |
 | 409 stale revision | `GET` the record into `base`, replay (drops the operation if its goal already holds, e.g. already completed elsewhere), then resend with the new revision and a **new** key |
 | 409 duplicate name (create project / tag) | Pull, adopt the existing server record for the local id (the outbox is rewritten to it), replay |
+| 400 / 422 / other 4xx on a task create or edit | Pull, then re-apply it as replay does (`GTDReducer.replayable`). If that drops a project archived or a tag deleted elsewhere (or a field change the task can no longer take), resend that form under a new key, at most once per body; the task keeps everything else. Otherwise, as the last row |
 | 401 | Stop; status "Sign in again to sync"; keep everything |
-| 400 / 404 / 422 / 409 idempotency | Move the operation to **sync issues** with the server message and reference id, pull, replay |
+| 400 / 404 / 422 / other 4xx / 409 idempotency | Move the operation to **sync issues** with the server message and reference id, pull, replay (operations that depend on it, such as a new task's subtasks, follow it) |
+
+A cycle whose push is blocked by the server's side (5xx, 429, a redirect, an
+unreadable success) still pulls, so what other devices changed arrives while
+the operation waits for its retry; only the network and a 401 stop a cycle
+at once.
 
 An operation whose first uncertain send is more than 23 hours old is never
 blindly resent: a create first pulls and adopts a matching server record
-(same title and list, created after the first attempt) if one exists.
+(same title and list, created after the first attempt) if one exists. A
+request that provably never left the device, or that nothing processed (a
+redirect), starts no such clock.
 
 **Pull** — full, because there is no delta endpoint:
 `GET /tasks?include_completed=true&include_cancelled=true&sort=manual&limit=200`
@@ -178,7 +188,17 @@ replaces the old; current = replay(outbox, base).
 **Subtasks and comments** are not in the list response and their edits do
 not bump the parent's revision, so they are hydrated per task: when a task
 detail opens (online), after the task's revision changes, and for open tasks
-in the background with a small concurrency limit.
+in the background with a small concurrency limit. A detail read runs in the
+same single-flight slot as sync cycles (after the running one), so it never
+overlaps a push whose acknowledgement it could overwrite with older children.
+
+**Sessions**: signing in as another account (or on another server) is
+refused while the linked account still has changes or sync issues on the
+device, so one account's changes never reach another; otherwise the old
+account's server data is removed before the new one is pulled. A logout the
+server could not be told about (offline, or it failed in a way worth
+retrying) waits in the Keychain and is sent when the network returns, on the
+next launch or foreground, or after the next sign-in.
 
 **When sync runs**: on launch and foreground, 2 s after the last local
 change, when connectivity returns (`NWPathMonitor`), on pull-to-refresh, and
@@ -219,13 +239,14 @@ unsynced changes. The server address defaults to
   and intents never sync, and there is no keychain sharing. It is removed on
   sign-out and on a 401, and a launch with no linked account removes any
   token left over from an earlier install.
-- **Transport.** https only; plain http is refused except to loopback, and
-  the app has no App Transport Security exceptions (ATS still allows
-  `http://localhost`, but not `http://127.0.0.1`). Redirects are never
-  followed: the API never sends one, and following it would resend the
+- **Transport.** https only; plain http is accepted only for the host
+  `localhost`, and the app has no App Transport Security exceptions (ATS
+  allows unqualified `http://localhost`, but not `http://127.0.0.1` or
+  `http://[::1]`, so the address check refuses those too). Redirects are
+  never followed: the API never sends one, and following it would resend the
   `Cookie` header (and a login's password) to another address. A 3xx is
   reported as "The server redirected the request, which Brain Buddy doesn't
-  follow."
+  follow." and retried like a server failure, without losing any change.
 - **Data at rest.** The store document (and any unreadable file set aside by
   "Start fresh") uses file protection `completeUntilFirstUserAuthentication`,
   so widgets and intents can read it after the first unlock. It is in device
@@ -235,8 +256,8 @@ unsynced changes. The server address defaults to
   *complete* a task require the device to be unlocked; capture is allowed
   from the lock screen, since it only adds to the Inbox.
 - **Switching accounts.** Signing in as a different account while changes
-  are waiting is refused: sign out first (which warns about the unsynced
-  changes), so one account's changes are never sent to another.
+  or sync issues are waiting is refused: sign out first (which warns about
+  the unsynced changes), so one account's changes are never sent to another.
 - **Account deletion.** Signing in during the 14-day deletion grace period
   cancels the deletion, as on the web; the app says so in a notice instead
   of doing it silently.
