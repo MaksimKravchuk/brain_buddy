@@ -81,7 +81,9 @@ tests and leave the app build to `.github/workflows/ios.yml`.
   floating clusters); content stays flat.
 - Pending product sign-off (`docs/native-ios-app.md`): SF Symbols instead of
   Lucide (use the documented mapping), dark mode derived from the slate/sky
-  scale, SF Pro instead of Inter, system glass motion. Do not add more
+  scale, SF Pro instead of Inter, system glass motion, and sky-700
+  (`BBColor.brandText` / `brandFill`) for text and filled controls because
+  white on sky-500 is 2.8:1 (sky-500 stays for large accents). Do not add more
   deviations without flagging them.
 - Copy: English, sentence case everywhere ("Move to next actions", not "Move
   To Next Actions"), calm second person, short imperatives. List names are

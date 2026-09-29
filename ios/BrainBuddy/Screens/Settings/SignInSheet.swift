@@ -314,7 +314,9 @@ enum SignInServerAddress {
         }
     }
 
+    /// App Transport Security lets plain http reach only the unqualified
+    /// `localhost`, so that is the one development host accepted.
     static func isLocalHost(_ host: String) -> Bool {
-        ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host) || host.hasSuffix(".localhost")
+        host == "localhost"
     }
 }

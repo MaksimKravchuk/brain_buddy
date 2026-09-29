@@ -69,9 +69,9 @@ enum BBColor {
     static let hairline = color(Tone(0xE2E8F0, 0x334155), highContrast: Tone(0xCBD5E1, 0x475569))
     /// slate-300. Hover / pressed hairline.
     static let hairlineStrong = color(Tone(0xCBD5E1, 0x475569), highContrast: Tone(0x94A3B8, 0x64748B))
-    /// slate-400 (slate-500 with Increase Contrast). The outline of a control
+    /// slate-500 (slate-600 with Increase Contrast), 4.8:1 on white. The outline of a control
     /// that is drawn as a shape only, such as the open completion circle.
-    static let controlStroke = color(Tone(0x94A3B8, 0x64748B), highContrast: Tone(0x64748B, 0x94A3B8))
+    static let controlStroke = color(Tone(0x64748B, 0x64748B), highContrast: Tone(0x475569, 0x94A3B8))
 
     // MARK: Semantics
 
