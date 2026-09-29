@@ -253,6 +253,10 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
     case emptyComment
     case commentTooLong
     case nothingToChange
+    /// `priority` cannot be cleared; "no priority" is `.set(.none)` (server: "Task priority cannot be null").
+    case priorityRequired
+    case projectAlreadyArchived
+    case tagAlreadyDeleted
 
     public var message: String {
         switch self {
@@ -285,6 +289,9 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
         case .emptyComment: "Write something before saving the comment."
         case .commentTooLong: "Keep the comment under \(GTDLimits.comment) characters."
         case .nothingToChange: "There is nothing to save."
+        case .priorityRequired: "Choose a priority, or No priority."
+        case .projectAlreadyArchived: "This project is already archived."
+        case .tagAlreadyDeleted: "This tag was already deleted."
         }
     }
 }
