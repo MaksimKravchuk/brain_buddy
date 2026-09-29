@@ -69,12 +69,22 @@ public struct TransportError: Error, Hashable, Sendable, CustomStringConvertible
 }
 
 /// `URLSession` transport: ephemeral configuration, no cookie jar and no
-/// cache (the client sends the session cookie itself), 30 s timeout.
+/// cache (the client sends the session cookie itself), 30 s timeout, and no
+/// redirects.
+///
+/// The API never redirects, and following a redirect would resend the
+/// `Cookie` header the client sets by hand (and, on 307/308, a login's
+/// password) to wherever `Location` points. So every redirect is refused and
+/// the 3xx comes back as an error response (`response(from:body:)`), which
+/// the client reports as `.rejected`.
 public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
     // `URLSession` is thread-safe; it is only `@unchecked` because
     // swift-corelibs-foundation does not mark it `Sendable`.
     private let session: URLSession
     private let timeout: TimeInterval
+
+    /// What the user reads when the server answers with a redirect.
+    static let redirectMessage = "The server redirected the request, which Brain Buddy doesn't follow."
 
     public init(timeout: TimeInterval = 30) {
         let configuration = URLSessionConfiguration.ephemeral
@@ -84,7 +94,10 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.timeoutIntervalForRequest = timeout
-        self.session = URLSession(configuration: configuration)
+        // A session-level delegate, not a per-task one: `data(for:)` consults
+        // it for redirects on Apple platforms and in swift-corelibs-foundation
+        // alike (there `URLSessionTask.delegate` falls back to it).
+        self.session = URLSession(configuration: configuration, delegate: RedirectRefusal(), delegateQueue: nil)
         self.timeout = timeout
     }
 
@@ -117,13 +130,31 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
                 description: "The server did not return an HTTP response.", requestMayHaveBeenSent: true
             )
         }
+        return Self.response(from: http, body: data)
+    }
+
+    /// `URLSession`'s answer as plain values. A 3xx — `RedirectRefusal` makes
+    /// it the final response — keeps its status and headers but loses its
+    /// cookies and body: it is not the API speaking, so it must not set or
+    /// clear the session. Its body becomes the backend's error envelope
+    /// carrying `redirectMessage`, so the client's mapping shows that text.
+    static func response(from http: HTTPURLResponse, body: Data) -> HTTPResponse {
         var headers: [String: String] = [:]
         for (key, value) in http.allHeaderFields {
             guard let name = key as? String else { continue }
             let text = value as? String ?? String(describing: value)
             if let existing = headers[name] { headers[name] = existing + ", " + text } else { headers[name] = text }
         }
-        return HTTPResponse(statusCode: http.statusCode, headers: headers, body: data)
+        guard (300..<400).contains(http.statusCode) else {
+            return HTTPResponse(statusCode: http.statusCode, headers: headers, body: body)
+        }
+        headers = headers.filter {
+            let name = $0.key.lowercased()
+            return name != "set-cookie" && name != "content-type" && name != "content-length"
+        }
+        headers["Content-Type"] = "application/json"
+        let envelope = (try? JSONEncoder().encode(["message": redirectMessage])) ?? Data()
+        return HTTPResponse(statusCode: http.statusCode, headers: headers, body: envelope)
     }
 
     static func transportError(for error: URLError) -> TransportError {
@@ -139,6 +170,18 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
             requestMayHaveBeenSent: !neverSent.contains(error.code),
             isCancellation: error.code == .cancelled
         )
+    }
+}
+
+/// Answers every redirect with "don't follow", so `URLSession` completes the
+/// task with the 3xx itself and nothing — least of all the `Cookie` header —
+/// goes to the `Location`.
+final class RedirectRefusal: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
 
