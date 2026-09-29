@@ -10,7 +10,9 @@ import Foundation
 /// titles are trimmed, an empty notes string clears the notes, only the
 /// references a command sets are checked, and `serverRevision` is never
 /// touched (it is the server's number). Subtask and comment edits do not bump
-/// the parent task's `updatedAt`, as on the server.
+/// the parent task's `updatedAt`, as on the server. In `ApplyMode.replay` a
+/// task creation or edit keeps whatever part of it still applies
+/// (`Reducer+Replay.swift`).
 public enum GTDReducer {
     /// Applies `command` as if issued at `date`.
     /// - Throws: `GTDValidationError` and leaves `state` untouched. Every
@@ -40,10 +42,14 @@ public enum GTDReducer {
     // MARK: - Tasks
 
     /// `POST /tasks`: an open task at the end of its list's manual order.
+    /// While replaying, references to projects and tags that are missing or
+    /// no longer active are dropped rather than failing the task
+    /// (`replayable(_:in:)`).
     static func createTask(
         _ command: GTDCommand.CreateTask, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
         if state.tasks[command.taskID] != nil { return try satisfied(mode, else: .idAlreadyExists) }
+        let command = mode == .replay ? replayable(command, in: state) : command
         let title = try FieldRules.title(command.title)
         let details = try FieldRules.details(command.details)
         try FieldRules.checkWaitingForLength(command.waitingFor)
@@ -64,11 +70,15 @@ public enum GTDReducer {
     }
 
     /// `PATCH /tasks/{id}`: field edits; the list only changes through transitions.
+    /// A user's edit is all or nothing. While replaying, each field change
+    /// stands on its own: the ones the task can no longer take are dropped
+    /// (`replayable(_:for:in:)`), the rest apply, and an edit with nothing
+    /// left is already satisfied.
     static func updateTask(
         _ command: GTDCommand.UpdateTask, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
         guard let task = state.tasks[command.taskID] else { throw .taskNotFound }
-        let changes = command.changes
+        let changes = mode == .replay ? replayable(command.changes, for: task, in: state) : command.changes
         guard changes.hasChanges else { return try satisfied(mode, else: .nothingToChange) }
         var updated = task
         switch changes.title {

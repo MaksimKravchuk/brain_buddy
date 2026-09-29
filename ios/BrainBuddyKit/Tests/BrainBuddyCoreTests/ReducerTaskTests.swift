@@ -325,3 +325,110 @@ struct ReducerTransitionTests {
         #expect(replayed == state)
     }
 }
+
+@Suite("GTDReducer: replaying task commands onto newer state")
+struct ReducerReplayTaskTests {
+    private func update(_ changes: TaskChanges, of id: TaskID = "next") -> GTDCommand {
+        .updateTask(.init(taskID: id, changes: changes))
+    }
+
+    @Test("A creation keeps its task and drops projects and tags that are missing, inactive or repeated")
+    func creationDropsReferences() throws {
+        let command = GTDCommand.createTask(
+            .init(taskID: "x", title: "X", list: .next, projectID: "old", tagIDs: ["gone", "home", "missing", "home"])
+        )
+        expectRejection(command, on: Fixture.base, .projectNotActive)
+        var state = Fixture.base
+        #expect(try apply(command, to: &state, mode: .replay) == .applied)
+        #expect(state.tasks["x"]?.projectID == nil && state.tasks["x"]?.tagIDs == ["home"])
+        #expect(
+            GTDReducer.replayable(command, in: Fixture.base)
+                == .createTask(.init(taskID: "x", title: "X", list: .next, tagIDs: ["home"]))
+        )
+
+        var missing = Fixture.base
+        try apply(.createTask(.init(taskID: "y", title: "Y", list: .inbox, projectID: "missing")), to: &missing, mode: .replay)
+        #expect(missing.tasks["y"]?.projectID == nil)
+    }
+
+    @Test("A creation that cannot stand without what it lacks is still rejected")
+    func creationRulesStillApply() {
+        expectRejection(.createTask(.init(taskID: "x", title: "X", list: .waiting)), on: Fixture.base, .waitingForRequired, mode: .replay)
+        expectRejection(.createTask(.init(taskID: "x", title: " ", list: .next)), on: Fixture.base, .emptyTitle, mode: .replay)
+    }
+
+    @Test("An edit keeps the fields the task can still take and drops the rest")
+    func editKeepsWhatApplies() throws {
+        let command = update(
+            .init(
+                title: .set("Renamed"), details: .set(String(repeating: "n", count: 20_001)), projectID: .set("old"),
+                tagIDs: .set(["gone", "home"]), priority: .set(.high), waitingFor: .set("Ana")
+            )
+        )
+        expectRejection(command, on: Fixture.base, .detailsTooLong)
+        var state = Fixture.base
+        #expect(try apply(command, to: &state, at: 4, mode: .replay) == .applied)
+        let task = try #require(state.tasks["next"])
+        #expect(task.title == "Renamed" && task.priority == .high && task.tagIDs == ["home"])
+        #expect(task.details == nil && task.waitingFor == nil && task.state == .next)
+        #expect(task.updatedAt == Fixture.at(4))
+        #expect(
+            GTDReducer.replayable(command, in: Fixture.base)
+                == update(.init(title: .set("Renamed"), projectID: .clear, tagIDs: .set(["home"]), priority: .set(.high)))
+        )
+    }
+
+    @Test("Valid values the strict path accepts are kept, including empty notes that clear the notes")
+    func validValuesAreKept() throws {
+        var state = Fixture.base
+        try apply(update(.init(details: .set("Notes")), of: "inbox"), to: &state)
+        let clear = update(.init(details: .set(""), dueDate: .clear), of: "inbox")
+        #expect(GTDReducer.replayable(clear, in: state) == clear)
+        try apply(clear, to: &state, mode: .replay)
+        #expect(state.tasks["inbox"]?.details == nil)
+    }
+
+    @Test("Setting an archived project clears the task's project, as archiving would have")
+    func archivedProjectClears() throws {
+        var state = Fixture.base
+        #expect(try apply(update(.init(projectID: .set("old")), of: "inbox"), to: &state, mode: .replay) == .applied)
+        #expect(state.tasks["inbox"]?.projectID == nil)
+        #expect(state.tasks["inbox"]?.tagIDs == ["home"], "other fields are untouched")
+    }
+
+    @Test("An edit with nothing left to apply is satisfied and changes nothing")
+    func nothingLeft() throws {
+        let cases: [(TaskChanges, GTDValidationError)] = [
+            (TaskChanges(waitingFor: .set("Ana")), .waitingForOnlyOnWaitingTasks),
+            (TaskChanges(title: .clear, priority: .clear), .emptyTitle),
+            (TaskChanges(projectID: .set("old"), tagIDs: .set(["gone"])), .projectNotActive),
+        ]
+        for (changes, interactiveError) in cases {
+            expectRejection(update(changes), on: Fixture.base, interactiveError)
+            var state = Fixture.base
+            #expect(try apply(update(changes), to: &state, mode: .replay) == .alreadySatisfied)
+            #expect(state == Fixture.base)
+        }
+    }
+
+    @Test("A waiting note still applies to a task that is Waiting, and a blank one is dropped")
+    func waitingNoteOnWaitingTask() throws {
+        var state = Fixture.base
+        try apply(update(.init(title: .set("W"), waitingFor: .set("  ")), of: "waiting"), to: &state, mode: .replay)
+        #expect(state.tasks["waiting"]?.title == "W" && state.tasks["waiting"]?.waitingFor == "Ana")
+        try apply(update(.init(waitingFor: .set(" Bob ")), of: "waiting"), to: &state, mode: .replay)
+        #expect(state.tasks["waiting"]?.waitingFor == "Bob")
+    }
+
+    @Test("Other commands, and edits of a task that is gone, are replayed as they are")
+    func otherCommandsUnchanged() {
+        let commands: [GTDCommand] = [
+            update(.init(projectID: .set("old")), of: "missing"),
+            .transitionTask(.init(taskID: "next", action: .move, toList: .waiting, waitingFor: " ")),
+            .createProject(.init(projectID: "p", name: "Work")),
+            .deleteTag("gone"),
+        ]
+        for command in commands { #expect(GTDReducer.replayable(command, in: Fixture.base) == command) }
+        expectRejection(commands[0], on: Fixture.base, .taskNotFound, mode: .replay)
+    }
+}

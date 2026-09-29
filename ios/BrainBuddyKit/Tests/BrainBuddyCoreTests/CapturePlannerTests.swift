@@ -276,6 +276,25 @@ struct CapturePlannerValidationTests {
         #expect(preview("Invoice", list: .waiting, waitingFor: "  Анна  ").problem == nil)
     }
 
+    /// U+001C…U+001F are whitespace to Python's `str.strip()` (and so to the
+    /// server and the reducer) but not Unicode `White_Space`: preview, plan
+    /// and reducer must all call such a note blank.
+    @Test func aNoteOfPythonWhitespaceIsBlankInPreviewPlanAndReducer() {
+        let note = "\u{1C}\u{1D} \u{1E}\u{1F}"
+        #expect(preview("Invoice", list: .waiting, waitingFor: note).problem == .waitingForRequired)
+        #expect(throws: GTDValidationError.waitingForRequired) {
+            try planCapture(CaptureDraft(text: "Invoice", list: .waiting, waitingFor: note))
+        }
+        var state = F.webState
+        #expect(throws: GTDValidationError.waitingForRequired) {
+            try GTDReducer.apply(
+                .createTask(.init(taskID: "t", title: "Invoice", list: .waiting, waitingFor: note)), at: Date(), to: &state
+            )
+        }
+        let plan = try? planCapture(CaptureDraft(text: "Invoice", list: .waiting, waitingFor: "\u{1F}Ana\u{1C}"))
+        #expect(plan.flatMap(createdTask)?.waitingFor == "Ana", "trimmed as the reducer stores it")
+    }
+
     @Test func theWaitingNoteIsMeasuredAfterTrimming() {
         let note = String(repeating: "w", count: 500)
 

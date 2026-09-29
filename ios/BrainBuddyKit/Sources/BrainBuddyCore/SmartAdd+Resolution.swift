@@ -43,7 +43,9 @@ extension CapturePlanner {
         var waitingFor: String?
         var waitingProblem: GTDValidationError?
         if draft.list == .waiting {
-            let trimmed = trimmedWhitespace(draft.waitingFor)
+            // Trimmed exactly as the reducer trims it, so a note the reducer
+            // would call blank (only U+001C…U+001F, say) is blank here too.
+            let trimmed = NameNormalizer.stripped(draft.waitingFor)
             if trimmed.isEmpty {
                 waitingProblem = .waitingForRequired
             } else if trimmed.unicodeScalars.count > GTDLimits.waitingFor {
@@ -172,16 +174,6 @@ extension CapturePlanner {
     }
 
     // MARK: - Whitespace
-
-    /// Trims Unicode `White_Space` scalars, as Python's `str.strip()` does for
-    /// `waiting_for` on the server.
-    private static func trimmedWhitespace(_ value: String) -> String {
-        let scalars = value.unicodeScalars
-        guard let first = scalars.firstIndex(where: { !$0.properties.isWhitespace }),
-            let last = scalars.lastIndex(where: { !$0.properties.isWhitespace })
-        else { return "" }
-        return String(scalars[first...last])
-    }
 
     private static func isBlank(_ value: String) -> Bool {
         value.unicodeScalars.allSatisfy(\.properties.isWhitespace)

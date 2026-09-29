@@ -301,8 +301,11 @@ public enum ApplyMode: Sendable, Hashable {
     /// A user action on the device: every rule is an error.
     case interactive
     /// Re-running queued commands on top of newer server state: commands whose
-    /// goal already holds report `.alreadySatisfied`, and creating a project or
-    /// tag whose normalized name is taken merges into the existing one.
+    /// goal already holds report `.alreadySatisfied`, creating a project or
+    /// tag whose normalized name is taken merges into the existing one, and a
+    /// task creation or edit drops what the task can no longer take (an
+    /// archived project, a deleted tag, a waiting note outside Waiting) and
+    /// keeps the rest (`GTDReducer.replayable(_:in:)`).
     case replay
 }
 

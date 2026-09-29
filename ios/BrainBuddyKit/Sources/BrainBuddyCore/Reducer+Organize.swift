@@ -7,7 +7,12 @@ extension GTDReducer {
     // MARK: - Projects
 
     /// `POST /projects`. While replaying, a name already taken by an active
-    /// project merges into it instead of failing.
+    /// project merges into it instead of failing. The existing project is
+    /// left exactly as it is: the local creation's colour is not applied,
+    /// even when the existing project has none, because it is the account's
+    /// record and a colour change would be a separate `PATCH` the user never
+    /// made to it (`OutboxReplayer.rewritingAfterMerge` drops later recolours
+    /// for the same reason).
     static func createProject(
         _ command: GTDCommand.CreateProject, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {

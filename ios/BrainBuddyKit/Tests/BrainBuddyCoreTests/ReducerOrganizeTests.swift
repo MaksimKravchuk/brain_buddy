@@ -31,6 +31,15 @@ struct ReducerProjectTests {
         #expect(state == Fixture.base)
     }
 
+    @Test("A merge leaves the existing project as it is, even without a colour of its own")
+    func mergeKeepsTheSurvivorsColour() throws {
+        var state = Fixture.base
+        #expect(state.projects["work"]?.color == nil)
+        let create = GTDCommand.createProject(.init(projectID: "p", name: "WORK", color: "#FF0000"))
+        #expect(try apply(create, to: &state, mode: .replay) == .mergedProject(into: "work"))
+        #expect(state == Fixture.base, "no recolour of the account's project")
+    }
+
     @Test("Name and colour limits")
     func limits() {
         let state = Fixture.base
