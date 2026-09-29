@@ -18,11 +18,13 @@ import Foundation
 ///   changed open tasks. Cycles are single-flight, and so are the task
 ///   detail reads `refreshTask` asks for: they run in the same slot, so a
 ///   detail read never overlaps a push.
-/// - **Failures**: network errors, 5xx and 429 keep the operation and its key
-///   and retry with backoff; an operation the server keeps failing is set
-///   aside after `rejectionLimit` failures in a row (or `rejectionAge`);
-///   409 stale revision re-reads the record and replays; 401 stops until the
-///   user signs in again; other rejections move the operation to `issues`.
+/// - **Failures**: network errors, 5xx, 429 and refused redirects keep the
+///   operation and its key and retry with backoff; an operation the server
+///   keeps failing (5xx) is set aside after `rejectionLimit` failures in a
+///   row (or `rejectionAge`); 409 stale revision re-reads the record and
+///   replays; 401 stops until the user signs in again; a task create or edit
+///   rejected for a project or tag gone stale elsewhere is resent without
+///   it; other rejections move the operation to `issues`.
 public actor SyncEngine: SyncService {
     let store: any DocumentStore
     let tokenStore: any SessionTokenStore

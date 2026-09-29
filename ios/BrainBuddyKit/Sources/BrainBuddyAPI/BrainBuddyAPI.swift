@@ -25,8 +25,12 @@ public enum BrainBuddyAPI {
     }
 
     /// Validates a user-entered server address: `https` for any host, `http`
-    /// only for `localhost` / `127.0.0.1` / `::1` (development). Surrounding
-    /// whitespace and trailing slashes are dropped. Returns nil when invalid.
+    /// only for the host `localhost` (development). That is the one plain-http
+    /// host App Transport Security lets the app reach without an exception
+    /// (unqualified names are allowed; the literal loopback addresses
+    /// `127.0.0.1` and `::1` are not), so any other would only fail later.
+    /// Surrounding whitespace and trailing slashes are dropped. Returns nil
+    /// when invalid.
     public static func serverURL(from raw: String) -> URL? {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         while text.hasSuffix("/") { text.removeLast() }
@@ -36,7 +40,7 @@ public enum BrainBuddyAPI {
         else { return nil }
         switch scheme {
         case "https": break
-        case "http" where ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host): break
+        case "http" where host == "localhost": break
         default: return nil
         }
         return components.url

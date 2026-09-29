@@ -156,8 +156,26 @@ struct ServerAddressTests {
     @Test("http only for localhost")
     func httpLocalhost() {
         #expect(BrainBuddyAPI.serverURL(from: "http://localhost:8000/api")?.absoluteString == "http://localhost:8000/api")
-        #expect(BrainBuddyAPI.serverURL(from: "http://127.0.0.1:8000/api") != nil)
+        #expect(BrainBuddyAPI.serverURL(from: " HTTP://LocalHost/api/ ") != nil, "scheme and host in any case")
         #expect(BrainBuddyAPI.serverURL(from: "http://example.com/api") == nil)
+    }
+
+    @Test(
+        "http to any other host is refused, loopback addresses included (ATS blocks them)",
+        arguments: [
+            "http://127.0.0.1:8000/api", "http://127.0.0.1", "http://[::1]:8000/api", "http://[::1]",
+            "http://localhost.:8000/api", "http://app.localhost/api", "http://localhost.example.com/api",
+            "http://192.168.1.20:8000/api",
+        ]
+    )
+    func httpElsewhere(text: String) {
+        #expect(BrainBuddyAPI.serverURL(from: text) == nil)
+    }
+
+    @Test("https is accepted for loopback addresses too")
+    func httpsLoopback() {
+        #expect(BrainBuddyAPI.serverURL(from: "https://127.0.0.1:8443/api")?.absoluteString == "https://127.0.0.1:8443/api")
+        #expect(BrainBuddyAPI.serverURL(from: "https://[::1]:8443/api") != nil)
     }
 
     @Test(

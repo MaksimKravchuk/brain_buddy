@@ -11,8 +11,9 @@ import Testing
 /// The API never redirects. `URLSessionTransport` refuses every redirect (so
 /// the hand-set `Cookie` header and a login's body never reach the
 /// `Location`) and turns the 3xx into an error response the client reports
-/// as `.rejected`. No network: the delegate is called directly and the
-/// converted responses go through `ScriptedTransport`.
+/// as a retryable `.server` failure that nothing processed. No network: the
+/// delegate is called directly and the converted responses go through
+/// `ScriptedTransport`.
 @Suite("URLSession transport")
 struct URLSessionTransportTests {
     static let redirects = [301, 302, 303, 307, 308]
@@ -73,7 +74,10 @@ struct URLSessionTransportTests {
         #expect(body == ["message": URLSessionTransport.redirectMessage])
     }
 
-    @Test("A redirected login is .rejected with the redirect message and stores no session", arguments: redirects)
+    @Test(
+        "A redirected login is a retryable server failure nothing processed, with the redirect message, and stores no session",
+        arguments: redirects
+    )
     func redirectedLogin(status: Int) async throws {
         let transport = ScriptedTransport([.respond(redirect(status))])
         let store = InMemorySessionTokenStore()
@@ -83,12 +87,13 @@ struct URLSessionTransportTests {
             await expectAPIError { _ = try await client.login(email: "ada@example.com", password: "pw") }
         )
 
-        #expect(error.kind == .rejected)
+        #expect(error.kind == .server)
+        #expect(error.isRedirect)
         #expect(error.message == "The server redirected the request, which Brain Buddy doesn't follow.")
         #expect(error.statusCode == status)
         #expect(error.referenceID == "hdr-redirect")
-        #expect(!error.isRetryable)
-        #expect(!error.isUncertainOutcome)
+        #expect(error.isRetryable, "a misconfigured server or proxy may be fixed")
+        #expect(!error.isUncertainOutcome, "the redirect was the answer: nothing processed the body")
         #expect(try store.token(for: Fixture.baseURL) == nil)
         #expect(transport.requests.count == 1)
     }
@@ -101,7 +106,8 @@ struct URLSessionTransportTests {
 
         let error = try #require(await expectAPIError { _ = try await client.listTags() })
 
-        #expect(error.kind == .rejected)
+        #expect(error.kind == .server)
+        #expect(error.isRedirect)
         #expect(error.message == URLSessionTransport.redirectMessage)
         #expect(try store.token(for: Fixture.baseURL) == Fixture.token)
     }

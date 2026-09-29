@@ -187,6 +187,28 @@ struct ErrorMappingTests {
         #expect(error.isUncertainOutcome)
     }
 
+    @Test("A 3xx from any transport is a retryable server failure nothing processed, in Brain Buddy's words", arguments: [301, 302, 303, 304, 307, 308])
+    func redirect(status: Int) async throws {
+        let error = try await failure(Fixture.error(status, "Moved elsewhere.", reference: "ref-3xx"))
+        #expect(error.kind == .server)
+        #expect(error.isRedirect)
+        #expect(error.statusCode == status)
+        #expect(error.message == APIError.redirectMessage, "a redirect's body is never the API speaking")
+        #expect(error.referenceID == "ref-3xx")
+        #expect(error.detail == nil)
+        #expect(error.isRetryable)
+        #expect(!error.isUncertainOutcome)
+    }
+
+    @Test("Only a 3xx counts as a redirect")
+    func notRedirects() async throws {
+        let bad = try await failure(Fixture.error(502, "Bad gateway."))
+        #expect(!bad.isRedirect)
+        #expect(bad.isUncertainOutcome)
+        #expect(!APIError(kind: .rejected, message: "x", statusCode: 302).isRedirect, "only a .server answer")
+        #expect(!APIError(kind: .server, message: "x").isRedirect)
+    }
+
     @Test("A proxy's HTML 502 falls back to a calm message and the correlation header")
     func htmlBadGateway() async throws {
         let error = try await failure(

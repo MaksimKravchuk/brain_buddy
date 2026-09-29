@@ -7,10 +7,10 @@ extension SyncEngine {
     /// One cycle: push until empty or blocked → pull (when warranted) → push
     /// again if the replay left work → hydrate children.
     ///
-    /// A push blocked by the server's side (5xx, 429, a success that can't be
-    /// read, the session store) still pulls, so what other devices changed
-    /// comes down while the operation waits for its retry; only the network
-    /// and a 401 stop the cycle at once.
+    /// A push blocked by the server's side (5xx, 429, a refused redirect, a
+    /// success that can't be read, the session store) still pulls, so what
+    /// other devices changed comes down while the operation waits for its
+    /// retry; only the network and a 401 stop the cycle at once.
     func runCycle(epoch cycleEpoch: Int) async -> CycleOutcome {
         guard let account, canRun, cycleEpoch == epoch else { return .aborted }
         await setStatus(.syncing)

@@ -18,6 +18,7 @@ extension SyncEngine {
     func pushOutbox(_ context: CycleContext) async throws -> PushSummary {
         var summary = PushSummary()
         var conflicts: [UUID: Int] = [:]
+        var resent: Set<RejectedBody> = []
         while true {
             try checkActive(context)
             let document = try await loadDocument()
@@ -42,11 +43,13 @@ extension SyncEngine {
             } catch {
                 try checkActive(context)
                 conflicts[operation.id, default: 0] += 1
-                // A request that never left the device starts no 23-hour clock.
-                let takeBackClock = operation.firstAttemptAt == nil && !error.requestMayHaveBeenSent
+                // A request that never left the device, or that nothing
+                // processed (a refused redirect), starts no 23-hour clock.
+                let takeBackClock =
+                    operation.firstAttemptAt == nil && (!error.requestMayHaveBeenSent || error.isRedirect)
                 try await handleFailure(
                     error, of: sending, rounds: conflicts[operation.id] ?? 1, clearingClock: takeBackClock, context,
-                    &summary
+                    &summary, resent: &resent
                 )
                 continue
             }
@@ -116,16 +119,23 @@ extension SyncEngine {
         lastSyncedAt = written.lastSyncedAt
     }
 
-    /// Everything but success.
+    /// Everything but success. `resent`: the task bodies this push already
+    /// resent without stale references (`resendWithoutStaleReferences`).
     private func handleFailure(
         _ error: APIError, of operation: PendingOperation, rounds: Int, clearingClock: Bool, _ context: CycleContext,
-        _ summary: inout PushSummary
+        _ summary: inout PushSummary, resent: inout Set<RejectedBody>
     ) async throws {
         switch error.kind {
         case .unauthorized:
             throw error
         case .network, .cancelled, .tokenStorage, .rateLimited:
             // The outcome may be unknown: keep the operation and its key.
+            try? await noteFailure(error, of: operation, clearingClock: clearingClock, context)
+            throw error
+        case .server where error.isRedirect:
+            // A server or proxy misconfiguration: nothing processed the
+            // request, so this says nothing about the operation. Keep it (and
+            // everything behind it) and back off until the redirect stops.
             try? await noteFailure(error, of: operation, clearingClock: clearingClock, context)
             throw error
         case .server:
@@ -144,8 +154,16 @@ extension SyncEngine {
             try? await noteFailure(error, of: operation, clearingClock: clearingClock, context)
             guard try await setAsideIfServerKeepsFailing(operation, error, context) else { throw error }
             summary.changed = true
+        case .rejected where operation.command.keepsItsTaskWithoutReferences:
+            // Perhaps a project archived or a tag deleted elsewhere since the
+            // last pull: learn what changed, then keep the task without them.
+            try await pull(context)
+            summary.changed = true
+            let firstRejection = resent.insert(RejectedBody(operation)).inserted
+            if firstRejection, try await resendWithoutStaleReferences(operation, context) { return }
+            try await setAside(operation, message: error.message, referenceID: error.referenceID, context)
         default:
-            // 400, 404, 422, idempotency conflicts, and conflicts that keep coming back.
+            // 400, 404, 422 and other 4xx, idempotency conflicts, and conflicts that keep coming back.
             try await setAside(operation, message: error.message, referenceID: error.referenceID, context)
             try await pull(context)
             summary.changed = true
@@ -153,8 +171,8 @@ extension SyncEngine {
     }
 
     /// Keeps the failure's words on the operation. `clearingClock`: the
-    /// request never left the device, so the uncertainty clock this attempt
-    /// started is taken back.
+    /// request never left the device (or nothing processed it), so the
+    /// uncertainty clock this attempt started is taken back.
     private func noteFailure(
         _ error: APIError, of operation: PendingOperation, clearingClock: Bool, _ context: CycleContext
     ) async throws {
@@ -205,6 +223,43 @@ extension SyncEngine {
                 SyncIssue(command: removed.command, message: message, referenceID: referenceID, occurredAt: date)
             )
             doc.replayOutbox(now: date)
+        }
+    }
+
+    /// A 4xx on a task create or edit, after the pull that followed it. When
+    /// the queued command, as replay applies it (`GTDReducer.replayable(_:in:)`)
+    /// to the state it replays onto, loses a project or tag no longer active
+    /// (archived or deleted elsewhere) or a field change the task can no
+    /// longer take, that form replaces it and is sent again: the task is kept
+    /// without them, as on the device, instead of being set aside with
+    /// everything that depends on it. A 4xx means nothing was applied, so it
+    /// goes out under a new key; the operation stays `everSent`. Returns
+    /// whether it was replaced; when nothing was stale, nothing changes.
+    ///
+    /// `replayable` only ever drops references and field changes, so every
+    /// resend carries less than the one before and a body the server rejected
+    /// is never sent again as it was (`pushOutbox` also resends each rejected
+    /// body at most once).
+    private func resendWithoutStaleReferences(
+        _ operation: PendingOperation, _ context: CycleContext
+    ) async throws -> Bool {
+        let date = now()
+        do {
+            try await update(context) { doc in
+                guard let index = doc.outbox.firstIndex(where: { $0.id == operation.id }) else {
+                    throw NothingToResend()
+                }
+                let queued = doc.outbox[index].command
+                let before = OutboxReplayer.replay(Array(doc.outbox[..<index]), onto: doc.base).state
+                let replayable = GTDReducer.replayable(queued, in: before)
+                guard replayable != queued else { throw NothingToResend() }
+                doc.outbox[index].command = replayable
+                doc.outbox[index].rotateKey()
+                doc.replayOutbox(now: date)
+            }
+            return true
+        } catch is NothingToResend {
+            return false
         }
     }
 
@@ -357,11 +412,36 @@ extension SyncEngine {
 /// The operation changed between planning and writing; plan it again.
 struct OperationChanged: Error {}
 
+/// A rejected operation had nothing stale to drop.
+struct NothingToResend: Error {}
+
+/// An operation with the body the server rejected: `pushOutbox` resends
+/// each without stale references at most once.
+struct RejectedBody: Hashable, Sendable {
+    var operationID: UUID
+    var command: GTDCommand
+
+    init(_ operation: PendingOperation) {
+        operationID = operation.id
+        command = operation.command
+    }
+}
+
 extension GTDCommand {
     /// Creates that answer 409 when the normalized name is taken.
     var isNamedCreate: Bool {
         switch self {
         case .createProject, .createTag: true
+        default: false
+        }
+    }
+
+    /// Task creates and edits, which replay keeps without references that
+    /// went stale (`GTDReducer.replayable(_:in:)`); the server rejects them
+    /// with a 400 instead ("Task project must be active.").
+    var keepsItsTaskWithoutReferences: Bool {
+        switch self {
+        case .createTask, .updateTask: true
         default: false
         }
     }

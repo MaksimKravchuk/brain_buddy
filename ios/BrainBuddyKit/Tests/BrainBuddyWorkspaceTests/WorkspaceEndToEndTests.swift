@@ -368,6 +368,59 @@ struct WorkspaceEndToEndTests {
         #expect(try await tablet.store.load()?.issues.isEmpty == true)
     }
 
+    @Test("A capture offline with a tag another device deleted keeps its task and subtask, without the tag, everywhere")
+    func captureWithATagDeletedElsewhere() async throws {
+        let world = World()
+        let phone = await world.device()
+        try await phone.signIn()
+        try phone.workspace.capture(CaptureDraft(text: "Buy stamps #errand", list: .next))
+        await phone.workspace.syncNow()
+        world.clock.advance(by: 60)
+        let tablet = await world.device()
+        try await tablet.signIn()
+        let errandOnTablet = try #require(tablet.workspace.tags().first { $0.tag.name == "errand" }).id
+        await tablet.networkChanged(isAvailable: false)
+
+        // On the tablet, offline: Smart Add reuses the tag it knows.
+        world.clock.advance(by: 60)
+        let milk = try tablet.workspace.capture(CaptureDraft(text: "Buy milk #errand", list: .next))
+        _ = try tablet.workspace.addSubtask(to: milk, title: "Oat milk")
+        #expect(tablet.workspace.task(milk)?.tagIDs == [errandOnTablet])
+
+        // Meanwhile the phone deletes the tag.
+        let errandOnPhone = try #require(phone.workspace.tags().first { $0.tag.name == "errand" }).id
+        try phone.workspace.deleteTag(errandOnPhone)
+        await phone.workspace.syncNow()
+        #expect(world.snapshot.tag(named: "errand")?.state == .deleted)
+
+        world.clock.advance(by: 60)
+        await tablet.networkChanged(isAvailable: true)
+
+        // The tablet: the task is kept, without the tag; nothing needs attention.
+        let tabletApp = tablet.workspace
+        #expect(tablet.rejectedRequests == ["POST /api/tasks → 400"], "refused once for the deleted tag")
+        #expect(tabletApp.issues.isEmpty)
+        #expect(tabletApp.pendingChangeCount == 0)
+        #expect(tabletApp.syncStatus == .idle(lastSyncedAt: world.clock.now()))
+        #expect(tabletApp.task(milk)?.tagIDs == [])
+        #expect(tabletApp.task(milk)?.subtasks.map(\.title) == ["Oat milk"])
+        #expect(tabletApp.tags().isEmpty)
+        #expect(VisibleState(tabletApp).titles(on: .list(.next)) == ["Buy milk", "Buy stamps"])
+        try tablet.expectInSyncWithServer()
+
+        let server = try #require(world.snapshot.task(titled: "Buy milk"))
+        #expect(server.tagIDs == [])
+        #expect(server.subtasks.map(\.title) == ["Oat milk"])
+
+        // The phone picks it up as it is.
+        world.clock.advance(by: 60)
+        await phone.workspace.syncNow()
+        await phone.settle()
+        #expect(phone.workspace.task(titled: "Buy milk")?.tagIDs == [])
+        #expect(phone.workspace.issues.isEmpty)
+        try phone.expectInSyncWithServer()
+    }
+
     // MARK: Session
 
     @Test("A revoked session asks to sign in again, keeps every change, and sends them after signing in")

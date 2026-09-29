@@ -76,7 +76,9 @@ public struct TransportError: Error, Hashable, Sendable, CustomStringConvertible
 /// `Cookie` header the client sets by hand (and, on 307/308, a login's
 /// password) to wherever `Location` points. So every redirect is refused and
 /// the 3xx comes back as an error response (`response(from:body:)`), which
-/// the client reports as `.rejected`.
+/// the client reports as a retryable `.server` failure that nothing
+/// processed (`APIError.isRedirect`): sync backs off and keeps its changes
+/// until the address or the proxy is fixed.
 public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
     // `URLSession` is thread-safe; it is only `@unchecked` because
     // swift-corelibs-foundation does not mark it `Sendable`.
@@ -84,7 +86,7 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
     private let timeout: TimeInterval
 
     /// What the user reads when the server answers with a redirect.
-    static let redirectMessage = "The server redirected the request, which Brain Buddy doesn't follow."
+    static let redirectMessage = APIError.redirectMessage
 
     public init(timeout: TimeInterval = 30) {
         let configuration = URLSessionConfiguration.ephemeral

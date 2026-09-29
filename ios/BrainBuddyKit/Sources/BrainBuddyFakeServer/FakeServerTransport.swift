@@ -123,6 +123,7 @@ public final class FakeServerTransport: HTTPTransport {
         let message: String =
             switch status {
             case 401: "Authentication required."
+            case 422: "Request validation failed."
             case 429: "Too many requests. Try again in a few minutes."
             case 503: "Storage is temporarily unavailable; please retry."
             default: "Internal Server Error"

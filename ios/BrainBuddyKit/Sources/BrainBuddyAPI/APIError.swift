@@ -13,6 +13,10 @@ import Foundation
 /// | idempotency replay mismatch, detail `{"resource": "Idempotency-Key", …}` | `.idempotencyConflict` |
 /// | `"Project '<name>' already exists."` / `"Tag '<name>' already exists."` | `.duplicateName` |
 /// | anything else (for example signup's "An account with that email already exists.") | `.rejected` |
+///
+/// A 3xx is never the API speaking (it never redirects, and
+/// `URLSessionTransport` refuses to follow one): it is `.server` with
+/// `redirectMessage`, retryable, and certain not to have been processed.
 public struct APIError: Error, Hashable, Sendable, CustomStringConvertible, LocalizedError {
     public enum Kind: Hashable, Sendable {
         /// No HTTP response: offline, DNS, TLS, timeout, dropped connection;
@@ -45,6 +49,8 @@ public struct APIError: Error, Hashable, Sendable, CustomStringConvertible, Loca
         /// validation; `detail` holds pydantic's error list), and other 4xx.
         case rejected
         /// 5xx, including 503 "Storage is temporarily unavailable; please retry."
+        /// Also a 3xx: a server or proxy misconfiguration that the API did not
+        /// process (`isUncertainOutcome` is false) and that may be fixed later.
         case server
         /// A 2xx response (or the error body) could not be decoded.
         case decoding(String)
@@ -78,7 +84,8 @@ public struct APIError: Error, Hashable, Sendable, CustomStringConvertible, Loca
     }
 
     /// Worth retrying later with the *same* `Idempotency-Key`: network
-    /// failures, cancellation, 408, 429, 5xx/503, and local token storage.
+    /// failures, cancellation, 408, 429, 5xx/503, a refused 3xx, and local
+    /// token storage.
     public var isRetryable: Bool {
         switch kind {
         case .network, .cancelled, .tokenStorage, .rateLimited, .server: true
@@ -90,16 +97,27 @@ public struct APIError: Error, Hashable, Sendable, CustomStringConvertible, Loca
     /// came back, so the operation must keep its `Idempotency-Key` (a retry
     /// with the same key replays instead of applying twice). True for network
     /// failures after the request may have left, cancellation in flight, 408,
-    /// 429, 5xx, and a 2xx whose body could not be decoded.
+    /// 429, 5xx, and a 2xx whose body could not be decoded. False for a
+    /// refused 3xx: the redirect was the answer, so nothing processed the body.
     public var isUncertainOutcome: Bool {
         switch kind {
         case .network, .cancelled: requestMayHaveBeenSent
-        case .rateLimited, .server: true
+        case .rateLimited: true
+        case .server: !isRedirect
         case .decoding: statusCode.map { (200..<300).contains($0) } ?? false
         case .tokenStorage, .unauthorized, .staleRevision, .idempotencyConflict, .duplicateName, .notFound, .rejected:
             false
         }
     }
+
+    /// The answer was a 3xx, which Brain Buddy never follows.
+    public var isRedirect: Bool {
+        guard case .server = kind, let statusCode else { return false }
+        return (300..<400).contains(statusCode)
+    }
+
+    /// What the user reads when the server answers with a redirect.
+    public static let redirectMessage = "The server redirected the request, which Brain Buddy doesn't follow."
 
     public var description: String {
         var text = "APIError(\(kind)"
@@ -148,6 +166,13 @@ extension APIError {
         }
 
         switch status {
+        case 300..<400:
+            // A redirect is never the API's answer, so no message its body
+            // carries is shown (`URLSessionTransport` drops the body too).
+            return APIError(
+                kind: .server, message: redirectMessage, referenceID: referenceID, statusCode: status,
+                retryAfter: retryAfter
+            )
         case 401:
             return make(.unauthorized, "Sign in again to continue.")
         case 404:

@@ -29,8 +29,9 @@ public struct SyncConfiguration: Sendable {
     /// Consecutive failed cycles with server errors before the status says `.failing`.
     public var failingThreshold: Int
     /// The server failing the operation at the front of the outbox this many
-    /// times in a row (5xx, or a success it cannot be read from) sets it
-    /// aside as a sync issue, so the changes behind it go out.
+    /// times in a row (5xx, or a success it cannot be read from; a redirect,
+    /// which nothing processed, does not count) sets it aside as a sync
+    /// issue, so the changes behind it go out.
     public var rejectionLimit: Int
     /// The same once the operation has been failing this long (and at least
     /// twice in a row), measured from its first attempt with the current key.

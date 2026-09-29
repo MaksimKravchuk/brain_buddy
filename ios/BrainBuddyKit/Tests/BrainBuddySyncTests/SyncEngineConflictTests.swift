@@ -113,34 +113,182 @@ struct SyncEngineConflictTests {
     @Test("A rejected change becomes an issue with the server's words, and the changes that depend on it follow")
     func setsAsideRejectedChangeAndDependents() async throws {
         let harness = SyncHarness()
-        let a = await harness.device()
-        let b = await harness.device()
-        try await a.signIn()
-        try await a.apply(.createTag(.init(tagID: "t", name: "calls")))
-        await a.sync()
-        try await b.signIn()
-        let tagOnB = try #require(try await b.current().tag(named: "calls")).id
-        try await a.apply(.deleteTag("t"))
-        await a.sync()
-        try await b.apply(.createTask(.init(taskID: "z", title: "Call Sam", list: .next, tagIDs: [tagOnB])))
-        try await b.apply(.createSubtask(.init(taskID: "z", subtaskID: "zs", title: "Find the number")))
-        try await b.apply(.createComment(.init(taskID: "z", commentID: "zc", body: "Before Friday.")))
-        try await b.apply(.createTask(.init(taskID: "w", title: "Water plants", list: .next)))
+        let device = await harness.device()
+        try await device.signIn()
+        let callSam = GTDCommand.createTask(.init(taskID: "z", title: "Call Sam", list: .next))
+        try await device.apply(callSam)
+        try await device.apply(.createSubtask(.init(taskID: "z", subtaskID: "zs", title: "Find the number")))
+        try await device.apply(.createComment(.init(taskID: "z", commentID: "zc", body: "Before Friday.")))
+        try await device.apply(.createTask(.init(taskID: "w", title: "Water plants", list: .next)))
+        // The server refuses the body for a reason the device can't see; nothing in it went stale.
+        device.transport.inject(.status(422), times: 1_000) { $0.bodyText.contains("Call Sam") }
+        device.transport.clearLog()
 
-        #expect(await b.sync() == .idle(lastSyncedAt: harness.clock.now()))
-        let document = try await b.document()
+        #expect(await device.sync() == .idle(lastSyncedAt: harness.clock.now()))
+        let document = try await device.document()
         #expect(document.outbox.isEmpty)
         #expect(document.issues.count == 3)
         let first = try #require(document.issues.first)
-        #expect(first.message == "Task contexts must be active; task tags must be active.")
+        #expect(first.message == "Request validation failed.")
         #expect(first.referenceID != nil)
+        #expect(first.command == callSam)
         #expect(document.issues.dropFirst().map(\.message) == [
             GTDValidationError.taskNotFound.message, GTDValidationError.taskNotFound.message,
         ])
+        #expect(device.mutations.filter { $0.bodyText.contains("Call Sam") }.count == 1, "nothing to drop, so no resend")
         let server = harness.snapshot
         #expect(server.task(titled: "Call Sam") == nil)
         #expect(server.task(titled: "Water plants") != nil, "independent changes still go out")
-        #expect(document.base.tags[tagOnB]?.state == .deleted)
+    }
+
+    // MARK: References that went stale elsewhere
+
+    /// Device b knows the tags "errand" and "shop" (made on a), then a
+    /// deletes "errand" while b does not know yet.
+    private func errandDeletedElsewhere() async throws -> (SyncHarness, Device, Device, errand: TagID, shop: TagID) {
+        let harness = SyncHarness()
+        let a = await harness.device()
+        let b = await harness.device()
+        try await a.signIn()
+        try await a.apply(.createTag(.init(tagID: "errand", name: "errand")))
+        try await a.apply(.createTag(.init(tagID: "shop", name: "shop")))
+        await a.sync()
+        try await b.signIn()
+        let errand = try #require(try await b.current().tag(named: "errand")).id
+        let shop = try #require(try await b.current().tag(named: "shop")).id
+        try await a.apply(.deleteTag("errand"))
+        await a.sync()
+        return (harness, a, b, errand, shop)
+    }
+
+    @Test("A capture tagged with a tag deleted elsewhere is resent without it: the task, its subtasks and comments are kept")
+    func resendsCaptureWithoutDeletedTag() async throws {
+        let (harness, _, b, errand, shop) = try await errandDeletedElsewhere()
+        try await b.apply(.createTask(.init(taskID: "z", title: "Buy milk", list: .next, tagIDs: [errand, shop])))
+        try await b.apply(.createSubtask(.init(taskID: "z", subtaskID: "zs", title: "Oat milk")))
+        try await b.apply(.createComment(.init(taskID: "z", commentID: "zc", body: "Two litres.")))
+        b.transport.clearLog()
+
+        #expect(await b.sync() == .idle(lastSyncedAt: harness.clock.now()))
+        let creates = b.transport.exchanges.filter { $0.request.route == "POST /tasks" }
+        #expect(creates.map(\.statusCode) == [400, 201], "refused once for the deleted tag, then accepted without it")
+        try #require(creates.count == 2)
+        #expect(creates.first?.errorMessage == "Task contexts must be active; task tags must be active.")
+        #expect(creates[0].request.idempotencyKey != creates[1].request.idempotencyKey, "a new body, a new key")
+        let errandOnServer = try #require(harness.snapshot.tag(named: "errand"))
+        let shopOnServer = try #require(harness.snapshot.tag(named: "shop"))
+        #expect(creates[0].request.bodyText.contains(errandOnServer.id))
+        #expect(!creates[1].request.bodyText.contains(errandOnServer.id))
+
+        let server = try #require(harness.snapshot.task(titled: "Buy milk"))
+        #expect(server.tagIDs == [shopOnServer.id])
+        #expect(server.subtasks.map(\.title) == ["Oat milk"])
+        #expect(server.comments.map(\.body) == ["Two litres."])
+        let document = try await b.document()
+        #expect(document.issues.isEmpty)
+        #expect(document.outbox.isEmpty)
+        #expect(document.base.tasks["z"]?.tagIDs == [shop])
+        #expect(document.base.tasks["z"]?.serverID == server.id)
+        #expect(document.base.tags[errand]?.state == .deleted)
+        #expect(try CanonicalState(await b.current(), children: true) == CanonicalState(harness.snapshot, children: true))
+    }
+
+    @Test("A capture in a project archived elsewhere is resent without the project and keeps everything else")
+    func resendsCaptureWithoutArchivedProject() async throws {
+        let harness = SyncHarness()
+        let a = await harness.device()
+        let b = await harness.device()
+        try await a.signIn()
+        try await a.apply(.createProject(.init(projectID: "garden", name: "Garden")))
+        await a.sync()
+        try await b.signIn()
+        let garden = try #require(try await b.current().project(named: "Garden")).id
+        try await a.apply(.archiveProject("garden"))
+        await a.sync()
+        try await b.apply(
+            .createTask(.init(taskID: "z", title: "Plant tulips", list: .someday, priority: .high, projectID: garden))
+        )
+        try await b.apply(.createSubtask(.init(taskID: "z", subtaskID: "zs", title: "Buy bulbs")))
+        b.transport.clearLog()
+
+        #expect(await b.sync() == .idle(lastSyncedAt: harness.clock.now()))
+        let creates = b.transport.exchanges.filter { $0.request.route == "POST /tasks" }
+        #expect(creates.map(\.statusCode) == [400, 201])
+        #expect(creates.first?.errorMessage == "Task project must be active.")
+        let server = try #require(harness.snapshot.task(titled: "Plant tulips"))
+        #expect(server.projectID == nil)
+        #expect(server.state == .someday)
+        #expect(server.priority == .high)
+        #expect(server.subtasks.map(\.title) == ["Buy bulbs"])
+        let document = try await b.document()
+        #expect(document.issues.isEmpty)
+        #expect(document.outbox.isEmpty)
+        let onB = try #require(try await b.current().tasks["z"])
+        #expect(onB.projectID == nil)
+        #expect(onB.serverID == server.id)
+        #expect(document.base.projects[garden]?.state == .archived)
+    }
+
+    @Test("An edit that sets a tag deleted elsewhere keeps its other changes, after the re-read and the rejection")
+    func resendsEditWithoutDeletedTag() async throws {
+        let harness = SyncHarness()
+        let a = await harness.device()
+        let b = await harness.device()
+        try await a.signIn()
+        try await a.apply(.createTag(.init(tagID: "errand", name: "errand")))
+        try await a.apply(.createTag(.init(tagID: "shop", name: "shop")))
+        try await a.apply(.createTask(.init(taskID: "x", title: "Buy milk", list: .next)))
+        await a.sync()
+        try await b.signIn()
+        let current = try await b.current()
+        let milk = try #require(current.task(titled: "Buy milk")).id
+        let errand = try #require(current.tag(named: "errand")).id
+        let shop = try #require(current.tag(named: "shop")).id
+        try await b.apply(
+            .updateTask(.init(taskID: milk, changes: TaskChanges(title: .set("Buy oat milk"), tagIDs: .set([errand, shop]))))
+        )
+        // Meanwhile on a: the tag goes, and the task changes, so b's edit is stale first.
+        try await a.apply(.deleteTag("errand"))
+        try await a.apply(.updateTask(.init(taskID: "x", changes: TaskChanges(priority: .set(.high)))))
+        await a.sync()
+        b.transport.clearLog()
+
+        #expect(await b.sync() == .idle(lastSyncedAt: harness.clock.now()))
+        let edits = b.transport.exchanges.filter { $0.request.method == .patch }
+        #expect(edits.map(\.statusCode) == [409, 400, 200])
+        #expect(Set(edits.compactMap(\.request.idempotencyKey)).count == 3)
+        let server = try #require(harness.snapshot.task(titled: "Buy oat milk"))
+        #expect(server.tagIDs == [try #require(harness.snapshot.tag(named: "shop")).id])
+        #expect(server.priority == .high, "a's edit is kept too")
+        let document = try await b.document()
+        #expect(document.issues.isEmpty)
+        #expect(document.outbox.isEmpty)
+        #expect(document.base.tasks[milk]?.tagIDs == [shop])
+        #expect(try CanonicalState(await b.current(), children: false) == CanonicalState(harness.snapshot, children: false))
+    }
+
+    @Test("A body still refused once its stale references are gone is set aside: each body is resent at most once")
+    func setsAsideWhenTheResendIsRefusedToo() async throws {
+        let (harness, _, b, errand, _) = try await errandDeletedElsewhere()
+        try await b.apply(.createTask(.init(taskID: "z", title: "Buy milk", list: .next, tagIDs: [errand])))
+        try await b.apply(.createSubtask(.init(taskID: "z", subtaskID: "zs", title: "Oat milk")))
+        let errandOnServer = try #require(harness.snapshot.tag(named: "errand")).id
+        b.transport.inject(.status(422), times: 1_000) {
+            $0.bodyText.contains("Buy milk") && !$0.bodyText.contains(errandOnServer)
+        }
+        b.transport.clearLog()
+
+        #expect(await b.sync() == .idle(lastSyncedAt: harness.clock.now()))
+        let creates = b.transport.exchanges.filter { $0.request.route == "POST /tasks" }
+        #expect(creates.map(\.statusCode) == [400, 422])
+        let document = try await b.document()
+        #expect(document.outbox.isEmpty)
+        #expect(document.issues.map(\.message) == ["Request validation failed.", GTDValidationError.taskNotFound.message])
+        #expect(
+            document.issues.first?.command == .createTask(.init(taskID: "z", title: "Buy milk", list: .next)),
+            "the issue holds the change as last sent"
+        )
+        #expect(harness.snapshot.task(titled: "Buy milk") == nil)
     }
 
     @Test("A 401 stops sync and keeps every change until the user signs in again")
@@ -192,6 +340,48 @@ struct SyncEngineConflictTests {
         #expect(try await device.document().sync.lastFailure == message)
         #expect(await device.sync() == .idle(lastSyncedAt: harness.clock.now()))
         #expect(try await device.document().sync.lastFailure == nil)
+    }
+
+    @Test("A redirect keeps every change and its key, backs off however long it lasts, and the status says why")
+    func keepsEverythingWhileRedirected() async throws {
+        let harness = SyncHarness()
+        let device = await harness.device()
+        try await device.signIn()
+        try await device.apply(.createTask(.init(taskID: "x", title: "Call the bank", list: .inbox)))
+        try await device.apply(.createTask(.init(taskID: "y", title: "Pay rent", list: .next)))
+        let before = try await device.document().outbox
+        // A misconfigured proxy starts redirecting every request.
+        device.transport.inject(.status(307), times: 1_000)
+
+        #expect(await device.sync() == .idle(lastSyncedAt: harness.clock.now()), "one failure is not yet failing")
+        #expect(device.scheduler.pendingDelays == [.seconds(2)])
+        let status = await device.sync()
+        guard case .failing(let message, _, _) = status else {
+            Issue.record("Expected .failing, got \(status)")
+            return
+        }
+        #expect(message == APIError.redirectMessage)
+        #expect(device.scheduler.pendingDelays == [.seconds(4)], "backing off")
+        // Well past the eight failures and the day after which a change the
+        // server keeps failing is set aside.
+        for _ in 0..<10 {
+            harness.clock.advance(by: 3 * 3600)
+            await device.sync()
+        }
+
+        let during = try await device.document()
+        #expect(during.issues.isEmpty, "a redirect says nothing about the change: nothing is set aside")
+        #expect(during.outbox.map(\.id) == before.map(\.id))
+        #expect(during.outbox.map(\.idempotencyKey) == before.map(\.idempotencyKey))
+        #expect(during.outbox.first?.lastError == APIError.redirectMessage)
+        #expect(during.outbox.first?.firstAttemptAt == nil, "nothing processed it, so no 23-hour clock runs")
+        #expect(during.sync.lastFailure == APIError.redirectMessage)
+        #expect(harness.snapshot.tasks.isEmpty)
+
+        device.transport.clearFaults()
+        #expect(await device.sync() == .idle(lastSyncedAt: harness.clock.now()))
+        #expect(try await device.document().outbox.isEmpty)
+        #expect(harness.snapshot.tasks.values.map(\.title).sorted() == ["Call the bank", "Pay rent"])
     }
 
     // MARK: An operation the server keeps failing
