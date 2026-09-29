@@ -1,4 +1,7 @@
+import BrainBuddyAPI
 import BrainBuddyCore
+import BrainBuddyPersistence
+import BrainBuddySync
 import Foundation
 import Observation
 
@@ -10,6 +13,20 @@ import Observation
 /// PUBLIC API CONTRACT: the SwiftUI app, widgets and App Intents are written
 /// against these signatures. Implementations may add members but must not
 /// change or remove these.
+///
+/// How it works: the workspace keeps the last known `StoreDocument` and the
+/// commands applied since that are not on disk yet (`unpersisted`). `state` is
+/// always `OutboxReplayer.replay(document.outbox + unpersisted, onto: document.base).state`.
+/// A command is applied to `state` directly (no replay); a document written
+/// by someone else (sync, a widget, an App Intent) is adopted with a full
+/// replay, so pending local changes stay visible on top of it. Writes run one
+/// at a time, in order, each appending the queued commands through
+/// `OutboxCompactor` under the store's lock.
+///
+/// After compaction folds a command into an earlier one, fields the server
+/// assigns when a request lands (`updatedAt`, a new task's `orderKey`,
+/// `waitingSince`, a comment's `editedAt`) can differ from a fresh replay
+/// until the next full replay (see `OutboxCompactor`).
 @MainActor
 @Observable
 public final class Workspace {
@@ -26,40 +43,164 @@ public final class Workspace {
     public private(set) var issues: [SyncIssue] = []
     /// Local changes not yet acknowledged by the server.
     public private(set) var pendingChangeCount = 0
+    /// Set while the latest changes could not be written to this device's
+    /// store (`WorkspaceError.storage`'s message). The changes stay applied in
+    /// memory and are written again with the next change or `flush()`;
+    /// cleared by the next successful write.
+    public private(set) var storageError: String?
+
+    /// Called on the main actor after each successful write to the store, and
+    /// after sign-out removed it. The app reloads widget timelines here.
+    @ObservationIgnored public var didPersist: (@MainActor () -> Void)?
+
+    // MARK: Collaborators
+
+    let store: any DocumentStore
+    let sync: (any SyncService)?
+    let now: @Sendable () -> Date
+    let makeID: @Sendable () -> UUID
+
+    // MARK: Internal state (not observed)
+
+    /// The document as last read or written.
+    @ObservationIgnored private(set) var document = StoreDocument()
+    /// Commands applied to `state` but not written yet, oldest first.
+    @ObservationIgnored private(set) var unpersisted: [PendingOperation] = []
+    /// Issues the user dismissed that are not removed on disk yet.
+    @ObservationIgnored private var pendingDismissals: Set<SyncIssue.ID> = []
+    /// The write loop, while it runs. Writes never overlap or reorder.
+    @ObservationIgnored private var writer: Task<Void, Never>?
+    @ObservationIgnored private var writerToken = 0
+    /// True while a store write is in flight: documents read meanwhile wait
+    /// in `deferredDocument`, so the commands being written are never
+    /// applied twice (once from the new document, once from `unpersisted`).
+    @ObservationIgnored private var isWriting = false
+    @ObservationIgnored private var deferredDocument: StoreDocument?
+    /// Set during sign-out: nothing new is written for the old account.
+    @ObservationIgnored private var writesSuspended = false
+    /// Bumped when the workspace is reset, so results of work started
+    /// before (a load, a write) are discarded.
+    @ObservationIgnored private var epoch = 0
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var hasEventHandler = false
+    /// The account the sync service was started (or signed in) for.
+    @ObservationIgnored private var syncStartedFor: String?
+    @ObservationIgnored private var isSigningIn = false
+    @ObservationIgnored private var networkUpdates: Task<Void, Never>?
+    @ObservationIgnored private var todayCache: TodayCache?
+    /// How many times `state` was rebuilt by a full replay (for tests).
+    @ObservationIgnored private(set) var fullReplayCount = 0
 
     // MARK: Construction
+
+    /// A workspace over `store`. Pass `sync: nil` where nothing may talk to
+    /// the server (widgets, App Intents, previews). `now` and `makeID` are the
+    /// clock and the id source for new commands (ids, operation ids and
+    /// idempotency keys); tests inject deterministic ones.
+    public init(
+        store: any DocumentStore, sync: (any SyncService)?,
+        now: @escaping @Sendable () -> Date = { Date() },
+        makeID: @escaping @Sendable () -> UUID = { UUID() }
+    ) {
+        self.store = store
+        self.sync = sync
+        self.now = now
+        self.makeID = makeID
+    }
 
     /// Production workspace backed by the shared App Group file. Extensions
     /// pass `enableSync: false`; only the app talks to the server.
     public static func live(appGroupID: String, enableSync: Bool = true) -> Workspace {
-        fatalError("Workspace.live is not implemented yet")
+        #if canImport(Darwin)
+            let fileURL =
+                FileDocumentStore.appGroupDocumentURL(appGroupID: appGroupID)
+                ?? FileDocumentStore.applicationSupportDocumentURL()
+        #else
+            let fileURL = FileDocumentStore.applicationSupportDocumentURL()
+        #endif
+        let store = FileDocumentStore(fileURL: fileURL)
+        guard enableSync else { return Workspace(store: store, sync: nil) }
+        #if canImport(Security)
+            let tokenStore: any SessionTokenStore = KeychainSessionTokenStore()
+        #else
+            let tokenStore: any SessionTokenStore = InMemorySessionTokenStore()
+        #endif
+        return Workspace(store: store, sync: SyncEngine(store: store, tokenStore: tokenStore))
     }
 
     /// In-memory workspace with sample data for SwiftUI previews and UI tests.
     public static func preview() -> Workspace {
-        fatalError("Workspace.preview is not implemented yet")
+        let document = SampleData.document(now: Date())
+        let workspace = Workspace(store: InMemoryDocumentStore(document: document), sync: nil)
+        workspace.adoptLoaded(document)
+        return workspace
     }
 
     /// Loads (or creates) the stored document and starts sync if an account is linked.
+    ///
+    /// A missing document is an empty workspace in memory; the file is only
+    /// created by the first write. An unreadable one sets `loadError` and is
+    /// left untouched (see `resetUnreadableStore()`). Concurrent calls share
+    /// one load.
     public func load() async {
-        fatalError("Workspace.load is not implemented yet")
+        if let loadTask { return await loadTask.value }
+        let task = Task {
+            await self.performLoad()
+            self.loadTask = nil
+        }
+        loadTask = task
+        await task.value
     }
 
     /// Picks up writes made by another process (widget, App Intent). Call on
     /// scene activation and when the shared-store change notification fires.
+    ///
+    /// When nothing changed it only reads the stored generation (no decode of
+    /// the document, no replay). Changes not written yet stay applied on top.
+    /// Before the first successful load it loads instead.
     public func reloadIfChangedExternally() async {
-        fatalError("Workspace.reloadIfChangedExternally is not implemented yet")
+        guard isLoaded, loadError == nil else { return await load() }
+        await refreshFromStore()
     }
 
-    /// Waits until every change applied so far is on disk.
+    /// Waits until every change applied so far is on disk. When the last
+    /// write failed, it tries once more; `storageError` says whether that worked.
     public func flush() async {
-        fatalError("Workspace.flush is not implemented yet")
+        if let writer { await writer.value }
+        schedulePersistence()
+        if let writer { await writer.value }
+    }
+
+    /// Sets an unreadable or too-new store document aside (it is kept next to
+    /// the store, not deleted) and starts from an empty one. Call it only
+    /// after the person confirmed. Returns where the old document now is.
+    @discardableResult
+    public func resetUnreadableStore() async -> URL? {
+        if let loadTask { await loadTask.value }
+        let quarantined: URL?
+        do {
+            quarantined = try await store.quarantineUnreadableDocument()
+        } catch {
+            loadError = error.message
+            return nil
+        }
+        await load()
+        return quarantined
     }
 
     // MARK: Reading
 
-    /// The device's current local calendar day, used by date views.
-    public var today: CalendarDay { CalendarDay(date: Date()) }
+    /// The device's current local calendar day, used by date views. Cached
+    /// until the next local midnight (and for at most a minute, in case the
+    /// time zone changes), because views ask for it on every render.
+    public var today: CalendarDay {
+        let instant = now()
+        if let cache = todayCache, cache.validFrom <= instant, instant < cache.validUntil { return cache.day }
+        let day = CalendarDay(date: instant)
+        let validUntil = min(day.adding(days: 1).startDate(), instant.addingTimeInterval(60))
+        todayCache = validUntil > instant ? TodayCache(day: day, validFrom: instant, validUntil: validUntil) : nil
+        return day
+    }
 
     public func list(_ destination: Destination, options: ListOptions = ListOptions()) -> TaskListResult {
         GTDQueries.list(destination, options: options, in: state, today: today)
@@ -83,122 +224,486 @@ public final class Workspace {
     /// Captures one task from a Smart Add draft; creates missing projects/tags.
     @discardableResult
     public func capture(_ draft: CaptureDraft) throws(GTDValidationError) -> TaskID {
-        fatalError("Workspace.capture is not implemented yet")
+        let makeID = self.makeID
+        let plan = try CapturePlanner.plan(
+            draft, in: state,
+            makeTaskID: { TaskID(Self.rawID(makeID())) },
+            makeProjectID: { ProjectID(Self.rawID(makeID())) },
+            makeTagID: { TagID(Self.rawID(makeID())) }
+        )
+        try perform(plan.commands)
+        return plan.taskID
     }
 
     public func updateTask(_ id: TaskID, _ changes: TaskChanges) throws(GTDValidationError) {
-        fatalError("Workspace.updateTask is not implemented yet")
+        try perform(.updateTask(.init(taskID: id, changes: changes)))
     }
 
     /// Moves an open task to another open list; Waiting requires `waitingFor`.
     public func moveTask(_ id: TaskID, to list: OpenList, waitingFor: String? = nil) throws(GTDValidationError) {
-        fatalError("Workspace.moveTask is not implemented yet")
+        try perform(.transitionTask(.init(taskID: id, action: .move, toList: list, waitingFor: waitingFor)))
     }
 
     public func completeTask(_ id: TaskID) throws(GTDValidationError) {
-        fatalError("Workspace.completeTask is not implemented yet")
+        try perform(.transitionTask(.init(taskID: id, action: .complete)))
     }
 
     public func cancelTask(_ id: TaskID) throws(GTDValidationError) {
-        fatalError("Workspace.cancelTask is not implemented yet")
+        try perform(.transitionTask(.init(taskID: id, action: .cancel)))
     }
 
     /// Reopens a completed or cancelled task into an explicit open list.
     public func reopenTask(_ id: TaskID, to list: OpenList, waitingFor: String? = nil) throws(GTDValidationError) {
-        fatalError("Workspace.reopenTask is not implemented yet")
+        try perform(.transitionTask(.init(taskID: id, action: .reopen, toList: list, waitingFor: waitingFor)))
     }
 
     @discardableResult
     public func addSubtask(to taskID: TaskID, title: String) throws(GTDValidationError) -> SubtaskID {
-        fatalError("Workspace.addSubtask is not implemented yet")
+        let subtaskID = SubtaskID(Self.rawID(makeID()))
+        try perform(.createSubtask(.init(taskID: taskID, subtaskID: subtaskID, title: title)))
+        return subtaskID
     }
 
     public func renameSubtask(_ subtaskID: SubtaskID, in taskID: TaskID, to title: String) throws(GTDValidationError) {
-        fatalError("Workspace.renameSubtask is not implemented yet")
+        try perform(.updateSubtask(.init(taskID: taskID, subtaskID: subtaskID, title: title)))
     }
 
     public func transitionSubtask(
         _ subtaskID: SubtaskID, in taskID: TaskID, _ action: SubtaskTransitionAction
     ) throws(GTDValidationError) {
-        fatalError("Workspace.transitionSubtask is not implemented yet")
+        try perform(.transitionSubtask(.init(taskID: taskID, subtaskID: subtaskID, action: action)))
     }
 
     @discardableResult
     public func addComment(to taskID: TaskID, body: String) throws(GTDValidationError) -> CommentID {
-        fatalError("Workspace.addComment is not implemented yet")
+        let commentID = CommentID(Self.rawID(makeID()))
+        try perform(.createComment(.init(taskID: taskID, commentID: commentID, body: body)))
+        return commentID
     }
 
     public func editComment(_ commentID: CommentID, in taskID: TaskID, body: String) throws(GTDValidationError) {
-        fatalError("Workspace.editComment is not implemented yet")
+        try perform(.updateComment(.init(taskID: taskID, commentID: commentID, body: body)))
     }
 
     @discardableResult
     public func createProject(name: String, color: String? = nil) throws(GTDValidationError) -> ProjectID {
-        fatalError("Workspace.createProject is not implemented yet")
+        let projectID = ProjectID(Self.rawID(makeID()))
+        try perform(.createProject(.init(projectID: projectID, name: name, color: color)))
+        return projectID
     }
 
     public func renameProject(_ id: ProjectID, to name: String) throws(GTDValidationError) {
-        fatalError("Workspace.renameProject is not implemented yet")
+        try perform(.updateProject(.init(projectID: id, name: name)))
     }
 
     public func setProjectColor(_ id: ProjectID, color: String?) throws(GTDValidationError) {
-        fatalError("Workspace.setProjectColor is not implemented yet")
+        try perform(.updateProject(.init(projectID: id, color: color.map { .set($0) } ?? .clear)))
     }
 
     /// Archives a project. Like the server today, this removes the project
     /// from all of its tasks; the tasks stay in their lists. There is no unarchive.
     public func archiveProject(_ id: ProjectID) throws(GTDValidationError) {
-        fatalError("Workspace.archiveProject is not implemented yet")
+        try perform(.archiveProject(id))
     }
 
     @discardableResult
     public func createTag(name: String) throws(GTDValidationError) -> TagID {
-        fatalError("Workspace.createTag is not implemented yet")
+        let tagID = TagID(Self.rawID(makeID()))
+        try perform(.createTag(.init(tagID: tagID, name: name)))
+        return tagID
     }
 
     public func renameTag(_ id: TagID, to name: String) throws(GTDValidationError) {
-        fatalError("Workspace.renameTag is not implemented yet")
+        try perform(.renameTag(.init(tagID: id, name: name)))
     }
 
     /// Deletes a tag and removes it from every task; the tasks stay.
     public func deleteTag(_ id: TagID) throws(GTDValidationError) {
-        fatalError("Workspace.deleteTag is not implemented yet")
+        try perform(.deleteTag(id))
     }
 
     // MARK: Account and sync
 
     /// Signs in and links this device's data to the account. Local-only data
     /// is uploaded; the account's existing data is downloaded and merged.
+    ///
+    /// - Throws: `WorkspaceError.invalidServerURL` for an address that is not
+    ///   https (or http on localhost), `.signInFailed` with the server's
+    ///   words otherwise (always, in a workspace without sync).
     public func signIn(serverURL: URL, email: String, password: String) async throws {
-        fatalError("Workspace.signIn is not implemented yet")
+        guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
+            throw WorkspaceError.invalidServerURL
+        }
+        guard let sync else {
+            throw WorkspaceError.signInFailed(message: "Sign in from the Brain Buddy app.", referenceID: nil)
+        }
+        // The engine uploads what is in the store, so everything must be there.
+        await flush()
+        await installEventHandlerIfNeeded(sync)
+        isSigningIn = true
+        let linked: LinkedAccount
+        do {
+            linked = try await sync.signIn(serverURL: url, email: email, password: password)
+        } catch {
+            isSigningIn = false
+            refreshDerivedState()
+            throw WorkspaceError.signInFailed(message: error.message, referenceID: error.referenceID)
+        }
+        syncStartedFor = linked.id
+        // The engine linked the account in the document; pick that up if its
+        // event has not arrived yet.
+        await refreshFromStore()
+        isSigningIn = false
+        refreshDerivedState()
+        if account != linked { account = linked }
+        if syncStatus == .localOnly { syncStatus = .idle(lastSyncedAt: document.sync.lastPullAt) }
     }
 
     /// Signs out and removes the account's data from this device. Fails with
     /// `WorkspaceError.unsyncedChanges` unless `discardUnsyncedChanges` is set
     /// while changes are still pending.
     public func signOut(discardUnsyncedChanges: Bool) async throws {
-        fatalError("Workspace.signOut is not implemented yet")
+        if pendingChangeCount > 0, !discardUnsyncedChanges {
+            throw WorkspaceError.unsyncedChanges(count: pendingChangeCount)
+        }
+        // Let a write in flight finish, and write nothing new for this account.
+        writesSuspended = true
+        if let writer { await writer.value }
+        await sync?.signOut()
+        do {
+            try await store.destroy()
+        } catch {
+            writesSuspended = false
+            schedulePersistence()
+            throw WorkspaceError.storage(error.message)
+        }
+        resetToEmptyLocalWorkspace()
+        writesSuspended = false
+        didPersist?()
     }
 
     /// Pushes pending changes and pulls the latest server state now.
     public func syncNow() async {
-        fatalError("Workspace.syncNow is not implemented yet")
+        guard let sync, account != nil else { return }
+        await flush()
+        let status = await sync.syncNow()
+        if account != nil, syncStatus != status { syncStatus = status }
+        // The engine reports its writes as events; this catches up if one was missed.
+        await refreshFromStore()
     }
 
     /// Loads subtasks and comments for a task from the server (when online);
     /// call when a task detail opens.
     public func refreshTaskDetails(_ id: TaskID) async {
-        fatalError("Workspace.refreshTaskDetails is not implemented yet")
+        guard let sync, account != nil else { return }
+        await sync.refreshTask(id)
     }
 
     public func dismissIssue(_ id: SyncIssue.ID) {
-        fatalError("Workspace.dismissIssue is not implemented yet")
+        guard document.issues.contains(where: { $0.id == id }) else { return }
+        pendingDismissals.insert(id)
+        issues.removeAll { $0.id == id }
+        schedulePersistence()
     }
 
     /// Informs the sync scheduler about connectivity (from NWPathMonitor in the app).
     public func networkAvailabilityChanged(isAvailable: Bool) {
-        fatalError("Workspace.networkAvailabilityChanged is not implemented yet")
+        guard let sync else { return }
+        // Chained, so the engine sees the changes in the order they happened.
+        let previous = networkUpdates
+        networkUpdates = Task {
+            await previous?.value
+            await sync.setNetworkAvailable(isAvailable)
+            if isAvailable { await sync.request(.networkRestored) }
+        }
     }
+
+    /// Waits until the connectivity updates sent so far reached the sync service.
+    func waitForNetworkUpdates() async {
+        await networkUpdates?.value
+    }
+}
+
+// MARK: - Applying commands
+
+extension Workspace {
+    private func perform(_ command: GTDCommand) throws(GTDValidationError) {
+        try perform([command])
+    }
+
+    /// Applies `commands` all-or-nothing to `state`, queues them, and starts
+    /// a write. A rejected command leaves everything untouched.
+    private func perform(_ commands: [GTDCommand]) throws(GTDValidationError) {
+        let issuedAt = Self.storedPrecision(now())
+        var next = state
+        for command in commands {
+            try GTDReducer.apply(command, at: issuedAt, to: &next, mode: .interactive)
+        }
+        state = next
+        for command in commands {
+            unpersisted.append(
+                PendingOperation(id: makeID(), command: command, issuedAt: issuedAt, idempotencyKey: makeID())
+            )
+        }
+        pendingChangeCount = document.outbox.count + unpersisted.count
+        schedulePersistence()
+    }
+
+    /// A client id in the same form as `EntityID.random()`.
+    nonisolated static func rawID(_ uuid: UUID) -> String { uuid.uuidString.lowercased() }
+
+    /// `date` as the store keeps it (whole microseconds, rounded the way
+    /// `StoreDocumentCoding` rounds), so a command applied in memory gives
+    /// exactly what replaying the stored command gives.
+    nonisolated static func storedPrecision(_ date: Date) -> Date {
+        let interval = date.timeIntervalSinceReferenceDate
+        guard interval.isFinite else { return date }
+        var whole = interval.rounded(.down)
+        var microseconds = ((interval - whole) * 1_000_000).rounded()
+        if microseconds == 1_000_000 {
+            whole += 1
+            microseconds = 0
+        }
+        return Date(timeIntervalSinceReferenceDate: whole + microseconds / 1_000_000)
+    }
+}
+
+// MARK: - Persistence
+
+extension Workspace {
+    private var hasPendingWrites: Bool { !unpersisted.isEmpty || !pendingDismissals.isEmpty }
+
+    /// Starts the write loop unless it is running (it picks up new changes
+    /// itself) or there is nothing to write.
+    private func schedulePersistence() {
+        guard writer == nil, hasPendingWrites, !writesSuspended else { return }
+        writerToken += 1
+        let token = writerToken
+        let epoch = self.epoch
+        writer = Task {
+            let succeeded = await self.drainWrites(epoch: epoch)
+            guard self.writerToken == token else { return }
+            self.writer = nil
+            // Changes queued after a reset still need writing; after a
+            // failure, the next change or `flush()` retries.
+            if succeeded { self.schedulePersistence() }
+        }
+    }
+
+    /// Writes queued changes one batch at a time, in order, until none are
+    /// left. Returns false when a write failed; its changes stay queued.
+    private func drainWrites(epoch: Int) async -> Bool {
+        while hasPendingWrites, !writesSuspended, epoch == self.epoch {
+            let operations = unpersisted
+            let dismissals = pendingDismissals
+            isWriting = true
+            let result = await write(operations, dismissing: dismissals)
+            isWriting = false
+            guard epoch == self.epoch else { return true }
+            switch result {
+            case .failure(let error):
+                let message = WorkspaceError.storage(Self.storageMessage(for: error)).message
+                if storageError != message { storageError = message }
+                adoptDeferredDocument()
+                return false
+            case .success(let written):
+                unpersisted.removeFirst(operations.count)
+                pendingDismissals.subtract(dismissals)
+                if storageError != nil { storageError = nil }
+                adoptWritten(written)
+                adoptDeferredDocument()
+                didPersist?()
+                if !operations.isEmpty, let sync { await sync.request(.localChange) }
+            }
+        }
+        return true
+    }
+
+    /// One read-modify-write under the store's lock. On Apple platforms the
+    /// process is kept from being suspended while it may hold the lock.
+    private func write(
+        _ operations: [PendingOperation], dismissing dismissals: Set<SyncIssue.ID>
+    ) async -> Result<StoreDocument, any Error> {
+        let activity = ExpiringActivity(reason: "Saving your changes")
+        defer { activity.end() }
+        do {
+            let written = try await store.update { document in
+                for operation in operations {
+                    document.outbox = OutboxCompactor.appending(operation, to: document.outbox)
+                }
+                if !dismissals.isEmpty { document.issues.removeAll { dismissals.contains($0.id) } }
+            }
+            return .success(written)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// Adopts the document this workspace just wrote. When nobody else wrote
+    /// in between, it is the held document plus the written commands, which
+    /// `state` already shows: no replay needed.
+    private func adoptWritten(_ written: StoreDocument) {
+        let expectedGeneration = document.generation + 1
+        document = written
+        if written.generation != expectedGeneration { recomputeState() }
+        refreshDerivedState()
+    }
+
+    nonisolated static func storageMessage(for error: any Error) -> String {
+        if let error = error as? DocumentStoreError { return error.message }
+        return "Your latest changes couldn't be saved on this device yet. They're kept and saved with your next change."
+    }
+}
+
+// MARK: - Adopting documents
+
+extension Workspace {
+    /// Takes a document read from the store or reported by sync, if it is
+    /// newer than the held one: every write increments the generation, so an
+    /// older or equal one is a late event or a read that started before one of
+    /// our own writes landed. While a write is in flight it waits for that
+    /// write, so the commands being written are not applied twice.
+    private func receive(_ incoming: StoreDocument) {
+        guard incoming.generation > document.generation else { return }
+        guard !isWriting else {
+            if incoming.generation > deferredDocument?.generation ?? Int.min { deferredDocument = incoming }
+            return
+        }
+        adopt(incoming)
+    }
+
+    private func adoptDeferredDocument() {
+        guard let deferred = deferredDocument else { return }
+        deferredDocument = nil
+        if deferred.generation > document.generation { adopt(deferred) }
+    }
+
+    private func adopt(_ incoming: StoreDocument) {
+        document = incoming
+        recomputeState()
+        refreshDerivedState()
+    }
+
+    /// Shows `document` as loaded, synchronously (previews).
+    func adoptLoaded(_ loaded: StoreDocument) {
+        adopt(loaded)
+        isLoaded = true
+    }
+
+    /// Rebuilds `state` from the document and the unwritten commands.
+    private func recomputeState() {
+        fullReplayCount += 1
+        let replayed = OutboxReplayer.replay(document.outbox + unpersisted, onto: document.base).state
+        if replayed != state { state = replayed }
+    }
+
+    /// Everything derived from `document` except `state`. Assigns only what
+    /// changed, so views are not invalidated for nothing.
+    private func refreshDerivedState() {
+        if account != document.account { account = document.account }
+        let visibleIssues = document.issues.filter { !pendingDismissals.contains($0.id) }
+        if issues != visibleIssues { issues = visibleIssues }
+        let pending = document.outbox.count + unpersisted.count
+        if pendingChangeCount != pending { pendingChangeCount = pending }
+        if account == nil {
+            if !isSigningIn, syncStatus != .localOnly { syncStatus = .localOnly }
+        } else if syncStatus == .localOnly {
+            syncStatus = .idle(lastSyncedAt: document.sync.lastPullAt)
+        }
+    }
+
+    /// Adopts the stored document when it is newer than the held one.
+    private func refreshFromStore() async {
+        let storedGeneration: Int?
+        do {
+            storedGeneration = try await store.generation()
+        } catch {
+            return
+        }
+        guard let storedGeneration, storedGeneration > document.generation else { return }
+        let loaded: StoreDocument?
+        do {
+            loaded = try await store.load()
+        } catch {
+            return
+        }
+        if let loaded { receive(loaded) }
+    }
+
+    private func performLoad() async {
+        let epoch = self.epoch
+        let loaded: StoreDocument?
+        do {
+            loaded = try await store.load()
+        } catch {
+            guard epoch == self.epoch else { return }
+            loadError = error.message
+            isLoaded = true
+            return
+        }
+        guard epoch == self.epoch else { return }
+        if loadError != nil { loadError = nil }
+        if let loaded { receive(loaded) }
+        isLoaded = true
+        // A command issued before loading may be writing; the document (and
+        // with it the account) is adopted once that write lands.
+        if let writer { await writer.value }
+        await startSyncIfNeeded()
+    }
+
+    /// Back to an empty, local-only workspace (after sign-out).
+    private func resetToEmptyLocalWorkspace() {
+        epoch += 1
+        unpersisted = []
+        pendingDismissals = []
+        deferredDocument = nil
+        document = StoreDocument()
+        syncStartedFor = nil
+        if storageError != nil { storageError = nil }
+        if state != .empty { state = .empty }
+        refreshDerivedState()
+    }
+}
+
+// MARK: - Sync events
+
+extension Workspace {
+    private func installEventHandlerIfNeeded(_ sync: any SyncService) async {
+        guard !hasEventHandler else { return }
+        hasEventHandler = true
+        await sync.setEventHandler { [weak self] event in
+            await self?.handle(event)
+        }
+    }
+
+    private func startSyncIfNeeded() async {
+        guard let sync, let account, syncStartedFor != account.id else { return }
+        syncStartedFor = account.id
+        await installEventHandlerIfNeeded(sync)
+        await sync.start(account: account)
+    }
+
+    func handle(_ event: SyncEvent) {
+        switch event {
+        case .status(let status):
+            // A late status from before sign-out must not replace "On this iPhone".
+            guard account != nil || isSigningIn else { return }
+            if syncStatus != status { syncStatus = status }
+        case .documentChanged(let incoming):
+            // Likewise a late document of the account that was just removed.
+            if incoming.account != nil, account == nil, !isSigningIn { return }
+            receive(incoming)
+        }
+    }
+}
+
+// MARK: - Supporting types
+
+/// `Workspace.today`, valid for `validFrom..<validUntil`.
+struct TodayCache {
+    var day: CalendarDay
+    var validFrom: Date
+    var validUntil: Date
 }
 
 public enum WorkspaceError: Error, Hashable, Sendable {
