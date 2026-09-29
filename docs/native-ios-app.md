@@ -256,6 +256,23 @@ Deviations that need a product sign-off:
 4. **System glass motion.** Glass morphing uses system springs; the brand's
    no-spring rule applies to our own animations only.
 
+## Known limitations of pass 1
+
+- **Children sync late.** A subtask or comment edited on another device
+  appears when the task is opened (or its own fields change), because such
+  edits do not change the parent's revision (backend ask 2).
+- **Lost responses older than a day.** If a create's response was lost, its
+  key has expired (24 h) and another device has since changed that task's
+  title or list, the retry can create a duplicate (backend ask 3).
+- **Last pushed wins per field.** Two devices editing the same field offline
+  converge on the one that syncs last; different fields of the same task
+  both survive.
+- **Archived projects and deleted tags are fetched one by one** on every
+  pull, so pulls get slower as archives grow (backend ask 7).
+- **Large local-only outboxes** (thousands of offline changes before the
+  first sign-in) replay on the main actor at launch: about 45 ms for 2 000
+  operations on a release build.
+
 ## Backend asks (not blocking pass 1)
 
 1. A change feed (`GET /tasks?updated_since=` including subtasks and
@@ -269,6 +286,8 @@ Deviations that need a product sign-off:
 6. `docs/api-compatibility.md` asks for an API version before a second
    client; the iOS app sends `X-Client: brainbuddy-ios/<version>` so the
    server can tell clients apart once that exists.
+7. List archived projects and deleted tags (`GET /projects?state=archived`,
+   `GET /tags?state=deleted`) instead of one `GET` per record.
 
 ## Verification
 
