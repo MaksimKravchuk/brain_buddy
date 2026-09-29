@@ -156,7 +156,7 @@ extension SyncEngine {
         case .createTask(let create):
             let before = Set(try await loadDocument().base.tasks.values.compactMap(\.serverID))
             try await pull(context)
-            let title = SyncText.strip(create.title)
+            let title = NameNormalizer.stripped(create.title)
             try await update(context) { doc in
                 guard let index = doc.outbox.firstIndex(where: { $0.id == operation.id }) else { return }
                 let referenced = Set(doc.outbox.compactMap(\.command.taskID))
@@ -184,7 +184,7 @@ extension SyncEngine {
                 try Self.ignoreNotFound(error)
                 break
             }
-            let title = SyncText.strip(create.title)
+            let title = NameNormalizer.stripped(create.title)
             try await update(context) { doc in
                 doc.upsert(task: detail, children: .replace(date), now: date)
                 guard let index = doc.outbox.firstIndex(where: { $0.id == operation.id }) else { return }

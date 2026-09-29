@@ -46,8 +46,11 @@ public enum NameNormalizer {
         }
     }
 
-    /// Python's `str.strip()` with no arguments.
-    static func stripped(_ value: String) -> String {
+    /// Python's `str.strip()` with no arguments: leading and trailing
+    /// `isSpace` scalars removed, nothing else touched. It is how the server
+    /// and every client trim a title, and how `GTDReducer` stores titles and
+    /// waiting notes, so sync uses it to send and match exactly those values.
+    public static func stripped(_ value: String) -> String {
         let scalars = value.unicodeScalars
         guard let first = scalars.firstIndex(where: { !isSpace($0) }),
             let last = scalars.lastIndex(where: { !isSpace($0) })

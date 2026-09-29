@@ -112,7 +112,7 @@ enum PushPlanner {
             let tag = try resolver.tag(id)
             return .deleteTag(id: tag.id, revision: tag.revision)
         case .createTask(var create):
-            create.title = SyncText.strip(create.title)
+            create.title = NameNormalizer.stripped(create.title)
             if create.details?.isEmpty == true { create.details = nil }
             do {
                 return .createTask(
@@ -124,7 +124,7 @@ enum PushPlanner {
         case .updateTask(let update):
             let task = try resolver.task(update.taskID)
             var changes = update.changes
-            if case .set(let title) = changes.title { changes.title = .set(SyncText.strip(title)) }
+            if case .set(let title) = changes.title { changes.title = .set(NameNormalizer.stripped(title)) }
             if changes.details == .set("") { changes.details = .clear }
             do {
                 let body = try TaskUpdateBody(
@@ -139,12 +139,15 @@ enum PushPlanner {
             let task = try resolver.task(transition.taskID)
             return .transitionTask(id: task.id, TaskTransitionBody(transition, expectedRevision: task.revision))
         case .createSubtask(let create):
-            return .createSubtask(taskID: try resolver.task(create.taskID).id, title: SyncText.strip(create.title))
+            return .createSubtask(
+                taskID: try resolver.task(create.taskID).id, title: NameNormalizer.stripped(create.title)
+            )
         case .updateSubtask(let update):
             let task = try resolver.task(update.taskID)
             let subtask = try resolver.subtask(update.subtaskID, in: update.taskID)
             return .updateSubtask(
-                taskID: task.id, subtaskID: subtask.id, title: SyncText.strip(update.title), revision: subtask.revision
+                taskID: task.id, subtaskID: subtask.id, title: NameNormalizer.stripped(update.title),
+                revision: subtask.revision
             )
         case .transitionSubtask(let transition):
             let task = try resolver.task(transition.taskID)
