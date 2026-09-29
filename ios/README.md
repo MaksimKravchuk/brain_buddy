@@ -134,12 +134,19 @@ This workflow is not part of `make verify-all` and not a landing-required
 check; it is separate from `ci.yml` so iOS changes do not slow the web
 pipeline down.
 
+Nothing in it floats. Every action is pinned to a commit SHA (with its tag in
+a comment), and XcodeGen is the release zip of the version in
+`XCODEGEN_VERSION`, checked against `XCODEGEN_SHA256` and against
+`xcodegen --version` before it runs. To upgrade XcodeGen, download the new
+`xcodegen.zip`, take its `shasum -a 256`, and change both values together.
+
 ## TestFlight
 
 Every push to `main` that touches `ios/` (and every manual run on `main`)
-uploads a build to TestFlight once `kit-linux` and `app-macos` pass. Until the
-owner finishes the setup below, the `testflight` job writes what is missing to
-the run summary ("TestFlight upload skipped: configure …") and stays green.
+uploads a build to TestFlight once `kit-linux` and `app-macos` pass and a
+reviewer approves the `testflight` deployment. Until the owner finishes the
+setup below, the `testflight` job writes what is missing to the run summary
+("TestFlight upload skipped: configure …") and stays green.
 
 ### One-time setup
 
@@ -151,17 +158,35 @@ the run summary ("TestFlight upload skipped: configure …") and stays green.
 2. **App record.** In App Store Connect create the app (*Apps → +*, iOS) with
    bundle id `<prefix>.ios`. The name, SKU and primary language are yours.
 3. **API key.** *Users and Access → Integrations → App Store Connect API →
-   Team keys*: create a key with the **Admin** role. Admin is what lets
-   `xcodebuild` create cloud-managed distribution certificates; App Manager is
-   not enough. Download the `.p8` (it can be downloaded once) and note the key
-   id and the issuer id.
+   Team keys*: create a key with the **Admin** role. Download the `.p8` (it
+   can be downloaded once) and note the key id and the issuer id.
+
+   *Why Admin.* CI signs on a fresh runner that has no certificate of its
+   own, so `xcodebuild -allowProvisioningUpdates` asks App Store Connect for a
+   cloud-managed distribution certificate and the profiles for both targets.
+   With an API key that takes the Admin role; App Manager is not enough.
+
+   *What it can do if it leaks.* A team key is not scoped to this app. Until
+   someone revokes it, whoever holds the `.p8`, key id and issuer id acts as
+   an Admin of the whole team through the App Store Connect API: every app's
+   builds, TestFlight testers and App Store submissions, certificates,
+   identifiers, devices and profiles (including revoking the certificates
+   other apps sign with), and users and their roles. It does not expire on its
+   own. That is why the next step's protection rules are not optional, why the
+   job deletes the key before any third-party action runs, and why the answer
+   to a suspected leak is to revoke the key in *Users and Access →
+   Integrations* at once and create a new one.
 4. **GitHub environment.** *Settings → Environments → New environment*, named
-   `testflight`:
+   `testflight`. Both protection rules below are required, not suggestions:
    - *Deployment branches and tags*: **Selected branches → `main`**. This
      branch policy, not the workflow's `if`, is what keeps the key away from
      pull requests and other branches, as the `production` environment does
      for Fly.
-   - Optional: required reviewers, to approve each upload.
+   - *Required reviewers*: at least one person, with **Prevent self-review**
+     checked, and **Allow administrators to bypass configured protection
+     rules** unchecked. Every upload then waits for someone other than the
+     person who triggered it, so one compromised or careless GitHub account
+     can't get code signed and shipped with the Admin key on its own.
    - Secrets:
      - `APP_STORE_CONNECT_API_KEY_ID`: the key id
      - `APP_STORE_CONNECT_API_ISSUER_ID`: the issuer id
@@ -183,7 +208,8 @@ change under `ios/`.
 
 ### What the job does
 
-1. Selects the newest Xcode 26 and generates the project.
+1. Waits for a reviewer's approval (the environment's rule), then selects the
+   newest Xcode 26, installs the pinned XcodeGen and generates the project.
 2. Writes the key to `$RUNNER_TEMP/private_keys/AuthKey_<key id>.p8` (mode 600).
 3. `xcodebuild archive` (Release, `generic/platform=iOS`) with
    `DEVELOPMENT_TEAM`, `CURRENT_PROJECT_VERSION` and, if set,
@@ -193,9 +219,11 @@ change under `ios/`.
 4. `xcodebuild -exportArchive` with `ci/ExportOptions.plist` (the team id is
    added to a temporary copy): method `app-store-connect`, destination
    `upload`, so the export uploads the build and its symbols directly.
-5. Writes the bundle id, version, build and commit to the run summary, and
-   deletes the key whatever happened. On failure it uploads the archive and
-   export logs, with the key id and issuer id redacted.
+5. Deletes the key, whatever happened, as soon as the export step is over:
+   before the summary, the log redaction and the artifact upload.
+6. Writes the bundle id, version, build and commit to the run summary. On
+   failure it uploads the archive and export logs, with the key id and issuer
+   id redacted.
 
 ### Build numbers and versions
 
@@ -261,11 +289,9 @@ data, or need a sign-in.
   The rules it relies on are tested in the package.
 - iOS results are not in the Allure report or `make verify-all`, and
   `ios.yml` does not gate landing.
-- An iOS-only landing still redeploys the Fly apps: `ios/` is not in the
-  inert set of `scripts/classify_deploy_paths.sh` (gate-guarded, so that is a
-  separate change).
 - The design deviations in `docs/native-ios-app.md` (SF Symbols, derived dark
-  mode, SF Pro, system glass motion) are awaiting product sign-off.
+  mode, SF Pro, system glass motion, sky-700 for text and filled controls) are
+  awaiting product sign-off.
 - The app icon is the Sprout logo in white on sky (`#0EA5E9`), a single
   1024 × 1024 px image; iOS derives the dark and tinted variants. No other
   brand mark exists yet.
