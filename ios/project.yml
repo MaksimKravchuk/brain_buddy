@@ -1,0 +1,183 @@
+# XcodeGen spec for the native iOS app (docs/native-ios-app.md).
+#
+#   cd ios && xcodegen generate && open BrainBuddy.xcodeproj
+#
+# BrainBuddy.xcodeproj, both Info.plists and both .entitlements files are
+# written from this file on every `xcodegen generate` and are not committed.
+# Change them here, never in Xcode's editors.
+name: BrainBuddy
+
+options:
+  minimumXcodeGenVersion: 2.42.0
+  # Fallback only, for a target without its own PRODUCT_BUNDLE_IDENTIFIER.
+  # The shipping targets derive theirs from BB_BUNDLE_ID_PREFIX below.
+  bundleIdPrefix: com.brainbuddy
+  deploymentTarget:
+    iOS: "26.0"
+  xcodeVersion: "26.0"
+  developmentLanguage: en
+
+packages:
+  BrainBuddyKit:
+    path: BrainBuddyKit
+
+# Project-level, so the app and its widget extension can never disagree on
+# identifiers, signing, version or language mode.
+settings:
+  base:
+    # Every identifier derives from this prefix: the app `<prefix>.ios`, the
+    # widgets `<prefix>.ios.widgets`, the App Group `group.<prefix>.ios` and
+    # the background refresh task `<prefix>.ios.refresh`. Code reads the App
+    # Group from the BBAppGroupIdentifier Info.plist key and the refresh id
+    # from the bundle id, so this line is the only place to change it. CI
+    # overrides it on the xcodebuild command line from vars.IOS_BUNDLE_ID_PREFIX.
+    BB_BUNDLE_ID_PREFIX: com.brainbuddy
+    BB_APP_GROUP_ID: group.$(BB_BUNDLE_ID_PREFIX).ios
+    # Deliberately empty. Choose your team in Xcode (Signing & Capabilities) or
+    # pass DEVELOPMENT_TEAM=<team id> to xcodebuild; CI passes vars.APPLE_TEAM_ID.
+    # See README.md, "Signing and identifiers".
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    # The extension's version and build must equal the app's, or App Store
+    # Connect rejects the upload. CI overrides CURRENT_PROJECT_VERSION.
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    ENABLE_PREVIEWS: YES
+
+targets:
+  BrainBuddy:
+    type: application
+    platform: iOS
+    sources:
+      # Includes BrainBuddy/Resources (asset catalog). The generated Info.plist
+      # and .entitlements there are never added to a build phase.
+      - path: BrainBuddy
+      # Compiled into both the app and the widget extension. Its resources
+      # (PrivacyInfo.xcprivacy) ship in both bundles.
+      - path: Shared
+    dependencies:
+      - package: BrainBuddyKit
+        products:
+          - BrainBuddyWorkspace
+          - BrainBuddyCore
+      - target: BrainBuddyWidgets
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BB_BUNDLE_ID_PREFIX).ios
+        # Set per target on purpose: XcodeGen's iOS presets are applied at the
+        # target level and would shadow a project-level value.
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    info:
+      path: BrainBuddy/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Brain Buddy
+        # XcodeGen's defaults are literal "1.0" / "1"; tie both to build settings.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        BBAppGroupIdentifier: $(BB_APP_GROUP_ID)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CFBundleURLTypes:
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
+            CFBundleURLSchemes:
+              - brainbuddy
+        # Registered in code as Bundle.main.bundleIdentifier + ".refresh".
+        BGTaskSchedulerPermittedIdentifiers:
+          - $(PRODUCT_BUNDLE_IDENTIFIER).refresh
+        UIBackgroundModes:
+          - fetch
+        # https everywhere; plain http only to a development server on the LAN
+        # or localhost (the server address is editable in Settings).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        # HTTPS only (exempt), so TestFlight skips the export-compliance prompt.
+        ITSAppUsesNonExemptEncryption: false
+    entitlements:
+      path: BrainBuddy/Resources/BrainBuddy.entitlements
+      properties:
+        # The one shared store (docs/native-ios-app.md, "Persistence and
+        # extensions"). No keychain sharing: extensions never sync, so they
+        # never need the session.
+        com.apple.security.application-groups:
+          - $(BB_APP_GROUP_ID)
+
+  BrainBuddyWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: BrainBuddyWidgets
+      - path: Shared
+    dependencies:
+      - package: BrainBuddyKit
+        products:
+          - BrainBuddyWorkspace
+          - BrainBuddyCore
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+      - sdk: AppIntents.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BB_BUNDLE_ID_PREFIX).ios.widgets
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # An embedded extension must not install on its own, or `xcodebuild
+        # archive` produces a generic archive that cannot go to TestFlight.
+        SKIP_INSTALL: YES
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME: WidgetBackground
+    info:
+      path: BrainBuddyWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Brain Buddy
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        BBAppGroupIdentifier: $(BB_APP_GROUP_ID)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: BrainBuddyWidgets/BrainBuddyWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(BB_APP_GROUP_ID)
+
+schemes:
+  BrainBuddy:
+    build:
+      targets:
+        BrainBuddy: all
+        BrainBuddyWidgets: all
+    run:
+      config: Debug
+      executable: BrainBuddy
+    test:
+      config: Debug
+      # The package's Swift Testing targets, run on the chosen iOS Simulator:
+      #   xcodebuild test -scheme BrainBuddy \
+      #     -destination 'platform=iOS Simulator,name=iPhone 17'
+      # CI runs the same targets with `swift test` on Linux and macOS.
+      targets:
+        - package: BrainBuddyKit/BrainBuddyCoreTests
+        - package: BrainBuddyKit/BrainBuddyPersistenceTests
+        - package: BrainBuddyKit/BrainBuddyAPITests
+        - package: BrainBuddyKit/BrainBuddySyncTests
+        - package: BrainBuddyKit/BrainBuddyWorkspaceTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

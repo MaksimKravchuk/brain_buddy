@@ -4,6 +4,7 @@
 - `backend/`: FastAPI app under `app/` with repositories, services, and `tests/` (pytest).
 - `frontend/`: Vite React client under `src/`; Vitest specs live in `src/**/__tests__/`.
 - `mobile/`: Expo (React Native) iOS-first client; Jest specs in `src/**/__tests__/`, real-backend integration suite in `integration/`. See `mobile/AGENTS.md`.
+- `ios/`: native offline-first SwiftUI app (iOS 26) with an XcodeGen project and the Linux-testable `BrainBuddyKit` package; CI and TestFlight in `.github/workflows/ios.yml`. See `ios/AGENTS.md` and `docs/native-ios-app.md`.
 - `docs/`: Architecture, API, troubleshooting, performance, and smoke runbooks.
 - `deploy/`: Container assets (nginx config).
 - `scripts/`: Utility scripts such as `smoke_test.sh`.
