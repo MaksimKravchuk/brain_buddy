@@ -18,7 +18,7 @@ let package = Package(
         .target(name: "BrainBuddyCore"),
         .target(name: "BrainBuddyPersistence", dependencies: ["BrainBuddyCore"]),
         .target(name: "BrainBuddyAPI", dependencies: ["BrainBuddyCore"]),
-        .target(name: "BrainBuddySync", dependencies: ["BrainBuddyCore", "BrainBuddyAPI"]),
+        .target(name: "BrainBuddySync", dependencies: ["BrainBuddyCore", "BrainBuddyPersistence", "BrainBuddyAPI"]),
         .target(
             name: "BrainBuddyWorkspace",
             dependencies: ["BrainBuddyCore", "BrainBuddyPersistence", "BrainBuddyAPI", "BrainBuddySync"]
