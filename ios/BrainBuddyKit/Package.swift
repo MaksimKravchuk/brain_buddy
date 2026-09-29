@@ -23,10 +23,13 @@ let package = Package(
             name: "BrainBuddyWorkspace",
             dependencies: ["BrainBuddyCore", "BrainBuddyPersistence", "BrainBuddyAPI", "BrainBuddySync"]
         ),
+        // An in-memory Brain Buddy server behind `HTTPTransport`, for tests
+        // (sync, workspace) that need realistic server semantics offline.
+        .target(name: "BrainBuddyFakeServer", dependencies: ["BrainBuddyCore", "BrainBuddyAPI"]),
         .testTarget(name: "BrainBuddyCoreTests", dependencies: ["BrainBuddyCore"]),
         .testTarget(name: "BrainBuddyPersistenceTests", dependencies: ["BrainBuddyPersistence"]),
         .testTarget(name: "BrainBuddyAPITests", dependencies: ["BrainBuddyAPI"]),
-        .testTarget(name: "BrainBuddySyncTests", dependencies: ["BrainBuddySync"]),
-        .testTarget(name: "BrainBuddyWorkspaceTests", dependencies: ["BrainBuddyWorkspace"]),
+        .testTarget(name: "BrainBuddySyncTests", dependencies: ["BrainBuddySync", "BrainBuddyFakeServer"]),
+        .testTarget(name: "BrainBuddyWorkspaceTests", dependencies: ["BrainBuddyWorkspace", "BrainBuddyFakeServer"]),
     ]
 )
