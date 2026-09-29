@@ -41,7 +41,7 @@ struct EmptyStateView: View {
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .buttonStyle(.borderedProminent)
-                    .tint(BBColor.brand)
+                    .tint(BBColor.brandFill)
                     .controlSize(.large)
             }
         }

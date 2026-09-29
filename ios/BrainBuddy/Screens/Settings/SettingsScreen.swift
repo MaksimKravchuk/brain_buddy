@@ -30,15 +30,21 @@ struct SettingsScreen: View {
         .sheet(item: $signInRequest) { request in
             SignInSheet(email: request.email, serverURL: request.serverURL)
         }
+        // Signing out removes the account's tasks from this device, so it is
+        // always confirmed; with unsynced changes the dialog says they'd be lost.
         .confirmationDialog(
-            WorkspaceError.unsyncedChanges(count: unsyncedCount).message,
+            signOutTitle,
             isPresented: $isConfirmingSignOut,
             titleVisibility: .visible
         ) {
-            Button("Sign out and remove", role: .destructive) { signOut(discardingUnsyncedChanges: true) }
+            if unsyncedCount > 0 {
+                Button("Sign out and remove", role: .destructive) { signOut(discardingUnsyncedChanges: true) }
+            } else {
+                Button("Sign out", role: .destructive) { signOut(discardingUnsyncedChanges: false) }
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(signOutWarning)
+            Text(signOutMessage)
         }
     }
 
@@ -98,7 +104,14 @@ struct SettingsScreen: View {
         "Signing out removes your tasks from this \(ThisDevice.name). They stay in your account."
     }
 
-    private var signOutWarning: String {
+    private var signOutTitle: String {
+        unsyncedCount > 0 ? WorkspaceError.unsyncedChanges(count: unsyncedCount).message : "Sign out?"
+    }
+
+    private var signOutMessage: String {
+        guard unsyncedCount > 0 else {
+            return "Your tasks are removed from this \(ThisDevice.name). They stay in your account."
+        }
         let pronoun = unsyncedCount == 1 ? "it" : "them"
         return "Sign out and remove \(pronoun) from this \(ThisDevice.name)?"
     }
@@ -196,14 +209,12 @@ struct SettingsScreen: View {
 
     // MARK: Actions
 
+    /// Always asks first. Without unsynced changes a plain sign-out is
+    /// confirmed; if changes arrive meanwhile, `signOut` asks again with the
+    /// real count.
     private func requestSignOut() {
-        let pending = workspace.pendingChangeCount
-        if pending > 0 {
-            unsyncedCount = pending
-            isConfirmingSignOut = true
-        } else {
-            signOut(discardingUnsyncedChanges: false)
-        }
+        unsyncedCount = workspace.pendingChangeCount
+        isConfirmingSignOut = true
     }
 
     private func signOut(discardingUnsyncedChanges discard: Bool) {

@@ -30,4 +30,8 @@ enum SharedConstants {
 
     /// Opens the app on the capture sheet; the app handles it in `.onOpenURL`.
     static let captureURL = URL(string: "\(urlScheme)://capture")!
+
+    /// Open the app on the Next actions and Today tabs (`AppRouter.handle`).
+    static let nextURL = URL(string: "\(urlScheme)://next")!
+    static let todayURL = URL(string: "\(urlScheme)://today")!
 }

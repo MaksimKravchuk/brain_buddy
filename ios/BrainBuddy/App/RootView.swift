@@ -21,8 +21,12 @@ struct RootView: View {
 // MARK: - Tabs
 
 /// Inbox, Next actions, Today, Lists and Search, with the capture bar in the
-/// tab view's bottom accessory. Glass comes from the system chrome (tab bar,
-/// accessory, navigation bars); the screens themselves stay flat.
+/// tab view's bottom accessory (and at the bottom of the iPad sidebar, where
+/// the accessory is not shown). Glass comes from the system chrome (tab bar,
+/// accessory, sidebar, navigation bars); the screens themselves stay flat.
+///
+/// The capture sheet and Process inbox host their own toasts, next to their
+/// bottom buttons, so an Undo never covers the controls.
 private struct MainTabView: View {
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
@@ -57,13 +61,16 @@ private struct MainTabView: View {
         .tabViewBottomAccessory {
             CaptureAccessory()
         }
+        .tabViewSidebarBottomBar {
+            CaptureAccessory(drawsGlass: true)
+        }
         .sheet(item: $router.capture) { context in
             CaptureSheet(context: context)
-                .overlay(alignment: .bottom) { ToastHost() }
         }
-        .fullScreenCover(isPresented: $router.isProcessingInbox) {
+        // A capture asked for while Process inbox was open (⌘N, a deep link)
+        // shows once the cover has gone.
+        .fullScreenCover(isPresented: $router.isProcessingInbox, onDismiss: { router.presentPendingCapture() }) {
             ProcessInboxScreen()
-                .overlay(alignment: .bottom) { ToastHost() }
         }
         // Changes stay on screen and are retried with the next save; say so
         // when a save fails instead of pretending it worked.
@@ -83,10 +90,13 @@ private struct TabRootView: View {
     var body: some View {
         NavigationStack(path: router.path(for: tab)) {
             TabRootScreen(tab: tab)
+                .toastMagicTap()
                 .navigationDestination(for: AppRoute.self) { route in
                     AppRouteView(route: route)
+                        .toastMagicTap()
                 }
         }
+        .environment(\.appTab, tab)
         .overlay(alignment: .bottom) {
             ToastHost()
         }

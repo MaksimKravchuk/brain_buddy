@@ -14,21 +14,30 @@ import UIKit
 /// from the same Tailwind slate / sky / indigo / emerald / amber / rose scales:
 /// surfaces step up in lightness with elevation (sunken `#0B1120` < base
 /// `#0F172A` < raised `#1E293B`), text uses slate-100/300/400, hairlines
-/// slate-700, the sky brand stays `#0EA5E9`, and semantic backgrounds are the
-/// dim 950 shades with 300-level text.
+/// slate-700, the sky brand stays `#0EA5E9` for large accents (text and fills
+/// use `brandText` / `brandFill`), and semantic backgrounds are the dim 950
+/// shades with 300-level text.
 ///
 /// With Increase Contrast on, tertiary text, placeholders and hairlines step
 /// one shade stronger so metadata stays legible.
 enum BBColor {
     // MARK: Brand
 
-    /// sky-500. Interactive accents, selection, the Inbox badge, completed checks.
+    /// sky-500. Large, non-text accents only: sky-500 is 2.8:1 on white, too
+    /// low for text, small symbols or fills that carry white text. Use
+    /// `brandText` or `brandFill` for those.
     static let brand = color(Tone(0x0EA5E9, 0x0EA5E9))
     /// sky-500 at 10% (18% in dark mode). Selected rows, soft brand fills.
     static let brandSoft = color(Tone(0x0EA5E9, 0x0EA5E9, lightAlpha: 0.10, darkAlpha: 0.18))
-    /// Brand-coloured text that meets contrast on the base surfaces
-    /// (sky-700 in light mode, sky-400 in dark mode).
-    static let brandText = color(Tone(0x0369A1, 0x38BDF8))
+    /// Brand-coloured text and symbols that meet contrast on the base surfaces
+    /// (sky-700 in light mode, sky-400 in dark mode). The app's tint.
+    static let brandText = color(brandTextTone)
+    /// `brandText` for UIKit views (the Smart Add highlight).
+    static var brandTextUIColor: UIColor { uiColor(brandTextTone) }
+    /// sky-700 in both modes. Fills that carry white text or a white glyph:
+    /// prominent buttons, the Inbox count pill, the completed check.
+    static let brandFill = color(Tone(0x0369A1, 0x0369A1))
+    private static let brandTextTone = Tone(0x0369A1, 0x38BDF8)
     /// indigo-500. Sparing secondary accents.
     static let secondary = color(Tone(0x6366F1, 0x818CF8))
     /// Text and symbols placed on a `brand` fill.
@@ -58,8 +67,11 @@ enum BBColor {
 
     /// slate-200. The universal hairline.
     static let hairline = color(Tone(0xE2E8F0, 0x334155), highContrast: Tone(0xCBD5E1, 0x475569))
-    /// slate-300. Hover / pressed hairline and the open completion circle.
+    /// slate-300. Hover / pressed hairline.
     static let hairlineStrong = color(Tone(0xCBD5E1, 0x475569), highContrast: Tone(0x94A3B8, 0x64748B))
+    /// slate-400 (slate-500 with Increase Contrast). The outline of a control
+    /// that is drawn as a shape only, such as the open completion circle.
+    static let controlStroke = color(Tone(0x94A3B8, 0x64748B), highContrast: Tone(0x64748B, 0x94A3B8))
 
     // MARK: Semantics
 
@@ -147,13 +159,17 @@ enum BBColor {
     }
 
     private static func color(_ normal: Tone, highContrast: Tone? = nil) -> Color {
-        Color(uiColor: UIColor { traits in
+        Color(uiColor: uiColor(normal, highContrast: highContrast))
+    }
+
+    private static func uiColor(_ normal: Tone, highContrast: Tone? = nil) -> UIColor {
+        UIColor { traits in
             let tone = traits.accessibilityContrast == .high ? (highContrast ?? normal) : normal
             if traits.userInterfaceStyle == .dark {
                 return UIColor(bbRGB: tone.dark, alpha: tone.darkAlpha)
             }
             return UIColor(bbRGB: tone.light, alpha: tone.lightAlpha)
-        })
+        }
     }
 }
 
@@ -267,6 +283,9 @@ enum BBMetrics {
     static let hitTarget: CGFloat = 44
     /// Visual diameter of the completion circle before Dynamic Type scaling.
     static let completionCircle: CGFloat = 22
+    /// The largest the completion circle grows with Dynamic Type, so it stays
+    /// inside its 44 pt target at accessibility sizes.
+    static let completionCircleMax: CGFloat = 36
     /// Project colour dot before Dynamic Type scaling.
     static let projectDot: CGFloat = 8
 }

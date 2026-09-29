@@ -61,6 +61,10 @@ struct TaskEntity: AppEntity {
 
 /// Resolves tasks for Siri and Shortcuts: by id, suggestions (due today or
 /// earlier, then next actions), and title search over open tasks.
+///
+/// While the device is locked, suggestions and search return nothing, so
+/// Siri never lists or reads back task titles on the Lock Screen. Lookup by
+/// id still works (for example the task a Lock Screen capture just created).
 struct TaskEntityQuery: EntityStringQuery {
     init() {}
 
@@ -69,11 +73,13 @@ struct TaskEntityQuery: EntityStringQuery {
     }
 
     func entities(matching string: String) async throws -> [TaskEntity] {
-        await TaskEntityLookup.search(string)
+        guard !DeviceLock.isLocked() else { return [] }
+        return await TaskEntityLookup.search(string)
     }
 
     func suggestedEntities() async throws -> [TaskEntity] {
-        await TaskEntityLookup.suggested()
+        guard !DeviceLock.isLocked() else { return [] }
+        return await TaskEntityLookup.suggested()
     }
 }
 

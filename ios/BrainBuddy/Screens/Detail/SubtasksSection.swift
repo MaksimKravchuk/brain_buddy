@@ -106,7 +106,7 @@ private struct DetailSubtaskRow: View {
             Button(action: toggle) {
                 Image(systemName: symbol)
                     .font(.title3)
-                    .foregroundStyle(isOpen ? Color.secondary : Color.accentColor)
+                    .foregroundStyle(isOpen ? BBColor.textTertiary : BBColor.brandText)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }

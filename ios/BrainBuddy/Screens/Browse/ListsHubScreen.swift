@@ -6,6 +6,8 @@ import SwiftUI
 /// the four open lists, dates, projects, tags, history, then settings.
 struct ListsHubScreen: View {
     @Environment(Workspace.self) private var workspace
+    /// Read so the Overdue and Today counts change at midnight.
+    @Environment(\.dayChangeCount) private var dayChangeCount
 
     /// How many tags the hub shows before "All tags".
     private static let topTagLimit = 6
@@ -13,9 +15,11 @@ struct ListsHubScreen: View {
     init() {}
 
     var body: some View {
+        let _ = dayChangeCount
         let counts = workspace.counts()
         List {
             listsSection(counts)
+            reviewSection
             datesSection(counts)
             projectsSection
             tagsSection
@@ -37,6 +41,13 @@ struct ListsHubScreen: View {
                     )
                 }
             }
+        }
+    }
+
+    /// Weekly review sits apart from the four lists: it is not a fifth list,
+    /// and it is visibly deferred.
+    private var reviewSection: some View {
+        Section {
             DeferredRow(title: "Weekly review", systemImage: "arrow.counterclockwise")
         }
     }

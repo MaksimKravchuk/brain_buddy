@@ -6,10 +6,16 @@ import Foundation
 /// Completes a task, fully offline. Siri and Shortcuts pick the task through
 /// `TaskEntityQuery`; widget rows run it from their completion button, in the
 /// widget extension's process.
+///
+/// It needs an unlocked device: choosing a task lists and reads back task
+/// titles, which must not happen on the Lock Screen (or from a widget in
+/// StandBy) for whoever is holding the phone.
 struct CompleteTaskIntent: AppIntent {
     static let title: LocalizedStringResource = "Complete task"
 
     static let description = IntentDescription("Marks a Brain Buddy task as complete, even offline.")
+
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @Parameter(title: "Task", requestValueDialog: "Which task did you finish?")
     var task: TaskEntity

@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 /// Smart Add text entry: a wrapping text field that highlights recognised
-/// `@project` tokens in the brand colour (semibold) and `#tag` tokens in the
+/// `@project` tokens in the brand text colour (semibold) and `#tag` tokens in the
 /// tag style (neutral fill). `tokens` come from `CapturePreview.tokens` and
 /// use UTF-16 offsets, which map directly onto the text view's `NSRange`s.
 ///
@@ -114,7 +114,7 @@ private struct SmartAddTextView: UIViewRepresentable {
             let range = token.utf16Range
             guard range.lowerBound >= 0, range.upperBound <= length, !range.isEmpty else { continue }
             storage.addAttributes(
-                attributes(for: token.kind, tint: view.tintColor),
+                attributes(for: token.kind),
                 range: NSRange(location: range.lowerBound, length: range.count)
             )
         }
@@ -127,11 +127,13 @@ private struct SmartAddTextView: UIViewRepresentable {
         [.font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: UIColor.label]
     }
 
-    private static func attributes(for kind: SmartAddToken.Kind, tint: UIColor) -> [NSAttributedString.Key: Any] {
+    private static func attributes(for kind: SmartAddToken.Kind) -> [NSAttributedString.Key: Any] {
         switch kind {
         case .project:
             return [
-                .foregroundColor: tint,
+                // Brand text (sky-700 / sky-400), not sky-500, so the token
+                // meets text contrast.
+                .foregroundColor: BBColor.brandTextUIColor,
                 .font: UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 17, weight: .semibold)),
             ]
         case .tag:

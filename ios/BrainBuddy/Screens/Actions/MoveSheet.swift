@@ -88,16 +88,24 @@ struct MoveSheet: View {
 }
 
 /// The "Waiting for" field used wherever a task enters Waiting for: moving,
-/// reopening, capturing and processing the inbox.
+/// reopening, capturing and processing the inbox. It takes focus when it
+/// appears, because the move can't happen until it is filled in.
 struct WaitingForSection: View {
     @Binding var text: String
+    @FocusState private var isFocused: Bool
+
+    init(text: Binding<String>) {
+        _text = text
+    }
 
     var body: some View {
         Section {
             TextField("Who or what are you waiting on?", text: $text, axis: .vertical)
                 .lineLimit(1...4)
                 .textInputAutocapitalization(.sentences)
+                .focused($isFocused)
                 .accessibilityLabel("Waiting for")
+                .onAppear { isFocused = true }
         } header: {
             Text("Waiting for")
         } footer: {
@@ -143,7 +151,7 @@ struct InlineProblemText: View {
                 .accessibilityHidden(true)
         }
         .font(.footnote)
-        .foregroundStyle(.red)
+        .foregroundStyle(BBColor.dangerText)
         .accessibilityElement(children: .combine)
     }
 }

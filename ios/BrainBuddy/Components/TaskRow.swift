@@ -10,15 +10,17 @@ import SwiftUI
 /// `List`, wrap it with `.padding().bbCard()` for the brand card look.
 ///
 /// For VoiceOver the whole row is one element whose label carries every piece
-/// of metadata, with "Complete" (open tasks) or "Reopen" (finished tasks) as
-/// custom actions.
+/// of metadata. Its actions (Complete, Move, Cancel task, Reopen into…) come
+/// from the `taskActions(_:)` modifier the lists apply, so they are offered
+/// once and reopening always asks for the list.
 struct TaskRow: View {
     let task: TaskRecord
     var showsProject: Bool = true
     var showsList: Bool = false
 
     @Environment(Workspace.self) private var workspace
-    @Environment(ToastCenter.self) private var toasts
+    /// Read so due chips and "since" dates redraw on a new day.
+    @Environment(\.dayChangeCount) private var dayChangeCount
     /// How far the circle's centre sits above the title's first baseline
     /// (about half the x-height), scaled with Dynamic Type.
     @ScaledMetric(relativeTo: .body) private var circleLift: CGFloat = 6
@@ -30,6 +32,7 @@ struct TaskRow: View {
     }
 
     var body: some View {
+        let _ = dayChangeCount
         let details = TaskRowDetails(
             task: task, workspace: workspace, showsProject: showsProject, showsList: showsList
         )
@@ -52,17 +55,6 @@ struct TaskRow: View {
         .listRowBackground(BBColor.surfaceRaised)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(details.accessibilityLabel)
-        .accessibilityActions {
-            if task.isOpen {
-                Button("Complete") {
-                    TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts)
-                }
-            } else {
-                Button("Reopen") {
-                    TaskCommandRunner.reopen(task, workspace: workspace, toasts: toasts)
-                }
-            }
-        }
     }
 }
 
@@ -212,7 +204,7 @@ private struct TaskRowDetails {
 
 // MARK: - Completion control
 
-/// The 44 pt completion target. Open tasks complete on tap: the circle fills
+/// The completion target, at least 44 pt. Open tasks complete on tap: the circle fills
 /// on the brand curve, then the task completes (under 600 ms in total; with
 /// Reduce Motion the fill is instant and the row does not slide). Finished
 /// tasks show a static filled check or cross.
@@ -228,7 +220,7 @@ private struct CompletionControl: View {
         if task.isOpen {
             Button(action: complete) {
                 CompletionCircle(style: isCompleting ? .completed : .open)
-                    .frame(width: BBMetrics.hitTarget, height: BBMetrics.hitTarget)
+                    .frame(minWidth: BBMetrics.hitTarget, minHeight: BBMetrics.hitTarget)
                     .contentShape(.rect)
             }
             .buttonStyle(.borderless)
@@ -236,7 +228,7 @@ private struct CompletionControl: View {
             .accessibilityLabel("Complete")
         } else {
             CompletionCircle(style: task.state == .completed ? .completed : .cancelled)
-                .frame(width: BBMetrics.hitTarget, height: BBMetrics.hitTarget)
+                .frame(minWidth: BBMetrics.hitTarget, minHeight: BBMetrics.hitTarget)
                 .accessibilityHidden(true)
         }
     }
@@ -264,7 +256,10 @@ private struct CompletionCircle: View {
     }
 
     let style: Style
-    @ScaledMetric(relativeTo: .body) private var diameter: CGFloat = BBMetrics.completionCircle
+    @ScaledMetric(relativeTo: .body) private var scaledDiameter: CGFloat = BBMetrics.completionCircle
+
+    /// Grows with Dynamic Type up to a cap, so it stays inside its 44 pt target.
+    private var diameter: CGFloat { min(scaledDiameter, BBMetrics.completionCircleMax) }
 
     var body: some View {
         ZStack {
@@ -285,15 +280,15 @@ private struct CompletionCircle: View {
     private var fill: Color {
         switch style {
         case .open: BBColor.surfaceRaised
-        case .completed: BBColor.brand
+        case .completed: BBColor.brandFill
         case .cancelled: BBColor.surfaceSunken
         }
     }
 
     private var stroke: Color {
         switch style {
-        case .open: BBColor.hairlineStrong
-        case .completed: BBColor.brand
+        case .open: BBColor.controlStroke
+        case .completed: BBColor.brandFill
         case .cancelled: BBColor.hairline
         }
     }

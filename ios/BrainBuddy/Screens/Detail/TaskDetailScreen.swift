@@ -306,7 +306,7 @@ private struct TaskDetailForm: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                TextField("Notes, links, context…", text: $notes, axis: .vertical)
+                TextField("Notes, links, details…", text: $notes, axis: .vertical)
                     .lineLimit(3...)
                     .focused($focus, equals: .notes)
                     .accessibilityLabel("Notes")
@@ -542,7 +542,9 @@ private func setOrClear<Value: Hashable & Sendable & Codable>(_ value: Value?) -
 
 /// Due date quick picks shared by task detail and capture: Today, Tomorrow,
 /// Next week, a calendar, and clear. The chosen day is reported through
-/// `onChange`; nil clears the due date.
+/// `onChange`; nil clears the due date. Disabled (a completed or cancelled
+/// task), the date is history rather than a deadline, so it is never shown
+/// as overdue.
 struct DueDateQuickPicker: View {
     private let day: CalendarDay?
     private let today: CalendarDay
@@ -573,7 +575,7 @@ struct DueDateQuickPicker: View {
                 }
             } label: {
                 if let day {
-                    DueChip(day: day, today: today)
+                    DueChip(day: day, today: today, isDeadlineActive: !isDisabled)
                 } else {
                     Text("Add date")
                 }
@@ -655,7 +657,7 @@ struct TaskTagsSheet: View {
                     if let errorMessage {
                         InlineProblemText(message: errorMessage)
                     } else {
-                        Text("Tags work as contexts, such as calls or errands.")
+                        Text("Tags group tasks by where or how you do them, like calls or errands.")
                     }
                 }
                 Section("Tags") {

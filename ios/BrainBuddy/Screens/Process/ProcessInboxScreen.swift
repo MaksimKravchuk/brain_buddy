@@ -11,7 +11,11 @@ import SwiftUI
 /// date, then decide: Next action, Waiting for… (asks who or what), Someday /
 /// maybe, Done — under 2 minutes (complete), Not needed (cancel), or Skip.
 /// Every decision is one or two workspace commands with an Undo toast that
-/// puts the item back in the Inbox exactly as it was.
+/// puts the item back in the Inbox exactly as it was. The toast shows above
+/// the decision buttons, never over them, and taps on the buttons are ignored
+/// for a moment after each decision so a double tap can't decide the next
+/// item too. At accessibility text sizes the buttons scroll with the item
+/// instead of being pinned, so the item stays readable.
 struct ProcessInboxScreen: View {
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
@@ -26,7 +30,12 @@ struct ProcessInboxScreen: View {
     @State private var stage = ClarifyStage()
     @State private var isAskingWaitingFor = false
     @State private var isChoosingTags = false
+    /// True for a moment after each decision (the double-tap guard).
+    @State private var isSettling = false
     @AccessibilityFocusState private var isTitleFocused: Bool
+
+    /// How long taps on the decision buttons are ignored after a decision.
+    private static let settleDelay: Duration = .milliseconds(300)
 
     init() {}
 
@@ -39,6 +48,9 @@ struct ProcessInboxScreen: View {
                     clarifyView(item)
                 } else {
                     finishedView
+                        .safeAreaInset(edge: .bottom) {
+                            ToastHost()
+                        }
                 }
             }
             .navigationTitle("Process inbox")
@@ -49,6 +61,7 @@ struct ProcessInboxScreen: View {
                 }
             }
         }
+        .toastMagicTap()
         .onAppear(perform: takeSnapshot)
         .onChange(of: current?.task.id, initial: true) { _, _ in
             // A new item starts from what it already has; nothing is staged.
@@ -109,7 +122,10 @@ struct ProcessInboxScreen: View {
     // MARK: Clarify
 
     private func clarifyView(_ item: InboxItem) -> some View {
-        ScrollView {
+        // At accessibility sizes six pinned buttons would fill the screen and
+        // hide the item, so they scroll with it instead.
+        let pinsActions = !dynamicTypeSize.isAccessibilitySize
+        return ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 progressHeader(item)
                 VStack(alignment: .leading, spacing: 8) {
@@ -131,6 +147,14 @@ struct ProcessInboxScreen: View {
                 Text("Is it actionable? Choose where it belongs.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                if !pinsActions {
+                    // The toast sits above the buttons, so Undo never covers a decision.
+                    VStack(spacing: 0) {
+                        ToastHost()
+                            .padding(.horizontal, -16)
+                        actionCluster(item, isFloating: false)
+                    }
+                }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -138,7 +162,15 @@ struct ProcessInboxScreen: View {
             .transition(.opacity)
         }
         .safeAreaInset(edge: .bottom) {
-            actionCluster(item)
+            if pinsActions {
+                // The toast sits above the buttons, so Undo never covers a decision.
+                VStack(spacing: 0) {
+                    ToastHost()
+                    actionCluster(item, isFloating: true)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                }
+            }
         }
     }
 
@@ -241,59 +273,85 @@ struct ProcessInboxScreen: View {
 
     // MARK: Actions
 
-    private func actionCluster(_ item: InboxItem) -> some View {
+    /// The six decisions. Floating (pinned at the bottom) they are a glass
+    /// cluster; inline (scrolling with the item) they are flat content.
+    @ViewBuilder
+    private func actionCluster(_ item: InboxItem, isFloating: Bool) -> some View {
+        let buttons = actionButtons(item, isFloating: isFloating)
+        if isFloating {
+            GlassEffectContainer(spacing: 10) { buttons }
+        } else {
+            buttons
+        }
+    }
+
+    private func actionButtons(_ item: InboxItem, isFloating: Bool) -> some View {
         let pair =
             dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
-        return GlassEffectContainer(spacing: 10) {
-            VStack(spacing: 10) {
-                pair {
-                    actionButton("Next action", systemImage: OpenList.next.symbolName, prominent: true) {
-                        apply(.move(.next), to: item)
-                    }
-                    actionButton("Waiting for…", systemImage: OpenList.waiting.symbolName) {
-                        isAskingWaitingFor = true
-                    }
+        return VStack(spacing: 10) {
+            pair {
+                actionButton("Next action", systemImage: OpenList.next.symbolName, isFloating: isFloating, prominent: true) {
+                    apply(.move(.next), to: item)
                 }
-                pair {
-                    actionButton("Someday / maybe", systemImage: OpenList.someday.symbolName) {
-                        apply(.move(.someday), to: item)
-                    }
-                    actionButton("Done — under 2 minutes", systemImage: "checkmark.circle") {
-                        apply(.complete, to: item)
-                    }
+                actionButton("Waiting for…", systemImage: OpenList.waiting.symbolName, isFloating: isFloating) {
+                    guard !isSettling else { return }
+                    isAskingWaitingFor = true
                 }
-                pair {
-                    actionButton("Not needed", systemImage: "xmark.circle") {
-                        apply(.cancel, to: item)
-                    }
-                    actionButton("Skip", systemImage: "arrow.forward") {
-                        skip(item)
-                    }
+            }
+            pair {
+                actionButton("Someday / maybe", systemImage: OpenList.someday.symbolName, isFloating: isFloating) {
+                    apply(.move(.someday), to: item)
+                }
+                actionButton("Done — under 2 minutes", systemImage: "checkmark.circle", isFloating: isFloating) {
+                    apply(.complete, to: item)
+                }
+            }
+            pair {
+                actionButton("Not needed", systemImage: "xmark.circle", isFloating: isFloating) {
+                    apply(.cancel, to: item)
+                }
+                actionButton("Skip", systemImage: "arrow.forward", isFloating: isFloating) {
+                    skip(item)
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
     }
 
     @ViewBuilder
     private func actionButton(
-        _ title: String, systemImage: String, prominent: Bool = false, action: @escaping () -> Void
+        _ title: String, systemImage: String, isFloating: Bool, prominent: Bool = false,
+        action: @escaping () -> Void
     ) -> some View {
         let button = Button(action: action) {
             Label(title, systemImage: systemImage)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
-        if prominent {
-            button.buttonStyle(.glassProminent)
-        } else {
+        switch (isFloating, prominent) {
+        case (true, true):
+            button.buttonStyle(.glassProminent).tint(BBColor.brandFill)
+        case (true, false):
             button.buttonStyle(.glass)
+        case (false, true):
+            button.buttonStyle(.borderedProminent).tint(BBColor.brandFill)
+        case (false, false):
+            button.buttonStyle(.bordered)
+        }
+    }
+
+    /// Ignores decision taps for `settleDelay`, so a double tap decides one
+    /// item, not the next one as well.
+    private func beginSettling() {
+        isSettling = true
+        Task {
+            try? await Task.sleep(for: Self.settleDelay)
+            isSettling = false
         }
     }
 
     private func apply(_ action: ClarifyAction, to item: InboxItem) {
+        guard !isSettling else { return }
         let original = item.task
         let changes = stage.changes(for: original)
         let succeeded = TaskCommandRunner.run(toasts) { () throws(GTDValidationError) in
@@ -312,6 +370,7 @@ struct ProcessInboxScreen: View {
             }
         }
         guard succeeded else { return }
+        beginSettling()
         moveCursor(to: item.index + 1)
         toasts.show(action.confirmation, actionTitle: "Undo") {
             undo(original: original, changes: changes, index: item.index)
@@ -319,6 +378,8 @@ struct ProcessInboxScreen: View {
     }
 
     private func skip(_ item: InboxItem) {
+        guard !isSettling else { return }
+        beginSettling()
         if !skipped.contains(item.task.id) { skipped.append(item.task.id) }
         moveCursor(to: item.index + 1)
     }
@@ -361,6 +422,7 @@ struct ProcessInboxScreen: View {
                     .frame(minWidth: 120, minHeight: 44)
             }
             .buttonStyle(.borderedProminent)
+            .tint(BBColor.brandFill)
             if !stillSkipped.isEmpty {
                 Button {
                     restart(with: stillSkipped)
@@ -550,7 +612,9 @@ private struct WaitingForPromptSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        // The field takes focus at once; large leaves room for the keyboard
+        // and for larger text.
+        .presentationDetents([.medium, .large])
     }
 }
 

@@ -46,6 +46,15 @@ final class ToastCenter {
         action?()
     }
 
+    /// VoiceOver's magic tap (two-finger double tap): runs the toast's action,
+    /// for example Undo, wherever focus is. Returns false when there is none.
+    @discardableResult
+    func performMagicTap() -> Bool {
+        guard current?.actionTitle != nil, action != nil else { return false }
+        performAction()
+        return true
+    }
+
     /// Dismisses the current toast, or only the toast `id` when given.
     func dismiss(_ id: Toast.ID? = nil) {
         guard let current, id == nil || current.id == id else { return }
@@ -68,10 +77,11 @@ final class ToastCenter {
         }
     }
 
-    /// About four seconds; longer when there is an action to reach or when
-    /// VoiceOver is reading, so nobody loses an Undo to the timer.
+    /// About four seconds; longer when there is an action to reach, and much
+    /// longer with VoiceOver or Switch Control, which take more steps to reach
+    /// it, so nobody loses an Undo to the timer.
     private static func duration(for toast: Toast) -> Duration {
-        if UIAccessibility.isVoiceOverRunning { return .seconds(10) }
+        if UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning { return .seconds(10) }
         if toast.actionTitle != nil || toast.kind == .error { return .seconds(5) }
         return .seconds(4)
     }
@@ -102,9 +112,29 @@ final class ToastCenter {
     }
 }
 
+extension View {
+    /// Lets VoiceOver's magic tap run the current toast's action (Undo)
+    /// from anywhere in this view.
+    func toastMagicTap() -> some View {
+        modifier(ToastMagicTap())
+    }
+}
+
+private struct ToastMagicTap: ViewModifier {
+    @Environment(ToastCenter.self) private var toasts
+
+    func body(content: Content) -> some View {
+        content.accessibilityAction(.magicTap) {
+            _ = toasts.performMagicTap()
+        }
+    }
+}
+
 /// Floats the current toast as a Liquid Glass capsule at the bottom of its
 /// container. Place it in an overlay whose safe area includes the tab bar and
-/// capture accessory, so it sits just above them.
+/// capture accessory, so it sits just above them — or, on a screen with its
+/// own bottom buttons, in the bottom inset just above those buttons, so it
+/// never covers them.
 struct ToastHost: View {
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

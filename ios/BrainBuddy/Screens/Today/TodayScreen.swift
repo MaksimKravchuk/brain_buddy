@@ -3,13 +3,17 @@ import BrainBuddyWorkspace
 import SwiftUI
 
 /// The Today tab: open tasks with a due date, as Overdue, Today and Upcoming.
+/// It redraws at midnight (and when the clock or time zone changes), so
+/// yesterday's "Today" moves to Overdue without another change.
 struct TodayScreen: View {
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
+    @Environment(\.dayChangeCount) private var dayChangeCount
 
     init() {}
 
     var body: some View {
+        let _ = dayChangeCount
         let agenda = workspace.list(.agenda)
         List {
             TodayHeader(day: workspace.today, summary: Self.summary(of: agenda))
@@ -36,9 +40,9 @@ struct TodayScreen: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    router.presentCapture(CaptureContext(list: .next))
+                    router.presentCapture(CaptureContext(list: .next, dueDate: workspace.today))
                 } label: {
-                    Label("Add task", systemImage: "plus")
+                    Label("Add task due today", systemImage: "plus")
                 }
             }
         }

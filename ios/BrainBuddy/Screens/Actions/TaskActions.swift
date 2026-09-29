@@ -49,7 +49,7 @@ private struct TaskActionsModifier: ViewModifier {
             Button(action: requestReopen) {
                 Label("Reopen", systemImage: "arrow.uturn.backward.circle")
             }
-            .tint(.accentColor)
+            .tint(BBColor.brandFill)
         }
     }
 

@@ -65,6 +65,37 @@ enum SharedWorkspace {
     }
 }
 
+/// Whether the device is locked, found out from files alone, so it works in
+/// the widget extension too (where `UIApplication` is not available).
+///
+/// A small probe file in the App Group has complete data protection, which
+/// can only be read — or created — while the device is unlocked. The store
+/// itself stays readable after the first unlock (Lock Screen capture needs
+/// that), so it can't answer this.
+enum DeviceLock {
+    static func isLocked() -> Bool {
+        let url = probeURL
+        if (try? Data(contentsOf: url)) != nil { return false }
+        // It exists but can't be read: its key is gone until the next unlock.
+        if FileManager.default.fileExists(atPath: url.path) { return true }
+        // Not created yet. Creating a complete-protection file also needs
+        // the device unlocked, so failing to create it means locked.
+        do {
+            try Data([1]).write(to: url, options: [.completeFileProtection])
+            return false
+        } catch {
+            return true
+        }
+    }
+
+    private static var probeURL: URL {
+        let directory =
+            FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SharedConstants.appGroupID)
+            ?? FileManager.default.temporaryDirectory
+        return directory.appendingPathComponent(".device-lock-probe", isDirectory: false)
+    }
+}
+
 /// An error whose message Siri, Shortcuts and widgets show as written. GTD
 /// rule failures carry `GTDValidationError.message`, which is already
 /// user-facing copy.

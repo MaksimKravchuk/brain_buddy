@@ -7,11 +7,13 @@ import SwiftUI
 /// - Type `@project` and `#tag` in the text; chips below the field show the
 ///   project and tags that will be used, marking the ones capture will create.
 /// - Return adds the task and keeps the sheet open for the next one ("Added
-///   to Inbox"); the Add button adds and closes; Done closes without adding.
+///   to Inbox"); the Add button adds and closes; Close closes without adding.
 /// - Closing with unsaved text asks first ("Discard this task?"); swiping the
 ///   sheet away is disabled while there is text.
 /// - Starting from a project or tag screen files the task there unless a
-///   token says otherwise (`CaptureContext`).
+///   token says otherwise, and Today's "+" starts with today's date
+///   (`CaptureContext`).
+/// - Toasts show above the Add button, never over it.
 struct CaptureSheet: View {
     private let context: CaptureContext
 
@@ -23,15 +25,23 @@ struct CaptureSheet: View {
     @State private var confirmation: String?
     @State private var showsNotes = false
     @State private var isConfirmingDiscard = false
+    /// Set once Add has added the task and the sheet is closing, so a second
+    /// tap during the dismissal can't add it again.
+    @State private var isClosing = false
+    @FocusState private var isWaitingForFocused: Bool
 
     init(context: CaptureContext) {
         self.context = context
-        _draft = State(
-            initialValue: CaptureDraft(
-                list: context.list,
-                contextProjectID: context.projectID,
-                contextTagID: context.tagID
-            )
+        _draft = State(initialValue: Self.freshDraft(list: context.list, context: context))
+    }
+
+    /// An empty draft for `list` with the context's project, tag and due date.
+    private static func freshDraft(list: OpenList, context: CaptureContext) -> CaptureDraft {
+        CaptureDraft(
+            list: list,
+            dueDate: context.dueDate,
+            contextProjectID: context.projectID,
+            contextTagID: context.tagID
         )
     }
 
@@ -48,13 +58,17 @@ struct CaptureSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done", action: close)
+                    Button("Close", action: close)
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                addButton(preview)
+                VStack(spacing: 0) {
+                    ToastHost()
+                    addButton(preview)
+                }
             }
         }
+        .toastMagicTap()
         .presentationDetents([.medium, .large])
         .interactiveDismissDisabled(!draft.isBlank)
         .confirmationDialog("Discard this task?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
@@ -65,6 +79,13 @@ struct CaptureSheet: View {
         }
         .onChange(of: draft) { _, _ in
             errorMessage = nil
+        }
+        .onChange(of: draft.list) { _, list in
+            // Choosing Waiting for asks who or what at once (opening capture
+            // on Waiting for keeps the focus on the task text). The field
+            // appears with this change, so focus it once it is there.
+            guard list == .waiting else { return }
+            Task { isWaitingForFocused = true }
         }
         .task(id: confirmation) {
             guard confirmation != nil else { return }
@@ -117,6 +138,7 @@ struct CaptureSheet: View {
             if draft.list == .waiting {
                 TextField("Who or what are you waiting on?", text: $draft.waitingFor, axis: .vertical)
                     .lineLimit(1...3)
+                    .focused($isWaitingForFocused)
                     .accessibilityLabel("Waiting for")
             }
         } footer: {
@@ -146,7 +168,7 @@ struct CaptureSheet: View {
     private var notesSection: some View {
         Section {
             DisclosureGroup(isExpanded: $showsNotes) {
-                TextField("Notes, links, context…", text: $draft.details, axis: .vertical)
+                TextField("Notes, links, details…", text: $draft.details, axis: .vertical)
                     .lineLimit(3...8)
                     .accessibilityLabel("Notes")
             } label: {
@@ -164,8 +186,9 @@ struct CaptureSheet: View {
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(.glassProminent)
+        .tint(BBColor.brandFill)
         .controlSize(.large)
-        .disabled(!preview.isValid)
+        .disabled(!preview.isValid || isClosing)
         .accessibilityHint(visibleProblem(preview) ?? "Adds the task and closes.")
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
@@ -188,6 +211,8 @@ struct CaptureSheet: View {
     }
 
     private func add(keepOpen: Bool) {
+        // A second tap while the sheet is closing would add the same task again.
+        guard !isClosing else { return }
         let preview = workspace.capturePreview(draft)
         if let problem = preview.problem {
             errorMessage = problem.message
@@ -202,12 +227,12 @@ struct CaptureSheet: View {
         }
         let message = "Added to \(destination)"
         if keepOpen {
-            draft = CaptureDraft(
-                list: draft.list, contextProjectID: draft.contextProjectID, contextTagID: draft.contextTagID)
+            draft = Self.freshDraft(list: draft.list, context: context)
             showsNotes = false
             confirmation = message
             AccessibilityNotification.Announcement(message).post()
         } else {
+            isClosing = true
             toasts.show(message)
             dismiss()
         }
@@ -221,7 +246,7 @@ struct CaptureSheet: View {
     }
 
     private func close() {
-        if draft.isBlank {
+        if draft.isBlank || isClosing {
             dismiss()
         } else {
             isConfirmingDiscard = true

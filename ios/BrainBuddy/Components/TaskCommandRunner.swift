@@ -114,11 +114,11 @@ enum TaskCommandRunner {
     }
 
     /// Reopens a completed or cancelled task into the list it was in before
-    /// (Inbox when that is unknown, or when it was Waiting for and the note is
-    /// gone), and says where it went.
+    /// (Next actions when that is unknown, as `ReopenSheet` preselects; Inbox
+    /// when it was Waiting for and the note is gone), and says where it went.
     @discardableResult
     static func reopen(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter) -> Bool {
-        let preferred = task.lastOpenList ?? .inbox
+        let preferred = task.lastOpenList ?? .next
         let note = task.waitingFor?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let list: OpenList = preferred == .waiting && note.isEmpty ? .inbox : preferred
         let reopened = reopen(task.id, into: list, waitingFor: note, workspace: workspace, toasts: toasts)

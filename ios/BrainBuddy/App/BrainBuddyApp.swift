@@ -1,16 +1,18 @@
 import BackgroundTasks
 import BrainBuddyCore
 import BrainBuddyWorkspace
+import Combine
 import CoreFoundation
 import Network
 import SwiftUI
+import UIKit
 import WidgetKit
 
 @main
 struct BrainBuddyApp: App {
+    /// One workspace for the process; navigation and toasts are per window
+    /// (`SceneRoot`), so two iPad windows don't drive each other.
     @State private var workspace: Workspace
-    @State private var router = AppRouter()
-    @State private var toasts = ToastCenter()
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -28,27 +30,21 @@ struct BrainBuddyApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            SceneRoot()
                 .modifier(WidgetReloadAfterSync())
                 .environment(workspace)
-                .environment(router)
-                .environment(toasts)
-                .tint(BBColor.brand)
                 .task { await loadIfNeeded() }
                 .task { await observeExternalWrites() }
                 .task { await observeNetwork() }
                 .onChange(of: scenePhase) { _, phase in
                     scenePhaseChanged(to: phase)
                 }
-                .onOpenURL { url in
-                    router.handle(url)
-                }
         }
         .backgroundTask(.appRefresh(AppConstants.backgroundRefreshTaskID)) { [workspace] in
             await BackgroundRefresh.run(workspace)
         }
         .commands {
-            CaptureCommands(router: router)
+            CaptureCommands()
         }
     }
 
@@ -94,6 +90,32 @@ struct BrainBuddyApp: App {
         for await isAvailable in SystemEvents.networkAvailability() {
             workspace.networkAvailabilityChanged(isAvailable: isAvailable)
         }
+    }
+}
+
+/// One window's root: its own navigation state and toasts, so on iPad each
+/// window keeps its tab, stack, capture sheet and Undo to itself. Deep links
+/// and ⌘N act on the window they reach.
+private struct SceneRoot: View {
+    @State private var router = AppRouter()
+    @State private var toasts = ToastCenter()
+
+    var body: some View {
+        let router = router
+        RootView()
+            .environment(router)
+            .environment(toasts)
+            .tint(BBColor.brandText)
+            .modifier(DayChangeObserver())
+            .focusedSceneValue(
+                \.captureAction,
+                CaptureAction {
+                    router.presentCapture(router.captureContextForSelectedTab)
+                }
+            )
+            .onOpenURL { url in
+                router.handle(url)
+            }
     }
 }
 
@@ -146,18 +168,77 @@ enum BackgroundRefresh {
 
 // MARK: - Commands
 
-/// Keyboard and menu-bar capture (iPad), which also covers the sidebar layout
-/// where the tab view's bottom accessory is not shown.
+/// Keyboard and menu-bar capture (iPad). It captures in the window that has
+/// focus, through the action that window publishes (`SceneRoot`).
 private struct CaptureCommands: Commands {
-    let router: AppRouter
+    @FocusedValue(\.captureAction) private var captureAction
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
             Button("Capture a task…") {
-                router.presentCapture(router.captureContextForSelectedTab)
+                captureAction?.run()
             }
             .keyboardShortcut("n", modifiers: .command)
+            .disabled(captureAction == nil)
         }
+    }
+}
+
+/// Opens capture in the window that publishes it.
+struct CaptureAction {
+    let run: @MainActor () -> Void
+
+    init(_ run: @escaping @MainActor () -> Void) {
+        self.run = run
+    }
+}
+
+private struct CaptureActionKey: FocusedValueKey {
+    typealias Value = CaptureAction
+}
+
+extension FocusedValues {
+    /// The focused window's capture action, for ⌘N.
+    var captureAction: CaptureAction? {
+        get { self[CaptureActionKey.self] }
+        set { self[CaptureActionKey.self] = newValue }
+    }
+}
+
+// MARK: - Day changes
+
+/// Bumps `dayChangeCount` at midnight and whenever the clock or time zone
+/// changes, so date views (Today, Overdue, due chips) show the new day
+/// without waiting for another change to redraw them.
+private struct DayChangeObserver: ViewModifier {
+    @State private var count = 0
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.dayChangeCount, count)
+            .onReceive(Self.dayChanges) { _ in
+                count &+= 1
+            }
+    }
+
+    private static var dayChanges: AnyPublisher<Notification, Never> {
+        NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)
+            .merge(with: NotificationCenter.default.publisher(for: .NSCalendarDayChanged))
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+}
+
+private struct DayChangeCountKey: EnvironmentKey {
+    static let defaultValue = 0
+}
+
+extension EnvironmentValues {
+    /// Changes when the calendar day (or the clock) changes. Views that show
+    /// dates relative to today read it so they redraw on a new day.
+    var dayChangeCount: Int {
+        get { self[DayChangeCountKey.self] }
+        set { self[DayChangeCountKey.self] = newValue }
     }
 }
 

@@ -52,6 +52,14 @@ enum TaskListChoice: String, AppEnum, CaseIterable {
         case .today: "\(count) due today or earlier"
         }
     }
+
+    /// Tapping the widget opens the app on the matching tab.
+    var appURL: URL {
+        switch self {
+        case .next: SharedConstants.nextURL
+        case .today: SharedConstants.todayURL
+        }
+    }
 }
 
 struct NextActionsConfigurationIntent: WidgetConfigurationIntent {
@@ -270,11 +278,13 @@ struct NextActionsWidgetView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .widgetURL(entry.choice.appURL)
         .containerBackground(palette.background, for: .widget)
     }
 
     /// Count and the first task. A small widget is one tap target, so it
-    /// opens the app; the row's completion button still works in place.
+    /// opens the app on the list's tab; the row's completion button still
+    /// works in place.
     private var smallBody: some View {
         VStack(alignment: .leading, spacing: 2) {
             WidgetListHeader(choice: entry.choice, palette: palette)
@@ -313,7 +323,9 @@ struct NextActionsWidgetView: View {
             if entry.tasks.isEmpty {
                 WidgetEmptyState(title: entry.choice.emptyTitle, hint: entry.choice.emptyHint, palette: palette)
             } else {
-                VStack(alignment: .leading, spacing: 6) {
+                // Rows are as tall as their completion target; the spacing
+                // keeps neighbouring targets apart.
+                VStack(alignment: .leading, spacing: 2) {
                     ForEach(entry.tasks.prefix(rowLimit)) { task in
                         WidgetTaskRow(task: task, due: dueLabel(for: task), palette: palette)
                     }
@@ -342,24 +354,35 @@ struct NextActionsWidgetView: View {
 
 /// One task: a completion button that works without opening the app, the
 /// title, and the due date when it matters.
+///
+/// The button's target runs from the circle to the title (36 × 28 pt, up
+/// from 24 × 24), as tall as eight rows allow in a large widget on the
+/// smallest iPhone. When the widget is redacted (a locked device hiding
+/// private content) the button's spoken label doesn't name the task either.
 struct WidgetTaskRow: View {
     let task: WidgetTask
     let due: DueLabel?
     var titleLineLimit = 1
     let palette: WidgetPalette
 
+    @Environment(\.redactionReasons) private var redactionReasons
+
+    private var completeLabel: String {
+        redactionReasons.contains(.privacy) ? "Complete task" : "Complete \(task.title)"
+    }
+
     var body: some View {
-        HStack(alignment: titleLineLimit > 1 ? .top : .center, spacing: 8) {
+        HStack(alignment: titleLineLimit > 1 ? .top : .center, spacing: 4) {
             Button(intent: CompleteTaskIntent(task: task.entity)) {
                 Image(systemName: "circle")
                     .font(.body)
                     .foregroundStyle(palette.secondaryText)
-                    .frame(width: 24, height: 24)
-                    .contentShape(Circle())
+                    .frame(width: 36, height: 28, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .widgetAccentable()
-            .accessibilityLabel("Complete \(task.title)")
+            .accessibilityLabel(completeLabel)
 
             Text(task.title)
                 .font(.subheadline)

@@ -185,8 +185,9 @@ struct PriorityBadge: View {
 
 // MARK: - Count badge
 
-/// A list count. `prominent` is the Inbox's sky pill; other counts are plain
-/// slate numerals. Nothing is shown for zero.
+/// A list count. `prominent` is the Inbox's sky pill (sky-700, so the white
+/// numerals meet contrast); other counts are plain slate-500 numerals.
+/// Nothing is shown for zero.
 struct CountBadge: View {
     let count: Int
     var prominent: Bool = false
@@ -206,13 +207,13 @@ struct CountBadge: View {
                     .foregroundStyle(BBColor.onBrand)
                     .padding(.horizontal, 6)
                     .frame(minWidth: pillHeight, minHeight: pillHeight)
-                    .background(BBColor.brand, in: Capsule())
+                    .background(BBColor.brandFill, in: Capsule())
                     .accessibilityLabel(Self.spokenCount(count))
             } else {
                 Text(count, format: .number)
                     .font(BBFont.meta)
                     .monospacedDigit()
-                    .foregroundStyle(BBColor.textPlaceholder)
+                    .foregroundStyle(BBColor.textTertiary)
                     .accessibilityLabel(Self.spokenCount(count))
             }
         }

@@ -1,4 +1,5 @@
 import BrainBuddyCore
+import BrainBuddyWorkspace
 import SwiftUI
 
 // Liquid Glass is for chrome only: the tab bar, navigation and toolbars,
@@ -56,23 +57,35 @@ extension View {
     }
 }
 
-/// The capture bar in the tab view's bottom accessory: always one tap from
-/// capturing. The system draws the accessory's glass capsule; this is its
-/// content. Next captures into Next actions, every other tab into Inbox.
+/// The capture bar: always one tap from capturing. In the tab view's bottom
+/// accessory the system draws the glass capsule and this is its content; at
+/// the bottom of the iPad sidebar (`drawsGlass`) it draws its own.
+///
+/// It files where the screen on top files (`AppRouter.captureContextForSelectedTab`):
+/// a project, a tag or a list, otherwise Next actions on the Next tab and
+/// Inbox everywhere else — and says so in its prompt.
 struct CaptureAccessory: View {
+    private let drawsGlass: Bool
+
     @Environment(AppRouter.self) private var router
+    @Environment(Workspace.self) private var workspace
+
+    init(drawsGlass: Bool = false) {
+        self.drawsGlass = drawsGlass
+    }
 
     var body: some View {
         let context = router.captureContextForSelectedTab
+        let prompt = Self.prompt(for: context, workspace: workspace)
         Button {
             router.presentCapture(context)
         } label: {
             HStack(spacing: BBSpacing.s2) {
                 Image(systemName: BBSymbol.capture)
                     .font(BBFont.bodyMedium)
-                    .foregroundStyle(BBColor.brand)
+                    .foregroundStyle(BBColor.brandText)
                 ViewThatFits(in: .horizontal) {
-                    Text(Self.prompt(for: context.list))
+                    Text(prompt + "…")
                     Text("Add")
                 }
                 .font(BBFont.body)
@@ -85,12 +98,45 @@ struct CaptureAccessory: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Capture a task")
-        .accessibilityHint(context.list == .next ? "Adds to Next actions" : "Adds to Inbox")
+        .modifier(SidebarCaptureGlass(isEnabled: drawsGlass))
+        // The label starts with the visible words, so Voice Control's
+        // "Tap Add to inbox" (or "Tap Add" when only "Add" fits) works.
+        .accessibilityLabel(prompt)
+        .accessibilityInputLabels([Text(prompt), Text("Add"), Text("Capture"), Text("Capture a task")])
+        .accessibilityHint("Opens capture.")
     }
 
-    static func prompt(for list: OpenList) -> String {
-        list == .next ? "Add a next action…" : "Add to inbox…"
+    /// The visible prompt without its ellipsis, for example "Add to inbox",
+    /// "Add a next action" or "Add to Errands".
+    static func prompt(for context: CaptureContext, workspace: Workspace) -> String {
+        if let projectID = context.projectID, let project = workspace.project(projectID) {
+            return "Add to \(project.name)"
+        }
+        if let tagID = context.tagID, let tag = workspace.tag(tagID) {
+            return "Add a task tagged \(tag.name)"
+        }
+        switch context.list {
+        case .inbox: return "Add to inbox"
+        case .next: return "Add a next action"
+        case .waiting: return "Add to \(OpenList.waiting.title)"
+        case .someday: return "Add to \(OpenList.someday.title)"
+        }
+    }
+}
+
+/// The capsule the tab view's accessory otherwise provides, for the sidebar.
+private struct SidebarCaptureGlass: ViewModifier {
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content
+                .glassEffect(.regular.interactive(), in: .capsule)
+                .padding(.horizontal, BBSpacing.s3)
+                .padding(.vertical, BBSpacing.s2)
+        } else {
+            content
+        }
     }
 }
 
@@ -99,7 +145,7 @@ struct CaptureAccessory: View {
         BBColor.surfaceBase.ignoresSafeArea()
         HStack(spacing: BBSpacing.s3) {
             GlassIconButton(systemImage: "arrow.uturn.backward", label: "Undo") {}
-            GlassIconButton(systemImage: "checkmark", label: "Done", tint: BBColor.brand) {}
+            GlassIconButton(systemImage: "checkmark", label: "Done", tint: BBColor.brandFill) {}
         }
         .bbFloatingCluster()
     }

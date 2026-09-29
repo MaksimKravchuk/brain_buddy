@@ -6,6 +6,10 @@ import UIKit
 
 /// Signs in to a Brain Buddy server. Local data is uploaded to the account
 /// and merged; nothing on the device is lost if signing in fails.
+///
+/// Signing in again after a session ended (an account is still linked) is
+/// locked to that account's email and server: the device's tasks belong to
+/// it, so another account means signing out first.
 struct SignInSheet: View {
     private enum Field: Hashable {
         case email, password, server
@@ -22,6 +26,13 @@ struct SignInSheet: View {
     @State private var isSigningIn = false
     @State private var failureMessage: String?
     @State private var failureReferenceID: String?
+    /// Shown after a sign-in that cancelled a pending account deletion.
+    @State private var showsDeletionCancelledNotice = false
+    /// The linked account (if any) when Sign in was pressed, and whether it
+    /// worked: once signed in the form keeps showing what was submitted
+    /// while the sheet closes, instead of switching to the new account's state.
+    @State private var accountAtSubmit: LinkedAccount?
+    @State private var hasSignedIn = false
     @FocusState private var focusedField: Field?
 
     /// `email` and `serverURL` prefill the form, for example when a session expired.
@@ -52,9 +63,27 @@ struct SignInSheet: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { signInButton }
-            .onAppear { focusedField = email.isEmpty ? Field.email : Field.password }
+            .onAppear {
+                focusedField = linkedAccount == nil && email.isEmpty ? Field.email : Field.password
+            }
         }
-        .interactiveDismissDisabled(isSigningIn)
+        .interactiveDismissDisabled(isSigningIn || showsDeletionCancelledNotice)
+        .alert("Your account deletion was cancelled", isPresented: $showsDeletionCancelledNotice) {
+            Button("OK") {
+                workspace.acknowledgeAccountDeletionNotice()
+                dismiss()
+            }
+        } message: {
+            Text(
+                "Signing in cancels a deletion you requested in the last 14 days. Delete your account again on the web if you still want to."
+            )
+        }
+    }
+
+    /// The account this device is linked to while its session has ended
+    /// (signing in again), or nil for a first sign-in.
+    private var linkedAccount: LinkedAccount? {
+        hasSignedIn ? accountAtSubmit : workspace.account
     }
 
     // MARK: Sections
@@ -75,7 +104,7 @@ struct SignInSheet: View {
     }
 
     private var introExplanation: String {
-        if workspace.account != nil {
+        if linkedAccount != nil {
             return "Your session ended. Sign in again to keep syncing — your changes are kept on this \(ThisDevice.name) until then."
         }
         return "What you've added on this \(ThisDevice.name) is uploaded to your account and merged with what's already there."
@@ -97,24 +126,45 @@ struct SignInSheet: View {
 
     private var credentialsSection: some View {
         Section {
-            TextField("Email", text: $email)
-                .textContentType(.username)
-                .keyboardType(.emailAddress)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.next)
-                .focused($focusedField, equals: .email)
-                .onSubmit { focusedField = .password }
+            if let account = linkedAccount {
+                // Locked: the tasks on this device belong to this account.
+                LabeledContent("Email", value: account.email)
+                    .textSelection(.enabled)
+                LabeledContent("Server", value: SettingsScreen.hostDescription(account.serverURL))
+            } else {
+                TextField("Email", text: $email)
+                    .textContentType(.username)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.next)
+                    .focused($focusedField, equals: .email)
+                    .onSubmit { focusedField = .password }
+            }
             SecureField("Password", text: $password)
                 .textContentType(.password)
                 .submitLabel(.go)
                 .focused($focusedField, equals: .password)
                 .onSubmit { signIn() }
+        } footer: {
+            if linkedAccount != nil {
+                VStack(alignment: .leading, spacing: BBSpacing.s1) {
+                    Text("Sign out first to use another account.")
+                    Text("If you asked to delete your account, signing in cancels that.")
+                }
+            }
         }
         .disabled(isSigningIn)
     }
 
-    private var advancedSection: some View {
+    @ViewBuilder private var advancedSection: some View {
+        // A linked account keeps its server; it is shown with the email.
+        if linkedAccount == nil {
+            editableServerSection
+        }
+    }
+
+    private var editableServerSection: some View {
         Section {
             DisclosureGroup("Advanced", isExpanded: $showsAdvanced) {
                 TextField("Server address", text: $serverAddress)
@@ -152,8 +202,9 @@ struct SignInSheet: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.glassProminent)
+        .tint(BBColor.brandFill)
         .controlSize(.large)
-        .disabled(!canSubmit || isSigningIn)
+        .disabled(!canSubmit || isSigningIn || hasSignedIn)
         .padding(.horizontal, BBSpacing.s5)
         .padding(.bottom, BBSpacing.s3)
     }
@@ -161,7 +212,8 @@ struct SignInSheet: View {
     private var signInTitle: String { isSigningIn ? "Signing in…" : "Sign in" }
 
     private var canSubmit: Bool {
-        !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if linkedAccount != nil { return !password.isEmpty }
+        return !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !password.isEmpty
             && !serverAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -170,25 +222,42 @@ struct SignInSheet: View {
 
     private func signIn() {
         guard canSubmit, !isSigningIn else { return }
-        guard let url = SignInServerAddress.url(from: serverAddress) else {
-            showsAdvanced = true
-            focusedField = .server
-            showFailure("\(WorkspaceError.invalidServerURL.message) http works only for localhost.", referenceID: nil)
-            return
+        let url: URL
+        let address: String
+        if let account = linkedAccount {
+            // Whatever the fields held, a linked device signs in to its own account.
+            url = account.serverURL
+            address = account.email
+        } else {
+            guard let typedURL = SignInServerAddress.url(from: serverAddress) else {
+                showsAdvanced = true
+                focusedField = .server
+                showFailure(
+                    "\(WorkspaceError.invalidServerURL.message) http works only for localhost.", referenceID: nil)
+                return
+            }
+            url = typedURL
+            address = email.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let secret = password
         failureMessage = nil
         failureReferenceID = nil
         focusedField = nil
+        accountAtSubmit = workspace.account
         isSigningIn = true
         Task {
             do {
                 try await workspace.signIn(serverURL: url, email: address, password: secret)
+                hasSignedIn = true
                 isSigningIn = false
                 password = ""
                 toasts.show("Signed in as \(address)", actionTitle: nil, action: nil)
-                dismiss()
+                if workspace.signInCancelledAccountDeletion {
+                    // Say so before closing; the sheet closes when it's acknowledged.
+                    showsDeletionCancelledNotice = true
+                } else {
+                    dismiss()
+                }
             } catch let error as WorkspaceError {
                 isSigningIn = false
                 handle(error)

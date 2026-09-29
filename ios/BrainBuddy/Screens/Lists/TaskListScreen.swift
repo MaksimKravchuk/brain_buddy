@@ -5,11 +5,18 @@ import SwiftUI
 /// Any list of tasks: the four GTD lists, Today (agenda) and date views,
 /// a project or tag, completed or cancelled history, and search results.
 /// Content is flat (plain list, brand rows); only the toolbar is glass.
+///
+/// While it is on top of its tab it publishes where a capture from here goes
+/// (its list, its active project or its tag) to the router, so the capture
+/// bar and ⌘N file into the screen you are looking at.
 struct TaskListScreen: View {
     private let destination: Destination
 
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
+    @Environment(\.appTab) private var tab
+    /// Read so date views and due chips redraw on a new day.
+    @Environment(\.dayChangeCount) private var dayChangeCount
     /// JSON-encoded `ListOptions`, one key per destination (see `ListOptionsStore`).
     /// The default value is the destination's default options, so a fresh
     /// install starts with Next actions grouped by project.
@@ -24,6 +31,7 @@ struct TaskListScreen: View {
     }
 
     var body: some View {
+        let _ = dayChangeCount
         let options = effectiveOptions
         let result = workspace.list(destination, options: options)
         taskList(result, options: options)
@@ -37,6 +45,47 @@ struct TaskListScreen: View {
                 // filter so the menu does not claim the list is filtered.
                 if isDangling { storedOptions.listOptions.tagFilter = nil }
             }
+            .onAppear(perform: publishCaptureContext)
+            .onChange(of: filesCaptures) { _, _ in
+                // The project was archived or the tag deleted while on screen.
+                publishCaptureContext()
+            }
+            .onDisappear {
+                if let tab { router.withdrawCaptureContext(for: destination, on: tab) }
+            }
+    }
+
+    // MARK: Capture
+
+    /// Where a capture started from this screen goes, or nil when it files
+    /// nothing (dates, history, search, an archived project, a deleted tag).
+    /// Projects capture next actions, since a project moves forward by its
+    /// next action.
+    private var captureContext: CaptureContext? {
+        switch destination {
+        case .list(let list):
+            return CaptureContext(list: list)
+        case .project(let id):
+            guard workspace.project(id)?.state == .active else { return nil }
+            return CaptureContext(list: .next, projectID: id)
+        case .tag(let id):
+            guard workspace.tag(id)?.state == .active else { return nil }
+            return CaptureContext(tagID: id)
+        case .agenda, .dateView, .history, .search:
+            return nil
+        }
+    }
+
+    private var filesCaptures: Bool { captureContext != nil }
+
+    private func publishCaptureContext() {
+        guard let tab else { return }
+        router.publishCaptureContext(captureContext, for: destination, on: tab)
+    }
+
+    private var isArchivedProject: Bool {
+        guard case .project(let id) = destination else { return false }
+        return workspace.project(id)?.state == .archived
     }
 
     private func taskList(_ result: TaskListResult, options: ListOptions) -> some View {
@@ -172,7 +221,10 @@ struct TaskListScreen: View {
     }
 
     private func emptyState(isFiltered: Bool) -> some View {
-        let copy = isFiltered ? EmptyListCopy.filtered : EmptyListCopy.forDestination(destination)
+        let copy =
+            isArchivedProject
+            ? EmptyListCopy.archivedProject
+            : isFiltered ? EmptyListCopy.filtered : EmptyListCopy.forDestination(destination)
         return VStack(spacing: 16) {
             EmptyStateView(title: copy.title, message: copy.message, systemImage: copy.systemImage)
             SyncStatusLabel()
@@ -206,7 +258,7 @@ private struct ProjectStatusRow: View {
                 }
             } icon: {
                 Image(systemName: "exclamationmark.circle")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(BBColor.warning)
                     .accessibilityHidden(true)
             }
             .accessibilityElement(children: .combine)
@@ -227,6 +279,14 @@ private struct EmptyListCopy {
         systemImage: "line.3.horizontal.decrease.circle"
     )
 
+    /// Archiving took the project off its tasks, and an archived project
+    /// takes no new ones, so there is nothing to add here.
+    static let archivedProject = EmptyListCopy(
+        title: "This project is archived",
+        message: "Archived projects are read-only. Its tasks stayed in their lists.",
+        systemImage: BBSymbol.archivedProjects
+    )
+
     static func forDestination(_ destination: Destination) -> EmptyListCopy {
         switch destination {
         case .list(let list): forList(list)
@@ -237,7 +297,8 @@ private struct EmptyListCopy {
         case .dateView(let view): forDateView(view)
         case .project:
             EmptyListCopy(
-                title: "No tasks in this project", message: "Capture a task here and it joins this project.",
+                title: "No tasks in this project",
+                message: "Tasks you capture from here join this project as next actions.",
                 systemImage: "folder")
         case .tag:
             EmptyListCopy(
