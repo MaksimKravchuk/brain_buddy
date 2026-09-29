@@ -1,6 +1,6 @@
 import Foundation
 
-#if canImport(Darwin)
+#if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
     /// Asks the system not to suspend this process until `end()`, so a write
     /// never stops halfway while it holds the shared store's file lock (which
     /// would block the app, its widgets and App Intents). Unlike a background
@@ -33,7 +33,8 @@ import Foundation
         }
     }
 #else
-    /// No process suspension to prevent outside Apple platforms.
+    /// macOS and Linux never suspend a process mid-write, and
+    /// `performExpiringActivity` is unavailable on macOS.
     struct ExpiringActivity {
         init(reason: String) {}
         func end() {}
