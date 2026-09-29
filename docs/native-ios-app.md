@@ -210,6 +210,37 @@ unsynced changes. The server address defaults to
 `https://brain-buddy-frontend.fly.dev/api` and is editable (https only;
 `http://localhost` for development).
 
+### Security and privacy
+
+- **Session token.** The `brainbuddy_session` value lives in the Keychain as
+  a generic password, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`:
+  readable after the first unlock so background refresh can sync, never
+  restored to another device from a backup. Only the app reads it; widgets
+  and intents never sync, and there is no keychain sharing. It is removed on
+  sign-out and on a 401, and a launch with no linked account removes any
+  token left over from an earlier install.
+- **Transport.** https only; plain http is refused except to loopback, and
+  the app has no App Transport Security exceptions (ATS still allows
+  `http://localhost`, but not `http://127.0.0.1`). Redirects are never
+  followed: the API never sends one, and following it would resend the
+  `Cookie` header (and a login's password) to another address. A 3xx is
+  reported as "The server redirected the request, which Brain Buddy doesn't
+  follow."
+- **Data at rest.** The store document (and any unreadable file set aside by
+  "Start fresh") uses file protection `completeUntilFirstUserAuthentication`,
+  so widgets and intents can read it after the first unlock. It is in device
+  backups. Retention of every on-device record is in
+  `docs/data-retention.md`.
+- **Lock screen.** App Intents, Siri and Control Center controls that
+  *complete* a task require the device to be unlocked; capture is allowed
+  from the lock screen, since it only adds to the Inbox.
+- **Switching accounts.** Signing in as a different account while changes
+  are waiting is refused: sign out first (which warns about the unsynced
+  changes), so one account's changes are never sent to another.
+- **Account deletion.** Signing in during the 14-day deletion grace period
+  cancels the deletion, as on the web; the app says so in a notice instead
+  of doing it silently.
+
 ## Interface
 
 Navigation (iPhone; iPad uses the adaptable sidebar):
@@ -217,7 +248,7 @@ Navigation (iPhone; iPad uses the adaptable sidebar):
 | Tab | Content |
 |---|---|
 | Inbox | projectless inbox, badge count, **Process inbox** |
-| Next | Next actions, grouped by project, tag (context) and priority filters |
+| Next | Next actions, grouped by project, with tag and priority filters |
 | Today | Overdue, Today, Upcoming |
 | Lists | Waiting for, Someday / maybe, Projects (with "needs a next action"), Tags, Completed, Cancelled, Settings |
 | Search | `Tab(role: .search)` across all tasks |
@@ -255,6 +286,11 @@ Deviations that need a product sign-off:
    and SF Pro is what glass controls are tuned for.
 4. **System glass motion.** Glass morphing uses system springs; the brand's
    no-spring rule applies to our own animations only.
+5. **sky-700 for text and filled controls.** Brand-coloured text and the
+   brand fill behind white labels use sky-700 (`#0369A1`) in light mode, the
+   `brandText` and `brandFill` tokens, because sky-500 falls short of WCAG AA
+   contrast there (white on `#0EA5E9` is about 2.8:1). sky-500 stays for
+   large accents: selection highlights, completed checks and the app icon.
 
 ## Known limitations of pass 1
 
