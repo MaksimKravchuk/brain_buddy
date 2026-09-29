@@ -18,12 +18,16 @@ struct BrainBuddyApp: App {
         let workspace = usesPreviewData
             ? Workspace.preview()
             : Workspace.live(appGroupID: AppConstants.appGroupID)
+        // App Intents that run inside the app process reuse this workspace
+        // instead of opening a second copy of the store (ios/Shared).
+        SharedWorkspace.adopt(workspace)
         _workspace = State(initialValue: workspace)
     }
 
     var body: some Scene {
         WindowGroup {
             RootView()
+                .modifier(WidgetReloadAfterSync())
                 .environment(workspace)
                 .environment(router)
                 .environment(toasts)
@@ -87,6 +91,22 @@ struct BrainBuddyApp: App {
     private func observeNetwork() async {
         for await isAvailable in SystemEvents.networkAvailability() {
             workspace.networkAvailabilityChanged(isAvailable: isAvailable)
+        }
+    }
+}
+
+/// Reloads widget timelines when a sync finishes, once the result is on disk
+/// (widgets read the shared file, not this process's memory).
+private struct WidgetReloadAfterSync: ViewModifier {
+    @Environment(Workspace.self) private var workspace
+
+    func body(content: Content) -> some View {
+        content.onChange(of: workspace.syncStatus) { previous, current in
+            guard previous == .syncing, current != .syncing else { return }
+            Task {
+                await workspace.flush()
+                WidgetCenter.shared.reloadAllTimelines()
+            }
         }
     }
 }
