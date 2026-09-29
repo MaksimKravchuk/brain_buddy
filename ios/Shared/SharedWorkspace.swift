@@ -47,9 +47,13 @@ enum SharedWorkspace {
 
     /// Call after every write. Waits until the change is on disk (an extension
     /// can be suspended as soon as it returns), tells a running app to reload,
-    /// and refreshes every widget.
-    static func didWrite(_ workspace: Workspace) async {
+    /// and refreshes every widget. Throws when the change could not be saved,
+    /// so Siri and Shortcuts never report a capture that was lost.
+    static func didWrite(_ workspace: Workspace) async throws(BrainBuddyIntentError) {
         await workspace.flush()
+        if let problem = workspace.storageError {
+            throw BrainBuddyIntentError(message: problem)
+        }
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName(SharedConstants.storeChangedNotification as CFString),

@@ -21,6 +21,8 @@ struct BrainBuddyApp: App {
         // App Intents that run inside the app process reuse this workspace
         // instead of opening a second copy of the store (ios/Shared).
         SharedWorkspace.adopt(workspace)
+        // Widgets show the store, so every saved change refreshes them.
+        workspace.didPersist = { WidgetCenter.shared.reloadAllTimelines() }
         _workspace = State(initialValue: workspace)
     }
 

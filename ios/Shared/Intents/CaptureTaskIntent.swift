@@ -72,7 +72,7 @@ struct CaptureTaskIntent: AppIntent {
         } catch {
             throw BrainBuddyIntentError(error)
         }
-        await SharedWorkspace.didWrite(workspace)
+        try await SharedWorkspace.didWrite(workspace)
 
         guard let record = workspace.task(taskID) else {
             throw BrainBuddyIntentError(.taskNotFound)

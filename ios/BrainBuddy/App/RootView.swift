@@ -26,6 +26,7 @@ struct RootView: View {
 private struct MainTabView: View {
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
+    @Environment(ToastCenter.self) private var toasts
 
     var body: some View {
         @Bindable var router = router
@@ -63,6 +64,11 @@ private struct MainTabView: View {
         .fullScreenCover(isPresented: $router.isProcessingInbox) {
             ProcessInboxScreen()
                 .overlay(alignment: .bottom) { ToastHost() }
+        }
+        // Changes stay on screen and are retried with the next save; say so
+        // when a save fails instead of pretending it worked.
+        .onChange(of: workspace.storageError) { _, problem in
+            if let problem { toasts.showError(problem) }
         }
     }
 }
@@ -124,22 +130,34 @@ private struct LoadingView: View {
 }
 
 /// The stored file could not be read. The workspace never overwrites a file
-/// it cannot decode, so nothing is lost; the person can retry.
+/// it cannot decode, so nothing is lost; the person can retry, or deliberately
+/// set the file aside and start with empty lists.
 private struct LoadErrorView: View {
     let message: String
     @Environment(Workspace.self) private var workspace
     @State private var isRetrying = false
+    @State private var confirmsStartFresh = false
 
     var body: some View {
-        EmptyStateView(
-            title: "We couldn't open your tasks",
-            message: "Your tasks are still on this device and nothing was changed. \(message)",
-            systemImage: "exclamationmark.triangle",
-            actionTitle: isRetrying ? "Trying again…" : "Try again",
-            action: retry
-        )
+        VStack(spacing: BBSpacing.sm) {
+            EmptyStateView(
+                title: "We couldn't open your tasks",
+                message: "Your tasks are still on this device and nothing was changed. \(message)",
+                systemImage: "exclamationmark.triangle",
+                actionTitle: isRetrying ? "Trying again…" : "Try again",
+                action: retry
+            )
+            Button("Start fresh", role: .destructive) { confirmsStartFresh = true }
+                .frame(minHeight: 44)
+        }
         .disabled(isRetrying)
         .bbScreenBackground()
+        .confirmationDialog("Start fresh?", isPresented: $confirmsStartFresh, titleVisibility: .visible) {
+            Button("Set the file aside and start fresh", role: .destructive, action: startFresh)
+            Button("Keep trying", role: .cancel) {}
+        } message: {
+            Text("The unreadable file stays on this device, set aside where Brain Buddy won't use it. You start with empty lists; tasks you synced come back when you sign in.")
+        }
     }
 
     private func retry() {
@@ -147,6 +165,15 @@ private struct LoadErrorView: View {
         isRetrying = true
         Task {
             await workspace.load()
+            isRetrying = false
+        }
+    }
+
+    private func startFresh() {
+        guard !isRetrying else { return }
+        isRetrying = true
+        Task {
+            await workspace.resetUnreadableStore()
             isRetrying = false
         }
     }

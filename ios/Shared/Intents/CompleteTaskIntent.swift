@@ -48,7 +48,7 @@ struct CompleteTaskIntent: AppIntent {
         } catch {
             throw BrainBuddyIntentError(error)
         }
-        await SharedWorkspace.didWrite(workspace)
+        try await SharedWorkspace.didWrite(workspace)
         return .result(dialog: "Completed “\(record.title)”.")
     }
 }
