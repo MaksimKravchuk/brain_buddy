@@ -7,11 +7,17 @@
   and reason when you start using one:
   https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api
 
-  Declared: UserDefaults for the app's own and the App Group's settings
-  (CA92.1, 1C8F.1); file timestamps inside the app / App Group container, for
-  the shared store (C617.1). Collected: the account email and the user's tasks,
-  sent to the owner's Brain Buddy server only when signed in, for app
-  functionality. No tracking.
+  Declared, and why:
+  - UserDefaults, CA92.1: the app's own settings in UserDefaults.standard
+    (@AppStorage list options and recent searches), read only by the app that
+    wrote them. There is no App Group suite, so 1C8F.1 is not declared; add it
+    if a UserDefaults(suiteName:) shared with the widgets ever appears.
+  - File timestamp APIs, C617.1: stat/fstat on the shared store's lock file in
+    the App Group container (BrainBuddyPersistence, DocumentFile.lock()).
+  Collected, linked to the account, for app functionality only, and sent only
+  to the Brain Buddy server the user signs in to: the email address (sign-in
+  and sign-up) and other user content (tasks, notes, subtasks, comments,
+  projects and tags). No analytics, no crash reporting, no tracking.
 -->
 <plist version="1.0">
 <dict>
@@ -54,7 +60,6 @@
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>CA92.1</string>
-				<string>1C8F.1</string>
 			</array>
 		</dict>
 		<dict>
