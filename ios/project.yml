@@ -101,10 +101,14 @@ targets:
           - $(PRODUCT_BUNDLE_IDENTIFIER).refresh
         UIBackgroundModes:
           - fetch
-        # https everywhere; plain http only to a development server on the LAN
-        # or localhost (the server address is editable in Settings).
-        NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
+        # No App Transport Security exceptions, in any configuration: https
+        # everywhere. The client refuses plain http except to loopback, and a
+        # development server at http://localhost still works because ATS
+        # allows unqualified host names by default. Literal loopback addresses
+        # (127.0.0.1, [::1]) are blocked by ATS since iOS 17; use `localhost`.
+        # Don't add NSAllowsLocalNetworking back: a `$(SETTING)` in the plist
+        # becomes a string, so it can't be made Debug-only here, and Release
+        # must not carry it.
         # HTTPS only (exempt), so TestFlight skips the export-compliance prompt.
         ITSAppUsesNonExemptEncryption: false
     entitlements:
