@@ -94,18 +94,71 @@ public struct CapturePlan: Hashable, Sendable {
     }
 }
 
+/// Smart Add on the device (`SmartAddParser` for the grammar; resolution and
+/// validation in `SmartAdd+Resolution.swift`). Validation mirrors the reducer's
+/// `createProject` / `createTag` / `createTask` rules without calling it, so the
+/// preview can say why capture is blocked before anything is applied.
 public enum CapturePlanner {
+    /// What capture would do right now: the clean title, the project and tags
+    /// it would use or create, the tokens to highlight, and the first problem.
+    /// A blank draft reports `.emptyTitle`; the sheet decides whether to show
+    /// it yet (for example while `CaptureDraft.isBlank`).
     public static func preview(_ draft: CaptureDraft, in state: GTDState) -> CapturePreview {
-        fatalError("CapturePlanner.preview is not implemented yet")
+        let resolution = resolve(draft, in: state)
+        return CapturePreview(
+            title: resolution.title, project: resolution.project?.preview, tags: resolution.tags.map(\.preview),
+            tokens: resolution.tokens, problem: resolution.problem
+        )
     }
 
     /// Resolves tokens against active projects and tags (by normalized name)
     /// and creates the missing ones. An archived project's name cannot be
     /// reused by capture (`GTDValidationError.projectNotActive`).
+    ///
+    /// Commands come in apply order: `createProject` (when new), `createTag`
+    /// for each new tag, then `createTask`. Ids are minted in that order too.
     public static func plan(
         _ draft: CaptureDraft, in state: GTDState, makeTaskID: () -> TaskID = { .random() },
         makeProjectID: () -> ProjectID = { .random() }, makeTagID: () -> TagID = { .random() }
     ) throws(GTDValidationError) -> CapturePlan {
-        fatalError("CapturePlanner.plan is not implemented yet")
+        let resolution = resolve(draft, in: state)
+        if let problem = resolution.problem { throw problem }
+
+        var commands: [GTDCommand] = []
+        var projectID: ProjectID?
+        switch resolution.project {
+        case .existing(let id, _):
+            projectID = id
+        case .new(let name):
+            let id = makeProjectID()
+            commands.append(.createProject(.init(projectID: id, name: name)))
+            projectID = id
+        case nil:
+            break
+        }
+
+        var tagIDs: [TagID] = []
+        for tag in resolution.tags {
+            switch tag {
+            case .existing(let id, _):
+                tagIDs.append(id)
+            case .new(let name):
+                let id = makeTagID()
+                commands.append(.createTag(.init(tagID: id, name: name)))
+                tagIDs.append(id)
+            }
+        }
+
+        let taskID = makeTaskID()
+        commands.append(
+            .createTask(
+                .init(
+                    taskID: taskID, title: resolution.title, details: resolution.details, list: draft.list,
+                    waitingFor: resolution.waitingFor, dueDate: draft.dueDate, priority: draft.priority,
+                    projectID: projectID, tagIDs: tagIDs
+                )
+            )
+        )
+        return CapturePlan(commands: commands, taskID: taskID)
     }
 }
