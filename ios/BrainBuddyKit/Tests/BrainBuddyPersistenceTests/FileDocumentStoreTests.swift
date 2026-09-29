@@ -396,6 +396,74 @@ import Musl
         #expect(try await store.load() == nil)
     }
 
+    /// A set-aside document is a full copy of someone's data: signing out
+    /// ("remove from this iPhone") must not leave it behind.
+    @Test func destroyAlsoRemovesSetAsideDocuments() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { removeTemporaryDirectory(directory) }
+        let url = directory.appendingPathComponent("store.json")
+        let store = FileDocumentStore(fileURL: url)
+        try Data("garbage".utf8).write(to: url)
+        let aside = try #require(try await store.quarantineUnreadableDocument())
+        try Data(#"{"version":9}"#.utf8).write(to: url)
+        _ = try #require(try await store.quarantineUnreadableDocument())
+        _ = try await store.update { $0.outbox.append(Fixtures.operation(1)) }
+        try Data("keep".utf8).write(to: directory.appendingPathComponent("other.unreadable-1.json"))
+        #expect(FileManager.default.fileExists(atPath: aside.path))
+
+        try await store.destroy()
+        #expect(try directoryListing(directory) == ["other.unreadable-1.json"])
+    }
+
+    @Test func destroyAfterACheckReadsTheLatestDocumentAndKeepsEverythingWhenRefused() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { removeTemporaryDirectory(directory) }
+        let url = directory.appendingPathComponent("store.json")
+        let app = FileDocumentStore(fileURL: url)
+        let widget = FileDocumentStore(fileURL: url)
+        _ = try await app.update { _ in }
+        // Another process queues a change the app has not read.
+        _ = try await widget.update { $0.outbox.append(Fixtures.operation(1)) }
+
+        let store: any DocumentStore = app
+        let seen = LockedValue<Int?>(nil)
+        await #expect(throws: Boom.self) {
+            try await store.destroy(after: { document in
+                seen.set(document?.outbox.count)
+                if document?.outbox.isEmpty == false { throw Boom() }
+            })
+        }
+        #expect(seen.value == 1)
+        #expect(try await app.load()?.outbox.count == 1)
+
+        try await store.destroy(after: { _ in })
+        #expect(try await app.load() == nil)
+        #expect(try directoryListing(directory).isEmpty)
+        // Nothing there: the check sees nil and there is nothing to remove.
+        try await store.destroy(after: { #expect($0 == nil) })
+    }
+
+    @Test func storedAccountIsReadEvenFromADocumentThatCannotBeDecoded() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { removeTemporaryDirectory(directory) }
+        let url = directory.appendingPathComponent("store.json")
+        let store: any DocumentStore = FileDocumentStore(fileURL: url)
+        #expect(await store.storedAccount() == nil)
+
+        let account = try #require(Fixtures.richDocument().account)
+        var json = try #require(
+            try JSONSerialization.jsonObject(with: StoreDocumentCoding.encode(Fixtures.richDocument())) as? [String: Any]
+        )
+        json["version"] = 9
+        json["outbox"] = [["something": "new"]]
+        try JSONSerialization.data(withJSONObject: json).write(to: url)
+        await #expect(throws: DocumentStoreError.unsupportedVersion(9)) { try await store.load() }
+        #expect(await store.storedAccount() == account)
+
+        try Data("garbage".utf8).write(to: url)
+        #expect(await store.storedAccount() == nil)
+    }
+
     @Test func otherStoresKeepWorkingAfterDestroy() async throws {
         let directory = try makeTemporaryDirectory()
         defer { removeTemporaryDirectory(directory) }

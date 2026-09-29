@@ -150,6 +150,36 @@ import Testing
         #expect(workspace.syncStatus != .localOnly)
     }
 
+    @Test func aSignInThatCancelledTheAccountsDeletionRaisesANoticeUntilAcknowledged() async throws {
+        let store = InMemoryDocumentStore()
+        let sync = FakeSyncService(store: store, deletionCancelled: true)
+        let workspace = await loadedWorkspace(store: store, sync: sync)
+        #expect(!workspace.signInCancelledAccountDeletion)
+
+        try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "correct horse")
+        #expect(workspace.signInCancelledAccountDeletion)
+        #expect(workspace.account == Fixture.account)
+
+        workspace.acknowledgeAccountDeletionNotice()
+        #expect(!workspace.signInCancelledAccountDeletion)
+    }
+
+    @Test func anOrdinarySignInRaisesNoDeletionNotice() async throws {
+        let store = InMemoryDocumentStore()
+        let workspace = await loadedWorkspace(store: store, sync: FakeSyncService(store: store))
+        try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "correct horse")
+        #expect(!workspace.signInCancelledAccountDeletion)
+    }
+
+    @Test func launchingWithoutAnAccountDiscardsStaleSessions() async {
+        let sync = FakeSyncService()
+        _ = await loadedWorkspace(sync: sync)
+        #expect(await sync.discardedSessions == [nil])
+
+        let session = await signedIn()
+        #expect(await session.sync.discardedSessions.isEmpty, "a linked account keeps its session")
+    }
+
     @Test func signInWithoutSyncPointsToTheApp() async {
         let workspace = await loadedWorkspace()
 
@@ -190,6 +220,50 @@ import Testing
         #expect(session.workspace.pendingChangeCount == 0)
         #expect(session.workspace.issues.isEmpty)
         #expect(persisted.count >= 1)
+    }
+
+    @Test func signOutCountsChangesAWidgetQueuedThatTheAppHasNotSeen() async throws {
+        let session = await signedIn()
+        let widget = await loadedWorkspace(store: session.store.base, ids: IDSequence(namespace: 2))
+        try widget.completeTask("server-1")
+        await widget.flush()
+        #expect(session.workspace.pendingChangeCount == 0, "not reloaded yet")
+
+        await #expect(throws: WorkspaceError.unsyncedChanges(count: 1)) {
+            try await session.workspace.signOut(discardUnsyncedChanges: false)
+        }
+        #expect(await session.sync.calls.contains(.signOut) == false)
+        #expect(try await session.store.load()?.outbox.count == 1)
+        #expect(session.workspace.account == Fixture.account)
+        #expect(session.workspace.pendingChangeCount == 1, "and now shows it")
+        #expect(session.workspace.task("server-1")?.state == .completed)
+
+        try await session.workspace.signOut(discardUnsyncedChanges: true)
+        #expect(try await session.store.load() == nil)
+        #expect(session.workspace.account == nil)
+    }
+
+    @Test func aChangeQueuedWhileSigningOutKeepsTheAccountsData() async throws {
+        let session = await signedIn()
+        let shared = session.store.base
+        // A widget writes after the check, while the engine logs out.
+        await session.sync.whileSigningOut {
+            _ = try? await shared.update { document in
+                let command = GTDCommand.transitionTask(.init(taskID: "server-1", action: .complete))
+                document.outbox.append(PendingOperation(command: command, issuedAt: Fixture.epoch))
+            }
+        }
+
+        await #expect(throws: WorkspaceError.unsyncedChanges(count: 1)) {
+            try await session.workspace.signOut(discardUnsyncedChanges: false)
+        }
+        #expect(try await session.store.load()?.outbox.count == 1, "nothing was removed")
+        #expect(session.workspace.account == Fixture.account)
+        #expect(session.workspace.pendingChangeCount == 1)
+        #expect(
+            await session.sync.calls == [.start(Fixture.account), .signOut, .start(Fixture.account)],
+            "sync starts again for the account, which will ask to sign in again"
+        )
     }
 
     @Test func signOutWithEverythingSyncedNeedsNoConfirmation() async throws {

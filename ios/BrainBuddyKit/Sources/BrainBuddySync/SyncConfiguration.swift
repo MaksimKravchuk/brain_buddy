@@ -28,6 +28,13 @@ public struct SyncConfiguration: Sendable {
     public var clockSkewTolerance: TimeInterval
     /// Consecutive failed cycles with server errors before the status says `.failing`.
     public var failingThreshold: Int
+    /// The server failing the operation at the front of the outbox this many
+    /// times in a row (5xx, or a success it cannot be read from) sets it
+    /// aside as a sync issue, so the changes behind it go out.
+    public var rejectionLimit: Int
+    /// The same once the operation has been failing this long (and at least
+    /// twice in a row), measured from its first attempt with the current key.
+    public var rejectionAge: TimeInterval
     /// Sent as `X-Client: brainbuddy-ios/<version>`.
     public var clientVersion: String
 
@@ -43,6 +50,8 @@ public struct SyncConfiguration: Sendable {
         uncertainCreateAge: TimeInterval = 23 * 3600,
         clockSkewTolerance: TimeInterval = 300,
         failingThreshold: Int = 2,
+        rejectionLimit: Int = 8,
+        rejectionAge: TimeInterval = 24 * 3600,
         clientVersion: String = BrainBuddyAPI.bundleVersion
     ) {
         self.scheduler = scheduler
@@ -56,6 +65,8 @@ public struct SyncConfiguration: Sendable {
         self.uncertainCreateAge = uncertainCreateAge
         self.clockSkewTolerance = clockSkewTolerance
         self.failingThreshold = max(1, failingThreshold)
+        self.rejectionLimit = max(1, rejectionLimit)
+        self.rejectionAge = rejectionAge
         self.clientVersion = clientVersion
     }
 

@@ -21,20 +21,25 @@ actor FakeSyncService: SyncService {
     private(set) var hasEventHandler = false
     /// Outbox size of the stored document when `signIn` was called.
     private(set) var outboxCountAtSignIn: Int?
+    /// Every `discardStaleSessions(loggingOut:)` call (kept out of `calls`).
+    private(set) var discardedSessions: [LinkedAccount?] = []
 
     private let store: (any DocumentStore)?
     private var handler: (@Sendable (SyncEvent) async -> Void)?
     private var signInResult: Result<LinkedAccount, SignInFailure>
     private var syncNowStatus: SyncStatus
+    private let deletionCancelled: Bool
 
     init(
         store: (any DocumentStore)? = nil,
         signInResult: Result<LinkedAccount, SignInFailure> = .success(Fixture.account),
-        syncNowStatus: SyncStatus = .idle(lastSyncedAt: Fixture.epoch)
+        syncNowStatus: SyncStatus = .idle(lastSyncedAt: Fixture.epoch),
+        deletionCancelled: Bool = false
     ) {
         self.store = store
         self.signInResult = signInResult
         self.syncNowStatus = syncNowStatus
+        self.deletionCancelled = deletionCancelled
     }
 
     /// Delivers `event` to the workspace and returns once it was handled.
@@ -62,6 +67,15 @@ actor FakeSyncService: SyncService {
         calls.append(.start(account))
     }
 
+    func signInWithResult(serverURL: URL, email: String, password: String) async throws(SignInFailure) -> SignInResult {
+        let account = try await signIn(serverURL: serverURL, email: email, password: password)
+        return SignInResult(account: account, deletionCancelled: deletionCancelled)
+    }
+
+    func discardStaleSessions(loggingOut account: LinkedAccount?) async {
+        discardedSessions.append(account)
+    }
+
     func signIn(serverURL: URL, email: String, password: String) async throws(SignInFailure) -> LinkedAccount {
         calls.append(.signIn(serverURL: serverURL, email: email))
         if let store {
@@ -79,8 +93,19 @@ actor FakeSyncService: SyncService {
         return account
     }
 
+    /// Runs inside the next `signOut`, for example another process writing.
+    func whileSigningOut(_ work: @escaping @Sendable () async -> Void) {
+        duringSignOut = work
+    }
+
+    private var duringSignOut: (@Sendable () async -> Void)?
+
     func signOut() async {
         calls.append(.signOut)
+        if let work = duringSignOut {
+            duringSignOut = nil
+            await work()
+        }
     }
 
     func request(_ trigger: SyncTrigger) async {

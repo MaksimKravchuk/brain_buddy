@@ -55,8 +55,30 @@ public actor InMemoryDocumentStore: DocumentStore {
         }
     }
 
+    /// Forgets the document and whatever was set aside, like the file store.
     public func destroy() async throws(DocumentStoreError) {
         contents = nil
+        quarantinedContents = []
+    }
+
+    public func destroy(after check: @Sendable (StoreDocument?) throws -> Void) async throws {
+        let current: StoreDocument? =
+            switch contents {
+            case nil: nil
+            case .document(let document)?: document
+            case .bytes(let data)?: try? StoreDocumentCoding.decode(data)
+            }
+        try check(current)
+        contents = nil
+        quarantinedContents = []
+    }
+
+    public func storedAccount() async -> LinkedAccount? {
+        switch contents {
+        case nil: nil
+        case .document(let document)?: document.account
+        case .bytes(let data)?: StoreDocumentCoding.linkedAccount(in: data)
+        }
     }
 
     /// Moves unreadable contents to `quarantinedContents` and returns a

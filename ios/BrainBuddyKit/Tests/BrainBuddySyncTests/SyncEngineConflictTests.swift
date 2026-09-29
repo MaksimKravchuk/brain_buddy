@@ -178,7 +178,8 @@ struct SyncEngineConflictTests {
         let device = await harness.device()
         try await device.signIn()
         try await device.apply(.createTask(.init(taskID: "x", title: "Call the bank", list: .inbox)))
-        device.transport.inject(.status(503), times: 2)
+        // Only the push fails: a cycle blocked by the server still pulls.
+        device.transport.inject(.status(503), times: 2, matching: FakeServerTransport.isMutation)
 
         #expect(await device.sync() == .idle(lastSyncedAt: harness.clock.now()))
         let status = await device.sync()
@@ -191,5 +192,138 @@ struct SyncEngineConflictTests {
         #expect(try await device.document().sync.lastFailure == message)
         #expect(await device.sync() == .idle(lastSyncedAt: harness.clock.now()))
         #expect(try await device.document().sync.lastFailure == nil)
+    }
+
+    // MARK: An operation the server keeps failing
+
+    /// Device b with a create the server always fails ("chokes") queued before
+    /// a healthy one, and a task written on device a since.
+    private func poisonedDevice(
+        _ configure: (inout SyncConfiguration) -> Void = { _ in }
+    ) async throws -> (SyncHarness, Device, Device, fault: FakeServerTransport.Fault) {
+        let harness = SyncHarness()
+        let a = await harness.device()
+        let b = await harness.device(configure)
+        try await a.signIn()
+        try await b.signIn()
+        try await b.apply(.createTask(.init(taskID: "bad", title: "Payload the server chokes on", list: .inbox)))
+        try await b.apply(.createTask(.init(taskID: "ok", title: "Fine task", list: .inbox)))
+        try await a.apply(.createTask(.init(taskID: "fromA", title: "Written on A", list: .next)))
+        await a.sync()
+        return (harness, a, b, .status(500))
+    }
+
+    @Test("A cycle blocked by a server error still pulls what other devices changed")
+    func blockedPushStillPulls() async throws {
+        let (harness, a, b, fault) = try await poisonedDevice()
+        b.transport.inject(fault, times: 1_000) { $0.bodyText.contains("chokes") }
+
+        let status = await b.sync()
+        guard case .idle = status else {
+            Issue.record("A first server failure is not yet failing, got \(status)")
+            return
+        }
+        #expect(try await b.current().task(titled: "Written on A") != nil, "the pull ran")
+        #expect(try await b.document().outbox.count == 2, "the blocked create keeps its place and key")
+        #expect(harness.snapshot.task(titled: "Fine task") == nil, "nothing overtakes it yet")
+        #expect(b.scheduler.pendingDelays == [.seconds(2)], "and it is retried with backoff")
+
+        // The retry asks for no pull and the last one is recent: it pulls
+        // because the push is still blocked.
+        try await a.apply(.createTask(.init(taskID: "later", title: "Also written on A", list: .next)))
+        await a.sync()
+        #expect(await b.scheduler.runNext())
+        await b.engine.waitUntilIdle()
+        #expect(try await b.current().task(titled: "Also written on A") != nil)
+        #expect(try await b.document().outbox.count == 2)
+    }
+
+    @Test("After eight server failures in a row the operation becomes a sync issue and the rest goes out")
+    func setsAsideAnOperationTheServerKeepsFailing() async throws {
+        let (harness, _, b, fault) = try await poisonedDevice()
+        b.transport.inject(fault, times: 1_000) { $0.bodyText.contains("chokes") }
+
+        for _ in 0..<7 {
+            harness.clock.advance(by: 60)
+            await b.sync()
+        }
+        #expect(try await b.document().issues.isEmpty, "seven failures are not enough")
+        #expect(harness.snapshot.task(titled: "Fine task") == nil)
+
+        harness.clock.advance(by: 60)
+        #expect(await b.sync() == .idle(lastSyncedAt: harness.clock.now()))
+        let document = try await b.document()
+        #expect(document.outbox.isEmpty)
+        #expect(document.issues.map(\.message) == ["The server kept rejecting this change."])
+        #expect(document.issues.first?.referenceID != nil)
+        #expect(harness.snapshot.task(titled: "Fine task") != nil)
+        #expect(harness.snapshot.task(titled: "Payload the server chokes on") == nil)
+        #expect(try await b.current().task(titled: "Written on A") != nil)
+    }
+
+    @Test("A success the device can't read, every time, is set aside the same way")
+    func setsAsideAnUnreadableAnswerThatKeepsComing() async throws {
+        let (harness, _, b, _) = try await poisonedDevice { $0.rejectionLimit = 3 }
+        let garbled = GarbledSuccess(inner: b.transport) { $0.bodyText.contains("chokes") }
+        let engine = SyncEngine(
+            store: b.store, tokenStore: b.tokens, transport: garbled, now: harness.clock.provider,
+            configuration: SyncConfiguration(
+                scheduler: ManualSyncScheduler(), jitter: { 0.5 }, rejectionLimit: 3, clientVersion: "test"
+            )
+        )
+        await engine.start(account: try #require(try await b.document().account))
+        await engine.waitUntilIdle()
+        _ = await engine.syncNow()
+        _ = await engine.syncNow()
+
+        let document = try await b.document()
+        #expect(document.issues.map(\.message) == ["The server kept rejecting this change."])
+        #expect(document.outbox.isEmpty)
+        #expect(harness.snapshot.task(titled: "Fine task") != nil)
+    }
+
+    @Test("An operation failing for a day is set aside after two failures in a row, even after a relaunch")
+    func setsAsideAnOperationFailingForADay() async throws {
+        let (harness, a, b, taskOnB) = try await twoDevicesWithTask()
+        _ = a
+        try await b.apply(.updateTask(.init(taskID: taskOnB, changes: TaskChanges(details: .set("chokes the server")))))
+        try await b.apply(.createTask(.init(taskID: "ok", title: "Fine task", list: .inbox)))
+        b.transport.inject(.status(500), times: 1_000) { $0.bodyText.contains("chokes") }
+        await b.sync()
+        #expect(try await b.document().outbox.first?.firstAttemptAt == harness.clock.now())
+
+        // The app is quit and opened a day later.
+        harness.clock.advance(by: 25 * 3600)
+        let relaunched = SyncEngine(
+            store: b.store, tokenStore: b.tokens, transport: b.transport, now: harness.clock.provider,
+            configuration: SyncConfiguration(scheduler: ManualSyncScheduler(), jitter: { 0.5 }, clientVersion: "test")
+        )
+        await relaunched.start(account: try #require(try await b.document().account))
+        await relaunched.waitUntilIdle()
+        #expect(try await b.document().issues.isEmpty, "one failure after a relaunch is not enough")
+
+        _ = await relaunched.syncNow()
+        let document = try await b.document()
+        #expect(document.issues.map(\.message) == ["The server kept rejecting this change."])
+        #expect(document.outbox.isEmpty)
+        #expect(harness.snapshot.task(titled: "Fine task") != nil)
+    }
+}
+
+/// Answers matching requests with a 201 whose body can't be decoded (after
+/// the server applied nothing), like a server returning a shape the app
+/// does not know.
+final class GarbledSuccess: HTTPTransport {
+    let inner: FakeServerTransport
+    let matches: @Sendable (HTTPRequest) -> Bool
+
+    init(inner: FakeServerTransport, matches: @escaping @Sendable (HTTPRequest) -> Bool) {
+        self.inner = inner
+        self.matches = matches
+    }
+
+    func send(_ request: HTTPRequest) async throws -> HTTPResponse {
+        guard matches(request) else { return try await inner.send(request) }
+        return HTTPResponse(statusCode: 201, headers: ["content-type": "application/json"], body: Data("{}".utf8))
     }
 }

@@ -89,6 +89,13 @@ public enum StoreDocumentCoding {
         }
     }
 
+    /// The `account` of stored bytes, decoded on its own and whatever the
+    /// version, so it is also found in a document that cannot be decoded as a
+    /// whole. Nil when there is none or not even it can be read.
+    public static func linkedAccount(in data: Data) -> LinkedAccount? {
+        (try? decoder.decode(AccountHeader.self, from: data))?.account
+    }
+
     /// Brings a document written by an older app version forward to
     /// `StoreDocument.currentVersion`. Each step rewrites the raw JSON of one
     /// version into the next (and sets its `version`), so no step needs the
@@ -139,6 +146,10 @@ public enum StoreDocumentCoding {
 
     private struct GenerationHeader: Decodable {
         var generation: Int
+    }
+
+    private struct AccountHeader: Decodable {
+        var account: LinkedAccount?
     }
 
     /// Versions start at 1; anything newer than this build is unsupported.

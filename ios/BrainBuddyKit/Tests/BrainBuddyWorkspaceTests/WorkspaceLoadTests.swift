@@ -108,6 +108,25 @@ import Testing
         #expect(await store.quarantinedContents == [Fixture.newerVersion])
     }
 
+    @Test func resetUnreadableStoreLogsOutTheAccountOfTheDocumentSetAside() async throws {
+        var json = try #require(
+            try JSONSerialization.jsonObject(with: StoreDocumentCoding.encode(WorkspaceSyncTests.linkedDocument()))
+                as? [String: Any]
+        )
+        json["version"] = 99
+        let store = InMemoryDocumentStore(contents: try JSONSerialization.data(withJSONObject: json))
+        let sync = FakeSyncService(store: store)
+        let workspace = await loadedWorkspace(store: store, sync: sync)
+        #expect(workspace.loadError != nil)
+        #expect(await sync.discardedSessions.isEmpty, "an unreadable document may belong to an account")
+
+        #expect(await workspace.resetUnreadableStore() != nil)
+        #expect(await sync.discardedSessions == [Fixture.account, nil], "its session, then any stale one")
+        #expect(workspace.loadError == nil)
+        #expect(workspace.account == nil)
+        #expect(await sync.calls.isEmpty)
+    }
+
     @Test func resetUnreadableStoreLeavesAReadableDocumentAlone() async throws {
         let store = InMemoryDocumentStore(document: StoreDocument(generation: 2, outbox: [
             PendingOperation(command: .createTag(.init(tagID: "t", name: "home")), issuedAt: Fixture.epoch)

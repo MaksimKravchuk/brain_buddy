@@ -20,8 +20,10 @@ import Foundation
 ///
 /// The lock is held only inside one synchronous stretch of `update`,
 /// `destroy` or `quarantineUnreadableDocument`, never across a suspension,
-/// so keep `transform` short. On iOS, wrap writes in a background task
-/// assertion so the process is not suspended while holding the lock.
+/// so keep `transform` short. On iOS each of those stretches runs inside an
+/// expiring-activity assertion (`ExpiringActivity`), so the process is not
+/// suspended while it holds the lock, whoever the writer is (the app, the
+/// sync engine, a widget or an App Intent).
 public actor FileDocumentStore: DocumentStore {
     /// The document file.
     public nonisolated let fileURL: URL
@@ -45,6 +47,8 @@ public actor FileDocumentStore: DocumentStore {
     public func update(
         _ transform: @Sendable (inout StoreDocument) throws -> Void
     ) async throws -> StoreDocument {
+        let activity = ExpiringActivity(reason: "Saving your changes")
+        defer { activity.end() }
         try file.createDirectoryIfNeeded()
         let lock = try file.lock()
         defer { lock.release() }
@@ -62,12 +66,31 @@ public actor FileDocumentStore: DocumentStore {
         return try StoreDocumentCoding.generation(of: data)
     }
 
-    /// Removes the document and its lock file, readable or not.
+    /// Removes the document, its lock file and every document set aside by
+    /// `quarantineUnreadableDocument()`, readable or not.
     public func destroy() async throws(DocumentStoreError) {
         guard file.directoryExists() else { return }
+        let activity = ExpiringActivity(reason: "Removing your data")
+        defer { activity.end() }
         let lock = try file.lock()
         defer { lock.release() }
         try file.removeAll()
+    }
+
+    public func destroy(after check: @Sendable (StoreDocument?) throws -> Void) async throws {
+        guard file.directoryExists() else { return try check(nil) }
+        let activity = ExpiringActivity(reason: "Removing your data")
+        defer { activity.end() }
+        let lock = try file.lock()
+        defer { lock.release() }
+        let current = try file.readContents().flatMap { try? StoreDocumentCoding.decode($0) }
+        try check(current)
+        try file.removeAll()
+    }
+
+    public func storedAccount() async -> LinkedAccount? {
+        guard let data = try? file.readContents() else { return nil }
+        return StoreDocumentCoding.linkedAccount(in: data)
     }
 
     /// Renames an unreadable document to `<name>.unreadable-<UTC time>.json`
@@ -75,6 +98,8 @@ public actor FileDocumentStore: DocumentStore {
     /// document that reads fine is left alone and the result is nil.
     public func quarantineUnreadableDocument() async throws(DocumentStoreError) -> URL? {
         guard file.directoryExists() else { return nil }
+        let activity = ExpiringActivity(reason: "Setting your data aside")
+        defer { activity.end() }
         let lock = try file.lock()
         defer { lock.release() }
         guard let data = try file.readContents() else { return nil }

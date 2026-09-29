@@ -150,10 +150,92 @@ extension GTDCommand {
     }
 }
 
+extension GTDCommand {
+    /// What is left to send of this command (the operation as it is queued
+    /// now) after `sent` (the same operation as it was sent) was
+    /// acknowledged. Empty when nothing changed since it was sent.
+    ///
+    /// A command can only change after it was sent through an older document
+    /// (one that folded a later edit into it before `everSent` existed) or an
+    /// id rewrite. Edits keep only the fields that differ from what was sent;
+    /// a create becomes the edits (and move) that bring the acknowledged record
+    /// to what the create now says. Replay drops whatever already holds.
+    func remainder(afterSending sent: GTDCommand) -> [GTDCommand] {
+        guard self != sent else { return [] }
+        switch (sent, self) {
+        case (.createTask(let sent), .createTask(let now)):
+            return Self.taskRemainder(sent: sent, now: now)
+        case (.createSubtask(let sent), .createSubtask(let now)):
+            guard sent.title != now.title else { return [] }
+            return [.updateSubtask(.init(taskID: now.taskID, subtaskID: now.subtaskID, title: now.title))]
+        case (.createComment(let sent), .createComment(let now)):
+            guard sent.body != now.body else { return [] }
+            return [.updateComment(.init(taskID: now.taskID, commentID: now.commentID, body: now.body))]
+        case (.createProject(let sent), .createProject(let now)):
+            let update = GTDCommand.UpdateProject(
+                projectID: now.projectID, name: sent.name == now.name ? nil : now.name,
+                color: sent.color == now.color ? .unchanged : now.color.map { .set($0) } ?? .clear
+            )
+            return update.name == nil && update.color == .unchanged ? [] : [.updateProject(update)]
+        case (.createTag(let sent), .createTag(let now)):
+            guard sent.name != now.name else { return [] }
+            return [.renameTag(.init(tagID: now.tagID, name: now.name))]
+        case (.updateTask(let sent), .updateTask(let now)):
+            let changes = TaskChanges(
+                title: Self.unsent(now.changes.title, sent.changes.title),
+                details: Self.unsent(now.changes.details, sent.changes.details),
+                projectID: Self.unsent(now.changes.projectID, sent.changes.projectID),
+                tagIDs: Self.unsent(now.changes.tagIDs, sent.changes.tagIDs),
+                dueDate: Self.unsent(now.changes.dueDate, sent.changes.dueDate),
+                priority: Self.unsent(now.changes.priority, sent.changes.priority),
+                waitingFor: Self.unsent(now.changes.waitingFor, sent.changes.waitingFor)
+            )
+            return changes.hasChanges ? [.updateTask(.init(taskID: now.taskID, changes: changes))] : []
+        case (.updateProject(let sent), .updateProject(let now)):
+            let update = GTDCommand.UpdateProject(
+                projectID: now.projectID, name: sent.name == now.name ? nil : now.name,
+                color: Self.unsent(now.color, sent.color)
+            )
+            return update.name == nil && update.color == .unchanged ? [] : [.updateProject(update)]
+        default:
+            return [self]
+        }
+    }
+
+    /// `now` unless it asks for exactly what was sent.
+    private static func unsent<Value>(_ now: FieldChange<Value>, _ sent: FieldChange<Value>) -> FieldChange<Value> {
+        now == sent ? .unchanged : now
+    }
+
+    private static func taskRemainder(sent: CreateTask, now: CreateTask) -> [GTDCommand] {
+        var commands: [GTDCommand] = []
+        if now.list != sent.list {
+            commands.append(
+                .transitionTask(.init(taskID: now.taskID, action: .move, toList: now.list, waitingFor: now.waitingFor))
+            )
+        }
+        var changes = TaskChanges()
+        if now.title != sent.title { changes.title = .set(now.title) }
+        if now.details != sent.details { changes.details = now.details.map { .set($0) } ?? .clear }
+        if now.projectID != sent.projectID { changes.projectID = now.projectID.map { .set($0) } ?? .clear }
+        if now.tagIDs != sent.tagIDs { changes.tagIDs = .set(now.tagIDs) }
+        if now.dueDate != sent.dueDate { changes.dueDate = now.dueDate.map { .set($0) } ?? .clear }
+        if now.priority != sent.priority { changes.priority = .set(now.priority) }
+        if now.list == sent.list, now.list == .waiting, now.waitingFor != sent.waitingFor, let note = now.waitingFor {
+            changes.waitingFor = .set(note)
+        }
+        if changes.hasChanges { commands.append(.updateTask(.init(taskID: now.taskID, changes: changes))) }
+        return commands
+    }
+}
+
 extension PendingOperation {
     /// A fresh `Idempotency-Key`, for a request whose body changed (or whose
-    /// old key may have expired): the attempt bookkeeping starts over.
+    /// old key may have expired): the attempt bookkeeping starts over, but an
+    /// operation that may have been sent stays `everSent`, so the compactor
+    /// never folds a later edit into it (its old request may still land).
     mutating func rotateKey() {
+        if attempts > 0 { everSent = true }
         idempotencyKey = UUID()
         attempts = 0
         firstAttemptAt = nil

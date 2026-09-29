@@ -62,6 +62,23 @@ public final class FakeBrainBuddyServer: Sendable {
         }
     }
 
+    /// Sessions of the account the server still accepts.
+    public func liveSessionCount(email: String) -> Int {
+        state.withLock { state in
+            guard let id = state.accountIDsByEmail[email.lowercased()] else { return 0 }
+            return state.sessions.values.filter { $0 == id }.count
+        }
+    }
+
+    /// Schedules the account for deletion (`DELETE /account` with its grace
+    /// period): the next login cancels that and says so (`deletion_cancelled`).
+    public func scheduleDeletion(email: String) {
+        state.withLock { state in
+            guard let id = state.accountIDsByEmail[email.lowercased()] else { return }
+            state.accounts[id]?.deletionScheduled = true
+        }
+    }
+
     /// A transport for one device, with its own fault queue and request log.
     public func makeTransport() -> FakeServerTransport { FakeServerTransport(server: self) }
 

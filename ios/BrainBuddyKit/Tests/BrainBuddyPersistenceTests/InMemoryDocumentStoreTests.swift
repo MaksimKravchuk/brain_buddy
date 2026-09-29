@@ -93,6 +93,37 @@ import Testing
         #expect(try await store.generation() == nil)
     }
 
+    @Test func destroyForgetsWhatWasSetAside() async throws {
+        let store = InMemoryDocumentStore(contents: Data("garbage".utf8))
+        #expect(try await store.quarantineUnreadableDocument() != nil)
+        try await store.destroy()
+        #expect(await store.quarantinedContents.isEmpty)
+    }
+
+    @Test func destroyAfterACheckKeepsEverythingWhenRefused() async throws {
+        let store: any DocumentStore = InMemoryDocumentStore(document: Fixtures.richDocument())
+        await #expect(throws: Boom.self) {
+            try await store.destroy(after: { if $0?.outbox.isEmpty == false { throw Boom() } })
+        }
+        #expect(try await store.load()?.outbox.count == 2)
+        try await store.destroy(after: { #expect($0?.generation == 4) })
+        #expect(try await store.load() == nil)
+    }
+
+    @Test func storedAccountIsReadFromUnreadableContentsToo() async throws {
+        let account = try #require(Fixtures.richDocument().account)
+        let readable: any DocumentStore = InMemoryDocumentStore(document: Fixtures.richDocument())
+        #expect(await readable.storedAccount() == account)
+        var json = try #require(
+            try JSONSerialization.jsonObject(with: StoreDocumentCoding.encode(Fixtures.richDocument())) as? [String: Any]
+        )
+        json["version"] = 9
+        let newer: any DocumentStore = InMemoryDocumentStore(contents: try JSONSerialization.data(withJSONObject: json))
+        #expect(await newer.storedAccount() == account)
+        #expect(await InMemoryDocumentStore(contents: Data("garbage".utf8)).storedAccount() == nil)
+        #expect(await InMemoryDocumentStore().storedAccount() == nil)
+    }
+
     /// Regression: a synchronous implementation would lose to the protocol's
     /// async default, silently refusing to quarantine.
     @Test func storesUseTheirOwnQuarantineThroughTheProtocol() async throws {

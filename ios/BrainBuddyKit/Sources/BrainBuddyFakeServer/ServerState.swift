@@ -122,10 +122,12 @@ struct ServerState: Sendable {
         return owner
     }
 
-    private func meDTO(_ account: FakeAccount) -> MeDTO {
-        MeDTO(id: account.id, email: account.email, displayName: account.displayName)
+    private func meDTO(_ account: FakeAccount, deletionCancelled: Bool = false) -> MeDTO {
+        MeDTO(id: account.id, email: account.email, displayName: account.displayName, deletionCancelled: deletionCancelled)
     }
 
+    /// `login`: a login within the deletion grace period cancels the deletion
+    /// and reports `deletion_cancelled: true`.
     private mutating func login(_ request: HTTPRequest, now: Date) throws(FakeHTTPError) -> Reply {
         let body = try RequestBody(request.body, allowing: ["email", "password"])
         let email = try body.string("email", required: true) ?? ""
@@ -134,7 +136,9 @@ struct ServerState: Sendable {
         else { throw FakeHTTPError(status: 401, message: "Invalid email or password.") }
         let token = "session_\(ids.hex(32))"
         sessions[token] = id
-        var reply = Reply.json(200, meDTO(account))
+        let cancelledDeletion = account.deletionScheduled
+        accounts[id]?.deletionScheduled = false
+        var reply = Reply.json(200, meDTO(account, deletionCancelled: cancelledDeletion))
         reply.headers["set-cookie"] =
             "\(Self.cookieName)=\(token); HttpOnly; Max-Age=2592000; Path=/; SameSite=lax; Secure"
         return reply

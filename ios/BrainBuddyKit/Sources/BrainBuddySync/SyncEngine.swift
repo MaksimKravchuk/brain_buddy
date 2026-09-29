@@ -12,13 +12,17 @@ import Foundation
 ///   read-modify-write through the shared store (the workspace appends to
 ///   the outbox concurrently), followed by `.documentChanged`.
 /// - **A cycle** pushes until the outbox is empty or blocked, pulls (after
-///   changes, on the first cycle, when asked, or when the last pull is older
-///   than a minute), pushes again if the replay left work, and hydrates the
-///   children of changed open tasks. Cycles are single-flight.
+///   changes, on the first cycle, when asked, when the last pull is older
+///   than a minute, or when the server keeps failing the front operation),
+///   pushes again if the replay left work, and hydrates the children of
+///   changed open tasks. Cycles are single-flight, and so are the task
+///   detail reads `refreshTask` asks for: they run in the same slot, so a
+///   detail read never overlaps a push.
 /// - **Failures**: network errors, 5xx and 429 keep the operation and its key
-///   and retry with backoff; 409 stale revision re-reads the record and
-///   replays; 401 stops until the user signs in again; other rejections move
-///   the operation to `issues`.
+///   and retry with backoff; an operation the server keeps failing is set
+///   aside after `rejectionLimit` failures in a row (or `rejectionAge`);
+///   409 stale revision re-reads the record and replays; 401 stops until the
+///   user signs in again; other rejections move the operation to `issues`.
 public actor SyncEngine: SyncService {
     let store: any DocumentStore
     let tokenStore: any SessionTokenStore
@@ -57,6 +61,22 @@ public actor SyncEngine: SyncService {
     var consecutiveServerFailures = 0
     /// `syncNow()` calls that joined a running cycle (observed by tests).
     var joinedCycles = 0
+    /// Tasks whose details were asked for (`refreshTask`), oldest first. The
+    /// single-flight cycle reads them, so a read never overlaps a push whose
+    /// acknowledgement it could overwrite with older children.
+    var requestedRefreshes: [TaskID] = []
+    /// The server's failures in a row of the operation at the front of the outbox.
+    var rejectionStreak: RejectionStreak?
+
+    // Sessions.
+    /// Sign-ins in progress. Nothing runs meanwhile (a request of the linked
+    /// account would carry the session being created), and stale sessions
+    /// are not discarded.
+    var signInsInProgress = 0
+    /// Sending logouts that waited for the network.
+    var logoutWork: Task<Void, Never>?
+    /// False once the token store had no pending logouts (saves Keychain reads).
+    var mayHavePendingLogouts = true
 
     /// - Parameters:
     ///   - store: the same document store the workspace writes to.
@@ -103,10 +123,44 @@ public actor SyncEngine: SyncService {
     }
 
     public func signIn(serverURL: URL, email: String, password: String) async throws(SignInFailure) -> LinkedAccount {
+        try await signInWithResult(serverURL: serverURL, email: email, password: password).account
+    }
+
+    public func signInWithResult(
+        serverURL: URL, email: String, password: String
+    ) async throws(SignInFailure) -> SignInResult {
+        let result: SignInResult
+        do throws(SignInFailure) {
+            result = try await linkAccount(serverURL: serverURL, email: email, password: password)
+        } catch {
+            // Nothing was linked: the account that was (if any) carries on.
+            if account != nil {
+                pullRequested = true
+                kick()
+            }
+            throw error
+        }
+        retryPendingLogouts()
+        await syncNow()
+        return result
+    }
+
+    /// Logs in and links the account in the document. Nothing of the linked
+    /// account runs meanwhile, and a refused link leaves it as it was.
+    private func linkAccount(
+        serverURL: URL, email: String, password: String
+    ) async throws(SignInFailure) -> SignInResult {
         guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
             throw SignInFailure(message: "Use an https server address.")
         }
+        signInsInProgress += 1
+        defer { signInsInProgress -= 1 }
+        // Once the login stores the new session, a request of the linked
+        // account would carry it: stop that work first.
+        await stopWork()
+        epoch += 1
         let client = client(for: url)
+        let previousToken = storedToken(for: url)
         let me: MeDTO
         do {
             me = try await client.login(email: email, password: password)
@@ -116,8 +170,31 @@ public actor SyncEngine: SyncService {
         let linked = LinkedAccount(
             id: me.id, email: me.email, displayName: me.displayName, serverURL: url, linkedAt: now()
         )
-        await stopWork()
-        epoch += 1
+        let replaced = ReplacedAccount()
+        let document: StoreDocument
+        do {
+            document = try await store.update { doc in
+                if let previous = doc.account, !previous.isSameAccount(as: linked) {
+                    // Another account's queued changes and issues must never
+                    // reach this one: they stay until that account signs out.
+                    guard doc.outbox.isEmpty, doc.issues.isEmpty else { throw AccountSwitchRefused() }
+                    // Nor may its server data mix with this one's.
+                    doc.base = .empty
+                    doc.sync = SyncMetadata()
+                    replaced.set(previous)
+                }
+                doc.account = linked
+            }
+        } catch {
+            await abandonSession(on: url, restoring: previousToken)
+            if error is AccountSwitchRefused {
+                throw SignInFailure(
+                    message:
+                        "Sign out first to use another account. Changes from the other account are still waiting on this iPhone."
+                )
+            }
+            throw SignInFailure(message: "Brain Buddy couldn't save your sign-in on this device.")
+        }
         account = linked
         needsSignIn = false
         firstCycle = true
@@ -125,28 +202,14 @@ public actor SyncEngine: SyncService {
         pullRequested = true
         consecutiveFailures = 0
         consecutiveServerFailures = 0
-        let date = now()
-        do {
-            let document = try await store.update { doc in
-                if let previous = doc.account, previous.id != linked.id {
-                    // Another account's server data must not mix with this one's.
-                    doc.base = .empty
-                    doc.sync = SyncMetadata()
-                    doc.replayOutbox(now: date)
-                }
-                doc.account = linked
-            }
-            lastSyncedAt = document.lastSyncedAt
-            await emit(.documentChanged(document))
-        } catch {
-            account = nil
-            try? client.discardStoredSession()
-            await setStatus(.localOnly)
-            throw SignInFailure(message: "Brain Buddy couldn't save your sign-in on this device.")
+        rejectionStreak = nil
+        lastSyncedAt = document.lastSyncedAt
+        await emit(.documentChanged(document))
+        if let previous = replaced.value {
+            await retireSessions(of: previous, replacedOn: url, previousToken: previousToken)
         }
         if !networkAvailable { await setStatus(.offline(lastSyncedAt: lastSyncedAt)) }
-        await syncNow()
-        return linked
+        return SignInResult(account: linked, deletionCancelled: me.deletionCancelled)
     }
 
     public func signOut() async {
@@ -157,12 +220,18 @@ public actor SyncEngine: SyncService {
         needsSignIn = false
         pullFirst = false
         if let signedOut {
-            try? await client(for: signedOut.serverURL).logout()
+            // Signed out here at once; the server is told now, or when the
+            // network is back.
+            let url = signedOut.serverURL
+            let token = storedToken(for: url)
+            try? tokenStore.removeToken(for: url)
+            if let token { await endSession(token: token, on: url) }
         }
         await setStatus(.localOnly)
     }
 
     public func request(_ trigger: SyncTrigger) async {
+        if trigger != .localChange { retryPendingLogouts() }
         guard account != nil else {
             await setStatus(.localOnly)
             return
@@ -197,22 +266,18 @@ public actor SyncEngine: SyncService {
             joinedCycles += 1
             return await running.value
         }
-        return await startCycles().value
+        return await startCycles(full: true).value
     }
 
+    /// Reads the task's detail inside the single-flight cycle: after the
+    /// running one (which reads it before it ends), or alone.
     public func refreshTask(_ id: TaskID) async {
-        guard let account, canRun else { return }
-        let context = CycleContext(account: account, client: client(for: account.serverURL), epoch: epoch)
-        do {
-            guard let serverID = try await loadDocument().base.tasks[id]?.serverID else { return }
-            try await hydrate([serverID], context)
-        } catch let error as APIError {
-            if case .unauthorized = error.kind, context.epoch == epoch {
-                needsSignIn = true
-                await setStatus(.needsSignIn)
-            }
-        } catch {
-            // Offline, aborted or unreadable: the detail shows what the device has.
+        guard account != nil, canRun else { return }
+        if !requestedRefreshes.contains(id) { requestedRefreshes.append(id) }
+        if let running = runningCycle {
+            _ = await running.value
+        } else {
+            _ = await startCycles(full: false).value
         }
     }
 
@@ -221,6 +286,7 @@ public actor SyncEngine: SyncService {
         networkAvailable = available
         if available {
             consecutiveFailures = 0
+            retryPendingLogouts()
             await request(.networkRestored)
         } else {
             retryWork?.cancel()
@@ -231,15 +297,23 @@ public actor SyncEngine: SyncService {
 
     // MARK: - Beyond the contract
 
-    /// Waits until no cycle is running (tests; also a clean point before
-    /// the app is suspended).
+    /// Waits until no cycle runs and no logout is on its way (tests; also a
+    /// clean point before the app is suspended).
     public func waitUntilIdle() async {
-        while let running = runningCycle { _ = await running.value }
+        while true {
+            if let running = runningCycle {
+                _ = await running.value
+            } else if let logouts = logoutWork {
+                await logouts.value
+            } else {
+                return
+            }
+        }
     }
 
     // MARK: - Scheduling
 
-    var canRun: Bool { account != nil && networkAvailable && !needsSignIn }
+    var canRun: Bool { account != nil && networkAvailable && !needsSignIn && signInsInProgress == 0 }
 
     func kick() {
         guard canRun else { return }
@@ -247,7 +321,7 @@ public actor SyncEngine: SyncService {
             rerunRequested = true
             return
         }
-        startCycles()
+        startCycles(full: true)
     }
 
     private func debounceFired() {
@@ -260,30 +334,53 @@ public actor SyncEngine: SyncService {
         kick()
     }
 
+    /// Starts the single-flight task: a full cycle, or (`full: false`) only
+    /// the requested task reads, which leave a scheduled retry in place.
     @discardableResult
-    private func startCycles() -> Task<SyncStatus, Never> {
-        retryWork?.cancel()
-        retryWork = nil
+    private func startCycles(full: Bool) -> Task<SyncStatus, Never> {
+        if full {
+            retryWork?.cancel()
+            retryWork = nil
+        }
         runningCycleID += 1
         let id = runningCycleID
         let cycleEpoch = epoch
-        let task = Task { await self.runCycles(id: id, epoch: cycleEpoch) }
+        // Whoever joins a task that makes no pull decision asks for a cycle.
+        pastPullDecision = !full
+        let task = Task { await self.runCycles(id: id, epoch: cycleEpoch, full: full) }
         runningCycle = task
         return task
     }
 
-    /// Runs cycles until none was requested meanwhile, then reports and
-    /// schedules a retry after a failure.
-    private func runCycles(id: Int, epoch cycleEpoch: Int) async -> SyncStatus {
-        var outcome = CycleOutcome.aborted
-        repeat {
-            rerunRequested = false
-            pastPullDecision = false
-            outcome = await runCycle(epoch: cycleEpoch)
-            if cycleEpoch == epoch { await report(outcome) }
-        } while rerunRequested && cycleEpoch == epoch && canRun && outcome.allowsRerun
+    /// Runs cycles until none was requested meanwhile, reading requested task
+    /// details after each, then reports and schedules a retry after a failure.
+    private func runCycles(id: Int, epoch cycleEpoch: Int, full: Bool) async -> SyncStatus {
+        var outcome: CycleOutcome?
+        var runsCycle = full
+        while cycleEpoch == epoch {
+            if runsCycle {
+                rerunRequested = false
+                pastPullDecision = false
+                let result = await runCycle(epoch: cycleEpoch)
+                outcome = result
+                if cycleEpoch == epoch { await report(result) }
+                guard cycleEpoch == epoch else { break }
+            }
+            if !requestedRefreshes.isEmpty {
+                if canRun {
+                    await hydrateRequestedTasks(epoch: cycleEpoch)
+                } else {
+                    requestedRefreshes.removeAll()
+                }
+                guard cycleEpoch == epoch else { break }
+            }
+            runsCycle = rerunRequested && canRun && (outcome?.allowsRerun ?? true)
+            // No suspension from this check until the slot is free, so a
+            // request made meanwhile is never left behind.
+            if !runsCycle, requestedRefreshes.isEmpty { break }
+        }
         if runningCycleID == id { runningCycle = nil }
-        if cycleEpoch == epoch, outcome.shouldRetry, canRun { scheduleRetry() }
+        if cycleEpoch == epoch, outcome?.shouldRetry == true, canRun { scheduleRetry() }
         return status
     }
 
@@ -309,6 +406,8 @@ public actor SyncEngine: SyncService {
         runningCycle = nil
         rerunRequested = false
         pastPullDecision = false
+        requestedRefreshes.removeAll()
+        rejectionStreak = nil
     }
 
     // MARK: - Status
@@ -416,5 +515,18 @@ struct CycleContext: Sendable {
     let epoch: Int
 }
 
+/// The server failing the operation at the front of the outbox, in a row.
+struct RejectionStreak: Sendable {
+    var operationID: UUID
+    var count: Int
+    /// The first failure of the streak, or the operation's first attempt
+    /// with its current key when that is earlier (it survives a relaunch).
+    var since: Date
+}
+
 /// The work belongs to an account that is no longer linked (or was cancelled).
 struct SyncAborted: Error {}
+
+/// Signing in to another account while the linked one still has queued
+/// changes or sync issues on the device.
+struct AccountSwitchRefused: Error {}

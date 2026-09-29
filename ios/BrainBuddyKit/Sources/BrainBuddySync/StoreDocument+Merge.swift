@@ -8,8 +8,33 @@ enum ChildrenUpdate: Sendable {
     case keep
     /// A new task: it has no children on the server yet.
     case created(Date)
-    /// A `GET /tasks/{id}` detail: its children replace the base's.
-    case replace(Date)
+    /// A `GET /tasks/{id}` detail: its children replace the base's, except
+    /// that a child the base holds at a newer revision keeps that revision,
+    /// and a child the base learned after the read started (missing from
+    /// `known`, acknowledged meanwhile) is kept even though the detail lacks it.
+    case replace(Date, known: KnownChildren)
+}
+
+/// The children of one task the base knew when a `GET /tasks/{id}` started.
+struct KnownChildren: Hashable, Sendable {
+    var subtasks: Set<String> = []
+    var comments: Set<String> = []
+
+    init(_ task: TaskRecord?) {
+        subtasks = Set(task?.subtasks.compactMap(\.serverID) ?? [])
+        comments = Set(task?.comments.compactMap(\.serverID) ?? [])
+    }
+
+    /// Per server task id, for the tasks of `base` among `serverIDs`.
+    static func snapshot(of serverIDs: some Sequence<String>, in base: GTDState) -> [String: KnownChildren] {
+        let wanted = Set(serverIDs)
+        var result: [String: KnownChildren] = [:]
+        for task in base.tasks.values {
+            guard let serverID = task.serverID, wanted.contains(serverID) else { continue }
+            result[serverID] = KnownChildren(task)
+        }
+        return result
+    }
 }
 
 /// Writing server records into `base`. Every write keeps the client ids the
@@ -103,9 +128,9 @@ extension StoreDocument {
                 record.comments = []
                 record.childrenSyncedAt = date
             }
-        case .replace(let date):
-            record.subtasks = Self.subtasks(dto.subtasks, existing: existing?.subtasks ?? [])
-            record.comments = Self.comments(dto.comments, existing: existing?.comments ?? [])
+        case .replace(let date, let known):
+            record.subtasks = Self.subtasks(dto.subtasks, existing: existing?.subtasks ?? [], known: known.subtasks)
+            record.comments = Self.comments(dto.comments, existing: existing?.comments ?? [], known: known.comments)
             record.childrenSyncedAt = date
         }
         base.tasks[id] = record
@@ -140,26 +165,44 @@ extension StoreDocument {
         )
     }
 
-    static func subtasks(_ items: [SubtaskDTO], existing: [SubtaskRecord]) -> [SubtaskRecord] {
-        var known: [String: SubtaskID] = [:]
-        for subtask in existing { if let sid = subtask.serverID { known[sid] = subtask.id } }
-        return items.map { item in
-            SubtaskRecord(
-                id: known[item.id] ?? SubtaskID.random(), serverID: item.id, serverRevision: item.revision,
+    /// A detail's subtasks under the ids the base uses. A base subtask at a
+    /// newer revision than the detail wins; one the detail lacks survives when
+    /// `known` (the base's subtasks when the read started) lacks it too.
+    static func subtasks(_ items: [SubtaskDTO], existing: [SubtaskRecord], known: Set<String>) -> [SubtaskRecord] {
+        var byServerID: [String: SubtaskRecord] = [:]
+        for subtask in existing { if let sid = subtask.serverID { byServerID[sid] = subtask } }
+        var merged = items.map { item in
+            if let current = byServerID[item.id], (current.serverRevision ?? .min) > item.revision { return current }
+            return SubtaskRecord(
+                id: byServerID[item.id]?.id ?? SubtaskID.random(), serverID: item.id, serverRevision: item.revision,
                 title: item.title, state: item.state, orderKey: item.orderKey
             )
         }
+        let listed = Set(items.map(\.id))
+        merged += existing.filter { subtask in
+            guard let sid = subtask.serverID else { return false }
+            return !listed.contains(sid) && !known.contains(sid)
+        }
+        return merged.sorted { ($0.orderKey, $0.serverID ?? "") < ($1.orderKey, $1.serverID ?? "") }
     }
 
-    static func comments(_ items: [CommentDTO], existing: [CommentRecord]) -> [CommentRecord] {
-        var known: [String: CommentID] = [:]
-        for comment in existing { if let sid = comment.serverID { known[sid] = comment.id } }
-        return items.map { item in
-            CommentRecord(
-                id: known[item.id] ?? CommentID.random(), serverID: item.id, serverRevision: item.revision,
+    /// The same for comments.
+    static func comments(_ items: [CommentDTO], existing: [CommentRecord], known: Set<String>) -> [CommentRecord] {
+        var byServerID: [String: CommentRecord] = [:]
+        for comment in existing { if let sid = comment.serverID { byServerID[sid] = comment } }
+        var merged = items.map { item in
+            if let current = byServerID[item.id], (current.serverRevision ?? .min) > item.revision { return current }
+            return CommentRecord(
+                id: byServerID[item.id]?.id ?? CommentID.random(), serverID: item.id, serverRevision: item.revision,
                 body: item.body, authorID: item.actorID, createdAt: item.createdAt, editedAt: item.editedAt
             )
         }
+        let listed = Set(items.map(\.id))
+        merged += existing.filter { comment in
+            guard let sid = comment.serverID else { return false }
+            return !listed.contains(sid) && !known.contains(sid)
+        }
+        return merged.sorted { ($0.createdAt, $0.serverID ?? "") < ($1.createdAt, $1.serverID ?? "") }
     }
 
     // MARK: - Subtasks and comments

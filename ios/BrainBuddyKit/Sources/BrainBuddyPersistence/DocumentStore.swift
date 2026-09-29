@@ -42,8 +42,23 @@ public protocol DocumentStore: Sendable {
     /// Cheap check for writes by other processes.
     func generation() async throws(DocumentStoreError) -> Int?
 
-    /// Removes the document (sign-out that discards local data).
+    /// Removes the document (sign-out that discards local data), and any
+    /// document set aside by `quarantineUnreadableDocument()`.
     func destroy() async throws(DocumentStoreError)
+
+    /// Removes the document like `destroy()`, but only once `check` accepted
+    /// the latest stored document (nil when there is none or it cannot be
+    /// read), read under the same lock as the removal so no other process
+    /// writes in between. When `check` throws, nothing is removed and its
+    /// error propagates. Sign-out uses it to count changes a widget or App
+    /// Intent queued that the app has not seen yet.
+    func destroy(after check: @Sendable (StoreDocument?) throws -> Void) async throws
+
+    /// The account linked in the stored document, read on its own, so it is
+    /// also found in a document that cannot be decoded as a whole (damaged,
+    /// or written by a newer version). Nil when there is none, or when not
+    /// even that can be read.
+    func storedAccount() async -> LinkedAccount?
 
     /// Sets an unreadable document (`.unreadable` or `.unsupportedVersion`)
     /// aside so the user can start fresh deliberately; the next `update`
@@ -60,5 +75,26 @@ extension DocumentStore {
     /// default, because async callers prefer the async overload.
     public func quarantineUnreadableDocument() async throws(DocumentStoreError) -> URL? {
         throw .io("this store cannot set an unreadable document aside")
+    }
+
+    /// Check, then remove: without a lock, another writer can land in between.
+    public func destroy(after check: @Sendable (StoreDocument?) throws -> Void) async throws {
+        let current: StoreDocument?
+        do {
+            current = try await load()
+        } catch {
+            current = nil
+        }
+        try check(current)
+        try await destroy()
+    }
+
+    /// The account of a document that decodes; nil otherwise.
+    public func storedAccount() async -> LinkedAccount? {
+        do {
+            return try await load()?.account
+        } catch {
+            return nil
+        }
     }
 }

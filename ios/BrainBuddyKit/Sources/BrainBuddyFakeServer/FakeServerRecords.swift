@@ -145,6 +145,8 @@ struct FakeAccount: Sendable {
     var email: String
     var password: String
     var displayName: String?
+    /// Within the deletion grace period; a login cancels it.
+    var deletionScheduled = false
 }
 
 extension OwnerData {

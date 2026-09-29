@@ -48,6 +48,10 @@ public final class Workspace {
     /// memory and are written again with the next change or `flush()`;
     /// cleared by the next successful write.
     public private(set) var storageError: String?
+    /// True after a sign-in that cancelled the account's pending deletion
+    /// (signing in during the grace period does that). The app tells the
+    /// person, then calls `acknowledgeAccountDeletionNotice()`.
+    public private(set) var signInCancelledAccountDeletion = false
 
     /// Called on the main actor after each successful write to the store, and
     /// after sign-out removed it. The app reloads widget timelines here.
@@ -179,11 +183,16 @@ public final class Workspace {
     }
 
     /// Sets an unreadable or too-new store document aside (it is kept next to
-    /// the store, not deleted) and starts from an empty one. Call it only
-    /// after the person confirmed. Returns where the old document now is.
+    /// the store, not deleted, until the next sign-out removes it) and starts
+    /// from an empty one. Call it only after the person confirmed. Returns
+    /// where the old document now is.
+    ///
+    /// The fresh start is linked to no account, so the stored session of the
+    /// set-aside document's account is logged out (best effort) and forgotten.
     @discardableResult
     public func resetUnreadableStore() async -> URL? {
         if let loadTask { await loadTask.value }
+        let setAsideAccount = await store.storedAccount()
         let quarantined: URL?
         do {
             quarantined = try await store.quarantineUnreadableDocument()
@@ -191,6 +200,7 @@ public final class Workspace {
             loadError = error.message
             return nil
         }
+        if quarantined != nil, let sync { await sync.discardStaleSessions(loggingOut: setAsideAccount) }
         await load()
         return quarantined
     }
@@ -350,7 +360,9 @@ public final class Workspace {
         isSigningIn = true
         let linked: LinkedAccount
         do {
-            linked = try await sync.signIn(serverURL: url, email: email, password: password)
+            let result = try await sync.signInWithResult(serverURL: url, email: email, password: password)
+            linked = result.account
+            if result.deletionCancelled { signInCancelledAccountDeletion = true }
         } catch {
             isSigningIn = false
             refreshDerivedState()
@@ -366,9 +378,15 @@ public final class Workspace {
         if syncStatus == .localOnly { syncStatus = .idle(lastSyncedAt: document.sync.lastPullAt) }
     }
 
+    /// Acknowledges `signInCancelledAccountDeletion` once the person was told.
+    public func acknowledgeAccountDeletionNotice() {
+        if signInCancelledAccountDeletion { signInCancelledAccountDeletion = false }
+    }
+
     /// Signs out and removes the account's data from this device. Fails with
     /// `WorkspaceError.unsyncedChanges` unless `discardUnsyncedChanges` is set
-    /// while changes are still pending.
+    /// while changes are still pending, counting those a widget or App Intent
+    /// queued in the store that this workspace has not picked up yet.
     public func signOut(discardUnsyncedChanges: Bool) async throws {
         if pendingChangeCount > 0, !discardUnsyncedChanges {
             throw WorkspaceError.unsyncedChanges(count: pendingChangeCount)
@@ -376,13 +394,35 @@ public final class Workspace {
         // Let a write in flight finish, and write nothing new for this account.
         writesSuspended = true
         if let writer { await writer.value }
+        if !discardUnsyncedChanges {
+            // Another process may have queued changes since the last reload.
+            let unsynced = unpersisted.count + ((try? await store.load())?.outbox.count ?? 0)
+            if unsynced > 0 {
+                writesSuspended = false
+                await refreshFromStore()
+                schedulePersistence()
+                throw WorkspaceError.unsyncedChanges(count: unsynced)
+            }
+        }
         await sync?.signOut()
         do {
-            try await store.destroy()
+            // Checked again under the store's lock, so nothing queued in between is lost.
+            let unpersistedCount = unpersisted.count
+            let discard = discardUnsyncedChanges
+            try await store.destroy(after: { stored in
+                let unsynced = unpersistedCount + (stored?.outbox.count ?? 0)
+                if unsynced > 0, !discard { throw WorkspaceError.unsyncedChanges(count: unsynced) }
+            })
         } catch {
             writesSuspended = false
+            await refreshFromStore()
             schedulePersistence()
-            throw WorkspaceError.storage(error.message)
+            // The account stays linked but its session was ended: sync starts
+            // again and asks to sign in again.
+            syncStartedFor = nil
+            await startSyncIfNeeded()
+            if let error = error as? WorkspaceError { throw error }
+            throw WorkspaceError.storage(Self.storageMessage(for: error))
         }
         resetToEmptyLocalWorkspace()
         writesSuspended = false
@@ -526,13 +566,11 @@ extension Workspace {
         return true
     }
 
-    /// One read-modify-write under the store's lock. On Apple platforms the
-    /// process is kept from being suspended while it may hold the lock.
+    /// One read-modify-write under the store's lock (the file store keeps the
+    /// process from being suspended while it holds the lock).
     private func write(
         _ operations: [PendingOperation], dismissing dismissals: Set<SyncIssue.ID>
     ) async -> Result<StoreDocument, any Error> {
-        let activity = ExpiringActivity(reason: "Saving your changes")
-        defer { activity.end() }
         do {
             let written = try await store.update { document in
                 for operation in operations {
@@ -659,6 +697,11 @@ extension Workspace {
         // with it the account) is adopted once that write lands.
         if let writer { await writer.value }
         await startSyncIfNeeded()
+        // No account on this device: a session left in the Keychain (it
+        // survives deleting the app) belongs to nobody here.
+        if account == nil, !isSigningIn, epoch == self.epoch, let sync {
+            await sync.discardStaleSessions(loggingOut: nil)
+        }
     }
 
     /// Back to an empty, local-only workspace (after sign-out).

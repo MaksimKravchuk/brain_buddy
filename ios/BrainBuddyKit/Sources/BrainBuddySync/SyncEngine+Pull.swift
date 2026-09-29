@@ -92,8 +92,30 @@ extension SyncEngine {
         }
     }
 
+    /// The details `refreshTask` asked for, read in the single-flight slot.
+    /// Only a 401 is reported; otherwise the detail shows what the device has.
+    func hydrateRequestedTasks(epoch cycleEpoch: Int) async {
+        let ids = requestedRefreshes
+        requestedRefreshes.removeAll()
+        guard let account, !ids.isEmpty else { return }
+        let context = CycleContext(account: account, client: client(for: account.serverURL), epoch: cycleEpoch)
+        do {
+            let base = try await loadDocument().base
+            try await hydrate(ids.compactMap { base.tasks[$0]?.serverID }, context)
+        } catch let error as APIError {
+            if case .unauthorized = error.kind, context.epoch == epoch {
+                needsSignIn = true
+                await setStatus(.needsSignIn)
+            }
+        } catch {
+            // Offline, aborted or unreadable: the detail shows what the device has.
+        }
+    }
+
     /// `GET /tasks/{id}` for each server id, at most
     /// `hydrationConcurrency` at a time; each batch is written as it lands.
+    /// Children the base learned while a read was out are kept (see
+    /// `ChildrenUpdate.replace`).
     func hydrate(_ serverIDs: [String], _ context: CycleContext) async throws {
         let client = context.client
         var start = 0
@@ -101,6 +123,7 @@ extension SyncEngine {
             try checkActive(context)
             let batch = serverIDs[start..<min(start + configuration.hydrationConcurrency, serverIDs.count)]
             start += batch.count
+            let known = KnownChildren.snapshot(of: batch, in: try await loadDocument().base)
             let results = await withTaskGroup(of: Result<TaskDTO, APIError>.self) { group in
                 for id in batch {
                     group.addTask {
@@ -132,7 +155,8 @@ extension SyncEngine {
                     references.write(into: &doc, now: date)
                     let old = doc.base
                     for task in details.sorted(by: { $0.id < $1.id }) {
-                        doc.upsert(task: task, children: .replace(date), now: date)
+                        let children = ChildrenUpdate.replace(date, known: known[task.id] ?? KnownChildren(nil))
+                        doc.upsert(task: task, children: children, now: date)
                     }
                     doc.rotateKeys(comparedTo: old)
                     doc.replayOutbox(now: date)
@@ -178,7 +202,7 @@ extension SyncEngine {
         case .createSubtask(let create):
             let base = try await loadDocument().base
             guard let parent = base.tasks[create.taskID], let serverID = parent.serverID else { break }
-            let before = Set(parent.subtasks.compactMap(\.serverID))
+            let known = KnownChildren(parent)
             let detail: TaskDTO
             do { detail = try await context.client.getTask(id: serverID) } catch {
                 try Self.ignoreNotFound(error)
@@ -186,9 +210,15 @@ extension SyncEngine {
             }
             let title = NameNormalizer.stripped(create.title)
             try await update(context) { doc in
-                doc.upsert(task: detail, children: .replace(date), now: date)
+                // Candidates are the detail's subtasks this device doesn't
+                // hold as it is written, not as it was before the read.
+                let held = KnownChildren(doc.base.tasks[create.taskID]).subtasks
+                doc.upsert(task: detail, children: .replace(date, known: known), now: date)
                 guard let index = doc.outbox.firstIndex(where: { $0.id == operation.id }) else { return }
-                let match = detail.subtasks.first { !before.contains($0.id) && $0.title == title && $0.state == .open }
+                // The server numbers subtasks in creation order, so one the
+                // first attempt made comes after every same-titled subtask
+                // that existed before it (which a stale base may not hold).
+                let match = detail.subtasks.last { !held.contains($0.id) && $0.title == title && $0.state == .open }
                 if let match {
                     doc.outbox.remove(at: index)
                     doc.upsert(subtask: match, in: create.taskID, as: create.subtaskID)
@@ -201,7 +231,7 @@ extension SyncEngine {
         case .createComment(let create):
             let base = try await loadDocument().base
             guard let parent = base.tasks[create.taskID], let serverID = parent.serverID else { break }
-            let before = Set(parent.comments.compactMap(\.serverID))
+            let known = KnownChildren(parent)
             let detail: TaskDTO
             do { detail = try await context.client.getTask(id: serverID) } catch {
                 try Self.ignoreNotFound(error)
@@ -209,10 +239,11 @@ extension SyncEngine {
             }
             let author = context.account.id
             try await update(context) { doc in
-                doc.upsert(task: detail, children: .replace(date), now: date)
+                let held = KnownChildren(doc.base.tasks[create.taskID]).comments
+                doc.upsert(task: detail, children: .replace(date, known: known), now: date)
                 guard let index = doc.outbox.firstIndex(where: { $0.id == operation.id }) else { return }
                 let match = detail.comments.first {
-                    !before.contains($0.id) && $0.body == create.body && $0.actorID == author && $0.createdAt >= since
+                    !held.contains($0.id) && $0.body == create.body && $0.actorID == author && $0.createdAt >= since
                 }
                 if let match {
                     doc.outbox.remove(at: index)

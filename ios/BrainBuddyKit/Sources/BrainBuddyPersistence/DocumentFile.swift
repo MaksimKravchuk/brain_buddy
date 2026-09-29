@@ -176,15 +176,21 @@ struct DocumentFile: Sendable {
 
     // MARK: Removing
 
-    /// Removes the document, leftovers of interrupted writes and the lock
+    /// Removes the document, leftovers of interrupted writes, documents set
+    /// aside by `moveAside` (full copies of the user's data) and the lock
     /// file. Call with the lock held; the lock file goes last, so a process
     /// waiting on it notices and retries on a new one (see `lock()`).
     func removeAll() throws(DocumentStoreError) {
         guard unlink(path) == 0 || errno == ENOENT else { throw posixError("remove", fileName) }
         let temporaryPrefix = ".\(fileName)."
+        let asidePrefix = "\(url.deletingPathExtension().lastPathComponent).unreadable-"
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directoryPath)) ?? []
-        for name in names where name.hasPrefix(temporaryPrefix) && name.hasSuffix(".tmp") {
-            unlink(directoryPath + "/" + name)
+        for name in names {
+            let isTemporary = name.hasPrefix(temporaryPrefix) && name.hasSuffix(".tmp")
+            guard isTemporary || name.hasPrefix(asidePrefix) else { continue }
+            guard unlink(directoryPath + "/" + name) == 0 || errno == ENOENT || isTemporary else {
+                throw posixError("remove", name)
+            }
         }
         guard unlink(lockPath) == 0 || errno == ENOENT else { throw posixError("remove lock for", fileName) }
         Self.synchronizeDirectory(directoryPath)

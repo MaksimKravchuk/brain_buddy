@@ -42,7 +42,12 @@ extension SyncEngine {
             } catch {
                 try checkActive(context)
                 conflicts[operation.id, default: 0] += 1
-                try await handleFailure(error, of: sending, rounds: conflicts[operation.id] ?? 1, context, &summary)
+                // A request that never left the device starts no 23-hour clock.
+                let takeBackClock = operation.firstAttemptAt == nil && !error.requestMayHaveBeenSent
+                try await handleFailure(
+                    error, of: sending, rounds: conflicts[operation.id] ?? 1, clearingClock: takeBackClock, context,
+                    &summary
+                )
                 continue
             }
             try await acknowledge(sending, with: record, context)
@@ -59,8 +64,10 @@ extension SyncEngine {
     }
 
     /// Marks the attempt before sending, so a crash leaves the operation
-    /// "maybe sent" and the compactor never folds into it. Nil when the
-    /// operation changed meanwhile (it is planned again).
+    /// "maybe sent" and the compactor never folds into it; a request that
+    /// provably never left the device takes back `firstAttemptAt` (see
+    /// `noteFailure`). Nil when the operation changed meanwhile (it is
+    /// planned again).
     private func recordAttempt(_ operation: PendingOperation, _ context: CycleContext) async throws -> PendingOperation? {
         let date = now()
         do {
@@ -80,35 +87,52 @@ extension SyncEngine {
 
     /// 2xx: the answer goes into the base under the command's ids, the
     /// operation leaves the outbox, and the rest is replayed on the new base.
+    ///
+    /// When the queued operation no longer is what was sent (a document
+    /// written before `everSent` existed may have folded a later edit into
+    /// it while the request was in flight), what was not sent stays queued,
+    /// as new operations, instead of being dropped with it.
     private func acknowledge(_ operation: PendingOperation, with record: ServerRecord, _ context: CycleContext) async throws {
         var references = FetchedReferences()
         if case .task(let task) = record { references = try await fetchUnknownReferences(of: [task], context) }
         let date = now()
         let written = try await update(context) { [references] doc in
             references.write(into: &doc, now: date)
+            if let index = doc.outbox.firstIndex(where: { $0.id == operation.id }) {
+                let queued = doc.outbox[index]
+                let remainder = queued.command.remainder(afterSending: operation.command).map {
+                    PendingOperation(command: $0, issuedAt: queued.issuedAt)
+                }
+                doc.outbox.replaceSubrange(index...index, with: remainder)
+            }
             let old = doc.base
             doc.apply(record, answering: operation.command, now: date)
-            doc.outbox.removeAll { $0.id == operation.id }
             doc.sync.lastPushAt = date
             doc.sync.lastFailure = nil
             doc.rotateKeys(comparedTo: old)
             doc.replayOutbox(now: date)
         }
+        rejectionStreak = nil
         lastSyncedAt = written.lastSyncedAt
     }
 
     /// Everything but success.
     private func handleFailure(
-        _ error: APIError, of operation: PendingOperation, rounds: Int, _ context: CycleContext,
+        _ error: APIError, of operation: PendingOperation, rounds: Int, clearingClock: Bool, _ context: CycleContext,
         _ summary: inout PushSummary
     ) async throws {
         switch error.kind {
         case .unauthorized:
             throw error
-        case .network, .cancelled, .tokenStorage, .rateLimited, .server:
+        case .network, .cancelled, .tokenStorage, .rateLimited:
             // The outcome may be unknown: keep the operation and its key.
-            try? await noteFailure(error, of: operation, context)
+            try? await noteFailure(error, of: operation, clearingClock: clearingClock, context)
             throw error
+        case .server:
+            // Unknown outcome too, unless the server keeps failing this one.
+            try? await noteFailure(error, of: operation, clearingClock: clearingClock, context)
+            guard try await setAsideIfServerKeepsFailing(operation, error, context) else { throw error }
+            summary.changed = true
         case .staleRevision where rounds <= 3:
             summary.needsPull = try await refetch(after: operation, context) || summary.needsPull
             summary.changed = true
@@ -117,8 +141,9 @@ extension SyncEngine {
             summary.changed = true
         case .decoding where error.isUncertainOutcome:
             // A 2xx we cannot read: applied, but unusable. Keep the key and try later.
-            try? await noteFailure(error, of: operation, context)
-            throw error
+            try? await noteFailure(error, of: operation, clearingClock: clearingClock, context)
+            guard try await setAsideIfServerKeepsFailing(operation, error, context) else { throw error }
+            summary.changed = true
         default:
             // 400, 404, 422, idempotency conflicts, and conflicts that keep coming back.
             try await setAside(operation, message: error.message, referenceID: error.referenceID, context)
@@ -127,13 +152,44 @@ extension SyncEngine {
         }
     }
 
-    private func noteFailure(_ error: APIError, of operation: PendingOperation, _ context: CycleContext) async throws {
+    /// Keeps the failure's words on the operation. `clearingClock`: the
+    /// request never left the device, so the uncertainty clock this attempt
+    /// started is taken back.
+    private func noteFailure(
+        _ error: APIError, of operation: PendingOperation, clearingClock: Bool, _ context: CycleContext
+    ) async throws {
         try await update(context) { doc in
             guard let index = doc.outbox.firstIndex(where: { $0.id == operation.id }),
                 doc.outbox[index].idempotencyKey == operation.idempotencyKey
             else { throw OperationChanged() }
             doc.outbox[index].lastError = error.message
+            if clearingClock, doc.outbox[index].firstAttemptAt == operation.firstAttemptAt {
+                doc.outbox[index].firstAttemptAt = nil
+            }
         }
+    }
+
+    static let keptRejectingMessage = "The server kept rejecting this change."
+
+    /// Counts a server-side failure of the operation at the front. After
+    /// `rejectionLimit` in a row, or at least two in a row once it has been
+    /// failing for `rejectionAge`, it is set aside as a sync issue so the
+    /// operations behind it go out. Returns whether it was.
+    private func setAsideIfServerKeepsFailing(
+        _ operation: PendingOperation, _ error: APIError, _ context: CycleContext
+    ) async throws -> Bool {
+        let date = now()
+        var streak =
+            rejectionStreak.flatMap { $0.operationID == operation.id ? $0 : nil }
+            ?? RejectionStreak(operationID: operation.id, count: 0, since: operation.firstAttemptAt ?? date)
+        streak.count += 1
+        rejectionStreak = streak
+        let failingFor = date.timeIntervalSince(streak.since)
+        guard streak.count >= configuration.rejectionLimit || (streak.count >= 2 && failingFor >= configuration.rejectionAge)
+        else { return false }
+        rejectionStreak = nil
+        try await setAside(operation, message: Self.keptRejectingMessage, referenceID: error.referenceID, context)
+        return true
     }
 
     /// Moves the operation to sync issues and replays, so operations that
@@ -162,6 +218,7 @@ extension SyncEngine {
         switch operation.command.conflictTarget {
         case .task(let id)?:
             guard let serverID = base.tasks[id]?.serverID else { break }
+            let known = KnownChildren(base.tasks[id])
             let task: TaskDTO
             do {
                 task = try await context.client.getTask(id: serverID)
@@ -172,7 +229,7 @@ extension SyncEngine {
             try await update(context) { doc in
                 references.write(into: &doc, now: date)
                 let old = doc.base
-                doc.upsert(task: task, children: .replace(date), now: date)
+                doc.upsert(task: task, children: .replace(date, known: known), now: date)
                 Self.renewKey(of: operation, in: &doc)
                 doc.rotateKeys(comparedTo: old)
                 doc.replayOutbox(now: date)
@@ -246,11 +303,7 @@ extension SyncEngine {
                     guard doc.outbox.contains(where: { $0.id == operation.id }) else { return }
                     let survivor = doc.upsert(project: match, now: date)
                     doc.outbox.removeAll { $0.id == operation.id }
-                    for index in doc.outbox.indices {
-                        doc.outbox[index].command = doc.outbox[index].command.replacing(
-                            project: create.projectID, with: survivor
-                        )
-                    }
+                    doc.outbox = Self.rewritingOutbox(doc.outbox, adopting: .project(create.projectID, into: survivor))
                     doc.replayOutbox(now: date)
                 }
                 return
@@ -263,9 +316,7 @@ extension SyncEngine {
                     guard doc.outbox.contains(where: { $0.id == operation.id }) else { return }
                     let survivor = doc.upsert(tag: match, now: date)
                     doc.outbox.removeAll { $0.id == operation.id }
-                    for index in doc.outbox.indices {
-                        doc.outbox[index].command = doc.outbox[index].command.replacing(tag: create.tagID, with: survivor)
-                    }
+                    doc.outbox = Self.rewritingOutbox(doc.outbox, adopting: .tag(create.tagID, into: survivor))
                     doc.replayOutbox(now: date)
                 }
                 return
@@ -279,6 +330,31 @@ extension SyncEngine {
         try await update(context) { doc in
             guard let index = doc.outbox.firstIndex(where: { $0.id == operation.id }) else { return }
             doc.outbox[index].rotateKey()
+        }
+    }
+
+    /// A local project or tag create that a 409 merged into the server's record.
+    enum Adoption {
+        case project(ProjectID, into: ProjectID)
+        case tag(TagID, into: TagID)
+    }
+
+    // TODO(merge-helper): switch the body to Core's OutboxReplayer.rewritingAfterMerge(_:project:into:)
+    // / rewritingAfterMerge(_:tag:into:) once it lands; that no longer retargets archiveProject,
+    // deleteTag or renames at the adopted record. Until then this keeps the old behaviour.
+    /// The queued operations after an adoption: every reference to the local
+    /// record now names the adopted one. The only place the adoption path
+    /// rewrites the outbox.
+    private static func rewritingOutbox(_ outbox: [PendingOperation], adopting adoption: Adoption) -> [PendingOperation] {
+        outbox.map { operation in
+            var operation = operation
+            switch adoption {
+            case .project(let local, let survivor):
+                operation.command = operation.command.replacing(project: local, with: survivor)
+            case .tag(let local, let survivor):
+                operation.command = operation.command.replacing(tag: local, with: survivor)
+            }
+            return operation
         }
     }
 }

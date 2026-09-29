@@ -15,10 +15,15 @@ public struct PendingOperation: Identifiable, Hashable, Sendable, Codable {
     public var firstAttemptAt: Date?
     public var lastAttemptAt: Date?
     public var lastError: String?
+    /// Sticky: some request for this operation may have reached the server,
+    /// under this or an earlier key. A new key (after a conflict, or while a
+    /// request is still in flight) resets `attempts`, never this.
+    public var everSent: Bool
 
     public init(
         id: UUID = UUID(), command: GTDCommand, issuedAt: Date, idempotencyKey: UUID = UUID(),
-        attempts: Int = 0, firstAttemptAt: Date? = nil, lastAttemptAt: Date? = nil, lastError: String? = nil
+        attempts: Int = 0, firstAttemptAt: Date? = nil, lastAttemptAt: Date? = nil, lastError: String? = nil,
+        everSent: Bool = false
     ) {
         self.id = id
         self.command = command
@@ -28,11 +33,46 @@ public struct PendingOperation: Identifiable, Hashable, Sendable, Codable {
         self.firstAttemptAt = firstAttemptAt
         self.lastAttemptAt = lastAttemptAt
         self.lastError = lastError
+        self.everSent = everSent
     }
 
     /// True once a request may have reached the server; such an operation must
     /// never be folded into another one.
-    public var hasBeenSent: Bool { attempts > 0 }
+    public var hasBeenSent: Bool { attempts > 0 || everSent }
+}
+
+extension PendingOperation {
+    private enum CodingKeys: String, CodingKey {
+        case id, command, issuedAt, idempotencyKey, attempts, firstAttemptAt, lastAttemptAt, lastError, everSent
+    }
+
+    /// Documents written before `everSent` existed decode with it false.
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        command = try values.decode(GTDCommand.self, forKey: .command)
+        issuedAt = try values.decode(Date.self, forKey: .issuedAt)
+        idempotencyKey = try values.decode(UUID.self, forKey: .idempotencyKey)
+        attempts = try values.decode(Int.self, forKey: .attempts)
+        firstAttemptAt = try values.decodeIfPresent(Date.self, forKey: .firstAttemptAt)
+        lastAttemptAt = try values.decodeIfPresent(Date.self, forKey: .lastAttemptAt)
+        lastError = try values.decodeIfPresent(String.self, forKey: .lastError)
+        everSent = try values.decodeIfPresent(Bool.self, forKey: .everSent) ?? false
+    }
+
+    /// `everSent` is written only when true, so other documents keep their bytes.
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(command, forKey: .command)
+        try values.encode(issuedAt, forKey: .issuedAt)
+        try values.encode(idempotencyKey, forKey: .idempotencyKey)
+        try values.encode(attempts, forKey: .attempts)
+        try values.encodeIfPresent(firstAttemptAt, forKey: .firstAttemptAt)
+        try values.encodeIfPresent(lastAttemptAt, forKey: .lastAttemptAt)
+        try values.encodeIfPresent(lastError, forKey: .lastError)
+        if everSent { try values.encode(everSent, forKey: .everSent) }
+    }
 }
 
 /// A local change that could not be applied on the server and was set aside.

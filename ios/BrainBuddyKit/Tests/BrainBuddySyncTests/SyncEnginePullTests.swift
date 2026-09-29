@@ -180,6 +180,62 @@ struct SyncEnginePullTests {
         #expect(base.tasks["x"]?.subtasks.first?.serverID == task.subtasks.first?.id)
     }
 
+    @Test("A create that never left the device starts no 23-hour clock and goes out later under its own key")
+    func offlineAttemptStartsNoUncertaintyClock() async throws {
+        let harness = SyncHarness()
+        let device = await harness.device()
+        try await device.signIn()
+        try await device.apply(.createTask(.init(taskID: "x", title: "Call the bank", list: .inbox)))
+        device.transport.inject(.offline, matching: FakeServerTransport.isMutation)
+        #expect(await device.sync() == .offline(lastSyncedAt: harness.clock.now()))
+        let pending = try #require(try await device.document().outbox.first)
+        #expect(pending.firstAttemptAt == nil, "the request provably never left")
+        #expect(pending.lastAttemptAt == harness.clock.now())
+
+        // A day later it is simply sent, with its key: no pull-and-adopt detour.
+        harness.clock.advance(by: 25 * 3600)
+        device.transport.clearLog()
+        #expect(await device.sync() == .idle(lastSyncedAt: harness.clock.now()))
+        #expect(device.transport.requests.first?.route == "POST /tasks", "not resolved as an uncertain create")
+        #expect(device.mutations.compactMap(\.idempotencyKey) == [pending.idempotencyKey.uuidString.lowercased()])
+        #expect(harness.snapshot.tasks.count == 1)
+    }
+
+    @Test("An uncertain subtask is matched against the task's current subtasks: the newest same-titled one is ours")
+    func adoptsTheNewestMatchingSubtask() async throws {
+        let harness = SyncHarness()
+        let a = await harness.device()
+        let b = await harness.device()
+        try await a.signIn()
+        try await a.apply(.createTask(.init(taskID: "x", title: "Groceries", list: .next)))
+        await a.sync()
+        try await b.signIn()
+        let taskOnB = try #require(try await b.current().task(titled: "Groceries")).id
+        #expect(try await b.document().base.tasks[taskOnB]?.childrenSyncedAt != nil)
+
+        // a adds "Milk"; b never learns (subtasks don't bump the task).
+        try await a.apply(.createSubtask(.init(taskID: "x", subtaskID: "a-milk", title: "Milk")))
+        await a.sync()
+        await b.sync()
+        #expect(try await b.document().base.tasks[taskOnB]?.subtasks.isEmpty == true)
+
+        // b adds its own "Milk"; the answer is lost.
+        try await b.apply(.createSubtask(.init(taskID: taskOnB, subtaskID: "b-milk", title: "Milk")))
+        b.transport.inject(.dropResponse, matching: FakeServerTransport.isMutation)
+        await b.sync()
+        let serverTask = try #require(harness.snapshot.tasks.values.first)
+        #expect(serverTask.subtasks.map(\.title) == ["Milk", "Milk"])
+        let bMilkOnServer = try #require(serverTask.subtasks.last).id
+
+        // A day later the key is gone: b adopts its own subtask, not a's.
+        harness.clock.advance(by: 25 * 3600)
+        #expect(await b.sync() == .idle(lastSyncedAt: harness.clock.now()))
+        let subtasks = try #require(try await b.document().base.tasks[taskOnB]?.subtasks)
+        #expect(subtasks.first { $0.id == "b-milk" }?.serverID == bMilkOnServer)
+        #expect(harness.snapshot.tasks.values.first?.subtasks.count == 2, "nothing was created twice")
+        #expect(try await b.document().outbox.isEmpty)
+    }
+
     @Test("Open tasks are hydrated after a pull, within the budget; a changed revision hydrates again")
     func hydratesChildren() async throws {
         let harness = SyncHarness()

@@ -153,6 +153,25 @@ import Testing
         #expect(isIO(error))
     }
 
+    /// `PendingOperation.everSent` came later: older documents decode with it
+    /// false, and it is written only when set, so other documents keep their bytes.
+    @Test func everSentIsOptionalOnDiskAndWrittenOnlyWhenSet() throws {
+        var document = Fixtures.richDocument()
+        let before = try StoreDocumentCoding.encode(document)
+        #expect(!String(decoding: before, as: UTF8.self).contains("everSent"))
+        let legacy = try StoreDocumentCoding.decode(before)
+        #expect(legacy.outbox.map(\.everSent) == [false, false])
+        #expect(legacy == document)
+
+        document.outbox[0].everSent = true
+        let after = try StoreDocumentCoding.encode(document)
+        #expect(String(decoding: after, as: UTF8.self).contains(#""everSent":true"#))
+        let decoded = try StoreDocumentCoding.decode(after)
+        #expect(decoded.outbox[0].everSent)
+        #expect(decoded.outbox[0].hasBeenSent, "with no attempt under its current key")
+        #expect(decoded == document)
+    }
+
     @Test func errorMessagesAreSentences() {
         let errors: [DocumentStoreError] = [.unreadable("x"), .unsupportedVersion(2), .io("disk full")]
         for error in errors {

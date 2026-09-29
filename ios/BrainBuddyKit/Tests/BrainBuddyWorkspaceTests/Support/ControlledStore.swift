@@ -101,6 +101,14 @@ actor ControlledStore: DocumentStore {
         try await base.destroy()
     }
 
+    func destroy(after check: @Sendable (StoreDocument?) throws -> Void) async throws {
+        try await base.destroy(after: check)
+    }
+
+    func storedAccount() async -> LinkedAccount? {
+        await base.storedAccount()
+    }
+
     func quarantineUnreadableDocument() async throws(DocumentStoreError) -> URL? {
         try await base.quarantineUnreadableDocument()
     }
