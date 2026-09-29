@@ -67,13 +67,14 @@ private struct TodayHeader: View {
     let summary: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: BBSpacing.s1) {
             Text(day.startDate(), format: .dateTime.weekday(.wide).day().month(.wide))
-                .font(.title3.weight(.semibold))
+                .font(BBFont.title)
+                .foregroundStyle(BBColor.textPrimary)
             if let summary {
                 Text(summary)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(BBFont.secondary)
+                    .foregroundStyle(BBColor.textSecondary)
             }
         }
         .accessibilityElement(children: .combine)
@@ -117,7 +118,7 @@ private struct AgendaSectionHeader: View {
     var body: some View {
         HStack {
             Label(title, systemImage: systemImage)
-            Spacer(minLength: 8)
+            Spacer(minLength: BBSpacing.s2)
             Text(count, format: .number)
                 .monospacedDigit()
         }

@@ -76,21 +76,22 @@ private struct SyncIssueRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(summary)
-                .font(.body.weight(.medium))
+                .font(BBFont.bodyMedium)
+                .foregroundStyle(BBColor.textPrimary)
             Text(issue.message)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(BBFont.secondary)
+                .foregroundStyle(BBColor.textSecondary)
             if let referenceID = issue.referenceID {
                 Text("Reference ID: \(referenceID)")
                     .font(.footnote.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BBColor.textTertiary)
                     .textSelection(.enabled)
             }
             Text(issue.occurredAt.formatted(date: .abbreviated, time: .shortened))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(BBFont.meta)
+                .foregroundStyle(BBColor.textTertiary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, BBSpacing.s1)
     }
 }
 

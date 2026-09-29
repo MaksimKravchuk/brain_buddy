@@ -65,7 +65,7 @@ struct ListsHubScreen: View {
         Section("Projects") {
             if projects.isEmpty {
                 Text("No projects yet")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BBColor.textTertiary)
             }
             ForEach(projects) { summary in
                 NavigationLink(value: AppRoute.destination(.project(summary.id))) {
@@ -88,7 +88,7 @@ struct ListsHubScreen: View {
         Section("Tags") {
             if tags.isEmpty {
                 Text("No tags yet")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BBColor.textTertiary)
             }
             ForEach(Self.topTags(tags, limit: Self.topTagLimit)) { summary in
                 NavigationLink(value: AppRoute.destination(.tag(summary.id))) {
@@ -117,9 +117,8 @@ struct ListsHubScreen: View {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Settings")
+                        // Styles itself with the metadata tokens.
                         SyncStatusLabel()
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
                 } icon: {
                     Image(systemName: "gearshape")
@@ -149,7 +148,7 @@ private struct HubRow: View {
     var body: some View {
         HStack {
             Label(title, systemImage: systemImage)
-            Spacer(minLength: 8)
+            Spacer(minLength: BBSpacing.s2)
             if count > 0 {
                 CountBadge(count: count, prominent: prominent)
             }
@@ -165,11 +164,11 @@ private struct DeferredRow: View {
     var body: some View {
         HStack {
             Label(title, systemImage: systemImage)
-            Spacer(minLength: 8)
+            Spacer(minLength: BBSpacing.s2)
             Text("coming later")
-                .font(.footnote)
+                .font(BBFont.meta)
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(BBColor.textTertiary)
         .accessibilityElement(children: .combine)
     }
 }

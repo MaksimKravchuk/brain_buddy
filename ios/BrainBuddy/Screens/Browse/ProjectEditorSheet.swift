@@ -87,7 +87,10 @@ struct ProjectEditorSheet: View {
 
     private var colorSection: some View {
         Section {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 8)], spacing: 8) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: BBMetrics.hitTarget), spacing: BBSpacing.s2)],
+                spacing: BBSpacing.s2
+            ) {
                 ColorSwatchButton(hex: nil, name: "No colour", isSelected: color == nil) {
                     color = nil
                 }
@@ -96,7 +99,7 @@ struct ProjectEditorSheet: View {
                         color = custom
                     }
                 }
-                ForEach(projectColorPalette, id: \.self) { hex in
+                ForEach(BBColor.projectColorPalette, id: \.self) { hex in
                     ColorSwatchButton(
                         hex: hex,
                         name: ProjectColorNames.name(for: hex),
@@ -106,7 +109,7 @@ struct ProjectEditorSheet: View {
                     }
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, BBSpacing.s1)
         } header: {
             Text("Colour")
         } footer: {
@@ -118,7 +121,7 @@ struct ProjectEditorSheet: View {
     /// web) and isn't in the palette, so it stays selectable.
     private var customColor: String? {
         guard case .edit(let project) = mode, let original = project.color, !original.isEmpty,
-            ProjectColorNames.paletteEntry(matching: original, in: projectColorPalette) == nil
+            ProjectColorNames.paletteEntry(matching: original, in: BBColor.projectColorPalette) == nil
         else { return nil }
         return original
     }
@@ -132,7 +135,7 @@ struct ProjectEditorSheet: View {
         isNameFocused = true
         guard !hasPreparedColor else { return }
         hasPreparedColor = true
-        let palette = projectColorPalette
+        let palette = BBColor.projectColorPalette
         if isCreating {
             // Rotate through the palette so new projects are told apart at a glance.
             guard !palette.isEmpty else { return }
@@ -179,12 +182,12 @@ struct EditorValidationMessage: View {
     var body: some View {
         Label {
             Text(text)
-                .foregroundStyle(.primary)
+                .foregroundStyle(BBColor.textPrimary)
         } icon: {
             Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(BBColor.danger)
         }
-        .font(.footnote)
+        .font(BBFont.meta)
     }
 }
 
@@ -198,10 +201,10 @@ struct ProjectColorIndicator: View {
             if let fill = resolvedColor {
                 Circle()
                     .fill(fill)
-                    .overlay { Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 0.5) }
+                    .overlay { Circle().strokeBorder(BBColor.hairlineStrong, lineWidth: 0.5) }
             } else {
                 Circle()
-                    .strokeBorder(Color.secondary, lineWidth: 1.5)
+                    .strokeBorder(BBColor.textTertiary, lineWidth: 1.5)
             }
         }
         .frame(width: diameter, height: diameter)
@@ -230,11 +233,11 @@ private struct ColorSwatchButton: View {
                 ProjectColorIndicator(hex: hex, diameter: 28)
                 if isSelected {
                     Circle()
-                        .strokeBorder(Color.primary, lineWidth: 2)
+                        .strokeBorder(BBColor.textPrimary, lineWidth: 2)
                         .frame(width: 40, height: 40)
                 }
             }
-            .frame(width: 44, height: 44)
+            .frame(width: BBMetrics.hitTarget, height: BBMetrics.hitTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -245,9 +248,10 @@ private struct ColorSwatchButton: View {
 
 // MARK: - Pure helpers (no SwiftUI)
 
-/// Human names for `#RRGGBB` project colours, for VoiceOver and menus. The
-/// palette is defined elsewhere, so names come from the colour itself: hue
-/// buckets calibrated on the Tailwind 500 scale, plus light/dark modifiers.
+/// Human names for `#RRGGBB` project colours, for VoiceOver and menus. Palette
+/// colours use their spoken name (`BBColor.projectColorOptions`); any other
+/// colour is named from the colour itself: hue buckets calibrated on the
+/// Tailwind 500 scale, plus light/dark modifiers.
 enum ProjectColorNames {
     private static let hueNames: [(upperBound: Double, name: String)] = [
         (15, "Red"), (33, "Orange"), (42, "Amber"), (65, "Yellow"), (95, "Lime"),
@@ -257,6 +261,7 @@ enum ProjectColorNames {
     ]
 
     static func name(for hex: String) -> String {
+        if let paletteName = BBColor.projectColorName(for: hex) { return paletteName }
         guard let rgb = components(of: hex) else { return hex }
         let (red, green, blue) = rgb
         let maxValue = max(red, green, blue)

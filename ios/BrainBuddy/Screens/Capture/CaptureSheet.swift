@@ -28,7 +28,7 @@ struct CaptureSheet: View {
         self.context = context
         _draft = State(
             initialValue: CaptureDraft(
-                list: context.list ?? .inbox,
+                list: context.list,
                 contextProjectID: context.projectID,
                 contextTagID: context.tagID
             )

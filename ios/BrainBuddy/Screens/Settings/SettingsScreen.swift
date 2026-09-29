@@ -149,10 +149,10 @@ struct SettingsScreen: View {
         NavigationLink(value: AppRoute.syncIssues) {
             HStack {
                 Label("Sync issues", systemImage: "exclamationmark.triangle")
-                Spacer(minLength: 8)
+                Spacer(minLength: BBSpacing.s2)
                 Text(workspace.issues.count, format: .number)
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BBColor.textTertiary)
             }
             .accessibilityElement(children: .combine)
         }
@@ -178,11 +178,11 @@ struct SettingsScreen: View {
     private var aboutSection: some View {
         Section {
             LabeledContent("Version", value: Self.versionDescription)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: BBSpacing.s1) {
                 Text("Works offline")
                 Text(offlineExplanation)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(BBFont.meta)
+                    .foregroundStyle(BBColor.textTertiary)
             }
             .accessibilityElement(children: .combine)
         } header: {

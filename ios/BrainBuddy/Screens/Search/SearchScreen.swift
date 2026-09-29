@@ -55,7 +55,7 @@ private struct SearchIdleView: View {
                             select(recent)
                         } label: {
                             Label(recent, systemImage: "clock.arrow.circlepath")
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(BBColor.textPrimary)
                         }
                         .accessibilityHint("Searches again")
                     }

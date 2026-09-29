@@ -69,13 +69,13 @@ struct TagsScreen: View {
             } label: {
                 Label("Delete", systemImage: "trash")
             }
-            .tint(.red)
+            .tint(BBColor.danger)
             Button {
                 editorMode = .rename(tag)
             } label: {
                 Label("Rename", systemImage: "pencil")
             }
-            .tint(.indigo)
+            .tint(BBColor.secondary)
         }
         .contextMenu {
             Button {
@@ -121,12 +121,9 @@ struct TagSummaryRow: View {
     var body: some View {
         HStack {
             TagPill(name: summary.tag.name)
-            Spacer(minLength: 8)
-            if summary.openTaskCount > 0 {
-                Text(summary.openTaskCount, format: .number)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
+            Spacer(minLength: BBSpacing.s2)
+            // Plain slate count, the same as the Lists hub rows; nothing for zero.
+            CountBadge(count: summary.openTaskCount)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)

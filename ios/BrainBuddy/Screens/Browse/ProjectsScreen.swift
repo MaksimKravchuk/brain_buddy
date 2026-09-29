@@ -97,13 +97,13 @@ private struct ActiveProjectsList: View {
             } label: {
                 Label("Archive", systemImage: "archivebox")
             }
-            .tint(.red)
+            .tint(BBColor.danger)
             Button {
                 editorMode = .edit(project)
             } label: {
                 Label("Rename", systemImage: "pencil")
             }
-            .tint(.indigo)
+            .tint(BBColor.secondary)
         }
         .contextMenu {
             Button {
@@ -165,7 +165,7 @@ private struct ProjectColorMenu: View {
                 if let custom = customColor {
                     Text("Current colour").tag(String?.some(custom))
                 }
-                ForEach(projectColorPalette, id: \.self) { hex in
+                ForEach(BBColor.projectColorPalette, id: \.self) { hex in
                     Text(ProjectColorNames.name(for: hex)).tag(String?.some(hex))
                 }
             }
@@ -175,13 +175,13 @@ private struct ProjectColorMenu: View {
     }
 
     private var matchedCurrent: String? {
-        ProjectColorNames.paletteEntry(matching: current, in: projectColorPalette) ?? current
+        ProjectColorNames.paletteEntry(matching: current, in: BBColor.projectColorPalette) ?? current
     }
 
     private var customColor: String? {
-        guard let current, ProjectColorNames.paletteEntry(matching: current, in: projectColorPalette) == nil else {
-            return nil
-        }
+        guard let current,
+            ProjectColorNames.paletteEntry(matching: current, in: BBColor.projectColorPalette) == nil
+        else { return nil }
         return current
     }
 
@@ -224,10 +224,10 @@ private struct ArchivedProjectRow: View {
     @ScaledMetric(relativeTo: .body) private var dotSize: CGFloat = 10
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: BBSpacing.s3) {
             ProjectColorIndicator(hex: project.color, diameter: dotSize)
             Text(project.name)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BBColor.textTertiary)
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
@@ -243,20 +243,18 @@ struct ProjectSummaryRow: View {
     @ScaledMetric(relativeTo: .body) private var dotSize: CGFloat = 10
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: BBSpacing.s3) {
             ProjectColorIndicator(hex: summary.project.color, diameter: dotSize)
             VStack(alignment: .leading, spacing: 2) {
                 Text(summary.project.name)
+                    .foregroundStyle(BBColor.textPrimary)
                 if summary.needsNextAction {
                     NeedsNextActionMarker()
                 }
             }
-            Spacer(minLength: 8)
-            if summary.openTaskCount > 0 {
-                Text(summary.openTaskCount, format: .number)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
+            Spacer(minLength: BBSpacing.s2)
+            // Plain slate count, the same as the Lists hub rows; nothing for zero.
+            CountBadge(count: summary.openTaskCount)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
@@ -276,9 +274,9 @@ private struct NeedsNextActionMarker: View {
             Text("Needs a next action")
         } icon: {
             Image(systemName: "exclamationmark.circle")
-                .foregroundStyle(.orange)
+                .foregroundStyle(BBColor.warning)
         }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
+        .font(BBFont.meta)
+        .foregroundStyle(BBColor.textTertiary)
     }
 }

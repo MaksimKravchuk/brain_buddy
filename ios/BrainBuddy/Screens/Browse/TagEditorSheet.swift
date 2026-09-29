@@ -38,7 +38,7 @@ struct TagEditorSheet: View {
                 Section {
                     HStack(spacing: 2) {
                         Text(verbatim: "#")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BBColor.textTertiary)
                             .accessibilityHidden(true)
                         TextField("Tag name", text: $name)
                             .textInputAutocapitalization(.never)

@@ -61,14 +61,15 @@ struct SignInSheet: View {
 
     private var introSection: some View {
         Section {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: BBSpacing.s2) {
                 Text("Sync with Brain Buddy on the web")
                     .font(.headline)
+                    .foregroundStyle(BBColor.textPrimary)
                 Text(introExplanation)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(BBFont.secondary)
+                    .foregroundStyle(BBColor.textSecondary)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, BBSpacing.s1)
             .accessibilityElement(children: .combine)
         }
     }
@@ -87,7 +88,7 @@ struct SignInSheet: View {
                 if let failureReferenceID {
                     Text("Reference ID: \(failureReferenceID)")
                         .font(.footnote.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BBColor.textTertiary)
                         .textSelection(.enabled)
                 }
             }
@@ -125,8 +126,8 @@ struct SignInSheet: View {
                     .focused($focusedField, equals: .server)
                     .onSubmit { signIn() }
                 Text("Use an https address. http works only for localhost, during development.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(BBFont.meta)
+                    .foregroundStyle(BBColor.textTertiary)
                 if serverAddress != SignInServerAddress.defaultString {
                     Button("Use the default server") {
                         serverAddress = SignInServerAddress.defaultString
@@ -141,10 +142,10 @@ struct SignInSheet: View {
         Button {
             signIn()
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: BBSpacing.s2) {
                 if isSigningIn {
                     ProgressView()
-                        .tint(.white)
+                        .tint(BBColor.onBrand)
                 }
                 Text(signInTitle)
             }
@@ -153,8 +154,8 @@ struct SignInSheet: View {
         .buttonStyle(.glassProminent)
         .controlSize(.large)
         .disabled(!canSubmit || isSigningIn)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 12)
+        .padding(.horizontal, BBSpacing.s5)
+        .padding(.bottom, BBSpacing.s3)
     }
 
     private var signInTitle: String { isSigningIn ? "Signing in…" : "Sign in" }
