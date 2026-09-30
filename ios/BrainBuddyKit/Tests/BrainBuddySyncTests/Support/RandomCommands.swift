@@ -24,9 +24,9 @@ struct RandomCommands {
     mutating func next(for state: GTDState) -> GTDCommand {
         serial += 1
         let stamp = "\(device)-\(serial)"
-        let tasks = state.tasks.values.sorted { $0.id < $1.id }
-        let projects = state.projects.values.filter { $0.state == .active }.sorted { $0.id < $1.id }.map(\.id)
-        let tags = state.tags.values.filter { $0.state == .active }.sorted { $0.id < $1.id }.map(\.id)
+        let tasks = state.tasks.values.sorted { $0.replayKey < $1.replayKey }
+        let projects = state.projects.values.filter { $0.state == .active }.sorted { $0.replayKey < $1.replayKey }.map(\.id)
+        let tags = state.tags.values.filter { $0.state == .active }.sorted { $0.replayKey < $1.replayKey }.map(\.id)
         let roll = Int.random(in: 0..<100, using: &rng)
         guard roll >= 16, let task = tasks.randomElement(using: &rng) else {
             return createTask(stamp, projects, tags)
@@ -134,4 +134,20 @@ struct RandomCommands {
 
     mutating func pick<Value>(_ values: [Value]) -> Value { values.randomElement(using: &rng)! }
     mutating func chance(_ percent: Int) -> Bool { Int.random(in: 0..<100, using: &rng) < percent }
+}
+
+// A record learned from the server gets a random client id on each device, so
+// ordering by client id would make a seed pick differently from run to run.
+// The server id is the same every run; a record not synced yet has only the
+// client id this generator gave it.
+extension TaskRecord {
+    var replayKey: String { serverID ?? id.rawValue }
+}
+
+extension ProjectRecord {
+    var replayKey: String { serverID ?? id.rawValue }
+}
+
+extension TagRecord {
+    var replayKey: String { serverID ?? id.rawValue }
 }

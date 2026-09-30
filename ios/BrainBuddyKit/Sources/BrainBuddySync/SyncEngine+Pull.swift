@@ -76,13 +76,14 @@ extension SyncEngine {
 
     /// Loads subtasks and comments for open tasks never hydrated or changed
     /// since (`childrenSyncedAt == nil`), newest first, within the budget.
+    /// Ties go by server id: a pulled task's client id is random per device.
     /// Only a 401 fails the cycle; other failures wait for the next cycle.
     func hydrateChangedTasks(_ context: CycleContext) async throws {
         guard configuration.hydrationBudget > 0 else { return }
         let base = try await loadDocument().base
         let candidates = base.tasks.values
             .filter { $0.isOpen && $0.childrenSyncedAt == nil && $0.serverID != nil }
-            .sorted { ($0.updatedAt, $0.id) > ($1.updatedAt, $1.id) }
+            .sorted { ($0.updatedAt, $0.serverID ?? "") > ($1.updatedAt, $1.serverID ?? "") }
             .prefix(configuration.hydrationBudget)
             .compactMap(\.serverID)
         do {

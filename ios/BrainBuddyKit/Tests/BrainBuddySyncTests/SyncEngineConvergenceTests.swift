@@ -57,7 +57,11 @@ struct SyncEngineConvergenceTests {
     /// The scenario; every convergence expectation is checked inside.
     static func run(seed: UInt64) async throws -> Run {
         let harness = SyncHarness()
-        let devices = [await harness.device(), await harness.device()]
+        // Detail reads one at a time, so an injected fault always hits the
+        // same request and a seed replays exactly (concurrent reads are
+        // covered by the pull tests).
+        let sequential: (inout SyncConfiguration) -> Void = { $0.hydrationConcurrency = 1 }
+        let devices = [await harness.device(sequential), await harness.device(sequential)]
         for device in devices { try await device.signIn() }
         var rng = SeededGenerator(seed: seed &* 0x9E37_79B9)
         var generators = [RandomCommands(seed: seed, device: "a"), RandomCommands(seed: seed ^ 0xB0B, device: "b")]
@@ -79,7 +83,8 @@ struct SyncEngineConvergenceTests {
                 injectFault(into: device, using: &rng)
                 try await sync(device)
             case 88..<94:
-                if let task = try await device.document().base.tasks.values.randomElement(using: &rng) {
+                let tasks = try await device.document().base.tasks.values.sorted { $0.replayKey < $1.replayKey }
+                if let task = tasks.randomElement(using: &rng) {
                     await device.engine.refreshTask(task.id)
                 }
             case 94..<96 where seed.isMultiple(of: 4) && !run.expiredKeys:
@@ -118,7 +123,9 @@ struct SyncEngineConvergenceTests {
         // Subtask and comment edits do not bump the task, so children match
         // once every task has been opened (hydrated) on both devices.
         for device in devices {
-            for id in try await device.document().base.tasks.keys.sorted() { await device.engine.refreshTask(id) }
+            for task in try await device.document().base.tasks.values.sorted(by: { $0.replayKey < $1.replayKey }) {
+                await device.engine.refreshTask(task.id)
+            }
         }
         let serverWithChildren = CanonicalState(harness.snapshot, children: true)
         for (index, device) in devices.enumerated() {
