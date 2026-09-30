@@ -1,3 +1,4 @@
+import { ChevronDown, Network } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type CrtTreeMenuItem = Readonly<{
@@ -131,12 +132,12 @@ export function CrtTreeMenu({
         aria-expanded={open}
         aria-controls="crt-tree-menu"
         disabled={busy}
-        className="flex min-h-10 items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-left text-sm font-semibold text-slate-900 shadow-sm disabled:cursor-wait disabled:opacity-70"
+        className="flex h-9 max-w-[min(420px,50vw)] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-sm font-semibold text-slate-900 shadow-soft transition-[border-color,box-shadow] duration-200 ease-smooth hover:border-slate-300 hover:shadow-raised aria-expanded:border-sky-300 disabled:cursor-wait disabled:opacity-70"
         onClick={() => setOpen((value) => !value)}
       >
-        <span aria-hidden="true">▱</span>
-        <span>{triggerLabel}</span>
-        <span aria-hidden="true" className="text-sky-700">⌄</span>
+        <Network className="h-4 w-4 shrink-0 text-brand-primary" aria-hidden="true" />
+        <span className="min-w-0 truncate">{triggerLabel}</span>
+        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ease-smooth ${open ? "rotate-180" : ""}`} aria-hidden="true" />
       </button>
       <input
         ref={fileInputRef}
@@ -146,7 +147,8 @@ export function CrtTreeMenu({
         aria-label="Choose tree JSON file"
         onChange={onFileChange}
       />
-      {!open && error ? <p role="alert" className="mt-2 rounded-md bg-rose-50 p-2 text-xs text-rose-800">{error}</p> : null}
+      {/* Floats under the trigger so an error never makes the canvas toolbar taller. */}
+      {!open && error ? <p role="alert" className="absolute left-0 top-[calc(100%+0.4rem)] z-40 w-max max-w-xs rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-left text-xs text-rose-800 shadow-floating">{error}</p> : null}
       {open ? (
         <nav
           ref={menuRef}
@@ -154,7 +156,7 @@ export function CrtTreeMenu({
           role="menu"
           aria-label="Tree menu"
           aria-busy={busy}
-          className="absolute left-0 top-[calc(100%+0.4rem)] z-50 min-w-64 rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating"
+          className="absolute left-0 top-[calc(100%+0.4rem)] z-50 min-w-64 origin-top-left rounded-xl border border-slate-200 bg-white p-1.5 text-left shadow-floating motion-safe:animate-scale-fade-in"
         >
           {error ? <p role="alert" className="m-2 rounded-md bg-rose-50 p-2 text-xs text-rose-800">{error}</p> : null}
           {(["create", "rename", "import", "export", "delete"] as const).map((action) => {
@@ -168,7 +170,7 @@ export function CrtTreeMenu({
                 role="menuitem"
                 disabled={disabled}
                 title={disabled && action !== "create" && action !== "import" ? "Create or choose a tree first" : undefined}
-                className={`flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400 ${danger ? "text-rose-700 hover:bg-rose-50" : "text-slate-700"}`}
+                className={`flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors duration-200 ease-smooth disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent ${danger ? "text-rose-700 hover:bg-rose-50" : "text-slate-700 hover:bg-surface-sunken hover:text-slate-900"}`}
                 onClick={() => runAction(action)}
               >
                 {actionLabel(action)}
@@ -176,7 +178,7 @@ export function CrtTreeMenu({
             );
           })}
           <div className="my-1 border-t border-slate-100" />
-          <p className="px-3 py-1 text-[0.68rem] font-bold uppercase tracking-[0.08em] text-slate-500">Switch tree</p>
+          <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Switch tree</p>
           {trees.length === 0 ? (
             <p className="px-3 py-2 text-sm text-slate-500">No other trees yet</p>
           ) : (
@@ -189,7 +191,7 @@ export function CrtTreeMenu({
                   role="menuitem"
                   aria-current={isCurrent ? "true" : undefined}
                   disabled={busy || isCurrent}
-                  className="flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-default disabled:text-slate-500"
+                  className="flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900 disabled:cursor-default disabled:text-slate-500 disabled:hover:bg-transparent"
                   onClick={() => { closeMenu(); void onSelectTree(tree.id); }}
                 >
                   {isCurrent ? `Current tree: ${tree.name}` : `Switch to ${tree.name}`}
