@@ -175,6 +175,23 @@ struct BrainBuddyProject: Codable, Identifiable {
     let state: String
     let revision: Int
     let open_task_count: Int
+    var desired_outcome: String? = nil
+    var last_reviewed_at: String? = nil
+    var last_review_decision: ProjectReviewDecision? = nil
+    var review_has_changes: Bool? = nil
+}
+
+enum ProjectReviewDecision: String, Codable, CaseIterable, Identifiable {
+    case keep, actionUpdated, deferred
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .keep: "Keep current plan"
+        case .actionUpdated: "I changed an action"
+        case .deferred: "Keep in Someday or Waiting"
+        }
+    }
 }
 
 struct BrainBuddyTag: Codable, Identifiable {
