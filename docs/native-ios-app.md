@@ -350,8 +350,11 @@ Deviations that need a product sign-off:
 
 - `sh ios/scripts/swift-linux.sh test` — every package target, on Linux via
   Docker (no Xcode needed).
-- `.github/workflows/ios.yml` — the package tests on Linux, and on macOS the
-  XcodeGen project is generated and the app, widgets and package are built
-  and tested with Xcode 26.
+- CI (`.github/workflows/ci.yml`) — the `ios-kit` lane runs the package
+  tests on Linux; the `ios-app` lane generates the XcodeGen project on macOS
+  and builds the app, widgets and package and tests the package with Xcode 26.
+  Both are part of `Full CI`, the verdict a change lands on.
+- `.github/workflows/ios.yml` — uploads to TestFlight after CI has passed on
+  `main` for a commit that changed `ios/`.
 - The SwiftUI layer can only be compiled on macOS; it has no logic of its
   own beyond presentation — rules live in the package.

@@ -780,6 +780,52 @@ jobs:
         self.assertIn("backend job declares needs it does not consume", completed.stderr)
         self.assertIn("spec-kit", completed.stderr)
 
+    def test_workflow_rejects_an_ios_lane_queued_behind_another_stack(self) -> None:
+        # The iOS lanes read only the changed-stack decision: waiting on the
+        # backend lane would hold the macOS build for a stack it never compiles.
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  ios-app:
+    needs:
+      - changes
+      - backend
+    steps:
+      - run: xcodebuild build
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("ios-app job declares needs it does not consume", completed.stderr)
+        self.assertIn("backend", completed.stderr)
+
+    def test_workflow_rejects_an_ios_lane_skipped_by_the_path_filter(self) -> None:
+        # Skipped is a Full CI failure by design, so the lane must run and gate
+        # its steps; a job-level filter would turn every non-iOS change red.
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(
+                """
+jobs:
+  ios-kit:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    steps:
+      - run: swift test
+""".strip(),
+                encoding="utf-8",
+            )
+
+            completed = self.run_validator("workflow", "--ci", str(workflow))
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("ios-kit job gates itself on the changed-stack filter", completed.stderr)
+
     def test_workflow_rejects_e2e_queued_behind_gates_that_do_not_guard_it(self) -> None:
         # Waiting on backend and frontend is allowed -- they are the cheap checks
         # that should fail before the stack is built. Waiting on the markdown
@@ -914,6 +960,7 @@ jobs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
       mobile: ${{ steps.decide.outputs.mobile }}
+      ios: ${{ steps.decide.outputs.ios }}
     steps:
       - id: decide
         run: echo decide
@@ -937,6 +984,22 @@ jobs:
           name: mobile-allure-results
           path: mobile/allure-results
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+  ios-kit:
+    needs: changes
+    env:
+      RUN: ${{ needs.changes.outputs.ios }}
+    steps:
+      - name: Test the package
+        if: env.RUN == 'true'
+        run: swift test --parallel
+  ios-app:
+    needs: changes
+    env:
+      RUN: ${{ needs.changes.outputs.ios }}
+    steps:
+      - name: Build app and widgets for the iOS Simulator
+        if: env.RUN == 'true'
+        run: xcodebuild build
   mutation-base:
     name: Backend mutation base measurement
     env:
@@ -988,6 +1051,8 @@ jobs:
       - changes
       - backend
       - mobile
+      - ios-kit
+      - ios-app
       - frontend
       - e2e
       - docker
@@ -1048,6 +1113,8 @@ jobs:
       - changes
       - backend
       - mobile
+      - ios-kit
+      - ios-app
       - frontend
       - e2e
       - docker

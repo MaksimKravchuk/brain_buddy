@@ -2,7 +2,8 @@
 # Selects the newest installed Xcode 26 on a GitHub macOS runner and prints its
 # version. Runner images install Xcode as /Applications/Xcode_26.<minor>[.<patch>].app;
 # anything else (betas, release candidates, the unversioned Xcode.app alias)
-# is skipped. Used by .github/workflows/ios.yml.
+# is skipped. Used by the ios-app lane of .github/workflows/ci.yml and by
+# .github/workflows/ios.yml (TestFlight).
 set -euo pipefail
 shopt -s nullglob
 

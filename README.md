@@ -23,7 +23,7 @@ See [Product direction: executable next actions](docs/product-direction.md) for 
 - **Backend**: FastAPI, Pydantic, pytest. Data persisted under `backend/data/` with schema versioning. See `docs/architecture_overview.md`.
 - **Frontend**: Vite + React + TypeScript, TailwindCSS, Zustand, React Query. Canvas profiling hook surfaces render timings during dev.
 - **Data contracts**: Shared JSON payloads defined in `backend/app/schemas` and referenced by the React client.
-- **Native iOS**: offline-first SwiftUI app for iOS 26 under `ios/`; `.github/workflows/ios.yml` builds it and, once signing is configured, uploads `main` to TestFlight. See `ios/README.md` and `docs/native-ios-app.md`.
+- **Native iOS**: offline-first SwiftUI app for iOS 26 under `ios/`; CI builds and tests it (the `ios-kit` and `ios-app` lanes), and `.github/workflows/ios.yml` uploads `main` to TestFlight once signing is configured. See `ios/README.md` and `docs/native-ios-app.md`.
 
 ## Quick Start
 

@@ -120,31 +120,43 @@ sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests
 
 ## CI
 
-[`.github/workflows/ios.yml`](../.github/workflows/ios.yml) runs on pull
-requests and on pushes to `main` and `trunk-candidate/**` that touch `ios/`
-(or the workflow), and on manual dispatch.
+The app is built and tested by two lanes of the main CI,
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml). Like the backend,
+frontend and mobile lanes they are part of `Full CI`, the verdict a pull
+request merges on and a trunk candidate lands on, so no change reaches `main`
+with the package tests red or the app unbuilt.
 
 | Job | Runner | What it proves |
 |---|---|---|
-| `kit-linux` | `ubuntu-latest`, `swift:6.2-noble` | The package builds and its tests pass on Linux |
-| `app-macos` | `macos-26`, newest Xcode 26 | The generated project builds the app and widgets for the simulator (unsigned); the package tests pass on macOS. The raw `xcodebuild` log and `.xcresult` are uploaded on failure |
-| `testflight` | `macos-26`, `testflight` environment | Only on `main` (push or dispatch), after both jobs pass: archive, sign, upload |
+| `ios-kit` | `ubuntu-latest`, `swift:6.2-noble` | The package builds and its tests pass on Linux |
+| `ios-app` | `macos-26`, newest Xcode 26 | The generated project builds the app and widgets for the simulator (unsigned); the package tests pass on macOS. The raw `xcodebuild` log and `.xcresult` are uploaded on failure |
 
-This workflow is not part of `make verify-all` and not a landing-required
-check; it is separate from `ci.yml` so iOS changes do not slow the web
-pipeline down.
+On a pull request they do their work only when it touches `ios/` (or a shared
+surface such as `.github/` or `scripts/`); otherwise they pass at once, and
+`ios-app` does so on Linux rather than waiting for a macOS runner. On pushes
+to `main` and `trunk-candidate/**` they always run, as every lane does on the
+landing path.
 
-Nothing in it floats. Every action is pinned to a commit SHA (with its tag in
-a comment), and XcodeGen is the release zip of the version in
-`XCODEGEN_VERSION`, checked against `XCODEGEN_SHA256` and against
-`xcodegen --version` before it runs. To upgrade XcodeGen, download the new
-`xcodegen.zip`, take its `shasum -a 256`, and change both values together.
+[`.github/workflows/ios.yml`](../.github/workflows/ios.yml) only uploads: see
+TestFlight below. Neither is part of `make verify-all`.
+
+XcodeGen is the release zip of the version in `XCODEGEN_VERSION`, checked
+against `XCODEGEN_SHA256` and against `xcodegen --version` before it runs;
+both workflows pin the same pair. To upgrade XcodeGen, download the new
+`xcodegen.zip`, take its `shasum -a 256`, and change both values together in
+both files. In `ios.yml`, which holds the App Store Connect key, every action
+is also pinned to a commit SHA (with its tag in a comment).
 
 ## TestFlight
 
-Every push to `main` that touches `ios/` (and every manual run on `main`)
-uploads a build to TestFlight once `kit-linux` and `app-macos` pass and a
-reviewer approves the `testflight` deployment. Until the owner finishes the
+`ios.yml` starts when CI completes on a push to `main`. If that run passed
+and its commit changed `ios/`, it uploads that commit to TestFlight once a
+reviewer approves the `testflight` deployment, so every build there passed
+`ios-kit` and `ios-app` first. A manual run on `main` uploads the current
+`main`. The commit is compared with its first parent, which covers a trunk
+landing and a merged or squashed pull request; if several commits are pushed
+at once only the last one is checked, so dispatch the workflow for anything
+that missed an upload. Until the owner finishes the
 setup below, the `testflight` job writes what is missing to the run summary
 ("TestFlight upload skipped: configure …") and stays green.
 
@@ -203,8 +215,8 @@ setup below, the `testflight` job writes what is missing to the run summary
    Info.plist answers the export-compliance question, so builds are not held
    for it.
 
-Then run the workflow on `main` (*Actions → iOS → Run workflow*), or push a
-change under `ios/`.
+Then run the workflow on `main` (*Actions → iOS TestFlight → Run
+workflow*), or land a change under `ios/`.
 
 ### What the job does
 
@@ -228,9 +240,10 @@ change under `ios/`.
 ### Build numbers and versions
 
 - Build number (`CFBundleVersion`) = the workflow's run number +
-  `IOS_BUILD_NUMBER_OFFSET`. App Store Connect needs it to go up. If builds
-  were uploaded from somewhere else with higher numbers, raise the offset past
-  them.
+  `IOS_BUILD_NUMBER_OFFSET`. App Store Connect needs it to go up. The run
+  number counts every CI completion on `main`, uploads or not, so builds skip
+  numbers; that is fine. If builds were uploaded from somewhere else with
+  higher numbers, raise the offset past them.
 - Re-running a failed run keeps its run number. That is fine when the upload
   never happened; if it did, App Store Connect rejects the duplicate. Start a
   fresh run from *Run workflow* instead.
@@ -239,10 +252,12 @@ change under `ios/`.
 
 ### Cost
 
-The `app-macos` and `testflight` jobs use macOS runners, which are free on
+The `ios-app` and `testflight` jobs use macOS runners, which are free on
 public repositories. On a private repository, macOS minutes are billed at a
 multiple of the Linux rate (10× at the time of writing; check GitHub's
-current pricing). Only pushes and pull requests that touch `ios/` run them.
+current pricing). `ios-app` takes a macOS runner for pull requests that touch
+`ios/` or a shared surface and for every push to `main` or
+`trunk-candidate/**`; `testflight` only for uploads.
 
 ### When the upload fails
 
@@ -287,8 +302,8 @@ data, or need a sign-in.
 
 - The SwiftUI layer compiles only on macOS; it has no automated UI tests.
   The rules it relies on are tested in the package.
-- iOS results are not in the Allure report or `make verify-all`, and
-  `ios.yml` does not gate landing.
+- iOS results are Swift Testing and `xcodebuild` output: they gate
+  `Full CI` but are not in the Allure report or `make verify-all`.
 - The design deviations in `docs/native-ios-app.md` (SF Symbols, derived dark
   mode, SF Pro, system glass motion, sky-700 for text and filled controls) are
   awaiting product sign-off.

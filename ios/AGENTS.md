@@ -17,7 +17,8 @@ xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy \
 ```
 
 The SwiftUI targets compile only on macOS. On Linux, verify with the package
-tests and leave the app build to `.github/workflows/ios.yml`.
+tests and leave the app build to CI (the `ios-app` lane of
+`.github/workflows/ci.yml`).
 
 ## Where code goes
 
