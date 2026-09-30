@@ -18,15 +18,25 @@
   overflow: hidden;
 }
 
+/* One 56px bar, the height of the app's top bar: exit link and tree menu on
+   the left, save state and shortcuts on the right. */
 .crt-canvas-toolbar {
   z-index: 5;
   display: flex;
+  min-height: 3.5rem;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--bb-border);
   background: rgba(255, 255, 255, 0.96);
-  padding: 1rem 1.25rem;
+  padding: 0.5rem 1.25rem;
+}
+
+.crt-canvas-toolbar-start {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .crt-canvas-toolbar h1 {
@@ -48,33 +58,64 @@
 .crt-canvas-toolbar-actions button {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.75rem;
 }
 
 .crt-canvas-toolbar-actions {
+  flex-shrink: 0;
   margin-left: auto;
 }
 
 .crt-canvas-toolbar-actions button,
 .crt-tool-rail button,
 .crt-zoom-controls button {
-  border: 1px solid #cbd5e1;
-  border-radius: 0.55rem;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-md);
   background: #fff;
-  color: #334155;
+  color: var(--bb-fg-3);
   cursor: pointer;
   font: inherit;
-  font-weight: 600;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition:
+    background-color var(--bb-dur-base) var(--bb-ease-smooth),
+    border-color var(--bb-dur-base) var(--bb-ease-smooth),
+    color var(--bb-dur-base) var(--bb-ease-smooth);
+}
+
+.crt-canvas-toolbar-actions button:hover,
+.crt-tool-rail button:hover,
+.crt-zoom-controls button:hover {
+  border-color: var(--bb-border-hover);
+  background: var(--bb-surface-base);
+  color: var(--bb-fg-1);
+}
+
+.crt-canvas-toolbar-actions button:active,
+.crt-tool-rail button:active,
+.crt-zoom-controls button:active {
+  transform: scale(0.98);
+}
+
+/* Connect and Pan are toggles; their pressed state has to be visible, not
+   only announced. */
+.crt-canvas-toolbar-actions button[aria-expanded="true"],
+.crt-tool-rail button[aria-pressed="true"] {
+  border-color: var(--bb-info-border);
+  background: var(--bb-info-bg);
+  color: var(--bb-info-fg);
 }
 
 .crt-canvas-toolbar-actions button {
-  padding: 0.45rem 0.7rem;
+  height: 2.25rem;
+  padding: 0 0.85rem;
+  box-shadow: var(--bb-shadow-soft);
 }
 
 .crt-save-status {
-  color: #047857;
-  font-size: 0.78rem;
-  font-weight: 600;
+  color: var(--bb-fg-5);
+  font-size: 0.75rem;
+  font-weight: 500;
 }
 
 .crt-shortcut-disclosure {
@@ -121,10 +162,10 @@
   z-index: 4;
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  border-right: 1px solid #e2e8f0;
+  gap: 0.5rem;
+  border-right: 1px solid var(--bb-border);
   background: rgba(255, 255, 255, 0.93);
-  padding: 0.75rem 0.5rem;
+  padding: 0.75rem 0.625rem;
 }
 
 .crt-tool-rail button {
@@ -132,12 +173,29 @@
   min-height: 2.25rem;
   padding: 0.35rem 0.25rem;
   place-items: center;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 
 .crt-flow-region {
   position: relative;
   min-height: 0;
+}
+
+.crt-canvas-empty-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  border: 1.5px dashed var(--bb-fg-7);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0.75rem 1.25rem;
+  color: var(--bb-fg-4);
+  font-size: 0.875rem;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .crt-flow-region .react-flow__node {
@@ -211,23 +269,32 @@
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 0.7rem;
+  border: 1px solid var(--bb-border);
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.96);
-  padding: 0.35rem;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+  padding: 0.3rem;
+  box-shadow: var(--bb-shadow-floating);
 }
 
 .crt-zoom-controls button {
+  display: grid;
   width: 2rem;
   height: 2rem;
-  font-size: 1.05rem;
+  place-items: center;
+  border-color: transparent;
+  padding: 0;
+}
+
+.crt-zoom-controls button svg {
+  width: 1rem;
+  height: 1rem;
 }
 
 .crt-zoom-controls span {
   min-width: 3.4rem;
-  color: #475569;
+  color: var(--bb-fg-4);
   font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
   text-align: center;
 }
 

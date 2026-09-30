@@ -453,9 +453,15 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   });
 
   const canonicalInboxCount = inboxBadgeQuery.data?.counts_by_state.inbox ?? (isInboxProductView ? counts.inbox : 0);
+  // Sidebar counts are whole-list sizes. The page query's counts follow its
+  // filters (project, tag, date window, projectless Inbox), so reading them
+  // made the sidebar numbers jump as the user moved between views. This is the
+  // same unfiltered projection the settings pages read, so the cache is shared.
+  const shellCountsQuery = useTaskList({ state: "next", limit: 1 });
+  const globalCounts = shellCountsQuery.data?.counts_by_state ?? counts;
   const shellCounts = useMemo(
-    () => ({ ...counts, inbox: canonicalInboxCount }),
-    [canonicalInboxCount, counts]
+    () => ({ ...globalCounts, inbox: canonicalInboxCount }),
+    [canonicalInboxCount, globalCounts]
   );
 
   const title = useMemo(() => {
@@ -830,14 +836,16 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       onDeleteTag={(tag) => tagMutation.mutate({ action: "delete", tag })}
     >
       <section aria-labelledby="task-list-title" className="mx-auto max-w-[760px]">
-        <div className="mb-5 flex flex-wrap items-end gap-x-3 gap-y-2">
-          <div className="min-w-0">
-            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-title font-semibold text-slate-900 outline-none">
+        {/* Below `sm` Sort stays beside the title and the two toggles take their
+            own row, so a phone never squeezes a control into two-line text. */}
+        <div className="mb-5 flex flex-wrap items-end gap-x-1.5 gap-y-3">
+          <div className="mr-auto min-w-0 pr-1.5 max-sm:flex-1">
+            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 break-words text-title font-semibold text-slate-900 outline-none">
               {title}
             </h1>
             <p className="m-0 mt-1 text-xs text-slate-500">{meta}</p>
           </div>
-          <div className="ml-auto flex items-center gap-1.5 max-[359px]:w-full max-[359px]:flex-wrap max-[359px]:justify-end">
+          <div className="flex items-center gap-1.5 whitespace-nowrap max-sm:order-last max-sm:w-full">
             {canGroupByProject ? (
               <Button
                 variant={groupByProject ? "secondary" : "ghost"}
@@ -857,7 +865,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
                 Group by project
               </Button>
             ) : null}
-            <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
+            <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900 max-sm:first:-ml-2.5">
               <input
                 type="checkbox"
                 className="h-3.5 w-3.5 rounded border-slate-300 text-brand-primary accent-brand-primary"
@@ -871,33 +879,33 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               />
               Show cancelled
             </label>
-            <label className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
-              <span className="text-slate-500">Sort</span>
-              <span className="relative inline-flex">
-                <select
-                  aria-label="Sort tasks"
-                  className="appearance-none bg-transparent pr-5 text-xs font-medium text-slate-700 outline-none"
-                  value={sort}
-                  onChange={(event) => {
-                    const next = new URLSearchParams(searchParams);
-                    const value = parseTaskSort(event.currentTarget.value);
-                    if (value === "manual") {
-                      next.delete("sort");
-                    } else {
-                      next.set("sort", value);
-                    }
-                    setSearchParams(next, { replace: true });
-                  }}
-                >
-                  <option value="manual">Manual</option>
-                  <option value="due">Due date</option>
-                  <option value="priority">Priority</option>
-                  <option value="title">Title</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
-              </span>
-            </label>
           </div>
+          <label className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900 max-sm:-mr-2">
+            <span className="text-slate-500">Sort</span>
+            <span className="relative inline-flex">
+              <select
+                aria-label="Sort tasks"
+                className="cursor-pointer appearance-none rounded bg-transparent pr-5 text-xs font-medium text-slate-700 outline-none"
+                value={sort}
+                onChange={(event) => {
+                  const next = new URLSearchParams(searchParams);
+                  const value = parseTaskSort(event.currentTarget.value);
+                  if (value === "manual") {
+                    next.delete("sort");
+                  } else {
+                    next.set("sort", value);
+                  }
+                  setSearchParams(next, { replace: true });
+                }}
+              >
+                <option value="manual">Manual</option>
+                <option value="due">Due date</option>
+                <option value="priority">Priority</option>
+                <option value="title">Title</option>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
+            </span>
+          </label>
         </div>
 
         {!taskId ? mutationNotice : null}
@@ -928,11 +936,12 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
                     />
                     <h2
                       id={`task-group-${group.key}`}
+                      title={group.name}
                       className="m-0 min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500"
                     >
                       {group.name}
                     </h2>
-                    <span className="text-xs font-medium text-slate-400">{group.tasks.length}</span>
+                    <span className="shrink-0 text-xs font-medium tabular-nums text-slate-400">{group.tasks.length}</span>
                   </div>
                   <TaskList {...taskListProps} tasks={group.tasks} label={group.name} inlineDetail={panel} />
                 </section>
@@ -952,7 +961,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             ) : null}
           </div>
         ) : (
-          <>
+          <div className="flex flex-col gap-3">
             <EmptyState
               state={state}
               onClearSearch={searchQuery.trim() ? () => {
@@ -963,7 +972,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               } : undefined}
             />
             {taskCreator}
-          </>
+          </div>
         )}
         </div>
 
@@ -1080,8 +1089,11 @@ function groupTasksByProject(tasks: TaskResponse[], projects: ProjectResponse[])
 
 // Every call site names its variant, so there is deliberately no default: a
 // silent fallback would let a new call site render the wrong chip unnoticed.
-function Chip({ variant, children }: {
+function Chip({ variant, truncate = false, title, children }: {
   variant: "due" | "neutral";
+  /** Lets a long label give way with an ellipsis instead of being clipped by the row. */
+  truncate?: boolean;
+  title?: string;
   children: ReactNode;
 }): React.JSX.Element {
   const variantClass =
@@ -1089,8 +1101,13 @@ function Chip({ variant, children }: {
       ? "border-due-border bg-due-bg text-due-fg"
       : "border-transparent bg-context-bg text-context-fg";
   return (
-    <span className={`inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium ${variantClass}`}>
-      {children}
+    <span
+      title={title}
+      className={`inline-flex h-[22px] items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium ${
+        truncate ? "min-w-0 max-w-[160px] shrink" : "shrink-0"
+      } ${variantClass}`}
+    >
+      {truncate ? <span className="min-w-0 truncate">{children}</span> : children}
     </span>
   );
 }
@@ -1215,7 +1232,7 @@ function TaskRow({
     >
       <div
         data-testid="task-row-header"
-        className={`flex h-11 min-w-0 items-center gap-2 px-1.5 transition-colors duration-150 ${isSelected ? "bg-slate-50" : "hover:bg-slate-50/70"}`}
+        className={`flex h-11 min-w-0 cursor-pointer items-center gap-2 pl-1.5 pr-3 transition-colors duration-150 ease-smooth ${isSelected ? "bg-slate-50" : "hover:bg-slate-50/70"}`}
         onClick={(event) => {
           const target = event.target as HTMLElement;
           if (target.closest("a, button, input, textarea, select, label")) return;
@@ -1224,16 +1241,20 @@ function TaskRow({
         }}
       >
         {isTerminal ? (
-          <span
-            role="img"
-            aria-label={task.state === "completed" ? "Completed" : "Cancelled"}
-            className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] ${
-              task.state === "completed"
-                ? "border-brand-primary bg-brand-primary text-white"
-                : "border-slate-300 bg-slate-200 text-slate-500"
-            }`}
-          >
-            {task.state === "completed" ? <Check className="h-[11px] w-[11px]" /> : <X className="h-2.5 w-2.5" />}
+          // Same 44px slot as the complete button, so finished and open rows
+          // keep their circles and titles on one vertical line.
+          <span className="-ml-1.5 flex h-11 w-11 shrink-0 items-center justify-center">
+            <span
+              role="img"
+              aria-label={task.state === "completed" ? "Completed" : "Cancelled"}
+              className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] ${
+                task.state === "completed"
+                  ? "border-brand-primary bg-brand-primary text-white"
+                  : "border-slate-300 bg-slate-200 text-slate-500"
+              }`}
+            >
+              {task.state === "completed" ? <Check className="h-[11px] w-[11px]" /> : <X className="h-2.5 w-2.5" />}
+            </span>
           </span>
         ) : (
           <button
@@ -1243,7 +1264,7 @@ function TaskRow({
             disabled={completionPending}
             onClick={() => onComplete(task)}
           >
-            <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-slate-300 bg-white text-transparent transition-colors duration-200 ease-smooth group-hover/complete:border-sky-700">
+            <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-slate-300 bg-white text-transparent transition-colors duration-200 ease-smooth group-hover/complete:border-sky-700 group-hover/complete:text-sky-700/50">
               <Check className="h-[11px] w-[11px]" aria-hidden />
             </span>
           </button>
@@ -1258,7 +1279,7 @@ function TaskRow({
             onCloseSelectedTask();
           }}
           aria-expanded={isSelected}
-          className={`min-w-0 flex-1 truncate text-sm font-medium outline-none hover:text-sky-700 focus-visible:rounded focus-visible:ring-2 focus-visible:ring-brand-primary ${
+          className={`min-w-0 flex-1 truncate text-sm font-medium outline-none transition-colors duration-150 ease-smooth hover:text-sky-700 focus-visible:rounded ${
             isTerminal ? "text-slate-500 line-through decoration-slate-300" : "text-slate-900"
           }`}
         >
@@ -1279,12 +1300,12 @@ function TaskRow({
             </Chip>
           </span>
         ) : null}
-        <span className="ml-auto hidden min-w-0 shrink items-center gap-2.5 overflow-hidden sm:flex sm:max-w-[34%]">
+        <span className="ml-auto hidden min-w-0 shrink items-center gap-1.5 sm:flex sm:max-w-[40%]">
           {task.state === "waiting" && task.waiting_for ? (
-            <span className="max-w-[140px] truncate text-[11px] text-slate-400">{task.waiting_for}</span>
+            <span title={task.waiting_for} className="mr-1 min-w-0 max-w-[140px] truncate text-[11px] text-slate-500">{task.waiting_for}</span>
           ) : null}
           {tags.map((tag) => (
-            <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
+            <Chip key={tag.id} variant="neutral" truncate title={tagLabel(tag)}>{tagLabel(tag)}</Chip>
           ))}
         </span>
         <TaskAgentControl
@@ -1298,7 +1319,7 @@ function TaskRow({
         />
       </div>
       {isSelected && inlineDetail ? (
-        <div className="border-t border-slate-200 bg-white" data-testid="inline-task-detail">
+        <div className="border-t border-slate-200 bg-white motion-safe:animate-detail-enter" data-testid="inline-task-detail">
           {inlineDetail}
         </div>
       ) : null}
@@ -1422,12 +1443,14 @@ function TaskCreator({
   };
 
   return (
-    <div className="mt-2 space-y-3">
+    <div className="space-y-3">
       {/* The prototype's dashed "add task" row; the smart-add form lives inside
-          it so the affordance is directly typable rather than click-to-expand. */}
+          it so the affordance is directly typable rather than click-to-expand.
+          The minimum height already fits the Add task button, so the row does
+          not grow and push the list down on the first keystroke. */}
       <form
         ref={composerRef}
-        className="flex w-full flex-wrap items-center gap-3 rounded-[12px] border-[1.5px] border-dashed border-slate-300 bg-transparent px-4 py-3 transition-colors duration-200 ease-smooth focus-within:border-brand-primary hover:border-brand-primary"
+        className="flex min-h-12 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] border-[1.5px] border-dashed border-slate-300 bg-transparent py-1.5 pl-4 pr-2 transition-[background-color,border-color] duration-200 ease-smooth focus-within:border-solid focus-within:border-brand-primary focus-within:bg-white hover:border-brand-primary"
         onSubmit={(event) => {
           event.preventDefault();
           submitDraft();
@@ -1450,7 +1473,7 @@ function TaskCreator({
                 ? `${completionListboxId}-option-${activeCompletionIndex}`
                 : undefined
           }
-          className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+          className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-slate-900 outline-none placeholder:text-slate-500 focus-visible:shadow-none"
           placeholder={placeholder}
           value={newTitle}
           onChange={(event) => {
@@ -1515,7 +1538,7 @@ function TaskCreator({
             <input
               id="new-task-waiting-for"
               aria-label="Waiting for"
-              className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+              className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-slate-900 outline-none placeholder:text-slate-500 focus-visible:shadow-none"
               placeholder="Waiting for who or what?"
               value={newWaitingFor}
               onChange={(event) => onWaitingForChange(event.currentTarget.value)}
@@ -1561,8 +1584,10 @@ function TaskCreator({
           onSelect={applyCompletion}
         />
       ) : null}
+      {/* Kept mounted so the live region exists before it speaks, but an empty
+          region must not add a blank 12px row under the composer. */}
       <div
-        className="text-xs text-slate-500"
+        className="text-xs text-slate-500 empty:!mt-0"
         role={autocomplete.loading || autocomplete.error ? "status" : undefined}
         aria-live="polite"
       >
@@ -1585,7 +1610,7 @@ function TaskCreator({
 
 function DateViewCaptureHint(): React.JSX.Element {
   return (
-    <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+    <div className="mt-6 rounded-xl border border-info-border bg-info-bg px-4 py-3 text-[13px] leading-relaxed text-info-fg">
       Date views are filters over existing tasks. Add a task from Inbox, Next, Waiting, Someday, a Project, or a Tag, then set its due date in task detail.
     </div>
   );
@@ -1593,9 +1618,16 @@ function DateViewCaptureHint(): React.JSX.Element {
 
 function LoadingState({ label }: { label: string }): React.JSX.Element {
   return (
-    <div className="space-y-[5px]" aria-label={`Loading ${label}`}>
-      {[0, 1, 2, 3].map((item) => (
-        <div key={item} className="h-10 animate-pulse rounded-[12px] border border-slate-200 bg-white" />
+    // Mirrors the loaded list — one card of 44px rows — so the rows arrive in
+    // place instead of the page jumping when data lands.
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label={`Loading ${label}`}>
+      {[64, 48, 72, 40].map((width, item) => (
+        <div key={item} className="flex h-11 items-center gap-2 border-b border-slate-200 pl-1.5 pr-3 last:border-b-0">
+          <span className="-ml-1.5 flex h-11 w-11 shrink-0 items-center justify-center">
+            <span className="h-[18px] w-[18px] rounded-full border-[1.5px] border-slate-200" />
+          </span>
+          <span className="h-2.5 rounded-full bg-slate-100 motion-safe:animate-pulse" style={{ width: `${width}%` }} />
+        </div>
       ))}
     </div>
   );

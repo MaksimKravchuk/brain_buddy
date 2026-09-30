@@ -574,6 +574,15 @@ describe("AppRoutes", () => {
           counts_by_state: { inbox: 4, next: 0, waiting: 0, someday: 0 }
         }));
       }
+      if (url.includes("/tasks?") && url.includes("limit=1")) {
+        // The sidebar's unfiltered whole-list counts.
+        return Promise.resolve(jsonResponse({
+          items: [],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 9, next: 5, waiting: 6, someday: 7 }
+        }));
+      }
       if (url.includes("/projects")) {
         return Promise.resolve(jsonResponse(projectsResponse));
       }
@@ -590,6 +599,8 @@ describe("AppRoutes", () => {
     const sidebar = screen.getByRole("navigation", { name: "Task navigation" });
     expect(await within(sidebar).findByText("4")).toBeInTheDocument();
     expect(within(sidebar).queryByText("9")).not.toBeInTheDocument();
+    // The other list counts are whole-list sizes, not the project view's.
+    expect(await within(within(sidebar).getByRole("link", { name: /Someday \/ maybe/ })).findByText("7")).toBeInTheDocument();
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("project_id=project-onboarding"), expect.anything());
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("unassigned_project=true"), expect.anything());
