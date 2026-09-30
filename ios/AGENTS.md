@@ -1,0 +1,99 @@
+# Brain Buddy iOS — agent guide
+
+SwiftUI for iOS 26, Swift 6 language mode with complete strict concurrency, an
+XcodeGen project and one local Swift package. The design and the rules the app
+mirrors are in `../docs/native-ios-app.md`; the runbook (signing, TestFlight,
+offline QA) is `README.md`.
+
+## Commands
+
+```bash
+sh ios/scripts/swift-linux.sh test         # package on Linux via Docker; no Xcode needed
+sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests
+(cd ios/BrainBuddyKit && swift test)       # package on macOS
+(cd ios && xcodegen generate)              # after adding, moving or deleting any file
+xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+```
+
+The SwiftUI targets compile only on macOS. On Linux, verify with the package
+tests and leave the app build to `.github/workflows/ios.yml`.
+
+## Where code goes
+
+| Path | Holds | Must not |
+|---|---|---|
+| `BrainBuddyKit/Sources/BrainBuddyCore` | Models, `GTDCommand`, `GTDReducer`, replay, queries, Smart Add | Import SwiftUI, UIKit, WidgetKit or anything Apple-only |
+| `BrainBuddyKit/Sources/BrainBuddy{Persistence,API,Sync}` | Store file, REST client, sync engine | Hold GTD rules |
+| `BrainBuddyKit/Sources/BrainBuddyWorkspace` | The `@Observable` model the UI binds to | Hold GTD rules |
+| `BrainBuddy/` | App: `App/`, `DesignSystem/`, `Components/`, `Screens/`, `Intents/`, `Resources/` | Hold GTD rules |
+| `BrainBuddyWidgets/` | Widgets and Control Center controls | Sync, or hold GTD rules |
+| `Shared/` | Code and resources for **both** the app and the widget extension | Use app-only API (`UIApplication.shared`, …) |
+
+## Non-negotiable rules
+
+- **Rules live in `BrainBuddyCore`.** `GTDReducer` is the only place a GTD
+  rule is decided (which transition is legal, Waiting's `waiting_for`, name
+  uniqueness, limits). The UI, widgets and intents dispatch a `GTDCommand`
+  through the workspace and render queries; they never re-check or
+  re-implement a rule, and never offer an action the reducer would reject —
+  ask the reducer or a query instead.
+- **Every package target builds and tests on Linux.** Put Apple-only API
+  (Security, file protection, `NWPathMonitor`, `BGTaskScheduler`) behind
+  `#if canImport(...)` or in the app target. Run
+  `sh ios/scripts/swift-linux.sh test` before calling package work done.
+- **No third-party dependencies**, in the package or the app. `Package.swift`
+  has none; keep it that way.
+- **`project.yml` is the source of truth.** The `.xcodeproj`, both
+  Info.plists and both `.entitlements` files are generated and git-ignored.
+  A new Info.plist key, entitlement, capability, build setting or target goes
+  into `project.yml`; a new source file needs only `xcodegen generate`.
+- **Never hard-code identifiers.** Read the App Group from the
+  `BBAppGroupIdentifier` Info.plist key; register the background refresh task
+  as `Bundle.main.bundleIdentifier + ".refresh"`. The URL scheme is
+  `brainbuddy`. Everything derives from `BB_BUNDLE_ID_PREFIX` so the owner can
+  sign under their own team (`README.md`, "Signing and identifiers").
+- **Declare required-reason APIs.** Using UserDefaults, file timestamps,
+  system boot time, disk space or active keyboards means a matching entry in
+  `Shared/PrivacyInfo.xcprivacy`; App Store Connect rejects the TestFlight
+  upload otherwise.
+- **Concurrency is checked, not suppressed.** No `@unchecked Sendable`,
+  `nonisolated(unsafe)` or `@preconcurrency` to silence a diagnostic without a
+  comment saying why it is safe.
+
+## Tests
+
+- Swift Testing (`import Testing`, `@Test`, `#expect`, `#require`), not XCTest.
+- One test target per package module (`BrainBuddyCoreTests`, …), files named
+  after the type under test (`GTDReducerTests.swift`).
+- Deterministic: pass dates, ids and clocks in (commands already carry their
+  ids and issue time); no sleeps, no network, no real App Group container.
+- Rules and sync are tested in the package, where they run on Linux and in
+  CI; a SwiftUI view is not the place to test a rule.
+
+## Design and copy
+
+- Tokens come from `.claude/skills/brain-buddy-design/` (the
+  `/brain-buddy-design` skill): sky `#0EA5E9` accent (`AccentColor`), slate
+  neutrals, the brand curve `cubic-bezier(0.22, 1, 0.36, 1)` for our own
+  animations, 44 pt hit targets, Reduce Motion respected.
+- Glass on chrome only (tab bar, toolbars, sheets, the capture accessory,
+  floating clusters); content stays flat.
+- Pending product sign-off (`docs/native-ios-app.md`): SF Symbols instead of
+  Lucide (use the documented mapping), dark mode derived from the slate/sky
+  scale, SF Pro instead of Inter, system glass motion, and sky-700
+  (`BBColor.brandText` / `brandFill`) for text and filled controls because
+  white on sky-500 is 2.8:1 (sky-500 stays for large accents). Do not add more
+  deviations without flagging them.
+- Copy: English, sentence case everywhere ("Move to next actions", not "Move
+  To Next Actions"), calm second person, short imperatives. List names are
+  "Inbox", "Next actions", "Waiting for", "Someday / maybe". Use `·` between
+  inline metadata. Sync state is always words ("Offline — 3 changes
+  waiting"), never a colour alone. No emoji. Weekly review stays visibly
+  deferred.
+
+## Style
+
+Swift API Design Guidelines, four-space indent, one primary type per file.
+Conventional commits scoped to the app: `feat(ios): …`, `fix(ios): …`,
+`ci(ios): …`.
