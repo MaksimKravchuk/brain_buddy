@@ -102,7 +102,7 @@ targets:
         UIBackgroundModes:
           - fetch
         # No App Transport Security exceptions, in any configuration: https
-        # everywhere. The client refuses plain http except to loopback, and a
+        # everywhere. The client refuses plain http except to localhost, and a
         # development server at http://localhost still works because ATS
         # allows unqualified host names by default. Literal loopback addresses
         # (127.0.0.1, [::1]) are blocked by ATS since iOS 17; use `localhost`.
