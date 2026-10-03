@@ -30,6 +30,8 @@ final class SmartAddParserTests: XCTestCase {
         XCTAssertEqual(description(draft.project), "id:vendor")
         XCTAssertEqual(draft.previewProjectName(in: projects), "Vendor launch")
         XCTAssertEqual(draft.previewTagNames(in: tags), ["deep work", "work"])
+        XCTAssertEqual(draft.previewProjectLabel(in: projects), "Project: Vendor launch")
+        XCTAssertEqual(draft.previewTagLabels(in: tags), ["#deep work", "#work"])
         XCTAssertTrue(draft.hasCompletedTokens)
         XCTAssertTrue(draft.isValid)
     }
@@ -57,6 +59,22 @@ final class SmartAddParserTests: XCTestCase {
         XCTAssertEqual(description(draft.project), "name:New Project")
         XCTAssertEqual(draft.previewProjectName(in: projects), "New Project")
         XCTAssertEqual(draft.previewTagNames(in: tags), ["café", "back\\slash"])
+        XCTAssertEqual(draft.previewProjectLabel(in: projects), "Create project: New Project")
+        XCTAssertEqual(draft.previewTagLabels(in: tags), ["Create tag: #café", "Create tag: #back\\slash"])
+    }
+
+    func testArchivedProjectNameIsShownAndRejectedBeforeCapture() {
+        let archived = BrainBuddyProject(
+            id: "old", name: "Old Launch", color: nil, state: "archived",
+            revision: 1, open_task_count: 0
+        )
+        let draft = SmartAddParser.parse(
+            "Plan @\"old launch\"", projects: projects, tags: tags,
+            archivedProjects: [archived]
+        )
+        XCTAssertEqual(draft.archivedProjectName, "Old Launch")
+        XCTAssertEqual(draft.previewProjectLabel(in: projects), "Archived project: old launch — restore it first")
+        XCTAssertFalse(draft.isValid)
     }
 
     func testRequiresNonemptyBoundedTitleAndNames() {

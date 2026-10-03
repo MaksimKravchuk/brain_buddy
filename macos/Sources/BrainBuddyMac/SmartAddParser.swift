@@ -4,6 +4,7 @@ struct SmartAddDraft {
     let cleanTitle: String
     let tags: [ClassificationRef]
     let project: ClassificationRef?
+    let archivedProjectName: String?
     let hasCompletedTokens: Bool
     let isValid: Bool
 
@@ -23,6 +24,20 @@ struct SmartAddDraft {
             }
         }
     }
+
+    func previewProjectLabel(in projects: [BrainBuddyProject]) -> String? {
+        guard let name = previewProjectName(in: projects) else { return nil }
+        if archivedProjectName != nil { return "Archived project: \(name) — restore it first" }
+        if case .name = project { return "Create project: \(name)" }
+        return "Project: \(name)"
+    }
+
+    func previewTagLabels(in tags: [BrainBuddyTag]) -> [String] {
+        zip(self.tags, previewTagNames(in: tags)).map { ref, name in
+            if case .name = ref { return "Create tag: #\(name)" }
+            return "#\(name)"
+        }
+    }
 }
 
 enum SmartAddParser {
@@ -37,6 +52,7 @@ enum SmartAddParser {
 
     static func parse(
         _ input: String, projects: [BrainBuddyProject], tags: [BrainBuddyTag],
+        archivedProjects: [BrainBuddyProject] = [],
         contextProjectId: String? = nil, contextTagId: String? = nil
     ) -> SmartAddDraft {
         let scalars = Array(input.unicodeScalars)
@@ -104,11 +120,20 @@ enum SmartAddParser {
             if case .name(let name) = ref { return name.utf16.count <= 500 }
             return true
         }
+        let archivedProjectName: String?
         let validProject: Bool
-        if case .name(let name) = projectRef { validProject = name.utf16.count <= 500 }
-        else { validProject = true }
+        if case .name(let name) = projectRef {
+            archivedProjectName = archivedProjects.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+            })?.name
+            validProject = name.utf16.count <= 500 && archivedProjectName == nil
+        } else {
+            archivedProjectName = nil
+            validProject = true
+        }
         return SmartAddDraft(
             cleanTitle: title, tags: tagRefs, project: projectRef,
+            archivedProjectName: archivedProjectName,
             hasCompletedTokens: !tokens.isEmpty,
             isValid: !title.isEmpty && title.utf16.count <= 500 && validTags && validProject
         )
