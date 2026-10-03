@@ -521,7 +521,7 @@ final class OfflineWorkspaceTests: XCTestCase {
         XCTAssertEqual(initial.map(\.project.name), ["First", "Second"])
         XCTAssertEqual(initial.first?.tasks.count, 101)
         XCTAssertEqual(initial.first?.nextCount, 101)
-        let marked = await model.markProjectReviewed(first, decision: .keep)
+        let marked = await model.markProjectReviewed(try XCTUnwrap(initial.first?.project), decision: .keep)
         XCTAssertTrue(marked)
 
         let reopenedStore = LocalGTDStore(fileURL: fileURL)
@@ -542,6 +542,37 @@ final class OfflineWorkspaceTests: XCTestCase {
         let changedReview = try XCTUnwrap(loadedChangedReview)
         XCTAssertEqual(changedReview.map(\.project.id), [first.id, second.id])
         XCTAssertTrue(changedReview.first?.project.review_has_changes == true)
+    }
+
+    @MainActor
+    func testProjectReviewRejectsActionsChangedAfterReviewOpened() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-stale-project-review-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = LocalGTDStore(fileURL: directory.appendingPathComponent("tasks.json"))
+        let project = try await store.createProject(name: "Move house", idempotencyKey: UUID())
+        let action = try await store.smartAddTask(
+            title: "Call mover", state: .next,
+            project: .id(project.id), idempotencyKey: UUID()
+        ).task
+        let model = BrainBuddyModel(store: store)
+        await model.restore()
+        let openedReview = await model.loadProjectReview()
+        let opened = try XCTUnwrap(openedReview?.first)
+        let changed = try await store.updateTask(
+            action, changes: TaskChanges(title: .set("Book mover")), idempotencyKey: UUID()
+        )
+
+        let staleDecision = await model.markProjectReviewed(opened.project, decision: .keep)
+        XCTAssertFalse(staleDecision)
+        XCTAssertEqual(model.error, "Project changed elsewhere. Reopen the review to inspect its current actions.")
+        let refreshedReview = await model.loadProjectReview()
+        let stillDue = try XCTUnwrap(refreshedReview?.first)
+        XCTAssertNil(stillDue.project.last_reviewed_at)
+        XCTAssertEqual(stillDue.tasks.first?.title, changed.title)
+        XCTAssertEqual(stillDue.project.revision, opened.project.revision)
+        let currentDecision = await model.markProjectReviewed(stillDue.project, decision: .keep)
+        XCTAssertTrue(currentDecision)
     }
 
     @MainActor

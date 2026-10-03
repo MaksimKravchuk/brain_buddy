@@ -455,7 +455,7 @@ final class BrainBuddyModel: ObservableObject {
     func markProjectReviewed(_ project: BrainBuddyProject, decision: ProjectReviewDecision) async -> Bool {
         guard !busy, let localStore = store as? LocalGTDStore else { return false }
         let operation = "review-project:\(project.id)"
-        let signature = "\(project.revision)|\(decision.rawValue)"
+        let signature = "\(project.revision)|\(project.review_task_signature ?? "-")|\(decision.rawValue)"
         let pending = pendingCollectionChange[operation]
         let key = pending?.signature == signature ? pending!.key : UUID()
         pendingCollectionChange[operation] = (signature, key)

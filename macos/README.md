@@ -51,7 +51,8 @@ only unclarified Inbox items needs a Next action before it can be marked
 reviewed. Completed projects with no open actions can be archived from the
 review. The decision and review time survive restart. Projects return to the
 queue after seven days or when a linked task changes. Reviewing never changes
-a task due date or GTD state automatically.
+a task due date or GTD state automatically. If linked actions change while the
+review is open, the old decision is rejected and the review must be reopened.
 
 Build a launchable `.app` on macOS 26+ with Xcode installed. The build includes
 the local Whisper base model and tokenizer. By default it reads the model from

@@ -159,6 +159,7 @@ final class LocalGTDStore: GTDStore {
     private struct ProjectReviewUpdate: Encodable {
         let decision: ProjectReviewDecision
         let expectedRevision: Int
+        let expectedTaskSignature: String?
     }
 
     private struct ProjectOutcomeUpdate: Encodable {
@@ -309,7 +310,8 @@ final class LocalGTDStore: GTDStore {
     }
 
     private func projectValue(_ project: StoredProject, in data: Snapshot) -> BrainBuddyProject {
-        BrainBuddyProject(
+        let taskSignature = Self.projectTaskSignature(project.id, in: data)
+        return BrainBuddyProject(
             id: project.id, name: project.name, color: project.color,
             state: project.state, revision: project.revision,
             open_task_count: data.tasks.filter { $0.projectID == project.id && $0.isOpen }.count,
@@ -317,7 +319,8 @@ final class LocalGTDStore: GTDStore {
             last_reviewed_at: project.lastReviewedAt,
             last_review_decision: project.lastReviewDecision,
             review_has_changes: project.lastReviewedAt != nil &&
-                project.lastReviewedTaskSignature != Self.projectTaskSignature(project.id, in: data)
+                project.lastReviewedTaskSignature != taskSignature,
+            review_task_signature: taskSignature
         )
     }
 
@@ -1232,7 +1235,10 @@ extension LocalGTDStore {
         let key = idempotencyKey.uuidString
         let fingerprint = try Self.fingerprint(
             "project.review/\(project.id)",
-            body: ProjectReviewUpdate(decision: decision, expectedRevision: project.revision)
+            body: ProjectReviewUpdate(
+                decision: decision, expectedRevision: project.revision,
+                expectedTaskSignature: project.review_task_signature
+            )
         )
         try checkLoaded()
         if let result: BrainBuddyProject = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
@@ -1243,6 +1249,9 @@ extension LocalGTDStore {
                 throw Self.missing("Project")
             }
             guard data.projects[index].revision == project.revision else { throw Self.conflict("Project") }
+            guard project.review_task_signature == Self.projectTaskSignature(project.id, in: data) else {
+                throw APIError(message: "Project actions changed since review opened. Reopen the review.", statusCode: 409)
+            }
             data.projects[index].lastReviewedAt = Self.now()
             data.projects[index].lastReviewDecision = decision
             data.projects[index].lastReviewedTaskSignature = Self.projectTaskSignature(project.id, in: data)
