@@ -4,6 +4,14 @@ import { useNavigate } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import { crtApi } from "../../api/crt";
 import { useAuthStore } from "../../stores/authStore";
+import { buttonVariants } from "../../styles/buttonVariants";
+import {
+  stateBodyClass,
+  stateCardClass,
+  stateEyebrowClass,
+  stateScreenClass,
+  stateTitleClass
+} from "./crtStateScreen";
 import { CrtWorkspace } from "./CrtWorkspace";
 
 type ExposureState =
@@ -47,18 +55,18 @@ type UnsupportedWidthBoundaryProps = Readonly<{
 
 function UnsupportedWidthBoundary({ headingRef, onBack }: UnsupportedWidthBoundaryProps): React.JSX.Element {
   return (
-    <main className="flex min-h-screen w-full max-w-full items-center justify-center overflow-x-hidden bg-surface-base px-6 text-center">
-      <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white px-8 py-10 shadow-raised">
-        <p className="text-xs font-semibold uppercase tracking-[0.06em] text-brand-primary">Thinking Mode</p>
-        <h1 ref={headingRef} tabIndex={-1} className="mt-2 text-title font-semibold text-slate-900">
+    <main className={`${stateScreenClass} w-full max-w-full overflow-x-hidden`}>
+      <section className={`${stateCardClass} border-slate-200`}>
+        <p className={stateEyebrowClass}>Thinking Mode</p>
+        <h1 ref={headingRef} tabIndex={-1} className={stateTitleClass}>
           Thinking Mode needs a wider window
         </h1>
-        <p className="mt-2 text-sm text-slate-600">
+        <p className={stateBodyClass}>
           Use a window at least 1024 px wide to edit this tree. Your BrainBuddy tasks and saved trees are unchanged.
         </p>
         <button
           type="button"
-          className="mt-6 w-full rounded-lg bg-brand-primary px-4 py-3 text-sm font-semibold text-white"
+          className={buttonVariants({ variant: "primary", size: "lg", className: "mt-6 w-full" })}
           onClick={onBack}
         >
           Back to Tasks
@@ -137,12 +145,12 @@ export function CrtGate(): React.JSX.Element {
 
   if (exposure.kind === "checking") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface-base px-6 text-center">
-        <section aria-live="polite" className="rounded-2xl border border-slate-200 bg-white px-8 py-10 shadow-raised">
-          <h1 ref={headingRef} tabIndex={-1} className="text-title font-semibold text-slate-900">
+      <main className={stateScreenClass}>
+        <section aria-live="polite" className={`${stateCardClass} border-slate-200`}>
+          <h1 ref={headingRef} tabIndex={-1} className="text-balance text-title font-semibold text-slate-900">
             Checking Thinking Mode access…
           </h1>
-          <p className="mt-2 text-sm text-slate-600" role="status">
+          <p className={stateBodyClass} role="status">
             No tree content is loaded until access is confirmed.
           </p>
         </section>
@@ -152,18 +160,18 @@ export function CrtGate(): React.JSX.Element {
 
   if (exposure.kind === "disabled") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface-base px-6 text-center">
-        <section className="rounded-2xl border border-slate-200 bg-white px-8 py-10 shadow-raised">
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-brand-primary">Thinking Mode</p>
-          <h1 ref={headingRef} tabIndex={-1} className="mt-2 text-title font-semibold text-slate-900">
+      <main className={stateScreenClass}>
+        <section className={`${stateCardClass} border-slate-200`}>
+          <p className={stateEyebrowClass}>Thinking Mode</p>
+          <h1 ref={headingRef} tabIndex={-1} className={stateTitleClass}>
             Thinking Mode isn't available for this account
           </h1>
-          <p className="mt-2 max-w-md text-sm text-slate-600">
+          <p className={stateBodyClass}>
             Existing BrainBuddy work is unchanged.
           </p>
           <button
             type="button"
-            className="mt-6 rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-white"
+            className={buttonVariants({ variant: "primary", className: "mt-6" })}
             onClick={() => navigate("/")}
           >
             Back to Tasks
@@ -175,19 +183,19 @@ export function CrtGate(): React.JSX.Element {
 
   if (exposure.kind === "degraded") {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface-base px-6 text-center">
-        <section aria-live="polite" className="rounded-2xl border border-amber-200 bg-white px-8 py-10 shadow-raised">
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-amber-700">Thinking Mode</p>
-          <h1 ref={headingRef} tabIndex={-1} className="mt-2 text-title font-semibold text-slate-900">
+      <main className={stateScreenClass}>
+        <section aria-live="polite" className={`${stateCardClass} border-amber-200`}>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-700">Thinking Mode</p>
+          <h1 ref={headingRef} tabIndex={-1} className={stateTitleClass}>
             Thinking Mode is temporarily unavailable
           </h1>
-          <p className="mt-2 max-w-md text-sm text-slate-600">We couldn't check access safely.</p>
+          <p className={stateBodyClass}>We couldn't check access safely.</p>
           {exposure.referenceId ? (
             <label className="mt-4 block text-left text-xs font-semibold text-slate-600">
               Support reference
               <input
                 aria-label="Support reference"
-                className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono text-xs text-slate-700"
+                className="mt-1 block w-full rounded-md border border-slate-200 bg-surface-base px-2 py-1.5 font-mono text-xs text-slate-700"
                 readOnly
                 value={exposure.referenceId}
                 onFocus={(event) => event.currentTarget.select()}
@@ -197,7 +205,7 @@ export function CrtGate(): React.JSX.Element {
           <div className="mt-6 flex justify-center gap-3">
             <button
               type="button"
-              className="rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-white"
+              className={buttonVariants({ variant: "primary" })}
               onClick={() => {
                 setExposure({ kind: "checking" });
                 setRetryCount((count) => count + 1);
@@ -207,7 +215,7 @@ export function CrtGate(): React.JSX.Element {
             </button>
             <button
               type="button"
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+              className={buttonVariants({ variant: "secondary" })}
               onClick={() => navigate("/")}
             >
               Back to Tasks
@@ -221,7 +229,7 @@ export function CrtGate(): React.JSX.Element {
   return (
     <>
       <div hidden={!isSupportedWidth} aria-hidden={!isSupportedWidth}>
-        <CrtWorkspace />
+        <CrtWorkspace onExit={() => navigate("/")} />
       </div>
       {!isSupportedWidth ? <UnsupportedWidthBoundary headingRef={headingRef} onBack={() => navigate("/")} /> : null}
     </>

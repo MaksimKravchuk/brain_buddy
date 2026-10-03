@@ -46,6 +46,8 @@ const iconButtonClass =
 
 const propLabelClass = "text-slate-600";
 
+const sectionLabelClass = "m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500";
+
 const propFieldClass =
   "w-full min-w-0 appearance-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[12.5px] text-slate-800 outline-none transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary";
 
@@ -124,7 +126,7 @@ export function TaskDetailPanel({
           {navigation ? <>
             <button type="button" aria-label="Previous task" data-task-navigation className={iconButtonClass} disabled={!navigation.onPrevious} onClick={navigation.onPrevious}><ChevronLeft className="h-4 w-4" aria-hidden /></button>
             <button type="button" aria-label="Next task" data-task-navigation className={iconButtonClass} disabled={!navigation.onNext} onClick={navigation.onNext}><ChevronRight className="h-4 w-4" aria-hidden /></button>
-            <span className="min-w-0 text-xs text-slate-600" aria-live="polite" aria-atomic="true">{navigation.position > 0 ? `${navigation.position} of ${navigation.total}` : "Outside this list"}</span>
+            <span className="ml-1 min-w-0 text-xs tabular-nums text-slate-600" aria-live="polite" aria-atomic="true">{navigation.position > 0 ? `${navigation.position} of ${navigation.total}` : "Outside this list"}</span>
           </> : null}
           <span className="relative ml-auto flex min-w-0 items-center gap-1">
             {task && !isTerminal ? (
@@ -140,7 +142,7 @@ export function TaskDetailPanel({
                   <MoreHorizontal className="h-[15px] w-[15px]" aria-hidden />
                 </button>
                 {menuOpen ? (
-                  <div className="absolute right-0 top-12 z-50 w-40 rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating">
+                  <div className="absolute right-0 top-12 z-50 w-40 origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating motion-safe:animate-scale-fade-in">
                     <button
                       type="button"
                       className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-rose-600 transition-colors duration-200 ease-smooth hover:bg-rose-50"
@@ -162,10 +164,10 @@ export function TaskDetailPanel({
         {autosaveSnapshot && autosaveSnapshot.status !== "clean" ? <div className="px-4 pb-2"><AutosaveStatus snapshot={autosaveSnapshot} /></div> : null}
       </div>
 
-      {notice}
-      {isLoading ? <p className="px-4 pb-4 text-sm text-slate-600">Loading task detail…</p> : null}
+      {notice ? <div className="px-4 pt-3">{notice}</div> : null}
+      {isLoading ? <p className="px-4 py-4 text-sm text-slate-600">Loading task detail…</p> : null}
       {error ? (
-        <p role="alert" className="px-4 pb-4 text-sm text-rose-700">
+        <p role="alert" className="px-4 py-4 text-sm text-rose-700">
           {getErrorMessage(error)}
         </p>
       ) : null}
@@ -346,12 +348,14 @@ function TaskDetailBody({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-start gap-2.5 px-4 pb-3">
+      {/* The circle and title sit on the same vertical lines as the list row
+          above them (22px circle centre, 52px text start). */}
+      <div className="flex items-start gap-1 px-4 pb-3 pt-3">
         <button
           type="button"
           aria-label={isTerminal ? "Reopen task" : "Complete task"}
           disabled={Boolean(autosaveSnapshot?.barriers.some((barrier) => barrier.action === "complete") || (autosaveSnapshot?.inFlight?.kind === "transition" && "action" in autosaveSnapshot.inFlight.body && autosaveSnapshot.inFlight.body.action === "complete"))}
-          className="group -ml-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+          className="group/check -ml-4 -mt-2.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
           onClick={() => autosave ? autosave.barrier(isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined) : onTransition(task, isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined)}
         >
           <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
@@ -359,7 +363,7 @@ function TaskDetailBody({
               ? "border-brand-primary bg-brand-primary text-white"
               : task.state === "cancelled"
                 ? "border-slate-300 bg-slate-200 text-slate-500"
-                : "border-slate-300 bg-white text-transparent group-hover:border-sky-700"
+                : "border-slate-300 bg-white text-transparent group-hover/check:border-sky-700 group-hover/check:text-sky-700/50"
           }`}>
             {task.state === "cancelled" ? <X className="h-2.5 w-2.5" aria-hidden /> : <Check className="h-[11px] w-[11px]" aria-hidden />}
           </span>
@@ -399,9 +403,9 @@ function TaskDetailBody({
         ))}
       </span>
 
-      <div className="flex flex-col gap-2 px-4 py-3">
+      <div className="flex flex-col gap-2 px-4 pb-3 pt-1">
         <div className="flex flex-col gap-1.5">
-          <h3 className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Details</h3>
+          <h3 className={sectionLabelClass}>Details</h3>
           <textarea
             aria-label={fieldLabel("Details", "details")}
             value={draft?.details ?? details}
@@ -440,7 +444,7 @@ function TaskDetailBody({
       ) : null}
 
       <section aria-label="Task properties" className="grid grid-cols-[76px_1fr] items-center gap-x-2.5 gap-y-2 border-t border-slate-200 px-4 pb-3.5 pt-3 text-[12.5px]">
-        <h3 className="col-span-2 m-0 text-xs font-semibold text-slate-600">Organize</h3>
+        <h3 className={`col-span-2 mb-0.5 ${sectionLabelClass}`}>Organize</h3>
         <span className={propLabelClass}>Due date</span>
         <input
           aria-label={fieldLabel("Due date", "due_date")}
@@ -483,9 +487,11 @@ function TaskDetailBody({
         </select>
 
         <span className={propLabelClass}>Project</span>
-        <span className="flex min-w-0 items-center gap-1.5">
+        {/* The colour dot hangs in the column gap so the project name starts on
+            the same line as every other property value. */}
+        <span className="relative flex min-w-0 items-center">
           <span
-            className="h-2 w-2 shrink-0 rounded-full"
+            className="absolute -left-[9px] top-1/2 h-2 w-2 -translate-y-1/2 rounded-full"
             style={{ backgroundColor: project?.color ?? "#cbd5e1" }}
             aria-hidden
           />
@@ -576,7 +582,7 @@ function TaskDetailBody({
             {subtasks.length ? `Subtasks · ${doneSubtasks} / ${subtasks.length}` : "Subtasks"}
           </h3>
           {subtasks.length ? (
-            <span className="text-[11px] text-slate-400">{Math.round((doneSubtasks / subtasks.length) * 100)}%</span>
+            <span className="text-[11px] tabular-nums text-slate-500">{Math.round((doneSubtasks / subtasks.length) * 100)}%</span>
           ) : null}
         </div>
         {subtasks.length ? (
@@ -588,37 +594,43 @@ function TaskDetailBody({
           </div>
         ) : null}
         <CreateTaskItemForm key={`${task.id}-subtask`} name="subtask_title" keyAction="subtask-create" label="New subtask title" placeholder="Add a subtask" onCreate={(title, key) => onCreateSubtask(task, title, key)} />
-        {subtasks.map((subtask) => {
-          const done = subtask.state !== "open";
-          return (
-            <div key={subtask.id} className="flex items-center gap-2 text-[13px] text-slate-700">
-              <button
-                type="button"
-                className="group -ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
-                aria-label={done ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
-                onClick={() => onTransitionSubtask(task, subtask, done ? "reopen" : "complete")}
-              >
-                <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
-                  done
-                    ? "border-brand-primary bg-brand-primary text-white"
-                    : "border-slate-300 bg-white text-transparent group-hover:border-sky-700"
-                }`}>
-                  <Check className="h-[11px] w-[11px]" aria-hidden />
-                </span>
-              </button>
-              <span className={done ? "text-slate-500 line-through" : ""}>{subtask.title}</span>
-            </div>
-          );
-        })}
+        {subtasks.length ? (
+          // Rows stack at the 44px target height with no extra gap; the
+          // circle's edge lines up with the section's text edge.
+          <div className="-my-1 flex flex-col">
+            {subtasks.map((subtask) => {
+              const done = subtask.state !== "open";
+              return (
+                <div key={subtask.id} className="flex min-h-11 items-center gap-1 text-[13px] text-slate-700">
+                  <button
+                    type="button"
+                    className="group/check -ml-[13px] flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+                    aria-label={done ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
+                    onClick={() => onTransitionSubtask(task, subtask, done ? "reopen" : "complete")}
+                  >
+                    <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
+                      done
+                        ? "border-brand-primary bg-brand-primary text-white"
+                        : "border-slate-300 bg-white text-transparent group-hover/check:border-sky-700 group-hover/check:text-sky-700/50"
+                    }`}>
+                      <Check className="h-[11px] w-[11px]" aria-hidden />
+                    </span>
+                  </button>
+                  <span className={`min-w-0 break-words ${done ? "text-slate-500 line-through" : ""}`}>{subtask.title}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
         <h3 className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Comments</h3>
         <CreateTaskItemForm key={`${task.id}-comment`} name="comment_body" keyAction="comment-create" label="New comment" placeholder="Add a comment" onCreate={(body, key) => onCreateComment(task, body, key)} />
         {comments.map((comment) => (
-          <div key={comment.id} className="text-[12.5px] leading-normal text-slate-700">
+          <div key={comment.id} className="whitespace-pre-line break-words text-[12.5px] leading-normal text-slate-700">
             {comment.body}
-            <span className="mt-0.5 block text-[11px] text-slate-400">
+            <span className="mt-0.5 block text-[11px] text-slate-500">
               {comment.actor_id.slice(0, 2).toUpperCase()} · {formatCommentTime(comment.created_at)}
             </span>
           </div>
