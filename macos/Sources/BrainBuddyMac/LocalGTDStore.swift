@@ -1040,10 +1040,6 @@ extension LocalGTDStore {
             guard data.tasks[index].state == TaskList.someday.rawValue else {
                 throw APIError(message: "This task is no longer in Someday.")
             }
-            if let projectID = data.tasks[index].projectID,
-               !data.projects.contains(where: { $0.id == projectID && $0.state == "active" }) {
-                throw APIError(message: "Restore this project before moving its task to Next actions.")
-            }
             var item = data.tasks[index]
             item.title = cleanTitle
             item.state = TaskList.next.rawValue

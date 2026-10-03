@@ -429,6 +429,32 @@ final class OfflineWorkspaceTests: XCTestCase {
     }
 
     @MainActor
+    func testSomedayActivationRetainsArchivedProjectMembership() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-archived-someday-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let project = try await store.createProject(name: "Garden", idempotencyKey: UUID())
+        let source = try await store.smartAddTask(
+            title: "Redesign garden", state: .someday,
+            project: .id(project.id), idempotencyKey: UUID()
+        ).task
+        _ = try await store.archiveProject(project, idempotencyKey: UUID())
+
+        let activated = try await store.activateSomedayTask(
+            source, title: "Sketch garden beds", idempotencyKey: UUID()
+        )
+        XCTAssertEqual(activated.state, TaskList.next.rawValue)
+        XCTAssertEqual(activated.project_id, project.id)
+
+        let reopened = LocalGTDStore(fileURL: fileURL)
+        let persisted = try await reopened.getTask(source.id)
+        XCTAssertEqual(persisted.state, TaskList.next.rawValue)
+        XCTAssertEqual(persisted.project_id, project.id)
+    }
+
+    @MainActor
     func testSidebarCountsStayGlobalWhileBrowsingOneProject() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("brainbuddy-counts-\(UUID().uuidString)", isDirectory: true)
