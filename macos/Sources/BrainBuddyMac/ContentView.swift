@@ -72,7 +72,8 @@ final class BrainBuddyModel: ObservableObject {
     private var pendingMoveKeys: [String: (signature: String, key: UUID)] = [:]
     private var pendingSubtaskCreate: [String: (title: String, key: UUID)] = [:]
     private var pendingCommentCreate: [String: (body: String, key: UUID)] = [:]
-    private var pendingFollowUpCreate: [String: (title: String, key: UUID)] = [:]
+    private var pendingFollowUpCreate: [String: (revision: Int, title: String, key: UUID)] = [:]
+    private var pendingWaitingReview: [String: (revision: Int, key: UUID)] = [:]
     private var pendingInboxProject: [String: (signature: String, key: UUID)] = [:]
     private var pendingCollectionCreate: [String: (name: String, key: UUID)] = [:]
     private var pendingCollectionChange: [String: (signature: String, key: UUID)] = [:]
@@ -145,6 +146,7 @@ final class BrainBuddyModel: ObservableObject {
         pendingSubtaskCreate.removeAll()
         pendingCommentCreate.removeAll()
         pendingFollowUpCreate.removeAll()
+        pendingWaitingReview.removeAll()
         pendingInboxProject.removeAll()
         pendingCollectionCreate.removeAll()
         pendingCollectionChange.removeAll()
@@ -572,15 +574,42 @@ final class BrainBuddyModel: ObservableObject {
         do {
             var result: [BrainBuddyTask] = []
             var cursor: String?
+            let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
             repeat {
                 let page = try await store.listTasks(query: TaskQuery(state: .waiting), cursor: cursor)
-                result.append(contentsOf: page.items.filter { $0.state == TaskList.waiting.rawValue })
+                result.append(contentsOf: page.items.filter { task in
+                    task.state == TaskList.waiting.rawValue &&
+                        ((store as? LocalGTDStore)?.waitingReviewDue(task, before: cutoff) ?? true)
+                })
                 cursor = page.next_cursor
             } while cursor != nil
             return result
         } catch {
             handleRequestFailure(error)
             return nil
+        }
+    }
+
+    func keepWaiting(_ task: BrainBuddyTask) async -> Bool {
+        guard !busy else { return false }
+        guard let localStore = store as? LocalGTDStore else { return true }
+        let pending = pendingWaitingReview[task.id]
+        let key = pending?.revision == task.revision ? pending!.key : UUID()
+        pendingWaitingReview[task.id] = (task.revision, key)
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            _ = try await localStore.markWaitingReviewed(task, idempotencyKey: key)
+            pendingWaitingReview.removeValue(forKey: task.id)
+            await reload()
+            return true
+        } catch {
+            if let apiError = error as? APIError, apiError.statusCode == 409 {
+                pendingWaitingReview.removeValue(forKey: task.id)
+                self.error = "This Waiting task changed. Reopen the review to inspect it."
+            } else { handleRequestFailure(error) }
+            return false
         }
     }
 
@@ -949,34 +978,46 @@ final class BrainBuddyModel: ObservableObject {
             return false
         }
         let pending = pendingFollowUpCreate[task.id]
-        let key = pending?.title == trimmed ? pending!.key : UUID()
-        pendingFollowUpCreate[task.id] = (trimmed, key)
+        let key = pending?.revision == task.revision && pending?.title == trimmed ? pending!.key : UUID()
+        pendingFollowUpCreate[task.id] = (task.revision, trimmed, key)
         busy = true
         error = nil
         defer { busy = false }
         do {
-            let current = try await store.getTask(task.id)
-            guard current.state == TaskList.waiting.rawValue else {
-                pendingFollowUpCreate.removeValue(forKey: task.id)
-                self.error = "This task is no longer in Waiting for. Refresh the review."
-                return false
+            if let localStore = store as? LocalGTDStore {
+                _ = try await localStore.createReviewedFollowUp(for: task, title: trimmed, idempotencyKey: key)
+            } else {
+                let current = try await store.getTask(task.id)
+                guard current.state == TaskList.waiting.rawValue else {
+                    pendingFollowUpCreate.removeValue(forKey: task.id)
+                    self.error = "This task is no longer in Waiting for. Refresh the review."
+                    return false
+                }
+                guard current.revision == task.revision else {
+                    pendingFollowUpCreate.removeValue(forKey: task.id)
+                    self.error = "This Waiting task changed. Reopen the review before creating a follow-up."
+                    return false
+                }
+                if let projectID = current.project_id,
+                   archivedProjects.contains(where: { $0.id == projectID }) {
+                    pendingFollowUpCreate.removeValue(forKey: task.id)
+                    self.error = "Restore this project before creating a follow-up in it."
+                    return false
+                }
+                _ = try await store.smartAddTask(
+                    title: trimmed, state: .next, waitingFor: nil,
+                    project: current.project_id.map { .id($0) }, tags: [], idempotencyKey: key
+                )
             }
-            if let projectID = current.project_id,
-               archivedProjects.contains(where: { $0.id == projectID }) {
-                pendingFollowUpCreate.removeValue(forKey: task.id)
-                self.error = "Restore this project before creating a follow-up in it."
-                return false
-            }
-            _ = try await store.smartAddTask(
-                title: trimmed, state: .next, waitingFor: nil,
-                project: current.project_id.map { .id($0) }, tags: [], idempotencyKey: key
-            )
             pendingFollowUpCreate.removeValue(forKey: task.id)
             await loadCollections()
             await reload()
             return true
         } catch {
-            handleRequestFailure(error)
+            if let apiError = error as? APIError, apiError.statusCode == 409 {
+                pendingFollowUpCreate.removeValue(forKey: task.id)
+                self.error = "Waiting task or project changed. Reopen the review before creating a follow-up."
+            } else { handleRequestFailure(error) }
             return false
         }
     }
@@ -3170,7 +3211,9 @@ private struct WaitingReviewView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Review Waiting for").font(.title2.bold())
-                    Text(loaded ? (items.isEmpty ? "No items" : "\(min(index + 1, items.count)) of \(items.count)") : "One item at a time")
+                    Text(loaded ? (items.isEmpty ? (model.isLocalWorkspace ? "No items due" : "No items")
+                                                 : "\(min(index + 1, items.count)) of \(items.count)")
+                                : "One item at a time")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -3188,8 +3231,11 @@ private struct WaitingReviewView: View {
                                        description: Text(model.error ?? "Try again."))
                 Button("Retry") { Task { await load() } }
             } else if items.isEmpty {
-                ContentUnavailableView("Nothing is waiting", systemImage: "hourglass",
-                                       description: Text("Waiting for tasks will appear here for review."))
+                ContentUnavailableView(model.isLocalWorkspace ? "Waiting review is up to date" : "Nothing is waiting",
+                                       systemImage: "hourglass",
+                                       description: Text(model.isLocalWorkspace
+                                                         ? "Reviewed items return after seven days or when their task changes."
+                                                         : "Waiting for tasks will appear here for review."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if index >= items.count {
                 ContentUnavailableView("Waiting review complete", systemImage: "checkmark.circle",
@@ -3234,7 +3280,9 @@ private struct WaitingReviewView: View {
                         Text(decision == .followUp
                              ? (isArchivedProject(item)
                                 ? "Restore this archived project before creating a follow-up in it."
-                                : "Creates a separate Next action in the same project. This item stays in Waiting for.")
+                                : (model.isLocalWorkspace
+                                   ? "Creates a separate Next action in the same project. This item stays in Waiting and returns to review after seven days or a change."
+                                   : "Creates a separate Next action in the same project. This item stays in Waiting for."))
                              : "Moves this item to Next actions and clears its active waiting details.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -3253,8 +3301,12 @@ private struct WaitingReviewView: View {
                     Text("What should happen next?")
                         .font(.headline)
                     HStack(spacing: 10) {
-                        Button("Keep waiting") { advance() }
-                            .help("Skip for this review; no reminder or review date is set")
+                        Button("Keep waiting") {
+                            Task { if await model.keepWaiting(item) { advance() } }
+                        }
+                            .help(model.isLocalWorkspace
+                                  ? "Review again after seven days or when this task changes"
+                                  : "Skip for this review; no reminder or review date is set")
                         Button("Create follow-up…") {
                             actionTitle = ""
                             decision = .followUp
