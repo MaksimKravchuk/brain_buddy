@@ -154,6 +154,10 @@ const config: Config = {
         "slide-in-right": {
           "0%": { opacity: "0", transform: "translateX(16px)" },
           "100%": { opacity: "1", transform: "translateX(0)" }
+        },
+        "drawer-in-left": {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(0)" }
         }
       },
       animation: {
@@ -178,7 +182,8 @@ const config: Config = {
         "caret-blink": "caret-blink 1.1s step-end infinite",
         "card-in": "card-in 300ms cubic-bezier(0.22, 1, 0.36, 1)",
         "shimmer-sweep": "shimmer-sweep 2.2s cubic-bezier(0.22, 1, 0.36, 1) infinite",
-        "slide-in-right": "slide-in-right 250ms cubic-bezier(0.22, 1, 0.36, 1)"
+        "slide-in-right": "slide-in-right 250ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "drawer-in-left": "drawer-in-left 250ms cubic-bezier(0.22, 1, 0.36, 1)"
       }
     }
   },

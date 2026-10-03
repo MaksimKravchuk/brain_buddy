@@ -1,0 +1,43 @@
+{
+  "run_id": "017-compact-task-rows-c2",
+  "status": "founder-accepted",
+  "risk": "medium",
+  "landing_class": "ASK",
+  "automated_status": "product-decision-required",
+  "amended_artifacts_digest": "fa8ae16ddb538f7934327c1c363da350a810fda65f067d72cd93c9e98d9806c9",
+  "founder_acceptance": {
+    "accepted_by": "Max (repository owner, task conversation)",
+    "accepted_on": "2026-09-11",
+    "expires_on": "2026-10-10",
+    "authorization_quote": "да",
+    "authorization_context": "After disclosure that both review campaigns were exhausted, the automated result could not honestly be called approved, the post-review artifacts had addressed the findings, localStorage rollback could leave residual bytes until the app or browser cleanup runs, and ASK landing would still require separate approval, the owner explicitly accepted the bounded founder-acceptance proposal. The final digest also includes the subsequently generated checklist-derived tasks.md, which changes no accepted product decision.",
+    "rationale": "Feature 017 reached the ADR-0011 hard cap of two complete, uncorrelated five-lens campaigns. Both campaigns honestly returned product-decision-required. The owner answered both campaign-1 decisions and both campaign-2 decisions, and the planning artifacts were amended after each campaign to resolve every verified blocking and important technical finding. The accepted residual risk is that ADR-0011 forbids a third automated campaign over the amended artifacts, the intentionally verbose accessible disclosure remains a user-approved desktop density tradeoff, TaskSideSheet/AppShell panel compatibility code remains temporarily dead rather than expanding this diff, and a rolled-back or never-reopened browser can retain the non-authorizing local preference until BrainBuddy or browser site-data cleanup runs. This acceptance authorizes implementation only and does not authorize the ASK-class landing.",
+    "compensating_measures": [
+      "Require targeted failing-then-passing tests for exact row/control geometry, inline route and focus behavior, modal Escape isolation, canonical recovery bounds, offline review, preference lifecycle wiring, and truthful compact labels.",
+      "Run the discovered Playwright product spec with @axe-core/playwright serious/critical enforcement, the full frontend gate, make verify-all, and requirement-coverage validation without suppressing coverage.",
+      "Require independent exact-candidate implementation review and acceptance QA; resolve blocking code or UX findings before any landing request.",
+      "Classify landing as ASK despite the current path classifier, prohibit automatic candidate promotion, and require separate explicit recorded owner approval plus the audited ADR-0008 landing procedure.",
+      "Keep the privacy policy, retention schedule, startup/focus/auth cleanup tests, and rollback site-data limitation synchronized and verifiable."
+    ],
+    "campaign_history": [
+      {
+        "run_id": "017-compact-task-rows-c1",
+        "status": "product-decision-required",
+        "artifacts_digest": "e80bba222f45f335127b86230748ab063848c5915f13c47dd29deedae6e7669c",
+        "findings": 27,
+        "product_decisions": 2
+      },
+      {
+        "run_id": "017-compact-task-rows-c2",
+        "status": "product-decision-required",
+        "artifacts_digest": "08a991549b9917e35ae64cda579036e03557576c584e858acbdfea381283bec8",
+        "findings": 26,
+        "product_decisions": 2
+      }
+    ]
+  },
+  "residual_lanes": [
+    "Delete the now-unconsumed TaskSideSheet and AppShell panel compatibility API in a separate bounded cleanup after 017 acceptance.",
+    "Revisit visible versus assistive full relay disclosure only if user testing shows the approved accessible-name verbosity harms screen-reader scanning."
+  ]
+}

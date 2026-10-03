@@ -2,6 +2,7 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { authApi, type AuthUser } from "../../api/auth";
+import * as crtBoundary from "../../features/crt/crtDraftCoordinator";
 import { FLAG_REFRESH_INTERVAL_MS, startFlagRefresh, useAuthStore } from "../authStore";
 
 describe("authStore", () => {
@@ -69,6 +70,40 @@ describe("authStore", () => {
     expect(useAuthStore.getInitialState().user).toBeNull();
   });
 
+  it("logout cleans departing-owner CRT records before ending the session", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    const cleanup = vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 2 });
+    const logoutSpy = vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+
+    await useAuthStore.getState().logout();
+
+    expect(cleanup).toHaveBeenCalledWith("u1", window.location.origin);
+    expect(logoutSpy).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState().status).toBe("anon");
+  });
+
+  it("cancels logout when departing-owner CRT cleanup fails", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    const cleanup = vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: false, reason: "cleanup-failed" });
+    const logoutSpy = vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+
+    await expect(useAuthStore.getState().logout()).resolves.toBe(false);
+
+    expect(cleanup).toHaveBeenCalledWith("u1", window.location.origin);
+    expect(logoutSpy).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().status).toBe("authed");
+  });
+
+  it("clearSessionAfterCleanup leaves the session in place when CRT cleanup fails", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: false, reason: "cleanup-failed" });
+
+    await expect(useAuthStore.getState().clearSessionAfterCleanup()).resolves.toBe(false);
+
+    expect(useAuthStore.getState().status).toBe("authed");
+    expect(useAuthStore.getState().user?.id).toBe("u1");
+  });
+
   it("logout ends the server session as well as the local one", async () => {
     useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
     const logoutSpy = vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
@@ -97,12 +132,306 @@ describe("authStore", () => {
     expect(useAuthStore.getState().user?.email).toBe("new@example.com");
   });
 
-  it("clearSession resets to anon without a network call", () => {
+  it("drops stale hydrate results and protects account changes behind CRT cleanup", async () => {
+    let resolveMe!: (value: AuthUser | null) => void;
+    const pending = new Promise<AuthUser | null>((resolve) => { resolveMe = resolve; });
+    vi.spyOn(authApi, "me").mockReturnValue(pending);
     useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    const hydrate = useAuthStore.getState().hydrate();
     useAuthStore.getState().clearSession();
+    resolveMe({ id: "u2", email: "b@b.c" });
+    await hydrate;
     expect(useAuthStore.getState().status).toBe("anon");
-    expect(useAuthStore.getState().user).toBeNull();
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue({ id: "u2", email: "b@b.c" });
+    const cleanup = vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 1 });
+    await useAuthStore.getState().hydrate();
+    expect(cleanup).toHaveBeenCalledWith("u1", window.location.origin);
+    expect(useAuthStore.getState().user?.id).toBe("u2");
   });
+
+  it("leaves the current account in place when hydrate cleanup is refused", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue(null);
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: false, reason: "cleanup-failed" });
+    await useAuthStore.getState().hydrate();
+    expect(useAuthStore.getState().user?.id).toBe("u1");
+    expect(useAuthStore.getState().status).toBe("authed");
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockRejectedValue(new Error("offline"));
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockImplementation(async () => {
+      useAuthStore.getState().clearSession();
+      return { ok: true, removed: 0 };
+    });
+    await useAuthStore.getState().hydrate();
+    expect(useAuthStore.getState().status).toBe("anon");
+  });
+
+  it("covers refresh account replacement, cleanup refusal, and stale cleanup completion", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue({ id: "u2", email: "b@b.c" });
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 1 });
+    await useAuthStore.getState().refreshSession();
+    expect(useAuthStore.getState().user?.id).toBe("u2");
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue({ id: "u2", email: "b@b.c" });
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: false, reason: "cleanup-failed" });
+    await useAuthStore.getState().refreshSession();
+    expect(useAuthStore.getState().user?.id).toBe("u1");
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue({ id: "u2", email: "b@b.c" });
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockImplementation(async () => {
+      useAuthStore.getState().clearSession();
+      return { ok: true, removed: 0 };
+    });
+    await useAuthStore.getState().refreshSession();
+    expect(useAuthStore.getState().status).toBe("anon");
+  });
+
+  it("keeps the existing user identity when a refresh is semantically unchanged", async () => {
+    const current: AuthUser = {
+      id: "u1",
+      email: "a@b.c",
+      display_name: "A",
+      deletion_cancelled: false,
+      feature_flags: { crt_canvas: true, voice_brain_dump: false }
+    };
+    useAuthStore.setState({ user: current, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue({
+      id: "u1",
+      email: "a@b.c",
+      display_name: "A",
+      deletion_cancelled: false,
+      feature_flags: { voice_brain_dump: false, crt_canvas: true }
+    });
+
+    await useAuthStore.getState().refreshSession();
+
+    expect(useAuthStore.getState().user).toBe(current);
+  });
+
+  it("publishes a refresh when a feature flag changes", async () => {
+    const current: AuthUser = {
+      id: "u1",
+      email: "a@b.c",
+      feature_flags: { crt_canvas: true }
+    };
+    useAuthStore.setState({ user: current, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue({
+      id: "u1",
+      email: "a@b.c",
+      feature_flags: { crt_canvas: false }
+    });
+
+    await useAuthStore.getState().refreshSession();
+
+    expect(useAuthStore.getState().user).not.toBe(current);
+    expect(useAuthStore.getState().user?.feature_flags?.crt_canvas).toBe(false);
+  });
+
+  it("refuses a null refresh when departing-owner CRT cleanup fails", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue(null);
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: false, reason: "cleanup-failed" });
+    await useAuthStore.getState().refreshSession();
+    expect(useAuthStore.getState().status).toBe("authed");
+    expect(useAuthStore.getState().user?.id).toBe("u1");
+  });
+
+  it("guards login and signup when cleanup fails or a newer transition starts", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: false, reason: "cleanup-failed" });
+    const loginApi = vi.spyOn(authApi, "login");
+    await expect(useAuthStore.getState().login({ email: "b@b.c", password: "x" })).rejects.toThrow("Could not clear");
+    expect(loginApi).not.toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+    let resolveLogin!: (value: AuthUser) => void;
+    const loginResult = new Promise<AuthUser>((resolve) => { resolveLogin = resolve; });
+    vi.spyOn(authApi, "login").mockReturnValue(loginResult);
+    const login = useAuthStore.getState().login({ email: "b@b.c", password: "x" });
+    await Promise.resolve();
+    useAuthStore.getState().clearSession();
+    resolveLogin({ id: "u2", email: "b@b.c" });
+    await login;
+    expect(useAuthStore.getState().status).toBe("anon");
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: false, reason: "cleanup-failed" });
+    await expect(useAuthStore.getState().signup({ email: "b@b.c", password: "x", invite_code: "i" })).rejects.toThrow("Could not clear");
+  });
+
+  it("drops stale signup and logout completions and handles synchronous 401 cleanup", async () => {
+    let resolveSignup!: (value: AuthUser) => void;
+    const signupResult = new Promise<AuthUser>((resolve) => { resolveSignup = resolve; });
+    vi.spyOn(authApi, "signup").mockReturnValue(signupResult);
+    const signup = useAuthStore.getState().signup({ email: "b@b.c", password: "x", invite_code: "i" });
+    await Promise.resolve();
+    useAuthStore.getState().clearSession();
+    resolveSignup({ id: "u2", email: "b@b.c" });
+    await signup;
+    expect(useAuthStore.getState().status).toBe("anon");
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    let resolveLogout!: () => void;
+    const logoutResult = new Promise<void>((resolve) => { resolveLogout = resolve; });
+    vi.spyOn(authApi, "logout").mockReturnValue(logoutResult);
+    const logout = useAuthStore.getState().logout();
+    await Promise.resolve();
+    useAuthStore.getState().clearSession();
+    resolveLogout();
+    await expect(logout).resolves.toBe(false);
+
+    vi.restoreAllMocks();
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockRejectedValue(new Error("cleanup"));
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    expect(useAuthStore.getState().clearSession()).toBe(true);
+    await Promise.resolve();
+    expect(useAuthStore.getState().status).toBe("anon");
+  });
+
+  it("supports successful fail-closed session clearing and rejects a superseded cleanup", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 1 });
+    await expect(useAuthStore.getState().clearSessionAfterCleanup()).resolves.toBe(true);
+    expect(useAuthStore.getState().status).toBe("anon");
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockImplementation(async () => {
+      useAuthStore.getState().clearSession();
+      return { ok: true, removed: 0 };
+    });
+    await expect(useAuthStore.getState().clearSessionAfterCleanup()).resolves.toBe(false);
+    expect(useAuthStore.getState().status).toBe("anon");
+  });
+  it("covers remaining hydrate and transition generation exits", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue({ id: "u2", email: "b@b.c" });
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: false, reason: "cleanup-failed" });
+    await useAuthStore.getState().hydrate();
+    expect(useAuthStore.getState().user?.id).toBe("u1");
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue({ id: "u2", email: "b@b.c" });
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockImplementation(async () => {
+      useAuthStore.getState().clearSession();
+      return { ok: true, removed: 0 };
+    });
+    await useAuthStore.getState().hydrate();
+    expect(useAuthStore.getState().status).toBe("anon");
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue(null);
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 0 });
+    await useAuthStore.getState().hydrate();
+    expect(useAuthStore.getState().status).toBe("anon");
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockResolvedValue(null);
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockImplementation(async () => {
+      useAuthStore.getState().clearSession();
+      return { ok: true, removed: 0 };
+    });
+    await useAuthStore.getState().hydrate();
+    expect(useAuthStore.getState().status).toBe("anon");
+
+    vi.restoreAllMocks();
+    let rejectMe!: (error: Error) => void;
+    const rejectedMe = new Promise<AuthUser | null>((_resolve, reject) => { rejectMe = reject; });
+    vi.spyOn(authApi, "me").mockReturnValue(rejectedMe);
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    const hydrate = useAuthStore.getState().hydrate();
+    useAuthStore.getState().clearSession();
+    rejectMe(new Error("offline"));
+    await hydrate;
+    expect(useAuthStore.getState().status).toBe("anon");
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    vi.spyOn(authApi, "me").mockRejectedValue(new Error("offline"));
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: false, reason: "cleanup-failed" });
+    await useAuthStore.getState().hydrate();
+    expect(useAuthStore.getState().status).toBe("authed");
+
+    vi.restoreAllMocks();
+    let resolveRefresh!: (value: AuthUser | null) => void;
+    const refreshResult = new Promise<AuthUser | null>((resolve) => { resolveRefresh = resolve; });
+    vi.spyOn(authApi, "me").mockReturnValue(refreshResult);
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockImplementation(async () => {
+      useAuthStore.getState().clearSession();
+      return { ok: true, removed: 0 };
+    });
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    const refresh = useAuthStore.getState().refreshSession();
+    resolveRefresh(null);
+    await refresh;
+    expect(useAuthStore.getState().status).toBe("anon");
+
+    vi.restoreAllMocks();
+    let resolveLogin!: (value: AuthUser) => void;
+    const loginResult = new Promise<AuthUser>((resolve) => { resolveLogin = resolve; });
+    vi.spyOn(authApi, "login").mockReturnValue(loginResult);
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 0 });
+    useAuthStore.setState({ user: null, status: "anon" });
+    const login = useAuthStore.getState().login({ email: "b@b.c", password: "x" });
+    await Promise.resolve();
+    useAuthStore.getState().clearSession();
+    resolveLogin({ id: "u2", email: "b@b.c" });
+    await login;
+    expect(useAuthStore.getState().status).toBe("anon");
+
+    vi.restoreAllMocks();
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    const staleSignupApi = vi.spyOn(authApi, "signup");
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockImplementation(async () => {
+      useAuthStore.getState().clearSession();
+      return { ok: true, removed: 0 };
+    });
+    await useAuthStore.getState().signup({ email: "b@b.c", password: "x", invite_code: "i" });
+    expect(staleSignupApi).not.toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+    let resolveSignup!: (value: AuthUser) => void;
+    const signupResult = new Promise<AuthUser>((resolve) => { resolveSignup = resolve; });
+    const signupApi = vi.spyOn(authApi, "signup").mockReturnValue(signupResult);
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 0 });
+    const signup = useAuthStore.getState().signup({ email: "b@b.c", password: "x", invite_code: "i" });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(signupApi).toHaveBeenCalled();
+    useAuthStore.getState().clearSession();
+    resolveSignup({ id: "u2", email: "b@b.c" });
+    await signup;
+    expect(useAuthStore.getState().status).toBe("anon");
+
+    vi.restoreAllMocks();
+    let resolveLogout!: () => void;
+    const logoutResult = new Promise<void>((resolve) => { resolveLogout = resolve; });
+    const logoutApi = vi.spyOn(authApi, "logout").mockReturnValue(logoutResult);
+    vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 0 });
+    const logout = useAuthStore.getState().logout();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(logoutApi).toHaveBeenCalled();
+    useAuthStore.getState().clearSession();
+    resolveLogout();
+    await expect(logout).resolves.toBe(false);
+  });
+
 });
 
 /**

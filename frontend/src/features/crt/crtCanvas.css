@@ -1,0 +1,429 @@
+.crt-canvas-shell {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.crt-canvas-definitions {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* One 56px bar, the height of the app's top bar: exit link and tree menu on
+   the left, save state and shortcuts on the right. */
+.crt-canvas-toolbar {
+  z-index: 5;
+  display: flex;
+  min-height: 3.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--bb-border);
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.5rem 1.25rem;
+}
+
+.crt-canvas-toolbar-start {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.crt-canvas-toolbar h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.crt-canvas-eyebrow {
+  margin: 0 0 0.2rem;
+  color: #0369a1;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.crt-canvas-toolbar-actions,
+.crt-canvas-toolbar-actions button {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.crt-canvas-toolbar-actions {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.crt-canvas-toolbar-actions button,
+.crt-tool-rail button,
+.crt-zoom-controls button {
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-md);
+  background: #fff;
+  color: var(--bb-fg-3);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition:
+    background-color var(--bb-dur-base) var(--bb-ease-smooth),
+    border-color var(--bb-dur-base) var(--bb-ease-smooth),
+    color var(--bb-dur-base) var(--bb-ease-smooth);
+}
+
+.crt-canvas-toolbar-actions button:hover,
+.crt-tool-rail button:hover,
+.crt-zoom-controls button:hover {
+  border-color: var(--bb-border-hover);
+  background: var(--bb-surface-base);
+  color: var(--bb-fg-1);
+}
+
+.crt-canvas-toolbar-actions button:active,
+.crt-tool-rail button:active,
+.crt-zoom-controls button:active {
+  transform: scale(0.98);
+}
+
+/* Connect and Pan are toggles; their pressed state has to be visible, not
+   only announced. */
+.crt-canvas-toolbar-actions button[aria-expanded="true"],
+.crt-tool-rail button[aria-pressed="true"] {
+  border-color: var(--bb-info-border);
+  background: var(--bb-info-bg);
+  color: var(--bb-info-fg);
+}
+
+.crt-canvas-toolbar-actions button {
+  height: 2.25rem;
+  padding: 0 0.85rem;
+  box-shadow: var(--bb-shadow-soft);
+}
+
+.crt-save-status {
+  color: var(--bb-fg-5);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.crt-shortcut-disclosure {
+  z-index: 6;
+  border-bottom: 1px solid #bae6fd;
+  background: #f0f9ff;
+  padding: 0.8rem 1.25rem;
+  color: #0f172a;
+}
+
+.crt-shortcut-disclosure h2 {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.crt-shortcut-disclosure ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.3rem 1.25rem;
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.crt-shortcut-disclosure kbd {
+  border: 1px solid #bae6fd;
+  border-radius: 0.25rem;
+  background: #fff;
+  padding: 0.05rem 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+}
+
+.crt-canvas-workspace {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+}
+
+.crt-tool-rail {
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border-right: 1px solid var(--bb-border);
+  background: rgba(255, 255, 255, 0.93);
+  padding: 0.75rem 0.625rem;
+}
+
+.crt-tool-rail button {
+  display: grid;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.25rem;
+  place-items: center;
+  font-size: 0.75rem;
+}
+
+.crt-flow-region {
+  position: relative;
+  min-height: 0;
+}
+
+.crt-canvas-empty-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  border: 1.5px dashed var(--bb-fg-7);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0.75rem 1.25rem;
+  color: var(--bb-fg-4);
+  font-size: 0.875rem;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.crt-flow-region .react-flow__node {
+  visibility: visible !important;
+}
+
+.crt-flow-region .react-flow {
+  background: #f8fafc;
+}
+
+.crt-relation-action-toolbar {
+  position: absolute;
+  top: 0.9rem;
+  left: 50%;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  width: max-content;
+  max-width: calc(100% - 1rem);
+  box-sizing: border-box;
+  border: 1px solid #bae6fd;
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.97);
+  padding: 0.4rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  transform: translateX(-50%);
+}
+
+.crt-relation-action-toolbar button {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.45rem;
+  background: #fff;
+  padding: 0.4rem 0.65rem;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  min-width: 0;
+  flex: 1 1 8rem;
+  white-space: normal;
+}
+
+.crt-relation-action-toolbar button:hover {
+  border-color: #0284c7;
+  color: #0369a1;
+}
+
+.crt-relation-action-toolbar button:focus-visible,
+.crt-canvas-toolbar-actions button:focus-visible,
+.crt-tool-rail button:focus-visible,
+.crt-zoom-controls button:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+/* The SVG group receives focus on edge click; its browser rectangle would
+   draw two black bars beside the curved path. Selection already turns the
+   relation stroke blue, including when it is focused by keyboard. */
+.react-flow__edge g[data-testid^="crt-edge-"]:focus {
+  outline: none;
+}
+
+.crt-zoom-controls {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--bb-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.3rem;
+  box-shadow: var(--bb-shadow-floating);
+}
+
+.crt-zoom-controls button {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-color: transparent;
+  padding: 0;
+}
+
+.crt-zoom-controls button svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.crt-zoom-controls span {
+  min-width: 3.4rem;
+  color: var(--bb-fg-4);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.crt-card-node {
+  position: relative;
+  width: 220px;
+}
+
+.crt-card-button {
+  display: flex;
+  width: 220px;
+  min-height: 92px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.55rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.85rem;
+  background: #fff;
+  padding: 0.9rem 1rem;
+  color: #0f172a;
+  cursor: grab;
+  text-align: left;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.09);
+}
+
+.crt-card-button:active {
+  cursor: grabbing;
+}
+
+.crt-card-editor {
+  display: block;
+  width: 220px;
+  min-height: 92px;
+  border: 2px solid #0284c7;
+  border-radius: 0.85rem;
+  background: #fff;
+  padding: 0.9rem 1rem;
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.9rem;
+  outline: 3px solid rgba(14, 165, 233, 0.18);
+}
+
+.crt-card-connector {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border: 1px solid #0284c7;
+  border-radius: 999px;
+  background: #fff;
+  color: #0369a1;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  pointer-events: auto;
+}
+
+.crt-card-connector-target {
+  bottom: -0.85rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.crt-card-connector-source {
+  top: -0.85rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.crt-card-connector:focus-visible,
+.crt-card-editor:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+.crt-card-node.is-selected .crt-card-button,
+.crt-card-button[aria-pressed="true"] {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.18), 0 8px 18px rgba(15, 23, 42, 0.09);
+}
+
+.crt-card-badge {
+  border-radius: 999px;
+  background: #e0f2fe;
+  padding: 0.18rem 0.45rem;
+  color: #075985;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.crt-card-label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.crt-card-handle {
+  z-index: 4;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #0284c7;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.crt-card-handle.is-visible {
+  opacity: 1;
+  pointer-events: none;
+}
+
+.crt-canvas-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .crt-canvas-workspace {
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+  }
+}

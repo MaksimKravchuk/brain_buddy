@@ -1,0 +1,30 @@
+{
+  "schema_version": "brainbuddy-owner-ratification/v1",
+  "feature": "015-completed-task-profile-count",
+  "approved_by": "Max",
+  "approved_on": "2026-09-05",
+  "approval_reply": "да делай уже",
+  "package": {
+    "files": [
+      "specs/015-completed-task-profile-count/intake.md",
+      "specs/015-completed-task-profile-count/spec.md",
+      "specs/015-completed-task-profile-count/design.md",
+      "specs/015-completed-task-profile-count/plan.md",
+      "specs/015-completed-task-profile-count/checklists/requirements.md",
+      "specs/015-completed-task-profile-count/tasks.md"
+    ],
+    "sha256": "a04860a07c36d1dfd7cf5279194601d1e82ad9f280cfeb25c2ed1b50af2d2892"
+  },
+  "planning_review": {
+    "run_id": "015-completed-task-profile-count-c1",
+    "status": "approved",
+    "risk": "medium",
+    "artifacts_digest": "82bcf40e6af6d49bbbe04a6508e42813ff5e3aede803ce8a9263145a8212e7d5",
+    "reviewers": 5,
+    "missing_reviewers": 0,
+    "technical_findings": 0,
+    "oracle_provenance": "unknown"
+  },
+  "scope": "Ratifies the exact six-file planning package and authorizes creation of the governed implementation run. It does not approve a future run approval request, commit product implementation, push, merge, deploy, or release.",
+  "immutability_note": "The six ratified files are intentionally unchanged after approval. Their pre-ratification status text is historical package content; this digest-bound receipt is the authoritative ratification record."
+}

@@ -4,8 +4,10 @@ import type { ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { useAgentRuns } from "../../api/agentHooks";
+import type { AgentRunResponse } from "../../api/agentTypes";
 import { hasFeatureFlag } from "../../api/auth";
 import { apiClient } from "../../api/client";
+import { getTaskCacheScope } from "../../api/taskHooks";
 import { AgentHandoffOverlay } from "../agents/AgentHandoffOverlay";
 import { AgentRunSection } from "../agents/AgentRunSection";
 import { compactRunLabel, newestRun } from "../agents/agentCopy";
@@ -20,6 +22,7 @@ import type {
 } from "../../api/taskTypes";
 import { Button } from "../../components/ui/Button";
 import { getErrorMessage } from "../../utils/error";
+import { rememberTaskAgentPreference } from "./taskAgentPreference";
 import type { AutosaveSnapshot, EditableField, TaskDetailAutosaveController } from "./taskDetailAutosave";
 
 type TaskDetailSavePayload = Parameters<typeof apiClient.updateTask>[1];
@@ -35,11 +38,15 @@ const openStateOptions: OpenTaskState[] = ["inbox", "next", "waiting", "someday"
 
 const activePanelClass =
   "flex h-full w-full min-w-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-l border-slate-200 bg-white";
+const inlinePanelClass =
+  "flex w-full min-w-0 flex-col overflow-x-hidden bg-white";
 
 const iconButtonClass =
   "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-600 transition-colors duration-200 ease-smooth hover:bg-slate-100 hover:text-slate-800 disabled:cursor-default disabled:text-slate-300 disabled:hover:bg-transparent";
 
 const propLabelClass = "text-slate-600";
+
+const sectionLabelClass = "m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500";
 
 const propFieldClass =
   "w-full min-w-0 appearance-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[12.5px] text-slate-800 outline-none transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary";
@@ -49,6 +56,7 @@ const dashedInputClass =
 
 export function TaskDetailPanel({
   active = true,
+  layout = "sheet",
   task,
   autosave,
   resetKey,
@@ -64,9 +72,11 @@ export function TaskDetailPanel({
   onTransition,
   onCreateSubtask,
   onTransitionSubtask,
-  onCreateComment
+  onCreateComment,
+  onAgentDispatched
 }: {
   active?: boolean;
+  layout?: "sheet" | "inline";
   task?: TaskResponse;
   autosave?: TaskDetailAutosaveController;
   resetKey?: number;
@@ -80,9 +90,10 @@ export function TaskDetailPanel({
   notice?: ReactNode;
   onSave: (task: TaskResponse, payload: TaskDetailSavePayload) => void;
   onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
-  onCreateSubtask: (task: TaskResponse, title: string) => void;
+  onCreateSubtask: (task: TaskResponse, title: string, key: string) => void | Promise<unknown>;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
-  onCreateComment: (task: TaskResponse, body: string) => void;
+  onCreateComment: (task: TaskResponse, body: string, key: string) => void | Promise<unknown>;
+  onAgentDispatched?: (run: AgentRunResponse) => void;
 }): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLButtonElement>(null);
@@ -98,7 +109,7 @@ export function TaskDetailPanel({
   }, [task?.id]);
 
   return (
-    <aside aria-labelledby="task-detail-title" className={activePanelClass} onKeyDown={(event) => {
+    <aside aria-labelledby="task-detail-title" className={layout === "inline" ? inlinePanelClass : activePanelClass} onKeyDown={(event) => {
       const target = event.target as HTMLElement;
       if (event.key === "Escape" && menuOpen && !event.defaultPrevented && !event.nativeEvent.isComposing && !target.closest('select, [role="combobox"], [role="listbox"]') && target.closest('[role="dialog"]') === event.currentTarget.closest('[role="dialog"]')) {
         event.preventDefault();
@@ -115,7 +126,7 @@ export function TaskDetailPanel({
           {navigation ? <>
             <button type="button" aria-label="Previous task" data-task-navigation className={iconButtonClass} disabled={!navigation.onPrevious} onClick={navigation.onPrevious}><ChevronLeft className="h-4 w-4" aria-hidden /></button>
             <button type="button" aria-label="Next task" data-task-navigation className={iconButtonClass} disabled={!navigation.onNext} onClick={navigation.onNext}><ChevronRight className="h-4 w-4" aria-hidden /></button>
-            <span className="min-w-0 text-xs text-slate-600" aria-live="polite" aria-atomic="true">{navigation.position > 0 ? `${navigation.position} of ${navigation.total}` : "Outside this list"}</span>
+            <span className="ml-1 min-w-0 text-xs tabular-nums text-slate-600" aria-live="polite" aria-atomic="true">{navigation.position > 0 ? `${navigation.position} of ${navigation.total}` : "Outside this list"}</span>
           </> : null}
           <span className="relative ml-auto flex min-w-0 items-center gap-1">
             {task && !isTerminal ? (
@@ -131,7 +142,7 @@ export function TaskDetailPanel({
                   <MoreHorizontal className="h-[15px] w-[15px]" aria-hidden />
                 </button>
                 {menuOpen ? (
-                  <div className="absolute right-0 top-12 z-50 w-40 rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating">
+                  <div className="absolute right-0 top-12 z-50 w-40 origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating motion-safe:animate-scale-fade-in">
                     <button
                       type="button"
                       className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-rose-600 transition-colors duration-200 ease-smooth hover:bg-rose-50"
@@ -153,10 +164,10 @@ export function TaskDetailPanel({
         {autosaveSnapshot && autosaveSnapshot.status !== "clean" ? <div className="px-4 pb-2"><AutosaveStatus snapshot={autosaveSnapshot} /></div> : null}
       </div>
 
-      {notice}
-      {isLoading ? <p className="px-4 pb-4 text-sm text-slate-600">Loading task detail…</p> : null}
+      {notice ? <div className="px-4 pt-3">{notice}</div> : null}
+      {isLoading ? <p className="px-4 py-4 text-sm text-slate-600">Loading task detail…</p> : null}
       {error ? (
-        <p role="alert" className="px-4 pb-4 text-sm text-rose-700">
+        <p role="alert" className="px-4 py-4 text-sm text-rose-700">
           {getErrorMessage(error)}
         </p>
       ) : null}
@@ -175,6 +186,7 @@ export function TaskDetailPanel({
           onCreateSubtask={onCreateSubtask}
           onTransitionSubtask={onTransitionSubtask}
           onCreateComment={onCreateComment}
+          onAgentDispatched={onAgentDispatched}
         />
       ) : null}
     </aside>
@@ -274,7 +286,8 @@ function TaskDetailBody({
   onTransition,
   onCreateSubtask,
   onTransitionSubtask,
-  onCreateComment
+  onCreateComment,
+  onAgentDispatched
 }: {
   active: boolean;
   task: TaskResponse;
@@ -286,9 +299,10 @@ function TaskDetailBody({
   isTerminal: boolean;
   onSave: (task: TaskResponse, payload: TaskDetailSavePayload) => void;
   onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
-  onCreateSubtask: (task: TaskResponse, title: string) => void;
+  onCreateSubtask: (task: TaskResponse, title: string, key: string) => void | Promise<unknown>;
   onTransitionSubtask: (task: TaskResponse, subtask: TaskSubtaskResponse, action: "complete" | "reopen" | "cancel") => void;
-  onCreateComment: (task: TaskResponse, body: string) => void;
+  onCreateComment: (task: TaskResponse, body: string, key: string) => void | Promise<unknown>;
+  onAgentDispatched?: (run: AgentRunResponse) => void;
 }): React.JSX.Element {
   // Live value shared between the "waiting" prop row and list moves into
   // Waiting for, which require a non-empty waiting_for on the transition.
@@ -334,12 +348,14 @@ function TaskDetailBody({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-start gap-2.5 px-4 pb-3">
+      {/* The circle and title sit on the same vertical lines as the list row
+          above them (22px circle centre, 52px text start). */}
+      <div className="flex items-start gap-1 px-4 pb-3 pt-3">
         <button
           type="button"
           aria-label={isTerminal ? "Reopen task" : "Complete task"}
           disabled={Boolean(autosaveSnapshot?.barriers.some((barrier) => barrier.action === "complete") || (autosaveSnapshot?.inFlight?.kind === "transition" && "action" in autosaveSnapshot.inFlight.body && autosaveSnapshot.inFlight.body.action === "complete"))}
-          className="group -ml-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+          className="group/check -ml-4 -mt-2.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
           onClick={() => autosave ? autosave.barrier(isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined) : onTransition(task, isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined)}
         >
           <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
@@ -347,7 +363,7 @@ function TaskDetailBody({
               ? "border-brand-primary bg-brand-primary text-white"
               : task.state === "cancelled"
                 ? "border-slate-300 bg-slate-200 text-slate-500"
-                : "border-slate-300 bg-white text-transparent group-hover:border-sky-700"
+                : "border-slate-300 bg-white text-transparent group-hover/check:border-sky-700 group-hover/check:text-sky-700/50"
           }`}>
             {task.state === "cancelled" ? <X className="h-2.5 w-2.5" aria-hidden /> : <Check className="h-[11px] w-[11px]" aria-hidden />}
           </span>
@@ -387,9 +403,9 @@ function TaskDetailBody({
         ))}
       </span>
 
-      <div className="flex flex-col gap-2 px-4 py-3">
+      <div className="flex flex-col gap-2 px-4 pb-3 pt-1">
         <div className="flex flex-col gap-1.5">
-          <h3 className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Details</h3>
+          <h3 className={sectionLabelClass}>Details</h3>
           <textarea
             aria-label={fieldLabel("Details", "details")}
             value={draft?.details ?? details}
@@ -428,7 +444,7 @@ function TaskDetailBody({
       ) : null}
 
       <section aria-label="Task properties" className="grid grid-cols-[76px_1fr] items-center gap-x-2.5 gap-y-2 border-t border-slate-200 px-4 pb-3.5 pt-3 text-[12.5px]">
-        <h3 className="col-span-2 m-0 text-xs font-semibold text-slate-600">Organize</h3>
+        <h3 className={`col-span-2 mb-0.5 ${sectionLabelClass}`}>Organize</h3>
         <span className={propLabelClass}>Due date</span>
         <input
           aria-label={fieldLabel("Due date", "due_date")}
@@ -471,9 +487,11 @@ function TaskDetailBody({
         </select>
 
         <span className={propLabelClass}>Project</span>
-        <span className="flex min-w-0 items-center gap-1.5">
+        {/* The colour dot hangs in the column gap so the project name starts on
+            the same line as every other property value. */}
+        <span className="relative flex min-w-0 items-center">
           <span
-            className="h-2 w-2 shrink-0 rounded-full"
+            className="absolute -left-[9px] top-1/2 h-2 w-2 -translate-y-1/2 rounded-full"
             style={{ backgroundColor: project?.color ?? "#cbd5e1" }}
             aria-hidden
           />
@@ -556,7 +574,7 @@ function TaskDetailBody({
         {waitingRequired ? <span className="col-start-2 text-xs text-[#92400e]">Add who or what you’re waiting for</span> : null}
       </section>
 
-      <AgentTaskRelay task={task} isTerminal={isTerminal} active={active} />
+      <AgentTaskRelay task={task} isTerminal={isTerminal} active={active} onDispatched={onAgentDispatched} />
 
       <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
         <div className="flex items-center gap-2">
@@ -564,7 +582,7 @@ function TaskDetailBody({
             {subtasks.length ? `Subtasks · ${doneSubtasks} / ${subtasks.length}` : "Subtasks"}
           </h3>
           {subtasks.length ? (
-            <span className="text-[11px] text-slate-400">{Math.round((doneSubtasks / subtasks.length) * 100)}%</span>
+            <span className="text-[11px] tabular-nums text-slate-500">{Math.round((doneSubtasks / subtasks.length) * 100)}%</span>
           ) : null}
         </div>
         {subtasks.length ? (
@@ -575,62 +593,44 @@ function TaskDetailBody({
             />
           </div>
         ) : null}
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            const title = String(form.get("subtask_title") ?? "").trim();
-            if (title) {
-              onCreateSubtask(task, title);
-              event.currentTarget.reset();
-            }
-          }}
-        >
-          <input name="subtask_title" aria-label="New subtask title" data-escape-keeps-draft placeholder="Add a subtask" className={dashedInputClass} />
-        </form>
-        {subtasks.map((subtask) => {
-          const done = subtask.state !== "open";
-          return (
-            <div key={subtask.id} className="flex items-center gap-2 text-[13px] text-slate-700">
-              <button
-                type="button"
-                className="group -ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
-                aria-label={done ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
-                onClick={() => onTransitionSubtask(task, subtask, done ? "reopen" : "complete")}
-              >
-                <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
-                  done
-                    ? "border-brand-primary bg-brand-primary text-white"
-                    : "border-slate-300 bg-white text-transparent group-hover:border-sky-700"
-                }`}>
-                  <Check className="h-[11px] w-[11px]" aria-hidden />
-                </span>
-              </button>
-              <span className={done ? "text-slate-500 line-through" : ""}>{subtask.title}</span>
-            </div>
-          );
-        })}
+        <CreateTaskItemForm key={`${task.id}-subtask`} name="subtask_title" keyAction="subtask-create" label="New subtask title" placeholder="Add a subtask" onCreate={(title, key) => onCreateSubtask(task, title, key)} />
+        {subtasks.length ? (
+          // Rows stack at the 44px target height with no extra gap; the
+          // circle's edge lines up with the section's text edge.
+          <div className="-my-1 flex flex-col">
+            {subtasks.map((subtask) => {
+              const done = subtask.state !== "open";
+              return (
+                <div key={subtask.id} className="flex min-h-11 items-center gap-1 text-[13px] text-slate-700">
+                  <button
+                    type="button"
+                    className="group/check -ml-[13px] flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+                    aria-label={done ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
+                    onClick={() => onTransitionSubtask(task, subtask, done ? "reopen" : "complete")}
+                  >
+                    <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
+                      done
+                        ? "border-brand-primary bg-brand-primary text-white"
+                        : "border-slate-300 bg-white text-transparent group-hover/check:border-sky-700 group-hover/check:text-sky-700/50"
+                    }`}>
+                      <Check className="h-[11px] w-[11px]" aria-hidden />
+                    </span>
+                  </button>
+                  <span className={`min-w-0 break-words ${done ? "text-slate-500 line-through" : ""}`}>{subtask.title}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
         <h3 className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Comments</h3>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            const body = String(form.get("comment_body") ?? "").trim();
-            if (body) {
-              onCreateComment(task, body);
-              event.currentTarget.reset();
-            }
-          }}
-        >
-          <input name="comment_body" aria-label="New comment" data-escape-keeps-draft placeholder="Add a comment" className={dashedInputClass} />
-        </form>
+        <CreateTaskItemForm key={`${task.id}-comment`} name="comment_body" keyAction="comment-create" label="New comment" placeholder="Add a comment" onCreate={(body, key) => onCreateComment(task, body, key)} />
         {comments.map((comment) => (
-          <div key={comment.id} className="text-[12.5px] leading-normal text-slate-700">
+          <div key={comment.id} className="whitespace-pre-line break-words text-[12.5px] leading-normal text-slate-700">
             {comment.body}
-            <span className="mt-0.5 block text-[11px] text-slate-400">
+            <span className="mt-0.5 block text-[11px] text-slate-500">
               {comment.actor_id.slice(0, 2).toUpperCase()} · {formatCommentTime(comment.created_at)}
             </span>
           </div>
@@ -640,12 +640,72 @@ function TaskDetailBody({
   );
 }
 
+function CreateTaskItemForm({ name, keyAction, label, placeholder, onCreate }: {
+  name: string;
+  keyAction: string;
+  label: string;
+  placeholder: string;
+  onCreate: (value: string, key: string) => void | Promise<unknown>;
+}): React.JSX.Element {
+  const pendingRef = useRef(false);
+  const attemptRef = useRef<{ value: string; key: string } | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <form aria-busy={pending} onSubmit={(event) => {
+      event.preventDefault();
+      if (pendingRef.current) return;
+      const input = event.currentTarget.elements.namedItem(name);
+      if (!(input instanceof HTMLInputElement)) return;
+      const original = input.value;
+      const value = original.trim();
+      if (!value) return;
+      const previous = attemptRef.current;
+      const key = previous?.value === value ? previous.key : `task-shell-${keyAction}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      attemptRef.current = { value, key };
+      pendingRef.current = true;
+      setPending(true);
+      setError(null);
+      void (async () => {
+        try {
+          await onCreate(value, key);
+          if (input.isConnected && input.value === original) input.value = "";
+          if (attemptRef.current?.key === key) attemptRef.current = null;
+        } catch (caught: unknown) {
+          setError(getErrorMessage(caught));
+        } finally {
+          pendingRef.current = false;
+          setPending(false);
+        }
+      })();
+    }}>
+      <input name={name} aria-label={label} data-escape-keeps-draft placeholder={placeholder} className={dashedInputClass} onChange={(event) => {
+        if (attemptRef.current && event.currentTarget.value.trim() !== attemptRef.current.value) attemptRef.current = null;
+        setError(null);
+      }} />
+      {pending ? <span role="status" className="mt-1 block text-xs text-slate-600">Adding…</span> : null}
+      {error ? <span role="alert" className="mt-1 block text-xs text-rose-700">{error}. Your draft is still here; press Enter to retry.</span> : null}
+    </form>
+  );
+}
+
 /**
  * Existing task runs remain observable and actionable after rollout is disabled.
  * The flag gates only creation of new hand-offs; it must not strand work that
  * already left BrainBuddy.
  */
-function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTerminal: boolean; active: boolean }): React.JSX.Element | null {
+function AgentTaskRelay({
+  task,
+  isTerminal,
+  active,
+  onDispatched
+}: {
+  task: TaskResponse;
+  isTerminal: boolean;
+  active: boolean;
+  onDispatched?: (run: AgentRunResponse) => void;
+}): React.JSX.Element | null {
   const user = useAuthStore((state) => state.user);
   const handoffEnabled = hasFeatureFlag(user, "external_agent_relay");
   const [reviewing, setReviewing] = useState(false);
@@ -657,6 +717,14 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
       if (trigger?.isConnected && !trigger.closest("[inert]")) trigger.focus({ preventScroll: true });
     });
   };
+  const dispatchedHandoff = (ownerId: string, run: AgentRunResponse) => {
+    rememberTaskAgentPreference(
+      { ownerId, apiOrigin: getTaskCacheScope(ownerId).apiOrigin },
+      run.connection_id
+    );
+    closeHandoff();
+    onDispatched?.(run);
+  };
   const runsQuery = useAgentRuns(task.id, Boolean(user));
 
   useEffect(() => {
@@ -667,7 +735,7 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
   // read is rolling out independently. Fail closed to an empty monitor rather
   // than crashing the entire task panel.
   const runs = Array.isArray(runsQuery.data) ? runsQuery.data : [];
-  const canStartHandoff = handoffEnabled && !isTerminal;
+  const canStartHandoff = handoffEnabled && !isTerminal && runsQuery.isSuccess && runs.length === 0;
   const latestRun = newestRun(runs);
 
   return (
@@ -719,12 +787,12 @@ function AgentTaskRelay({ task, isTerminal, active }: { task: TaskResponse; isTe
         handoffEnabled={handoffEnabled}
       />
 
-      {active && reviewing && canStartHandoff ? createPortal(
+      {user && active && reviewing && canStartHandoff ? createPortal(
         <AgentHandoffOverlay
           taskId={task.id}
           taskTitle={task.title}
           onClose={closeHandoff}
-          onDispatched={closeHandoff}
+          onDispatched={(run) => dispatchedHandoff(user.id, run)}
         />, document.body
       ) : null}
     </>

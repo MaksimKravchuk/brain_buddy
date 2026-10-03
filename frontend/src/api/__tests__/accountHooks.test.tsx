@@ -11,6 +11,7 @@ const account: AccountResponse = {
   id: "user_1",
   email: "a@b.c",
   display_name: "Maks",
+  completed_task_count: 4,
   created_at: "2026-08-01T00:00:00Z",
   deletion_requested_at: null,
   purge_at: null
@@ -28,7 +29,7 @@ describe("accountHooks", () => {
     expect(accountKeys.detail()).toEqual(["account", "detail"]);
   });
 
-  it("useAccountQuery fetches the caller's account", async () => {
+  it("018-FR-001 useAccountQuery fetches the caller's count", async () => {
     const spy = vi.spyOn(apiClient, "getAccount").mockResolvedValue(account);
 
     const { result } = renderHook(() => useAccountQuery(), { wrapper });

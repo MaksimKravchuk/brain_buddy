@@ -64,6 +64,11 @@ async function expectCompleted(page: Page, task: TaskRecord, openTitles: string[
   await expect(title).toHaveCSS("color", "rgb(100, 116, 139)");
   const completed = page.getByRole("heading", { name: "Completed", exact: true });
   await expect(completed).toBeVisible();
+  await expect.poll(async () => {
+    const settledHeading = await completed.boundingBox();
+    const settledTask = await row(page, task.title).boundingBox();
+    return Boolean(settledHeading && settledTask && settledTask.y >= settledHeading.y + settledHeading.height);
+  }).toBe(true);
   const headingBox = await completed.boundingBox();
   const taskBox = await row(page, task.title).boundingBox();
   expect(headingBox).not.toBeNull();
@@ -209,8 +214,7 @@ test("016-FR-001 016-FR-002 016-FR-003 016-SC-001 016-SC-003 016-SC-004 one task
     }
     await page.getByRole("link", { name: target.title, exact: true }).click();
     await page.getByRole("button", { name: "Complete task", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Reopen task", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Close task", exact: true }).click();
+    await expect(page.getByRole("complementary", { name: "Task detail" })).toHaveCount(0);
     await expectCompleted(page, target);
     for (const view of views) {
       await page.goto(view);

@@ -12,12 +12,13 @@ import type {
   TaskState,
   TaskSubtaskResponse
 } from "../../../api/taskTypes";
-import { apiClient } from "../../../api/client";
+import { apiClient, getApiBaseUrl } from "../../../api/client";
 import { ShellToastContext } from "../../../components/shell/shellToast";
 import { useAuthStore } from "../../../stores/authStore";
 import type { AgentRunResponse } from "../../../api/agentTypes";
 import { canCancelRun, canReplyToRun } from "../../agents/agentCopy";
 import { TaskDetailPanel } from "../TaskDetailPanel";
+import { taskAgentPreferenceKey } from "../taskAgentPreference";
 
 // Stubbed so this suite is about the *panel* — but the stub asks the same two
 // guard functions the real section does, so a control the agent withdrew can
@@ -45,7 +46,7 @@ vi.mock("../../agents/AgentHandoffOverlay", () => ({
       <button type="button" onClick={onClose}>
         Close handoff
       </button>
-      <button type="button" onClick={() => onDispatched({} as never)}>
+      <button type="button" onClick={() => onDispatched({ connection_id: "agent-confirmed" } as never)}>
         Simulate dispatch
       </button>
     </div>
@@ -139,6 +140,7 @@ function renderPanel(overrides: Partial<PanelProps> = {}) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  window.localStorage.clear();
   act(() => {
     useAuthStore.setState({ user: null, status: "loading", deletionCancelledNotice: false });
   });
@@ -248,6 +250,9 @@ describe("TaskDetailPanel chrome", () => {
     await user.click(screen.getByRole("button", { name: "Hand to agent" }));
     await user.click(screen.getByRole("button", { name: "Simulate dispatch" }));
     expect(screen.queryByRole("heading", { name: "Hand this task to an agent" })).not.toBeInTheDocument();
+    expect(
+      JSON.parse(window.localStorage.getItem(taskAgentPreferenceKey({ ownerId: "user-1", apiOrigin: getApiBaseUrl() })) ?? "null")
+    ).toMatchObject({ connectionId: "agent-confirmed" });
     await user.click(handoff);
     const titleNode = screen.getByLabelText("Title");
     open.rerenderPanel({ active: false });
@@ -291,6 +296,31 @@ describe("TaskDetailPanel chrome", () => {
     expect(screen.getByTestId("agent-run-count")).toHaveTextContent("1");
     expect(screen.queryByRole("button", { name: "Hand to agent" })).not.toBeInTheDocument();
     expect(screen.queryByText("Review exactly what would be sent before anything leaves BrainBuddy.")).not.toBeInTheDocument();
+  });
+
+  it("waits for a trustworthy empty run history before offering a handoff", async () => {
+    let resolveRuns: (runs: AgentRunResponse[]) => void = () => undefined;
+    const pendingRuns = new Promise<AgentRunResponse[]>((resolve) => {
+      resolveRuns = resolve;
+    });
+    vi.spyOn(apiClient, "listAgentRuns").mockReturnValue(pendingRuns);
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "max@example.test",
+          feature_flags: { external_agent_relay: true }
+        },
+        status: "authed",
+        deletionCancelledNotice: false
+      });
+    });
+
+    renderPanel();
+
+    expect(screen.queryByRole("button", { name: "Hand to agent" })).not.toBeInTheDocument();
+    act(() => resolveRuns([]));
+    expect(await screen.findByRole("button", { name: "Hand to agent" })).toBeInTheDocument();
   });
 
   it("keeps an existing actionable run visible while rollout is off without exposing a new handoff", async () => {
@@ -784,7 +814,7 @@ describe("TaskDetailPanel subtasks and comments", () => {
 
     await user.clear(field);
     await user.type(field, "Draft the copy{Enter}");
-    expect(onCreateSubtask).toHaveBeenCalledWith(task, "Draft the copy");
+    expect(onCreateSubtask).toHaveBeenCalledWith(task, "Draft the copy", expect.any(String));
     expect(field).toHaveValue("");
   });
 
@@ -798,8 +828,41 @@ describe("TaskDetailPanel subtasks and comments", () => {
     expect(onCreateComment).not.toHaveBeenCalled();
 
     await user.type(field, "Blocked on analytics{Enter}");
-    expect(onCreateComment).toHaveBeenCalledWith(task, "Blocked on analytics");
+    expect(onCreateComment).toHaveBeenCalledWith(task, "Blocked on analytics", expect.any(String));
     expect(field).toHaveValue("");
+  });
+
+  it.each([
+    { label: "New subtask title", draft: "Draft the copy", handler: "onCreateSubtask" as const },
+    { label: "New comment", draft: "Blocked on analytics", handler: "onCreateComment" as const }
+  ])("keeps the $label draft after a failed create and clears it only after retry succeeds", async ({ label, draft, handler }) => {
+    const user = userEvent.setup();
+    const create = vi.fn().mockRejectedValueOnce(new Error("Could not create item")).mockResolvedValue(undefined);
+    renderPanel({ [handler]: create });
+    const field = screen.getByLabelText(label);
+
+    await user.type(field, `${draft}{Enter}`);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not create item");
+    expect(field).toHaveValue(draft);
+    await user.type(field, "{Enter}");
+    await waitFor(() => expect(field).toHaveValue(""));
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not double-submit a pending comment or clear text typed while it saves", async () => {
+    const user = userEvent.setup();
+    let resolveCreate: () => void = () => undefined;
+    const create = vi.fn(() => new Promise<void>((resolve) => { resolveCreate = resolve; }));
+    renderPanel({ onCreateComment: create });
+    const field = screen.getByLabelText("New comment");
+
+    await user.type(field, "First draft{Enter}{Enter}");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status")).toHaveTextContent("Adding");
+    await user.clear(field);
+    await user.type(field, "Newer draft");
+    await act(async () => resolveCreate());
+    expect(field).toHaveValue("Newer draft");
   });
 
   it("renders each comment with an actor initialism and a readable date, falling back to the raw value", () => {

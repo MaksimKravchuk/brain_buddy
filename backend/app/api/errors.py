@@ -12,13 +12,18 @@ from app.exceptions import (
     AdminAuthorizationError,
     BrainBuddyError,
     ConflictError,
+    IdempotencyConflictError,
+    IdempotencyReceiptExpiredError,
+    IdempotencyReceiptUnavailableError,
     NotFoundError,
+    PendingCommandError,
     ReauthFailedError,
     RepositoryError,
+    StaleRevisionError,
     StorageUnavailableError,
     ValidationFailure,
 )
-from app.schemas import ErrorResponse
+from app.schemas import ErrorResponse, StaleRevisionDetail
 
 from .middleware import CORRELATION_HEADER
 
@@ -104,9 +109,26 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ConflictError)
     async def handle_conflict(request: Request, exc: ConflictError) -> JSONResponse:
         correlation_id = getattr(request.state, "correlation_id", None)
+        detail = (
+            StaleRevisionDetail.model_validate(exc.detail).model_dump(mode="json")
+            if isinstance(exc, StaleRevisionError)
+            else (
+                exc.detail
+                if isinstance(
+                    exc,
+                    (
+                        IdempotencyConflictError,
+                        IdempotencyReceiptExpiredError,
+                        IdempotencyReceiptUnavailableError,
+                        PendingCommandError,
+                    ),
+                )
+                else {"resource": exc.resource, "id": exc.identifier}
+            )
+        )
         payload = ErrorResponse(
             message=str(exc),
-            detail={"resource": exc.resource, "id": exc.identifier},
+            detail=detail,
             reference_id=correlation_id,
         )
         response = JSONResponse(

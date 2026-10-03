@@ -85,6 +85,31 @@ describe("AgentRunSection", () => {
     await unmount();
   });
 
+  it("shows a completed result once when the timeline carries the same report", async () => {
+    const result = "The agent completed the task.";
+    const run = makeRun({
+      reported_state: "completed",
+      primary_state_label: "Agent reported complete",
+      result_text: result,
+      events: [
+        makeRunEvent({
+          id: "event_completed",
+          type: "completed",
+          run_version: 3,
+          summary: result,
+        }),
+      ],
+    });
+    const { renderer, unmount } = await renderWithProviders(
+      <AgentRunSection {...props({ runs: [run] })} />,
+    );
+
+    expect(visibleText(renderer).split(result)).toHaveLength(2);
+    expect(visibleText(renderer)).toContain("Agent reported complete");
+
+    await unmount();
+  });
+
   it("answers a blocked run and hands the updated run back to the feed", async () => {
     const run = makeRun({
       reported_state: "blocked",

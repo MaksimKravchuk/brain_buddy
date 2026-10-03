@@ -31,6 +31,48 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
 
     expected_error_statuses = {
         ("/api/health", "get"): set(),
+        ("/api/crt/exposure", "get"): {"400", "401", "404"},
+        ("/api/crt/trees", "get"): {"400", "401", "404"},
+        ("/api/crt/trees", "post"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
+        ("/api/crt/trees/import", "post"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
+        ("/api/crt/trees/{tree_id}", "get"): {
+            "400",
+            "401",
+            "404",
+            "422",
+        },
+        ("/api/crt/trees/{tree_id}", "put"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
+        ("/api/crt/trees/{tree_id}", "delete"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
+        ("/api/crt/trees/{tree_id}/export", "post"): {
+            "400",
+            "401",
+            "404",
+            "422",
+        },
         ("/api/account", "get"): {"401"},
         ("/api/account/profile", "patch"): {"400", "401", "422"},
         ("/api/account/email", "post"): {"400", "401", "403", "422", "429"},

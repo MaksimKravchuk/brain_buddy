@@ -30,11 +30,20 @@ body {
 }
 
 /* Keyboard-only focus ring. Mouse clicks won't trigger a ring thanks to
- * :focus-visible. Individual components can opt out via `focus-visible:shadow-none`. */
+ * :focus-visible. Individual components can opt out via `focus-visible:shadow-none`.
+ * The ring follows the element's own corners: inheriting the parent's radius
+ * here reshaped a focused pill or square control into its container's shape. */
 *:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px rgba(14, 165, 233, 0.5);
-  border-radius: inherit;
+}
+
+/* Programmatic focus targets — headings and panels moved to with
+ * tabIndex={-1} so screen readers land in the right place — are not controls,
+ * and a ring around them reads as a stray selection box. `:where` keeps this
+ * below any component-level override. */
+:where([tabindex="-1"]):focus-visible {
+  box-shadow: none;
 }
 
 .account-menu-trigger:focus-visible {

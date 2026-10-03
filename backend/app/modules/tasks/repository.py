@@ -408,6 +408,19 @@ class TaskRepository(SQLiteRepositorySupport, BaseRepository):
     def list_for_owner(self, *, owner_id: str) -> list[TaskDocument]:
         return self._list("tasks", TaskDocument, owner_id=owner_id)
 
+    def count_for_owner_by_state(self, *, owner_id: str, state: str) -> int:
+        """Count current top-level tasks for one owner and state."""
+
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Task count", owner_id),
+        ):
+            value = conn.execute(
+                "SELECT COUNT(*) FROM tasks WHERE owner_id = ? AND state = ?",
+                (owner_id, state),
+            ).fetchone()[0]
+        return int(value)
+
     def create_subtask(self, subtask: TaskSubtaskDocument) -> None:
         with (
             self._connection(self._thread_state) as conn,

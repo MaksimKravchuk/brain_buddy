@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>D-01 · Compact Task list</title>
+  <style>
+    :root {
+      --sky: #0ea5e9;
+      --sky-50: #f0f9ff;
+      --sky-200: #bae6fd;
+      --sky-700: #0369a1;
+      --slate-50: #f8fafc;
+      --slate-100: #f1f5f9;
+      --slate-200: #e2e8f0;
+      --slate-300: #cbd5e1;
+      --slate-400: #94a3b8;
+      --slate-500: #64748b;
+      --slate-600: #475569;
+      --slate-700: #334155;
+      --slate-900: #0f172a;
+      --amber-50: #fffbeb;
+      --amber-200: #fde68a;
+      --amber-800: #92400e;
+      --rose-50: #fff1f2;
+      --rose-200: #fecdd3;
+      --rose-800: #9f1239;
+      --emerald-50: #ecfdf5;
+      --emerald-200: #a7f3d0;
+      --emerald-800: #065f46;
+      --focus: 0 0 0 2px #fff, 0 0 0 4px rgba(14,165,233,.5);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--slate-50); color: var(--slate-900); }
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-feature-settings: "cv11", "ss01", "ss03";
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, [tabindex]:focus-visible { outline: none; box-shadow: var(--focus); }
+    svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+    .screen {
+      width: min(1440px, 100vw);
+      min-height: 900px;
+      margin: 0 auto;
+      overflow: hidden;
+      background: var(--slate-50);
+      border-inline: 1px solid var(--slate-200);
+    }
+    .topbar {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 20px;
+      background: rgba(255,255,255,.94);
+      border-bottom: 1px solid var(--slate-200);
+    }
+    .brand { display: flex; align-items: center; gap: 9px; width: 228px; font-size: 14px; font-weight: 600; }
+    .brand svg { width: 25px; height: 25px; color: var(--sky); }
+    .search {
+      width: min(420px, 36vw); height: 34px; border: 1px solid var(--slate-200);
+      border-radius: 8px; background: white; padding: 0 12px; color: var(--slate-500); font-size: 13px;
+    }
+    .dump { margin-left: auto; height: 34px; padding: 0 13px; border: 0; border-radius: 8px; background: var(--sky); color: white; font-size: 13px; font-weight: 600; }
+    .avatar { width: 32px; height: 32px; border: 1px solid var(--slate-200); border-radius: 50%; background: white; color: var(--slate-600); }
+
+    .workspace { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 844px; }
+    .sidebar { padding: 18px 12px; background: white; border-right: 1px solid var(--slate-200); }
+    .nav-title { margin: 18px 10px 7px; color: var(--slate-500); font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+    .nav-item { height: 36px; display: flex; align-items: center; gap: 9px; padding: 0 10px; border-radius: 8px; color: var(--slate-600); font-size: 13px; }
+    .nav-item.active { background: var(--sky-50); color: var(--sky-700); font-weight: 600; }
+    .nav-item .count { margin-left: auto; color: var(--slate-400); font-size: 11px; }
+    .nav-item.active .count { padding: 2px 7px; border-radius: 999px; background: var(--sky); color: white; }
+    .weekly { margin: 20px 10px 0; padding-top: 15px; border-top: 1px solid var(--slate-200); color: var(--slate-500); font-size: 12px; }
+    .weekly span { display: block; margin-top: 3px; color: var(--slate-400); font-size: 11px; }
+
+    .main { min-width: 0; padding: 28px 34px 48px; }
+    .pane { max-width: 1000px; margin: 0 auto; }
+    .pane-head { display: flex; align-items: end; gap: 16px; min-height: 52px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 20px; line-height: 1.3; letter-spacing: -.015em; font-weight: 600; }
+    .meta { margin: 4px 0 0; color: var(--slate-500); font-size: 12px; }
+    .measurements { margin-left: auto; display: flex; gap: 8px; }
+    .measure { padding: 5px 8px; border: 1px solid var(--sky-200); border-radius: 999px; background: var(--sky-50); color: var(--sky-700); font-size: 11px; white-space: nowrap; }
+    .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+    .add {
+      height: 36px; flex: 1; border: 1px dashed var(--slate-300); border-radius: 8px;
+      background: rgba(255,255,255,.7); padding: 0 12px; text-align: left; color: var(--slate-500); font-size: 13px;
+    }
+    .filter { height: 36px; padding: 0 11px; border: 1px solid var(--slate-200); border-radius: 8px; background: white; color: var(--slate-600); font-size: 12px; }
+
+    .task-list { background: white; border-top: 1px solid var(--slate-200); }
+    .task-row {
+      position: relative;
+      height: 44px;
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr) minmax(0, auto) 184px;
+      align-items: center;
+      column-gap: 8px;
+      border-bottom: 1px solid var(--slate-200);
+    }
+    .task-row.selected { background: var(--sky-50); }
+    .task-row.selected::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--sky); }
+    .complete {
+      width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--slate-300); cursor: pointer;
+    }
+    .complete::before { content: ""; width: 18px; height: 18px; border: 1.5px solid currentColor; border-radius: 50%; background: white; }
+    .complete:hover { color: var(--sky); background: var(--slate-50); }
+    .task-title {
+      min-width: 0; height: 44px; display: flex; align-items: center; padding: 0; border: 0;
+      background: transparent; text-align: left; color: var(--slate-900); font-size: 14px; font-weight: 500; cursor: pointer;
+    }
+    .task-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task-title:hover { color: var(--sky-700); }
+    .row-meta { min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: 6px; overflow: hidden; }
+    .tag, .due, .subtasks { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 999px; font-size: 11px; }
+    .tag, .subtasks { max-width: 82px; padding: 3px 8px; background: var(--slate-100); color: var(--slate-600); }
+    .due { max-width: 76px; padding: 2px 7px; border: 1px solid var(--rose-200); background: var(--rose-50); color: #be123c; }
+
+    .agent-slot { width: 184px; height: 44px; display: flex; align-items: center; justify-content: flex-end; }
+    .assigned {
+      width: 184px; height: 28px; display: grid;
+      grid-template-columns: 16px 50px 3px 14px minmax(0, 1fr);
+      align-items: center; column-gap: 6px; padding: 0 8px;
+      border: 1px solid var(--slate-200); border-radius: 8px; background: white;
+      color: var(--slate-600); cursor: pointer; overflow: hidden;
+    }
+    .assigned .bot { width: 16px; height: 16px; }
+    .agent-name, .state-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: 11px; font-weight: 500; }
+    .agent-name { color: var(--slate-900); }
+    .separator { width: 3px; height: 3px; border-radius: 50%; background: var(--slate-300); }
+    .state-icon { width: 14px; height: 14px; }
+    .assigned.running { border-color: var(--sky-200); }
+    .assigned.running .state-icon, .assigned.running .state-label { color: var(--sky-700); }
+    .assigned.needs { border-color: var(--amber-200); background: var(--amber-50); }
+    .assigned.needs .state-icon, .assigned.needs .state-label { color: var(--amber-800); }
+    .assigned.reported { border-color: var(--emerald-200); }
+    .assigned.reported .state-icon, .assigned.reported .state-label { color: var(--emerald-800); }
+    .assigned.failed { border-color: var(--rose-200); background: var(--rose-50); }
+    .assigned.failed .state-icon, .assigned.failed .state-label { color: var(--rose-800); }
+
+    .split { width: 54px; height: 28px; display: grid; grid-template-columns: 32px 22px; border: 1px solid var(--slate-200); border-radius: 8px; background: white; overflow: hidden; }
+    .split button { display: grid; place-items: center; border: 0; background: transparent; color: var(--slate-500); cursor: pointer; }
+    .split button + button { border-left: 1px solid var(--slate-200); }
+    .split button:hover { color: var(--sky-700); background: var(--sky-50); }
+    .split svg { width: 14px; height: 14px; }
+
+    .legend { display: flex; align-items: center; gap: 14px; margin-top: 12px; color: var(--slate-500); font-size: 11px; }
+    .legend strong { color: var(--slate-700); font-weight: 600; }
+    .legend .spacer { flex: 1; }
+    .no-project { text-decoration: line-through; text-decoration-color: var(--rose-200); }
+
+    @media (max-width: 900px) {
+      .workspace { grid-template-columns: 190px minmax(0, 1fr); }
+      .brand { width: 170px; }
+      .sidebar { padding-inline: 8px; }
+      .main { padding-inline: 20px; }
+      .task-row { grid-template-columns: 44px minmax(72px, 1fr) minmax(0, auto) 184px; gap: 6px; }
+      .tag:nth-child(n+2), .subtasks { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="screen" aria-label="D-01 compact desktop Task list design">
+    <header class="topbar">
+      <div class="brand" aria-label="BrainBuddy">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20h10"></path><path d="M10 20c5.5-2.5.8-6.4 3-10"></path><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"></path><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9.1 3.3-.2 4.3-.9 1-.6 1.9-1.8 2.7-3.6-2.4-.5-4-.3-5-.1-.4.1-.7.3-.9.6z"></path></svg>
+        BrainBuddy
+      </div>
+      <input class="search" aria-label="Search tasks" value="Search tasks" readonly>
+      <button class="dump" type="button">Brain dump</button>
+      <button class="avatar" type="button" aria-label="Open account menu">M</button>
+    </header>
+
+    <div class="workspace">
+      <aside class="sidebar" aria-label="Task navigation">
+        <div class="nav-item"><span>Inbox</span><span class="count">3</span></div>
+        <div class="nav-item active"><span>Next actions</span><span class="count">12</span></div>
+        <div class="nav-item"><span>Waiting for</span><span class="count">4</span></div>
+        <div class="nav-item"><span>Someday / maybe</span><span class="count">8</span></div>
+        <p class="nav-title">Projects</p>
+        <div class="nav-item"><span>Launch review</span><span class="count">5</span></div>
+        <div class="nav-item"><span>Home</span><span class="count">4</span></div>
+        <p class="nav-title">Tags</p>
+        <div class="nav-item"><span>deep-work</span><span class="count">6</span></div>
+        <div class="nav-item"><span>calls</span><span class="count">3</span></div>
+        <div class="nav-item"><span>errands</span><span class="count">2</span></div>
+        <div class="weekly">Weekly Review<span>coming later</span></div>
+      </aside>
+
+      <section class="main" aria-labelledby="task-list-title">
+        <div class="pane">
+          <div class="pane-head">
+            <div>
+              <h1 id="task-list-title">Next actions</h1>
+              <p class="meta">12 tasks</p>
+            </div>
+            <div class="measurements" aria-label="Design measurements">
+              <span class="measure">row 44 px</span>
+              <span class="measure">assigned 184 × 28 px</span>
+            </div>
+          </div>
+          <div class="toolbar">
+            <button class="add" type="button">Add a next action</button>
+            <button class="filter" type="button">Filter</button>
+          </div>
+
+          <div class="task-list" role="list" aria-label="Next actions">
+            <article class="task-row" role="listitem">
+              <button class="complete" aria-label="Complete Call the dentist"></button>
+              <button class="task-title" aria-expanded="false"><span>Call the dentist</span></button>
+              <div class="row-meta"><span class="tag">calls</span></div>
+              <div class="agent-slot">
+                <div class="split" role="group" aria-label="Agent hand-off">
+                  <button type="button" aria-label="Review hand-off to Hermes for Call the dentist"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg></button>
+                  <button type="button" aria-label="Choose an agent for Call the dentist" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg></button>
+                </div>
+              </div>
+            </article>
+
+            <article class="task-row" role="listitem">
+              <button class="complete" aria-label="Complete Gather sources for the review"></button>
+              <button class="task-title" aria-expanded="false"><span>Gather sources for the review</span></button>
+              <div class="row-meta"><span class="tag">deep-work</span></div>
+              <div class="agent-slot"><button class="assigned" type="button" aria-label="Open Hermes run for Gather sources for the review. Server status: Queued. Guaranteed single start.">
+                <svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="agent-name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg><span class="state-label">Queued</span>
+              </button></div>
+            </article>
+
+            <article class="task-row selected" role="listitem">
+              <button class="complete" aria-label="Complete Review the homepage"></button>
+              <button class="task-title" aria-expanded="true" aria-controls="task-detail-placeholder"><span>[UX audit] Review the homepage and record the three clearest changes</span></button>
+              <div class="row-meta"><span class="due">Fri</span><span class="tag">laptop</span></div>
+              <div class="agent-slot"><button class="assigned running" type="button" aria-label="Open Hermes run for [UX audit] Review the homepage and record the three clearest changes. Server status: Running. Guaranteed single start.">
+                <svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="agent-name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2"></circle></svg><span class="state-label">Running</span>
+              </button></div>
+            </article>
+
+            <article class="task-row" role="listitem">
+              <button class="complete" aria-label="Complete Choose a venue for the offsite"></button>
+              <button class="task-title" aria-expanded="false"><span>Choose a venue for the offsite</span></button>
+              <div class="row-meta"><span class="tag">calls</span></div>
+              <div class="agent-slot"><button class="assigned needs" type="button" aria-label="Open Hermes run for Choose a venue for the offsite. Server status: Needs you. Best-effort single start. Cancellation not supported.">
+                <svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="agent-name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16h.01"></path></svg><span class="state-label">Needs you</span>
+              </button></div>
+            </article>
+
+            <article class="task-row" role="listitem">
+              <button class="complete" aria-label="Complete Buy cinema tickets"></button>
+              <button class="task-title" aria-expanded="false"><span>Buy cinema tickets</span></button>
+              <div class="row-meta"><span class="subtasks">1/2</span><span class="tag">errands</span></div>
+              <div class="agent-slot"><button class="assigned reported" type="button" aria-label="Open Hermes run for Buy cinema tickets. Server status: Agent reported complete. Guaranteed single start.">
+                <svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="agent-name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"></path><path d="M14 3v4h4M9 12h6M9 16h4"></path></svg><span class="state-label">Reported</span>
+              </button></div>
+            </article>
+
+            <article class="task-row" role="listitem">
+              <button class="complete" aria-label="Complete Reconcile the launch budget"></button>
+              <button class="task-title" aria-expanded="false"><span>Reconcile the launch budget against the approved forecast and flag every mismatch</span></button>
+              <div class="row-meta"><span class="tag">finance</span><span class="tag">deep-work</span></div>
+              <div class="agent-slot"><button class="assigned failed" type="button" aria-label="Open Hermes run for Reconcile the launch budget. Server status: Failed. Best-effort single start.">
+                <svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="agent-name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 20h19z"></path><path d="M12 9v5M12 17h.01"></path></svg><span class="state-label">Failed</span>
+              </button></div>
+            </article>
+
+            <article class="task-row" role="listitem">
+              <button class="complete" aria-label="Complete Send venue questions"></button>
+              <button class="task-title" aria-expanded="false"><span>Send venue questions</span></button>
+              <div class="row-meta"><span class="due">Today</span><span class="tag">calls</span></div>
+              <div class="agent-slot"></div>
+            </article>
+            <article class="task-row" role="listitem">
+              <button class="complete" aria-label="Complete Update the onboarding brief"></button>
+              <button class="task-title" aria-expanded="false"><span>Update the onboarding brief</span></button>
+              <div class="row-meta"><span class="tag">laptop</span></div>
+              <div class="agent-slot"></div>
+            </article>
+            <article class="task-row" role="listitem">
+              <button class="complete" aria-label="Complete Replace the hall light"></button>
+              <button class="task-title" aria-expanded="false"><span>Replace the hall light</span></button>
+              <div class="row-meta"><span class="tag">errands</span></div>
+              <div class="agent-slot"></div>
+            </article>
+            <article class="task-row" role="listitem">
+              <button class="complete" aria-label="Complete Confirm September dates"></button>
+              <button class="task-title" aria-expanded="false"><span>Confirm September dates</span></button>
+              <div class="row-meta"><span class="subtasks">2/3</span></div>
+              <div class="agent-slot"></div>
+            </article>
+          </div>
+
+          <div class="legend" id="task-detail-placeholder">
+            <strong>D-01-S01</strong><span>10 visible rows × 44 px</span><span class="spacer"></span>
+            <span class="no-project">Project/List repeated per row</span><span>Delete stays in detail</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

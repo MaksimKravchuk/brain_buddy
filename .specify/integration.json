@@ -1,15 +1,20 @@
 {
-  "version": "0.15.0",
+  "version": "1.0.11",
   "integration_state_schema": 1,
   "installed_integrations": [
-    "claude"
+    "generic"
   ],
   "integration_settings": {
-    "claude": {
+    "generic": {
       "script": "sh",
+      "raw_options": "--commands-dir .specify/agent-commands --skills",
+      "parsed_options": {
+        "commands_dir": ".specify/agent-commands",
+        "skills": true
+      },
       "invoke_separator": "-"
     }
   },
-  "integration": "claude",
-  "default_integration": "claude"
+  "integration": "generic",
+  "default_integration": "generic"
 }

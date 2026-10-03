@@ -278,6 +278,29 @@ export function compactRunLabel(
   return parts.join(" · ");
 }
 
+const compactTaskRunStates: Record<string, string> = {
+  "Not sent": "Not sent",
+  Queued: "Queued",
+  Sent: "Sent",
+  "Delivery unconfirmed": "Unconfirmed",
+  Accepted: "Accepted",
+  Running: "Running",
+  "Needs you": "Needs you",
+  "Cancellation requested": "Cancelling",
+  "Agent reported complete": "Reported",
+  Failed: "Failed",
+  Cancelled: "Cancelled",
+  "Stopped reporting": "Stopped",
+  "Agent no longer reports this run": "Lost contact",
+  "Connection disconnected": "Disconnected",
+  "Content expired under retention policy": "Expired"
+};
+
+/** Short visible copy for the fixed desktop row control; full copy stays accessible. */
+export function compactTaskRunStateLabel(serverLabel: string): string {
+  return compactTaskRunStates[serverLabel] ?? serverLabel;
+}
+
 /**
  * The run a compact line is about.
  *

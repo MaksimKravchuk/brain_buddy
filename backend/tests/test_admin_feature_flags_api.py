@@ -43,7 +43,10 @@ MANAGED = "voice_brain_dump"
 OTHER_MANAGED = "mobile_task_classification"
 RELAY = "external_agent_relay"
 AUTOCOMPLETE = "task_title_autocomplete"
-FOUR_MANAGED_FLAG_NAMES = frozenset({MANAGED, OTHER_MANAGED, RELAY, AUTOCOMPLETE})
+CRT_CANVAS = "crt_canvas"
+MANAGED_FLAG_NAMES = frozenset(
+    {MANAGED, OTHER_MANAGED, RELAY, AUTOCOMPLETE, CRT_CANVAS}
+)
 
 SERVICE_LOGGER = "app.services.feature_flag_service"
 ADMIN_SERVICE_LOGGER = "app.services.admin_service"
@@ -394,6 +397,7 @@ def test_010_SC_001_setting_each_mode_leaves_every_other_flag_untouched(
         "mobile_task_classification",
         "external_agent_relay",
         "task_title_autocomplete",
+        "crt_canvas",
     }
 
 
@@ -415,7 +419,7 @@ def test_010_FR_005_every_mutation_is_idempotent_and_returns_the_full_state(
     assert repeat_add.status_code == 200
     assert world.snapshot() == after_add
     assert {entry["name"] for entry in repeat_add.json()["flags"]} == (
-        FOUR_MANAGED_FLAG_NAMES
+        MANAGED_FLAG_NAMES
     )
 
     first_remove = world.operator.delete(
@@ -509,10 +513,10 @@ def test_010_FR_010_a_cohort_survives_a_mode_round_trip_and_is_locked_meanwhile(
     ] == [account_id]
 
 
-def test_010_DD_15_get_reports_exactly_the_four_managed_flags_mode_always_present(
+def test_010_DD_15_get_reports_exactly_the_managed_flags_mode_always_present(
     world: _FlagWorld,
 ) -> None:
-    """`GET` reports exactly the four managed flags, each with a `mode` field
+    """`GET` reports exactly the managed flags, each with a `mode` field
     always present (never null, and never the retired
     `override_mode`/`source`/`deploy_default_state` fields), since there is no
     more inheritance state to represent (DD-3, DD-15)."""
@@ -520,7 +524,7 @@ def test_010_DD_15_get_reports_exactly_the_four_managed_flags_mode_always_presen
     payload = world.operator.get(FLAGS_ROOT).json()
 
     names = {entry["name"] for entry in payload["flags"]}
-    assert names == FOUR_MANAGED_FLAG_NAMES
+    assert names == MANAGED_FLAG_NAMES
 
     for entry in payload["flags"]:
         assert "mode" in entry
@@ -546,7 +550,7 @@ def test_010_FR_010_every_mutation_response_is_the_servers_own_authoritative_sta
     world: _FlagWorld,
 ) -> None:
     """Every mutation returns the server's own post-mutation state, across all
-    four managed flags including `external_agent_relay` and autocomplete — the screen must
+    managed flags including `external_agent_relay`, autocomplete and CRT — the screen must
     re-render from this, never optimistic local state (010-FR-010)."""
 
     mutated = world.operator.put(f"{FLAGS_ROOT}/{RELAY}/mode", json={"mode": "on"})
@@ -736,7 +740,7 @@ def test_010_FR_006_the_get_read_emits_one_aggregate_record_per_call(
 
     ours = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER]
     assert len(ours) == 1
-    assert "flags=4" in ours[0]
+    assert "flags=5" in ours[0]
     assert "resolved_accounts=1" in ours[0]
     assert [r for r in caplog.records if r.name == ADMIN_SERVICE_LOGGER] == []
 

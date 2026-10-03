@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -15,7 +15,7 @@ function renderUsers() {
 }
 
 describe("AdminUsersSection CRUD safety", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it("renders Users as a full-width semantic section without card chrome", async () => {
     vi.spyOn(apiClient, "listAdminAccounts").mockResolvedValue({ accounts: [] });
@@ -301,6 +301,83 @@ describe("AdminUsersSection CRUD safety", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("013-SC-007 exposes off-screen actions only for overflowing tables and follows scroll/resize", async () => {
+    let width = 420;
+    let notifyResize: ResizeObserverCallback | undefined;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    class ResizeObserverStub {
+      constructor(callback: ResizeObserverCallback) { notifyResize = callback; }
+      observe = observe;
+      disconnect = disconnect;
+    }
+    vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(300);
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(() => width);
+    vi.spyOn(apiClient, "listAdminAccounts").mockResolvedValue({ accounts: [member] });
+    const view = renderUsers();
+    await screen.findByText(member.email);
+    const scroller = screen.getByTestId("admin-users-table-scroll");
+    const user = userEvent.setup();
+    const show = await screen.findByRole("button", { name: "Show table actions" });
+    expect(show).toHaveTextContent("More columns and actions →");
+    expect(scroller).toHaveAttribute("role", "region");
+    expect(scroller).toHaveAttribute("tabindex", "0");
+    expect(observe).toHaveBeenCalledWith(scroller);
+    expect(observe).toHaveBeenCalledWith(scroller.firstElementChild);
+
+    await user.click(show);
+    expect(scroller.scrollLeft).toBe(120);
+    fireEvent.scroll(scroller);
+    const back = screen.getByRole("button", { name: "Back to table start" });
+    expect(back).toHaveTextContent("← Back to email");
+    await user.click(back);
+    expect(scroller.scrollLeft).toBe(0);
+    fireEvent.scroll(scroller);
+    expect(screen.getByRole("button", { name: "Show table actions" })).toBeInTheDocument();
+
+    width = 300;
+    fireEvent(window, new Event("resize"));
+    expect(screen.queryByRole("button", { name: "Show table actions" })).not.toBeInTheDocument();
+    expect(scroller).not.toHaveAttribute("tabindex");
+    width = 420;
+    act(() => notifyResize?.([], {} as ResizeObserver));
+    expect(screen.getByRole("button", { name: "Show table actions" })).toBeInTheDocument();
+    view.unmount();
+    expect(disconnect).toHaveBeenCalled();
+  });
+
+  it("013-FR-014 shows compact Refresh users after success and keeps Retry for failures", async () => {
+    const list = vi.spyOn(apiClient, "listAdminAccounts")
+      .mockResolvedValueOnce({ accounts: [member] })
+      .mockRejectedValueOnce(new ApiError("bad", 503, null, "corr-refresh"));
+    renderUsers();
+    await screen.findByText(member.email);
+    const refresh = screen.getByRole("button", { name: "Refresh users" });
+    expect(refresh).toHaveClass("self-start");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    await userEvent.setup().click(refresh);
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(member.email)).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load users. Ref: corr-refresh");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("013-FR-014 keeps Refresh users after a successful explicit refetch", async () => {
+    const updated = { ...member, display_name: "Updated member" };
+    const list = vi.spyOn(apiClient, "listAdminAccounts")
+      .mockResolvedValueOnce({ accounts: [member] })
+      .mockResolvedValueOnce({ accounts: [updated] });
+    renderUsers();
+    await screen.findByText(member.email);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh users" }));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Updated member")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh users" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("013-FR-014 preserves the last confirmed account list when a refetch fails", async () => {
     const list = vi
       .spyOn(apiClient, "listAdminAccounts")
@@ -308,7 +385,7 @@ describe("AdminUsersSection CRUD safety", () => {
       .mockRejectedValueOnce(new ApiError("bad", 503, null, "corr-stale"));
     renderUsers();
     await screen.findByText(member.email);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh users" }));
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
     expect(screen.getByText(member.email)).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load users. Ref: corr-stale");

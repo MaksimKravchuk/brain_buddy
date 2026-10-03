@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { adminKeysFor } from "../api/adminHooks";
+import { getApiBaseUrl } from "../api/client";
 // Importing the module is the point: its body constructs the sole
 // process-global cache and binds it to auth, exactly once, before React
 // renders. A test that built its own QueryClient would prove the helper works
 // and prove nothing about production wiring.
 import { queryClient } from "../queryClient";
+import { rememberTaskAgentPreference, taskAgentPreferenceKey } from "../features/tasks/taskAgentPreference";
 import { useAuthStore } from "../stores/authStore";
 
 const OPERATOR = { id: "operator-1", email: "operator@example.com" };
@@ -20,6 +22,7 @@ describe("queryClient process wiring (009-FR-005)", () => {
     useAuthStore.setState({ user: null, status: "loading", deletionCancelledNotice: false });
     queryClient.removeQueries({ queryKey: ["admin"] });
     queryClient.removeQueries({ queryKey: [...unrelatedKey] });
+    window.localStorage.clear();
   });
 
   it("009-FR-005: signing out drops the operator capability entry and nothing else", () => {
@@ -57,5 +60,21 @@ describe("queryClient process wiring (009-FR-005)", () => {
     });
 
     expect(queryClient.getQueryData(operatorStatusKey)).toBeUndefined();
+  });
+
+  it("017-FR-008 017-SC-008: production wiring erases the departing owner's agent preference", () => {
+    const apiOrigin = getApiBaseUrl();
+    useAuthStore.setState({ user: OPERATOR, status: "authed", deletionCancelledNotice: false });
+    rememberTaskAgentPreference({ ownerId: OPERATOR.id, apiOrigin }, "agent-1");
+    const key = taskAgentPreferenceKey({ ownerId: OPERATOR.id, apiOrigin });
+    expect(window.localStorage.getItem(key)).not.toBeNull();
+
+    useAuthStore.setState({
+      user: { id: "member-2", email: "member@example.com" },
+      status: "authed",
+      deletionCancelledNotice: false
+    });
+
+    expect(window.localStorage.getItem(key)).toBeNull();
   });
 });

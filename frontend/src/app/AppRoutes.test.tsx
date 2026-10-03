@@ -145,6 +145,12 @@ beforeEach(() => {
       if (url.includes("/tags")) {
         return Promise.resolve(jsonResponse(tagsResponse));
       }
+      if (url.includes("/crt/exposure")) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url.endsWith("/crt/trees")) {
+        return Promise.resolve(jsonResponse([]));
+      }
       return Promise.resolve(jsonResponse(null));
     })
   );
@@ -173,9 +179,48 @@ describe("AppRoutes", () => {
     expect(screen.getByText("6 tasks")).toBeInTheDocument();
     expect(screen.queryByText("Draft the launch announcement")).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/tasks?state=next"), expect.anything());
-    expect(screen.getByRole("button", { name: "Weekly review" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Weekly review — Coming soon" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Thinking Mode — Coming soon" })).toBeDisabled();
     expect(screen.queryByRole("link", { name: /CRT.*legacy/i })).not.toBeInTheDocument();
+  });
+
+  it("019-FR-002 exposes Thinking Mode navigation when crt_canvas is enabled", async () => {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "internal-user@example.test",
+          feature_flags: { crt_canvas: true }
+        },
+        status: "authed"
+      });
+    });
+
+    renderRoutes("/");
+
+    const thinkingMode = await screen.findByRole("link", { name: "Thinking Mode" });
+    expect(thinkingMode).toHaveAttribute("href", "/crt");
+  });
+
+  it("019-FR-002 renders the CRT workspace at the protected direct route", async () => {
+    act(() => {
+      useAuthStore.setState({
+        user: {
+          id: "user-1",
+          email: "internal-user@example.test",
+          feature_flags: { crt_canvas: true }
+        },
+        status: "authed"
+      });
+    });
+
+    renderRoutes("/crt");
+
+    expect(await screen.findByRole("heading", { name: "Start with your first undesired effect" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create first tree" })).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/crt/exposure"), expect.objectContaining({ method: "GET" }));
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/crt/trees"), expect.objectContaining({ method: "GET" }));
+    expect(screen.queryByText("Coming later")).not.toBeInTheDocument();
   });
 
   it("renders projects, tags and task rows from server projections without Context copy", async () => {
@@ -221,7 +266,8 @@ describe("AppRoutes", () => {
     const rowTitle = await screen.findByText("Fix onboarding drop-off");
     const row = rowTitle.closest("article");
     expect(row).not.toBeNull();
-    expect(row).toHaveClass("rounded-[12px]", "px-3.5", "py-[7px]", "transition-colors", "duration-200", "ease-smooth");
+    expect(row).toHaveClass("border-b", "border-slate-200", "bg-white");
+    expect(within(row as HTMLElement).getByTestId("task-row-header")).toHaveClass("h-11");
 
     // The per-row project column is gone (prototype default); the group heading
     // carries the project name instead.
@@ -294,11 +340,21 @@ describe("AppRoutes", () => {
     expect(screen.queryByRole("form", { name: /add an agent/i })).not.toBeInTheDocument();
   });
 
-  it("keeps direct CRT routes inert until the feature is available", async () => {
+  it("019-FR-025 019-FR-026 keeps direct CRT routes inert until the feature is available", async () => {
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      if (String(input).includes("/crt/exposure")) {
+        return Promise.resolve(jsonResponse({ detail: { reason: "crt_canvas_disabled" } }, 404));
+      }
+      return Promise.resolve(jsonResponse(null));
+    });
+
     renderRoutes("/crt/demo-tree");
 
-    expect(await screen.findByRole("heading", { name: "Thinking Mode" })).toBeInTheDocument();
-    expect(screen.getByText("Coming later")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Thinking Mode isn't available for this account" })).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/crt/exposure"), expect.objectContaining({ method: "GET" }));
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/crt/trees"), expect.anything());
+    expect(screen.getByText(/existing BrainBuddy work is unchanged/i)).toBeInTheDocument();
+    expect(screen.queryByText("Coming later")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Next actions" })).not.toBeInTheDocument();
     });
@@ -518,6 +574,15 @@ describe("AppRoutes", () => {
           counts_by_state: { inbox: 4, next: 0, waiting: 0, someday: 0 }
         }));
       }
+      if (url.includes("/tasks?") && url.includes("limit=1")) {
+        // The sidebar's unfiltered whole-list counts.
+        return Promise.resolve(jsonResponse({
+          items: [],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 9, next: 5, waiting: 6, someday: 7 }
+        }));
+      }
       if (url.includes("/projects")) {
         return Promise.resolve(jsonResponse(projectsResponse));
       }
@@ -534,6 +599,8 @@ describe("AppRoutes", () => {
     const sidebar = screen.getByRole("navigation", { name: "Task navigation" });
     expect(await within(sidebar).findByText("4")).toBeInTheDocument();
     expect(within(sidebar).queryByText("9")).not.toBeInTheDocument();
+    // The other list counts are whole-list sizes, not the project view's.
+    expect(await within(within(sidebar).getByRole("link", { name: /Someday \/ maybe/ })).findByText("7")).toBeInTheDocument();
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("project_id=project-onboarding"), expect.anything());
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("unassigned_project=true"), expect.anything());
@@ -733,12 +800,20 @@ describe("AppRoutes", () => {
     });
   });
 
-  it("keeps direct task detail visible when the task is absent from the active projection", async () => {
+  it("recovers a direct task into its canonical projection before showing inline detail", async () => {
     const directTask = taskFixture("task-direct", "Shared task outside Next", "waiting");
     vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/tasks/task-direct")) {
         return Promise.resolve(jsonResponse(directTask));
+      }
+      if (url.includes("/tasks?") && url.includes("state=waiting")) {
+        return Promise.resolve(jsonResponse({
+          items: [directTask],
+          next_cursor: null,
+          has_more: false,
+          counts_by_state: { inbox: 0, next: 0, waiting: 1, someday: 0 }
+        }));
       }
       if (url.includes("/tasks?")) {
         return Promise.resolve(jsonResponse({
@@ -761,7 +836,7 @@ describe("AppRoutes", () => {
 
     expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
     expect(await screen.findByDisplayValue("Shared task outside Next")).toBeInTheDocument();
-    expect(screen.getByText("Next actions is clear")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Waiting for" })).toBeInTheDocument();
   });
 
   it("keeps terminal recovery explicit in task detail", async () => {
@@ -828,7 +903,7 @@ describe("AppRoutes", () => {
     });
   });
 
-  it("opens task detail from a click on the noninteractive card body but not from interactive descendants", async () => {
+  it("opens task detail from the compact row header but not from interactive descendants", async () => {
     const user = userEvent.setup();
     renderRoutes("/tasks/next");
 
@@ -839,7 +914,7 @@ describe("AppRoutes", () => {
     await user.click(within(row as HTMLElement).getByRole("button", { name: "Complete Fix onboarding drop-off" }));
     expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument();
 
-    await user.click(row as HTMLElement);
+    await user.click(within(row as HTMLElement).getByTestId("task-row-header"));
     expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
   });
 
@@ -892,7 +967,7 @@ describe("AppRoutes", () => {
     expect(screen.getByLabelText("Sort tasks")).toHaveValue("due");
   });
 
-  it("restores focus to the list heading when the originating row is absent on close", async () => {
+  it("restores focus to the canonical list heading when recovery cannot find a row", async () => {
     const user = userEvent.setup();
     const directTask = taskFixture("task-direct", "Shared task outside Next", "waiting");
     vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
@@ -918,11 +993,10 @@ describe("AppRoutes", () => {
     });
 
     renderRoutes("/tasks/next/task-direct");
-    await screen.findByRole("heading", { name: "Task detail" });
+    expect(await screen.findByText(/not in this list/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Close task" }));
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Next actions" })).toHaveFocus());
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Waiting for" })).toHaveFocus());
   });
 
   it("keeps unbuilt task-bound thinking actions out of the task workspace", async () => {

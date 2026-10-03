@@ -82,6 +82,12 @@ function eventLabel(type: AgentRunEvent["type"]): string {
   }
 }
 
+function shouldRenderEventSummary(run: AgentRunResponse, event: AgentRunEvent): boolean {
+  return Boolean(event.summary) &&
+    event.kind !== "task_succession" &&
+    !(event.type === "completed" && event.summary === run.result_text);
+}
+
 interface ReplyIntentSnapshot {
   idempotencyKey: string;
   message: string;
@@ -461,7 +467,7 @@ function RunCard({
                   {event.previous_agent_task_id} → {event.new_agent_task_id}
                 </span>
               ) : null}
-              {!contentExpired && event.summary && event.kind !== "task_succession" ? (
+              {!contentExpired && shouldRenderEventSummary(run, event) ? (
                 <span className="basis-full text-slate-500">{event.summary}</span>
               ) : null}
             </li>

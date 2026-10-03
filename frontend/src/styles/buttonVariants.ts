@@ -5,7 +5,8 @@ export const buttonVariants = cva(
     "inline-flex items-center justify-center gap-2 rounded-lg font-medium",
     "transition-[background-color,border-color,color,box-shadow,transform]",
     "duration-200 ease-smooth",
-    "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60"
+    "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60",
+    "focus-visible:shadow-ring-focus"
   ].join(" "),
   {
     variants: {

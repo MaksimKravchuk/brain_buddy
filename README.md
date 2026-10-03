@@ -3,7 +3,13 @@
 [![CI](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml/badge.svg)](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-artifacts-blue)](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml)
 
-Brain Buddy is a collaborative knowledge-graph workspace that helps product teams capture research trees, validate assumptions with AI guidance, and preserve historical versions of their thinking. It also ships a GTD-style task tracker for turning that thinking into action.
+Brain Buddy is a personal GTD workspace whose product focus is helping people turn loosely expressed intentions into executable next actions. It is built first for its owner's everyday use, then for people with similar needs.
+
+The intended core loop is **capture → clarify into an executable next action → act personally or delegate → inspect the result → weekly review of what got stuck**. During review, AI helps identify why work stalled and clarify, resize, defer, or otherwise resolve it. Task detail should fit the person, executor, and situation; more subtasks are not automatically better.
+
+Personal usefulness, learning, and a demonstrable body of work are the project's current goals. Open-source publication is under consideration; a large commercial business is not required for success.
+
+See [Product direction: executable next actions](docs/product-direction.md) for the owner's goals, behavioral hypothesis, garage example, and roles of weekly review and agents. This is product direction, not a claim that the full loop is implemented; the feature specs and release evidence track delivery.
 
 ## Highlights
 - **Interactive canvas** powered by React Flow with undo/redo, optimistic updates, and large-graph tuning for 200+ nodes.
@@ -21,24 +27,43 @@ Brain Buddy is a collaborative knowledge-graph workspace that helps product team
 ## Quick Start
 
 ### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- Optional: `make`, `uvicorn`, `npm` scripts available on your PATH
+- Python 3.11 with the `venv` module (see `.python-version`)
+- Node.js 20.19.0 for the web frontend; mobile uses 22.13.1 (see each
+  stack's `.nvmrc`)
+- nvm available to the shell, npm, and GNU Make
 
-### Backend
+For a reproducible host setup, runtime selection, and verification commands,
+see [Local development](docs/runbooks/local-deployment.md).
+
+### Install dependencies
+
+From the repository root:
+
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-pip install -e .[dev]
+python3 -m venv backend/.venv
+source backend/.venv/bin/activate
+python -m pip install -e 'backend[dev]'
 
-uvicorn app.main:app --reload
+cd frontend
+nvm use
+npm ci
+cd ..
 ```
 
-### Frontend
+### Run
+
+In one terminal from the repository root:
+
+```bash
+source backend/.venv/bin/activate
+make dev-backend
+```
+
+In a second terminal:
+
 ```bash
 cd frontend
-npm install
+nvm use
 npm run dev
 ```
 
@@ -116,9 +141,13 @@ See `docs/api_usage.md` for request/response details and examples.
 - **Mutation testing** runs nightly and report-only on both stacks — mutmut over the backend deterministic core (ADR-0004, ADR-0016) and Stryker over the frontend deterministic modules (ADR-0013): `make mutation-backend`, `make mutation-frontend`. Each stack keeps an *observed* scope it measures and a narrower *enforced* scope allowed to gate a pull request once calibrated; neither gate is connected yet.
 
 ## Feature Specs
-GitHub Spec Kit v0.15.0 is mandatory for new or materially changed feature
-specs. Use `docs/spec-kit-workflow.md` for the portable authoring path, pinned
-commands, and historical grandfathering rules. Outcomes explicitly enrolled in
+GitHub Spec Kit v1.0.11 is mandatory when an ADR-0023 full-path trigger applies: a
+significant new capability, cross-surface contract change, persistence/schema change,
+materially changed workflow/state-machine boundary, or ASK-class outcome. Eligible
+bounded SHIP/SHOW changes use ADR-0023's lightweight brief and one risk-selected
+independent gate instead. Use
+`docs/spec-kit-workflow.md` for the portable full authoring path, pinned commands, and
+historical grandfathering rules. Outcomes explicitly enrolled in
 the optional Hermes managed-delivery mode additionally follow ADR-0010 and
 `docs/spec-driven-kanban.md`.
 

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { authApi, type AuthUser, type LoginPayload, type SignupPayload } from "../api/auth";
+import { cleanupCrtOwnerScope } from "../features/crt/crtDraftCoordinator";
 
 export type AuthStatus = "loading" | "authed" | "anon";
 
@@ -30,8 +31,11 @@ interface AuthStoreState {
   refreshSession: () => Promise<void>;
   login: (payload: LoginPayload) => Promise<void>;
   signup: (payload: SignupPayload) => Promise<void>;
-  logout: () => Promise<void>;
-  clearSession: () => void;
+  logout: () => Promise<boolean>;
+  /** Immediate local boundary used by 401 handlers; cleanup is started for the captured owner. */
+  clearSession: () => boolean;
+  /** Fail-closed boundary for destructive transitions such as account deletion. */
+  clearSessionAfterCleanup: () => Promise<boolean>;
   dismissDeletionNotice: () => void;
   scheduleDeletionNotice: (purgeAt: string) => void;
 }
@@ -45,23 +49,54 @@ interface AuthStoreState {
 // the newer one (010-FR-009).
 let sessionGeneration = 0;
 
-export const useAuthStore = create<AuthStoreState>((set) => ({
+async function cleanupDepartingOwner(user: AuthUser | null): Promise<boolean> {
+  if (!user) return true;
+  const result = await cleanupCrtOwnerScope(user.id, globalThis.location?.origin ?? "");
+  return result.ok;
+}
+
+function sameFeatureFlags(left: AuthUser["feature_flags"], right: AuthUser["feature_flags"]): boolean {
+  const leftFlags = left ?? {};
+  const rightFlags = right ?? {};
+  const leftKeys = Object.keys(leftFlags);
+  const rightKeys = Object.keys(rightFlags);
+  return leftKeys.length === rightKeys.length && leftKeys.every((key) => leftFlags[key] === rightFlags[key]);
+}
+
+function sameAuthUser(left: AuthUser, right: AuthUser): boolean {
+  return left.id === right.id &&
+    left.email === right.email &&
+    (left.display_name ?? null) === (right.display_name ?? null) &&
+    (left.deletion_cancelled === true) === (right.deletion_cancelled === true) &&
+    sameFeatureFlags(left.feature_flags, right.feature_flags);
+}
+
+export const useAuthStore = create<AuthStoreState>((set, get) => ({
   user: null,
   status: "loading",
   deletionCancelledNotice: false,
   deletionScheduledFor: null,
 
   async hydrate() {
-    sessionGeneration += 1;
+    const requestGeneration = ++sessionGeneration;
     try {
       const me = await authApi.me();
+      if (requestGeneration !== sessionGeneration) return;
+      const current = get().user;
+      if (me && current && current.id !== me.id && !(await cleanupDepartingOwner(current))) return;
+      if (requestGeneration !== sessionGeneration) return;
       if (me) {
         set({ user: me, status: "authed" });
-      } else {
+      } else if (await cleanupDepartingOwner(get().user)) {
+        if (requestGeneration !== sessionGeneration) return;
         set({ user: null, status: "anon" });
       }
     } catch {
-      set({ user: null, status: "anon" });
+      if (requestGeneration !== sessionGeneration) return;
+      if (await cleanupDepartingOwner(get().user)) {
+        if (requestGeneration !== sessionGeneration) return;
+        set({ user: null, status: "anon" });
+      }
     }
   },
 
@@ -80,16 +115,28 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
       // in flight — applying it now would apply stale (or wrong-account) data.
       return;
     }
+    const current = get().user;
+    if (current && me && current.id !== me.id && !(await cleanupDepartingOwner(current))) return;
+    if (requestGeneration !== sessionGeneration) return;
     if (me) {
+      // The poll normally returns a newly allocated object even when no account
+      // or flag value changed. Retain the current identity so object-dependent
+      // exposure gates do not unmount active workspaces every polling interval.
+      if (current && get().status === "authed" && sameAuthUser(current, me)) return;
       set({ user: me, status: "authed" });
     } else {
+      if (!(await cleanupDepartingOwner(get().user))) return;
+      if (requestGeneration !== sessionGeneration) return;
       set({ user: null, status: "anon" });
     }
   },
 
   async login(payload) {
-    sessionGeneration += 1;
+    const requestGeneration = ++sessionGeneration;
+    if (!(await cleanupDepartingOwner(get().user))) throw new Error("Could not clear the previous account's local CRT data");
+    if (requestGeneration !== sessionGeneration) return;
     const user = await authApi.login(payload);
+    if (requestGeneration !== sessionGeneration) return;
     set({
       user,
       status: "authed",
@@ -99,13 +146,18 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
   },
 
   async signup(payload) {
-    sessionGeneration += 1;
+    const requestGeneration = ++sessionGeneration;
+    if (!(await cleanupDepartingOwner(get().user))) throw new Error("Could not clear the previous account's local CRT data");
+    if (requestGeneration !== sessionGeneration) return;
     const user = await authApi.signup(payload);
+    if (requestGeneration !== sessionGeneration) return;
     set({ user, status: "authed" });
   },
 
   async logout() {
-    sessionGeneration += 1;
+    const requestGeneration = ++sessionGeneration;
+    if (!(await cleanupDepartingOwner(get().user))) return false;
+    if (requestGeneration !== sessionGeneration) return false;
     // Always clear local state, even if the network call fails — the user
     // asked to sign out and we shouldn't block them on a transient error.
     try {
@@ -113,12 +165,29 @@ export const useAuthStore = create<AuthStoreState>((set) => ({
     } catch {
       /* swallow: local state is the source of truth for logout UX */
     }
+    if (requestGeneration !== sessionGeneration) return false;
     set({ user: null, status: "anon" });
+    return true;
   },
 
   clearSession() {
+    const departing = get().user;
     sessionGeneration += 1;
     set({ user: null, status: "anon" });
+    // 401 handlers must invalidate the session synchronously so protected
+    // requests cannot continue under a revoked owner. The cleanup targets the
+    // captured owner and is best-effort here; explicit logout/deletion use the
+    // fail-closed async boundary below.
+    if (departing) void cleanupDepartingOwner(departing).catch(() => undefined);
+    return true;
+  },
+
+  async clearSessionAfterCleanup() {
+    const requestGeneration = ++sessionGeneration;
+    if (!(await cleanupDepartingOwner(get().user))) return false;
+    if (requestGeneration !== sessionGeneration) return false;
+    set({ user: null, status: "anon" });
+    return true;
   },
 
   dismissDeletionNotice() {

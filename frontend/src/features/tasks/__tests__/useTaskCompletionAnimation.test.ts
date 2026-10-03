@@ -21,8 +21,8 @@ function Harness({ completed = false, secondCompleted = false, scope = "owner-a"
     key: id, "data-task-id": id, "data-task-state": done ? "completed" : "next", "data-top": top
   }, done ? createElement("span", null, "Completed") : createElement("button", { "aria-label": `Complete ${id}` }, "Complete"), createElement("a", { href: `#${id}` }, id));
   return createElement("div", { ref: animation.containerRef },
-    createElement("section", { key: "open" }, !completed && row("first", false, 0), !secondCompleted && row("second", false, completed ? 0 : 50)),
-    createElement("section", { key: "completed" }, completed && row("first", true, secondCompleted ? 0 : 70), secondCompleted && row("second", true, 70))
+    createElement("section", { key: "open", role: "list", "aria-label": "Open" }, !completed && row("first", false, 0), !secondCompleted && row("second", false, completed ? 0 : 50)),
+    createElement("section", { key: "completed", role: "list", "aria-label": "Completed" }, completed && row("first", true, secondCompleted ? 0 : 70), secondCompleted && row("second", true, 70))
   );
 }
 
@@ -64,6 +64,35 @@ describe("016 canonical completion movement", () => {
       expect(motion.element.style.pointerEvents).not.toBe("none");
     }
     expect(screen.getAllByRole("link")).toHaveLength(2);
+  });
+
+  it("016-FR-002 unclips each list card only while one of its rows is in flight", () => {
+    const page = render(createElement(Harness));
+    act(() => capture("first"));
+    page.rerender(createElement(Harness, { completed: true }));
+    const open = screen.getByRole("list", { name: "Open" });
+    const completed = screen.getByRole("list", { name: "Completed" });
+    // The completed row travels into the Completed card; clipping it would
+    // make the row wipe in from the card's top edge.
+    expect(open.style.overflow).toBe("visible");
+    expect(completed.style.overflow).toBe("visible");
+    act(() => motions[0]?.finish());
+    expect(completed.style.overflow).toBe("visible");
+    act(() => motions[1]?.finish());
+    expect(open.style.overflow).toBe("");
+    expect(completed.style.overflow).toBe("");
+  });
+
+  it("016-FR-002 restores list clipping when motion is replaced or the view unmounts", () => {
+    const page = render(createElement(Harness));
+    act(() => capture("first"));
+    page.rerender(createElement(Harness, { completed: true }));
+    act(() => capture("second"));
+    page.rerender(createElement(Harness, { completed: true, secondCompleted: true }));
+    expect(screen.getByRole("list", { name: "Completed" }).style.overflow).toBe("visible");
+    const completed = screen.getByRole("list", { name: "Completed" });
+    page.unmount();
+    expect(completed.style.overflow).toBe("");
   });
 
   it("016-FR-003 transfers a removed completion button's focus without scrolling even across grouped parents", () => {
