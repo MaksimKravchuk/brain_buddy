@@ -3,7 +3,16 @@
 Native SwiftUI proof of concept with a durable local GTD store. It opens without
 web sign-in or network access and supports Inbox / Next actions / Waiting for /
 Someday, date views, projects and tags, Completed / Cancelled history, search, pagination, task
-completion and reopening, and an inline editor with explicit Save and Cancel.
+completion and reopening, quick moves between the four GTD lists, and an inline
+editor with explicit Save and Discard for task fields.
+Inbox has a one-item-at-a-time clarification flow. A captured item can become
+a concrete Next action, a Waiting item with an explicit reason, a new project
+with a desired outcome and first Next action, Someday, or Cancelled. Clear
+actions can move to Next in one click; more ambiguous choices ask one question
+at a time. Reference-only material remains in Inbox until a separate reference
+space is designed. The project conversion is one atomic local write that keeps
+the source item's task ID and details while using its original title as the
+proposed project name. No AI classification is performed.
 The POC uses one main window so separate window snapshots cannot overwrite each
 other's local changes. Switching to another capture context with an unfinished
 task draft asks whether to keep editing or discard it.
@@ -29,6 +38,21 @@ quick capture, while the global New task action opens Next actions. The current
 web archive operation clears task membership and needs a contract fix before sync.
 Archiving waits until a pending quick-capture draft is added or cleared, so its
 project classification cannot silently change.
+Active local projects can store a separate desired outcome. The project view
+shows that outcome beside the first Next action, fetched independently of the
+current search or task page. When no Next action exists, it points to Inbox,
+Waiting, Someday, or an empty project according to its open task counts. The
+outcome is stored only in the local POC; web synchronization has no corresponding
+project outcome contract yet.
+The Projects sidebar has a local, one-project-at-a-time review. It shows why a
+project needs attention, its desired outcome, all linked open actions, and up to
+three recent closures. Reviewing requires an explicit decision; a project with
+only unclarified Inbox items needs a Next action before it can be marked
+reviewed. Completed projects with no open actions can be archived from the
+review. The decision and review time survive restart. Projects return to the
+queue after seven days or when a linked task changes. Reviewing never changes
+a task due date or GTD state automatically. If linked actions change while the
+review is open, the old decision is rejected and the review must be reopened.
 
 Build a launchable `.app` on macOS 26+ with Xcode installed. The build includes
 the local Whisper base model and tokenizer. By default it reads the model from
@@ -60,13 +84,38 @@ web synchronization and its contract tests, but the visible Mac workspace does
 not require a web session. Bidirectional synchronization is not yet enabled.
 
 Opening a task loads its full detail from the local store, including subtasks
-and comments. The editor can add, rename, complete, and reopen subtasks; add
-and edit comments; and cancel a task. Subtask and comment operations save
-immediately, while the task fields use explicit Save and Cancel. Unsaved edits
+and comments. The editor keeps the task in its list, gives notes the main area,
+shows the GTD list and project directly, and reveals date, priority, and tags
+on request. The task-row move menu changes open GTD states without opening the
+editor; moving to Waiting asks who or what is awaited before saving. The editor
+can add, rename, complete, and reopen subtasks; add and edit comments; and
+cancel a task. Subtask and comment operations save immediately, while task
+fields use explicit Save and Discard. The UI states that discarding task edits
+keeps already saved subtask and comment changes. Unsaved edits
 require confirmation before switching tasks or lists. A stale revision keeps
 edited fields in the editor until the current task is loaded and the user
 chooses to retry. Voice transcription asks before
 replacing an existing quick-capture draft.
+
+The Waiting for list has a one-item-at-a-time review. It loads every Waiting
+page, shows the awaited person/event and the date waiting began, then asks for
+an explicit decision: keep waiting, create a separate Next
+follow-up in the same project, return the task to Next with an editable action
+title, or cancel it. Follow-up creation leaves the original Waiting task in
+place. Returning it to Next clears the active waiting fields. The review does
+not send messages or schedule a due date. In the local workspace, Keep waiting
+and Create follow-up store a review receipt separately from the Waiting task:
+the item returns to the review after seven days or immediately when its task
+revision changes, while its GTD state and waiting date remain intact. Follow-up
+creation and its review receipt are one atomic local write.
+
+The local Someday list also has a one-item-at-a-time review. Keep in Someday
+records a review receipt without editing the task; the item returns after seven
+days or when its revision changes. Moving an item to Next asks for a concrete
+action title and saves the title and GTD state atomically while preserving its
+project, tags, notes, and due date. Irrelevant items can be cancelled. Tasks in
+archived projects can remain deferred, but their project must be restored before
+moving them to Next. The review never schedules a due date automatically.
 
 Completed and cancelled tasks reopen into a chosen open list; Waiting for
 requires a person, event, or condition. The local store records the last open

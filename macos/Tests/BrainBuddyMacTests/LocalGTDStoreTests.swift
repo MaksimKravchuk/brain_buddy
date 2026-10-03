@@ -224,6 +224,155 @@ final class LocalGTDStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), fileBeforeReplay)
     }
 
+    func testProjectOutcomePersistsAndRejectsStaleOrReusedCommands() async throws {
+        let url = try makeURL()
+        let store = LocalGTDStore(fileURL: url)
+        let project = try await store.createProject(name: "Garage ready", idempotencyKey: UUID())
+        XCTAssertNil(project.desired_outcome)
+        let outcomeKey = UUID()
+        let updated = try await store.updateProjectOutcome(
+            project, to: "  The garage is clear enough to park the car.  ",
+            idempotencyKey: outcomeKey
+        )
+        XCTAssertEqual(updated.desired_outcome, "The garage is clear enough to park the car.")
+        XCTAssertEqual(updated.revision, project.revision + 1)
+
+        let reopened = LocalGTDStore(fileURL: url)
+        let reopenedProjects = try await reopened.listProjects()
+        let persisted = try XCTUnwrap(reopenedProjects.first)
+        XCTAssertEqual(persisted.desired_outcome, updated.desired_outcome)
+        let replay = try await reopened.updateProjectOutcome(
+            project, to: "The garage is clear enough to park the car.", idempotencyKey: outcomeKey
+        )
+        XCTAssertEqual(replay.revision, updated.revision)
+        do {
+            _ = try await reopened.updateProjectOutcome(
+                project, to: "Another outcome", idempotencyKey: outcomeKey
+            )
+            XCTFail("A reused key with a different outcome must fail")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+        do {
+            _ = try await reopened.updateProjectOutcome(
+                project, to: "Another outcome", idempotencyKey: UUID()
+            )
+            XCTFail("An outdated project revision must fail")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+    }
+
+    func testProjectReviewDecisionPersistsAndRejectsStaleOrChangedReplay() async throws {
+        let url = try makeURL()
+        let store = LocalGTDStore(fileURL: url)
+        let project = try await store.createProject(name: "House move", idempotencyKey: UUID())
+        let key = UUID()
+        let reviewed = try await store.markProjectReviewed(project, decision: .keep, idempotencyKey: key)
+        XCTAssertNotNil(reviewed.last_reviewed_at)
+        XCTAssertEqual(reviewed.last_review_decision, .keep)
+        XCTAssertEqual(reviewed.revision, project.revision + 1)
+
+        let reopened = LocalGTDStore(fileURL: url)
+        let projects = try await reopened.listProjects()
+        let persisted = try XCTUnwrap(projects.first)
+        XCTAssertEqual(persisted.last_reviewed_at, reviewed.last_reviewed_at)
+        XCTAssertEqual(persisted.last_review_decision, .keep)
+        XCTAssertEqual(persisted.review_has_changes, false)
+        let beforeReplay = try Data(contentsOf: url)
+        let replay = try await reopened.markProjectReviewed(project, decision: .keep, idempotencyKey: key)
+        XCTAssertEqual(replay.last_reviewed_at, reviewed.last_reviewed_at)
+        XCTAssertEqual(try Data(contentsOf: url), beforeReplay)
+        do {
+            _ = try await reopened.markProjectReviewed(project, decision: .deferred, idempotencyKey: key)
+            XCTFail("A changed decision must not replay")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+        _ = try await reopened.smartAddTask(
+            title: "Find moving boxes", state: .next,
+            project: .id(project.id), idempotencyKey: UUID()
+        )
+        let changedProjects = try await reopened.listProjects()
+        XCTAssertTrue(changedProjects.first?.review_has_changes == true)
+        do {
+            _ = try await reopened.markProjectReviewed(project, decision: .keep, idempotencyKey: UUID())
+            XCTFail("An outdated project revision must not overwrite the review")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+    }
+
+    func testInboxProjectClarificationIsAtomicAndReplaySafe() async throws {
+        let url = try makeURL()
+        let store = LocalGTDStore(fileURL: url)
+        let tag = try await store.createTag(name: "home", idempotencyKey: UUID())
+        let source = try await store.smartAddTask(
+            title: "Clear the garage", details: "The fridge is in the way.",
+            state: .inbox, waitingFor: nil, dueDate: "2026-10-01",
+            priority: .high, project: nil, tags: [.id(tag.id)], idempotencyKey: UUID()
+        ).task
+        let key = UUID()
+        let result = try await store.clarifyInboxAsProject(
+            source, projectName: "Clear the garage",
+            desiredOutcome: "The car fits inside the garage.",
+            firstAction: "Call Vasya about the fridge", idempotencyKey: key
+        )
+        XCTAssertEqual(result.project.desired_outcome, "The car fits inside the garage.")
+        XCTAssertEqual(result.project.open_task_count, 1)
+        XCTAssertEqual(result.action.id, source.id)
+        XCTAssertEqual(result.action.title, "Call Vasya about the fridge")
+        XCTAssertEqual(result.action.state, "next")
+        XCTAssertEqual(result.action.project_id, result.project.id)
+        XCTAssertEqual(result.action.details, "The fridge is in the way.")
+        XCTAssertEqual(result.action.due_date, "2026-10-01")
+        XCTAssertEqual(result.action.priority, .high)
+        XCTAssertEqual(result.action.tag_ids, [tag.id])
+
+        let reopened = LocalGTDStore(fileURL: url)
+        let inbox = try await reopened.listTasks(query: TaskQuery(state: .inbox, unassignedProject: true))
+        XCTAssertTrue(inbox.items.isEmpty)
+        let persisted = try await reopened.getTask(source.id)
+        XCTAssertEqual(persisted.project_id, result.project.id)
+        let projects = try await reopened.listProjects()
+        XCTAssertEqual(projects.first?.desired_outcome, result.project.desired_outcome)
+        let beforeReplay = try Data(contentsOf: url)
+        let replay = try await reopened.clarifyInboxAsProject(
+            source, projectName: "Clear the garage",
+            desiredOutcome: "The car fits inside the garage.",
+            firstAction: "Call Vasya about the fridge", idempotencyKey: key
+        )
+        XCTAssertEqual(replay.project.id, result.project.id)
+        XCTAssertEqual(try Data(contentsOf: url), beforeReplay)
+        do {
+            _ = try await reopened.clarifyInboxAsProject(
+                source, projectName: "Clear the garage",
+                desiredOutcome: "A different result",
+                firstAction: "Call Vasya about the fridge", idempotencyKey: key
+            )
+            XCTFail("A reused key with a different outcome must fail")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+        let second = try await reopened.createTask(
+            title: "Another idea", state: .inbox,
+            waitingFor: nil, idempotencyKey: UUID()
+        )
+        do {
+            _ = try await reopened.clarifyInboxAsProject(
+                second, projectName: "Clear the garage",
+                desiredOutcome: "Another result", firstAction: "First step", idempotencyKey: UUID()
+            )
+            XCTFail("A duplicate project name must not consume the Inbox item")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+        let unchangedSecond = try await reopened.getTask(second.id)
+        let allProjects = try await reopened.listProjects()
+        XCTAssertEqual(unchangedSecond.state, "inbox")
+        XCTAssertEqual(allProjects.count, 1)
+    }
+
     func testLocalCollectionAndCommentLengthsMatchEditorLimits() async throws {
         let store = LocalGTDStore(fileURL: try makeURL())
         let projectName = String(repeating: "P", count: 500)

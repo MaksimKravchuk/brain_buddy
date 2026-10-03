@@ -2,6 +2,11 @@ import Foundation
 import Darwin
 import CryptoKit
 
+struct InboxProjectResult: Codable {
+    let project: BrainBuddyProject
+    let action: BrainBuddyTask
+}
+
 /// The task surface reads and writes one store. A network client can be used
 /// separately for optional synchronization; the local store needs no session.
 @MainActor
@@ -52,11 +57,28 @@ final class LocalGTDStore: GTDStore {
         var tags: [StoredTag] = []
         var idempotency: [String: String] = [:]
         var idempotencyReceipts: [String: IdempotencyReceipt]?
+        var waitingReviews: [String: TaskReviewReceipt]?
+        var somedayReviews: [String: TaskReviewReceipt]?
     }
 
     private struct IdempotencyReceipt: Codable {
         let fingerprint: String
         let response: Data
+    }
+
+    private struct TaskReviewReceipt: Codable {
+        let taskRevision: Int
+        let reviewedAt: String
+    }
+
+    private struct SomedayActivationBody: Encodable {
+        let title: String
+        let expectedRevision: Int
+    }
+
+    private struct FollowUpReviewBody: Encodable {
+        let title: String
+        let expectedRevision: Int
     }
 
     private struct StoredTask: Codable {
@@ -128,6 +150,28 @@ final class LocalGTDStore: GTDStore {
         var color: String?
         var state: String
         var revision: Int
+        var desiredOutcome: String? = nil
+        var lastReviewedAt: String? = nil
+        var lastReviewDecision: ProjectReviewDecision? = nil
+        var lastReviewedTaskSignature: String? = nil
+    }
+
+    private struct ProjectReviewUpdate: Encodable {
+        let decision: ProjectReviewDecision
+        let expectedRevision: Int
+        let expectedTaskSignature: String?
+    }
+
+    private struct ProjectOutcomeUpdate: Encodable {
+        let desiredOutcome: String
+        let expectedRevision: Int
+    }
+
+    private struct InboxProjectClarification: Encodable {
+        let projectName: String
+        let desiredOutcome: String
+        let firstAction: String
+        let expectedRevision: Int
     }
 
     private struct StoredTag: Codable {
@@ -266,11 +310,27 @@ final class LocalGTDStore: GTDStore {
     }
 
     private func projectValue(_ project: StoredProject, in data: Snapshot) -> BrainBuddyProject {
-        BrainBuddyProject(
+        let taskSignature = Self.projectTaskSignature(project.id, in: data)
+        return BrainBuddyProject(
             id: project.id, name: project.name, color: project.color,
             state: project.state, revision: project.revision,
-            open_task_count: data.tasks.filter { $0.projectID == project.id && $0.isOpen }.count
+            open_task_count: data.tasks.filter { $0.projectID == project.id && $0.isOpen }.count,
+            desired_outcome: project.desiredOutcome,
+            last_reviewed_at: project.lastReviewedAt,
+            last_review_decision: project.lastReviewDecision,
+            review_has_changes: project.lastReviewedAt != nil &&
+                project.lastReviewedTaskSignature != taskSignature,
+            review_task_signature: taskSignature
         )
+    }
+
+    private static func projectTaskSignature(_ projectID: String, in data: Snapshot) -> String {
+        let payload = data.tasks.filter { $0.projectID == projectID }
+            .sorted { $0.id < $1.id }
+            .map { "\($0.id):\($0.revision)" }
+            .joined(separator: "|")
+        return SHA256.hash(data: Data(payload.utf8))
+            .map { String(format: "%02x", $0) }.joined()
     }
 
     private func tagValue(_ tag: StoredTag, in data: Snapshot) -> BrainBuddyTag {
@@ -848,6 +908,207 @@ extension LocalGTDStore {
 }
 
 extension LocalGTDStore {
+    private static func recordWaitingReview(_ task: StoredTask, in data: inout Snapshot, at now: String) {
+        if data.waitingReviews == nil { data.waitingReviews = [:] }
+        data.waitingReviews?[task.id] = TaskReviewReceipt(taskRevision: task.revision, reviewedAt: now)
+    }
+
+    func waitingReviewDue(_ task: BrainBuddyTask, before cutoff: Date) -> Bool {
+        guard task.state == TaskList.waiting.rawValue,
+              let receipt = snapshot.waitingReviews?[task.id],
+              receipt.taskRevision == task.revision,
+              let reviewed = ISO8601DateFormatter().date(from: receipt.reviewedAt) else {
+            return true
+        }
+        return reviewed < cutoff
+    }
+
+    func markWaitingReviewed(_ task: BrainBuddyTask, idempotencyKey: UUID) async throws -> BrainBuddyTask {
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "waiting.review/\(task.id)", body: ["expectedRevision": task.revision]
+        )
+        try checkLoaded()
+        if let replay: StoredTask = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return replay.publicValue()
+        }
+        let reviewed = try mutate { data -> StoredTask in
+            guard let current = data.tasks.first(where: { $0.id == task.id }) else { throw Self.missing("Task") }
+            guard current.revision == task.revision else { throw Self.conflict("Task") }
+            guard current.state == TaskList.waiting.rawValue else {
+                throw APIError(message: "Only Waiting tasks can be marked reviewed.")
+            }
+            Self.recordWaitingReview(current, in: &data, at: Self.now())
+            try Self.record(in: &data, key: key, objectID: task.id, fingerprint: fingerprint, response: current)
+            return current
+        }
+        return reviewed.publicValue()
+    }
+
+    func createReviewedFollowUp(
+        for task: BrainBuddyTask, title: String, idempotencyKey: UUID
+    ) async throws -> BrainBuddyTask {
+        let cleanTitle = try Self.text(title, label: "Follow-up action", max: 500)
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "waiting.follow-up/\(task.id)",
+            body: FollowUpReviewBody(title: cleanTitle, expectedRevision: task.revision)
+        )
+        try checkLoaded()
+        if let replay: StoredTask = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return replay.publicValue()
+        }
+        let created = try mutate { data -> StoredTask in
+            guard let source = data.tasks.first(where: { $0.id == task.id }) else { throw Self.missing("Task") }
+            guard source.revision == task.revision else { throw Self.conflict("Task") }
+            guard source.state == TaskList.waiting.rawValue else {
+                throw APIError(message: "This task is no longer in Waiting for.")
+            }
+            if let projectID = source.projectID,
+               !data.projects.contains(where: { $0.id == projectID && $0.state == "active" }) {
+                throw APIError(message: "Restore this project before creating a follow-up in it.")
+            }
+            let now = Self.now()
+            let followUp = StoredTask(
+                id: Self.id("task"), title: cleanTitle, details: nil,
+                state: TaskList.next.rawValue, lastOpenState: nil, revision: 1,
+                projectID: source.projectID, tagIDs: [], dueDate: nil, priority: .none,
+                waitingFor: nil, waitingSince: nil, completedAt: nil, cancelledAt: nil,
+                orderKey: (data.tasks.filter { $0.state == TaskList.next.rawValue }.map(\.orderKey).max() ?? 0) + 1,
+                createdAt: now, subtasks: [], comments: []
+            )
+            data.tasks.append(followUp)
+            Self.recordWaitingReview(source, in: &data, at: now)
+            try Self.record(in: &data, key: key, objectID: followUp.id,
+                            fingerprint: fingerprint, response: followUp)
+            return followUp
+        }
+        return created.publicValue()
+    }
+
+    func somedayReviewDue(_ task: BrainBuddyTask, before cutoff: Date) -> Bool {
+        guard task.state == TaskList.someday.rawValue,
+              let receipt = snapshot.somedayReviews?[task.id],
+              receipt.taskRevision == task.revision,
+              let reviewed = ISO8601DateFormatter().date(from: receipt.reviewedAt) else {
+            return true
+        }
+        return reviewed < cutoff
+    }
+
+    func markSomedayReviewed(_ task: BrainBuddyTask, idempotencyKey: UUID) async throws -> BrainBuddyTask {
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "someday.review/\(task.id)", body: ["expectedRevision": task.revision]
+        )
+        try checkLoaded()
+        if let replay: StoredTask = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return replay.publicValue()
+        }
+        let reviewed = try mutate { data -> StoredTask in
+            guard let current = data.tasks.first(where: { $0.id == task.id }) else { throw Self.missing("Task") }
+            guard current.revision == task.revision else { throw Self.conflict("Task") }
+            guard current.state == TaskList.someday.rawValue else {
+                throw APIError(message: "Only Someday tasks can be marked reviewed.")
+            }
+            if data.somedayReviews == nil { data.somedayReviews = [:] }
+            data.somedayReviews?[task.id] = TaskReviewReceipt(taskRevision: current.revision, reviewedAt: Self.now())
+            try Self.record(in: &data, key: key, objectID: task.id, fingerprint: fingerprint, response: current)
+            return current
+        }
+        return reviewed.publicValue()
+    }
+
+    func activateSomedayTask(
+        _ task: BrainBuddyTask, title: String, idempotencyKey: UUID
+    ) async throws -> BrainBuddyTask {
+        let cleanTitle = try Self.text(title, label: "Next action", max: 500)
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "someday.activate/\(task.id)",
+            body: SomedayActivationBody(title: cleanTitle, expectedRevision: task.revision)
+        )
+        try checkLoaded()
+        if let replay: StoredTask = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return replay.publicValue()
+        }
+        let activated = try mutate { data -> StoredTask in
+            guard let index = data.tasks.firstIndex(where: { $0.id == task.id }) else {
+                throw Self.missing("Task")
+            }
+            guard data.tasks[index].revision == task.revision else { throw Self.conflict("Task") }
+            guard data.tasks[index].state == TaskList.someday.rawValue else {
+                throw APIError(message: "This task is no longer in Someday.")
+            }
+            if let projectID = data.tasks[index].projectID,
+               !data.projects.contains(where: { $0.id == projectID && $0.state == "active" }) {
+                throw APIError(message: "Restore this project before moving its task to Next actions.")
+            }
+            var item = data.tasks[index]
+            item.title = cleanTitle
+            item.state = TaskList.next.rawValue
+            item.orderKey = (data.tasks.filter { $0.state == TaskList.next.rawValue }.map(\.orderKey).max() ?? 0) + 1
+            item.revision += 1
+            data.tasks[index] = item
+            try Self.record(in: &data, key: key, objectID: item.id, fingerprint: fingerprint, response: item)
+            return item
+        }
+        return activated.publicValue()
+    }
+
+    func clarifyInboxAsProject(
+        _ task: BrainBuddyTask, projectName: String, desiredOutcome: String,
+        firstAction: String, idempotencyKey: UUID
+    ) async throws -> InboxProjectResult {
+        let name = try Self.text(projectName, label: "Project name", max: 500)
+        let outcome = try Self.text(desiredOutcome, label: "Desired outcome", max: 1_000)
+        let actionTitle = try Self.text(firstAction, label: "Next action", max: 500)
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "inbox.project/\(task.id)", body: InboxProjectClarification(
+                projectName: name, desiredOutcome: outcome,
+                firstAction: actionTitle, expectedRevision: task.revision
+            )
+        )
+        try checkLoaded()
+        if let replay: InboxProjectResult = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return replay
+        }
+        return try mutate { data -> InboxProjectResult in
+            guard let index = data.tasks.firstIndex(where: { $0.id == task.id }) else {
+                throw Self.missing("Task")
+            }
+            guard data.tasks[index].revision == task.revision else { throw Self.conflict("Task") }
+            guard data.tasks[index].state == TaskList.inbox.rawValue,
+                  data.tasks[index].projectID == nil else {
+                throw APIError(message: "Only an unassigned Inbox item can start a new project.")
+            }
+            guard !data.projects.contains(where: {
+                $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+            }) else { throw APIError(message: "A project with that name already exists.", statusCode: 409) }
+            let project = StoredProject(
+                id: Self.id("project"), name: name, color: nil,
+                state: "active", revision: 1, desiredOutcome: outcome
+            )
+            data.projects.append(project)
+            var action = data.tasks[index]
+            action.title = actionTitle
+            action.state = TaskList.next.rawValue
+            action.lastOpenState = nil
+            action.projectID = project.id
+            action.waitingFor = nil
+            action.waitingSince = nil
+            action.orderKey = (data.tasks.filter { $0.state == TaskList.next.rawValue }.map(\.orderKey).max() ?? 0) + 1
+            action.revision += 1
+            data.tasks[index] = action
+            let result = InboxProjectResult(
+                project: projectValue(project, in: data), action: action.publicValue()
+            )
+            try Self.record(in: &data, key: key, objectID: task.id, fingerprint: fingerprint, response: result)
+            return result
+        }
+    }
+
     func listProjects() async throws -> [BrainBuddyProject] {
         try checkLoaded()
         return snapshot.projects.filter { $0.state == "active" }
@@ -931,6 +1192,69 @@ extension LocalGTDStore {
                     $0.name.localizedCaseInsensitiveCompare(clean) == .orderedSame
             }) else { throw APIError(message: "A project with that name already exists.", statusCode: 409) }
             data.projects[index].name = clean
+            data.projects[index].revision += 1
+            let result = projectValue(data.projects[index], in: data)
+            try Self.record(in: &data, key: key, objectID: project.id, fingerprint: fingerprint, response: result)
+            return result
+        }
+    }
+
+    func updateProjectOutcome(
+        _ project: BrainBuddyProject, to desiredOutcome: String, idempotencyKey: UUID
+    ) async throws -> BrainBuddyProject {
+        let clean = try Self.text(desiredOutcome, label: "Desired outcome", max: 1_000)
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "project.outcome/\(project.id)",
+            body: ProjectOutcomeUpdate(desiredOutcome: clean, expectedRevision: project.revision)
+        )
+        try checkLoaded()
+        if let result: BrainBuddyProject = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return result
+        }
+        return try mutate { data -> BrainBuddyProject in
+            guard let index = data.projects.firstIndex(where: { $0.id == project.id && $0.state == "active" }) else {
+                throw Self.missing("Project")
+            }
+            guard data.projects[index].revision == project.revision else { throw Self.conflict("Project") }
+            data.projects[index].desiredOutcome = clean
+            data.projects[index].lastReviewedAt = nil
+            data.projects[index].lastReviewDecision = nil
+            data.projects[index].lastReviewedTaskSignature = nil
+            data.projects[index].revision += 1
+            let result = projectValue(data.projects[index], in: data)
+            try Self.record(in: &data, key: key, objectID: project.id, fingerprint: fingerprint, response: result)
+            return result
+        }
+    }
+
+    func markProjectReviewed(
+        _ project: BrainBuddyProject, decision: ProjectReviewDecision,
+        idempotencyKey: UUID
+    ) async throws -> BrainBuddyProject {
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "project.review/\(project.id)",
+            body: ProjectReviewUpdate(
+                decision: decision, expectedRevision: project.revision,
+                expectedTaskSignature: project.review_task_signature
+            )
+        )
+        try checkLoaded()
+        if let result: BrainBuddyProject = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return result
+        }
+        return try mutate { data -> BrainBuddyProject in
+            guard let index = data.projects.firstIndex(where: { $0.id == project.id && $0.state == "active" }) else {
+                throw Self.missing("Project")
+            }
+            guard data.projects[index].revision == project.revision else { throw Self.conflict("Project") }
+            guard project.review_task_signature == Self.projectTaskSignature(project.id, in: data) else {
+                throw APIError(message: "Project actions changed since review opened. Reopen the review.", statusCode: 409)
+            }
+            data.projects[index].lastReviewedAt = Self.now()
+            data.projects[index].lastReviewDecision = decision
+            data.projects[index].lastReviewedTaskSignature = Self.projectTaskSignature(project.id, in: data)
             data.projects[index].revision += 1
             let result = projectValue(data.projects[index], in: data)
             try Self.record(in: &data, key: key, objectID: project.id, fingerprint: fingerprint, response: result)
@@ -1031,6 +1355,9 @@ extension LocalGTDStore {
                     $0.name.localizedCaseInsensitiveCompare(project.name) == .orderedSame
             }) else { throw APIError(message: "An active project already uses this name.", statusCode: 409) }
             data.projects[index].state = "active"
+            data.projects[index].lastReviewedAt = nil
+            data.projects[index].lastReviewDecision = nil
+            data.projects[index].lastReviewedTaskSignature = nil
             data.projects[index].revision += 1
             let result = projectValue(data.projects[index], in: data)
             try Self.record(in: &data, key: key, objectID: project.id, fingerprint: fingerprint, response: result)
