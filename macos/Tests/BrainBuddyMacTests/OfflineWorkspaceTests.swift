@@ -4,6 +4,102 @@ import XCTest
 
 final class OfflineWorkspaceTests: XCTestCase {
     @MainActor
+    func testQuickTitleRenamePreservesTaskContentAndRejectsStaleRevision() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-quick-rename-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let created = try await store.createTask(
+            title: "Ask for a quote", state: .next, waitingFor: nil, idempotencyKey: UUID()
+        )
+        _ = try await store.updateTask(
+            created, changes: TaskChanges(details: .set("Bring the bike serial number")),
+            idempotencyKey: UUID()
+        )
+        _ = try await store.createSubtask(
+            taskID: created.id, title: "Find serial number", idempotencyKey: UUID()
+        )
+        let model = BrainBuddyModel(store: store)
+        await model.restore()
+        let beforeRename = try await store.getTask(created.id)
+
+        let renamed = await model.saveTask(
+            beforeRename, changes: TaskChanges(title: .set("Call workshop for a quote")),
+            destinationState: nil
+        )
+        XCTAssertTrue(renamed)
+        let reopened = LocalGTDStore(fileURL: fileURL)
+        let persisted = try await reopened.getTask(created.id)
+        XCTAssertEqual(persisted.title, "Call workshop for a quote")
+        XCTAssertEqual(persisted.details, "Bring the bike serial number")
+        XCTAssertEqual(persisted.state, TaskList.next.rawValue)
+        XCTAssertEqual(persisted.subtasks.map(\.title), ["Find serial number"])
+
+        let staleRename = await model.saveTask(
+            beforeRename, changes: TaskChanges(title: .set("Overwrite unseen change")),
+            destinationState: nil
+        )
+        XCTAssertFalse(staleRename)
+        let afterConflict = try await store.getTask(created.id)
+        XCTAssertEqual(afterConflict.title, "Call workshop for a quote")
+        XCTAssertEqual(model.syncConflictTaskID, created.id)
+    }
+
+    @MainActor
+    func testQuickCaptureSavesInboxOfflineWithoutChangingMainDraft() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-quick-capture-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let unreachableWeb = APIClient(baseURL: URL(string: "http://127.0.0.1:1/api")!)
+        let model = BrainBuddyModel(api: unreachableWeb, store: store)
+        await model.restore()
+        model.draft = "Keep this unfinished Next draft"
+        let key = UUID()
+
+        try await model.quickCaptureInbox("  Remember the idea  ", idempotencyKey: key)
+        try await model.quickCaptureInbox("  Remember the idea  ", idempotencyKey: key)
+        let inbox = try await store.listTasks(state: .inbox)
+        XCTAssertEqual(inbox.items.map(\.title), ["Remember the idea"])
+        XCTAssertEqual(model.draft, "Keep this unfinished Next draft")
+        XCTAssertEqual(model.destination, .list(.next))
+
+        let reopened = LocalGTDStore(fileURL: fileURL)
+        let reopenedInbox = try await reopened.listTasks(state: .inbox)
+        XCTAssertEqual(reopenedInbox.items.map(\.title), ["Remember the idea"])
+    }
+
+    @MainActor
+    func testQuickOpenDistinguishesTypesAndFindsTaskBeyondFirstPage() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-quick-open-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = LocalGTDStore(fileURL: directory.appendingPathComponent("tasks.json"))
+        let project = try await store.createProject(name: "Review", idempotencyKey: UUID())
+        let tag = try await store.createTag(name: "Review", idempotencyKey: UUID())
+        var lastTask: BrainBuddyTask?
+        for index in 0..<101 {
+            lastTask = try await store.createTask(
+                title: "Review item \(index)", state: .next,
+                waitingFor: nil, idempotencyKey: UUID()
+            )
+        }
+        let model = BrainBuddyModel(store: store)
+        await model.restore()
+
+        let results = try await model.quickOpenResults("Review")
+        XCTAssertEqual(results.count, 103)
+        XCTAssertEqual(results.first(where: { $0.id == "project:\(project.id)" })?.subtitle, "Project")
+        XCTAssertEqual(results.first(where: { $0.id == "tag:\(tag.id)" })?.subtitle, "Tag")
+        let task = try XCTUnwrap(lastTask)
+        XCTAssertEqual(results.first(where: { $0.id == "task:\(task.id)" })?.subtitle, "Task · Next actions")
+        let opened = await model.quickOpenTask(task.id)
+        XCTAssertEqual(opened?.id, task.id)
+    }
+
+    @MainActor
     func testLocalWorkspaceOpensAndKeepsTaskAfterRestartWithoutWebSession() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("brainbuddy-offline-\(UUID().uuidString)", isDirectory: true)
@@ -105,7 +201,8 @@ final class OfflineWorkspaceTests: XCTestCase {
         await reopened.restore()
         let loadedReopenedReview = await reopened.loadWaitingReviewTasks()
         let reopenedReview = try XCTUnwrap(loadedReopenedReview)
-        XCTAssertEqual(reopenedReview.count, 101)
+        XCTAssertEqual(reopenedReview.count, 100)
+        XCTAssertFalse(reopenedReview.contains { $0.id == source.id })
         XCTAssertEqual(reopened.sidebarCounts?.next, 1)
 
         _ = try await store.archiveProject(project, idempotencyKey: UUID())
@@ -113,6 +210,39 @@ final class OfflineWorkspaceTests: XCTestCase {
         let archivedFollowUp = await model.createFollowUp(for: source, title: "Ask landlord again")
         XCTAssertFalse(archivedFollowUp)
         XCTAssertEqual(model.error, "Restore this project before creating a follow-up in it.")
+    }
+
+    @MainActor
+    func testReviewedFollowUpIsAtomicAndReplaySafe() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-reviewed-follow-up-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let source = try await store.createTask(
+            title: "Wait for Sam", state: .waiting, waitingFor: "Sam", idempotencyKey: UUID()
+        )
+        let key = UUID()
+        let first = try await store.createReviewedFollowUp(
+            for: source, title: "Ask Sam for an update", idempotencyKey: key
+        )
+        let replay = try await store.createReviewedFollowUp(
+            for: source, title: "Ask Sam for an update", idempotencyKey: key
+        )
+        XCTAssertEqual(replay.id, first.id)
+        XCTAssertEqual(first.state, TaskList.next.rawValue)
+        let original = try await store.getTask(source.id)
+        XCTAssertEqual(original.state, TaskList.waiting.rawValue)
+        XCTAssertEqual(original.revision, source.revision)
+        XCTAssertEqual(original.waiting_since, source.waiting_since)
+
+        let reopenedStore = LocalGTDStore(fileURL: fileURL)
+        let next = try await reopenedStore.listTasks(query: TaskQuery(state: .next))
+        XCTAssertEqual(next.items.map(\.id), [first.id])
+        let reopened = BrainBuddyModel(store: reopenedStore)
+        await reopened.restore()
+        let review = await reopened.loadWaitingReviewTasks()
+        XCTAssertTrue(try XCTUnwrap(review).isEmpty)
     }
 
     @MainActor
@@ -154,6 +284,174 @@ final class OfflineWorkspaceTests: XCTestCase {
         XCTAssertNil(next.waiting_since)
         let cancelledAfterRestart = try await reopenedStore.getTask(cancelled.id)
         XCTAssertEqual(cancelledAfterRestart.state, "cancelled")
+    }
+
+    @MainActor
+    func testKeepWaitingResumesAfterRestartOrTaskChange() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-keep-waiting-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let task = try await store.createTask(
+            title: "Wait for a reply", state: .waiting,
+            waitingFor: "Sam", idempotencyKey: UUID()
+        )
+        let key = UUID()
+        let first = try await store.markWaitingReviewed(task, idempotencyKey: key)
+        let replay = try await store.markWaitingReviewed(task, idempotencyKey: key)
+        XCTAssertEqual(replay.revision, first.revision)
+        XCTAssertEqual(first.revision, task.revision)
+        XCTAssertEqual(first.waiting_since, task.waiting_since)
+        XCTAssertFalse(store.waitingReviewDue(task, before: Date().addingTimeInterval(-7 * 24 * 60 * 60)))
+        XCTAssertTrue(store.waitingReviewDue(task, before: Date().addingTimeInterval(1)))
+
+        let reopenedStore = LocalGTDStore(fileURL: fileURL)
+        let reopened = BrainBuddyModel(store: reopenedStore)
+        await reopened.restore()
+        let afterRestart = await reopened.loadWaitingReviewTasks()
+        XCTAssertTrue(try XCTUnwrap(afterRestart).isEmpty)
+        let changed = try await reopenedStore.updateTask(
+            task, changes: TaskChanges(title: .set("Wait for Sam's revised reply")), idempotencyKey: UUID()
+        )
+        let afterChange = await reopened.loadWaitingReviewTasks()
+        XCTAssertEqual(try XCTUnwrap(afterChange).map(\.id), [task.id])
+        do {
+            _ = try await reopenedStore.markWaitingReviewed(task, idempotencyKey: UUID())
+            XCTFail("A stale review decision must not be accepted")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+        let kept = await reopened.keepWaiting(changed)
+        XCTAssertTrue(kept)
+        let afterSecondReview = await reopened.loadWaitingReviewTasks()
+        XCTAssertTrue(try XCTUnwrap(afterSecondReview).isEmpty)
+        let current = try await reopenedStore.getTask(task.id)
+        XCTAssertEqual(current.revision, changed.revision)
+        XCTAssertEqual(current.waiting_since, task.waiting_since)
+    }
+
+    @MainActor
+    func testSomedayReviewResumesAcrossPagesRestartAndTaskChange() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-someday-review-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let source = try await store.createTask(
+            title: "Build a small greenhouse", state: .someday,
+            waitingFor: nil, idempotencyKey: UUID()
+        )
+        for index in 0..<100 {
+            _ = try await store.createTask(
+                title: "Future idea \(index)", state: .someday,
+                waitingFor: nil, idempotencyKey: UUID()
+            )
+        }
+        let model = BrainBuddyModel(store: store)
+        await model.restore()
+        let initialReview = await model.loadSomedayReviewTasks()
+        XCTAssertEqual(try XCTUnwrap(initialReview).count, 101)
+        let key = UUID()
+        let reviewed = try await store.markSomedayReviewed(source, idempotencyKey: key)
+        let replay = try await store.markSomedayReviewed(source, idempotencyKey: key)
+        XCTAssertEqual(replay.revision, reviewed.revision)
+        XCTAssertEqual(reviewed.revision, source.revision)
+        XCTAssertEqual(reviewed.state, TaskList.someday.rawValue)
+        XCTAssertFalse(store.somedayReviewDue(source, before: Date().addingTimeInterval(-7 * 24 * 60 * 60)))
+        XCTAssertTrue(store.somedayReviewDue(source, before: Date().addingTimeInterval(1)))
+
+        let reopenedStore = LocalGTDStore(fileURL: fileURL)
+        let reopened = BrainBuddyModel(store: reopenedStore)
+        await reopened.restore()
+        let afterRestart = await reopened.loadSomedayReviewTasks()
+        XCTAssertEqual(try XCTUnwrap(afterRestart).count, 100)
+        let changed = try await reopenedStore.updateTask(
+            source, changes: TaskChanges(title: .set("Build a greenhouse next spring")),
+            idempotencyKey: UUID()
+        )
+        let afterChange = await reopened.loadSomedayReviewTasks()
+        XCTAssertEqual(try XCTUnwrap(afterChange).count, 101)
+        do {
+            _ = try await reopenedStore.markSomedayReviewed(source, idempotencyKey: UUID())
+            XCTFail("A stale Someday review must not be accepted")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+        let kept = await reopened.keepSomeday(changed)
+        XCTAssertTrue(kept)
+        let afterSecondReview = await reopened.loadSomedayReviewTasks()
+        XCTAssertEqual(try XCTUnwrap(afterSecondReview).count, 100)
+        let current = try await reopenedStore.getTask(source.id)
+        XCTAssertEqual(current.revision, changed.revision)
+    }
+
+    @MainActor
+    func testSomedayActivationIsAtomicAndReplaySafe() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-someday-activation-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let project = try await store.createProject(name: "Garden", idempotencyKey: UUID())
+        let tag = try await store.createTag(name: "outside", idempotencyKey: UUID())
+        let source = try await store.smartAddTask(
+            title: "Garden redesign", state: .someday,
+            project: .id(project.id), tags: [.id(tag.id)], idempotencyKey: UUID()
+        ).task
+        let key = UUID()
+        let first = try await store.activateSomedayTask(
+            source, title: "  Sketch the first garden bed  ", idempotencyKey: key
+        )
+        let replay = try await store.activateSomedayTask(
+            source, title: "Sketch the first garden bed", idempotencyKey: key
+        )
+        XCTAssertEqual(replay.id, first.id)
+        XCTAssertEqual(first.title, "Sketch the first garden bed")
+        XCTAssertEqual(first.state, TaskList.next.rawValue)
+        XCTAssertEqual(first.revision, source.revision + 1)
+        XCTAssertEqual(first.project_id, project.id)
+        XCTAssertEqual(first.tag_ids, [tag.id])
+        let reopenedStore = LocalGTDStore(fileURL: fileURL)
+        let reopened = try await reopenedStore.getTask(source.id)
+        XCTAssertEqual(reopened.state, TaskList.next.rawValue)
+        XCTAssertEqual(reopened.title, first.title)
+        let next = try await reopenedStore.listTasks(query: TaskQuery(state: .next))
+        XCTAssertEqual(next.items.map(\.id), [source.id])
+        do {
+            _ = try await reopenedStore.activateSomedayTask(
+                source, title: "Another action", idempotencyKey: UUID()
+            )
+            XCTFail("A stale Someday activation must not be accepted")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+    }
+
+    @MainActor
+    func testSomedayActivationRetainsArchivedProjectMembership() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-archived-someday-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let project = try await store.createProject(name: "Garden", idempotencyKey: UUID())
+        let source = try await store.smartAddTask(
+            title: "Redesign garden", state: .someday,
+            project: .id(project.id), idempotencyKey: UUID()
+        ).task
+        _ = try await store.archiveProject(project, idempotencyKey: UUID())
+
+        let activated = try await store.activateSomedayTask(
+            source, title: "Sketch garden beds", idempotencyKey: UUID()
+        )
+        XCTAssertEqual(activated.state, TaskList.next.rawValue)
+        XCTAssertEqual(activated.project_id, project.id)
+
+        let reopened = LocalGTDStore(fileURL: fileURL)
+        let persisted = try await reopened.getTask(source.id)
+        XCTAssertEqual(persisted.state, TaskList.next.rawValue)
+        XCTAssertEqual(persisted.project_id, project.id)
     }
 
     @MainActor
@@ -249,7 +547,7 @@ final class OfflineWorkspaceTests: XCTestCase {
         XCTAssertEqual(initial.map(\.project.name), ["First", "Second"])
         XCTAssertEqual(initial.first?.tasks.count, 101)
         XCTAssertEqual(initial.first?.nextCount, 101)
-        let marked = await model.markProjectReviewed(first, decision: .keep)
+        let marked = await model.markProjectReviewed(try XCTUnwrap(initial.first?.project), decision: .keep)
         XCTAssertTrue(marked)
 
         let reopenedStore = LocalGTDStore(fileURL: fileURL)
@@ -270,6 +568,37 @@ final class OfflineWorkspaceTests: XCTestCase {
         let changedReview = try XCTUnwrap(loadedChangedReview)
         XCTAssertEqual(changedReview.map(\.project.id), [first.id, second.id])
         XCTAssertTrue(changedReview.first?.project.review_has_changes == true)
+    }
+
+    @MainActor
+    func testProjectReviewRejectsActionsChangedAfterReviewOpened() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-stale-project-review-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = LocalGTDStore(fileURL: directory.appendingPathComponent("tasks.json"))
+        let project = try await store.createProject(name: "Move house", idempotencyKey: UUID())
+        let action = try await store.smartAddTask(
+            title: "Call mover", state: .next,
+            project: .id(project.id), idempotencyKey: UUID()
+        ).task
+        let model = BrainBuddyModel(store: store)
+        await model.restore()
+        let openedReview = await model.loadProjectReview()
+        let opened = try XCTUnwrap(openedReview?.first)
+        let changed = try await store.updateTask(
+            action, changes: TaskChanges(title: .set("Book mover")), idempotencyKey: UUID()
+        )
+
+        let staleDecision = await model.markProjectReviewed(opened.project, decision: .keep)
+        XCTAssertFalse(staleDecision)
+        XCTAssertEqual(model.error, "Project changed elsewhere. Reopen the review to inspect its current actions.")
+        let refreshedReview = await model.loadProjectReview()
+        let stillDue = try XCTUnwrap(refreshedReview?.first)
+        XCTAssertNil(stillDue.project.last_reviewed_at)
+        XCTAssertEqual(stillDue.tasks.first?.title, changed.title)
+        XCTAssertEqual(stillDue.project.revision, opened.project.revision)
+        let currentDecision = await model.markProjectReviewed(stillDue.project, decision: .keep)
+        XCTAssertTrue(currentDecision)
     }
 
     @MainActor

@@ -30,7 +30,7 @@ final class SmartAddParserTests: XCTestCase {
         XCTAssertEqual(description(draft.project), "id:vendor")
         XCTAssertEqual(draft.previewProjectName(in: projects), "Vendor launch")
         XCTAssertEqual(draft.previewTagNames(in: tags), ["deep work", "work"])
-        XCTAssertEqual(draft.previewProjectLabel(in: projects), "◈ Vendor launch")
+        XCTAssertEqual(draft.previewProjectLabel(in: projects), "Project: Vendor launch")
         XCTAssertEqual(draft.previewTagLabels(in: tags), ["#deep work", "#work"])
         XCTAssertTrue(draft.hasCompletedTokens)
         XCTAssertTrue(draft.isValid)

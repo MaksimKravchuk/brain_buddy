@@ -72,7 +72,10 @@ final class BrainBuddyModel: ObservableObject {
     private var pendingMoveKeys: [String: (signature: String, key: UUID)] = [:]
     private var pendingSubtaskCreate: [String: (title: String, key: UUID)] = [:]
     private var pendingCommentCreate: [String: (body: String, key: UUID)] = [:]
-    private var pendingFollowUpCreate: [String: (title: String, key: UUID)] = [:]
+    private var pendingFollowUpCreate: [String: (revision: Int, title: String, key: UUID)] = [:]
+    private var pendingWaitingReview: [String: (revision: Int, key: UUID)] = [:]
+    private var pendingSomedayReview: [String: (revision: Int, key: UUID)] = [:]
+    private var pendingSomedayActivation: [String: (revision: Int, title: String, key: UUID)] = [:]
     private var pendingInboxProject: [String: (signature: String, key: UUID)] = [:]
     private var pendingCollectionCreate: [String: (name: String, key: UUID)] = [:]
     private var pendingCollectionChange: [String: (signature: String, key: UUID)] = [:]
@@ -145,6 +148,9 @@ final class BrainBuddyModel: ObservableObject {
         pendingSubtaskCreate.removeAll()
         pendingCommentCreate.removeAll()
         pendingFollowUpCreate.removeAll()
+        pendingWaitingReview.removeAll()
+        pendingSomedayReview.removeAll()
+        pendingSomedayActivation.removeAll()
         pendingInboxProject.removeAll()
         pendingCollectionCreate.removeAll()
         pendingCollectionChange.removeAll()
@@ -327,6 +333,83 @@ final class BrainBuddyModel: ObservableObject {
         }
     }
 
+    func quickOpenResults(_ input: String) async throws -> [QuickOpenResult] {
+        let term = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        func matches(_ value: String) -> Bool {
+            term.isEmpty || value.localizedStandardContains(term)
+        }
+        var results: [QuickOpenResult] = []
+        for list in TaskList.allCases where matches(list.title) {
+            results.append(QuickOpenResult(
+                id: "list:\(list.rawValue)", title: list.title,
+                subtitle: "GTD list", symbol: list.symbol, target: .list(list)
+            ))
+        }
+        for state in [HistoryState.completed, .cancelled] where matches(state.title) {
+            results.append(QuickOpenResult(
+                id: "history:\(state.rawValue)", title: state.title,
+                subtitle: "History", symbol: state.symbol, target: .history(state)
+            ))
+        }
+        let allProjects = projects + archivedProjects
+        for project in allProjects where matches(project.name) {
+            results.append(QuickOpenResult(
+                id: "project:\(project.id)", title: project.name,
+                subtitle: project.state == "archived" ? "Archived project" : "Project",
+                symbol: "square.stack", target: .project(project.id)
+            ))
+        }
+        for tag in tags where matches(tag.name) {
+            results.append(QuickOpenResult(
+                id: "tag:\(tag.id)", title: "#\(tag.name)",
+                subtitle: "Tag", symbol: "tag", target: .tag(tag.id)
+            ))
+        }
+        guard !term.isEmpty else { return results }
+        var cursor: String?
+        var seenTaskIDs: Set<String> = []
+        repeat {
+            try Task.checkCancellation()
+            let page = try await store.listTasks(
+                query: TaskQuery(includeCompleted: true, includeCancelled: true, q: term),
+                cursor: cursor
+            )
+            for task in page.items where seenTaskIDs.insert(task.id).inserted {
+                let state = TaskList(rawValue: task.state)?.title ?? task.state.capitalized
+                let project = allProjects.first(where: { $0.id == task.project_id })?.name
+                let subtitle = (["Task", state] + [project].compactMap { $0 }).joined(separator: " · ")
+                results.append(QuickOpenResult(
+                    id: "task:\(task.id)", title: task.title,
+                    subtitle: subtitle, symbol: "checkmark.circle", target: .task(task.id)
+                ))
+            }
+            cursor = page.next_cursor
+        } while cursor != nil
+        return results
+    }
+
+    func quickOpenTask(_ id: String) async -> BrainBuddyTask? {
+        do { return try await store.getTask(id) }
+        catch {
+            handleRequestFailure(error)
+            return nil
+        }
+    }
+
+    func quickCaptureInbox(_ rawTitle: String, idempotencyKey: UUID) async throws {
+        guard isLocalWorkspace else {
+            throw APIError(message: "Quick Capture is available in the local workspace.")
+        }
+        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title.count <= 500 else {
+            throw APIError(message: "Enter a task title of 500 characters or fewer.")
+        }
+        _ = try await store.createTask(
+            title: title, state: .inbox, waitingFor: nil, idempotencyKey: idempotencyKey
+        )
+        await reload()
+    }
+
     func loadProjectReview() async -> [ProjectReviewItem]? {
         error = nil
         do {
@@ -372,7 +455,7 @@ final class BrainBuddyModel: ObservableObject {
     func markProjectReviewed(_ project: BrainBuddyProject, decision: ProjectReviewDecision) async -> Bool {
         guard !busy, let localStore = store as? LocalGTDStore else { return false }
         let operation = "review-project:\(project.id)"
-        let signature = "\(project.revision)|\(decision.rawValue)"
+        let signature = "\(project.revision)|\(project.review_task_signature ?? "-")|\(decision.rawValue)"
         let pending = pendingCollectionChange[operation]
         let key = pending?.signature == signature ? pending!.key : UUID()
         pendingCollectionChange[operation] = (signature, key)
@@ -495,15 +578,113 @@ final class BrainBuddyModel: ObservableObject {
         do {
             var result: [BrainBuddyTask] = []
             var cursor: String?
+            let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
             repeat {
                 let page = try await store.listTasks(query: TaskQuery(state: .waiting), cursor: cursor)
-                result.append(contentsOf: page.items.filter { $0.state == TaskList.waiting.rawValue })
+                result.append(contentsOf: page.items.filter { task in
+                    task.state == TaskList.waiting.rawValue &&
+                        ((store as? LocalGTDStore)?.waitingReviewDue(task, before: cutoff) ?? true)
+                })
                 cursor = page.next_cursor
             } while cursor != nil
             return result
         } catch {
             handleRequestFailure(error)
             return nil
+        }
+    }
+
+    func keepWaiting(_ task: BrainBuddyTask) async -> Bool {
+        guard !busy else { return false }
+        guard let localStore = store as? LocalGTDStore else { return true }
+        let pending = pendingWaitingReview[task.id]
+        let key = pending?.revision == task.revision ? pending!.key : UUID()
+        pendingWaitingReview[task.id] = (task.revision, key)
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            _ = try await localStore.markWaitingReviewed(task, idempotencyKey: key)
+            pendingWaitingReview.removeValue(forKey: task.id)
+            await reload()
+            return true
+        } catch {
+            if let apiError = error as? APIError, apiError.statusCode == 409 {
+                pendingWaitingReview.removeValue(forKey: task.id)
+                self.error = "This Waiting task changed. Reopen the review to inspect it."
+            } else { handleRequestFailure(error) }
+            return false
+        }
+    }
+
+    func loadSomedayReviewTasks() async -> [BrainBuddyTask]? {
+        guard let localStore = store as? LocalGTDStore else { return [] }
+        error = nil
+        do {
+            var result: [BrainBuddyTask] = []
+            var cursor: String?
+            let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+            repeat {
+                let page = try await store.listTasks(query: TaskQuery(state: .someday), cursor: cursor)
+                result.append(contentsOf: page.items.filter {
+                    $0.state == TaskList.someday.rawValue && localStore.somedayReviewDue($0, before: cutoff)
+                })
+                cursor = page.next_cursor
+            } while cursor != nil
+            return result
+        } catch {
+            handleRequestFailure(error)
+            return nil
+        }
+    }
+
+    func keepSomeday(_ task: BrainBuddyTask) async -> Bool {
+        guard !busy, let localStore = store as? LocalGTDStore else { return false }
+        let pending = pendingSomedayReview[task.id]
+        let key = pending?.revision == task.revision ? pending!.key : UUID()
+        pendingSomedayReview[task.id] = (task.revision, key)
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            _ = try await localStore.markSomedayReviewed(task, idempotencyKey: key)
+            pendingSomedayReview.removeValue(forKey: task.id)
+            await reload()
+            return true
+        } catch {
+            if let apiError = error as? APIError, apiError.statusCode == 409 {
+                pendingSomedayReview.removeValue(forKey: task.id)
+                self.error = "This Someday task changed. Reopen the review to inspect it."
+            } else { handleRequestFailure(error) }
+            return false
+        }
+    }
+
+    func activateSomeday(_ task: BrainBuddyTask, title: String) async -> Bool {
+        guard !busy, let localStore = store as? LocalGTDStore else { return false }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 500 else {
+            error = "Enter a concrete next action of 500 characters or fewer."
+            return false
+        }
+        let pending = pendingSomedayActivation[task.id]
+        let key = pending?.revision == task.revision && pending?.title == trimmed ? pending!.key : UUID()
+        pendingSomedayActivation[task.id] = (task.revision, trimmed, key)
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            let updated = try await localStore.activateSomedayTask(task, title: trimmed, idempotencyKey: key)
+            pendingSomedayActivation.removeValue(forKey: task.id)
+            taskDetails[task.id] = updated
+            await reload()
+            return true
+        } catch {
+            if let apiError = error as? APIError, apiError.statusCode == 409 {
+                pendingSomedayActivation.removeValue(forKey: task.id)
+                self.error = "This Someday task changed. Reopen the review to inspect it."
+            } else { handleRequestFailure(error) }
+            return false
         }
     }
 
@@ -872,34 +1053,46 @@ final class BrainBuddyModel: ObservableObject {
             return false
         }
         let pending = pendingFollowUpCreate[task.id]
-        let key = pending?.title == trimmed ? pending!.key : UUID()
-        pendingFollowUpCreate[task.id] = (trimmed, key)
+        let key = pending?.revision == task.revision && pending?.title == trimmed ? pending!.key : UUID()
+        pendingFollowUpCreate[task.id] = (task.revision, trimmed, key)
         busy = true
         error = nil
         defer { busy = false }
         do {
-            let current = try await store.getTask(task.id)
-            guard current.state == TaskList.waiting.rawValue else {
-                pendingFollowUpCreate.removeValue(forKey: task.id)
-                self.error = "This task is no longer in Waiting for. Refresh the review."
-                return false
+            if let localStore = store as? LocalGTDStore {
+                _ = try await localStore.createReviewedFollowUp(for: task, title: trimmed, idempotencyKey: key)
+            } else {
+                let current = try await store.getTask(task.id)
+                guard current.state == TaskList.waiting.rawValue else {
+                    pendingFollowUpCreate.removeValue(forKey: task.id)
+                    self.error = "This task is no longer in Waiting for. Refresh the review."
+                    return false
+                }
+                guard current.revision == task.revision else {
+                    pendingFollowUpCreate.removeValue(forKey: task.id)
+                    self.error = "This Waiting task changed. Reopen the review before creating a follow-up."
+                    return false
+                }
+                if let projectID = current.project_id,
+                   archivedProjects.contains(where: { $0.id == projectID }) {
+                    pendingFollowUpCreate.removeValue(forKey: task.id)
+                    self.error = "Restore this project before creating a follow-up in it."
+                    return false
+                }
+                _ = try await store.smartAddTask(
+                    title: trimmed, state: .next, waitingFor: nil,
+                    project: current.project_id.map { .id($0) }, tags: [], idempotencyKey: key
+                )
             }
-            if let projectID = current.project_id,
-               archivedProjects.contains(where: { $0.id == projectID }) {
-                pendingFollowUpCreate.removeValue(forKey: task.id)
-                self.error = "Restore this project before creating a follow-up in it."
-                return false
-            }
-            _ = try await store.smartAddTask(
-                title: trimmed, state: .next, waitingFor: nil,
-                project: current.project_id.map { .id($0) }, tags: [], idempotencyKey: key
-            )
             pendingFollowUpCreate.removeValue(forKey: task.id)
             await loadCollections()
             await reload()
             return true
         } catch {
-            handleRequestFailure(error)
+            if let apiError = error as? APIError, apiError.statusCode == 409 {
+                pendingFollowUpCreate.removeValue(forKey: task.id)
+                self.error = "Waiting task or project changed. Reopen the review before creating a follow-up."
+            } else { handleRequestFailure(error) }
             return false
         }
     }
@@ -1220,6 +1413,7 @@ enum HistoryState: String, Hashable {
 
 private enum PendingEditorNavigation {
     case destination(WorkspaceDestination)
+    case quickOpen(QuickOpenTarget)
     case task(String?)
     case complete(BrainBuddyTask)
     case move(BrainBuddyTask, TaskList)
@@ -1231,6 +1425,7 @@ private enum PendingEditorNavigation {
     case signOut
     case createTask
     case reviewWaiting
+    case reviewSomeday
     case reviewProjects
     case clarifyInbox
     case groupByProject(Bool)
@@ -1263,6 +1458,7 @@ private extension TaskChanges {
 
 struct ContentView: View {
     @StateObject private var model = BrainBuddyModel()
+    @StateObject private var quickCapture = QuickCaptureController()
     @State private var email = ""
     @State private var password = ""
     @State private var voicePresented = false
@@ -1292,9 +1488,18 @@ struct ContentView: View {
     @State private var movingTask: BrainBuddyTask?
     @State private var moveWaitingFor = ""
     @State private var reviewingWaiting = false
+    @State private var reviewingSomeday = false
     @State private var reviewingProjects = false
     @State private var clarifyingInbox = false
+    @State private var quickOpenPresented = false
+    @State private var pendingQuickOpenTarget: QuickOpenTarget?
+    @State private var quickOpenedTask: BrainBuddyTask?
+    @State private var renamingTask: BrainBuddyTask?
+    @State private var quickRenameTitle = ""
+    @State private var quickRenameError: String?
+    @State private var quickRenameConflict = false
     @FocusState private var addFocused: Bool
+    @FocusState private var quickRenameFocused: Bool
 
     var body: some View {
         Group {
@@ -1313,6 +1518,19 @@ struct ContentView: View {
                             Label("New task", systemImage: "plus")
                         }
                         .keyboardShortcut("n", modifiers: [.command])
+                        Button {
+                            quickOpenPresented = true
+                        } label: {
+                            Label("Quick Open", systemImage: "magnifyingglass.circle")
+                        }
+                        .keyboardShortcut("o", modifiers: [.command])
+                        Button {
+                            quickCapture.show()
+                        } label: {
+                            Label("Quick Capture", systemImage: "square.and.pencil")
+                        }
+                        .keyboardShortcut("b", modifiers: [.control, .option, .shift])
+                        .help("Capture to Inbox from anywhere with ⌃⌥⇧B")
                         Button {
                             voicePresented = true
                         } label: {
@@ -1356,6 +1574,63 @@ struct ContentView: View {
             }
         }
         .task { await model.restore() }
+        .onAppear { quickCapture.start(model: model) }
+        .onDisappear { quickCapture.stop() }
+        .sheet(isPresented: $quickOpenPresented, onDismiss: {
+            if let target = pendingQuickOpenTarget {
+                pendingQuickOpenTarget = nil
+                requestNavigation(.quickOpen(target))
+            }
+        }) {
+            QuickOpenView(model: model) { target in
+                pendingQuickOpenTarget = target
+                quickOpenPresented = false
+            } onClose: {
+                quickOpenPresented = false
+            }
+        }
+        .sheet(item: $renamingTask) { task in
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Rename task").font(.title2.bold())
+                TextField("Task title", text: $quickRenameTitle)
+                    .focused($quickRenameFocused)
+                    .onSubmit {
+                        guard !quickRenameConflict else { return }
+                        Task { await saveQuickRename(task) }
+                    }
+                if quickRenameTitle.count > 500 {
+                    Text("Use 500 characters or fewer.")
+                        .font(.caption).foregroundStyle(.red)
+                }
+                if let quickRenameError {
+                    Text(quickRenameError).font(.caption).foregroundStyle(.red)
+                }
+                if quickRenameConflict,
+                   let current = model.taskDetails[task.id] {
+                    Text("Current title: \(current.title)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Use my title on the current task") {
+                        Task { await saveQuickRename(current) }
+                    }
+                    .disabled(model.busy || quickRenameTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              || quickRenameTitle.count > 500)
+                }
+                HStack {
+                    Spacer()
+                    Button("Cancel") { cancelQuickRename(task.id) }
+                        .keyboardShortcut(.cancelAction)
+                    Button("Save title") { Task { await saveQuickRename(task) } }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(model.busy || quickRenameConflict
+                                  || quickRenameTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                  || quickRenameTitle.count > 500)
+                }
+            }
+            .padding(24)
+            .frame(width: 420)
+            .onAppear { quickRenameFocused = true }
+        }
         .onChange(of: model.account?.id) { previousID, accountID in
             if accountID != nil {
                 password = ""
@@ -1365,6 +1640,8 @@ struct ContentView: View {
                 }
             } else {
                 voicePresented = false
+                quickOpenPresented = false
+                pendingQuickOpenTarget = nil
                 selectedTaskID = nil
             }
         }
@@ -1605,6 +1882,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $reviewingWaiting) {
             WaitingReviewView(model: model)
+        }
+        .sheet(isPresented: $reviewingSomeday) {
+            SomedayReviewView(model: model)
         }
         .sheet(isPresented: $reviewingProjects) {
             ProjectReviewView(model: model) { id in
@@ -1856,6 +2136,7 @@ struct ContentView: View {
     private func changesCaptureContext(_ next: PendingEditorNavigation) -> Bool {
         switch next {
         case .destination(let destination): destination != model.destination
+        case .quickOpen: true
         case .newTask: isDateDestination || model.destination.isHistory || isArchivedProjectDestination
         case .signOut: true
         default: false
@@ -1870,8 +2151,14 @@ struct ContentView: View {
         switch pendingEditorNavigation {
         case .destination(let destination):
             selectedTaskID = nil
+            quickOpenedTask = nil
             Task { await model.choose(destination) }
+        case .quickOpen(let target):
+            selectedTaskID = nil
+            quickOpenedTask = nil
+            Task { await openQuickOpenTarget(target) }
         case .task(let id):
+            if id != quickOpenedTask?.id { quickOpenedTask = nil }
             selectedTaskID = id
             if let id {
                 model.taskDetails.removeValue(forKey: id)
@@ -1936,6 +2223,9 @@ struct ContentView: View {
         case .reviewWaiting:
             selectedTaskID = nil
             reviewingWaiting = true
+        case .reviewSomeday:
+            selectedTaskID = nil
+            reviewingSomeday = true
         case .reviewProjects:
             selectedTaskID = nil
             reviewingProjects = true
@@ -1954,6 +2244,40 @@ struct ContentView: View {
         case .sort(let value):
             selectedTaskID = nil
             model.sort = value
+        }
+    }
+
+    private func openQuickOpenTarget(_ target: QuickOpenTarget) async {
+        guard model.account != nil else { return }
+        model.searchText = ""
+        model.priorityFilter = .all
+        switch target {
+        case .list(let list):
+            await model.choose(.list(list))
+        case .history(let state):
+            await model.choose(.history(state))
+        case .project(let id):
+            await model.choose(.project(id))
+        case .tag(let id):
+            await model.choose(.tag(id))
+        case .task(let id):
+            guard let task = await model.quickOpenTask(id) else { return }
+            let destination: WorkspaceDestination
+            if task.state == HistoryState.completed.rawValue {
+                destination = .history(.completed)
+            } else if task.state == HistoryState.cancelled.rawValue {
+                destination = .history(.cancelled)
+            } else if task.state == TaskList.inbox.rawValue, let projectID = task.project_id {
+                destination = .project(projectID)
+            } else if let list = TaskList(rawValue: task.state) {
+                destination = .list(list)
+            } else {
+                model.error = "This task has an unknown GTD state."
+                return
+            }
+            await model.choose(destination)
+            quickOpenedTask = task
+            applyNavigation(.task(id))
         }
     }
 
@@ -1981,6 +2305,13 @@ struct ContentView: View {
                     if model.destination == .list(.waiting) {
                         Button("Review Waiting for") {
                             requestNavigation(.reviewWaiting)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.busy)
+                    }
+                    if model.isLocalWorkspace && model.destination == .list(.someday) {
+                        Button("Review Someday") {
+                            requestNavigation(.reviewSomeday)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(model.busy)
@@ -2028,6 +2359,14 @@ struct ContentView: View {
                 .padding(.bottom, 12)
             }
 
+            if let error = quickCapture.registrationError {
+                Label(error, systemImage: "keyboard.badge.exclamationmark")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 12)
+            }
+
             if let taskID = model.syncConflictTaskID {
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.triangle.2.circlepath")
@@ -2057,6 +2396,13 @@ struct ContentView: View {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if case .project(let id) = model.destination {
                         projectOverviewCard(id)
+                    }
+                    if let quickOpenedTask, selectedTaskID == quickOpenedTask.id {
+                        Text("OPENED FROM QUICK OPEN")
+                            .font(.caption.bold())
+                            .tracking(1.5)
+                            .foregroundStyle(.secondary)
+                        taskCard(model.taskDetails[quickOpenedTask.id] ?? quickOpenedTask)
                     }
                     ForEach(taskSections, id: \.name) { section in
                         if !section.name.isEmpty {
@@ -2212,15 +2558,20 @@ struct ContentView: View {
     }
 
     private var openTasks: [BrainBuddyTask] {
-        model.tasks.filter { $0.state != "completed" && $0.state != "cancelled" }
+        visibleTasks.filter { $0.state != "completed" && $0.state != "cancelled" }
     }
 
     private var completedTasks: [BrainBuddyTask] {
-        model.tasks.filter { $0.state == "completed" }
+        visibleTasks.filter { $0.state == "completed" }
     }
 
     private var cancelledTasks: [BrainBuddyTask] {
-        model.tasks.filter { $0.state == "cancelled" }
+        visibleTasks.filter { $0.state == "cancelled" }
+    }
+
+    private var visibleTasks: [BrainBuddyTask] {
+        guard let pinned = quickOpenedTask, selectedTaskID == pinned.id else { return model.tasks }
+        return model.tasks.filter { $0.id != pinned.id }
     }
 
     private var taskSections: [(name: String, tasks: [BrainBuddyTask])] {
@@ -2249,6 +2600,39 @@ struct ContentView: View {
             blue: Double(value & 0xff) / 255,
             opacity: 1
         )
+    }
+
+    private func beginQuickRename(_ task: BrainBuddyTask) {
+        guard selectedTaskID == nil, !model.busy else { return }
+        quickRenameTitle = task.title
+        quickRenameError = nil
+        quickRenameConflict = false
+        model.error = nil
+        renamingTask = task
+    }
+
+    private func cancelQuickRename(_ taskID: String) {
+        model.clearSyncConflict(for: taskID)
+        renamingTask = nil
+        quickRenameError = nil
+        quickRenameConflict = false
+    }
+
+    private func saveQuickRename(_ task: BrainBuddyTask) async {
+        let title = quickRenameTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.busy, !title.isEmpty, title.count <= 500 else { return }
+        if title == task.title {
+            cancelQuickRename(task.id)
+            return
+        }
+        if await model.saveTask(task, changes: TaskChanges(title: .set(title)), destinationState: nil) {
+            cancelQuickRename(task.id)
+        } else if model.syncConflictTaskID == task.id {
+            quickRenameConflict = true
+            quickRenameError = "This task changed elsewhere. Review its current title before applying yours."
+        } else {
+            quickRenameError = model.error ?? "The task title could not be saved. Try again."
+        }
     }
 
     private func taskCard(_ task: BrainBuddyTask) -> some View {
@@ -2296,6 +2680,10 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Edit \(task.title)")
                         .accessibilityValue(selectedTaskID == task.id ? "Expanded" : "Collapsed")
+                        .contextMenu {
+                            Button("Rename title…") { beginQuickRename(task) }
+                                .disabled(selectedTaskID != nil || model.busy)
+                        }
                     }
                 }
                 Spacer(minLength: 8)
@@ -2431,7 +2819,7 @@ struct ContentView: View {
                 .strokeBorder(selectedTaskID == task.id ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.12))
                 .allowsHitTesting(false)
         }
-        .id("\(task.id):\(task.revision):\(task.state)")
+        .id("\(task.id):\(task.revision):\(task.state):\(selectedTaskID == task.id)")
     }
 
     private func terminalDetail(_ detail: BrainBuddyTask) -> some View {
@@ -2531,7 +2919,7 @@ struct ContentView: View {
                             .font(.caption.weight(.semibold))
                             .lineLimit(1)
                     }
-                    Text("↪ \(smartCaptureState.title)")
+                    Text("Will save in \(smartCaptureState.title)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -2541,8 +2929,14 @@ struct ContentView: View {
                 }
                 let projectLabel = smartDraft.previewProjectLabel(in: model.projects)
                 let tagLabels = smartDraft.previewTagLabels(in: model.tags)
-                if projectLabel != nil || !tagLabels.isEmpty {
-                    Text(([projectLabel].compactMap { $0 } + tagLabels).joined(separator: " · "))
+                Text(([projectLabel ?? "No project"] + (tagLabels.isEmpty ? ["No tags"] : tagLabels))
+                    .joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.hasAppliedTaskFilter || !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || model.priorityFilter != .all {
+                    Text("Current search or priority filter may hide the new task from this list.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2907,7 +3301,9 @@ private struct WaitingReviewView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Review Waiting for").font(.title2.bold())
-                    Text(loaded ? (items.isEmpty ? "No items" : "\(min(index + 1, items.count)) of \(items.count)") : "One item at a time")
+                    Text(loaded ? (items.isEmpty ? (model.isLocalWorkspace ? "No items due" : "No items")
+                                                 : "\(min(index + 1, items.count)) of \(items.count)")
+                                : "One item at a time")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -2925,8 +3321,11 @@ private struct WaitingReviewView: View {
                                        description: Text(model.error ?? "Try again."))
                 Button("Retry") { Task { await load() } }
             } else if items.isEmpty {
-                ContentUnavailableView("Nothing is waiting", systemImage: "hourglass",
-                                       description: Text("Waiting for tasks will appear here for review."))
+                ContentUnavailableView(model.isLocalWorkspace ? "Waiting review is up to date" : "Nothing is waiting",
+                                       systemImage: "hourglass",
+                                       description: Text(model.isLocalWorkspace
+                                                         ? "Reviewed items return after seven days or when their task changes."
+                                                         : "Waiting for tasks will appear here for review."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if index >= items.count {
                 ContentUnavailableView("Waiting review complete", systemImage: "checkmark.circle",
@@ -2971,7 +3370,9 @@ private struct WaitingReviewView: View {
                         Text(decision == .followUp
                              ? (isArchivedProject(item)
                                 ? "Restore this archived project before creating a follow-up in it."
-                                : "Creates a separate Next action in the same project. This item stays in Waiting for.")
+                                : (model.isLocalWorkspace
+                                   ? "Creates a separate Next action in the same project. This item stays in Waiting and returns to review after seven days or a change."
+                                   : "Creates a separate Next action in the same project. This item stays in Waiting for."))
                              : "Moves this item to Next actions and clears its active waiting details.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -2990,8 +3391,12 @@ private struct WaitingReviewView: View {
                     Text("What should happen next?")
                         .font(.headline)
                     HStack(spacing: 10) {
-                        Button("Keep waiting") { advance() }
-                            .help("Skip for this review; no reminder or review date is set")
+                        Button("Keep waiting") {
+                            Task { if await model.keepWaiting(item) { advance() } }
+                        }
+                            .help(model.isLocalWorkspace
+                                  ? "Review again after seven days or when this task changes"
+                                  : "Skip for this review; no reminder or review date is set")
                         Button("Create follow-up…") {
                             actionTitle = ""
                             decision = .followUp
@@ -3081,6 +3486,168 @@ private struct WaitingReviewView: View {
         if let date = formatter.date(from: value) { return date }
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)
+    }
+}
+
+private struct SomedayReviewView: View {
+    @ObservedObject var model: BrainBuddyModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [BrainBuddyTask] = []
+    @State private var index = 0
+    @State private var loading = true
+    @State private var loaded = false
+    @State private var enteringNext = false
+    @State private var actionTitle = ""
+    @State private var confirmingCancel = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Review Someday").font(.title2.bold())
+                    Text(loaded ? (items.isEmpty ? "No items due" : "\(min(index + 1, items.count)) of \(items.count)")
+                                : "One item at a time")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Close review") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(model.busy)
+            }
+
+            if loading {
+                ProgressView("Loading Someday tasks…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !loaded {
+                ContentUnavailableView("Could not load review", systemImage: "arrow.clockwise",
+                                       description: Text(model.error ?? "Try again."))
+                Button("Retry") { Task { await load() } }
+            } else if items.isEmpty {
+                ContentUnavailableView("Someday review is up to date", systemImage: "calendar.badge.checkmark",
+                                       description: Text("Reviewed items return after seven days or when their task changes."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if index >= items.count {
+                ContentUnavailableView("Someday review complete", systemImage: "checkmark.circle",
+                                       description: Text("Deferred items stay in Someday; selected next actions move to Next."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                let item = items[index]
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(item.title).font(.title3.weight(.semibold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if let details = item.details, !details.isEmpty {
+                            Text(details)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let projectID = item.project_id {
+                            Text("Project · \((model.projects + model.archivedProjects).first(where: { $0.id == projectID })?.name ?? "Unknown project")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .scrollIndicators(.visible)
+
+                if enteringNext {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("What is the concrete next action?").font(.headline)
+                        TextField("Concrete next action", text: $actionTitle)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityLabel("Concrete next action")
+                            .onSubmit { Task { await activate(item) } }
+                        Text(isArchivedProject(item)
+                             ? "Restore this archived project before moving its task to Next actions."
+                             : "The title and GTD list change together. Project, tags, notes, and due date remain attached.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            Button("Back") { enteringNext = false }
+                            Spacer()
+                            Button("Move to Next actions") { Task { await activate(item) } }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.busy || !validActionTitle || isArchivedProject(item))
+                        }
+                    }
+                } else {
+                    Text("Is this relevant now?").font(.headline)
+                    HStack(spacing: 10) {
+                        Button("Keep in Someday") {
+                            Task { if await model.keepSomeday(item) { advance() } }
+                        }
+                        .help("Review again after seven days or when this task changes")
+                        Button("Make it a Next action…") {
+                            actionTitle = item.title
+                            enteringNext = true
+                        }
+                        .disabled(isArchivedProject(item))
+                        Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
+                    }
+                    .disabled(model.busy)
+                    if isArchivedProject(item) {
+                        Text("Restore the archived project to activate this task.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let error = model.error {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 640, height: 440)
+        .task { await load() }
+        .confirmationDialog("Cancel this task?", isPresented: $confirmingCancel) {
+            Button("Cancel task", role: .destructive) {
+                guard index < items.count else { return }
+                let item = items[index]
+                Task { if await model.cancelTask(item) { advance() } }
+            }
+            Button("Keep task", role: .cancel) {}
+        } message: {
+            Text("The task will move to history. No message will be sent.")
+        }
+    }
+
+    private var validActionTitle: Bool {
+        let title = actionTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !title.isEmpty && title.count <= 500
+    }
+
+    private func isArchivedProject(_ task: BrainBuddyTask) -> Bool {
+        guard let projectID = task.project_id else { return false }
+        return model.archivedProjects.contains { $0.id == projectID }
+    }
+
+    private func load() async {
+        loading = true
+        if let fetched = await model.loadSomedayReviewTasks() {
+            items = fetched
+            index = 0
+            loaded = true
+            enteringNext = false
+        } else {
+            loaded = false
+        }
+        loading = false
+    }
+
+    private func activate(_ task: BrainBuddyTask) async {
+        guard validActionTitle, !isArchivedProject(task) else { return }
+        if await model.activateSomeday(task, title: actionTitle) { advance() }
+    }
+
+    private func advance() {
+        index += 1
+        enteringNext = false
+        actionTitle = ""
+        model.error = nil
     }
 }
 
