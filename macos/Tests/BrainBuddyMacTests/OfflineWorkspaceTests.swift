@@ -4,6 +4,49 @@ import XCTest
 
 final class OfflineWorkspaceTests: XCTestCase {
     @MainActor
+    func testQuickTitleRenamePreservesTaskContentAndRejectsStaleRevision() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-quick-rename-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let created = try await store.createTask(
+            title: "Ask for a quote", state: .next, waitingFor: nil, idempotencyKey: UUID()
+        )
+        _ = try await store.updateTask(
+            created, changes: TaskChanges(details: .set("Bring the bike serial number")),
+            idempotencyKey: UUID()
+        )
+        _ = try await store.createSubtask(
+            taskID: created.id, title: "Find serial number", idempotencyKey: UUID()
+        )
+        let model = BrainBuddyModel(store: store)
+        await model.restore()
+        let beforeRename = try await store.getTask(created.id)
+
+        let renamed = await model.saveTask(
+            beforeRename, changes: TaskChanges(title: .set("Call workshop for a quote")),
+            destinationState: nil
+        )
+        XCTAssertTrue(renamed)
+        let reopened = LocalGTDStore(fileURL: fileURL)
+        let persisted = try await reopened.getTask(created.id)
+        XCTAssertEqual(persisted.title, "Call workshop for a quote")
+        XCTAssertEqual(persisted.details, "Bring the bike serial number")
+        XCTAssertEqual(persisted.state, TaskList.next.rawValue)
+        XCTAssertEqual(persisted.subtasks.map(\.title), ["Find serial number"])
+
+        let staleRename = await model.saveTask(
+            beforeRename, changes: TaskChanges(title: .set("Overwrite unseen change")),
+            destinationState: nil
+        )
+        XCTAssertFalse(staleRename)
+        let afterConflict = try await store.getTask(created.id)
+        XCTAssertEqual(afterConflict.title, "Call workshop for a quote")
+        XCTAssertEqual(model.syncConflictTaskID, created.id)
+    }
+
+    @MainActor
     func testQuickCaptureSavesInboxOfflineWithoutChangingMainDraft() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("brainbuddy-quick-capture-\(UUID().uuidString)", isDirectory: true)
