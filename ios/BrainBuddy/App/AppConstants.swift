@@ -14,7 +14,7 @@ enum AppConstants {
     /// The App Group whose container holds the shared store file. Read from
     /// Info.plist `BBAppGroupIdentifier`, falling back to the default group.
     static let appGroupID: String = {
-        let fallback = "group.com.brainbuddy.ios"
+        let fallback = "group.brainbuddy.ios"
         guard let value = Bundle.main.object(forInfoDictionaryKey: appGroupInfoKey) as? String else {
             return fallback
         }
@@ -29,7 +29,7 @@ enum AppConstants {
 
     /// `BGAppRefreshTask` identifier. Must also be listed in Info.plist
     /// `BGTaskSchedulerPermittedIdentifiers` (as `$(PRODUCT_BUNDLE_IDENTIFIER).refresh`).
-    static let backgroundRefreshTaskID = (Bundle.main.bundleIdentifier ?? "com.brainbuddy.ios") + ".refresh"
+    static let backgroundRefreshTaskID = (Bundle.main.bundleIdentifier ?? "brainbuddy.ios") + ".refresh"
 
     static let defaultServerURL = URL(string: "https://brain-buddy-frontend.fly.dev/api")!
 

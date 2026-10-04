@@ -6,7 +6,7 @@ import WidgetKit
 /// on the capture sheet. `OpenCaptureIntent` is compiled into the app as well,
 /// as controls that open their app require.
 struct CaptureControl: ControlWidget {
-    static let kind = "com.brainbuddy.ios.control.capture"
+    static let kind = "brainbuddy.ios.control.capture"
 
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {

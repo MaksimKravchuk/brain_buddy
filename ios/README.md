@@ -53,7 +53,7 @@ xcodebuild test -project BrainBuddy.xcodeproj -scheme BrainBuddy \
 ## Signing and identifiers
 
 Every identifier derives from one build setting, `BB_BUNDLE_ID_PREFIX`
-(`settings.base` in `project.yml`, default `com.brainbuddy`):
+(`settings.base` in `project.yml`, default `brainbuddy`):
 
 | Identifier | Value | Where it is used |
 |---|---|---|

@@ -285,7 +285,7 @@ enum SystemEvents {
             continuation.onTermination = { _ in
                 box.monitor.cancel()
             }
-            box.monitor.start(queue: DispatchQueue(label: "com.brainbuddy.ios.network-path"))
+            box.monitor.start(queue: DispatchQueue(label: "brainbuddy.ios.network-path"))
         }
     }
 }

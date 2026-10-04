@@ -11,7 +11,7 @@ options:
   minimumXcodeGenVersion: 2.42.0
   # Fallback only, for a target without its own PRODUCT_BUNDLE_IDENTIFIER.
   # The shipping targets derive theirs from BB_BUNDLE_ID_PREFIX below.
-  bundleIdPrefix: com.brainbuddy
+  bundleIdPrefix: brainbuddy
   deploymentTarget:
     iOS: "26.0"
   xcodeVersion: "26.0"
@@ -31,7 +31,7 @@ settings:
     # Group from the BBAppGroupIdentifier Info.plist key and the refresh id
     # from the bundle id, so this line is the only place to change it. CI
     # overrides it on the xcodebuild command line from vars.IOS_BUNDLE_ID_PREFIX.
-    BB_BUNDLE_ID_PREFIX: com.brainbuddy
+    BB_BUNDLE_ID_PREFIX: brainbuddy
     BB_APP_GROUP_ID: group.$(BB_BUNDLE_ID_PREFIX).ios
     # Deliberately empty. Choose your team in Xcode (Signing & Capabilities) or
     # pass DEVELOPMENT_TEAM=<team id> to xcodebuild; CI passes vars.APPLE_TEAM_ID.

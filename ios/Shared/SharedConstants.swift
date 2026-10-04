@@ -9,7 +9,7 @@ import Foundation
 /// group). Both targets must carry the same value, or the widget and the app
 /// open different files.
 enum SharedConstants {
-    static let fallbackAppGroupID = "group.com.brainbuddy.ios"
+    static let fallbackAppGroupID = "group.brainbuddy.ios"
 
     /// App Group holding the shared store document.
     static let appGroupID: String = {

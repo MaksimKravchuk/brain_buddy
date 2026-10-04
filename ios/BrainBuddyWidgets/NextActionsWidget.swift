@@ -234,7 +234,7 @@ struct NextActionsProvider: AppIntentTimelineProvider {
 // MARK: - Widget
 
 struct NextActionsWidget: Widget {
-    static let kind = "com.brainbuddy.ios.widget.next-actions"
+    static let kind = "brainbuddy.ios.widget.next-actions"
 
     var body: some WidgetConfiguration {
         AppIntentConfiguration(

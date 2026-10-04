@@ -135,8 +135,10 @@ jobs:
             echo "::error::APPLE_TEAM_ID must be the 10-character Apple team id."
             exit 1
           fi
-          if [ -n "${BUNDLE_ID_PREFIX}" ] && ! [[ "${BUNDLE_ID_PREFIX}" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]]; then
-            echo "::error::IOS_BUNDLE_ID_PREFIX must be a reverse-DNS prefix such as com.example."
+          # Apple allows letters, digits, hyphens and periods; reverse-DNS
+          # (com.example) is the convention, a single word (brainbuddy) is valid.
+          if [ -n "${BUNDLE_ID_PREFIX}" ] && ! [[ "${BUNDLE_ID_PREFIX}" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$ ]]; then
+            echo "::error::IOS_BUNDLE_ID_PREFIX must be letters, digits and hyphens, optionally dot-separated (brainbuddy, com.example)."
             exit 1
           fi
           offset="${BUILD_NUMBER_OFFSET:-0}"

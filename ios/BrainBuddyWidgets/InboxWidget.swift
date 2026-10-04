@@ -60,7 +60,7 @@ struct InboxProvider: AppIntentTimelineProvider {
 /// Inbox count on the Home Screen and the Lock Screen. Every size opens the
 /// app on the capture sheet.
 struct InboxWidget: Widget {
-    static let kind = "com.brainbuddy.ios.widget.inbox"
+    static let kind = "brainbuddy.ios.widget.inbox"
 
     var body: some WidgetConfiguration {
         AppIntentConfiguration(
