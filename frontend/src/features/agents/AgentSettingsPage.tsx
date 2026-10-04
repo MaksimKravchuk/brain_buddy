@@ -784,7 +784,9 @@ function UpdateConnectionForm({
   const [ambiguous, setAmbiguous] = useState(false);
   const keys = useAgentKeys();
   const intentKey = useIntentKey(`agent-connection-update-${connection.id}`);
-  const frozen = useRef<{
+  // The exact request an ambiguous failure left in flight. It decides whether
+  // the retry control renders, so it is state rather than a ref.
+  const [frozen, setFrozen] = useState<{
     body: {
       name?: string;
       agent_address?: string;
@@ -801,11 +803,11 @@ function UpdateConnectionForm({
 
   const mutation = useRelayMutation({
     mutationKey: keys.mutation("connection-update", connection.id),
-    mutationFn: (input: NonNullable<typeof frozen.current>) =>
+    mutationFn: (input: NonNullable<typeof frozen>) =>
       apiClient.updateAgentConnection(connection.id, input.body, input.idempotencyKey),
     onSuccess: (_, input) => {
       intentKey.settle();
-      frozen.current = null;
+      setFrozen(null);
       setAmbiguous(false);
       onDone(
         input.body.agent_address || input.body.auth_scheme
@@ -817,14 +819,14 @@ function UpdateConnectionForm({
       const definitive = definitivelyRejected(caught);
       if (definitive) {
         intentKey.settle();
-        frozen.current = null;
+        setFrozen(null);
       }
       setAmbiguous(!definitive);
       setError(getErrorMessage(caught));
     }
   });
 
-  const submit = (input: NonNullable<typeof frozen.current>) => {
+  const submit = (input: NonNullable<typeof frozen>) => {
     setError(null);
     setAmbiguous(false);
     mutation.mutate(input);
@@ -855,7 +857,7 @@ function UpdateConnectionForm({
           body,
           idempotencyKey: intentKey.current(JSON.stringify([connection.id, body]))
         };
-        frozen.current = snapshot;
+        setFrozen(snapshot);
         submit(snapshot);
       }}
     >
@@ -893,13 +895,13 @@ function UpdateConnectionForm({
         <Button type="submit" variant="secondary" size="sm" isLoading={mutation.isPending} disabled={!online}>
           Save connection
         </Button>
-        {ambiguous && frozen.current ? (
+        {ambiguous && frozen ? (
           <Button
             type="button"
             variant="secondary"
             size="sm"
             disabled={!online}
-            onClick={() => frozen.current && submit(frozen.current)}
+            onClick={() => submit(frozen)}
           >
             Retry exact update
           </Button>

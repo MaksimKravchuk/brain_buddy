@@ -38,6 +38,7 @@ export function BrainDumpPrivacyControls(): React.JSX.Element {
       return;
     }
     const controller = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- data-loading effect: switching to another operation id re-enters the loading state ahead of the fetch it starts, and only that fetch's callbacks leave it.
     setIsLoading(true);
     apiClient
       .getBrainDump(operationId, controller.signal)

@@ -572,7 +572,7 @@ describe("AgentHandoffOverlay", () => {
     await waitFor(() => expect(apiClient.previewAgentHandoff).toHaveBeenCalledTimes(2));
   });
 
-  it.each(["forbidden", { detail: "not-a-structured-reason" }])(
+  it.each(["forbidden", { detail: "not-a-structured-reason" }, { detail: { reason: 42 } }])(
     "shows an unrelated dispatch failure without silently re-previewing for payload %#",
     async (payload) => {
       vi.spyOn(apiClient, "confirmAgentHandoff").mockRejectedValue(

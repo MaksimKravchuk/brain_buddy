@@ -68,6 +68,22 @@ describe("Task side sheet", () => {
     expect(screen.queryByRole("dialog", { hidden: true })).not.toBeInTheDocument();
   });
 
+  it("mounts without content and presents the sheet once content arrives", () => {
+    vi.useFakeTimers();
+    const onPresenceChange = vi.fn();
+    const view = render(<TaskSideSheet onClose={vi.fn()} onPresenceChange={onPresenceChange}>{null}</TaskSideSheet>);
+    expect(screen.queryByRole("dialog", { hidden: true })).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(160));
+    expect(onPresenceChange).toHaveBeenLastCalledWith(false);
+
+    view.rerender(<TaskSideSheet onClose={vi.fn()} onPresenceChange={onPresenceChange}>{<SheetContent />}</TaskSideSheet>);
+    const sheet = screen.getByRole("dialog");
+    expect(onPresenceChange).toHaveBeenLastCalledWith(true);
+    expect(sheet.parentElement).toHaveAttribute("data-state", "closing");
+    act(() => vi.advanceTimersByTime(40));
+    expect(sheet.parentElement).toHaveAttribute("data-state", "open");
+  });
+
   it("contains keyboard focus, skips unavailable controls, and releases listeners on unmount", () => {
     const external = document.createElement("button");
     document.body.append(external);

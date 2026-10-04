@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 export type CrtCardDeleteConfirmationProps = Readonly<{
@@ -32,10 +32,12 @@ export function CrtCardDeleteConfirmation({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  onCancelRef.current = onCancel;
-  onConfirmRef.current = onConfirm;
-  returnFocusRefValue.current = returnFocusRef;
-  busyRef.current = busy;
+  useLayoutEffect(() => {
+    onCancelRef.current = onCancel;
+    onConfirmRef.current = onConfirm;
+    returnFocusRefValue.current = returnFocusRef;
+    busyRef.current = busy;
+  });
 
   const restoreFocus = useCallback(() => {
     if (restoredFocusRef.current) return;
@@ -116,7 +118,7 @@ export function CrtCardDeleteConfirmation({
         aria-describedby={descriptionId}
         aria-busy={busy}
         tabIndex={-1}
-        className="w-full max-w-lg rounded-2xl border border-rose-200 bg-white p-6 shadow-floating outline-none"
+        className="w-full max-w-lg rounded-2xl border border-rose-200 bg-white p-6 shadow-floating outline-hidden"
       >
         <p className="text-xs font-bold uppercase tracking-[0.08em] text-rose-700">Delete card</p>
         <h1 id="crt-card-delete-title" className="mt-2 text-xl font-semibold text-slate-900">{title}</h1>

@@ -190,6 +190,16 @@ describe("AgentSettingsPage", () => {
     expect(within(row).queryByRole("link", { name: "not a valid URL" })).toBeNull();
   });
 
+  it("renders a plain http agent address as a link", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([
+      connection({ agent_address: "http://agent.internal.test" })
+    ]);
+    renderPage();
+
+    const row = await screen.findByRole("row", { name: "Hermes" });
+    expect(within(row).getByRole("link", { name: "http://agent.internal.test" })).toHaveAttribute("href", "http://agent.internal.test");
+  });
+
   it("closes the edit modal through both dialog controls and restores focus", async () => {
     vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
     renderPage();

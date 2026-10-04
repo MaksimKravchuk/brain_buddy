@@ -356,4 +356,34 @@ describe("AccountSettingsPage", () => {
     );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
+
+  it("keeps the account signed in when the browser-local CRT cleanup fails after scheduling", async () => {
+    const spy = vi.spyOn(apiClient, "requestAccountDeletion").mockResolvedValue({
+      deletion_requested_at: "2026-08-06T12:00:00Z",
+      purge_at: "2026-08-20T12:00:00Z"
+    });
+    const clearSessionAfterCleanup = useAuthStore.getState().clearSessionAfterCleanup;
+    useAuthStore.setState({ clearSessionAfterCleanup: vi.fn(async () => false) });
+    renderPage();
+
+    const user = userEvent.setup();
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /delete account/i }));
+    });
+    await act(async () => {
+      await user.type(screen.getByLabelText(/confirm with your password/i), "hunter2hunter2");
+      await user.click(screen.getByRole("button", { name: /delete my account/i }));
+    });
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith({ current_password: "hunter2hunter2" })
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(/couldn't clear this browser's local CRT data/i)
+    );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByText(/login page/)).not.toBeInTheDocument();
+    expect(useAuthStore.getState().user).not.toBeNull();
+    useAuthStore.setState({ clearSessionAfterCleanup });
+  });
 });
