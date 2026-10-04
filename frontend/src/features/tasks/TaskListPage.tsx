@@ -541,6 +541,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         else listHeadingRef.current?.focus({ preventScroll: true });
       }
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a focus target is a one-shot request: it needs the committed DOM above (the assigned control or the surviving row), and consuming it here is what stops a later agent-summary refresh from replaying it.
     setAgentFocusTarget(null);
   }, [agentFocusTarget, agentRunSummaries]);
 
@@ -663,6 +664,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   useEffect(() => {
     if (!taskId || selectedTaskVisible) {
       recoveryAttemptRef.current = null;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- selection-recovery effect: leaving recovery (no selection, or the row is visible) clears the notice together with the attempt it belonged to; the attempts below own the notice while they redirect and page through the list.
       setSelectionRecoveryMessage(null);
       return;
     }

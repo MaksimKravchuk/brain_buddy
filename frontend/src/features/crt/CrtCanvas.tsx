@@ -16,7 +16,7 @@ import {
   type Viewport
 } from "@xyflow/react";
 import { Maximize2, Minus, Plus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
@@ -220,7 +220,9 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
   const pendingCreationRef = useRef<string | null>(null);
   const pendingCompositeEntryRef = useRef(false);
   const programmaticFocusRef = useRef(false);
-  onChangeRef.current = onChange;
+  useLayoutEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useEffect(() => {
     const current = historyRef.current;
@@ -491,10 +493,16 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
   );
 
   const [flowNodes, setFlowNodes] = useState<CrtCard[]>(derivedFlowNodes);
+  const [flowNodesSource, setFlowNodesSource] = useState(derivedFlowNodes);
 
-  useEffect(() => {
+  // Positions dragged through React Flow live in `flowNodes` until the graph derives a new
+  // node list, which then replaces them. Adjusted during render (the previous derivation is
+  // kept in state) rather than from an effect, so React Flow never receives the stale list
+  // for a frame.
+  if (flowNodesSource !== derivedFlowNodes) {
+    setFlowNodesSource(derivedFlowNodes);
     setFlowNodes(derivedFlowNodes);
-  }, [derivedFlowNodes]);
+  }
 
   const handleNodeChanges = useCallback((changes: NodeChange<CrtCard>[]) => {
     const positionChanges = changes.filter((change) => change.type === "position");

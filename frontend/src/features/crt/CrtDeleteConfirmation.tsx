@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 export type CrtConfirmationAction = () => void | Promise<void>;
@@ -16,9 +16,11 @@ function useModalBehavior(
   busy = false
 ): void {
   const cancelRef = useRef(onCancel);
-  cancelRef.current = onCancel;
   const returnRef = useRef(returnFocusRef);
-  returnRef.current = returnFocusRef;
+  useLayoutEffect(() => {
+    cancelRef.current = onCancel;
+    returnRef.current = returnFocusRef;
+  });
   const previousFocus = useRef<HTMLElement | null>(null);
   const restored = useRef(false);
 

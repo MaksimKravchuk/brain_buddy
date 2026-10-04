@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
 export type CrtRecoveryAction = () => void | Promise<void>;
@@ -58,23 +58,25 @@ function useDialogBehavior(
   busy = false
 ): { cancel: () => void } {
   const cancelRef = useRef(onCancel);
-  cancelRef.current = onCancel;
   const returnFocusRefValue = useRef(returnFocusRef);
-  returnFocusRefValue.current = returnFocusRef;
   const returnFocusCallbackRef = useRef(onReturnFocus);
-  returnFocusCallbackRef.current = onReturnFocus;
   const busyRef = useRef(busy);
-  busyRef.current = busy;
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const restoredFocusRef = useRef(false);
   const restoreFocusRef = useRef<() => void>(() => undefined);
-  restoreFocusRef.current = () => {
-    if (restoredFocusRef.current) return;
-    restoredFocusRef.current = true;
-    const target = returnFocusRefValue.current?.current ?? previousFocusRef.current;
-    if (target?.isConnected) target.focus();
-    returnFocusCallbackRef.current?.();
-  };
+  useLayoutEffect(() => {
+    cancelRef.current = onCancel;
+    returnFocusRefValue.current = returnFocusRef;
+    returnFocusCallbackRef.current = onReturnFocus;
+    busyRef.current = busy;
+    restoreFocusRef.current = () => {
+      if (restoredFocusRef.current) return;
+      restoredFocusRef.current = true;
+      const target = returnFocusRefValue.current?.current ?? previousFocusRef.current;
+      if (target?.isConnected) target.focus();
+      returnFocusCallbackRef.current?.();
+    };
+  });
   const cancel = useCallback(() => {
     cancelRef.current();
     restoreFocusRef.current();

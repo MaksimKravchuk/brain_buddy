@@ -24,11 +24,16 @@ export function CrtCardNode({ id, data, selected }: NodeProps<CrtCard>): React.J
   const cardRef = useRef<HTMLButtonElement>(null);
   const restoreCardFocusRef = useRef(false);
   const [draftLabel, setDraftLabel] = useState(data.label);
+  const [draftSource, setDraftSource] = useState({ label: data.label, editing: data.editing });
   const isSelected = selected || data.selected;
 
-  useEffect(() => {
+  // The draft restarts from the committed label whenever that label changes or editing
+  // starts or stops. Adjusted during render (the previous props are kept in state) rather
+  // than from an effect, so the editor never shows a stale draft for a frame.
+  if (draftSource.label !== data.label || draftSource.editing !== data.editing) {
+    setDraftSource({ label: data.label, editing: data.editing });
     setDraftLabel(data.label);
-  }, [data.editing, data.label]);
+  }
 
   useEffect(() => {
     if (data.editing) {

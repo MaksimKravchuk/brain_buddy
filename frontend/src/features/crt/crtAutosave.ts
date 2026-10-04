@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError } from "../../api/client";
 import { crtApi, type CrtTreeResponse, type CrtTreeUpdatePayload } from "../../api/crt";
@@ -800,16 +800,31 @@ export function useCrtAutosave(
   const [reference, setReference] = useState<string | undefined>();
   const [conflict, setConflict] = useState<CrtConflict | undefined>();
   const callbackRef = useRef(onCanonical);
-  callbackRef.current = onCanonical;
+  useLayoutEffect(() => {
+    callbackRef.current = onCanonical;
+  }, [onCanonical]);
   const treeId = tree?.id;
+  // The controller is keyed on the tree id (and the persistence), never on the tree object:
+  // it is built from the tree as it was when that id first arrived and keeps its identity --
+  // and with it the pending command, timer and conflict -- while the canonical tree advances.
+  // `initialTreeRef` pins that tree during render, which is the only place the memo below
+  // can read it without widening its dependencies to every tree update. Nothing renders
+  // from the ref, so the react-hooks/refs reports on it are suppressed here; they stop being
+  // true (and the suppressions must go) if the ref is ever read by the JSX or the controller
+  // stops being memoized on the id.
   const initialTreeRef = useRef(tree);
+  // eslint-disable-next-line react-hooks/refs -- pins the controller's initial tree during render (see above); nothing renders from it
   if (!tree) initialTreeRef.current = null;
+  // eslint-disable-next-line react-hooks/refs -- pins the controller's initial tree during render (see above); nothing renders from it
   else if (initialTreeRef.current?.id !== tree.id) initialTreeRef.current = tree;
   const controller = useMemo(() => {
+    // eslint-disable-next-line react-hooks/refs -- the memo reads the pinned initial tree (see above), keyed on the tree id
     if (treeId === undefined || !initialTreeRef.current) return null;
     return createCrtAutosaveController(
+      // eslint-disable-next-line react-hooks/refs -- the memo reads the pinned initial tree (see above), keyed on the tree id
       initialTreeRef.current,
       crtApi.updateCrtTree,
+      // eslint-disable-next-line react-hooks/refs -- the controller invokes this listener from a save completion, a handler or an effect, never during render
       (canonicalTree) => callbackRef.current(canonicalTree),
       persistence
     );
@@ -823,6 +838,7 @@ export function useCrtAutosave(
       setReference(nextReference);
       setConflict(controller.conflict);
     });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the controller is an external store: after (re)subscribing, and after `syncCanonical` above may have moved it, the React mirror is seeded from the controller's current snapshot; only the subscription callback updates it afterwards.
     setStatus(controller.status);
     setReference(controller.reference);
     setConflict(controller.conflict);

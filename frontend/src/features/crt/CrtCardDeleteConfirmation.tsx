@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 export type CrtCardDeleteConfirmationProps = Readonly<{
@@ -32,10 +32,12 @@ export function CrtCardDeleteConfirmation({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  onCancelRef.current = onCancel;
-  onConfirmRef.current = onConfirm;
-  returnFocusRefValue.current = returnFocusRef;
-  busyRef.current = busy;
+  useLayoutEffect(() => {
+    onCancelRef.current = onCancel;
+    onConfirmRef.current = onConfirm;
+    returnFocusRefValue.current = returnFocusRef;
+    busyRef.current = busy;
+  });
 
   const restoreFocus = useCallback(() => {
     if (restoredFocusRef.current) return;

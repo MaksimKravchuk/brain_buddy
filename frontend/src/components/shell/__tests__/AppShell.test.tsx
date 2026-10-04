@@ -246,11 +246,16 @@ describe("AppShell canonical sidebar", () => {
     expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
     await user.type(projectName, "{Enter}");
     expect(handlers.onCreateProject).not.toHaveBeenCalled();
+    // Enter never submits while Add is disabled; a forced submit still refuses the blank name.
+    fireEvent.submit(projectName.closest("form") as HTMLFormElement);
+    expect(handlers.onCreateProject).not.toHaveBeenCalled();
     await user.keyboard("{Escape}");
 
     await user.click(screen.getByRole("button", { name: "New tag" }));
     const tagName = screen.getByLabelText("New tag name");
     await user.type(tagName, "  {Enter}");
+    expect(handlers.onCreateTag).not.toHaveBeenCalled();
+    fireEvent.submit(tagName.closest("form") as HTMLFormElement);
     expect(handlers.onCreateTag).not.toHaveBeenCalled();
     await user.keyboard("{Escape}");
 
@@ -488,6 +493,22 @@ describe("AppShell account menu", () => {
 
     await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(currentLocation()).toBe("/login"));
+  });
+
+  it("stays on the current route when signing out does not clear the session", async () => {
+    const user = userEvent.setup();
+    const logout = vi.fn(async () => false);
+    act(() => {
+      useAuthStore.setState({ logout });
+    });
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("menu", { name: "Account" })).not.toBeInTheDocument();
+    expect(currentLocation()).toBe("/tasks/next");
   });
 
   it("closes on Escape, on an outside click, and on a second press of the trigger", async () => {

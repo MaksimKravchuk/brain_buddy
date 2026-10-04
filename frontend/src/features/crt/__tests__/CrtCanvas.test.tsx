@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { createElement, useState } from "react";
+import { createElement, useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createGraphState, type GraphState, type NewNodeIds } from "../graphModel";
@@ -1664,7 +1664,11 @@ describe("CrtCanvas — 019-FR-005 through 019-FR-016", () => {
     let replaceGraph: ((next: GraphState) => void) | null = null;
     function ExternalGraphCanvas() {
       const [graph, setGraph] = useState(initialGraph);
-      replaceGraph = setGraph;
+      // Expose the setter to the test after commit rather than during render
+      // (react-hooks/globals); RTL's act() flushes this effect before render() returns.
+      useEffect(() => {
+        replaceGraph = setGraph;
+      }, []);
       return <CrtCanvas graph={graph} onChange={(next) => { setGraph(next); onChange(next); }} />;
     }
     render(<ExternalGraphCanvas />);
