@@ -224,10 +224,13 @@ workflow*), or land a change under `ios/`.
    newest Xcode 26, installs the pinned XcodeGen and generates the project.
 2. Writes the key to `$RUNNER_TEMP/private_keys/AuthKey_<key id>.p8` (mode 600).
 3. `xcodebuild archive` (Release, `generic/platform=iOS`) with
-   `DEVELOPMENT_TEAM`, `CURRENT_PROJECT_VERSION` and, if set,
+   `DEVELOPMENT_TEAM`, `CURRENT_PROJECT_VERSION`,
+   `CODE_SIGN_IDENTITY=Apple Distribution` and, if set,
    `BB_BUNDLE_ID_PREFIX` on the command line, and `-allowProvisioningUpdates`
-   with the API key: automatic signing creates or refreshes the certificates
-   and profiles it needs.
+   with the API key: automatic signing creates or refreshes the distribution
+   certificate and the App Store profiles it needs. Signing for distribution
+   from the start means the team needs no registered devices (a development
+   profile would).
 4. `xcodebuild -exportArchive` with `ci/ExportOptions.plist` (the team id is
    added to a temporary copy): method `app-store-connect`, destination
    `upload`, so the export uploads the build and its symbols directly.
@@ -263,6 +266,9 @@ current pricing). `ios-app` takes a macOS runner for pull requests that touch
 
 - *No profiles / no signing certificate*: the API key is not Admin, or the
   identifiers in step 1 are missing or under another prefix.
+- *Your team has no devices from which to generate a provisioning profile*:
+  the archive was signed for development; it must carry
+  `CODE_SIGN_IDENTITY=Apple Distribution` (the job passes it).
 - *Bundle version must be higher*: raise `IOS_BUILD_NUMBER_OFFSET`.
 - *ITMS-91053 Missing API declaration*: code started using a required-reason
   API; declare it in `Shared/PrivacyInfo.xcprivacy`.
