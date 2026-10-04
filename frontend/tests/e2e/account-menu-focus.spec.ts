@@ -140,10 +140,27 @@ async function assertRenderedFocus(page: import("@playwright/test").Page, forced
     const element = document.querySelector<HTMLButtonElement>('button[aria-label^="Account menu"]');
     if (!element) throw new Error("account trigger missing");
     const rect = element.getBoundingClientRect();
+    // Tailwind 4 writes opacity modifiers such as `bg-white/90` as
+    // `color-mix(in oklab, …)`, so Chromium reports the computed colour as
+    // `oklab(… / 0.9)`. Painting the colour onto a 1×1 sRGB canvas and reading
+    // the pixel back converts any CSS colour to the rgb()/rgba() form the
+    // parsers below read.
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    const toSrgb = (color: string): string => {
+      if (!context) return color;
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data;
+      return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+    };
     const readBackground = (x: number, y: number): string => {
       let adjacent = document.elementFromPoint(x, y);
       while (adjacent) {
-        const background = getComputedStyle(adjacent).backgroundColor;
+        const background = toSrgb(getComputedStyle(adjacent).backgroundColor);
         const alpha = background.match(/rgba?\(\d+,\s*\d+,\s*\d+(?:,\s*([\d.]+))?\)/)?.[1];
         if (alpha === undefined || Number(alpha) > 0) return background;
         adjacent = adjacent.parentElement;

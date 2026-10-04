@@ -1,4 +1,4 @@
-import { cloneElement, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { cloneElement, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 
 const focusableSelector = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
@@ -8,17 +8,18 @@ export function TaskSideSheet({ children, onClose, onPresenceChange }: { childre
   const open = children !== null;
   const [present, setPresent] = useState(open);
   const [entered, setEntered] = useState(false);
-  const previousChildren = useRef(children);
+  // The outgoing view is refreshed while open and rendered once `children` is
+  // gone, so it is state adjusted during render rather than a ref the JSX reads.
+  const [retained, setRetained] = useState(children);
+  if (open && children !== retained) setRetained(children);
+  if (open && !present) setPresent(true);
   const sheetRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    if (open) previousChildren.current = children;
-  }, [children, open]);
 
   useEffect(() => {
     if (open) {
-      setPresent(true);
       onPresenceChange(true);
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- reduced motion skips the two-frame enter armed below; `entered` still flips in this effect, after the media-query read, so open, reopen-during-exit and release stay one state machine.
         setEntered(true);
         return;
       }
@@ -82,7 +83,7 @@ export function TaskSideSheet({ children, onClose, onPresenceChange }: { childre
     <div className="task-side-sheet fixed inset-0 z-40 overflow-hidden" data-state={open && entered ? "open" : "closing"}>
       <div className="task-side-sheet-scrim absolute inset-0 bg-slate-900/15" data-testid="task-sheet-scrim" aria-hidden onClick={() => { if (open) onClose(); }} />
       <div ref={sheetRef} role="dialog" aria-modal="true" aria-labelledby="task-detail-title" aria-hidden={!open || undefined} inert={!open} className="task-side-sheet-panel absolute inset-y-0 right-0 w-full bg-white shadow-floating sm:w-[460px]">
-        {children ?? (previousChildren.current && cloneElement(previousChildren.current, { active: false }))}
+        {children ?? (retained && cloneElement(retained, { active: false }))}
       </div>
     </div>
   );

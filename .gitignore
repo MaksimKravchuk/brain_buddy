@@ -36,6 +36,10 @@ coverage/
 /backend/pyproject.toml.mutation-bak
 /backend/.mutation-enforced-changed.txt
 /frontend/allure-results/
+# allure 3.16's `quality-gate` writes quality-gate.json and test-results.json
+# into <cwd>/allure-report; the canary test src/test/allureQualityGate.test.ts
+# runs it from frontend/, so every Vitest run leaves this directory behind.
+/frontend/allure-report/
 /frontend/.stryker-tmp/
 /frontend/mutation-artifacts/
 /frontend/mutation-allure-results/

@@ -279,7 +279,7 @@ export function AgentHandoffOverlay({
                     setAcknowledged(false);
                     setConnectionId(event.currentTarget.value || null);
                   }}
-                  className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-soft outline-none transition-colors focus:border-brand-primary"
+                  className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-soft outline-hidden transition-colors focus:border-brand-primary"
                 >
                   <option value="">Choose an agent…</option>
                   {connections.map((connection) => (
@@ -376,7 +376,7 @@ export function AgentHandoffOverlay({
                   value={contextBody}
                   onChange={(event) => setContextBody(event.currentTarget.value)}
                   placeholder="Add a constraint, preference, or useful background"
-                  className="resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 shadow-soft outline-none transition-colors placeholder:text-slate-400 focus:border-brand-primary"
+                  className="resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 shadow-soft outline-hidden transition-colors placeholder:text-slate-400 focus:border-brand-primary"
                 />
               </label>
               <div>
