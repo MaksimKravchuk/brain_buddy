@@ -2,6 +2,11 @@ import Foundation
 import Darwin
 import CryptoKit
 
+struct InboxProjectResult: Codable {
+    let project: BrainBuddyProject
+    let action: BrainBuddyTask
+}
+
 /// The task surface reads and writes one store. A network client can be used
 /// separately for optional synchronization; the local store needs no session.
 @MainActor
@@ -128,6 +133,27 @@ final class LocalGTDStore: GTDStore {
         var color: String?
         var state: String
         var revision: Int
+        var desiredOutcome: String? = nil
+        var lastReviewedAt: String? = nil
+        var lastReviewDecision: ProjectReviewDecision? = nil
+        var lastReviewedTaskSignature: String? = nil
+    }
+
+    private struct ProjectReviewUpdate: Encodable {
+        let decision: ProjectReviewDecision
+        let expectedRevision: Int
+    }
+
+    private struct ProjectOutcomeUpdate: Encodable {
+        let desiredOutcome: String
+        let expectedRevision: Int
+    }
+
+    private struct InboxProjectClarification: Encodable {
+        let projectName: String
+        let desiredOutcome: String
+        let firstAction: String
+        let expectedRevision: Int
     }
 
     private struct StoredTag: Codable {
@@ -269,8 +295,22 @@ final class LocalGTDStore: GTDStore {
         BrainBuddyProject(
             id: project.id, name: project.name, color: project.color,
             state: project.state, revision: project.revision,
-            open_task_count: data.tasks.filter { $0.projectID == project.id && $0.isOpen }.count
+            open_task_count: data.tasks.filter { $0.projectID == project.id && $0.isOpen }.count,
+            desired_outcome: project.desiredOutcome,
+            last_reviewed_at: project.lastReviewedAt,
+            last_review_decision: project.lastReviewDecision,
+            review_has_changes: project.lastReviewedAt != nil &&
+                project.lastReviewedTaskSignature != Self.projectTaskSignature(project.id, in: data)
         )
+    }
+
+    private static func projectTaskSignature(_ projectID: String, in data: Snapshot) -> String {
+        let payload = data.tasks.filter { $0.projectID == projectID }
+            .sorted { $0.id < $1.id }
+            .map { "\($0.id):\($0.revision)" }
+            .joined(separator: "|")
+        return SHA256.hash(data: Data(payload.utf8))
+            .map { String(format: "%02x", $0) }.joined()
     }
 
     private func tagValue(_ tag: StoredTag, in data: Snapshot) -> BrainBuddyTag {
@@ -848,6 +888,59 @@ extension LocalGTDStore {
 }
 
 extension LocalGTDStore {
+    func clarifyInboxAsProject(
+        _ task: BrainBuddyTask, projectName: String, desiredOutcome: String,
+        firstAction: String, idempotencyKey: UUID
+    ) async throws -> InboxProjectResult {
+        let name = try Self.text(projectName, label: "Project name", max: 500)
+        let outcome = try Self.text(desiredOutcome, label: "Desired outcome", max: 1_000)
+        let actionTitle = try Self.text(firstAction, label: "Next action", max: 500)
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "inbox.project/\(task.id)", body: InboxProjectClarification(
+                projectName: name, desiredOutcome: outcome,
+                firstAction: actionTitle, expectedRevision: task.revision
+            )
+        )
+        try checkLoaded()
+        if let replay: InboxProjectResult = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return replay
+        }
+        return try mutate { data -> InboxProjectResult in
+            guard let index = data.tasks.firstIndex(where: { $0.id == task.id }) else {
+                throw Self.missing("Task")
+            }
+            guard data.tasks[index].revision == task.revision else { throw Self.conflict("Task") }
+            guard data.tasks[index].state == TaskList.inbox.rawValue,
+                  data.tasks[index].projectID == nil else {
+                throw APIError(message: "Only an unassigned Inbox item can start a new project.")
+            }
+            guard !data.projects.contains(where: {
+                $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+            }) else { throw APIError(message: "A project with that name already exists.", statusCode: 409) }
+            let project = StoredProject(
+                id: Self.id("project"), name: name, color: nil,
+                state: "active", revision: 1, desiredOutcome: outcome
+            )
+            data.projects.append(project)
+            var action = data.tasks[index]
+            action.title = actionTitle
+            action.state = TaskList.next.rawValue
+            action.lastOpenState = nil
+            action.projectID = project.id
+            action.waitingFor = nil
+            action.waitingSince = nil
+            action.orderKey = (data.tasks.filter { $0.state == TaskList.next.rawValue }.map(\.orderKey).max() ?? 0) + 1
+            action.revision += 1
+            data.tasks[index] = action
+            let result = InboxProjectResult(
+                project: projectValue(project, in: data), action: action.publicValue()
+            )
+            try Self.record(in: &data, key: key, objectID: task.id, fingerprint: fingerprint, response: result)
+            return result
+        }
+    }
+
     func listProjects() async throws -> [BrainBuddyProject] {
         try checkLoaded()
         return snapshot.projects.filter { $0.state == "active" }
@@ -931,6 +1024,63 @@ extension LocalGTDStore {
                     $0.name.localizedCaseInsensitiveCompare(clean) == .orderedSame
             }) else { throw APIError(message: "A project with that name already exists.", statusCode: 409) }
             data.projects[index].name = clean
+            data.projects[index].revision += 1
+            let result = projectValue(data.projects[index], in: data)
+            try Self.record(in: &data, key: key, objectID: project.id, fingerprint: fingerprint, response: result)
+            return result
+        }
+    }
+
+    func updateProjectOutcome(
+        _ project: BrainBuddyProject, to desiredOutcome: String, idempotencyKey: UUID
+    ) async throws -> BrainBuddyProject {
+        let clean = try Self.text(desiredOutcome, label: "Desired outcome", max: 1_000)
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "project.outcome/\(project.id)",
+            body: ProjectOutcomeUpdate(desiredOutcome: clean, expectedRevision: project.revision)
+        )
+        try checkLoaded()
+        if let result: BrainBuddyProject = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return result
+        }
+        return try mutate { data -> BrainBuddyProject in
+            guard let index = data.projects.firstIndex(where: { $0.id == project.id && $0.state == "active" }) else {
+                throw Self.missing("Project")
+            }
+            guard data.projects[index].revision == project.revision else { throw Self.conflict("Project") }
+            data.projects[index].desiredOutcome = clean
+            data.projects[index].lastReviewedAt = nil
+            data.projects[index].lastReviewDecision = nil
+            data.projects[index].lastReviewedTaskSignature = nil
+            data.projects[index].revision += 1
+            let result = projectValue(data.projects[index], in: data)
+            try Self.record(in: &data, key: key, objectID: project.id, fingerprint: fingerprint, response: result)
+            return result
+        }
+    }
+
+    func markProjectReviewed(
+        _ project: BrainBuddyProject, decision: ProjectReviewDecision,
+        idempotencyKey: UUID
+    ) async throws -> BrainBuddyProject {
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "project.review/\(project.id)",
+            body: ProjectReviewUpdate(decision: decision, expectedRevision: project.revision)
+        )
+        try checkLoaded()
+        if let result: BrainBuddyProject = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return result
+        }
+        return try mutate { data -> BrainBuddyProject in
+            guard let index = data.projects.firstIndex(where: { $0.id == project.id && $0.state == "active" }) else {
+                throw Self.missing("Project")
+            }
+            guard data.projects[index].revision == project.revision else { throw Self.conflict("Project") }
+            data.projects[index].lastReviewedAt = Self.now()
+            data.projects[index].lastReviewDecision = decision
+            data.projects[index].lastReviewedTaskSignature = Self.projectTaskSignature(project.id, in: data)
             data.projects[index].revision += 1
             let result = projectValue(data.projects[index], in: data)
             try Self.record(in: &data, key: key, objectID: project.id, fingerprint: fingerprint, response: result)
@@ -1031,6 +1181,9 @@ extension LocalGTDStore {
                     $0.name.localizedCaseInsensitiveCompare(project.name) == .orderedSame
             }) else { throw APIError(message: "An active project already uses this name.", statusCode: 409) }
             data.projects[index].state = "active"
+            data.projects[index].lastReviewedAt = nil
+            data.projects[index].lastReviewDecision = nil
+            data.projects[index].lastReviewedTaskSignature = nil
             data.projects[index].revision += 1
             let result = projectValue(data.projects[index], in: data)
             try Self.record(in: &data, key: key, objectID: project.id, fingerprint: fingerprint, response: result)
