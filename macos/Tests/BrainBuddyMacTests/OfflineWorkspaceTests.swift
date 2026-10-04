@@ -4,6 +4,31 @@ import XCTest
 
 final class OfflineWorkspaceTests: XCTestCase {
     @MainActor
+    func testQuickCaptureSavesInboxOfflineWithoutChangingMainDraft() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-quick-capture-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let unreachableWeb = APIClient(baseURL: URL(string: "http://127.0.0.1:1/api")!)
+        let model = BrainBuddyModel(api: unreachableWeb, store: store)
+        await model.restore()
+        model.draft = "Keep this unfinished Next draft"
+        let key = UUID()
+
+        try await model.quickCaptureInbox("  Remember the idea  ", idempotencyKey: key)
+        try await model.quickCaptureInbox("  Remember the idea  ", idempotencyKey: key)
+        let inbox = try await store.listTasks(state: .inbox)
+        XCTAssertEqual(inbox.items.map(\.title), ["Remember the idea"])
+        XCTAssertEqual(model.draft, "Keep this unfinished Next draft")
+        XCTAssertEqual(model.destination, .list(.next))
+
+        let reopened = LocalGTDStore(fileURL: fileURL)
+        let reopenedInbox = try await reopened.listTasks(state: .inbox)
+        XCTAssertEqual(reopenedInbox.items.map(\.title), ["Remember the idea"])
+    }
+
+    @MainActor
     func testQuickOpenDistinguishesTypesAndFindsTaskBeyondFirstPage() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("brainbuddy-quick-open-\(UUID().uuidString)", isDirectory: true)
