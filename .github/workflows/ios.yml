@@ -204,15 +204,12 @@ jobs:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           BUNDLE_ID_PREFIX: ${{ vars.IOS_BUNDLE_ID_PREFIX }}
           BUILD_NUMBER: ${{ steps.config.outputs.build-number }}
-        # Signed for distribution from the start. Automatic signing otherwise
-        # archives with an Apple Development profile, which Apple only issues
-        # to a team with registered devices; an App Store profile needs none.
+        # Automatic signing archives with a development profile (so the team
+        # needs one registered device, README step 1) and the export below
+        # re-signs for the App Store. Forcing CODE_SIGN_IDENTITY to Apple
+        # Distribution here fails with "conflicting provisioning settings".
         run: |
-          overrides=(
-            "DEVELOPMENT_TEAM=${APPLE_TEAM_ID}"
-            "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}"
-            "CODE_SIGN_IDENTITY=Apple Distribution"
-          )
+          overrides=("DEVELOPMENT_TEAM=${APPLE_TEAM_ID}" "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}")
           if [ -n "${BUNDLE_ID_PREFIX}" ]; then
             overrides+=("BB_BUNDLE_ID_PREFIX=${BUNDLE_ID_PREFIX}")
           fi
