@@ -5,6 +5,14 @@ export function useTaskCompletionAnimation(scope: string, view: string) {
   const context = `${scope}:${view}`;
   const contextRef = useRef(context);
   const animations = useRef(new Map<HTMLElement, Animation>());
+  // Each list is an `overflow-hidden` card, so a row travelling into another
+  // list would be clipped by its new card and appear to wipe in from an edge.
+  // The cards are unclipped only while a row is in flight.
+  const unclipped = useRef(new Set<HTMLElement>());
+  const restoreClipping = () => {
+    unclipped.current.forEach((list) => { list.style.overflow = ""; });
+    unclipped.current.clear();
+  };
   const pending = useRef<{
     taskId: string;
     rectangles: Map<string, DOMRect>;
@@ -30,6 +38,7 @@ export function useTaskCompletionAnimation(scope: string, view: string) {
     const cancelAnimations = () => {
       animations.current.forEach((animation) => animation.cancel());
       animations.current.clear();
+      restoreClipping();
     };
     if (contextRef.current !== context) {
       contextRef.current = context;
@@ -54,12 +63,20 @@ export function useTaskCompletionAnimation(scope: string, view: string) {
         const x = previous.left - current.left;
         const y = previous.top - current.top;
         if (x === 0 && y === 0) continue;
+        const list = row.closest<HTMLElement>('[role="list"]');
+        if (list && !unclipped.current.has(list)) {
+          list.style.overflow = "visible";
+          unclipped.current.add(list);
+        }
         const animation = row.animate([
           { transform: `translate(${x}px, ${y}px)` },
           { transform: "translate(0px, 0px)" }
         ], { duration: 380, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
         animations.current.set(row, animation);
-        animation.onfinish = () => animations.current.delete(row);
+        animation.onfinish = () => {
+          animations.current.delete(row);
+          if (animations.current.size === 0) restoreClipping();
+        };
       }
     }
     if (snapshot.focusedButton && (document.activeElement === document.body || document.activeElement === snapshot.focusedButton)) {
@@ -69,9 +86,12 @@ export function useTaskCompletionAnimation(scope: string, view: string) {
 
   useLayoutEffect(() => {
     const activeAnimations = animations.current;
+    const activeUnclipped = unclipped.current;
     return () => {
       activeAnimations.forEach((animation) => animation.cancel());
       activeAnimations.clear();
+      activeUnclipped.forEach((list) => { list.style.overflow = ""; });
+      activeUnclipped.clear();
     };
   }, []);
 

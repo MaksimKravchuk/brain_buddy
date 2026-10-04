@@ -56,6 +56,23 @@ class ValidateCiArtifactsTests(unittest.TestCase):
             json.dumps(payload), encoding="utf-8"
         )
 
+    def test_ci_disables_preinstalled_google_chrome_sources_before_playwright(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        disable_step = """
+          if [ -f /etc/apt/sources.list.d/google-chrome.list ]; then
+            sudo mv /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.list.disabled
+          fi
+          if [ -f /etc/apt/sources.list.d/google-chrome.sources ]; then
+            sudo mv /etc/apt/sources.list.d/google-chrome.sources /etc/apt/sources.list.d/google-chrome.sources.disabled
+          fi
+""".strip()
+        install_command = "npx playwright install --with-deps chromium"
+
+        self.assertIn(disable_step, workflow)
+        self.assertLess(workflow.index(disable_step), workflow.index(install_command))
+
     def test_results_requires_non_empty_allure_result_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             results_dir = Path(tmp) / "allure-results"

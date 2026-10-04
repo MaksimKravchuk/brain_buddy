@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>D-03 · Agent control states</title>
+  <style>
+    :root {
+      --sky: #0ea5e9; --sky-50: #f0f9ff; --sky-200: #bae6fd; --sky-700: #0369a1;
+      --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
+      --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155; --slate-900: #0f172a;
+      --amber-50: #fffbeb; --amber-200: #fde68a; --amber-800: #92400e;
+      --rose-50: #fff1f2; --rose-200: #fecdd3; --rose-800: #9f1239;
+      --emerald-50: #ecfdf5; --emerald-200: #a7f3d0; --emerald-800: #065f46;
+      --focus: 0 0 0 2px #fff, 0 0 0 4px rgba(14,165,233,.5);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--slate-50); color: var(--slate-900); }
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-feature-settings: "cv11", "ss01", "ss03"; -webkit-font-smoothing: antialiased; }
+    button { font: inherit; color: inherit; }
+    button:focus-visible { outline: none; box-shadow: var(--focus); }
+    svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+    .board { width: min(1060px, calc(100vw - 32px)); margin: 24px auto 48px; }
+    .head { display: flex; align-items: end; gap: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--slate-200); }
+    h1 { margin: 0; font-size: 20px; line-height: 1.3; letter-spacing: -.015em; font-weight: 600; }
+    .subtitle { margin: 4px 0 0; color: var(--slate-500); font-size: 12px; }
+    .decision { margin-left: auto; color: var(--sky-700); font-size: 11px; white-space: nowrap; }
+    .grid { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(310px,.65fr); gap: 20px; margin-top: 20px; }
+    .surface { border: 1px solid var(--slate-200); border-radius: 12px; background: white; overflow: hidden; }
+    .surface-head { min-height: 54px; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--slate-200); }
+    .surface-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+    .surface-head span { margin-left: auto; color: var(--slate-500); font-size: 11px; }
+
+    .task-row { height: 44px; display: grid; grid-template-columns: 44px minmax(0,1fr) 184px; align-items: center; gap: 8px; border-bottom: 1px solid var(--slate-200); padding-right: 12px; }
+    .task-row:last-child { border-bottom: 0; }
+    .complete { width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: transparent; color: var(--slate-300); }
+    .complete::before { content: ""; width: 18px; height: 18px; border: 1.5px solid currentColor; border-radius: 50%; }
+    .title { min-width: 0; border: 0; padding: 0; background: transparent; text-align: left; font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-slot { width: 184px; height: 44px; display: flex; align-items: center; justify-content: flex-end; }
+
+    .assigned {
+      width: 184px; height: 28px;
+      display: grid; grid-template-columns: 16px 50px 3px 14px minmax(0,1fr);
+      align-items: center; column-gap: 6px; padding: 0 8px;
+      border: 1px solid var(--slate-200); border-radius: 8px; background: white;
+      color: var(--slate-600); overflow: hidden; cursor: pointer;
+    }
+    .assigned .bot { width: 16px; height: 16px; }
+    .assigned .state-icon { width: 14px; height: 14px; }
+    .assigned .agent-name, .assigned .state-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: 11px; line-height: 1; font-weight: 500; }
+    .assigned .agent-name { color: var(--slate-900); }
+    .assigned .separator { width: 3px; height: 3px; border-radius: 50%; background: var(--slate-300); }
+    .assigned.running { border-color: var(--sky-200); }
+    .assigned.running .state-icon, .assigned.running .state-label { color: var(--sky-700); }
+    .assigned.needs { border-color: var(--amber-200); background: var(--amber-50); }
+    .assigned.needs .state-icon, .assigned.needs .state-label { color: var(--amber-800); }
+    .assigned.reported { border-color: var(--emerald-200); }
+    .assigned.reported .state-icon, .assigned.reported .state-label { color: var(--emerald-800); }
+    .assigned.failed { border-color: var(--rose-200); background: var(--rose-50); }
+    .assigned.failed .state-icon, .assigned.failed .state-label { color: var(--rose-800); }
+
+    .rail-measure { position: relative; width: 184px; height: 30px; margin: 12px 12px 10px auto; border-top: 1px solid var(--sky); color: var(--sky-700); text-align: center; font-size: 10px; }
+    .rail-measure::before, .rail-measure::after { content: ""; position: absolute; top: -4px; width: 1px; height: 8px; background: var(--sky); }
+    .rail-measure::before { left: 0; } .rail-measure::after { right: 0; }
+    .rail-measure span { position: relative; top: 4px; padding: 0 6px; background: white; }
+    .columns { display: grid; grid-template-columns: 16px 50px 3px 14px minmax(0,1fr); column-gap: 6px; width: 184px; margin: 0 12px 12px auto; padding: 0 8px; color: var(--slate-400); font-size: 9px; text-align: center; }
+    .columns span:last-child { text-align: left; }
+
+    .preassign { padding: 16px; }
+    .pre-row { position: relative; min-height: 68px; display: flex; align-items: flex-start; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--slate-200); }
+    .pre-row + .pre-row { padding-top: 14px; }
+    .pre-copy { flex: 1; min-width: 0; }
+    .pre-copy strong { display: block; font-size: 13px; font-weight: 600; }
+    .pre-copy p { margin: 4px 0 0; color: var(--slate-500); font-size: 11px; line-height: 1.45; }
+    .target { width: 54px; height: 44px; display: flex; align-items: center; justify-content: flex-end; }
+    .split { width: 54px; height: 28px; display: grid; grid-template-columns: 32px 22px; border: 1px solid var(--slate-200); border-radius: 8px; background: white; overflow: hidden; }
+    .split button { border: 0; display: grid; place-items: center; background: transparent; color: var(--slate-500); cursor: pointer; }
+    .split button + button { border-left: 1px solid var(--slate-200); }
+    .split button:hover { color: var(--sky-700); background: var(--sky-50); }
+    .split svg { width: 14px; height: 14px; }
+
+    .menu-wrap { position: relative; width: 54px; min-height: 176px; }
+    .menu { position: absolute; z-index: 2; top: 34px; right: 0; width: 224px; padding: 5px; border: 1px solid var(--slate-200); border-radius: 9px; background: white; box-shadow: 0 12px 32px -16px rgba(15,23,42,.22); }
+    .menu-title { padding: 5px 8px; color: var(--slate-500); font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+    .option { width: 100%; min-height: 40px; display: grid; grid-template-columns: 26px minmax(0,1fr); align-items: center; gap: 8px; border: 0; border-radius: 6px; background: transparent; padding: 0 8px; text-align: left; cursor: pointer; }
+    .option:hover, .option.selected { background: var(--slate-100); }
+    .agent-avatar { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 8px; background: var(--emerald-50); color: #047857; font-size: 10px; font-weight: 600; }
+    .option span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+
+    .contract { margin-top: 20px; display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+    .note { min-height: 84px; padding: 12px; border: 1px solid var(--slate-200); border-radius: 10px; background: white; }
+    .note strong { display: block; margin-bottom: 5px; font-size: 12px; font-weight: 600; }
+    .note p { margin: 0; color: var(--slate-500); font-size: 11px; line-height: 1.45; }
+    .note.report-note { border-color: var(--emerald-200); background: var(--emerald-50); }
+
+    @media (max-width: 800px) {
+      .grid { grid-template-columns: 1fr; }
+      .contract { grid-template-columns: 1fr; }
+      .decision { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="board" aria-labelledby="title">
+    <header class="head">
+      <div><h1 id="title">Agent controls in compact Task rows</h1><p class="subtitle">One fixed rail after assignment; the arrow exists only before assignment.</p></div>
+      <span class="decision">approved direction B / hairline</span>
+    </header>
+
+    <div class="grid">
+      <section class="surface" aria-labelledby="assigned-heading">
+        <header class="surface-head"><h2 id="assigned-heading">Assigned state rail</h2><span>all visuals 184 × 28 px</span></header>
+        <div role="list" aria-label="Five representative assigned states">
+          <article class="task-row" role="listitem"><button class="complete" type="button" aria-label="Complete Gather sources"></button><button class="title" type="button">Gather sources for the review</button><div class="agent-slot"><button class="assigned" type="button" aria-label="Open Hermes run for Gather sources for the review. Server status: Queued. Guaranteed single start."><svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="agent-name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg><span class="state-label">Queued</span></button></div></article>
+          <article class="task-row" role="listitem"><button class="complete" type="button" aria-label="Complete Review the homepage"></button><button class="title" type="button">Review the homepage</button><div class="agent-slot"><button class="assigned running" type="button" aria-label="Open Hermes run for Review the homepage. Server status: Running. Guaranteed single start."><svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="agent-name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2"></circle></svg><span class="state-label">Running</span></button></div></article>
+          <article class="task-row" role="listitem"><button class="complete" type="button" aria-label="Complete Choose an offsite venue"></button><button class="title" type="button">Choose an offsite venue</button><div class="agent-slot"><button class="assigned needs" type="button" aria-label="Open Hermes run for Choose an offsite venue. Server status: Needs you. Best-effort single start. Cancellation not supported."><svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="agent-name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16h.01"></path></svg><span class="state-label">Needs you</span></button></div></article>
+          <article class="task-row" role="listitem"><button class="complete" type="button" aria-label="Complete Buy cinema tickets"></button><button class="title" type="button">Buy cinema tickets</button><div class="agent-slot"><button class="assigned reported" type="button" aria-label="Open Hermes run for Buy cinema tickets. Server status: Agent reported complete. Guaranteed single start."><svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="agent-name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"></path><path d="M14 3v4h4M9 12h6M9 16h4"></path></svg><span class="state-label">Reported</span></button></div></article>
+          <article class="task-row" role="listitem"><button class="complete" type="button" aria-label="Complete Reconcile the budget"></button><button class="title" type="button">Reconcile the budget</button><div class="agent-slot"><button class="assigned failed" type="button" aria-label="Open Hermes run for Reconcile the budget. Server status: Failed. Best-effort single start."><svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="agent-name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 20h19z"></path><path d="M12 9v5M12 17h.01"></path></svg><span class="state-label">Failed</span></button></div></article>
+        </div>
+        <div class="rail-measure" aria-hidden="true"><span>184 px</span></div>
+        <div class="columns" aria-hidden="true"><span>icon</span><span>agent</span><span></span><span>icon</span><span>state</span></div>
+      </section>
+
+      <section class="surface" aria-labelledby="entry-heading">
+        <header class="surface-head"><h2 id="entry-heading">Before assignment</h2><span>split only here</span></header>
+        <div class="preassign">
+          <div class="pre-row">
+            <div class="pre-copy"><strong>Last-used shortcut</strong><p>The robot resolves Hermes and opens the existing immutable review. It never sends on its own.</p></div>
+            <div class="target"><div class="split" role="group" aria-label="Agent hand-off"><button type="button" aria-label="Review hand-off to Hermes for Call the dentist"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg></button><button type="button" aria-label="Choose an agent for Call the dentist" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg></button></div></div>
+          </div>
+          <div class="pre-row">
+            <div class="pre-copy"><strong>Choose another</strong><p>Only eligible connections appear. Selection opens review with that identity preselected.</p></div>
+            <div class="menu-wrap">
+              <div class="split" role="group" aria-label="Agent hand-off"><button type="button" aria-label="Review hand-off to Hermes for Review the homepage"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg></button><button type="button" aria-label="Choose an agent for Review the homepage" aria-expanded="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 14 4-4 4 4"></path></svg></button></div>
+              <div class="menu" role="menu" aria-label="Eligible agents"><div class="menu-title">Choose an agent</div><button class="option selected" type="button" role="menuitem"><span class="agent-avatar">H</span><span>Hermes · research.example</span></button><button class="option" type="button" role="menuitem"><span class="agent-avatar">H</span><span>Hermes · ops.example</span></button><button class="option" type="button" role="menuitem"><span class="agent-avatar">O</span><span>Ops runner</span></button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="contract" aria-label="Agent-control design rules">
+      <div class="note"><strong>One button after assignment</strong><p>No chevron and no action menu. Activation expands this Task inline and reveals the complete run.</p></div>
+      <div class="note"><strong>Exact state stays accessible</strong><p>The visible copy is compact; the accessible name and detail carry the exact server state, tier, and cancellation withdrawal.</p></div>
+      <div class="note report-note"><strong>Reported, never Done</strong><p>An agent’s completion report does not complete the Task. The open completion circle remains under owner control.</p></div>
+    </section>
+  </main>
+</body>
+</html>

@@ -15,10 +15,13 @@ dev-frontend:
 	cd frontend && npm run dev
 
 test-backend:
+	rm -rf backend/allure-results && mkdir -p backend/allure-results
+	touch backend/allure-results/.run-started-at
 	cd backend && pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
 	python3 scripts/validate_coverage_floor.py --stack backend --format cobertura \
 		--report backend/coverage.xml --floor backend/coverage-floor.json
-	python3 scripts/validate_allure_taxonomy.py --path backend/allure-results --label backend-pytest
+	python3 scripts/validate_allure_taxonomy.py --path backend/allure-results --label backend-pytest \
+		--since-file backend/allure-results/.run-started-at
 
 lint-backend:
 	cd backend && ruff check app tests
@@ -39,10 +42,13 @@ format-check-backend:
 ci-backend: lint-backend test-backend
 
 test-frontend:
+	rm -rf frontend/allure-results/vitest && mkdir -p frontend/allure-results/vitest
+	touch frontend/allure-results/vitest/.run-started-at
 	cd frontend && npm run test:coverage
 	python3 scripts/validate_coverage_floor.py --stack frontend --format istanbul-summary \
 		--report frontend/coverage/coverage-summary.json --floor frontend/coverage-floor.json
-	python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/vitest --label frontend-vitest
+	python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/vitest --label frontend-vitest \
+		--since-file frontend/allure-results/vitest/.run-started-at
 
 test-e2e:
 	./scripts/run_playwright_e2e.sh
@@ -152,6 +158,7 @@ check-specs:
 	python3 scripts/check_spec_kit_specs.py
 	python3 scripts/check_speckit_manifests.py
 	python3 scripts/check_gate_integrity.py
+	python3 scripts/check_requirement_coverage.py specs/019-miro-like-crt-canvas
 
 # --- Mobile (Expo / React Native, mobile/) ---
 
@@ -165,10 +172,13 @@ lint-mobile:
 	cd mobile && npx eslint .
 
 test-mobile:
+	rm -rf mobile/allure-results && mkdir -p mobile/allure-results
+	touch mobile/allure-results/.run-started-at
 	cd mobile && npx jest --coverage
 	python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
 		--report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json
-	python3 scripts/validate_allure_taxonomy.py --path mobile/allure-results --label mobile-jest
+	python3 scripts/validate_allure_taxonomy.py --path mobile/allure-results --label mobile-jest \
+		--since-file mobile/allure-results/.run-started-at
 
 # Report-only, like mutation-backend: the deterministic-core scope lives in
 # mobile/stryker.config.json and is fixed by ADR-0015.

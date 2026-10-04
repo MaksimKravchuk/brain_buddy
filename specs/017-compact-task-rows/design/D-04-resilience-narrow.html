@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>D-04 · Resilience and narrow web</title>
+  <style>
+    :root {
+      --sky: #0ea5e9; --sky-50: #f0f9ff; --sky-200: #bae6fd; --sky-700: #0369a1;
+      --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
+      --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155; --slate-900: #0f172a;
+      --amber-50: #fffbeb; --amber-200: #fde68a; --amber-800: #92400e;
+      --rose-50: #fff1f2; --rose-200: #fecdd3; --rose-800: #9f1239;
+      --focus: 0 0 0 2px #fff, 0 0 0 4px rgba(14,165,233,.5);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--slate-50); color: var(--slate-900); }
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-feature-settings: "cv11", "ss01", "ss03"; -webkit-font-smoothing: antialiased; }
+    button { font: inherit; color: inherit; }
+    button:focus-visible, [tabindex]:focus-visible { outline: none; box-shadow: var(--focus); }
+    svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+    .board { width: min(1180px, calc(100vw - 32px)); margin: 24px auto 48px; }
+    .head { display: flex; align-items: end; gap: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--slate-200); }
+    h1 { margin: 0; font-size: 20px; line-height: 1.3; letter-spacing: -.015em; font-weight: 600; }
+    .subtitle { margin: 4px 0 0; color: var(--slate-500); font-size: 12px; }
+    .measure { margin-left: auto; padding: 5px 8px; border: 1px solid var(--sky-200); border-radius: 999px; background: var(--sky-50); color: var(--sky-700); font-size: 11px; }
+    .layout { display: grid; grid-template-columns: minmax(0,1fr) 390px; gap: 22px; margin-top: 20px; align-items: start; }
+
+    .states { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .state { min-height: 166px; border: 1px solid var(--slate-200); border-radius: 12px; background: white; overflow: hidden; }
+    .state-head { min-height: 42px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border-bottom: 1px solid var(--slate-200); color: var(--slate-700); font-size: 11px; font-weight: 600; }
+    .state-id { color: var(--sky-700); }
+    .mini-screen { min-height: 122px; padding: 12px; }
+    .mini-title { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+    .mini-copy { margin: 0; color: var(--slate-500); font-size: 11px; line-height: 1.45; }
+    .mini-action { min-height: 36px; margin-top: 12px; padding: 0 12px; border: 1px solid var(--slate-200); border-radius: 8px; background: white; color: var(--slate-700); font-size: 11px; font-weight: 600; }
+    .mini-action.primary { border-color: var(--sky); background: var(--sky); color: white; }
+    .notice { padding: 9px 10px; border: 1px solid var(--amber-200); border-radius: 8px; background: var(--amber-50); color: var(--amber-800); font-size: 11px; line-height: 1.4; }
+    .error { border-color: var(--rose-200); background: var(--rose-50); color: var(--rose-800); }
+    .skeleton-row { height: 32px; display: grid; grid-template-columns: 20px minmax(0,1fr) 82px; align-items: center; gap: 8px; border-bottom: 1px solid var(--slate-100); }
+    .skeleton { height: 7px; border-radius: 999px; background: var(--slate-200); }
+    .skeleton.circle { width: 16px; height: 16px; border-radius: 50%; }
+    .skeleton.short { width: 72%; }
+    .empty { min-height: 112px; display: grid; place-items: center; text-align: center; }
+    .empty strong { display: block; font-size: 13px; }
+    .empty span { display: block; margin-top: 5px; color: var(--slate-500); font-size: 11px; }
+
+    .phone { width: 390px; min-height: 851px; border: 1px solid var(--slate-300); border-radius: 22px; background: white; overflow: hidden; box-shadow: 0 12px 32px -20px rgba(15,23,42,.24); }
+    .phone-top { height: 56px; display: grid; grid-template-columns: 44px minmax(0,1fr) 44px; align-items: center; border-bottom: 1px solid var(--slate-200); padding: 0 5px; }
+    .phone-top button { width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--slate-600); }
+    .phone-brand { text-align: center; font-size: 14px; font-weight: 600; }
+    .phone-main { padding: 18px 10px 32px; }
+    .phone-heading { display: flex; align-items: end; gap: 10px; margin: 0 4px 12px; }
+    .phone-heading h2 { margin: 0; font-size: 20px; letter-spacing: -.015em; }
+    .phone-heading span { margin-left: auto; color: var(--slate-500); font-size: 11px; }
+    .offline { margin-bottom: 10px; display: flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid var(--amber-200); border-radius: 8px; background: var(--amber-50); color: var(--amber-800); font-size: 11px; }
+    .offline svg { width: 14px; height: 14px; }
+
+    .task-list { border-top: 1px solid var(--slate-200); }
+    .task-row { position: relative; height: 44px; display: grid; grid-template-columns: 44px minmax(0,1fr) auto; align-items: center; gap: 5px; border-bottom: 1px solid var(--slate-200); }
+    .task-row.selected { background: var(--sky-50); }
+    .task-row.selected::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--sky); }
+    .complete { width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--slate-300); }
+    .complete::before { content: ""; width: 18px; height: 18px; border: 1.5px solid currentColor; border-radius: 50%; background: white; }
+    .title { min-width: 0; height: 44px; display: flex; align-items: center; border: 0; padding: 0; background: transparent; text-align: left; font-size: 13px; font-weight: 500; }
+    .title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-target { width: 184px; height: 44px; display: flex; align-items: center; justify-content: flex-end; }
+    .assigned { width: 184px; height: 28px; display: grid; grid-template-columns: 16px 50px 3px 14px minmax(0,1fr); align-items: center; column-gap: 6px; padding: 0 8px; border: 1px solid var(--slate-200); border-radius: 8px; background: white; color: var(--slate-600); overflow: hidden; }
+    .assigned .bot, .assigned .state-icon { width: 14px; height: 14px; }
+    .assigned .name, .assigned .state-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: 11px; font-weight: 500; }
+    .assigned .name { color: var(--slate-900); }
+    .assigned .separator { width: 3px; height: 3px; border-radius: 50%; background: var(--slate-300); }
+    .assigned.running { border-color: var(--sky-200); }
+    .assigned.running .state-icon, .assigned.running .state-label { color: var(--sky-700); }
+    .assigned.needs { border-color: var(--amber-200); background: var(--amber-50); }
+    .assigned.needs .state-icon, .assigned.needs .state-label { color: var(--amber-800); }
+    .split-target { width: 54px; height: 44px; display: flex; align-items: center; justify-content: flex-end; }
+    .split { width: 54px; height: 28px; display: grid; grid-template-columns: 32px 22px; border: 1px solid var(--slate-200); border-radius: 8px; background: white; overflow: hidden; }
+    .split button { display: grid; place-items: center; border: 0; background: transparent; color: var(--slate-500); }
+    .split button + button { border-left: 1px solid var(--slate-200); }
+    .split svg { width: 14px; height: 14px; }
+
+    .inline { padding: 12px 10px 16px; border-bottom: 1px solid var(--slate-300); box-shadow: inset 2px 0 0 var(--sky); }
+    .inline-head { display: flex; align-items: center; gap: 4px; min-height: 44px; }
+    .inline-head h3 { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+    .inline-head button { width: 44px; height: 44px; display: grid; place-items: center; margin-left: auto; border: 0; border-radius: 8px; background: transparent; color: var(--slate-600); }
+    .field { margin-top: 10px; }
+    .field label { display: block; margin-bottom: 5px; color: var(--slate-500); font-size: 11px; font-weight: 600; }
+    .input { width: 100%; min-height: 44px; border: 1px solid var(--slate-200); border-radius: 6px; background: white; padding: 9px; color: var(--slate-700); font-size: 12px; }
+    .run-line { margin-top: 10px; padding: 9px; border: 1px solid var(--sky-200); border-radius: 8px; background: var(--sky-50); color: var(--slate-600); font-size: 11px; line-height: 1.45; }
+    .phone-note { margin: 14px 4px 0; color: var(--slate-500); font-size: 10px; line-height: 1.45; }
+
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .phone { margin: 0 auto; }
+    }
+    @media (max-width: 600px) {
+      .board { width: calc(100vw - 16px); margin-top: 12px; }
+      .states { grid-template-columns: 1fr; }
+      .measure { display: none; }
+      .phone { width: min(390px, 100%); }
+    }
+  </style>
+</head>
+<body>
+  <main class="board" aria-labelledby="title">
+    <header class="head"><div><h1 id="title">Resilience and narrow responsive web</h1><p class="subtitle">Failure changes the message, not the Task row’s basic usability.</p></div><span class="measure">390 × 851 · no horizontal scroll</span></header>
+
+    <div class="layout">
+      <section class="states" aria-label="Resilience state gallery">
+        <article class="state"><header class="state-head"><span class="state-id">D-01-S10</span> Loading</header><div class="mini-screen" role="status" aria-label="Loading tasks"><div class="skeleton-row"><span class="skeleton circle"></span><span class="skeleton"></span><span class="skeleton"></span></div><div class="skeleton-row"><span class="skeleton circle"></span><span class="skeleton short"></span><span class="skeleton"></span></div><div class="skeleton-row"><span class="skeleton circle"></span><span class="skeleton"></span><span class="skeleton"></span></div></div></article>
+        <article class="state"><header class="state-head"><span class="state-id">D-01-S11</span> Empty · first run</header><div class="mini-screen empty"><div><strong>No tasks yet</strong><span>Add a next action when you’re ready.</span><button class="mini-action primary" type="button">Add a task</button></div></div></article>
+        <article class="state"><header class="state-head"><span class="state-id">D-01-S12</span> Empty · filtered</header><div class="mini-screen empty"><div><strong>No tasks match these filters</strong><span>Your Tasks are unchanged.</span><button class="mini-action" type="button">Clear filters</button></div></div></article>
+        <article class="state"><header class="state-head"><span class="state-id">D-01-S13</span> Fetch error</header><div class="mini-screen"><div class="notice error" role="alert"><strong>We couldn’t load these tasks.</strong><br>Reference: 8f21c0</div><button class="mini-action" type="button">Retry</button></div></article>
+        <article class="state"><header class="state-head"><span class="state-id">D-01-S15</span> Summary refresh failure</header><div class="mini-screen"><div class="notice" role="status">Agent updates couldn’t be refreshed. Tasks are still available.</div><p class="mini-copy" style="margin-top:10px">Trustworthy cached controls stay and say they may be stale. Without cache, rows reserve no agent slot.</p><button class="mini-action" type="button">Retry agent updates</button></div></article>
+        <article class="state"><header class="state-head"><span class="state-id">D-01-S16</span> Cached · offline</header><div class="mini-screen"><div class="notice" role="status">Offline · showing saved tasks</div><p class="mini-copy" style="margin-top:10px">Last confirmed run labels remain reachable and are announced as potentially stale. Nothing is queued.</p></div></article>
+      </section>
+
+      <section class="phone" aria-label="Narrow responsive Task list at 390 by 851">
+        <header class="phone-top"><button type="button" aria-label="Open navigation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></button><div class="phone-brand">BrainBuddy</div><button type="button" aria-label="Start brain dump"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0M12 17v4M9 21h6"></path></svg></button></header>
+        <div class="phone-main">
+          <div class="phone-heading"><h2>Next actions</h2><span>12 tasks</span></div>
+          <div class="offline"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M8.5 8.5A7 7 0 0 1 19 11M5 11a7 7 0 0 1 .8-2.9M12 19h.01"></path></svg>Offline · showing saved tasks</div>
+
+          <div class="task-list" role="list">
+            <article class="task-row" role="listitem"><button class="complete" type="button" aria-label="Complete Gather sources"></button><button class="title" type="button" aria-expanded="false"><span>Gather sources for the review with the research notes</span></button><div class="agent-target"><button class="assigned" type="button" aria-label="Open Hermes run for Gather sources for the review with the research notes. Server status: Queued. Guaranteed single start. State may be stale."><svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg><span class="state-label">Queued</span></button></div></article>
+            <article class="task-row selected" role="listitem"><button class="complete" type="button" aria-label="Complete Review homepage"></button><button class="title" type="button" aria-expanded="true" aria-controls="narrow-detail"><span>[UX audit] Review the homepage</span></button><div class="agent-target"><button class="assigned running" type="button" aria-label="Open Hermes run for [UX audit] Review the homepage. Server status: Running. Guaranteed single start. State may be stale."><svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2"></circle></svg><span class="state-label">Running</span></button></div></article>
+
+            <section class="inline" id="narrow-detail" aria-labelledby="narrow-heading">
+              <header class="inline-head"><h3 id="narrow-heading" tabindex="-1">[UX audit] Review the homepage</h3><button type="button" aria-label="Close task"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button></header>
+              <div class="field"><label for="narrow-details">Details</label><div class="input" id="narrow-details">Review navigation and first-use clarity. Edits remain in this tab while offline.</div></div>
+              <div class="run-line"><strong>Hermes · Running</strong><br>Exact server state: Running · Guaranteed single start · Last contact 4 min ago. State may be stale.</div>
+            </section>
+
+            <article class="task-row" role="listitem"><button class="complete" type="button" aria-label="Complete Choose venue"></button><button class="title" type="button" aria-expanded="false"><span>Choose a venue</span></button><div class="agent-target"><button class="assigned needs" type="button" aria-label="Open Hermes run for Choose a venue. Server status: Needs you. Best-effort single start. Cancellation not supported. State may be stale."><svg class="bot" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg><span class="name">Hermes</span><span class="separator"></span><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16h.01"></path></svg><span class="state-label">Needs you</span></button></div></article>
+            <article class="task-row" role="listitem"><button class="complete" type="button" aria-label="Complete Call dentist"></button><button class="title" type="button" aria-expanded="false"><span>Call dentist</span></button><div class="split-target"><div class="split" role="group" aria-label="Agent hand-off"><button type="button" aria-label="Review hand-off to Hermes for Call dentist"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="10" rx="2"></rect><path d="M9 12h.01M15 12h.01M9 16h6M12 8V5M10 5h4"></path></svg></button><button type="button" aria-label="Choose an agent for Call dentist" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"></path></svg></button></div></div></article>
+          </div>
+          <p class="phone-note">At 390 px, Tags and due/subtask chips yield before the title or agent target. The 28 px visual control remains centered inside a 44 px target. This is responsive web, not a native-mobile redesign.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

@@ -5,8 +5,10 @@ from __future__ import annotations
 import sqlite3
 from datetime import timedelta
 from pathlib import Path
+from threading import Event, Thread
 
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from app.container import Container
 from app.utils.time import utcnow
@@ -260,6 +262,75 @@ def test_purge_account_is_idempotent(api_client: TestClient) -> None:
 
     assert container.user_repo.get_by_id(owner) is None
     assert container.tree_service.list_trees(owner_id=owner) == []
+
+
+def test_purge_blocks_an_already_authenticated_legacy_tree_mutation(
+    api_client: TestClient, monkeypatch
+) -> None:
+    """A legacy request waiting at the purge snapshot cannot recreate owner data."""
+
+    container = _container(api_client)
+    owner = _user_id(api_client)
+    created = api_client.post("/api/trees", json={"name": "Snapshot target"})
+    assert created.status_code == 201
+    tree_id = created.json()["id"]
+
+    authenticated = Event()
+    release_authentication = Event()
+    snapshot_taken = Event()
+    release_snapshot = Event()
+    mutation_finished = Event()
+    mutation_result: list[Response] = []
+    real_get_user = container.auth_service.get_user_for_token
+    real_list_trees = container.tree_service.list_trees
+
+    def pause_after_authentication(token: str | None):
+        user = real_get_user(token)
+        authenticated.set()
+        assert release_authentication.wait(timeout=2)
+        return user
+
+    def snapshot_then_pause(*, owner_id: str):
+        snapshot = real_list_trees(owner_id=owner_id)
+        snapshot_taken.set()
+        assert release_snapshot.wait(timeout=2)
+        return snapshot
+
+    def legacy_mutation() -> None:
+        try:
+            mutation_result.append(
+                api_client.post("/api/trees", json={"name": "Must not survive"})
+            )
+        finally:
+            mutation_finished.set()
+
+    monkeypatch.setattr(
+        container.auth_service, "get_user_for_token", pause_after_authentication
+    )
+    monkeypatch.setattr(container.tree_service, "list_trees", snapshot_then_pause)
+
+    mutation_thread = Thread(target=legacy_mutation)
+    mutation_thread.start()
+    assert authenticated.wait(timeout=2)
+
+    purge_thread = Thread(target=lambda: container.account_service.purge_account(owner))
+    purge_thread.start()
+    assert snapshot_taken.wait(timeout=2)
+    release_authentication.set()
+    assert not mutation_finished.wait(timeout=0.1)
+
+    release_snapshot.set()
+    purge_thread.join(timeout=2)
+    mutation_thread.join(timeout=2)
+
+    assert not purge_thread.is_alive()
+    assert not mutation_thread.is_alive()
+    assert len(mutation_result) == 1
+    assert mutation_result[0].status_code == 404
+    assert container.user_repo.get_by_id(owner) is None
+    assert container.tree_service.list_trees(owner_id=owner) == []
+    assert all(entry.owner_id != owner for entry in container.index_repo.load_all())
+    assert not (container.user_repo.root / tree_id).exists()
 
 
 def test_stale_profile_save_cannot_unschedule_deletion(api_client: TestClient) -> None:

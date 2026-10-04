@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from app.exceptions import ConflictError, NotFoundError
+from app.exceptions import ConflictError, NotFoundError, StaleRevisionError
 from app.schemas.domain import TreeDocument
 from app.utils.file_ops import ensure_directory
 
@@ -31,9 +31,10 @@ class TreeRepository(BaseRepository):
         return self.tree_path(tree_id).exists()
 
     def create(self, tree: TreeDocument) -> None:
-        if self.exists(tree.id):
-            raise ConflictError("Tree", tree.id)
-        self.save(tree)
+        with self._exclusive_tree_lock(tree.id):
+            if self.exists(tree.id):
+                raise ConflictError("Tree", tree.id)
+            self.save(tree)
 
     def save(self, tree: TreeDocument) -> None:
         path = self.tree_path(tree.id)
@@ -46,38 +47,96 @@ class TreeRepository(BaseRepository):
         *,
         update: Callable[[TreeDocument], TreeDocument],
         after_save: Callable[[TreeDocument], None] | None = None,
+        command_id: str | None = None,
     ) -> TreeDocument:
         """Atomically load, transform, replace, and publish one tree document."""
 
         with self._exclusive_tree_lock(tree_id):
             current = self.load(tree_id)
-            updated = update(current)
+            candidate = update(current)
+            updated = candidate.model_copy(
+                update={
+                    "revision": current.revision + 1,
+                    # Legacy mutations must invalidate any command marker left
+                    # by a partially committed Stage B command. Reconciliation
+                    # only trusts markers written by its own command path.
+                    "last_command_id": command_id,
+                },
+                deep=True,
+            )
             self.save(updated)
             if after_save is not None:
                 after_save(updated)
             return updated
 
+    def replace_if_current(
+        self,
+        tree_id: str,
+        *,
+        expected_revision: int,
+        replacement: TreeDocument,
+        after_save: Callable[[TreeDocument], None] | None = None,
+    ) -> TreeDocument:
+        """Persist a precomputed command target at its recorded base revision."""
+
+        with self._exclusive_tree_lock(tree_id):
+            current = self.load(tree_id)
+            if current.revision != expected_revision:
+                raise StaleRevisionError(
+                    "Tree",
+                    tree_id,
+                    current_revision=current.revision,
+                    current_updated_at=current.updated_at,
+                )
+            if (
+                replacement.id != tree_id
+                or replacement.revision != expected_revision + 1
+            ):
+                raise ConflictError("Tree", tree_id, "Prepared tree target is invalid.")
+            self.save(replacement)
+            if after_save is not None:
+                after_save(replacement)
+            return replacement
+
     def update_if_current(
         self,
         tree_id: str,
         *,
-        expected_updated_at: datetime,
+        expected_updated_at: datetime | None = None,
+        expected_revision: int | None = None,
         update: Callable[[TreeDocument], TreeDocument],
         after_save: Callable[[TreeDocument], None] | None = None,
+        command_id: str | None = None,
     ) -> TreeDocument:
-        """Atomically replace a tree only when its timestamp still matches."""
+        """Atomically replace a tree when its preferred or legacy token matches."""
 
         def guarded_update(current: TreeDocument) -> TreeDocument:
-            updated = update(current)
-            if current.updated_at != expected_updated_at:
+            is_current = (
+                current.revision == expected_revision
+                if expected_revision is not None
+                else current.updated_at == expected_updated_at
+            )
+            if not is_current:
+                if expected_revision is not None:
+                    raise StaleRevisionError(
+                        "Tree",
+                        tree_id,
+                        current_revision=current.revision,
+                        current_updated_at=current.updated_at,
+                    )
                 raise ConflictError(
                     "Tree",
                     tree_id,
                     f"Tree '{tree_id}' has newer changes; reload before saving.",
                 )
-            return updated
+            return update(current)
 
-        return self.mutate(tree_id, update=guarded_update, after_save=after_save)
+        return self.mutate(
+            tree_id,
+            update=guarded_update,
+            after_save=after_save,
+            command_id=command_id,
+        )
 
     @contextmanager
     def _exclusive_tree_lock(self, tree_id: str) -> Generator[None, None, None]:
@@ -111,6 +170,34 @@ class TreeRepository(BaseRepository):
             if after_load is not None:
                 after_load(tree)
             return tree
+
+    def delete_if_current(
+        self,
+        tree_id: str,
+        *,
+        owner_id: str,
+        expected_revision: int,
+        before_delete: Callable[[TreeDocument], None] | None = None,
+        after_delete: Callable[[], None] | None = None,
+    ) -> None:
+        """Delete only the owner tree at ``expected_revision`` under one lock."""
+
+        with self._exclusive_tree_lock(tree_id):
+            tree = self.load(tree_id)
+            if tree.owner_id != owner_id:
+                raise NotFoundError("Tree", tree_id)
+            if tree.revision != expected_revision:
+                raise StaleRevisionError(
+                    "Tree",
+                    tree_id,
+                    current_revision=tree.revision,
+                    current_updated_at=tree.updated_at,
+                )
+            if before_delete is not None:
+                before_delete(tree)
+            shutil.rmtree(self.resolve(tree_id))
+            if after_delete is not None:
+                after_delete()
 
     def delete(
         self,

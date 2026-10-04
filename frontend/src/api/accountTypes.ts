@@ -4,6 +4,7 @@ export type AccountResponse = {
   id: string;
   email: string;
   display_name: string | null;
+  completed_task_count: number;
   created_at: string;
   /** Set while an account deletion is pending; null otherwise. */
   deletion_requested_at: string | null;

@@ -92,6 +92,28 @@ describe("AdminPage capability and exclusive tabs", () => {
     expect(users).toHaveAttribute("aria-selected", "true");
   });
 
+  it("013-SC-007 gives only the selected tab a visible marker without losing keyboard focus", async () => {
+    vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue({ is_operator: true });
+    vi.spyOn(apiClient, "listAdminAccounts").mockResolvedValue({ accounts: [] });
+    vi.spyOn(apiClient, "getAdminFeatureFlags").mockResolvedValue({ degraded: false, flags: [] });
+    renderPage();
+    const user = userEvent.setup();
+    const users = await screen.findByRole("tab", { name: "Users" });
+    const flags = screen.getByRole("tab", { name: "Feature flags" });
+    expect(users).toHaveAttribute("aria-selected", "true");
+    expect(users).toHaveClass("border-sky-700", "text-sky-800", "focus-visible:ring-2");
+    expect(flags).toHaveClass("border-transparent");
+    users.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(flags).toHaveFocus();
+    expect(flags).toHaveAttribute("aria-selected", "true");
+    expect(flags).toHaveClass("border-sky-700", "text-sky-800");
+    expect(users).toHaveClass("border-transparent");
+    await user.keyboard("{ArrowLeft}");
+    expect(users).toHaveFocus();
+    expect(users).toHaveClass("border-sky-700");
+  });
+
   it("keeps the selected tab unchanged for unrelated keys", async () => {
     vi.spyOn(apiClient, "getAdminStatus").mockResolvedValue({ is_operator: true });
     vi.spyOn(apiClient, "listAdminAccounts").mockResolvedValue({ accounts: [] });

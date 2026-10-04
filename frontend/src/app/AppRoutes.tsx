@@ -6,6 +6,7 @@ import { AdminPage } from "../features/admin/AdminPage";
 import { AgentSettingsGate } from "../features/agents/AgentSettingsGate";
 import { BrainDumpGate } from "../features/brain-dump/BrainDumpGate";
 import type { BrainDumpLocationState } from "../features/brain-dump/brainDumpNavigation";
+import { CrtGate } from "../features/crt/CrtGate";
 import { TaskListPage } from "../features/tasks/TaskListPage";
 import LoginPage from "../pages/LoginPage";
 import PrivacyPolicyPage from "../pages/PrivacyPolicyPage";
@@ -149,7 +150,7 @@ function workspaceRoutes(): React.JSX.Element {
         path="/crt/*"
         element={
           <ProtectedRoute>
-            <ComingLater title="Thinking Mode" />
+            <CrtGate />
           </ProtectedRoute>
         }
       />
@@ -162,19 +163,5 @@ function workspaceRoutes(): React.JSX.Element {
         }
       />
     </>
-  );
-}
-
-function ComingLater({ title }: { title: string }): React.JSX.Element {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-surface-base px-6 text-center">
-      <section className="rounded-2xl border border-slate-200 bg-white px-8 py-10 shadow-raised">
-        <p className="text-xs font-semibold uppercase tracking-[0.06em] text-brand-primary">Coming later</p>
-        <h1 className="mt-2 text-title font-semibold text-slate-900">{title}</h1>
-        <p className="mt-2 max-w-md text-sm text-slate-600">
-          This workspace is intentionally unavailable while the canonical GTD flow remains focused.
-        </p>
-      </section>
-    </main>
   );
 }

@@ -1,12 +1,13 @@
-import { AlertTriangle, Bot, CalendarDays, Check, ChevronDown, Layers, Plus, RotateCcw, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CalendarDays, Check, ChevronDown, Layers, Plus, RotateCcw, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { useAgentRunSummaries } from "../../api/agentHooks";
-import { compactRunLabel } from "../agents/agentCopy";
-import type { AgentRunSummaryResponse } from "../../api/agentTypes";
+import { useAgentConnections, useAgentKeys, useAgentRunSummaries } from "../../api/agentHooks";
+import { hasFeatureFlag } from "../../api/auth";
+import type { AgentConnectionResponse, AgentRunResponse, AgentRunSummaryResponse } from "../../api/agentTypes";
 
 import { apiClient } from "../../api/client";
 import { useAuthStore } from "../../stores/authStore";
@@ -20,7 +21,9 @@ import type { SmartAddDraft, SmartAddSuggestion } from "./smartAdd";
 import { SmartAddSuggestions } from "./SmartAddSuggestions";
 import { TaskTitleAutocompleteSuggestions } from "./TaskTitleAutocompleteSuggestions";
 import { TaskDetailPanel } from "./TaskDetailPanel";
-import { TaskSideSheet } from "./TaskSideSheet";
+import { AgentHandoffOverlay } from "../agents/AgentHandoffOverlay";
+import { TaskAgentControl } from "./TaskAgentControl";
+import { readTaskAgentPreference, rememberTaskAgentPreference } from "./taskAgentPreference";
 import { getTaskDetailAutosaveController } from "./taskDetailAutosave";
 import type { AutosaveResult } from "./taskDetailAutosave";
 import { useTaskTitleAutocomplete } from "./useTaskTitleAutocomplete";
@@ -42,6 +45,7 @@ const dateViewLabels = {
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
 const emptyProjects: ProjectResponse[] = [];
 const emptyTags: TagResponse[] = [];
+const emptyAgentRunSummaries: Record<string, AgentRunSummaryResponse> = {};
 
 function idempotencyKey(action: string): string {
   return `task-shell-${action}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -77,16 +81,40 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const projectId = mode === "project" ? params.projectId : undefined;
   const tagId = mode === "tag" ? params.tagId : undefined;
   const taskId = params.taskId;
+  const listPath = projectId
+    ? `/projects/${projectId}`
+    : tagId
+      ? `/tags/${tagId}`
+      : `/tasks/${params.state ?? "next"}`;
+  const taskSearch = searchParams.toString();
+  const closeTarget = useMemo(() => ({ pathname: listPath, search: taskSearch }), [listPath, taskSearch]);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [newTitle, setNewTitle] = useState("");
   const [newWaitingFor, setNewWaitingFor] = useState("");
-  const [showCancelled, setShowCancelled] = useState(false);
+  const showCancelled = searchParams.get("showCancelled") === "1";
   const pendingCompletionsRef = useRef(new Set<string>());
   const [pendingCompletions, setPendingCompletions] = useState(new Set<string>());
   const completionFocusRef = useRef(new Map<string, HTMLElement>());
-  const [panelOpen, setPanelOpen] = useState(true);
-  const [sheetPresent, setSheetPresent] = useState(Boolean(taskId));
+  const [rowHandoff, setRowHandoff] = useState<{
+    task: TaskResponse;
+    connectionId: string;
+    fallbackTaskId: string | null;
+  } | null>(null);
+  const [agentFocusTarget, setAgentFocusTarget] = useState<{
+    taskId: string;
+    fallbackTaskId: string | null;
+  } | null>(null);
+  const [selectionRecoveryMessage, setSelectionRecoveryMessage] = useState<string | null>(null);
+  const [selectionRecoveryVersion, setSelectionRecoveryVersion] = useState(0);
+  const recoveryAttemptRef = useRef<{
+    taskId: string;
+    routeKey: string;
+    expectedRouteKey: string | null;
+    redirected: boolean;
+    fetchedPages: number;
+    stopped: boolean;
+  } | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [autosaveConflict, setAutosaveConflict] = useState<Extract<AutosaveResult, { status: "conflict" }> | null>(null);
   const [recoveryAvailable, setRecoveryAvailable] = useState(false);
@@ -114,7 +142,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const detailHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const listHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const openingTaskIdRef = useRef<string | undefined>(undefined);
-  const sheetWasOpenRef = useRef(false);
+  const previousTaskIdRef = useRef<string | undefined>(undefined);
+  const focusSettledTaskIdRef = useRef<string | undefined>(undefined);
   const navigationControlRef = useRef<HTMLButtonElement | null>(null);
   const registerRowLink = (rowTaskId: string, el: HTMLAnchorElement | null) => {
     if (el) {
@@ -147,43 +176,17 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     dueOn: dateView === "today" ? today : undefined,
     dueAfter: dateView === "upcoming" ? today : undefined
   });
+  const {
+    dataUpdatedAt: taskQueryDataUpdatedAt,
+    fetchNextPage: fetchNextTaskPage,
+    hasNextPage: taskQueryHasNextPage,
+    isFetchingNextPage: taskQueryIsFetchingNextPage,
+    isLoading: taskQueryIsLoading
+  } = taskQuery;
   const inboxBadgeQuery = useTaskList({ state: "inbox", unassignedProject: true, limit: 1 });
   const detailQuery = useTaskDetail(taskId);
   const projectsQuery = useProjects();
   const tagsQuery = useTags();
-
-  // Selecting a task reopens a panel the shortcut had hidden, in the same
-  // render as the selection rather than a commit later.
-  const [panelTaskId, setPanelTaskId] = useState(taskId);
-  if (taskId !== panelTaskId) {
-    setPanelTaskId(taskId);
-    if (taskId) setPanelOpen(true);
-  }
-
-  useEffect(() => {
-    if (taskId && panelOpen) {
-      if (!sheetWasOpenRef.current) openingTaskIdRef.current = taskId;
-      sheetWasOpenRef.current = true;
-      if (navigationControlRef.current) {
-        const control = navigationControlRef.current;
-        navigationControlRef.current = null;
-        // Preserve the navigation control's focus; at a disabled boundary move
-        // to the remaining direction rather than dropping focus into the body.
-        if (control.disabled) {
-          detailHeadingRef.current?.parentElement?.querySelector<HTMLButtonElement>("[data-task-navigation]:not(:disabled)")?.focus({ preventScroll: true });
-        }
-      } else detailHeadingRef.current?.focus({ preventScroll: true });
-    } else if (!sheetPresent && sheetWasOpenRef.current) {
-      const originLink = rowLinkRefs.current.get(openingTaskIdRef.current ?? "");
-      if (originLink && document.contains(originLink)) {
-        originLink.focus({ preventScroll: true });
-      } else {
-        listHeadingRef.current?.focus({ preventScroll: true });
-      }
-      sheetWasOpenRef.current = false;
-    }
-  }, [taskId, panelOpen, sheetPresent]);
-
   const projects = projectsQuery.data ?? emptyProjects;
   const tags = tagsQuery.data ?? emptyTags;
   const tasks = taskQuery.data?.items ?? [];
@@ -192,8 +195,41 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const cancelledTasks = tasks.filter((task) => task.state === "cancelled");
   const openGroups = groupByProject ? groupTasksByProject(openTasks, projects) : [];
   const counts = taskQuery.data?.counts_by_state ?? emptyCounts;
+  const selectedTaskVisible = Boolean(taskId && tasks.some((task) => task.id === taskId));
+  const projectsRecoveryPending = projectsQuery.isLoading || projectsQuery.isError;
 
-  const accountId = useAuthStore((store) => store.user?.id);
+  useEffect(() => {
+    const previousTaskId = previousTaskIdRef.current;
+    if (taskId) {
+      if (!previousTaskId) openingTaskIdRef.current = taskId;
+      if (navigationControlRef.current) {
+        const requestedLabel = navigationControlRef.current.getAttribute("aria-label");
+        navigationControlRef.current = null;
+        const requestedControl = requestedLabel
+          ? Array.from(detailHeadingRef.current?.parentElement?.querySelectorAll<HTMLButtonElement>("[data-task-navigation]") ?? [])
+              .find((control) => control.getAttribute("aria-label") === requestedLabel)
+          : null;
+        if (requestedControl && !requestedControl.disabled) requestedControl.focus({ preventScroll: true });
+        else detailHeadingRef.current?.parentElement?.querySelector<HTMLButtonElement>("[data-task-navigation]:not(:disabled)")?.focus({ preventScroll: true });
+        focusSettledTaskIdRef.current = taskId;
+      } else if (selectedTaskVisible && focusSettledTaskIdRef.current !== taskId && detailHeadingRef.current) {
+        detailHeadingRef.current?.focus({ preventScroll: true });
+        focusSettledTaskIdRef.current = taskId;
+      }
+    } else if (previousTaskId) {
+      const originLink = rowLinkRefs.current.get(openingTaskIdRef.current ?? "");
+      if (originLink && document.contains(originLink)) {
+        originLink.focus({ preventScroll: true });
+      } else {
+        listHeadingRef.current?.focus({ preventScroll: true });
+      }
+      focusSettledTaskIdRef.current = undefined;
+    }
+    previousTaskIdRef.current = taskId;
+  }, [detailQuery.data, selectedTaskVisible, taskId]);
+
+  const user = useAuthStore((store) => store.user);
+  const accountId = user?.id;
   const cacheScope = getTaskCacheScope(accountId ?? null);
   const scopeKey = JSON.stringify(cacheScope);
   const completionAnimation = useTaskCompletionAnimation(scopeKey, JSON.stringify({ state, projectId, tagId, dateView, searchQuery, sort, groupByProject, showCancelled }));
@@ -205,7 +241,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const applyCanonicalTask = (canonical: TaskResponse, animateCompletion = false) => {
     if (!isCurrentScope()) return;
     if (animateCompletion && canonical.state === "completed") {
-      completionAnimation.capture(canonical.id, completionFocusRef.current.get(`${scopeKey}:${canonical.id}`));
+      const focused = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+      completionAnimation.capture(canonical.id, completionFocusRef.current.get(`${scopeKey}:${canonical.id}`) ?? focused);
+      if (canonical.id === taskId) queueMicrotask(() => navigate(closeTarget));
     }
     queryClient.setQueryData(taskKeys.detail(canonical.id, cacheScope), canonical);
     queryClient.setQueriesData<{
@@ -294,25 +332,27 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       setMutationError(getErrorMessage(caught));
     }
   };
-  const listPath = projectId
-    ? `/projects/${projectId}`
-    : tagId
-      ? `/tags/${tagId}`
-      : `/tasks/${params.state ?? "next"}`;
-  const closeTarget = { pathname: listPath, search: searchParams.toString() };
+  const closeSelectedTask = useCallback(() => {
+    detailController?.flush();
+    navigate(closeTarget);
+  }, [closeTarget, detailController, navigate]);
 
-  // Escape/focus are owned by the modal sheet; keep the existing panel shortcut.
+  // Inline detail has one source of truth: the selected task in the URL. Both
+  // keys only collapse; there is no hidden local state that can reopen it.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "\\" && (event.metaKey || event.ctrlKey)) {
-        if (Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]:not(.task-side-sheet-panel)')).some((modal) => !modal.closest('[inert], [aria-hidden="true"]'))) return;
-        event.preventDefault();
-        setPanelOpen((open) => !open);
-      }
+      if (!taskId) return;
+      const shortcut = event.key === "\\" && (event.metaKey || event.ctrlKey);
+      if (event.key !== "Escape" && !shortcut) return;
+      if (Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some((modal) => !modal.closest('[inert], [aria-hidden="true"]'))) return;
+      const target = event.target as HTMLElement;
+      if (event.key === "Escape" && target.closest('[data-escape-keeps-draft], select, [role="combobox"], [role="listbox"], [role="menu"]')) return;
+      event.preventDefault();
+      closeSelectedTask();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  });
+  }, [closeSelectedTask, taskId]);
 
   const createMutation = useMutation({
     mutationFn: (request: CaptureRequest) => request.smart
@@ -339,8 +379,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   });
 
   const subtaskCreateMutation = useMutation({
-    mutationFn: ({ task, title }: { task: TaskResponse; title: string }) =>
-      apiClient.createSubtask(task.id, { title }, idempotencyKey("subtask-create")),
+    mutationFn: ({ task, title, key }: { task: TaskResponse; title: string; key: string }) =>
+      apiClient.createSubtask(task.id, { title }, key),
     onSuccess: () => {
       setMutationError(null);
       void invalidateTasks();
@@ -359,8 +399,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   });
 
   const commentCreateMutation = useMutation({
-    mutationFn: ({ task, body }: { task: TaskResponse; body: string }) =>
-      apiClient.createComment(task.id, { body }, idempotencyKey("comment-create")),
+    mutationFn: ({ task, body, key }: { task: TaskResponse; body: string; key: string }) =>
+      apiClient.createComment(task.id, { body }, key),
     onSuccess: () => {
       setMutationError(null);
       void invalidateTasks();
@@ -419,9 +459,15 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   });
 
   const canonicalInboxCount = inboxBadgeQuery.data?.counts_by_state.inbox ?? (isInboxProductView ? counts.inbox : 0);
+  // Sidebar counts are whole-list sizes. The page query's counts follow its
+  // filters (project, tag, date window, projectless Inbox), so reading them
+  // made the sidebar numbers jump as the user moved between views. This is the
+  // same unfiltered projection the settings pages read, so the cache is shared.
+  const shellCountsQuery = useTaskList({ state: "next", limit: 1 });
+  const globalCounts = shellCountsQuery.data?.counts_by_state ?? counts;
   const shellCounts = useMemo(
-    () => ({ ...counts, inbox: canonicalInboxCount }),
-    [canonicalInboxCount, counts]
+    () => ({ ...globalCounts, inbox: canonicalInboxCount }),
+    [canonicalInboxCount, globalCounts]
   );
 
   const title = useMemo(() => {
@@ -445,13 +491,73 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     ? "Process these — decide the next action for each."
     : `${openCount} ${taskNoun}`;
 
-  const hasFrameError = taskQuery.isError || projectsQuery.isError || tagsQuery.isError;
+  const hasFrameError = (taskQuery.isError && !taskQuery.data) || projectsQuery.isError || tagsQuery.isError;
 
-  // Existing run chips stay visible after rollout is disabled; only creation of
-  // new hand-offs is gated. A failed summary fetch still degrades to no chips.
-  const hasOwner = Boolean(useAuthStore((store) => store.user));
-  const agentRunSummaries =
-    useAgentRunSummaries(tasks.map((task) => task.id), hasOwner).data ?? {};
+  // Existing run chips stay visible after rollout is disabled or a refresh
+  // fails. New hand-offs wait for a successful summary projection, otherwise
+  // an unknown assigned task could be dispatched twice.
+  const hasOwner = Boolean(user);
+  const relayEnabled = hasFeatureFlag(user, "external_agent_relay");
+  const agentKeys = useAgentKeys();
+  const agentRunSummariesQuery = useAgentRunSummaries(tasks.map((task) => task.id), hasOwner);
+  const agentRunSummaries = agentRunSummariesQuery.data ?? emptyAgentRunSummaries;
+  const agentHandoffEnabled = relayEnabled && agentRunSummariesQuery.isSuccess;
+  const agentConnectionsQuery = useAgentConnections(relayEnabled);
+  const agentConnections = agentConnectionsQuery.data ?? [];
+  const preferredConnection = accountId && agentConnectionsQuery.data !== undefined
+    ? readTaskAgentPreference(
+        { ownerId: accountId, apiOrigin: cacheScope.apiOrigin },
+        agentConnectionsQuery.data
+      )
+    : null;
+
+  const displayedTasks = [
+    ...(groupByProject ? openGroups.flatMap((group) => group.tasks) : openTasks),
+    ...completedTasks,
+    ...cancelledTasks
+  ];
+  const agentFocusFallbackTaskId = (focusedTaskId: string): string | null => {
+    const focusedIndex = displayedTasks.findIndex((task) => task.id === focusedTaskId);
+    if (focusedIndex < 0) return null;
+    return displayedTasks[focusedIndex + 1]?.id ?? displayedTasks[focusedIndex - 1]?.id ?? null;
+  };
+
+  useEffect(() => {
+    if (!agentFocusTarget) return;
+    const control = Array.from(document.querySelectorAll<HTMLElement>("[data-agent-assigned-control]"))
+      .find((element) => element.dataset.agentAssignedControl === agentFocusTarget.taskId);
+    if (control) control.focus({ preventScroll: true });
+    else {
+      const rowLink = rowLinkRefs.current.get(agentFocusTarget.taskId);
+      if (rowLink && document.contains(rowLink)) rowLink.focus({ preventScroll: true });
+      else {
+        const preferredFallback = agentFocusTarget.fallbackTaskId
+          ? rowLinkRefs.current.get(agentFocusTarget.fallbackTaskId)
+          : null;
+        const survivingRow = preferredFallback && document.contains(preferredFallback)
+          ? preferredFallback
+          : Array.from(rowLinkRefs.current.values()).find((link) => document.contains(link));
+        if (survivingRow) survivingRow.focus({ preventScroll: true });
+        else listHeadingRef.current?.focus({ preventScroll: true });
+      }
+    }
+    setAgentFocusTarget(null);
+  }, [agentFocusTarget, agentRunSummaries]);
+
+  const closeRowHandoff = () => setRowHandoff(null);
+  const handleRowHandoffDispatched = (run: AgentRunResponse) => {
+    if (accountId && rowHandoff) {
+      rememberTaskAgentPreference(
+        { ownerId: accountId, apiOrigin: cacheScope.apiOrigin },
+        run.connection_id
+      );
+    }
+    const taskToFocus = rowHandoff?.task.id;
+    const fallbackTaskId = rowHandoff?.fallbackTaskId ?? null;
+    setRowHandoff(null);
+    setAgentFocusTarget(taskToFocus ? { taskId: taskToFocus, fallbackTaskId } : null);
+    void queryClient.invalidateQueries({ queryKey: agentKeys.connections() });
+  };
 
   // Shared by the flat list and by every project group, so the two render paths
   // can never drift apart.
@@ -486,7 +592,19 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
           setPendingCompletions(new Set(pendingCompletionsRef.current));
         });
     },
-    agentRuns: agentRunSummaries
+    agentRuns: agentRunSummaries,
+    relayEnabled: agentHandoffEnabled,
+    agentConnections,
+    preferredConnectionId: preferredConnection?.id,
+    onReviewAgent: (task: TaskResponse, connectionId: string) => setRowHandoff({
+      task,
+      connectionId,
+      fallbackTaskId: agentFocusFallbackTaskId(task.id)
+    }),
+    onOpenTask: (task: TaskResponse) => {
+      if (task.id !== taskId) navigate({ pathname: `${listPath}/${task.id}`, search: searchParams.toString() });
+    },
+    onCloseSelectedTask: closeSelectedTask
   };
 
   const isSavedNotice = mutationError === "Saved";
@@ -498,14 +616,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     </div>
   ) : null;
 
-  const displayedTasks = [...(groupByProject ? openGroups.flatMap((group) => group.tasks) : openTasks), ...completedTasks, ...cancelledTasks];
   const taskPosition = displayedTasks.findIndex((task) => task.id === taskId);
   const navigateTask = (id: string) => {
     navigationControlRef.current = document.activeElement?.matches("[data-task-navigation]") ? document.activeElement as HTMLButtonElement : null;
     navigate({ pathname: `${listPath}/${id}`, search: searchParams.toString() });
   };
-  const panel = panelOpen && taskId ? (
+  const panel = taskId ? (
     <TaskDetailPanel
+      layout="inline"
       task={detailQuery.data}
       autosave={detailController ?? undefined}
       resetKey={canonicalResetKey}
@@ -514,7 +632,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       isLoading={detailQuery.isLoading}
       error={detailQuery.error}
       headingRef={detailHeadingRef}
-      onClose={() => navigate(closeTarget)}
+      onClose={closeSelectedTask}
       notice={mutationNotice}
       navigation={{
         position: taskPosition + 1,
@@ -527,11 +645,186 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       // is nothing to save, so they stay no-ops rather than dead `.save()` calls.
       onSave={() => undefined}
       onTransition={() => undefined}
-      onCreateSubtask={(task, subtaskTitle) => subtaskCreateMutation.mutate({ task, title: subtaskTitle })}
+      onCreateSubtask={(task, subtaskTitle, key) => subtaskCreateMutation.mutateAsync({ task, title: subtaskTitle, key })}
       onTransitionSubtask={(task, subtask, action) => subtaskTransitionMutation.mutate({ task, subtask, action })}
-      onCreateComment={(task, body) => commentCreateMutation.mutate({ task, body })}
+      onCreateComment={(task, body, key) => commentCreateMutation.mutateAsync({ task, body, key })}
+      onAgentDispatched={(run) => {
+        setAgentFocusTarget({
+          taskId: run.task_id,
+          fallbackTaskId: agentFocusFallbackTaskId(run.task_id)
+        });
+        void queryClient.invalidateQueries({ queryKey: agentKeys.connections() });
+      }}
     />
   ) : null;
+
+  const currentRouteKey = `${listPath}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+
+  useEffect(() => {
+    if (!taskId || selectedTaskVisible) {
+      recoveryAttemptRef.current = null;
+      setSelectionRecoveryMessage(null);
+      return;
+    }
+    if (detailQuery.isError) {
+      setSelectionRecoveryMessage(getErrorMessage(detailQuery.error));
+      return;
+    }
+    const selected = detailQuery.data;
+    if (!selected) return;
+
+    let attempt = recoveryAttemptRef.current;
+    if (!attempt || attempt.taskId !== taskId) {
+      attempt = {
+        taskId,
+        routeKey: currentRouteKey,
+        expectedRouteKey: null,
+        redirected: false,
+        fetchedPages: 0,
+        stopped: false
+      };
+      recoveryAttemptRef.current = attempt;
+    } else if (attempt.routeKey !== currentRouteKey) {
+      if (attempt.expectedRouteKey === currentRouteKey) {
+        attempt.routeKey = currentRouteKey;
+        attempt.expectedRouteKey = null;
+      } else {
+        // A user-driven route/filter change is a new bounded recovery attempt.
+        attempt = {
+          taskId,
+          routeKey: currentRouteKey,
+          expectedRouteKey: null,
+          redirected: false,
+          fetchedPages: 0,
+          stopped: false
+        };
+        recoveryAttemptRef.current = attempt;
+      }
+    }
+    if (attempt.stopped || taskQueryIsLoading || taskQueryIsFetchingNextPage || projectsRecoveryPending) return;
+
+    if (!attempt.redirected) {
+      const target = canonicalTaskTarget({
+        task: selected,
+        projects,
+        state,
+        projectId,
+        tagId,
+        dateView: Boolean(dateView),
+        listPath,
+        searchParams
+      });
+      const targetKey = `${target.pathname}${target.search ? `?${target.search}` : ""}`;
+      attempt.redirected = true;
+      if (targetKey !== currentRouteKey) {
+        attempt.expectedRouteKey = targetKey;
+        navigate({ pathname: `${target.pathname}/${taskId}`, search: target.search }, { replace: true });
+        return;
+      }
+    }
+
+    if (taskQueryHasNextPage && attempt.fetchedPages < 10) {
+      attempt.fetchedPages += 1;
+      setSelectionRecoveryMessage(`Loading the row for “${selected.title}”…`);
+      const activeAttempt = attempt;
+      void fetchNextTaskPage().then((result) => {
+        if (result.isError && recoveryAttemptRef.current === activeAttempt) {
+          activeAttempt.stopped = true;
+          setSelectionRecoveryMessage(`Could not load the row for “${selected.title}”.`);
+        }
+      });
+      return;
+    }
+
+    attempt.stopped = true;
+    setSelectionRecoveryMessage(
+      taskQueryHasNextPage
+        ? `The row for “${selected.title}” is beyond the automatic 10-page limit.`
+        : `The row for “${selected.title}” is not in this list.`
+    );
+  }, [
+    taskId,
+    selectedTaskVisible,
+    detailQuery.data,
+    detailQuery.error,
+    detailQuery.isError,
+    dateView,
+    listPath,
+    navigate,
+    projectId,
+    projects,
+    projectsRecoveryPending,
+    searchParams,
+    state,
+    tagId,
+    fetchNextTaskPage,
+    taskQueryIsLoading,
+    taskQueryIsFetchingNextPage,
+    taskQueryHasNextPage,
+    taskQueryDataUpdatedAt,
+    currentRouteKey,
+    selectionRecoveryVersion
+  ]);
+
+  const selectionRecoveryNotice = taskId && !selectedTaskVisible && selectionRecoveryMessage ? (
+    <div role={detailQuery.isError ? "alert" : "status"} className="mb-3 flex flex-wrap items-center gap-2 border-y border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+      <span>{selectionRecoveryMessage}</span>
+      {!detailQuery.isError ? (
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            recoveryAttemptRef.current = null;
+            setSelectionRecoveryMessage(null);
+            setSelectionRecoveryVersion((version) => version + 1);
+          }}
+        >
+          Retry / load more
+        </Button>
+      ) : (
+        <Button size="sm" variant="secondary" onClick={() => void detailQuery.refetch()}>Retry</Button>
+      )}
+      <Button size="sm" variant="ghost" onClick={closeSelectedTask}>Close</Button>
+    </div>
+  ) : null;
+  const agentSummaryNotice = agentRunSummariesQuery.isError && agentRunSummariesQuery.data ? (
+    <div role="status" className="mb-3 flex items-center gap-2 border-y border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+      <span>Agent statuses may be out of date.</span>
+      <Button size="sm" variant="ghost" onClick={() => void agentRunSummariesQuery.refetch()}>Retry</Button>
+    </div>
+  ) : null;
+
+  const taskCreator = dateView ? null : (
+    <TaskCreator
+      newTitle={newTitle}
+      newWaitingFor={newWaitingFor}
+      projects={projects}
+      tags={tags}
+      contextProjectId={projectId}
+      contextTagId={tagId}
+      state={state}
+      isCreating={createMutation.isPending}
+      captureSettlementVersion={captureSettlementVersion}
+      onCreate={(draft, restoreFocus) => {
+        const waitingFor = newWaitingForRef.current;
+        const payload = {
+          title: draft.cleanTitle,
+          state: state ?? "inbox",
+          ...(state === "waiting" ? { waiting_for: waitingFor.trim() } : {}),
+          ...(draft.hasCompletedTokens
+            ? { project: draft.project, tags: draft.tags }
+            : { ...(projectId ? { project_id: projectId } : {}), ...(tagId ? { tag_ids: [tagId] } : {}) })
+        };
+        const signature = captureSignature(draft, state, projectId, tagId, waitingFor);
+        const previous = captureAttemptRef.current;
+        const key = previous?.signature === signature ? previous.key : idempotencyKey(draft.hasCompletedTokens ? "smart-add" : "create");
+        captureAttemptRef.current = { signature, key };
+        createMutation.mutate({ payload, key, signature, smart: draft.hasCompletedTokens, restoreFocus });
+      }}
+      onTitleChange={setNewTitle}
+      onWaitingForChange={setNewWaitingFor}
+    />
+  );
 
   return (
     <AppShell
@@ -541,8 +834,6 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       activeState={state}
       activeProjectId={projectId}
       activeTagId={tagId}
-      panel={<TaskSideSheet onClose={() => navigate(closeTarget)} onPresenceChange={setSheetPresent}>{panel}</TaskSideSheet>}
-      panelModal={Boolean(panel) || sheetPresent}
       onCreateProject={(name) => projectMutation.mutate({ action: "create", name })}
       onRenameProject={(project, name) => projectMutation.mutate({ action: "rename", project, name })}
       onArchiveProject={(project) => projectMutation.mutate({ action: "archive", project })}
@@ -551,14 +842,16 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
       onDeleteTag={(tag) => tagMutation.mutate({ action: "delete", tag })}
     >
       <section aria-labelledby="task-list-title" className="mx-auto max-w-[760px]">
-        <div className="mb-5 flex flex-wrap items-end gap-x-3 gap-y-2">
-          <div className="min-w-0">
-            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 text-title font-semibold text-slate-900 outline-hidden">
+        {/* Below `sm` Sort stays beside the title and the two toggles take their
+            own row, so a phone never squeezes a control into two-line text. */}
+        <div className="mb-5 flex flex-wrap items-end gap-x-1.5 gap-y-3">
+          <div className="mr-auto min-w-0 pr-1.5 max-sm:flex-1">
+            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 break-words text-title font-semibold text-slate-900 outline-hidden">
               {title}
             </h1>
             <p className="m-0 mt-1 text-xs text-slate-500">{meta}</p>
           </div>
-          <div className="ml-auto flex items-center gap-1.5 max-[359px]:w-full max-[359px]:flex-wrap max-[359px]:justify-end">
+          <div className="flex items-center gap-1.5 whitespace-nowrap max-sm:order-last max-sm:w-full">
             {canGroupByProject ? (
               <Button
                 variant={groupByProject ? "secondary" : "ghost"}
@@ -578,45 +871,52 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
                 Group by project
               </Button>
             ) : null}
-            <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
+            <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900 max-sm:first:-ml-2.5">
               <input
                 type="checkbox"
                 className="h-3.5 w-3.5 rounded-sm border-slate-300 text-brand-primary accent-brand-primary"
                 checked={showCancelled}
-                onChange={(event) => setShowCancelled(event.currentTarget.checked)}
+                onChange={(event) => {
+                  const next = new URLSearchParams(searchParams);
+                  if (event.currentTarget.checked) next.set("showCancelled", "1");
+                  else next.delete("showCancelled");
+                  setSearchParams(next, { replace: true });
+                }}
               />
               Show cancelled
             </label>
-            <label className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900">
-              <span className="text-slate-500">Sort</span>
-              <span className="relative inline-flex">
-                <select
-                  aria-label="Sort tasks"
-                  className="appearance-none bg-transparent pr-5 text-xs font-medium text-slate-700 outline-hidden"
-                  value={sort}
-                  onChange={(event) => {
-                    const next = new URLSearchParams(searchParams);
-                    const value = parseTaskSort(event.currentTarget.value);
-                    if (value === "manual") {
-                      next.delete("sort");
-                    } else {
-                      next.set("sort", value);
-                    }
-                    setSearchParams(next, { replace: true });
-                  }}
-                >
-                  <option value="manual">Manual</option>
-                  <option value="due">Due date</option>
-                  <option value="priority">Priority</option>
-                  <option value="title">Title</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
-              </span>
-            </label>
           </div>
+          <label className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900 max-sm:-mr-2">
+            <span className="text-slate-500">Sort</span>
+            <span className="relative inline-flex">
+              <select
+                aria-label="Sort tasks"
+                className="cursor-pointer appearance-none rounded-sm bg-transparent pr-5 text-xs font-medium text-slate-700 outline-hidden"
+                value={sort}
+                onChange={(event) => {
+                  const next = new URLSearchParams(searchParams);
+                  const value = parseTaskSort(event.currentTarget.value);
+                  if (value === "manual") {
+                    next.delete("sort");
+                  } else {
+                    next.set("sort", value);
+                  }
+                  setSearchParams(next, { replace: true });
+                }}
+              >
+                <option value="manual">Manual</option>
+                <option value="due">Due date</option>
+                <option value="priority">Priority</option>
+                <option value="title">Title</option>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
+            </span>
+          </label>
         </div>
 
-        {!panel ? mutationNotice : null}
+        {!taskId ? mutationNotice : null}
+        {selectionRecoveryNotice}
+        {agentSummaryNotice}
 
         <div ref={completionAnimation.containerRef}>
         {hasFrameError ? (
@@ -642,41 +942,51 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
                     />
                     <h2
                       id={`task-group-${group.key}`}
+                      title={group.name}
                       className="m-0 min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500"
                     >
                       {group.name}
                     </h2>
-                    <span className="text-xs font-medium text-slate-400">{group.tasks.length}</span>
+                    <span className="shrink-0 text-xs font-medium tabular-nums text-slate-400">{group.tasks.length}</span>
                   </div>
-                  <TaskList {...taskListProps} tasks={group.tasks} label={group.name} />
+                  <TaskList {...taskListProps} tasks={group.tasks} label={group.name} inlineDetail={panel} />
                 </section>
-              )) : openTasks.length ? <TaskList {...taskListProps} tasks={openTasks} /> : null}
+              )) : openTasks.length ? <TaskList {...taskListProps} tasks={openTasks} inlineDetail={panel} /> : null}
+            {taskCreator}
             {completedTasks.length ? (
               <section aria-labelledby="completed-tasks-heading">
                 <h2 id="completed-tasks-heading" className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Completed</h2>
-                <TaskList {...taskListProps} tasks={completedTasks} label="Completed" />
+                <TaskList {...taskListProps} tasks={completedTasks} label="Completed" inlineDetail={panel} />
               </section>
             ) : null}
             {cancelledTasks.length ? (
               <section aria-labelledby="cancelled-tasks-heading">
                 <h2 id="cancelled-tasks-heading" className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Cancelled</h2>
-                <TaskList {...taskListProps} tasks={cancelledTasks} label="Cancelled" />
+                <TaskList {...taskListProps} tasks={cancelledTasks} label="Cancelled" inlineDetail={panel} />
               </section>
             ) : null}
           </div>
         ) : (
-          <EmptyState
-            state={state}
-            onClearSearch={searchQuery.trim() ? () => {
-              const next = new URLSearchParams(searchParams);
-              next.delete("q");
-              setSearchParams(next, { replace: true });
-              listHeadingRef.current?.focus();
-            } : undefined}
-          />
+          <div className="flex flex-col gap-3">
+            <EmptyState
+              state={state}
+              onClearSearch={searchQuery.trim() ? () => {
+                const next = new URLSearchParams(searchParams);
+                next.delete("q");
+                setSearchParams(next, { replace: true });
+                listHeadingRef.current?.focus();
+              } : undefined}
+            />
+            {taskCreator}
+          </div>
         )}
         </div>
 
+        {taskQuery.isFetchNextPageError ? (
+          <div role="alert" className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            Could not load more tasks: {getErrorMessage(taskQuery.error)}. The tasks above are still available.
+          </div>
+        ) : null}
         {taskQuery.hasNextPage ? (
           <div className="mt-3 flex justify-center">
             <Button
@@ -684,47 +994,66 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
               onClick={() => void taskQuery.fetchNextPage()}
               isLoading={taskQuery.isFetchingNextPage}
             >
-              {taskQuery.isFetchingNextPage ? "Loading more tasks…" : "Load more tasks"}
+              {taskQuery.isFetchingNextPage ? "Loading more tasks…" : taskQuery.isFetchNextPageError ? "Retry loading tasks" : "Load more tasks"}
             </Button>
           </div>
         ) : null}
 
-        {dateView ? (
-          <DateViewCaptureHint />
-        ) : (
-          <TaskCreator
-            newTitle={newTitle}
-            newWaitingFor={newWaitingFor}
-            projects={projects}
-            tags={tags}
-            contextProjectId={projectId}
-            contextTagId={tagId}
-            state={state}
-            isCreating={createMutation.isPending}
-            captureSettlementVersion={captureSettlementVersion}
-            onCreate={(draft, restoreFocus) => {
-              const waitingFor = newWaitingForRef.current;
-              const payload = {
-                title: draft.cleanTitle,
-                state: state ?? "inbox",
-                ...(state === "waiting" ? { waiting_for: waitingFor.trim() } : {}),
-                ...(draft.hasCompletedTokens
-                  ? { project: draft.project, tags: draft.tags }
-                  : { ...(projectId ? { project_id: projectId } : {}), ...(tagId ? { tag_ids: [tagId] } : {}) })
-              };
-              const signature = captureSignature(draft, state, projectId, tagId, waitingFor);
-              const previous = captureAttemptRef.current;
-              const key = previous?.signature === signature ? previous.key : idempotencyKey(draft.hasCompletedTokens ? "smart-add" : "create");
-              captureAttemptRef.current = { signature, key };
-              createMutation.mutate({ payload, key, signature, smart: draft.hasCompletedTokens, restoreFocus });
-            }}
-            onTitleChange={setNewTitle}
-            onWaitingForChange={setNewWaitingFor}
-          />
-        )}
+        {dateView ? <DateViewCaptureHint /> : null}
       </section>
+      {rowHandoff ? createPortal(
+        <AgentHandoffOverlay
+          taskId={rowHandoff.task.id}
+          taskTitle={rowHandoff.task.title}
+          seed={{ connectionId: rowHandoff.connectionId, includeDetails: true, supportingItems: [] }}
+          onClose={closeRowHandoff}
+          onDispatched={handleRowHandoffDispatched}
+        />,
+        document.body
+      ) : null}
     </AppShell>
   );
+}
+
+function canonicalTaskTarget({
+  task,
+  projects,
+  state,
+  projectId,
+  tagId,
+  dateView,
+  listPath,
+  searchParams
+}: {
+  task: TaskResponse;
+  projects: ProjectResponse[];
+  state?: OpenTaskState;
+  projectId?: string;
+  tagId?: string;
+  dateView: boolean;
+  listPath: string;
+  searchParams: URLSearchParams;
+}): { pathname: string; search: string } {
+  const currentMembership = !dateView && (
+    projectId ? task.project_id === projectId
+      : tagId ? task.tag_ids.includes(tagId)
+        : state === "inbox" ? task.state === "inbox" && task.project_id === null
+          : state ? task.state === state
+          : false
+  );
+  const clean = new URLSearchParams();
+  const sort = searchParams.get("sort");
+  if (sort) clean.set("sort", sort);
+  if (task.state === "cancelled") clean.set("showCancelled", "1");
+
+  if (currentMembership) return { pathname: listPath, search: clean.toString() };
+  if (task.project_id && projects.some((project) => project.id === task.project_id)) {
+    return { pathname: `/projects/${task.project_id}`, search: clean.toString() };
+  }
+  if (task.state === "inbox" || task.state === "next" || task.state === "waiting" || task.state === "someday") {
+    return { pathname: `/tasks/${task.state}`, search: clean.toString() };
+  }
+  return { pathname: "/tasks/next", search: clean.toString() };
 }
 
 interface TaskProjectGroup {
@@ -766,21 +1095,25 @@ function groupTasksByProject(tasks: TaskResponse[], projects: ProjectResponse[])
 
 // Every call site names its variant, so there is deliberately no default: a
 // silent fallback would let a new call site render the wrong chip unnoticed.
-function Chip({ variant, children }: {
-  variant: "due" | "neutral" | "agent" | "needs-you";
+function Chip({ variant, truncate = false, title, children }: {
+  variant: "due" | "neutral";
+  /** Lets a long label give way with an ellipsis instead of being clipped by the row. */
+  truncate?: boolean;
+  title?: string;
   children: ReactNode;
 }): React.JSX.Element {
   const variantClass =
     variant === "due"
       ? "border-due-border bg-due-bg text-due-fg"
-      : variant === "agent"
-        ? "border-ai-border bg-ai-bg text-ai-fg"
-        : variant === "needs-you"
-          ? "border-needs-you-border bg-needs-you-bg text-needs-you-fg"
-          : "border-transparent bg-context-bg text-context-fg";
+      : "border-transparent bg-context-bg text-context-fg";
   return (
-    <span className={`inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium ${variantClass}`}>
-      {children}
+    <span
+      title={title}
+      className={`inline-flex h-[22px] items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium ${
+        truncate ? "min-w-0 max-w-[160px] shrink" : "shrink-0"
+      } ${variantClass}`}
+    >
+      {truncate ? <span className="min-w-0 truncate">{children}</span> : children}
     </span>
   );
 }
@@ -800,6 +1133,13 @@ function TaskList({
   scopeKey,
   onComplete,
   agentRuns,
+  relayEnabled,
+  agentConnections,
+  preferredConnectionId,
+  onReviewAgent,
+  onOpenTask,
+  onCloseSelectedTask,
+  inlineDetail,
   label
 }: {
   tasks: TaskResponse[];
@@ -813,13 +1153,20 @@ function TaskList({
   onComplete: (task: TaskResponse) => void;
   /** Latest external run per task, sparse: most tasks have none. */
   agentRuns: Record<string, AgentRunSummaryResponse>;
+  relayEnabled: boolean;
+  agentConnections: readonly AgentConnectionResponse[];
+  preferredConnectionId?: string;
+  onReviewAgent: (task: TaskResponse, connectionId: string) => void;
+  onOpenTask: (task: TaskResponse) => void;
+  onCloseSelectedTask: () => void;
+  inlineDetail?: ReactNode;
   /** Names this list for assistive tech; each group supplies its project name. */
   label?: string;
 }): React.JSX.Element {
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
 
   return (
-    <div className="flex flex-col gap-[5px]" role="list" aria-label={label ?? "Tasks"}>
+    <div className="overflow-hidden rounded-xl border border-slate-200" role="list" aria-label={label ?? "Tasks"}>
       {tasks.map((task) => (
         <TaskRow
           key={task.id}
@@ -831,6 +1178,13 @@ function TaskList({
           completionPending={pendingCompletions.has(`${scopeKey}:${task.id}`)}
           onComplete={onComplete}
           agentRun={agentRuns[task.id]}
+          relayEnabled={relayEnabled}
+          agentConnections={agentConnections}
+          preferredConnectionId={preferredConnectionId}
+          onReviewAgent={onReviewAgent}
+          onOpenTask={onOpenTask}
+          onCloseSelectedTask={onCloseSelectedTask}
+          inlineDetail={selectedTaskId === task.id ? inlineDetail : undefined}
         />
       ))}
     </div>
@@ -845,7 +1199,14 @@ function TaskRow({
   registerRowLink,
   completionPending,
   onComplete,
-  agentRun
+  agentRun,
+  relayEnabled,
+  agentConnections,
+  preferredConnectionId,
+  onReviewAgent,
+  onOpenTask,
+  onCloseSelectedTask,
+  inlineDetail
 }: {
   task: TaskResponse;
   tags: TagResponse[];
@@ -855,6 +1216,13 @@ function TaskRow({
   completionPending: boolean;
   onComplete: (task: TaskResponse) => void;
   agentRun?: AgentRunSummaryResponse;
+  relayEnabled: boolean;
+  agentConnections: readonly AgentConnectionResponse[];
+  preferredConnectionId?: string;
+  onReviewAgent: (task: TaskResponse, connectionId: string) => void;
+  onOpenTask: (task: TaskResponse) => void;
+  onCloseSelectedTask: () => void;
+  inlineDetail?: ReactNode;
 }): React.JSX.Element {
   const isTerminal = task.state === "completed" || task.state === "cancelled";
   const navigate = useNavigate();
@@ -863,85 +1231,104 @@ function TaskRow({
 
   return (
     <article
-      className={`group rounded-[12px] border px-3.5 py-[7px] transition-colors duration-200 ease-smooth ${
-        isSelected ? "border-sky-700 bg-info-bg" : "border-slate-200 bg-white hover:bg-slate-50"
-      }`}
+      className="group border-b border-slate-200 bg-white last:border-b-0"
       role="listitem"
       data-task-id={task.id}
       data-task-state={task.state}
-      onClick={(event) => {
-        const target = event.target as HTMLElement;
-        if (target.closest("a, button, input, textarea, select, label")) {
-          return;
-        }
-        navigate(detailPath);
-      }}
     >
-      <div className="flex min-h-[26px] flex-wrap items-center gap-x-2.5 gap-y-1.5">
+      <div
+        data-testid="task-row-header"
+        className={`flex h-11 min-w-0 cursor-pointer items-center gap-2 pl-1.5 pr-3 transition-colors duration-150 ease-smooth ${isSelected ? "bg-slate-50" : "hover:bg-slate-50/70"}`}
+        onClick={(event) => {
+          const target = event.target as HTMLElement;
+          if (target.closest("a, button, input, textarea, select, label")) return;
+          if (isSelected) onCloseSelectedTask();
+          else navigate(detailPath);
+        }}
+      >
         {isTerminal ? (
-          <span
-            role="img"
-            aria-label={task.state === "completed" ? "Completed" : "Cancelled"}
-            className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-[1.5px] ${
-              task.state === "completed"
-                ? "border-brand-primary bg-brand-primary text-white"
-                : "border-slate-300 bg-slate-200 text-slate-500"
-            }`}
-          >
-            {task.state === "completed" ? <Check className="h-[11px] w-[11px]" /> : <X className="h-2.5 w-2.5" />}
+          // Same 44px slot as the complete button, so finished and open rows
+          // keep their circles and titles on one vertical line.
+          <span className="-ml-1.5 flex h-11 w-11 shrink-0 items-center justify-center">
+            <span
+              role="img"
+              aria-label={task.state === "completed" ? "Completed" : "Cancelled"}
+              className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] ${
+                task.state === "completed"
+                  ? "border-brand-primary bg-brand-primary text-white"
+                  : "border-slate-300 bg-slate-200 text-slate-500"
+              }`}
+            >
+              {task.state === "completed" ? <Check className="h-[11px] w-[11px]" /> : <X className="h-2.5 w-2.5" />}
+            </span>
           </span>
         ) : (
           <button
             type="button"
-            className="group/complete -my-[7px] -ml-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+            className="group/complete -ml-1.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
             aria-label={`Complete ${task.title}`}
             disabled={completionPending}
             onClick={() => onComplete(task)}
           >
-            <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-slate-300 bg-white text-transparent transition-colors duration-200 ease-smooth group-hover/complete:border-sky-700">
+            <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-slate-300 bg-white text-transparent transition-colors duration-200 ease-smooth group-hover/complete:border-sky-700 group-hover/complete:text-sky-700/50">
               <Check className="h-[11px] w-[11px]" aria-hidden />
             </span>
           </button>
         )}
         <Link
           ref={(el) => registerRowLink(task.id, el)}
-          to={detailPath}
-          className={`min-w-0 flex-1 truncate text-sm font-medium hover:text-brand-primary ${
+          to={isSelected ? ".." : detailPath}
+          relative={isSelected ? "path" : undefined}
+          onClick={(event) => {
+            if (!isSelected) return;
+            event.preventDefault();
+            onCloseSelectedTask();
+          }}
+          aria-expanded={isSelected}
+          className={`min-w-0 flex-1 truncate text-sm font-medium outline-hidden transition-colors duration-150 ease-smooth hover:text-sky-700 focus-visible:rounded-sm ${
             isTerminal ? "text-slate-500 line-through decoration-slate-300" : "text-slate-900"
           }`}
         >
           {task.title}
         </Link>
         {task.due_date ? (
-          <Chip variant="due">
-            <CalendarDays className="h-[11px] w-[11px]" aria-hidden />
-            {formatDueDate(task.due_date)}
-          </Chip>
-        ) : null}
-        {agentRun ? (
-          // The server's own label, verbatim: the card can never describe a run
-          // more confidently than the detail view does. The tier is spelled out
-          // in full beside it (D-03-S21) — an abbreviation would be a promise
-          // about duplicate risk written in a code the user has to learn.
-          <Chip variant={agentRun.needs_user ? "needs-you" : "agent"}>
-            <Bot className="h-[11px] w-[11px]" aria-hidden />
-            {compactRunLabel(agentRun)}
-          </Chip>
+          <span className="hidden md:inline-flex">
+            <Chip variant="due">
+              <CalendarDays className="h-[11px] w-[11px]" aria-hidden />
+              {formatDueDate(task.due_date)}
+            </Chip>
+          </span>
         ) : null}
         {subtasks.length ? (
-          <Chip variant="neutral">
-            {doneSubtasks} / {subtasks.length}
-          </Chip>
+          <span className="hidden md:inline-flex">
+            <Chip variant="neutral">
+              {doneSubtasks} / {subtasks.length}
+            </Chip>
+          </span>
         ) : null}
-        <span className="ml-auto flex shrink-0 items-center gap-2.5">
+        <span className="ml-auto hidden min-w-0 shrink items-center gap-1.5 sm:flex sm:max-w-[40%]">
           {task.state === "waiting" && task.waiting_for ? (
-            <span className="max-w-[140px] truncate text-[11px] text-slate-400">{task.waiting_for}</span>
+            <span title={task.waiting_for} className="mr-1 min-w-0 max-w-[140px] truncate text-[11px] text-slate-500">{task.waiting_for}</span>
           ) : null}
           {tags.map((tag) => (
-            <Chip key={tag.id} variant="neutral">{tagLabel(tag)}</Chip>
+            <Chip key={tag.id} variant="neutral" truncate title={tagLabel(tag)}>{tagLabel(tag)}</Chip>
           ))}
         </span>
+        <TaskAgentControl
+          task={task}
+          run={agentRun}
+          relayEnabled={relayEnabled}
+          connections={agentConnections}
+          preferredConnectionId={preferredConnectionId}
+          onReview={(connectionId) => onReviewAgent(task, connectionId)}
+          onOpenTask={() => onOpenTask(task)}
+        />
       </div>
+      {isSelected && inlineDetail ? (
+        <div className="border-t border-slate-200 bg-white motion-safe:animate-detail-enter" data-testid="inline-task-detail">
+          {inlineDetail}
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -1062,12 +1449,14 @@ function TaskCreator({
   };
 
   return (
-    <div className="mt-2 space-y-3">
+    <div className="space-y-3">
       {/* The prototype's dashed "add task" row; the smart-add form lives inside
-          it so the affordance is directly typable rather than click-to-expand. */}
+          it so the affordance is directly typable rather than click-to-expand.
+          The minimum height already fits the Add task button, so the row does
+          not grow and push the list down on the first keystroke. */}
       <form
         ref={composerRef}
-        className="flex w-full flex-wrap items-center gap-3 rounded-[12px] border-[1.5px] border-dashed border-slate-300 bg-transparent px-4 py-3 transition-colors duration-200 ease-smooth focus-within:border-brand-primary hover:border-brand-primary"
+        className="flex min-h-12 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] border-[1.5px] border-dashed border-slate-300 bg-transparent py-1.5 pl-4 pr-2 transition-[background-color,border-color] duration-200 ease-smooth focus-within:border-solid focus-within:border-brand-primary focus-within:bg-white hover:border-brand-primary"
         onSubmit={(event) => {
           event.preventDefault();
           submitDraft();
@@ -1090,7 +1479,7 @@ function TaskCreator({
                 ? `${completionListboxId}-option-${activeCompletionIndex}`
                 : undefined
           }
-          className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-hidden placeholder:text-slate-400"
+          className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-slate-900 outline-hidden placeholder:text-slate-500 focus-visible:shadow-none"
           placeholder={placeholder}
           value={newTitle}
           onChange={(event) => {
@@ -1155,7 +1544,7 @@ function TaskCreator({
             <input
               id="new-task-waiting-for"
               aria-label="Waiting for"
-              className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-hidden placeholder:text-slate-400"
+              className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-slate-900 outline-hidden placeholder:text-slate-500 focus-visible:shadow-none"
               placeholder="Waiting for who or what?"
               value={newWaitingFor}
               onChange={(event) => onWaitingForChange(event.currentTarget.value)}
@@ -1201,8 +1590,10 @@ function TaskCreator({
           onSelect={applyCompletion}
         />
       ) : null}
+      {/* Kept mounted so the live region exists before it speaks, but an empty
+          region must not add a blank 12px row under the composer. */}
       <div
-        className="text-xs text-slate-500"
+        className="text-xs text-slate-500 empty:mt-0!"
         role={autocomplete.loading || autocomplete.error ? "status" : undefined}
         aria-live="polite"
       >
@@ -1225,7 +1616,7 @@ function TaskCreator({
 
 function DateViewCaptureHint(): React.JSX.Element {
   return (
-    <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+    <div className="mt-6 rounded-xl border border-info-border bg-info-bg px-4 py-3 text-[13px] leading-relaxed text-info-fg">
       Date views are filters over existing tasks. Add a task from Inbox, Next, Waiting, Someday, a Project, or a Tag, then set its due date in task detail.
     </div>
   );
@@ -1233,9 +1624,16 @@ function DateViewCaptureHint(): React.JSX.Element {
 
 function LoadingState({ label }: { label: string }): React.JSX.Element {
   return (
-    <div className="space-y-[5px]" aria-label={`Loading ${label}`}>
-      {[0, 1, 2, 3].map((item) => (
-        <div key={item} className="h-10 animate-pulse rounded-[12px] border border-slate-200 bg-white" />
+    // Mirrors the loaded list — one card of 44px rows — so the rows arrive in
+    // place instead of the page jumping when data lands.
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label={`Loading ${label}`}>
+      {[64, 48, 72, 40].map((width, item) => (
+        <div key={item} className="flex h-11 items-center gap-2 border-b border-slate-200 pl-1.5 pr-3 last:border-b-0">
+          <span className="-ml-1.5 flex h-11 w-11 shrink-0 items-center justify-center">
+            <span className="h-[18px] w-[18px] rounded-full border-[1.5px] border-slate-200" />
+          </span>
+          <span className="h-2.5 rounded-full bg-slate-100 motion-safe:animate-pulse" style={{ width: `${width}%` }} />
+        </div>
       ))}
     </div>
   );

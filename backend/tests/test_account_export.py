@@ -85,7 +85,9 @@ def _seed_relay_export_data(
 ) -> str:
     owner_id = client.get("/api/account").json()["id"]
     repo = _container(client).agent_repo
-    now = datetime(2026, 8, 11, tzinfo=UTC)
+    # Keep the default fixture inside the retention window as wall-clock time
+    # advances; boundary behavior is covered explicitly by the tests below.
+    now = utcnow()
     connection_id = f"agentconn_{marker}"
     run_id = f"agentrun_{marker}"
     repo.create_connection(

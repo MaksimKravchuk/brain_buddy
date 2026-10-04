@@ -3,13 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, apiClient } from "../../../api/client";
 import type { TaskResponse } from "../../../api/taskTypes";
 import {
-  createTaskDetailAutosaveController,
+  createTaskDetailAutosaveController as createAutosaveController,
   getTaskDetailAutosaveController,
   loadTaskAutosaveRecovery,
   resetTaskDetailAutosaveControllersForTests,
   taskAutosaveStorageKey,
   validateTaskResponse,
-  type AutosaveSnapshot
+  type AutosaveSnapshot,
+  type TaskDetailAutosaveController
 } from "../taskDetailAutosave";
 
 const task = (overrides: Partial<TaskResponse> = {}): TaskResponse => ({
@@ -37,8 +38,23 @@ const settle = async () => {
   await Promise.resolve();
 };
 
-afterEach(() => {
+const directControllers = new Set<TaskDetailAutosaveController>();
+const createTaskDetailAutosaveController = (...args: Parameters<typeof createAutosaveController>) => {
+  const controller = createAutosaveController(...args);
+  directControllers.add(controller);
+  return controller;
+};
+
+afterEach(async () => {
+  directControllers.forEach((controller) => controller.dispose());
+  directControllers.clear();
   resetTaskDetailAutosaveControllersForTests();
+  if (vi.isFakeTimers()) {
+    await settle();
+    vi.clearAllTimers();
+  } else {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
   vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -46,6 +62,70 @@ afterEach(() => {
 });
 
 describe("contract-complete task detail autosave controller", () => {
+  it("settles an immediate edit when its controller is reset before dispatch", async () => {
+    const update = vi.spyOn(apiClient, "updateTask");
+    const controller = getTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+
+    controller.change("title", "Changed", 0);
+    resetTaskDetailAutosaveControllersForTests();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("stops processing an acknowledgement after disposal during an in-flight request", async () => {
+    const response = deferred<TaskResponse>();
+    const update = vi.spyOn(apiClient, "updateTask").mockReturnValue(response.promise);
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+
+    controller.change("title", "Changed", 0);
+    await settle();
+    controller.dispose();
+    response.resolve(task({ revision: 2, title: "Changed" }));
+    await settle();
+
+    expect(update).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot().baseline).toEqual(task());
+    controller.dispose();
+  });
+
+  it("ignores a rejected acknowledgement after disposal during an in-flight request", async () => {
+    const response = deferred<TaskResponse>();
+    const update = vi.spyOn(apiClient, "updateTask").mockReturnValue(response.promise);
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+
+    controller.change("title", "Changed", 0);
+    await settle();
+    controller.dispose();
+    response.reject(new TypeError("offline"));
+    await settle();
+
+    expect(update).toHaveBeenCalledOnce();
+    expect(controller.getSnapshot().error).toBeNull();
+  });
+
+  it("does not apply a conflict refetch after disposal", async () => {
+    const refetch = deferred<TaskResponse>();
+    const update = vi.spyOn(apiClient, "updateTask").mockRejectedValue(new ApiError("stale", 409, {}));
+    vi.spyOn(apiClient, "getTask").mockReturnValue(refetch.promise);
+    const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task());
+
+    controller.change("title", "Changed", 0);
+    await settle();
+    expect(update).toHaveBeenCalledOnce();
+    expect(apiClient.getTask).toHaveBeenCalledOnce();
+
+    controller.dispose();
+    refetch.resolve(task({ revision: 2, title: "Server wins" }));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await settle();
+
+    expect(controller.task).toEqual(task());
+    expect(controller.getSnapshot().baseline).toEqual(task());
+    expect(controller.getSnapshot().conflict?.latestServerTask).toBeNull();
+    expect(update).toHaveBeenCalledOnce();
+  });
+
   it("coalesces successor fields, publishes queued state, and never reports an older acknowledgement as saved", async () => {
     const first = deferred<TaskResponse>();
     const second = deferred<TaskResponse>();
@@ -612,12 +692,17 @@ describe("contract-complete task detail autosave controller", () => {
     expect(transition).toHaveBeenCalledWith("task-1", { action: "move", to_state: "waiting", waiting_for: "Finance", expected_revision: 1 }, "move-key");
   });
 
-  it("replaces a stale controller whose recovery was cleared", () => {
+  it("disposes a stale controller before replacing it after recovery is cleared", async () => {
+    vi.useFakeTimers();
+    const update = vi.spyOn(apiClient, "updateTask").mockResolvedValue(task({ revision: 2, title: "Dirty" }));
     const first = getTaskDetailAutosaveController("account-a", "https://api.example.test/api", task(), vi.fn());
     first.change("title", "Dirty", 100);
     sessionStorage.clear();
     const second = getTaskDetailAutosaveController("account-a", "https://api.example.test/api", task(), vi.fn());
+    await vi.advanceTimersByTimeAsync(100);
+
     expect(second).not.toBe(first);
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("falls back to a friendly message when the lane pauses on a non-Error rejection", async () => {
@@ -807,5 +892,62 @@ describe("contract-complete task detail autosave controller", () => {
 
     expect(update).not.toHaveBeenCalled();
     expect(controller.getSnapshot()).toMatchObject({ status: "clean", dirtyFields: [] });
+  });
+
+  it("does not let a reset controller persist after its request settles", async () => {
+    const origin = "https://brainbuddy.test/api";
+    const response = deferred<TaskResponse>();
+    const resetTask = task({ id: "reset-task" });
+    const update = vi.spyOn(apiClient, "updateTask").mockImplementation((taskId) => taskId === resetTask.id
+      ? response.promise
+      : Promise.resolve(task({ id: taskId, revision: 2 })));
+    const controller = getTaskDetailAutosaveController("account-a", origin, resetTask);
+    controller.change("title", "Changed", 0);
+    await vi.waitFor(() => expect(update.mock.calls.filter(([taskId]) => taskId === resetTask.id)).toHaveLength(1));
+
+    resetTaskDetailAutosaveControllersForTests();
+    sessionStorage.clear();
+    response.resolve(task({ id: resetTask.id, title: "Changed", revision: 2 }));
+    await settle();
+
+    expect(sessionStorage.getItem(taskAutosaveStorageKey("account-a", origin, resetTask.id))).toBeNull();
+  });
+
+  it("cancels retry backoff when the controller is reset", async () => {
+    vi.useFakeTimers();
+    const failure = deferred<never>();
+    const started = deferred<void>();
+    const retryTask = task({ id: "retry-reset-task" });
+    let targetCalls = 0;
+    const update = vi.spyOn(apiClient, "updateTask").mockImplementation((taskId) => {
+      if (taskId !== retryTask.id) return Promise.resolve(task({ id: taskId, revision: 2 }));
+      targetCalls += 1;
+      if (targetCalls === 1) {
+        started.resolve();
+        return failure.promise;
+      }
+      return Promise.resolve(task({ id: retryTask.id, title: "Changed", revision: 2 }));
+    });
+    const controller = getTaskDetailAutosaveController("account-a", "https://brainbuddy.test/api", retryTask);
+    const retrying = new Promise<void>((resolve) => {
+      const unsubscribe = controller.subscribe(() => {
+        if (!controller.getSnapshot().retrying) return;
+        unsubscribe();
+        resolve();
+      });
+    });
+    controller.change("title", "Changed", 0);
+    controller.flush();
+    await started.promise;
+    failure.reject(new TypeError("offline"));
+    await retrying;
+    const timersDuringRetry = vi.getTimerCount();
+    resetTaskDetailAutosaveControllersForTests();
+    const timersAfterReset = vi.getTimerCount();
+    await settle();
+
+    expect(controller.getSnapshot()).toMatchObject({ status: "retrying", retrying: true });
+    expect(update.mock.calls.filter(([taskId]) => taskId === retryTask.id)).toHaveLength(1);
+    expect(timersAfterReset).toBe(timersDuringRetry - 1);
   });
 });

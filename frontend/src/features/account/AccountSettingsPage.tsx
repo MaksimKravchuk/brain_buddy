@@ -14,7 +14,7 @@ import { Button } from "../../components/ui/Button";
 import { Overlay, OverlayHeader } from "../../components/ui/Overlay";
 import { Feedback, Field, SectionCard } from "../../components/ui/SettingsSection";
 import { useAuthStore } from "../../stores/authStore";
-import { getErrorMessage } from "../../utils/error";
+import { getErrorContext, getErrorMessage } from "../../utils/error";
 
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
 
@@ -69,6 +69,9 @@ function ProfileSection(): React.JSX.Element {
   const [success, setSuccess] = useState<string | null>(null);
 
   const displayName = draft ?? account.data?.display_name ?? "";
+  const countError = account.error
+    ? getErrorContext(account.error, "Completed tasks unavailable.")
+    : null;
 
   const mutation = useMutation({
     mutationFn: () => apiClient.updateProfile({ display_name: displayName }),
@@ -94,22 +97,38 @@ function ProfileSection(): React.JSX.Element {
       title="Profile"
       description="The name shown in the app. Leave it empty to go by your email."
     >
-      <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
-        <Field
-          label="Display name"
-          name="display_name"
-          type="text"
-          value={displayName}
-          onChange={(value) => setDraft(value)}
-          autoComplete="name"
-        />
-        <Feedback error={error} success={success} />
-        <div>
-          <Button type="submit" variant="primary" size="md" isLoading={mutation.isPending}>
-            Save profile
-          </Button>
-        </div>
-      </form>
+      <div className="flex flex-col gap-4">
+        {countError ? (
+          <p role="alert" className="text-sm text-red-700">
+            Completed tasks unavailable. Refresh the page to try again.
+            {countError.referenceId ? ` (ref: ${countError.referenceId})` : ""}
+          </p>
+        ) : account.data ? (
+          <p aria-live="polite" aria-atomic="true" className="text-sm text-slate-600">
+            Completed tasks: {account.data.completed_task_count}
+          </p>
+        ) : (
+          <p role="status" aria-live="polite" className="text-sm text-slate-600">
+            Completed tasks: …
+          </p>
+        )}
+        <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
+          <Field
+            label="Display name"
+            name="display_name"
+            type="text"
+            value={displayName}
+            onChange={(value) => setDraft(value)}
+            autoComplete="name"
+          />
+          <Feedback error={error} success={success} />
+          <div>
+            <Button type="submit" variant="primary" size="md" isLoading={mutation.isPending}>
+              Save profile
+            </Button>
+          </div>
+        </form>
+      </div>
     </SectionCard>
   );
 }
@@ -303,18 +322,22 @@ function DangerZone(): React.JSX.Element {
 
 function DeleteAccountDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
   const navigate = useNavigate();
-  const clearSession = useAuthStore((state) => state.clearSession);
+  const clearSessionAfterCleanup = useAuthStore((state) => state.clearSessionAfterCleanup);
   const scheduleDeletionNotice = useAuthStore((state) => state.scheduleDeletionNotice);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const mutation = useMutation({
     mutationFn: () => apiClient.requestAccountDeletion({ current_password: password }),
-    onSuccess: (scheduled) => {
-      // Stash the purge date in the store before clearing the session:
-      // ProtectedRoute races us to /login and would drop router state.
+    onSuccess: async (scheduled) => {
+      // Cleanup must finish before the session is cleared: ProtectedRoute races
+      // us to /login and the departing owner's browser-local keys must not be
+      // carried into the next account.
+      if (!(await clearSessionAfterCleanup())) {
+        setError("We couldn't clear this browser's local CRT data. No account transition was made.");
+        return;
+      }
       scheduleDeletionNotice(scheduled.purge_at);
-      clearSession();
       navigate("/login", { replace: true, state: { deletionScheduled: scheduled.purge_at } });
     },
     onError: (caught: unknown) => setError(getErrorMessage(caught))

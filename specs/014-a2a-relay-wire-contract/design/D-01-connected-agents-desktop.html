@@ -137,6 +137,19 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
 .navitem .badge{margin-left:auto;background:var(--brand);color:#fff;font-size:10px;font-weight:600;border-radius:var(--r-full);padding:1px 7px}
 .navitem.deferred{color:var(--fg6)}
 .main{flex:1 1 auto;padding:18px;min-width:0}
+.registry{width:100%;border-collapse:separate;border-spacing:0;background:var(--raised);border:1px solid var(--bd);border-radius:var(--r-row);overflow:hidden;box-shadow:var(--sh-soft)}
+.registry th{padding:9px 10px;border-bottom:1px solid var(--bd);background:var(--sunken);color:var(--fg5);font-size:10px;font-weight:600;text-align:left}
+.registry td{padding:11px 10px;border-bottom:1px solid var(--bd);vertical-align:top;font-size:12px;color:var(--fg3)}
+.registry tr:last-child td{border-bottom:0}.registry .actions{display:flex;gap:6px;justify-content:flex-end;white-space:nowrap}
+@media (max-width:767px){
+  .page{padding:18px 12px 48px;overflow-x:hidden}.side{display:none}.main{padding:12px}.panel{min-width:0}.shell{display:block}
+  .registry,.registry tbody,.registry tr,.registry td{display:block;width:100%}.registry thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .registry tr{padding:12px;border-bottom:1px solid var(--bd)}.registry td{border:0;padding:5px 0;overflow-wrap:anywhere}
+  .registry td::before{display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--fg6)}
+  .registry td:nth-child(1)::before{content:"Agent"}.registry td:nth-child(2)::before{content:"Version"}.registry td:nth-child(3)::before{content:"Protocol"}
+  .registry td:nth-child(4)::before{content:"Interface"}.registry td:nth-child(5)::before{content:"Status"}.registry td:nth-child(6)::before{content:"Actions"}
+  .registry .actions{justify-content:flex-start;white-space:normal;flex-wrap:wrap}.rowt{flex-direction:column}.rowt .spacer{display:none}
+}
 
 .phone{width:390px;height:851px;flex:0 0 auto;border:1px solid var(--bd-hover);border-radius:var(--r-xl);background:var(--base);overflow:hidden;box-shadow:var(--sh-raised);display:flex;flex-direction:column}
 .phone .status{height:34px;flex:0 0 auto;background:var(--raised);border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11px;color:var(--fg5)}
@@ -192,78 +205,22 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
   <div class="navitem deferred" style="margin-top:auto"><span>Weekly Review · coming later</span></div>
 </nav>
   <div class="main stack g4">
-    <div class="stack g1">
-      <p class="title">Connected agents</p>
-      <p class="caption" style="max-width:62ch">BrainBuddy relays one task at a time to an agent you operate. You own its
-      hosting, tools, credentials, cost and output quality. BrainBuddy sends only what you review and shows only what the
-      agent reports back.</p>
+    <div class="rowt">
+      <div class="stack g1">
+        <p class="title">Connected agents</p>
+        <p class="caption" style="max-width:62ch">Agents you operate and the connection facts BrainBuddy last observed.</p>
+      </div>
+      <span class="spacer"></span><span class="btn primary">Add new agent</span>
     </div>
-    <div class="stack g3">
-      <p class="label">Your agents</p>
-      
-    <article class="card stack g3">
-      <div class="row">
-        <div class="stack g1" style="min-width:0">
-          <p class="subtitle">Hermes planner</p>
-          <p class="micro mono" style="word-break:break-all">https://hermes.example.com</p>
-        </div>
-        <span class="spacer"></span><span class="pill ok">Tested ready</span>
-      </div>
-      <p class="body" style="font-size:13px">The last test reached this agent and it authenticated.</p>
-      <p class="caption" style="color:var(--fg3)"><strong>Guaranteed single start.</strong> This agent's card declares BrainBuddy's single-start extension: it deduplicates by message ID inside one conversation and returns the original task on a replay, so a retry cannot start a second run.</p>
-      <dl class="kv"><dt>Credential</dt><dd>Bearer token · stored sealed, never displayed again</dd><dt>Last contact</dt><dd>Sep 3, 21:58</dd><dt>Last tested</dt><dd>Sep 3, 21:58</dd><dt>Goes stale after</dt><dd>24 hours without contact</dd></dl>
-      
-      
-      <div class="row" style="gap:8px">
-        <span class="btn sm">Test connection</span>
-        <span class="btn sm">Edit connection</span>
-        <span class="btn sm">Rotate credential</span>
-        <span class="btn sm danger">Disconnect…</span>
-      </div>
-    </article>
-      
-    <article class="card stack g3">
-      <div class="row">
-        <div class="stack g1" style="min-width:0">
-          <p class="subtitle">Drafting sample agent</p>
-          <p class="micro mono" style="word-break:break-all">https://sample-agent.example.com</p>
-        </div>
-        <span class="spacer"></span><span class="pill ok">Tested ready</span>
-      </div>
-      <p class="body" style="font-size:13px">The last test reached this agent and it authenticated.</p>
-      <p class="caption" style="color:var(--fg3)"><strong>Best-effort single start.</strong> This agent's card does not declare BrainBuddy's single-start extension. Before any retry BrainBuddy checks the agent for an existing task and adopts it instead of sending again. A duplicate remains possible if the agent forgets its tasks.<p class="caption" style="margin-top:6px"><a class="link" href="docs/a2a-extensions/single-start/v1.md" rel="noopener noreferrer">Read the single-start extension specification</a> <span class="micro">Opens the published specification outside BrainBuddy, so you can ask your agent's operator to declare it.</span></p></p>
-      <dl class="kv"><dt>Credential</dt><dd>API key in X-API-Key · stored sealed</dd><dt>Last contact</dt><dd>Sep 3, 20:12</dd><dt>Last tested</dt><dd>Sep 3, 20:12</dd><dt>Goes stale after</dt><dd>24 hours without contact</dd></dl>
-      
-      
-      <div class="row" style="gap:8px">
-        <span class="btn sm">Test connection</span>
-        <span class="btn sm">Edit connection</span>
-        <span class="btn sm">Rotate credential</span>
-        <span class="btn sm danger">Disconnect…</span>
-      </div>
-    </article>
-      
-    <article class="card stack g3">
-      <div class="row">
-        <div class="stack g1" style="min-width:0">
-          <p class="subtitle">Research runner</p>
-          <p class="micro mono" style="word-break:break-all">https://research.example.com</p>
-        </div>
-        <span class="spacer"></span><span class="pill warn">Stale</span>
-      </div>
-      <p class="body" style="font-size:13px">The last contact is older than the 24 hours staleness threshold. Test it again before a hand-off.</p>
-      
-      <dl class="kv"><dt>Credential</dt><dd>Bearer token · stored sealed</dd><dt>Last contact</dt><dd>Sep 1, 08:40</dd><dt>Last tested</dt><dd>Sep 1, 08:40</dd><dt>Guarantee tier</dt><dd>Best-effort single start (from the last test)</dd></dl>
-      <p class="caption" style="color:var(--warn-fg)">Cannot receive a hand-off yet.</p>
-      
-      <div class="row" style="gap:8px">
-        <span class="btn sm">Test connection</span>
-        <span class="btn sm">Edit connection</span>
-        <span class="btn sm">Rotate credential</span>
-        <span class="btn sm danger">Disconnect…</span>
-      </div>
-    </article>
-    </div>
+    <table class="registry" aria-label="Connected agents">
+      <thead><tr><th>Agent</th><th>Version</th><th>Protocol</th><th>Interface</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+      <tbody>
+        <tr><td><p class="subtitle">Hermes planner</p><a class="link" href="https://hermes.example.com" target="_blank" rel="noopener noreferrer">hermes.example.com</a></td><td>1.2.3</td><td>A2A 1.0</td><td class="mono">https://hermes.example.com/a2a/jsonrpc</td><td><span class="pill ok">Tested ready</span><p class="micro" style="margin-top:5px">Guaranteed single start</p></td><td><div class="actions"><span class="btn sm">Test</span><span class="btn sm">Edit</span><span class="btn sm danger">Delete</span></div></td></tr>
+        <tr><td><p class="subtitle">Drafting sample</p><a class="link" href="https://sample-agent.example.com" target="_blank" rel="noopener noreferrer">sample-agent.example.com</a></td><td>0.8.1</td><td>A2A 1.0</td><td class="mono">https://sample-agent.example.com/rpc</td><td><span class="pill ok">Tested ready</span><p class="micro" style="margin-top:5px">Best-effort</p></td><td><div class="actions"><span class="btn sm">Test</span><span class="btn sm">Edit</span><span class="btn sm danger">Delete</span></div></td></tr>
+        <tr><td><p class="subtitle">Research runner</p><a class="link" href="https://research.example.com" target="_blank" rel="noopener noreferrer">research.example.com</a></td><td>2.0.0</td><td>A2A 1.0</td><td class="mono">https://research.example.com/agent</td><td><span class="pill warn">Stale</span><p class="micro" style="margin-top:5px">Test before hand-off</p></td><td><div class="actions"><span class="btn sm">Test</span><span class="btn sm">Edit</span><span class="btn sm danger">Delete</span></div></td></tr>
+      </tbody>
+    </table>
+    <p class="caption">Edit opens the complete discovered card, capabilities, guarantee, timing and credential controls without expanding this table.</p>
   </div>
 </div></div>
 </section></div>
@@ -805,6 +762,16 @@ hr.hair{border:0;border-top:1px solid var(--bd);margin:12px 0}
       </div>
       <p class="micro">Testing again re-uses the credential already stored, sealed. Nothing secret is shown here and nothing has to be typed again. When the agent gives no retry-after, the line above is dropped and the retry is offered immediately.</p>
     </article></div>
+</section></div>
+
+<h2 class="sec">Edit modal</h2>
+<div class="grid"><section class="panel wide">
+  <header class="panel-h"><span class="sid">D-01-S26</span><span class="pname">edit — selected connection</span><p class="pnote">The registry remains behind this labelled modal. All accepted connection diagnostics stay reachable here; closing restores focus to this row's Edit action.</p></header>
+  <div class="panel-b sunk"><div class="dlg">
+    <div class="overlay-head"><div class="stack g1"><p class="title">Edit Hermes planner</p><p class="caption">Connection details and credentials</p></div><span class="spacer"></span><span class="btn ghost sm">Close</span></div>
+    <div class="rowt"><div class="stack g2" style="flex:1"><p class="subtitle">Discovered agent</p><dl class="kv"><dt>Description</dt><dd>Plans and researches tasks</dd><dt>Skills</dt><dd>Research, planning</dd><dt>Capabilities</dt><dd>Streaming supported · Push supported</dd><dt>Guarantee</dt><dd>Guaranteed single start</dd><dt>Last tested</dt><dd>Sep 3, 21:58</dd></dl></div><div class="stack g2" style="flex:1"><p class="subtitle">Connection</p><div class="field"><span class="label">Agent name</span><div class="input">Hermes planner</div></div><div class="field"><span class="label">Agent address</span><div class="input">https://hermes.example.com</div></div><div class="row"><span class="btn primary sm">Save changes</span></div></div></div>
+    <hr class="hair"><p class="subtitle">Replace credential</p><p class="caption">The current credential is sealed and never displayed. Replacing it requires your password.</p><div class="row"><span class="btn sm">Replace credential</span></div>
+  </div></div>
 </section></div>
 
 </div>

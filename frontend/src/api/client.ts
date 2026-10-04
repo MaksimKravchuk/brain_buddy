@@ -79,6 +79,10 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
   onUnauthorized = handler;
 }
 
+export function notifyUnauthorized() {
+  onUnauthorized?.();
+}
+
 function buildUrl(path: string): string {
   return `${API_BASE_URL.replace(/\/$/, "")}${path}`;
 }
@@ -144,8 +148,8 @@ async function request<T>(path: string, options: JsonRequestOptions): Promise<T>
     throw error;
   }
 
-  if (response.status === 401 && onUnauthorized) {
-    onUnauthorized();
+  if (response.status === 401) {
+    notifyUnauthorized();
   }
 
   if (response.status === 204) {

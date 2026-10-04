@@ -87,6 +87,40 @@ def test_tree_contract_round_trip(api_client) -> None:
     assert imported_relation["target_node_id"] == effect_node["id"]
 
 
+def test_019_FR_020_full_tree_update_uses_revision_precondition(api_client) -> None:
+    created_response = api_client.post("/api/trees", json={"name": "Revision guarded"})
+    assert created_response.status_code == 201
+    created = created_response.json()
+    assert created["revision"] == 1
+    assert created["schema_version"] == 1
+
+    update_payload = {
+        "name": "Revision guarded v2",
+        "expected_revision": created["revision"],
+        "schema_version": created["schema_version"],
+        "metadata": created["metadata"],
+        "nodes": created["nodes"],
+        "relations": created["relations"],
+        "owner_id": created["owner_id"],
+    }
+    updated_response = api_client.put(
+        f"/api/trees/{created['id']}", json=update_payload
+    )
+    assert updated_response.status_code == 200
+    updated = updated_response.json()
+    assert updated["revision"] == 2
+
+    stale_payload = {
+        **update_payload,
+        "name": "Stale writer",
+        "metadata": updated["metadata"],
+    }
+    stale_response = api_client.put(f"/api/trees/{created['id']}", json=stale_payload)
+
+    assert stale_response.status_code == 409
+    assert stale_response.headers.get("X-Correlation-ID")
+
+
 def test_create_relation_preserves_direction_after_node_moves(api_client) -> None:
     tree_resp = api_client.post("/api/trees", json={"name": "Cross branch"})
     assert tree_resp.status_code == 201

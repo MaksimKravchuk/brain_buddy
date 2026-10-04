@@ -189,6 +189,12 @@ export function ConnectionCard({
         </BBText>
       ) : null}
 
+      <BBText variant="caption" color={colors.fg5} accessibilityLabel="Test connection disclosure">
+        Test makes authenticated, external, read-only A2A calls to the configured agent. It calls
+        ListTasks first. Only if that method is unsupported/MethodNotFound, it calls
+        {` GetTask("brainbuddy-probe")`}. It does not send Task content or start agent work.
+      </BBText>
+
       <View style={styles.actions}>
         <Button
           variant="secondary"

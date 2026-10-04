@@ -176,10 +176,10 @@ class ReviewSectionTests(RendersSectionFive, unittest.TestCase):
         self.assertIn("degraded panel", text)
         self.assertIn("single-provider panel", text)
         self.assertIn("correlated oracles", text)
-        self.assertIn("**Lenses that ran on a fallback oracle**", text)
+        self.assertIn("**Lenses using a nondefault or unverified oracle**", text)
         self.assertIn("`requirements-consistency`", text)
         self.assertIn("`testability-evidence`", text)
-        self.assertIn("weaker result", text)
+        self.assertIn("weaker evidence", text)
         self.assertIn("The panel collapsed to a single provider.", text)
         self.assertIn("**Panel oracles**: `claude/opus` x3, `claude/sonnet` x2", text)
         self.assertIn("**Panel providers**: `claude` x5", text)
@@ -255,7 +255,7 @@ class ReviewSectionTests(RendersSectionFive, unittest.TestCase):
         self.assertIn("unknown provenance", text)
         self.assertIn("**Panel correlated**: not recorded.", text)
         self.assertNotIn("**Verdict**: `approved`  ", text)
-        self.assertNotIn("**Lenses that ran on a fallback oracle**", text)
+        self.assertNotIn("**Lenses using a nondefault or unverified oracle**", text)
 
     def test_degraded_lens_without_a_recorded_oracle_says_so(self) -> None:
         """`degraded_lenses` without the matching reviewer block invents nothing."""
@@ -449,7 +449,7 @@ class NextActionTests(RendersSectionFive, unittest.TestCase):
         self.assertNotIn("Provenance note:", text)
         self.assertNotIn("one vendor's opinion counted several times", text)
         # Cutting the notes must not cost the reader the facts they carried.
-        self.assertIn("**Lenses that ran on a fallback oracle**", text)
+        self.assertIn("**Lenses using a nondefault or unverified oracle**", text)
         self.assertIn("**Lenses with unknown provenance**", text)
         self.assertIn("The panel collapsed to a single provider.", text)
 
@@ -545,7 +545,7 @@ class PanelProvenanceTests(RendersSectionFive, unittest.TestCase):
         rendered = "\n".join(lines)
         self.assertIn("**Lenses with unknown provenance**", rendered)
         self.assertIn("**Panel correlated**: not recorded.", rendered)
-        self.assertIn("**Single-provider panel**: not recorded", rendered)
+        self.assertIn("**Single-provider panel**: undetermined", rendered)
         self.assertNotIn("**Panel oracles**", rendered)
         self.assertNotIn("**Panel providers**", rendered)
 
@@ -578,11 +578,27 @@ class PanelProvenanceTests(RendersSectionFive, unittest.TestCase):
 
         rendered = "\n".join(lines)
         self.assertIn("unknown provenance", caveat)
-        self.assertIn("**Single-provider panel**: not recorded", rendered)
-        self.assertIn("never measured", rendered)
+        self.assertIn("**Single-provider panel**: undetermined", rendered)
+        self.assertIn("Not evidence of a multi-provider panel", rendered)
         self.assertNotIn("more than one provider is represented", rendered)
         # The honest count stays visible beside the refusal to answer.
         self.assertIn("**Panel providers**: `claude` x1", rendered)
+
+    def test_external_model_claim_is_not_rendered_as_verified_provider(self) -> None:
+        caveat, lines = self.module.panel_provenance({
+            "reviewers": [],
+            "degraded_lenses": ["requirements-consistency"],
+            "model_unverified_lenses": ["requirements-consistency"],
+            "panel_correlated": None,
+            "panel_oracles": {"codex/gpt-5.6-sol": 4},
+            "panel_providers": {"codex": 4},
+            "single_provider_panel": None,
+        })
+        rendered = "\n".join(lines)
+        self.assertIn("external model identity unverified", caveat)
+        self.assertIn("claimed providers and models", rendered)
+        self.assertIn("**Single-provider panel**: undetermined", rendered)
+        self.assertNotIn("more than one provider is represented", rendered)
 
     def test_a_genuinely_diverse_panel_still_says_so(self) -> None:
         """The fix must not silence the true negative it was hiding behind."""
@@ -602,7 +618,7 @@ class PanelProvenanceTests(RendersSectionFive, unittest.TestCase):
         rendered = "\n".join(lines)
         self.assertIn("degraded panel", caveat)
         self.assertIn("more than one provider is represented", rendered)
-        self.assertNotIn("**Single-provider panel**: not recorded", rendered)
+        self.assertNotIn("**Single-provider panel**: undetermined", rendered)
 
 
 if __name__ == "__main__":

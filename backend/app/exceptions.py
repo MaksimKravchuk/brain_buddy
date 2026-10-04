@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 
@@ -28,6 +29,80 @@ class ConflictError(BrainBuddyError):
         super().__init__(message or f"{resource} '{identifier}' already exists.")
         self.resource = resource
         self.identifier = identifier
+
+
+class IdempotencyConflictError(ConflictError):
+    """Raised when a scoped idempotency key is reused for another request."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Idempotency-Key",
+            "scoped",
+            "The Idempotency-Key was reused with a different request.",
+        )
+        self.detail = {"reason": "idempotency_conflict"}
+
+
+class IdempotencyReceiptExpiredError(ConflictError):
+    """Raised when an exact-replay receipt is outside its retention window."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Idempotency receipt",
+            "expired",
+            "The idempotency receipt expired; refetch and explicitly reconcile.",
+        )
+        self.detail = {"reason": "idempotency_receipt_expired"}
+
+
+class IdempotencyReceiptUnavailableError(ConflictError):
+    """Raised when a committed receipt cannot safely reconstruct its response."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Idempotency receipt",
+            "unavailable",
+            "The idempotency receipt cannot be replayed safely.",
+        )
+        self.detail = {"reason": "idempotency_receipt_unavailable"}
+
+
+class PendingCommandError(ConflictError):
+    """Raised when another CRT command is pending for the same resource."""
+
+    def __init__(self, resource_id: str) -> None:
+        super().__init__(
+            "CRT command",
+            resource_id,
+            "A prior CRT command is still pending reconciliation; retry later.",
+        )
+        self.detail = {"reason": "pending_command", "tree_id": resource_id}
+
+
+class StaleRevisionError(ConflictError):
+    """Raised when an owner supplied an older aggregate revision."""
+
+    def __init__(
+        self,
+        resource: str,
+        identifier: str,
+        *,
+        current_revision: int,
+        current_updated_at: datetime,
+    ) -> None:
+        super().__init__(
+            resource,
+            identifier,
+            "This tree has newer changes; review the conflict before saving.",
+        )
+        self.current_revision = current_revision
+        self.current_updated_at = current_updated_at
+        self.detail = {
+            "reason": "stale_revision",
+            "tree_id": identifier,
+            "current_revision": current_revision,
+            "current_updated_at": current_updated_at,
+        }
 
 
 class RepositoryError(BrainBuddyError):
@@ -88,11 +163,16 @@ __all__ = [
     "AdminAuthorizationError",
     "BrainBuddyError",
     "ConflictError",
+    "IdempotencyConflictError",
+    "IdempotencyReceiptExpiredError",
+    "IdempotencyReceiptUnavailableError",
     "NotFoundError",
     "ProviderRetryableError",
     "ProviderTerminalError",
+    "PendingCommandError",
     "ReauthFailedError",
     "RepositoryError",
     "StorageUnavailableError",
+    "StaleRevisionError",
     "ValidationFailure",
 ]

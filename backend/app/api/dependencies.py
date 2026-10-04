@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+import uuid
+from collections.abc import Callable, Iterator
 from typing import cast
 
 from fastapi import Depends, HTTPException, Request, status
@@ -11,6 +12,7 @@ from fastapi import Depends, HTTPException, Request, status
 from app.container import Container
 from app.core.config import AppConfig
 from app.core.logging import get_correlation_id
+from app.exceptions import NotFoundError
 from app.modules.agents.service import AgentRelayService
 from app.modules.tasks import TaskService
 from app.modules.tasks.autocomplete import TaskTitleAutocompleteService
@@ -25,6 +27,11 @@ from app.services import (
     TreeService,
     ValidationService,
     VersionService,
+)
+from app.services.crt_command_service import CrtCommandService
+from app.services.crt_exposure_service import (
+    CrtExposureService,
+    CrtFeatureFlagUnavailableError,
 )
 from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
 
@@ -47,6 +54,12 @@ def get_config_dep(request: Request) -> AppConfig:
 
 def get_tree_service(container: Container = Depends(get_container)) -> TreeService:
     return container.tree_service
+
+
+def get_crt_command_service(
+    container: Container = Depends(get_container),
+) -> CrtCommandService:
+    return container.crt_command_service
 
 
 def get_node_service(container: Container = Depends(get_container)) -> NodeService:
@@ -149,6 +162,73 @@ def get_current_user(
             detail="Authentication required.",
         )
     return user
+
+
+def require_legacy_tree_mutation(
+    current_user: User = Depends(get_current_user),
+    container: Container = Depends(get_container),
+) -> Iterator[User]:
+    """Serialize legacy tree writes with account purge and recheck ownership.
+
+    The CRT command lock is process- and worker-global. Holding it across the
+    legacy route prevents a purge from snapshotting owner trees and then
+    deleting the account while a stale authenticated request writes afterward.
+    The account read must happen after acquiring the lock: the request's
+    authentication snapshot is intentionally not authoritative for mutations.
+    """
+
+    with container.crt_command_repo.command_lock(current_user.id):
+        fresh = container.user_repo.get_by_id(current_user.id)
+        if fresh is None or fresh.deletion_requested_at is not None:
+            raise NotFoundError("Account", current_user.id)
+        yield fresh
+
+
+def get_crt_exposure_service(
+    container: Container = Depends(get_container),
+) -> CrtExposureService:
+    """Resolve CRT exposure through the existing runtime flag service."""
+
+    return CrtExposureService(container.feature_flag_service)
+
+
+def require_crt_exposure(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    exposure: CrtExposureService = Depends(get_crt_exposure_service),
+) -> User:
+    """Require authenticated, effective CRT exposure without exposing content."""
+
+    for header_name in ("X-Correlation-ID", "X-Request-ID"):
+        raw_value = request.headers.get(header_name)
+        if raw_value is None:
+            continue
+        try:
+            parsed = uuid.UUID(raw_value)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"reason": "invalid_correlation_id"},
+            ) from exc
+        if str(parsed) != raw_value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"reason": "invalid_correlation_id"},
+            )
+
+    try:
+        decision = exposure.resolve(current_user)
+    except CrtFeatureFlagUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"reason": "feature_flag_unavailable"},
+        ) from exc
+    if not decision.effective:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"reason": "crt_canvas_disabled"},
+        )
+    return current_user
 
 
 ADMIN_STATUS_EVENT = "admin_capability_probe"

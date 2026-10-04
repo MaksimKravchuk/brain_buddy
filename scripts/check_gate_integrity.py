@@ -139,8 +139,8 @@ INVARIANTS: tuple[Invariant, ...] = (
     MustMatch(
         "scripts/spec_kit_planning_review.py",
         "missing mandatory evidence escalates",
-        r"if missing_roles:\s*\n\s*status\s*=\s*\"escalated\"",
-        "Missing review evidence must escalate, never resolve to a pass.",
+        r"elif missing_roles or unknown_oracle_roles:\s*\n\s*status\s*=\s*\"escalated\"",
+        "Missing reviews or harness provenance must escalate, never resolve to a pass.",
     ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
@@ -215,6 +215,13 @@ INVARIANTS: tuple[Invariant, ...] = (
     ),
     MustMatch(
         "Makefile",
+        "check-specs runs feature requirement coverage",
+        r"^check-specs:(?:\n\t[^\n]*)*?\n\tpython3 scripts/check_requirement_coverage\.py specs/019-miro-like-crt-canvas",
+        "Feature-019 traceability must execute in the authoritative spec gate; "
+        "unit-testing the validator alone cannot prove requirement coverage.",
+    ),
+    MustMatch(
+        "Makefile",
         "check-specs runs this integrity guard",
         r"^check-specs:(?:\n\t[^\n]*)*?\n\tpython3 scripts/check_gate_integrity\.py",
         "The guard must run in CI, or it guards nothing.",
@@ -261,29 +268,80 @@ INVARIANTS: tuple[Invariant, ...] = (
         "The privacy and UX lenses cover constitution principles I and V. "
         "Removing either leaves a principle with no reviewer.",
     ),
-    # The fallback exists so an absent runtime cannot lock the gate shut. That
-    # is only acceptable while the substitution stays visible: a fallback that
-    # stops recording degradation is a panel silently running on one oracle
-    # while reporting the diversity it was configured with.
-    # Every pattern below is right-bounded to the enclosing function with
-    # `(?:(?!\ndef ).)*?`. An unbounded DOTALL `.*?` runs to the end of the
-    # file and happily terminates on an identical token in an unrelated
-    # function — the exact hazard flagged for the Makefile invariants above,
-    # and one these reintroduced on their first draft: deleting run_review's
-    # own `raise` still matched `preflight`'s three hundred lines later.
+    # ADR-0025 keeps Codex as a default without making it mandatory. An
+    # external adapter must be measured before execution and its declared
+    # provider/model must never become proof of reviewer independence.
     MustMatch(
         "scripts/spec_kit_planning_review.py",
-        "a fallback oracle is recorded as degraded",
-        r'def resolve_oracle\((?:(?!\ndef ).)*?"degraded":\s*True',
-        "Substituting a reviewer runtime without marking it degraded hides a "
-        "correlated panel behind a configuration that no longer describes it.",
+        "external adapter rejects a wrong executable hash",
+        r'measured\s*=\s*hashlib\.sha256\(executable\.read_bytes\(\)\)\.hexdigest\(\)'
+        r'(?:(?!\ndef ).)*?if measured != adapter_sha256:'
+        r'(?:(?!\ndef ).)*?raise ReviewError',
+        "The reviewed adapter pin must be checked before a lens executes.",
     ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
-        "both codex lenses keep a fallback",
-        r'"fallback":\s*CODEX_FALLBACK(?:(?!\ndef ).)*?"fallback":\s*CODEX_FALLBACK',
-        "Removing a fallback returns that lens to writing no review when its "
-        "CLI is absent, which is the permanent `escalated` ADR-0014 removed.",
+        "external model identity is marked unverified",
+        r'"integration":\s*"external-unverified"\s*,\s*"model":\s*"unverified"'
+        r'(?:(?!\ndef ).)*?"degraded":\s*True',
+        "Caller-supplied labels do not attest provider identity or independence.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "review snapshot is checked before and after reviewer execution",
+        r'if review_artifacts_digest\(feature_dir\) != expected_digest:'
+        r'(?:(?!\ndef ).)*?result\s*=\s*subprocess\.run\('
+        r'(?:(?!\ndef ).)*?if review_artifacts_digest\(feature_dir\) != expected_digest:',
+        "An adapter that reads or changes a moving spec cannot stamp a trustworthy verdict.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "unverified models are excluded from provider statistics",
+        r'if oracle\.get\("integration"\) == "external-unverified":'
+        r'(?:(?!\ndef ).)*?unverified_model_roles\.append\(role_name\)'
+        r'(?:(?!\ndef ).)*?continue',
+        "Caller-declared labels must never count as a verified second provider.",
+    ),
+    MustMatch(
+        "scripts/render_feature_report.py",
+        "unverified model identity is visible in the report",
+        r'if unverified:\s*lines\.append\('
+        r'(?:(?!\ndef ).)*?External reviewer model identity unverified',
+        "The report must show why external reviews do not prove model independence.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "resolved reviewer executable is used",
+        r'def build_review_command\((?:(?!\ndef ).)*?\[\s*executable,\s*"exec"',
+        "The subprocess must execute the same absolute path recorded in reviewer provenance.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "summarize requires preflight context",
+        r'def summarize\((?:(?!\ndef ).)*?if not context_path\.is_file\(\):'
+        r'(?:(?!\ndef ).)*?raise ReviewError\("Planning preflight was not completed',
+        "Summarization without deterministic preflight bypasses artifact, risk, and sign-off gates.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "summarize recomputes derived risk",
+        r'def summarize\((?:(?!\ndef ).)*?derived\s*=\s*derive_risk\(feature_dir\)',
+        "Cached context must not be able to downgrade an ASK-class feature.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "unknown reviewer provenance escalates",
+        r'def aggregate_reviews\((?:(?!\ndef ).)*?elif missing_roles or unknown_oracle_roles:'
+        r'(?:(?!\ndef ).)*?status\s*=\s*"escalated"',
+        "Hand-written reviews with no harness provenance are missing mandatory evidence.",
+    ),
+    MustMatch(
+        "scripts/spec_kit_planning_review.py",
+        "Codex oracle provenance is validated",
+        r'def validate_oracle_provenance\((?:(?!\ndef ).)*?payload\.get\("integration"\) != "codex"'
+        r'(?:(?!\ndef ).)*?payload\.get\("degraded"\) is not False'
+        r'(?:(?!\ndef ).)*?Path\(executable\)\.is_absolute\(\)',
+        "The default Codex route still requires the exact harness provenance shape.",
     ),
     MustMatch(
         "scripts/spec_kit_planning_review.py",
@@ -309,17 +367,13 @@ INVARIANTS: tuple[Invariant, ...] = (
         "invisible to every consumer of the gate. Bound to the collected list "
         "so assigning a constant empty list does not satisfy it.",
     ),
-    # Anchored inside run_review on purpose, and bounded on both sides. The
-    # first draft bounded only the left edge, so deleting run_review's raise
-    # let the match run on to preflight's — seeing the hazard and fixing half
-    # of it.
+    # Anchored inside run_review on purpose and bounded on both sides.
     MustMatch(
         "scripts/spec_kit_planning_review.py",
-        "a failing reviewer is not routed to a fallback",
+        "reviewer failure stays a hard error",
         r"def run_review\((?:(?!\ndef ).)*?if result\.returncode != 0:"
         r"(?:(?!\ndef ).)*?raise ReviewError",
-        "Only an absent runtime may be substituted. Retrying a failed "
-        "reviewer on another oracle launders a defect into a clean verdict.",
+        "Ignoring or retrying away a failed reviewer launders a defect into a clean verdict.",
     ),
     # ADR-0014 trades blocking for visibility: a degraded campaign may reach
     # `approved` because the human will see the degradation. After that trade
@@ -355,7 +409,7 @@ INVARIANTS: tuple[Invariant, ...] = (
     MustMatch(
         "scripts/render_feature_report.py",
         "an unmeasurable provider question is rendered, not skipped",
-        r"\*\*Single-provider panel\*\*: not recorded",
+        r"\*\*Single-provider panel\*\*: undetermined",
         "Silence on the third state leaves the reader to infer a diverse "
         "panel from an absent line, which is the false claim this branch "
         "exists to replace.",
@@ -391,6 +445,13 @@ INVARIANTS: tuple[Invariant, ...] = (
         r"python3 scripts/check_speckit_manifests\.py",
         "Preserved Spec Kit overrides can otherwise be reverted by an "
         "integration upgrade with no build failure.",
+    ),
+    MustMatch(
+        ".github/workflows/ci.yml",
+        "CI runs the authoritative check-specs target",
+        r"^\s{10}make check-specs\s*$",
+        "Running individual validator tests is not equivalent to executing the "
+        "authoritative spec gate, including feature requirement coverage.",
     ),
 )
 

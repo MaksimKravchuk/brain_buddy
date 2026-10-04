@@ -19,6 +19,10 @@ class AccountResponse(StrictBaseModel):
     display_name: str | None = Field(
         default=None, description="Optional display name chosen by the user."
     )
+    completed_task_count: int = Field(
+        ge=0,
+        description="Current completed top-level tasks owned by the user.",
+    )
     created_at: datetime = Field(description="UTC timestamp when the account was made.")
     deletion_requested_at: datetime | None = Field(
         default=None,

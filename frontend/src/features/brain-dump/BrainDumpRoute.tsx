@@ -954,7 +954,7 @@ function RecordingSurface({
           </div>
           <div>
             <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">Brain dump</h1>
-            <p className="mt-0.5 text-xs text-slate-500">Speak freely — tasks are proposed after you stop</p>
+            <p className="mt-0.5 text-balance text-xs text-slate-500">Speak freely — tasks are proposed after you stop</p>
           </div>
           <span className={`inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold tabular-nums ${isRecording ? "text-rose-600" : "text-slate-500"}`}>
             <span className={`h-[7px] w-[7px] rounded-full ${isRecording ? "bg-rose-600 motion-safe:animate-pulse-dot" : "bg-slate-400"}`} aria-hidden />
@@ -1035,7 +1035,9 @@ function RecordingSurface({
 
         {/* Live transcript readout: raw text is a status, never a draft task. Tasks
             are only minted by the reconciler from the accurate transcript after Stop. */}
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-6 pb-4 pt-[18px]">
+        {/* With the close button in the dialog's top-right corner, the pane
+            starts below it rather than letting the settings card run under it. */}
+        <div className={`flex min-h-0 flex-col gap-2 overflow-y-auto px-6 pb-4 pt-[18px] ${!operation && onClose ? "sm:pt-14" : ""}`}>
           {error ? <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
           {!operation && isNewRecording ? (
             <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-soft">
@@ -1059,7 +1061,7 @@ function RecordingSurface({
               ) : providersFailed ? (
                 <div role="alert" className="grid gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                   <span>Could not load the configured voice providers, so recording is unavailable. No audio leaves this device until the vendors are confirmed.</span>
-                  <button type="button" className="justify-self-start rounded-md border border-amber-300 bg-white px-2.5 py-1 font-semibold text-amber-800" onClick={onRetryProviders}>
+                  <button type="button" className="justify-self-start rounded-md border border-amber-300 bg-white px-2.5 py-1 font-semibold text-amber-800 transition-colors duration-200 ease-smooth hover:bg-amber-100" onClick={onRetryProviders}>
                     Retry
                   </button>
                 </div>

@@ -25,6 +25,7 @@ import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode, Ref
 import { Link, NavLink, useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router-dom";
 
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
+import { hasFeatureFlag } from "../../api/auth";
 import { useAuthStore } from "../../stores/authStore";
 import { ShellToastContext } from "./shellToast";
 
@@ -47,10 +48,7 @@ interface AppShellProps {
   onDeleteTag?: (tag: TagResponse) => void;
 }
 
-type SidebarProps = AppShellProps & {
-  weeklyReviewOpen: boolean;
-  onOpenWeeklyReview: () => void;
-};
+type SidebarProps = AppShellProps;
 
 const listItems: Array<{ state: OpenTaskState; label: string; icon: ComponentType<{ className?: string }> }> = [
   { state: "inbox", label: "Inbox", icon: Inbox },
@@ -66,6 +64,17 @@ const dateItems: Array<{ path: string; label: string; icon: ComponentType<{ clas
 ];
 
 const fallbackProjectColors = ["#0ea5e9", "#6366f1", "#94a3b8", "#10b981"];
+
+// Sidebar create/rename popovers. Inputs are 16px below `lg`, where the sidebar
+// lives in the touch drawer: iOS zooms the page into any smaller focused field.
+const popoverClass =
+  "z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating motion-safe:animate-scale-fade-in";
+const popoverInputClass =
+  "min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-base text-slate-900 outline-hidden transition-colors duration-200 ease-smooth placeholder:text-slate-400 focus:border-brand-primary lg:text-xs";
+const popoverPrimaryClass =
+  "rounded-md bg-sky-700 px-2 py-1.5 text-xs font-semibold text-white transition-colors duration-200 ease-smooth hover:bg-sky-800 disabled:opacity-50";
+const popoverDangerClass =
+  "rounded-md border border-rose-200 bg-white px-2 py-1.5 text-xs font-medium text-rose-600 transition-colors duration-200 ease-smooth hover:border-rose-300 hover:bg-rose-50";
 
 const navRowClass = (active: boolean): string =>
   `flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium transition-colors duration-200 ease-smooth ${
@@ -87,7 +96,6 @@ export function SoonChip(): React.JSX.Element {
 export function AppShell(props: AppShellProps): React.JSX.Element {
   const { children, panel, panelModal } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [weeklyReviewOpen, setWeeklyReviewOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
@@ -113,23 +121,15 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     };
   }, []);
 
-  // Any route change dismisses the weekly-review placeholder; a path change
-  // also closes the drawer. Browser history can select a task while navigation
-  // is open, and that drawer must not stay active behind the sheet — typing a
-  // search (same path, new query) keeps it open. Adjusted during render so the
-  // dismissal lands in the same commit as the new location.
-  const [renderedLocation, setRenderedLocation] = useState({ pathname: location.pathname, search: location.search });
-  if (renderedLocation.pathname !== location.pathname || renderedLocation.search !== location.search) {
-    setRenderedLocation({ pathname: location.pathname, search: location.search });
-    setWeeklyReviewOpen(false);
-    if (renderedLocation.pathname !== location.pathname) setIsDrawerOpen(false);
+  // Browser history can select a task while navigation is open. Do not leave
+  // that drawer active behind the sheet; typing a search (same path, new
+  // query) keeps it open. Adjusted during render so the dismissal lands in the
+  // same commit as the new location (react-hooks/set-state-in-effect).
+  const [renderedPathname, setRenderedPathname] = useState(location.pathname);
+  if (renderedPathname !== location.pathname) {
+    setRenderedPathname(location.pathname);
+    setIsDrawerOpen(false);
   }
-
-  const sidebarProps: SidebarProps = {
-    ...props,
-    weeklyReviewOpen,
-    onOpenWeeklyReview: () => setWeeklyReviewOpen(true)
-  };
 
   return (
     <ShellToastContext.Provider value={notify}>
@@ -139,19 +139,19 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           <DeletionCancelledBanner />
           <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
             <aside className="hidden w-[248px] shrink-0 overflow-y-auto border-r border-slate-200 px-3 pb-6 pt-4 lg:block">
-              <Sidebar {...sidebarProps} />
+              <Sidebar {...props} />
             </aside>
             <main className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8 lg:pb-16 lg:pt-8">
-              {weeklyReviewOpen ? <WeeklyReviewPlaceholder /> : children}
+              {children}
             </main>
           </div>
-          <NavigationDrawer {...sidebarProps} open={isDrawerOpen} onClose={closeDrawer} />
+          <NavigationDrawer {...props} open={isDrawerOpen} onClose={closeDrawer} />
         </div>
-        {weeklyReviewOpen ? null : panel}
+        {panel}
         {toast ? (
           <div
             role="status"
-            className="fixed bottom-6 left-1/2 z-[200] -translate-x-1/2 whitespace-nowrap rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-[13px] text-slate-700 shadow-floating backdrop-blur-sm motion-safe:animate-fade-in-up"
+            className="fixed bottom-6 left-1/2 z-[200] w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-center text-[13px] text-slate-700 shadow-floating backdrop-blur-sm motion-safe:animate-fade-in-up"
           >
             {toast}
           </div>
@@ -161,27 +161,6 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
   );
 }
 
-function WeeklyReviewPlaceholder(): React.JSX.Element {
-  return (
-    <section aria-label="Weekly review placeholder" className="mx-auto max-w-[760px]">
-      <div className="flex flex-col items-center gap-2 rounded-xl border-[1.5px] border-dashed border-slate-300 px-8 py-14 text-center">
-        <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-info-bg text-brand-primary">
-          <RotateCcw className="h-[26px] w-[26px]" aria-hidden />
-        </div>
-        <h2 className="m-0 text-[28px] font-semibold leading-[1.15] tracking-[-0.02em] text-slate-900">
-          Weekly review — coming soon
-        </h2>
-        <p className="m-0 max-w-[400px] text-sm leading-normal text-slate-500">
-          A guided pass over your lists — empty the inbox, refresh next actions, decide on the somedays. We&apos;re
-          still building this one.
-        </p>
-        <span className="mt-3 rounded-full bg-surface-sunken px-2.5 py-[3px] text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">
-          Placeholder — not designed yet
-        </span>
-      </div>
-    </section>
-  );
-}
 
 function DeletionCancelledBanner(): React.JSX.Element | null {
   const notice = useAuthStore((state) => state.deletionCancelledNotice);
@@ -261,7 +240,7 @@ function AccountMenu(): React.JSX.Element {
         <div
           role="menu"
           aria-label="Account"
-          className="absolute right-0 top-[calc(100%+8px)] z-50 w-60 rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating"
+          className="absolute right-0 top-[calc(100%+8px)] z-50 w-60 origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating motion-safe:animate-scale-fade-in"
         >
           <div className="px-2.5 py-2">
             <p className="truncate text-sm font-medium text-slate-900">
@@ -317,8 +296,7 @@ function AccountMenu(): React.JSX.Element {
             className={itemClass}
             onClick={async () => {
               setOpen(false);
-              await logout();
-              navigate("/login");
+              if (await logout()) navigate("/login");
             }}
           >
             <LogOut className="h-4 w-4 text-slate-500" aria-hidden /> Sign out
@@ -366,7 +344,7 @@ function TaskSearch({ className, onSubmit }: { className: string; onSubmit?: () 
         onSubmit?.();
       }}
     >
-      <label className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-lg border border-transparent bg-surface-sunken px-3 text-slate-500 transition-colors duration-200 ease-smooth focus-within:border-sky-700 focus-within:bg-white md:h-[34px]">
+      <label className="flex h-11 min-w-0 flex-1 cursor-text items-center gap-2 rounded-lg border border-transparent bg-surface-sunken px-3 text-slate-500 transition-[background-color,border-color,box-shadow] duration-200 ease-smooth hover:border-slate-200 focus-within:border-sky-700 focus-within:bg-white focus-within:shadow-soft md:h-[34px]">
         <Search className="h-[15px] w-[15px] shrink-0" aria-hidden />
         <input
           ref={searchInputRef}
@@ -375,11 +353,11 @@ function TaskSearch({ className, onSubmit }: { className: string; onSubmit?: () 
           aria-label="Search tasks"
           value={searchValue}
           onChange={(event) => updateSearch(event.currentTarget.value)}
-          className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 placeholder:text-slate-500"
+          className="min-w-0 flex-1 bg-transparent text-base text-slate-900 outline-hidden placeholder:text-slate-500 focus-visible:shadow-none md:text-sm"
         />
       </label>
       {onSubmit ? (
-        <button type="submit" className="h-11 rounded-lg bg-sky-700 px-3 text-sm font-medium text-white hover:bg-sky-800">
+        <button type="submit" className="h-11 shrink-0 rounded-lg bg-sky-700 px-3 text-sm font-medium text-white transition-colors duration-200 ease-smooth hover:bg-sky-800 active:scale-[0.98]">
           Search
         </button>
       ) : null}
@@ -455,14 +433,14 @@ function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): R
 
   return (
     <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Task navigation">
-      <button type="button" className="absolute inset-0 bg-slate-900/30" aria-label="Close task navigation" onClick={onClose} />
-      <div className="absolute inset-y-0 left-0 flex w-[min(320px,calc(100vw-32px))] flex-col bg-surface-base px-3 pb-6 pt-3 shadow-floating">
+      <button type="button" className="absolute inset-0 bg-slate-900/30 motion-safe:animate-fade-in" aria-label="Close task navigation" onClick={onClose} />
+      <div className="absolute inset-y-0 left-0 flex w-[min(320px,calc(100vw-32px))] flex-col bg-surface-base px-3 pb-6 pt-3 shadow-floating motion-safe:animate-drawer-in-left">
         <div className="mb-2 flex h-11 items-center justify-between px-2">
           <span className="text-sm font-semibold text-slate-900">Navigation</span>
           <button
             ref={closeButtonRef}
             type="button"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 hover:bg-white"
+            className="-mr-2 inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 transition-colors duration-200 ease-smooth hover:bg-white hover:text-slate-900"
             aria-label="Close task navigation"
             onClick={onClose}
           >
@@ -474,7 +452,7 @@ function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): R
           className="min-h-0 flex-1 overflow-y-auto"
           onClick={(event) => {
             const target = event.target as HTMLElement;
-            if (target.closest("a, [data-drawer-dismiss]")) {
+            if (target.closest("a")) {
               onClose();
             }
           }}
@@ -498,15 +476,15 @@ function Sidebar({
   onArchiveProject,
   onCreateTag,
   onRenameTag,
-  onDeleteTag,
-  weeklyReviewOpen,
-  onOpenWeeklyReview
+  onDeleteTag
 }: SidebarProps): React.JSX.Element {
   const [newProjectName, setNewProjectName] = useState("");
   const [projectEdits, setProjectEdits] = useState<Record<string, string>>({});
   const [newTagName, setNewTagName] = useState("");
   const [tagEdits, setTagEdits] = useState<Record<string, string>>({});
   const [openPopover, setOpenPopover] = useState<string | null>(null);
+  const user = useAuthStore((state) => state.user);
+  const hasCrtCanvas = hasFeatureFlag(user, "crt_canvas");
 
   const closePopover = () => setOpenPopover(null);
   const popoverKeyDown = (event: ReactKeyboardEvent) => {
@@ -523,7 +501,7 @@ function Sidebar({
           <li key={item.state}>
             <NavLink
               to={`/tasks/${item.state}`}
-              className={({ isActive }) => navRowClass(!weeklyReviewOpen && (isActive || activeState === item.state))}
+              className={({ isActive }) => navRowClass(isActive || activeState === item.state)}
             >
               <item.icon className="h-4 w-4 shrink-0" aria-hidden />
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
@@ -542,10 +520,9 @@ function Sidebar({
         <li>
           <button
             type="button"
-            aria-label="Weekly review"
-            data-drawer-dismiss
-            className={navRowClass(weeklyReviewOpen)}
-            onClick={onOpenWeeklyReview}
+            disabled
+            aria-label="Weekly review — Coming soon"
+            className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
           >
             <RotateCcw className="h-4 w-4 shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 truncate">Weekly review</span>
@@ -553,16 +530,23 @@ function Sidebar({
           </button>
         </li>
         <li>
-          <button
-            type="button"
-            disabled
-            aria-label="Thinking Mode — Coming soon"
-            className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
-          >
-            <Network className="h-4 w-4 shrink-0" aria-hidden />
-            <span className="min-w-0 flex-1 truncate">Thinking Mode</span>
-            <SoonChip />
-          </button>
+          {hasCrtCanvas ? (
+            <NavLink to="/crt" className={({ isActive }) => navRowClass(isActive)}>
+              <Network className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="min-w-0 flex-1 truncate">Thinking Mode</span>
+            </NavLink>
+          ) : (
+            <button
+              type="button"
+              disabled
+              aria-label="Thinking Mode — Coming soon"
+              className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
+            >
+              <Network className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="min-w-0 flex-1 truncate">Thinking Mode</span>
+              <SoonChip />
+            </button>
+          )}
         </li>
       </ul>
 
@@ -571,7 +555,7 @@ function Sidebar({
         <ul className="space-y-0.5">
           {dateItems.map((item) => (
             <li key={item.path}>
-              <NavLink to={item.path} className={({ isActive }) => navRowClass(!weeklyReviewOpen && isActive)}>
+              <NavLink to={item.path} className={({ isActive }) => navRowClass(isActive)}>
                 <item.icon className="h-4 w-4 shrink-0" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </NavLink>
@@ -592,7 +576,7 @@ function Sidebar({
                   <NavLink
                     to={`/projects/${project.id}`}
                     className={`flex min-h-[34px] w-full items-start gap-2.5 rounded-lg px-2.5 py-[7px] pr-7 text-sm font-medium transition-colors duration-200 ease-smooth ${
-                      !weeklyReviewOpen && activeProjectId === project.id
+                      activeProjectId === project.id
                         ? "bg-white text-slate-900 shadow-soft"
                         : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
                     }`}
@@ -615,7 +599,7 @@ function Sidebar({
                         <div
                           role="dialog"
                           aria-label={`Edit project ${project.name}`}
-                          className="absolute right-0 top-8 z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating"
+                          className={`absolute right-0 top-8 origin-top-right ${popoverClass}`}
                           onKeyDown={popoverKeyDown}
                         >
                           <form
@@ -631,7 +615,7 @@ function Sidebar({
                           >
                             <input
                               aria-label={`Project name ${project.name}`}
-                              className="min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                              className={popoverInputClass}
                               value={projectEdits[project.id] ?? project.name}
                               onChange={(event) => {
                                 const value = event.currentTarget.value;
@@ -639,12 +623,12 @@ function Sidebar({
                               }}
                             />
                             <div className="flex gap-1.5">
-                              <button type="submit" className="flex-1 rounded-md bg-sky-700 px-2 py-1.5 text-xs font-semibold text-white">
+                              <button type="submit" className={`flex-1 ${popoverPrimaryClass}`}>
                                 Rename
                               </button>
                               <button
                                 type="button"
-                                className="flex-1 rounded-md border border-rose-200 bg-white px-2 py-1.5 text-xs text-rose-600"
+                                className={`flex-1 ${popoverDangerClass}`}
                                 onClick={() => {
                                   onArchiveProject?.(project);
                                   closePopover();
@@ -680,7 +664,7 @@ function Sidebar({
                 <div
                   role="dialog"
                   aria-label="Create project"
-                  className="absolute left-0 top-9 z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating"
+                  className={`absolute left-0 top-9 origin-top-left ${popoverClass}`}
                   onKeyDown={popoverKeyDown}
                 >
                   <form
@@ -697,14 +681,14 @@ function Sidebar({
                     <input
                       autoFocus
                       aria-label="New project name"
-                      className="min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                      className={popoverInputClass}
                       placeholder="New project"
                       value={newProjectName}
                       onChange={(event) => setNewProjectName(event.currentTarget.value)}
                     />
                     <button
                       type="submit"
-                      className="rounded-md bg-sky-700 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      className={popoverPrimaryClass}
                       disabled={!newProjectName.trim()}
                     >
                       Add
@@ -734,7 +718,9 @@ function Sidebar({
                       to={`/tags/${tag.id}`}
                       title={tag.name}
                       className={`max-w-full truncate rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors duration-200 ease-smooth ${
-                        !weeklyReviewOpen && activeTagId === tag.id
+                        onRenameTag || onDeleteTag ? "max-lg:pr-6" : ""
+                      } ${
+                        activeTagId === tag.id
                           ? "border-brand-primary bg-info-bg text-info-fg"
                           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
                       }`}
@@ -742,14 +728,17 @@ function Sidebar({
                       {tag.name.startsWith("@") ? tag.name : `#${tag.name.replace(/^#/, "")}`}
                     </NavLink>
                     {onRenameTag || onDeleteTag ? (
+                      // A hover badge on the desktop sidebar. In the touch drawer
+                      // there is no hover, so it sits inside the pill's end instead
+                      // of floating over the neighbouring pills.
                       <button
                         type="button"
                         aria-label={`Tag options ${tag.name}`}
                         aria-expanded={openPopover === popoverId}
-                        className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-soft group-focus-within:inline-flex group-hover:inline-flex max-lg:inline-flex"
+                        className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-soft transition-colors duration-200 ease-smooth hover:text-slate-900 group-focus-within:inline-flex group-hover:inline-flex max-lg:right-1 max-lg:top-1/2 max-lg:inline-flex max-lg:h-5 max-lg:w-5 max-lg:-translate-y-1/2 max-lg:border-transparent max-lg:bg-transparent max-lg:shadow-none"
                         onClick={() => setOpenPopover(openPopover === popoverId ? null : popoverId)}
                       >
-                        <MoreHorizontal className="h-2.5 w-2.5" aria-hidden />
+                        <MoreHorizontal className="h-2.5 w-2.5 max-lg:h-3.5 max-lg:w-3.5" aria-hidden />
                       </button>
                     ) : null}
                   </span>
@@ -758,7 +747,7 @@ function Sidebar({
                       <div
                         role="dialog"
                         aria-label={`Edit tag ${tag.name}`}
-                        className="absolute bottom-full right-0 z-50 mb-1 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating"
+                        className={`absolute bottom-full right-0 mb-1 origin-bottom-right ${popoverClass}`}
                         onKeyDown={popoverKeyDown}
                       >
                           <form
@@ -774,7 +763,7 @@ function Sidebar({
                           >
                             <input
                               aria-label={`Tag name ${tag.name}`}
-                              className="min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                              className={popoverInputClass}
                               value={tagEdits[tag.id] ?? tag.name}
                               onChange={(event) => {
                                 const value = event.currentTarget.value;
@@ -782,12 +771,12 @@ function Sidebar({
                               }}
                             />
                             <div className="flex gap-1.5">
-                              <button type="submit" className="flex-1 rounded-md bg-sky-700 px-2 py-1.5 text-xs font-semibold text-white">
+                              <button type="submit" className={`flex-1 ${popoverPrimaryClass}`}>
                                 Rename
                               </button>
                               <button
                                 type="button"
-                                className="flex-1 rounded-md border border-rose-200 bg-white px-2 py-1.5 text-xs text-rose-600"
+                                className={`flex-1 ${popoverDangerClass}`}
                                 onClick={() => {
                                   onDeleteTag?.(tag);
                                   closePopover();
@@ -821,7 +810,7 @@ function Sidebar({
                 <div
                   role="dialog"
                   aria-label="Create tag"
-                  className="absolute left-0 top-7 z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating"
+                  className={`absolute left-0 top-7 origin-top-left ${popoverClass}`}
                   onKeyDown={popoverKeyDown}
                 >
                   <form
@@ -838,14 +827,14 @@ function Sidebar({
                     <input
                       autoFocus
                       aria-label="New tag name"
-                      className="min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                      className={popoverInputClass}
                       placeholder="New tag"
                       value={newTagName}
                       onChange={(event) => setNewTagName(event.currentTarget.value)}
                     />
                     <button
                       type="submit"
-                      className="rounded-md bg-sky-700 px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      className={popoverPrimaryClass}
                       disabled={!newTagName.trim()}
                     >
                       Add

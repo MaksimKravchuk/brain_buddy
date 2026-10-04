@@ -17,6 +17,14 @@ describe("Button", () => {
     expect(button).toHaveClass("bg-sky-700", "text-white", "hover:bg-sky-800");
   });
 
+  it("014-FR-018 gives every shared button a two-layer keyboard focus ring", () => {
+    render(<Button>Primary</Button>);
+
+    expect(screen.getByRole("button", { name: "Primary" })).toHaveClass(
+      "focus-visible:shadow-ring-focus"
+    );
+  });
+
   it("applies the danger variant when requested", () => {
     render(<Button variant="danger">Delete</Button>);
     const button = screen.getByRole("button", { name: "Delete" });

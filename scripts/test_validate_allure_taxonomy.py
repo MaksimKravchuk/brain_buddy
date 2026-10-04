@@ -7,6 +7,7 @@ it can run in CI before backend/frontend dependencies are installed.
 """
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -243,6 +244,46 @@ class ValidateAllureTaxonomyTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
+    def test_rejects_a_skipped_only_result_set(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp)
+            skipped = _valid_result()
+            skipped["status"] = "skipped"
+            skipped.pop("steps")
+            self._write(results, "skipped-result.json", skipped)
+
+            completed = self.run_validator(
+                "--path", str(results), "--label", "frontend-vitest"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("no executed allure results", completed.stderr.lower())
+
+    def test_rejects_positive_duration_placeholder_without_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp)
+            payload = _valid_result()
+            payload["steps"] = [
+                {
+                    "name": "Verify: the feature works",
+                    "status": "passed",
+                    "start": 1000,
+                    "stop": 1050,
+                    "steps": [],
+                    "attachments": [],
+                    "parameters": [],
+                }
+            ]
+            self._write(results, "a-result.json", payload)
+
+            completed = self.run_validator(
+                "--path", str(results), "--label", "frontend-playwright"
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("placeholder", completed.stderr.lower())
+        self.assertIn("meaningful step", completed.stderr.lower())
+
     def test_rejects_nested_childless_no_op_verify_placeholder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp)
@@ -368,6 +409,48 @@ class ValidateAllureTaxonomyTests(unittest.TestCase):
 
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("frontend-vitest", completed.stderr)
+
+    def test_rejects_stale_only_results_after_run_start_marker(self) -> None:
+        """A prior run must not satisfy the current taxonomy gate."""
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp)
+            self._write(results, "stale-result.json", _valid_result())
+            marker = results / ".run-started-at"
+            marker.write_text("run started", encoding="utf-8")
+
+            completed = self.run_validator(
+                "--path",
+                str(results),
+                "--label",
+                "frontend-vitest",
+                "--since-file",
+                str(marker),
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("fresh", completed.stderr.lower())
+        self.assertIn("stale-result.json", completed.stderr)
+
+    def test_accepts_fresh_result_after_run_start_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp)
+            marker = results / ".run-started-at"
+            marker.write_text("run started", encoding="utf-8")
+            self._write(results, "fresh-result.json", _valid_result())
+            result_mtime_ns = (results / "fresh-result.json").stat().st_mtime_ns
+            os.utime(marker, ns=(result_mtime_ns - 1, result_mtime_ns - 1))
+
+            completed = self.run_validator(
+                "--path",
+                str(results),
+                "--label",
+                "frontend-vitest",
+                "--since-file",
+                str(marker),
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("1 Allure result file", completed.stdout)
 
     def test_missing_directory_fails(self) -> None:
         completed = self.run_validator(

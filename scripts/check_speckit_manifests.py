@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Guard the Spec Kit files BrainBuddy deliberately diverges from upstream.
 
-`docs/spec-kit-workflow.md` documents `specify integration upgrade <agent>
+`docs/spec-kit-workflow.md` documents `specify integration upgrade generic
 --force` as the refresh path. That command overwrites installed assets with
 the pinned upstream release, which silently reverts every BrainBuddy override
 it touches. Nothing verified those files afterwards, so a refresh could quietly
@@ -26,10 +26,14 @@ from pathlib import Path
 
 # path -> (why it diverges, marker that only the BrainBuddy version contains)
 PRESERVED_OVERRIDES: dict[str, tuple[str, str]] = {
-    ".claude/skills/speckit-implement/SKILL.md": (
+    ".specify/agent-commands/speckit-implement/SKILL.md": (
         "Implements directly from tasks.md instead of refusing and routing to "
         "Hermes; upstream has neither policy.",
         "preserved BrainBuddy override",
+    ),
+    ".specify/agent-commands/speckit-tasks/SKILL.md": (
+        "Approves reviewable multi-PR slice boundaries before implementation.",
+        "BrainBuddy preserved override: approve PR slice boundaries",
     ),
     ".specify/scripts/bash/create-new-feature.sh": (
         "Reserves feature numbers across every git ref, not just the "
@@ -84,7 +88,7 @@ def check(root: Path) -> list[str]:
         if marker not in path.read_text(encoding="utf-8"):
             failures.append(
                 f"{relative}: lost its override marker {marker!r}. This is what a "
-                f"`specify integration upgrade --force` reversion looks like. "
+                f"`specify integration upgrade generic --force` reversion looks like. "
                 f"{reason} Restore the override before merging."
             )
     return failures

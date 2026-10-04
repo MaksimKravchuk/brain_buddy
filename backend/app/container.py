@@ -34,6 +34,7 @@ from app.modules.agents.service import (
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.autocomplete import TaskTitleAutocompleteService
 from app.repositories import (
+    CrtCommandRepository,
     FeatureFlagOverrideRepository,
     IndexRepository,
     InviteRepository,
@@ -49,6 +50,7 @@ from app.services import (
     AccountService,
     AdminService,
     AuthService,
+    CrtCommandService,
     FeatureFlagService,
     NodeService,
     RelationService,
@@ -91,6 +93,7 @@ class Container:
     voice_operation_repo: OperationRepository
     agent_repo: AgentRepository
     feature_flag_repo: FeatureFlagOverrideRepository
+    crt_command_repo: CrtCommandRepository
     tree_service: TreeService
     node_service: NodeService
     relation_service: RelationService
@@ -100,6 +103,7 @@ class Container:
     account_service: AccountService
     admin_service: AdminService
     feature_flag_service: FeatureFlagService
+    crt_command_service: CrtCommandService
     task_service: TaskService
     voice_brain_dump_service: VoiceBrainDumpService
     agent_relay_service: AgentRelayService
@@ -326,6 +330,7 @@ def build_container(config: AppConfig) -> Container:
         load_migration_seed=config.feature_flags.load_managed_migration_seed,
         resolve_account_id=_resolve_account_id_by_email,
     )
+    crt_command_repo = CrtCommandRepository(data_root)
 
     # Built once, here, so the migration-time SQLite read `_build_agent_secret_
     # box` needs (DD-16) sees the same repository instance every other flag
@@ -353,6 +358,16 @@ def build_container(config: AppConfig) -> Container:
     )
 
     tree_service = TreeService(tree_repo, index_repo)
+
+    def _owner_is_live(owner_id: str) -> bool:
+        user = user_repo.get_by_id(owner_id)
+        return user is not None and user.deletion_requested_at is None
+
+    crt_command_service = CrtCommandService(
+        crt_command_repo,
+        tree_service,
+        owner_is_live=_owner_is_live,
+    )
     node_service = NodeService(tree_repo, tree_service)
     relation_service = RelationService(tree_repo, tree_service)
     version_service = VersionService(tree_repo, version_repo, tree_service)
@@ -518,6 +533,7 @@ def build_container(config: AppConfig) -> Container:
         voice_operation_repo=voice_operation_repo,
         agent_repo=agent_repo,
         feature_flag_repo=feature_flag_repo,
+        crt_command_repo=crt_command_repo,
         auth_service=auth_service,
         reserved_emails=config.admin.operator_emails,
         deletion_grace=deletion_grace,
@@ -539,6 +555,7 @@ def build_container(config: AppConfig) -> Container:
         voice_operation_repo=voice_operation_repo,
         agent_repo=agent_repo,
         feature_flag_repo=feature_flag_repo,
+        crt_command_repo=crt_command_repo,
         tree_service=tree_service,
         node_service=node_service,
         relation_service=relation_service,
@@ -548,6 +565,7 @@ def build_container(config: AppConfig) -> Container:
         account_service=account_service,
         admin_service=admin_service,
         feature_flag_service=feature_flag_service,
+        crt_command_service=crt_command_service,
         task_service=task_service,
         voice_brain_dump_service=voice_brain_dump_service,
         agent_relay_service=agent_relay_service,

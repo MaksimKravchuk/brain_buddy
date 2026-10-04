@@ -22,7 +22,9 @@ export function AdminPage(): React.JSX.Element {
 
   return (
     <AppShell counts={countsQuery.data?.counts_by_state ?? emptyCounts} projects={projectsQuery.data ?? []} tags={tagsQuery.data ?? []}>
-      <div className="flex w-full flex-col gap-5 pb-12">
+      {/* Admin tables use the full workspace, capped at the same width as the
+          connected-agents page so the two wide settings surfaces line up. */}
+      <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-12">
         <header>
           <h1 className="text-title font-semibold text-slate-900">Admin</h1>
           <p className="mt-1 text-sm text-slate-500">Manage member accounts and runtime feature flags.</p>
@@ -35,6 +37,10 @@ export function AdminPage(): React.JSX.Element {
 
 function AdminTabs(): React.JSX.Element {
   const [tab, setTab] = useState<"users" | "flags">("users");
+  const tabClass = (selected: boolean) =>
+    `relative -mb-px rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sky-700 focus-visible:ring-offset-2 ${
+      selected ? "border-sky-700 text-sky-800" : "border-transparent text-slate-600 hover:text-slate-900"
+    }`;
   const onTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     const next = event.key === "ArrowRight" || event.key === "ArrowDown" ? "flags" : event.key === "ArrowLeft" || event.key === "ArrowUp" ? "users" : null;
     if (next === null) return;
@@ -46,8 +52,8 @@ function AdminTabs(): React.JSX.Element {
   return (
     <div className="flex w-full flex-col gap-4">
       <div role="tablist" aria-label="Admin sections" className="flex gap-2 border-b border-slate-200">
-        <button role="tab" id="admin-users-tab" aria-controls="admin-users-panel" aria-selected={tab === "users"} tabIndex={tab === "users" ? 0 : -1} onClick={() => setTab("users")} onKeyDown={onTabKeyDown} className="px-3 py-2 text-sm">Users</button>
-        <button role="tab" id="admin-flags-tab" aria-controls="admin-flags-panel" aria-selected={tab === "flags"} tabIndex={tab === "flags" ? 0 : -1} onClick={() => setTab("flags")} onKeyDown={onTabKeyDown} className="px-3 py-2 text-sm">Feature flags</button>
+        <button role="tab" id="admin-users-tab" aria-controls="admin-users-panel" aria-selected={tab === "users"} tabIndex={tab === "users" ? 0 : -1} onClick={() => setTab("users")} onKeyDown={onTabKeyDown} className={tabClass(tab === "users")}>Users</button>
+        <button role="tab" id="admin-flags-tab" aria-controls="admin-flags-panel" aria-selected={tab === "flags"} tabIndex={tab === "flags" ? 0 : -1} onClick={() => setTab("flags")} onKeyDown={onTabKeyDown} className={tabClass(tab === "flags")}>Feature flags</button>
       </div>
       {tab === "users" ? <div className="w-full" role="tabpanel" id="admin-users-panel" aria-labelledby="admin-users-tab"><AdminUsersSection /></div> : null}
       {tab === "flags" ? <div className="w-full" role="tabpanel" id="admin-flags-panel" aria-labelledby="admin-flags-tab"><AdminFeatureFlagsSection /></div> : null}

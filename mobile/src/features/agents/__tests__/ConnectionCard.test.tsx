@@ -26,6 +26,32 @@ async function renderCard(overrides: Partial<AgentConnectionResponse> = {}) {
 }
 
 describe("ConnectionCard connection conditions", () => {
+  it("discloses the read-only A2A test sequence and runs once only after an explicit click", async () => {
+    const onTest = jest.fn();
+    const { renderer, unmount } = await renderWithProviders(
+      <ConnectionCard
+        connection={makeConnection({ status: "untested", ready_for_handoff: false })}
+        onTest={onTest}
+        onRotate={jest.fn()}
+        onDisconnect={jest.fn()}
+      />,
+    );
+
+    const rendered = textOf(renderer);
+    expect(rendered).toContain("authenticated, external, read-only A2A calls");
+    expect(rendered).toContain("ListTasks first");
+    expect(rendered).toContain('GetTask("brainbuddy-probe")');
+    expect(rendered).toContain("does not send Task content or start agent work");
+    expect(renderer.root.findByProps({ accessibilityLabel: "Test connection disclosure" })).toBeTruthy();
+    expect(onTest).not.toHaveBeenCalled();
+
+    const testButton = renderer.root.find(
+      (node) => node.props?.children === "Test connection" && typeof node.props?.onPress === "function",
+    );
+    testButton.props.onPress();
+    expect(onTest).toHaveBeenCalledTimes(1);
+    await unmount();
+  });
   it("014-FR-002 shows the discovery result and the tier (M-01-S09)", async () => {
     const { renderer, unmount } = await renderCard();
 

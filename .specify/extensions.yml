@@ -1,127 +1,53 @@
-# BrainBuddy first-party stage chaining for Spec Kit.
-#
-# Two kinds of entry live in this file:
-#
-#   hooks:     repository-local stage chaining (first-party, hand-written)
-#   installed: real Spec Kit extensions added with `specify extension add`
-#
-# `hooks` is NOT a third-party extension install. `docs/spec-kit-workflow.md`
-# restricts community extensions; this section is repository-local
-# configuration that the ten v0.15.0 skills already read. It adds no new
-# runtime, no scheduler, and no upstream dependency.
-#
-# Every one of the ten speckit skills checks `hooks.before_<stage>` and
-# `hooks.after_<stage>` here. Chaining stages through this file is what lets us
-# add the interview, design, review, acceptance and report stages WITHOUT
-# forking a single upstream skill.
-#
-# `optional: true`  -> the skill prints the suggestion and continues.
-# `optional: false` -> the skill emits EXECUTE_COMMAND and waits for the result.
-#
-# Command ids use dots; the skills translate `speckit.review` -> `/speckit-review`.
-#
-# WARNING: every hooked command must resolve to a SKILL.md under
-# `.claude/skills/`, or the agent emits EXECUTE_COMMAND for a command it cannot
-# invoke and the pipeline stops at that stage.
-# `scripts/test_check_speckit_manifests.py` enforces that.
-#
-# This warning used to cover two trees; `.agents/` was removed because nobody
-# authored specs in Codex. Note what that costs: the guard used to be the
-# reason `assess` below is not hooked, and it no longer is — assess ships
-# Claude skills, so hooking it would now pass every mechanical check. The
-# reason it stays unhooked is written out at the `installed:` section and is
-# about what assess IS, not about which trees exist.
-#
-# WARNING 2: `specify extension add` REWRITES this file and strips comments.
-# After any install, restore this header from git history.
-
+# BrainBuddy first-party hooks around the Spec Kit core.
+# The generic integration under .specify/agent-commands/ is canonical: no
+# vendor CLI is needed to author specs. Mandatory stages must be executed by
+# the active agent before moving on, using the command's SKILL.md file.
+# assess is deliberately unhooked: stage 0 is optional, and its kill verdict
+# is enforced by the interview stage. Do not turn assessment into a mandatory
+# cost for every small feature.
+# `specify extension update` rewrites this file and strips comments. Restore
+# this header after updating the extension and verify the actual hook values.
 hooks:
-  # Optional on purpose. /speckit-interview is the human front door and it
-  # invokes /speckit-specify itself once the business requirements are agreed.
-  # Registering it as mandatory here would make specify call interview call
-  # specify, forever.
   before_specify:
-    - extension: brainbuddy-pipeline
-      command: speckit.interview
-      optional: true
-      description: "Elicit business requirements from the human before writing the spec."
-      prompt: >-
-        No intake.md exists for this feature. Run /speckit-interview first to
-        capture the problem, persona, business objective, scope boundary,
-        non-goals, constraints and definition of done, then let it call
-        /speckit-specify with the agreed description.
-
-  # Design is load-bearing: the plan must cite design.md, and the acceptance
-  # auditor keys its traceability matrix off the D-/M- screen ids.
+  - extension: brainbuddy-pipeline
+    command: speckit.interview
+    optional: true
+    description: Elicit business requirements from the human before writing the spec.
+    prompt: No intake.md exists for this feature. Run /speckit-interview first to
+      capture the problem, persona, business objective, scope boundary, non-goals,
+      constraints and definition of done, then let it call /speckit-specify with the
+      agreed description.
   after_clarify:
-    - extension: brainbuddy-pipeline
-      command: speckit.design
-      optional: false
-      description: "Produce the UX/UI design and the numbered screen+state inventory."
-      prompt: >-
-        The spec and its Clarifications are settled. Produce design.md and the
-        static HTML screens before planning, so the technical plan can cite
-        real screens and states.
-
-  # The review gate. Runs after the technical plan exists, because three of the
-  # five lenses cannot judge a spec without it.
+  - extension: brainbuddy-pipeline
+    command: speckit.design
+    optional: false
+    description: Produce the UX/UI design and the numbered screen+state inventory.
+    prompt: The spec and its Clarifications are settled. Produce design.md and the
+      static HTML screens before planning, so the technical plan can cite real screens
+      and states.
   after_plan:
-    - extension: brainbuddy-pipeline
-      command: speckit.review
-      optional: false
-      description: "Run the five-lens spec review gate and print the verdict."
-      prompt: >-
-        Run the portable spec review gate (ADR-0011). Implementation must not
-        start until the aggregated verdict is approved or founder-accepted.
-
-  # Advisory until an implementation exists to accept. /speckit-accept refuses
-  # to grade an unimplemented feature, so leaving this optional costs nothing
-  # and makes the stage discoverable.
+  - extension: brainbuddy-pipeline
+    command: speckit.review
+    optional: false
+    description: Run the five-lens spec review gate and print the verdict.
+    prompt: Run the portable spec review gate (ADR-0011). Implementation must not
+      start until the aggregated verdict is approved or founder-accepted.
   after_tasks:
-    - extension: brainbuddy-pipeline
-      command: speckit.accept
-      optional: true
-      description: "Grade the delivered feature against its spec once it is built."
-      prompt: >-
-        After implementation and verification are green, run /speckit-accept to
-        build the traceability matrix and issue the accept/reject verdict.
-
+  - extension: brainbuddy-pipeline
+    command: speckit.accept
+    optional: true
+    description: Grade the delivered feature against its spec once it is built.
+    prompt: After implementation and verification are green, run /speckit-accept to
+      build the traceability matrix and issue the accept/reject verdict.
   after_analyze:
-    - extension: brainbuddy-pipeline
-      command: speckit.report
-      optional: true
-      description: "Render the end-to-end run report for the human."
-      prompt: >-
-        Run /speckit-report to aggregate intake, spec, design, plan, every
-        reviewer verdict, verification results and the acceptance verdict into
-        one report for the human.
-
-# Real Spec Kit extensions, managed by `specify extension`.
-#
-# assess (spec-kit-core, default catalog) is stage 0: intake -> research ->
-# define -> shape -> decide, writing `.specify/assessments/<slug>/decision.md`
-# with a go / needs-clarification / kill verdict. It supplies the one thing the
-# hand-built pipeline lacked — the ability to close an idea before any
-# requirement is elicited. /speckit-interview reads that verdict and refuses to
-# proceed on a `kill`, which is what makes the gate load-bearing rather than
-# advisory.
-#
-# It is deliberately NOT registered under `hooks` above. The reason recorded
-# here until `.agents/` was removed — no Codex twin — was true but incidental,
-# and it is now void; the real reasons outlast it:
-#
-#   1. Stage 0 is optional by design. Its value is being skippable: a small,
-#      obviously-wanted change should not pay for a five-stage assessment.
-#      A hook with `optional: false` makes it mandatory for every feature,
-#      which is the opposite of what CLAUDE.md and the pipeline promise.
-#   2. The kill verdict is already load-bearing without a hook.
-#      /speckit-interview reads decision.md and refuses to proceed past a
-#      `kill`, so enforcement does not depend on auto-execution.
-#   3. `assess` is five commands (intake -> research -> define -> shape ->
-#      decide), not one. There is no single command a `before_specify` hook
-#      could name that would mean "run the assessment".
+  - extension: brainbuddy-pipeline
+    command: speckit.report
+    optional: true
+    description: Render the end-to-end run report for the human.
+    prompt: Run /speckit-report to aggregate intake, spec, design, plan, every reviewer
+      verdict, verification results and the acceptance verdict into one report for
+      the human.
 installed:
-  - assess
-
+- assess
 settings:
   auto_execute_hooks: true

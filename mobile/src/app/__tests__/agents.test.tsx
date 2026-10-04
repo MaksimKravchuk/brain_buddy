@@ -128,6 +128,28 @@ describe("connected agents screen", () => {
     // There is nothing to copy: the A2A wire has no inbound secret an owner
     // configures at their agent (014-FR-012).
     expect(screen.queryByText("I have copied it")).not.toBeOnTheScreen();
+    expect(backend.callsTo("POST", "/agent-connections/conn_1/test")).toHaveLength(0);
+    expect(backend.callsTo("POST", "/tasks/task_1/agent-runs")).toHaveLength(0);
+  });
+
+  it("keeps Test and dispatch APIs idle through mount, remount, and query refresh", async () => {
+    const backend = serveConnected();
+
+    const first = await renderScreen();
+    expect(await screen.findByText("Release agent")).toBeOnTheScreen();
+    expect(backend.callsTo("POST", "/agent-connections/conn_1/test")).toHaveLength(0);
+    expect(backend.callsTo("POST", "/tasks/task_1/agent-runs")).toHaveLength(0);
+
+    await first.unmount();
+    const remounted = await renderScreen();
+    expect(await screen.findByText("Release agent")).toBeOnTheScreen();
+    expect(backend.callsTo("POST", "/agent-connections/conn_1/test")).toHaveLength(0);
+    expect(backend.callsTo("POST", "/tasks/task_1/agent-runs")).toHaveLength(0);
+
+    await remounted.queryClient.invalidateQueries({ queryKey: ["agents", "private"] });
+    await waitFor(() => expect(backend.callsTo("GET", "/agent-connections")).toHaveLength(3));
+    expect(backend.callsTo("POST", "/agent-connections/conn_1/test")).toHaveLength(0);
+    expect(backend.callsTo("POST", "/tasks/task_1/agent-runs")).toHaveLength(0);
   });
 
   it("preserves an ambiguous create key across dismissal for the exact same canonical input", async () => {

@@ -35,6 +35,15 @@ class ErrorResponse(StrictBaseModel):
     )
 
 
+class StaleRevisionDetail(StrictBaseModel):
+    """Owner-safe detail returned when an optimistic revision is stale."""
+
+    reason: Literal["stale_revision"]
+    tree_id: str
+    current_revision: int = Field(ge=1)
+    current_updated_at: datetime
+
+
 class RelationCounts(StrictBaseModel):
     """Upstream and downstream relation counts for a node."""
 
@@ -183,6 +192,9 @@ class TreeCreateRequest(StrictBaseModel):
     """Payload for creating a new tree."""
 
     name: str = Field(description="Name for the tree.")
+    schema_version: int | None = Field(
+        default=None, ge=1, description="Optional top-level tree schema version."
+    )
     owner_id: str | None = Field(default=None, description="Optional owner identifier.")
     metadata: TreeMetadata | None = Field(
         default=None, description="Optional metadata overrides."
@@ -199,6 +211,17 @@ class TreeUpdateRequest(StrictBaseModel):
     """Payload for replacing a tree's state."""
 
     name: str = Field(description="Updated tree name.")
+    expected_revision: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Preferred optimistic-concurrency token; legacy callers may omit it "
+            "during the Stage A compatibility window."
+        ),
+    )
+    schema_version: int = Field(
+        default=1, description="Supported top-level tree schema version."
+    )
     metadata: TreeMetadata = Field(description="Updated metadata block for the tree.")
     nodes: list[NodeResponse] = Field(
         default_factory=list, description="Updated nodes."
@@ -222,6 +245,12 @@ class TreeDetailResponse(StrictBaseModel):
     """Detailed tree payload returned from read endpoints."""
 
     id: str = Field(description="Tree identifier.")
+    revision: int = Field(default=1, ge=1, description="Monotonic aggregate revision.")
+    schema_version: int = Field(
+        default=1,
+        ge=1,
+        description="Top-level import/export schema version.",
+    )
     name: str = Field(description="Tree name.")
     metadata: TreeMetadata = Field(description="Metadata describing the tree payload.")
     nodes: list[NodeResponse] = Field(
@@ -349,6 +378,7 @@ __all__ = [
     "NodeUpdateRequest",
     "RelationCreateRequest",
     "RelationCounts",
+    "StaleRevisionDetail",
     "RelationResponse",
     "RelationUpdateRequest",
     "TreeCreateRequest",
