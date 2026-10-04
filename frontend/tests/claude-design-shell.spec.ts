@@ -342,6 +342,13 @@ test("017-FR-004 017-SC-007 inline task detail preserves desktop list width and 
     if (overflow !== 0) throw new Error(`Expected no workspace horizontal overflow, received ${overflow}px`);
   });
 
+  // Playwright retries a click whose target is still moving, and from the second
+  // attempt on it force-scrolls the target with `scrollIntoView({ block: "end" |
+  // "center" | "start" })` instead of scrolling only if needed. The detail's
+  // 250ms enter animation keeps the Close button unstable, so a click landing
+  // before it ends scrolls <main> to 0 or to the button's top edge and the
+  // "list did not move" check below fails although the app scrolled nothing.
+  await page.getByTestId("inline-task-detail").evaluate((detail) => Promise.all(detail.getAnimations().map((animation) => animation.finished)));
   await page.getByRole("button", { name: "Close task" }).click();
   await expect(page.getByRole("heading", { name: "Task detail" })).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "Task detail" })).toHaveCount(0);
