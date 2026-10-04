@@ -51,7 +51,8 @@ only unclarified Inbox items needs a Next action before it can be marked
 reviewed. Completed projects with no open actions can be archived from the
 review. The decision and review time survive restart. Projects return to the
 queue after seven days or when a linked task changes. Reviewing never changes
-a task due date or GTD state automatically.
+a task due date or GTD state automatically. If linked actions change while the
+review is open, the old decision is rejected and the review must be reopened.
 
 Build a launchable `.app` on macOS 26+ with Xcode installed. The build includes
 the local Whisper base model and tokenizer. By default it reads the model from
@@ -107,6 +108,14 @@ and Create follow-up store a review receipt separately from the Waiting task:
 the item returns to the review after seven days or immediately when its task
 revision changes, while its GTD state and waiting date remain intact. Follow-up
 creation and its review receipt are one atomic local write.
+
+The local Someday list also has a one-item-at-a-time review. Keep in Someday
+records a review receipt without editing the task; the item returns after seven
+days or when its revision changes. Moving an item to Next asks for a concrete
+action title and saves the title and GTD state atomically while preserving its
+project, tags, notes, and due date. Irrelevant items can be cancelled. Tasks in
+archived projects can remain deferred, but their project must be restored before
+moving them to Next. The review never schedules a due date automatically.
 
 Completed and cancelled tasks reopen into a chosen open list; Waiting for
 requires a person, event, or condition. The local store records the last open

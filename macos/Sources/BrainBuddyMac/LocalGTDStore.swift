@@ -57,7 +57,8 @@ final class LocalGTDStore: GTDStore {
         var tags: [StoredTag] = []
         var idempotency: [String: String] = [:]
         var idempotencyReceipts: [String: IdempotencyReceipt]?
-        var waitingReviews: [String: WaitingReviewReceipt]?
+        var waitingReviews: [String: TaskReviewReceipt]?
+        var somedayReviews: [String: TaskReviewReceipt]?
     }
 
     private struct IdempotencyReceipt: Codable {
@@ -65,9 +66,14 @@ final class LocalGTDStore: GTDStore {
         let response: Data
     }
 
-    private struct WaitingReviewReceipt: Codable {
+    private struct TaskReviewReceipt: Codable {
         let taskRevision: Int
         let reviewedAt: String
+    }
+
+    private struct SomedayActivationBody: Encodable {
+        let title: String
+        let expectedRevision: Int
     }
 
     private struct FollowUpReviewBody: Encodable {
@@ -153,6 +159,7 @@ final class LocalGTDStore: GTDStore {
     private struct ProjectReviewUpdate: Encodable {
         let decision: ProjectReviewDecision
         let expectedRevision: Int
+        let expectedTaskSignature: String?
     }
 
     private struct ProjectOutcomeUpdate: Encodable {
@@ -303,7 +310,8 @@ final class LocalGTDStore: GTDStore {
     }
 
     private func projectValue(_ project: StoredProject, in data: Snapshot) -> BrainBuddyProject {
-        BrainBuddyProject(
+        let taskSignature = Self.projectTaskSignature(project.id, in: data)
+        return BrainBuddyProject(
             id: project.id, name: project.name, color: project.color,
             state: project.state, revision: project.revision,
             open_task_count: data.tasks.filter { $0.projectID == project.id && $0.isOpen }.count,
@@ -311,7 +319,8 @@ final class LocalGTDStore: GTDStore {
             last_reviewed_at: project.lastReviewedAt,
             last_review_decision: project.lastReviewDecision,
             review_has_changes: project.lastReviewedAt != nil &&
-                project.lastReviewedTaskSignature != Self.projectTaskSignature(project.id, in: data)
+                project.lastReviewedTaskSignature != taskSignature,
+            review_task_signature: taskSignature
         )
     }
 
@@ -901,7 +910,7 @@ extension LocalGTDStore {
 extension LocalGTDStore {
     private static func recordWaitingReview(_ task: StoredTask, in data: inout Snapshot, at now: String) {
         if data.waitingReviews == nil { data.waitingReviews = [:] }
-        data.waitingReviews?[task.id] = WaitingReviewReceipt(taskRevision: task.revision, reviewedAt: now)
+        data.waitingReviews?[task.id] = TaskReviewReceipt(taskRevision: task.revision, reviewedAt: now)
     }
 
     func waitingReviewDue(_ task: BrainBuddyTask, before cutoff: Date) -> Bool {
@@ -975,6 +984,72 @@ extension LocalGTDStore {
             return followUp
         }
         return created.publicValue()
+    }
+
+    func somedayReviewDue(_ task: BrainBuddyTask, before cutoff: Date) -> Bool {
+        guard task.state == TaskList.someday.rawValue,
+              let receipt = snapshot.somedayReviews?[task.id],
+              receipt.taskRevision == task.revision,
+              let reviewed = ISO8601DateFormatter().date(from: receipt.reviewedAt) else {
+            return true
+        }
+        return reviewed < cutoff
+    }
+
+    func markSomedayReviewed(_ task: BrainBuddyTask, idempotencyKey: UUID) async throws -> BrainBuddyTask {
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "someday.review/\(task.id)", body: ["expectedRevision": task.revision]
+        )
+        try checkLoaded()
+        if let replay: StoredTask = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return replay.publicValue()
+        }
+        let reviewed = try mutate { data -> StoredTask in
+            guard let current = data.tasks.first(where: { $0.id == task.id }) else { throw Self.missing("Task") }
+            guard current.revision == task.revision else { throw Self.conflict("Task") }
+            guard current.state == TaskList.someday.rawValue else {
+                throw APIError(message: "Only Someday tasks can be marked reviewed.")
+            }
+            if data.somedayReviews == nil { data.somedayReviews = [:] }
+            data.somedayReviews?[task.id] = TaskReviewReceipt(taskRevision: current.revision, reviewedAt: Self.now())
+            try Self.record(in: &data, key: key, objectID: task.id, fingerprint: fingerprint, response: current)
+            return current
+        }
+        return reviewed.publicValue()
+    }
+
+    func activateSomedayTask(
+        _ task: BrainBuddyTask, title: String, idempotencyKey: UUID
+    ) async throws -> BrainBuddyTask {
+        let cleanTitle = try Self.text(title, label: "Next action", max: 500)
+        let key = idempotencyKey.uuidString
+        let fingerprint = try Self.fingerprint(
+            "someday.activate/\(task.id)",
+            body: SomedayActivationBody(title: cleanTitle, expectedRevision: task.revision)
+        )
+        try checkLoaded()
+        if let replay: StoredTask = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
+            return replay.publicValue()
+        }
+        let activated = try mutate { data -> StoredTask in
+            guard let index = data.tasks.firstIndex(where: { $0.id == task.id }) else {
+                throw Self.missing("Task")
+            }
+            guard data.tasks[index].revision == task.revision else { throw Self.conflict("Task") }
+            guard data.tasks[index].state == TaskList.someday.rawValue else {
+                throw APIError(message: "This task is no longer in Someday.")
+            }
+            var item = data.tasks[index]
+            item.title = cleanTitle
+            item.state = TaskList.next.rawValue
+            item.orderKey = (data.tasks.filter { $0.state == TaskList.next.rawValue }.map(\.orderKey).max() ?? 0) + 1
+            item.revision += 1
+            data.tasks[index] = item
+            try Self.record(in: &data, key: key, objectID: item.id, fingerprint: fingerprint, response: item)
+            return item
+        }
+        return activated.publicValue()
     }
 
     func clarifyInboxAsProject(
@@ -1156,7 +1231,10 @@ extension LocalGTDStore {
         let key = idempotencyKey.uuidString
         let fingerprint = try Self.fingerprint(
             "project.review/\(project.id)",
-            body: ProjectReviewUpdate(decision: decision, expectedRevision: project.revision)
+            body: ProjectReviewUpdate(
+                decision: decision, expectedRevision: project.revision,
+                expectedTaskSignature: project.review_task_signature
+            )
         )
         try checkLoaded()
         if let result: BrainBuddyProject = try Self.replay(from: snapshot, key: key, fingerprint: fingerprint) {
@@ -1167,6 +1245,9 @@ extension LocalGTDStore {
                 throw Self.missing("Project")
             }
             guard data.projects[index].revision == project.revision else { throw Self.conflict("Project") }
+            guard project.review_task_signature == Self.projectTaskSignature(project.id, in: data) else {
+                throw APIError(message: "Project actions changed since review opened. Reopen the review.", statusCode: 409)
+            }
             data.projects[index].lastReviewedAt = Self.now()
             data.projects[index].lastReviewDecision = decision
             data.projects[index].lastReviewedTaskSignature = Self.projectTaskSignature(project.id, in: data)
