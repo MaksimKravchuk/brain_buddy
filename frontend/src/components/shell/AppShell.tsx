@@ -70,7 +70,7 @@ const fallbackProjectColors = ["#0ea5e9", "#6366f1", "#94a3b8", "#10b981"];
 const popoverClass =
   "z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-floating motion-safe:animate-scale-fade-in";
 const popoverInputClass =
-  "min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-base text-slate-900 outline-none transition-colors duration-200 ease-smooth placeholder:text-slate-400 focus:border-brand-primary lg:text-xs";
+  "min-w-0 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-base text-slate-900 outline-hidden transition-colors duration-200 ease-smooth placeholder:text-slate-400 focus:border-brand-primary lg:text-xs";
 const popoverPrimaryClass =
   "rounded-md bg-sky-700 px-2 py-1.5 text-xs font-semibold text-white transition-colors duration-200 ease-smooth hover:bg-sky-800 disabled:opacity-50";
 const popoverDangerClass =
@@ -121,11 +121,15 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     };
   }, []);
 
-  useEffect(() => {
-    // Browser history can select a task while navigation is open. Do not leave
-    // that drawer active behind the sheet; typing a search keeps it open.
+  // Browser history can select a task while navigation is open. Do not leave
+  // that drawer active behind the sheet; typing a search (same path, new
+  // query) keeps it open. Adjusted during render so the dismissal lands in the
+  // same commit as the new location (react-hooks/set-state-in-effect).
+  const [renderedPathname, setRenderedPathname] = useState(location.pathname);
+  if (renderedPathname !== location.pathname) {
+    setRenderedPathname(location.pathname);
     setIsDrawerOpen(false);
-  }, [location.pathname]);
+  }
 
   return (
     <ShellToastContext.Provider value={notify}>
@@ -147,7 +151,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         {toast ? (
           <div
             role="status"
-            className="fixed bottom-6 left-1/2 z-[200] w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-center text-[13px] text-slate-700 shadow-floating backdrop-blur motion-safe:animate-fade-in-up"
+            className="fixed bottom-6 left-1/2 z-[200] w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-center text-[13px] text-slate-700 shadow-floating backdrop-blur-sm motion-safe:animate-fade-in-up"
           >
             {toast}
           </div>
@@ -349,7 +353,7 @@ function TaskSearch({ className, onSubmit }: { className: string; onSubmit?: () 
           aria-label="Search tasks"
           value={searchValue}
           onChange={(event) => updateSearch(event.currentTarget.value)}
-          className="min-w-0 flex-1 bg-transparent text-base text-slate-900 outline-none placeholder:text-slate-500 focus-visible:shadow-none md:text-sm"
+          className="min-w-0 flex-1 bg-transparent text-base text-slate-900 outline-hidden placeholder:text-slate-500 focus-visible:shadow-none md:text-sm"
         />
       </label>
       {onSubmit ? (
@@ -370,7 +374,7 @@ function TopBar({ onOpenDrawer, navigationTriggerRef }: {
 
   return (
     <header
-      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
+      className="relative z-30 flex h-14 items-center gap-2 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-sm max-[359px]:gap-1 max-[359px]:px-2 sm:gap-4 sm:px-5"
       style={{ height: "56px" }}
     >
       <button

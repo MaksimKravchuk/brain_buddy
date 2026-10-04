@@ -13,7 +13,7 @@ This design system captures the visual language, content voice, and UI kit neede
 | Source | Path / Link |
 |---|---|
 | Original product codebase (React + TS + Tailwind + React Flow + FastAPI) | `brain_buddy/` (attached locally at DS creation, read-only) |
-| Tailwind tokens | `brain_buddy/frontend/tailwind.config.ts` |
+| Tailwind tokens | `brain_buddy/frontend/src/styles.css` (`@theme` block) |
 | Node color config | `brain_buddy/frontend/src/config/nodeColors.json` |
 | Pivot design explorations (task shell, brain dump, AI states) | "Pivot Explorations" design project (shared canvas) |
 

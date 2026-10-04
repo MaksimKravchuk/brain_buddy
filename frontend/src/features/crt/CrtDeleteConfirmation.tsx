@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 export type CrtConfirmationAction = () => void | Promise<void>;
@@ -16,9 +16,11 @@ function useModalBehavior(
   busy = false
 ): void {
   const cancelRef = useRef(onCancel);
-  cancelRef.current = onCancel;
   const returnRef = useRef(returnFocusRef);
-  returnRef.current = returnFocusRef;
+  useLayoutEffect(() => {
+    cancelRef.current = onCancel;
+    returnRef.current = returnFocusRef;
+  });
   const previousFocus = useRef<HTMLElement | null>(null);
   const restored = useRef(false);
 
@@ -154,7 +156,7 @@ export function CrtDeleteTreeDialog({
         aria-describedby="crt-delete-tree-description"
         aria-busy={pending}
         tabIndex={-1}
-        className="w-full max-w-lg rounded-2xl border border-rose-200 bg-white p-6 shadow-floating outline-none"
+        className="w-full max-w-lg rounded-2xl border border-rose-200 bg-white p-6 shadow-floating outline-hidden"
       >
         <p className="text-xs font-bold uppercase tracking-[0.08em] text-rose-700">Delete tree</p>
         <h1 id="crt-delete-tree-title" className="mt-2 text-xl font-semibold text-slate-900">Delete ‘{treeName}’?</h1>
@@ -231,7 +233,7 @@ export function CrtPendingWorkDialog({
         aria-describedby="crt-pending-work-description"
         aria-busy={pending}
         tabIndex={-1}
-        className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-floating outline-none"
+        className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-floating outline-hidden"
       >
         <h1 id="crt-pending-work-title" className="text-xl font-semibold text-slate-900">Resolve unsynced changes before continuing</h1>
         <p id="crt-pending-work-description" className="mt-2 text-sm leading-6 text-slate-600">

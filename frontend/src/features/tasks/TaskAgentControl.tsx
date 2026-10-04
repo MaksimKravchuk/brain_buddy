@@ -156,7 +156,7 @@ export function TaskAgentControl({
               ref={(item) => { menuItemRefs.current[index] = item; }}
               type="button"
               role="menuitem"
-              className="block w-full rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 focus:bg-slate-50 focus:outline-none"
+              className="block w-full rounded-md px-2.5 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 focus:bg-slate-50 focus:outline-hidden"
               onClick={() => {
                 setMenuOpen(false);
                 onReview(connection.id);

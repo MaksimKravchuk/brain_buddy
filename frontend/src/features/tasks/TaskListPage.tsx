@@ -1,5 +1,5 @@
 import { AlertTriangle, CalendarDays, Check, ChevronDown, Layers, Plus, RotateCcw, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -121,10 +121,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const [canonicalResetKey, setCanonicalResetKey] = useState(0);
   const conflictControllerRef = useRef<ReturnType<typeof getTaskDetailAutosaveController> | null>(null);
   const discardFocusRef = useRef<HTMLElement | null>(null);
+  // Settlement compares against the draft as it is *now*, not as it was when
+  // the request left; synced after commit so a discarded render cannot leak in.
   const newTitleRef = useRef(newTitle);
   const newWaitingForRef = useRef(newWaitingFor);
-  newTitleRef.current = newTitle;
-  newWaitingForRef.current = newWaitingFor;
+  useLayoutEffect(() => {
+    newTitleRef.current = newTitle;
+    newWaitingForRef.current = newWaitingFor;
+  }, [newTitle, newWaitingFor]);
   type CaptureRequest = {
     payload: Parameters<typeof apiClient.createTask>[0] | Parameters<typeof apiClient.smartAddTask>[0];
     key: string;
@@ -258,6 +262,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     return invalidateTasks();
   };
   const detailController = detailQuery.data && accountId
+    // eslint-disable-next-line react-hooks/refs -- the controller stores this callback and invokes it when an autosave is accepted, after commit; the completion focus map it reads is never read during render
     ? getTaskDetailAutosaveController(accountId, cacheScope.apiOrigin, detailQuery.data, (accepted) => applyCanonicalTask(accepted, true))
     : null;
   const refetchCanonicalProjections = async (canonical: TaskResponse) => {
@@ -267,6 +272,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     await taskQuery.refetch();
   };
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- `recover()` reads the persisted autosave draft (browser storage) for this controller/task; the conflict and recovery flags are reset before that external read and re-derived from it, so a stale conflict never outlives the task it belonged to.
     setAutosaveConflict(null);
     const available = Boolean(detailController?.recover());
     setRecoveryAvailable(available);
@@ -535,6 +541,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         else listHeadingRef.current?.focus({ preventScroll: true });
       }
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a focus target is a one-shot request: it needs the committed DOM above (the assigned control or the surviving row), and consuming it here is what stops a later agent-summary refresh from replaying it.
     setAgentFocusTarget(null);
   }, [agentFocusTarget, agentRunSummaries]);
 
@@ -657,6 +664,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   useEffect(() => {
     if (!taskId || selectedTaskVisible) {
       recoveryAttemptRef.current = null;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- selection-recovery effect: leaving recovery (no selection, or the row is visible) clears the notice together with the attempt it belonged to; the attempts below own the notice while they redirect and page through the list.
       setSelectionRecoveryMessage(null);
       return;
     }
@@ -840,7 +848,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             own row, so a phone never squeezes a control into two-line text. */}
         <div className="mb-5 flex flex-wrap items-end gap-x-1.5 gap-y-3">
           <div className="mr-auto min-w-0 pr-1.5 max-sm:flex-1">
-            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 break-words text-title font-semibold text-slate-900 outline-none">
+            <h1 id="task-list-title" ref={listHeadingRef} tabIndex={-1} className="m-0 break-words text-title font-semibold text-slate-900 outline-hidden">
               {title}
             </h1>
             <p className="m-0 mt-1 text-xs text-slate-500">{meta}</p>
@@ -868,7 +876,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             <label className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2.5 text-xs font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900 max-sm:first:-ml-2.5">
               <input
                 type="checkbox"
-                className="h-3.5 w-3.5 rounded border-slate-300 text-brand-primary accent-brand-primary"
+                className="h-3.5 w-3.5 rounded-sm border-slate-300 text-brand-primary accent-brand-primary"
                 checked={showCancelled}
                 onChange={(event) => {
                   const next = new URLSearchParams(searchParams);
@@ -885,7 +893,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             <span className="relative inline-flex">
               <select
                 aria-label="Sort tasks"
-                className="cursor-pointer appearance-none rounded bg-transparent pr-5 text-xs font-medium text-slate-700 outline-none"
+                className="cursor-pointer appearance-none rounded-sm bg-transparent pr-5 text-xs font-medium text-slate-700 outline-hidden"
                 value={sort}
                 onChange={(event) => {
                   const next = new URLSearchParams(searchParams);
@@ -1279,7 +1287,7 @@ function TaskRow({
             onCloseSelectedTask();
           }}
           aria-expanded={isSelected}
-          className={`min-w-0 flex-1 truncate text-sm font-medium outline-none transition-colors duration-150 ease-smooth hover:text-sky-700 focus-visible:rounded ${
+          className={`min-w-0 flex-1 truncate text-sm font-medium outline-hidden transition-colors duration-150 ease-smooth hover:text-sky-700 focus-visible:rounded-sm ${
             isTerminal ? "text-slate-500 line-through decoration-slate-300" : "text-slate-900"
           }`}
         >
@@ -1473,7 +1481,7 @@ function TaskCreator({
                 ? `${completionListboxId}-option-${activeCompletionIndex}`
                 : undefined
           }
-          className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-slate-900 outline-none placeholder:text-slate-500 focus-visible:shadow-none"
+          className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-slate-900 outline-hidden placeholder:text-slate-500 focus-visible:shadow-none"
           placeholder={placeholder}
           value={newTitle}
           onChange={(event) => {
@@ -1538,7 +1546,7 @@ function TaskCreator({
             <input
               id="new-task-waiting-for"
               aria-label="Waiting for"
-              className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-slate-900 outline-none placeholder:text-slate-500 focus-visible:shadow-none"
+              className="min-w-0 flex-1 bg-transparent py-1.5 text-sm text-slate-900 outline-hidden placeholder:text-slate-500 focus-visible:shadow-none"
               placeholder="Waiting for who or what?"
               value={newWaitingFor}
               onChange={(event) => onWaitingForChange(event.currentTarget.value)}
@@ -1587,7 +1595,7 @@ function TaskCreator({
       {/* Kept mounted so the live region exists before it speaks, but an empty
           region must not add a blank 12px row under the composer. */}
       <div
-        className="text-xs text-slate-500 empty:!mt-0"
+        className="text-xs text-slate-500 empty:mt-0!"
         role={autocomplete.loading || autocomplete.error ? "status" : undefined}
         aria-live="polite"
       >

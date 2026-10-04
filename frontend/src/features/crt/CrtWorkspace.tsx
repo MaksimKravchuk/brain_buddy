@@ -204,7 +204,9 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
   const canvasOpenActivationRef = useRef(0);
   const canvasOpenEmittedRef = useRef(0);
   const createDraftCoordinatorRef = useRef(createDraftCoordinator);
-  createDraftCoordinatorRef.current = createDraftCoordinator;
+  useLayoutEffect(() => {
+    createDraftCoordinatorRef.current = createDraftCoordinator;
+  }, [createDraftCoordinator]);
   const createIntentRef = useRef<{ key: string; migrationId: string; epoch: number; coordinator: CrtDraftCoordinator } | null>(null);
   const coordinatorRef = useRef<CrtDraftCoordinator | null>(null);
   const pendingScheduleRef = useRef<GraphState | null>(null);
@@ -223,7 +225,9 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
     setCoordinatorState(next);
   }, []);
   const replaceCoordinatorRef = useRef(replaceCoordinator);
-  replaceCoordinatorRef.current = replaceCoordinator;
+  useLayoutEffect(() => {
+    replaceCoordinatorRef.current = replaceCoordinator;
+  }, [replaceCoordinator]);
 
   const persistence = useMemo<CrtAutosavePersistence | undefined>(() => {
     const coordinator = coordinatorState;
@@ -288,9 +292,14 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
     autosave.schedule(next);
   }, [autosave, phase, tree]);
 
-  useEffect(() => {
+  // A refreshed server copy only counts for the conflict it was fetched during: any other
+  // save status invalidates it. Adjusted during render (the previous status is kept in
+  // state) rather than from an effect.
+  const [lastAutosaveStatus, setLastAutosaveStatus] = useState(autosave.status);
+  if (lastAutosaveStatus !== autosave.status) {
+    setLastAutosaveStatus(autosave.status);
     if (autosave.status !== "Conflict") setConflictRefetched(false);
-  }, [autosave.status]);
+  }
 
   const backupDraft = useCallback((coordinator: CrtDraftCoordinator): void => {
     const backup = coordinator.backup();
@@ -373,7 +382,9 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
     setPhase("ready");
   }, [createDraftCoordinator, replaceCoordinator, userId]);
   const installLoadedTreeRef = useRef(installLoadedTree);
-  installLoadedTreeRef.current = installLoadedTree;
+  useLayoutEffect(() => {
+    installLoadedTreeRef.current = installLoadedTree;
+  }, [installLoadedTree]);
 
   useEffect(() => {
 
@@ -383,6 +394,7 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
     const controller = new AbortController();
     let active = true;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- data-loading effect: each load epoch (mount, retry, owner change) re-enters the loading state and clears the previous epoch's error flags ahead of the fetches it starts; only that epoch's continuations leave it.
     setPhase("loading");
     setLoadReference(undefined);
     setCreateError(false);
@@ -875,7 +887,9 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
       setManagementBusy(false);
     }
   }, [clearManagementIdempotencyKey, ensureTransitionSafe, managementIdempotencyKey, openPendingTransition]);
-  importManagedTreeRef.current = importManagedTree;
+  useLayoutEffect(() => {
+    importManagedTreeRef.current = importManagedTree;
+  }, [importManagedTree]);
 
   const deleteManagedTree = useCallback(async () => {
     if (!deleteTarget || (!deleteBarrierPassed && !ensureTransitionSafe())) return;

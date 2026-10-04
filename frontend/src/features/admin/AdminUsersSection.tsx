@@ -37,6 +37,7 @@ export function AdminUsersSection(): React.JSX.Element {
   useEffect(() => {
     if (!showCreate && focusCreateAfterClose) {
       triggerRefs.current.get("create")?.focus();
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the Create trigger only exists once the form has unmounted, so focus is placed after commit and the one-shot request is consumed here rather than replayed on the next render.
       setFocusCreateAfterClose(false);
     }
   }, [showCreate, focusCreateAfterClose]);
@@ -159,7 +160,7 @@ function ConfirmDialog({ title, description, confirmLabel, isLoading, onCancel, 
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
-  return <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onKeyDown={onKeyDown} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 outline-none motion-safe:animate-fade-in">
+  return <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onKeyDown={onKeyDown} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 outline-hidden motion-safe:animate-fade-in">
     <div className="w-full max-w-md rounded-[20px] border border-slate-200 bg-white p-5 shadow-floating motion-safe:animate-scale-fade-in">
       <h2 id="admin-confirm-title" className="break-words text-subtitle font-semibold text-slate-900">{title}</h2>
       <p className="mt-3 text-sm text-slate-600">{description}</p>

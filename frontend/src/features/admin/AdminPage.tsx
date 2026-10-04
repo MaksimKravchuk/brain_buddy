@@ -38,7 +38,7 @@ export function AdminPage(): React.JSX.Element {
 function AdminTabs(): React.JSX.Element {
   const [tab, setTab] = useState<"users" | "flags">("users");
   const tabClass = (selected: boolean) =>
-    `relative -mb-px rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-700 focus-visible:ring-offset-2 ${
+    `relative -mb-px rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sky-700 focus-visible:ring-offset-2 ${
       selected ? "border-sky-700 text-sky-800" : "border-transparent text-slate-600 hover:text-slate-900"
     }`;
   const onTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {

@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, useEffect } from "react";
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,19 +9,24 @@ let reduced = false;
 const motions: Array<{ element: HTMLElement; frames: Keyframe[]; options: KeyframeAnimationOptions; cancel: ReturnType<typeof vi.fn>; finish: () => void }> = [];
 const visualTops = new Map<string, number>();
 
-function Harness({ completed = false, secondCompleted = false, scope = "owner-a", view = "next" }: {
+function Harness({ completed = false, secondCompleted = false, extraRow = false, scope = "owner-a", view = "next" }: {
   completed?: boolean;
   secondCompleted?: boolean;
+  extraRow?: boolean;
   scope?: string;
   view?: string;
 }) {
   const animation = useTaskCompletionAnimation(scope, view);
-  capture = animation.capture;
+  // Expose the hook's API to the test after commit rather than during render
+  // (react-hooks/globals); RTL's act() flushes this effect before render() returns.
+  useEffect(() => {
+    capture = animation.capture;
+  });
   const row = (id: string, done: boolean, top: number) => createElement("article", {
     key: id, "data-task-id": id, "data-task-state": done ? "completed" : "next", "data-top": top
   }, done ? createElement("span", null, "Completed") : createElement("button", { "aria-label": `Complete ${id}` }, "Complete"), createElement("a", { href: `#${id}` }, id));
   return createElement("div", { ref: animation.containerRef },
-    createElement("section", { key: "open", role: "list", "aria-label": "Open" }, !completed && row("first", false, 0), !secondCompleted && row("second", false, completed ? 0 : 50)),
+    createElement("section", { key: "open", role: "list", "aria-label": "Open" }, !completed && row("first", false, 0), !secondCompleted && row("second", false, completed ? 0 : 50), extraRow && row("third", false, 120)),
     createElement("section", { key: "completed", role: "list", "aria-label": "Completed" }, completed && row("first", true, secondCompleted ? 0 : 70), secondCompleted && row("second", true, 70))
   );
 }
@@ -147,5 +152,21 @@ describe("016 canonical completion movement", () => {
     act(() => oldCapture("first"));
     page.rerender(createElement(Harness, { completed: true, scope: "owner-b" }));
     expect(motions).toHaveLength(0);
+  });
+
+  it("016-FR-002 ignores a capture for a row that is absent or already completed", () => {
+    const page = render(createElement(Harness, { completed: true }));
+    act(() => capture("missing"));
+    act(() => capture("first"));
+    page.rerender(createElement(Harness, { completed: true, secondCompleted: true }));
+    expect(motions).toHaveLength(0);
+  });
+
+  it("016-FR-002 leaves a row that only appeared after the capture where it is", () => {
+    const page = render(createElement(Harness));
+    act(() => capture("first"));
+    page.rerender(createElement(Harness, { completed: true, extraRow: true }));
+    expect(motions.map((motion) => motion.element.dataset.taskId).sort()).toEqual(["first", "second"]);
+    expect(screen.getByRole("link", { name: "third" })).toBeInTheDocument();
   });
 });
