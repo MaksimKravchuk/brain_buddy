@@ -1,0 +1,295 @@
+name: iOS TestFlight
+
+# Uploads the native iOS app (docs/native-ios-app.md, ios/README.md) to
+# TestFlight. The build and test lanes are `ios-kit` and `ios-app` in ci.yml,
+# inside the `Full CI` verdict a candidate lands on; this workflow only runs
+# after that verdict is in. It starts when CI completes on a push to main, and
+# uploads when that run succeeded and its commit changed ios/, so every build
+# in TestFlight is a commit whose package tests passed and whose app built.
+# Manual dispatch on main uploads the current main regardless.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Every action is pinned by commit SHA (the comment names its tag), and
+# XcodeGen by release and by the SHA-256 of that release's xcodegen.zip, so a
+# moved tag or a replaced download can't run in the job that holds the App
+# Store Connect key. Bump the version and the hash together, taking the hash
+# from the downloaded asset (`shasum -a 256 xcodegen.zip`); ci.yml's `ios-app`
+# lane pins the same pair.
+env:
+  XCODEGEN_VERSION: "2.46.0"
+  XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+
+jobs:
+  # Which commit to upload, and whether to. Only a successful CI run of a push
+  # to main in this repository counts: a pull request from a fork can have a
+  # branch named main too, and workflow_run would fire for its CI run.
+  #
+  # "Changed ios/" is the commit against its first parent, which is the whole
+  # change for a trunk landing (one commit on main) and for a merged or
+  # squashed pull request. A push of several commits at once is judged by its
+  # last one; dispatch the workflow to upload anything that missed.
+  decide:
+    name: Decide what to upload
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    outputs:
+      upload: ${{ steps.decide.outputs.upload }}
+      sha: ${{ steps.decide.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Decide
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+          if [ "${EVENT}" = "workflow_dispatch" ]; then
+            if [ "${REF}" = "refs/heads/main" ]; then upload=true; else upload=false; fi
+          elif ! changed="$(git diff --name-only HEAD^ HEAD 2>/dev/null)"; then
+            echo "could not read the parent of ${sha}; uploading"
+            upload=true
+          elif printf '%s\n' "${changed}" | grep -q '^ios/'; then
+            upload=true
+          else
+            upload=false
+          fi
+          echo "upload=${upload}" >> "${GITHUB_OUTPUT}"
+          echo "commit ${sha}: upload=${upload}"
+
+  # Signs with automatic, cloud-managed signing through an App Store Connect
+  # API key and uploads the archive. Until the owner configures the
+  # `testflight` environment the job reports what is missing and stays green.
+  # That environment must allow only the `main` branch and require a reviewer
+  # other than the person who triggered the run (ios/README.md): those
+  # protection rules, not the `if`s above, are what keep the Admin key away
+  # from other refs and from a single account acting alone.
+  testflight:
+    name: Upload to TestFlight
+    needs: decide
+    if: needs.decide.outputs.upload == 'true'
+    runs-on: macos-26
+    environment: testflight
+    # On the upload job, not the workflow: every CI completion on main starts
+    # this workflow, and a workflow-level group would let those no-op runs
+    # displace a pending upload. Uploads never overlap and are never
+    # cancelled mid-flight; a newer one queues.
+    concurrency:
+      group: ios-testflight
+      cancel-in-progress: false
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check the TestFlight configuration
+        id: config
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          BUNDLE_ID_PREFIX: ${{ vars.IOS_BUNDLE_ID_PREFIX }}
+          BUILD_NUMBER_OFFSET: ${{ vars.IOS_BUILD_NUMBER_OFFSET }}
+        run: |
+          missing=()
+          [ -n "${API_KEY_ID}" ] || missing+=("secret APP_STORE_CONNECT_API_KEY_ID")
+          [ -n "${API_ISSUER_ID}" ] || missing+=("secret APP_STORE_CONNECT_API_ISSUER_ID")
+          [ -n "${API_KEY_P8}" ] || missing+=("secret APP_STORE_CONNECT_API_KEY_P8")
+          [ -n "${APPLE_TEAM_ID}" ] || missing+=("variable APPLE_TEAM_ID")
+          if [ "${#missing[@]}" -gt 0 ]; then
+            {
+              echo "### TestFlight upload skipped"
+              echo
+              echo "TestFlight upload skipped: configure the following in the \`testflight\` environment, then re-run this workflow on main (see \`ios/README.md\`, TestFlight):"
+              echo
+              printf -- '- %s\n' "${missing[@]}"
+            } >> "${GITHUB_STEP_SUMMARY}"
+            echo "::notice title=TestFlight upload skipped::Configure ${missing[*]} (ios/README.md, TestFlight)."
+            echo "configured=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          # Present but malformed is a mistake, not "not set up yet": fail.
+          if ! [[ "${APPLE_TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "::error::APPLE_TEAM_ID must be the 10-character Apple team id."
+            exit 1
+          fi
+          # Apple allows letters, digits, hyphens and periods; reverse-DNS
+          # (com.example) is the convention, a single word (brainbuddy) is valid.
+          if [ -n "${BUNDLE_ID_PREFIX}" ] && ! [[ "${BUNDLE_ID_PREFIX}" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*$ ]]; then
+            echo "::error::IOS_BUNDLE_ID_PREFIX must be letters, digits and hyphens, optionally dot-separated (brainbuddy, com.example)."
+            exit 1
+          fi
+          offset="${BUILD_NUMBER_OFFSET:-0}"
+          if ! [[ "${offset}" =~ ^[0-9]+$ ]]; then
+            echo "::error::IOS_BUILD_NUMBER_OFFSET must be a non-negative integer."
+            exit 1
+          fi
+
+          echo "build-number=$((GITHUB_RUN_NUMBER + 10#${offset}))" >> "${GITHUB_OUTPUT}"
+          echo "configured=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+          persist-credentials: false
+
+      - name: Select the newest Xcode 26
+        if: steps.config.outputs.configured == 'true'
+        run: bash ios/scripts/select-xcode.sh
+
+      - name: Install XcodeGen (pinned, checksum-verified)
+        if: steps.config.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/xcodegen.zip"
+          curl --fail --location --silent --show-error --output "${archive}" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+          echo "${XCODEGEN_SHA256}  ${archive}" | shasum -a 256 --check
+          unzip -q "${archive}" -d "${RUNNER_TEMP}"
+          version="$("${RUNNER_TEMP}/xcodegen/bin/xcodegen" --version)"
+          echo "${version}"
+          if [[ "${version}" != *"${XCODEGEN_VERSION}"* ]]; then
+            echo "::error::Expected XcodeGen ${XCODEGEN_VERSION}, got: ${version}"
+            exit 1
+          fi
+          echo "${RUNNER_TEMP}/xcodegen/bin" >> "${GITHUB_PATH}"
+
+      - name: Generate the Xcode project
+        if: steps.config.outputs.configured == 'true'
+        working-directory: ios
+        run: xcodegen generate --spec project.yml
+
+      - name: Install the App Store Connect API key
+        if: steps.config.outputs.configured == 'true'
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+        run: |
+          key_dir="${RUNNER_TEMP}/private_keys"
+          mkdir -p "${key_dir}"
+          chmod 700 "${key_dir}"
+          key_path="${key_dir}/AuthKey_${API_KEY_ID}.p8"
+          (umask 077 && printf '%s\n' "${API_KEY_P8}" > "${key_path}")
+          chmod 600 "${key_path}"
+
+      - name: Archive for the App Store (Release)
+        if: steps.config.outputs.configured == 'true'
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          BUNDLE_ID_PREFIX: ${{ vars.IOS_BUNDLE_ID_PREFIX }}
+          BUILD_NUMBER: ${{ steps.config.outputs.build-number }}
+        run: |
+          overrides=("DEVELOPMENT_TEAM=${APPLE_TEAM_ID}" "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}")
+          if [ -n "${BUNDLE_ID_PREFIX}" ]; then
+            overrides+=("BB_BUNDLE_ID_PREFIX=${BUNDLE_ID_PREFIX}")
+          fi
+          xcodebuild archive \
+            -project ios/BrainBuddy.xcodeproj \
+            -scheme BrainBuddy \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "${RUNNER_TEMP}/BrainBuddy.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "${RUNNER_TEMP}/private_keys/AuthKey_${API_KEY_ID}.p8" \
+            -authenticationKeyID "${API_KEY_ID}" \
+            -authenticationKeyIssuerID "${API_ISSUER_ID}" \
+            "${overrides[@]}" 2>&1 \
+            | tee "${RUNNER_TEMP}/xcodebuild-archive.log" \
+            | if command -v xcbeautify >/dev/null 2>&1; then xcbeautify --renderer github-actions; else cat; fi
+
+      - name: Export and upload to App Store Connect
+        if: steps.config.outputs.configured == 'true'
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          options="${RUNNER_TEMP}/ExportOptions.plist"
+          cp ios/ci/ExportOptions.plist "${options}"
+          plutil -replace teamID -string "${APPLE_TEAM_ID}" "${options}"
+          xcodebuild -exportArchive \
+            -archivePath "${RUNNER_TEMP}/BrainBuddy.xcarchive" \
+            -exportPath "${RUNNER_TEMP}/export" \
+            -exportOptionsPlist "${options}" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "${RUNNER_TEMP}/private_keys/AuthKey_${API_KEY_ID}.p8" \
+            -authenticationKeyID "${API_KEY_ID}" \
+            -authenticationKeyIssuerID "${API_ISSUER_ID}" 2>&1 \
+            | tee "${RUNNER_TEMP}/xcodebuild-export.log"
+
+      # The last step that needs the key is above. Delete it now, whatever
+      # happened, so it is gone before any later step runs — above all the
+      # third-party upload-artifact action below.
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "${RUNNER_TEMP}/private_keys"
+
+      - name: Summarize the upload
+        if: steps.config.outputs.configured == 'true'
+        env:
+          COMMIT: ${{ needs.decide.outputs.sha }}
+        run: |
+          plist="${RUNNER_TEMP}/BrainBuddy.xcarchive/Info.plist"
+          read_key() { /usr/libexec/PlistBuddy -c "Print :ApplicationProperties:$1" "${plist}"; }
+          {
+            echo "### Uploaded to TestFlight"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Bundle id | \`$(read_key CFBundleIdentifier)\` |"
+            echo "| Version | \`$(read_key CFBundleShortVersionString)\` |"
+            echo "| Build | \`$(read_key CFBundleVersion)\` |"
+            echo "| Commit | \`${COMMIT}\` |"
+            echo
+            echo "App Store Connect processes the build before it appears in TestFlight."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # xcodebuild echoes its command line, key id and issuer id included, into
+      # the logs. Those are masked in the console but not inside an artifact.
+      - name: Redact API key identifiers from the logs
+        if: failure() && steps.config.outputs.configured == 'true'
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+        run: |
+          for log in "${RUNNER_TEMP}"/xcodebuild-*.log; do
+            [ -f "${log}" ] || continue
+            sed -i '' -e "s|${API_KEY_ID}|[key id]|g" -e "s|${API_ISSUER_ID}|[issuer id]|g" "${log}"
+          done
+
+      - name: Upload archive logs
+        if: failure() && steps.config.outputs.configured == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-testflight-logs-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/xcodebuild-archive.log
+            ${{ runner.temp }}/xcodebuild-export.log
+          if-no-files-found: ignore
+          retention-days: 7

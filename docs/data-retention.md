@@ -31,18 +31,33 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 | Web last-used agent preference (connection **id** and confirmation timestamp only; no Task content, address, or credential) | browser `localStorage`, key `bb.taskAgent.lastUsed.v1.<server>.<account>` | Eligible for 30 days from last confirmed hand-off; removed on sign-out/identity transition, invalid eligibility, and by a cross-identity startup/focus/interval sweep after expiry | Web preference lifecycle binding (spec 017, FR-008/FR-017) |
 | CRT unsynchronized drafts (user-authored graph/layout content, immutable in-flight save snapshot, queued commands and idempotency-key UUID) | browser `localStorage`, namespaced by origin/account/tree or pre-canonical create attempt | Eligible for 30 days from last edit/use; on next startup/focus/interval after expiry the stale draft stays outside the canvas and offers backup, recover (resetting the clock), or discard; all departing-owner keys on the active origin are removed after the pending-work decision on sign-out/account switch/account deletion | Web CRT recovery lifecycle (spec 019, FR-018–FR-020) |
 | CRT last-tree preference (owner id, tree id, origin and last-use timestamp; no graph content) | browser `localStorage`, namespaced by origin/account | 30 days from last use; removed by startup/focus/interval expiry sweep and with all departing-owner CRT keys on same-browser identity transition | Web CRT preference lifecycle (spec 019, FR-003/FR-020) |
+| **iOS app store document** (the user's working copy: tasks with notes, due dates, waiting-for, subtasks and comments; projects and tags; pending changes not yet sent, with their idempotency keys; sync issues with the server's message and reference id; the linked account's id, email, display name and server address) | iPhone/iPad, one JSON file in the app's App Group container (`BrainBuddyPersistence`), file protection `completeUntilFirstUserAuthentication`; included in device backups | Until sign-out deletes it, or "Start fresh" sets an unreadable one aside (next row). **Kept through a 401** ("Sign in again to sync"), so an expired or revoked session never loses unsent changes. With no account ("On this iPhone"), until the app is deleted | iOS client sign-out (`docs/native-ios-app.md`) |
+| **iOS quarantined store files** (a store document the app could not read, set aside as `<name>.unreadable-<UTC timestamp>.json` with whatever it held) | Same App Group folder, same file protection; included in device backups | Until sign-out removes them, or the app is deleted | iOS client sign-out |
+| **iOS recent searches** (up to 8 search queries, which can quote words from tasks) | app `UserDefaults.standard`, key `search.recentQueries`; included in device backups | Until sign-out clears them, or the app is deleted | iOS client sign-out |
+| iOS list display options (sort, grouping, completed/cancelled visibility, priority and tag filters; keyed by list or by a local project/tag id; no names or task text) | app `UserDefaults.standard`, keys `listOptions.*` | Until the app is deleted; not tied to an account | None needed: preferences without content |
+| **iOS session token** (the opaque `brainbuddy_session` cookie value, one per server host) | Keychain generic password, service `app.brainbuddy.session`, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: never restored to another device from a backup or synced through iCloud Keychain; the app's own, no keychain sharing with the widgets | Until sign-out or the first 401 (session expired or revoked server-side), whichever comes first. Keychain items can outlive deleting the app, so a launch with no linked account removes any left over | iOS client (`KeychainSessionTokenStore`); the server-side session follows the Sessions row |
 
-The five device/browser rows are the only entries in this table an account purge cannot
-reach: the server can revoke every session, but it cannot delete bytes on a phone or
-in a browser. The native sweep provides the device stores' 30-day physical bound as
-specified by feature 006. The web preference becomes unusable at 30 days and its
+The device and browser rows (mobile, web, CRT and iOS) are the only entries in this table
+an account purge cannot reach: the server can revoke every session, but it cannot delete
+bytes on a phone or in a browser. The Expo mobile client's native sweep provides its
+device stores' 30-day physical bound as specified by feature 006. The web preference becomes unusable at 30 days and its
 cross-identity sweep removes expired bytes whenever BrainBuddy next starts, regains
 focus, or reaches its sweep interval. CRT drafts likewise become ineligible for automatic
 application at 30 days and require the one stale-recovery decision when the app next runs.
 If BrainBuddy is never run again, the user must
 clear BrainBuddy site data in the browser to remove those residual local bytes; the
-server cannot honestly do that. These stores are unencrypted at rest and may be
-captured by device backups — see spec 006's Assumptions for the native stores.
+server cannot honestly do that. The mobile and browser stores are unencrypted at rest
+and may be captured by device backups — see spec 006's Assumptions for the native stores.
+
+The iOS rows have no 30-day bound, on purpose: the app is offline-first, so its store is
+the user's working copy, not a cache. Once an account deletion revokes its sessions, the
+app's next request gets a 401 and its token is removed, but the store stays until the
+user signs out, so changes made offline are never silently dropped. Deleting the app
+removes the App Group files and its `UserDefaults`; only the Keychain token can outlive
+that, and it stops working when its 30-day server session ends (a reinstalled app
+removes it at launch). The store is encrypted at rest by iOS Data Protection, but
+readable from the first unlock after a restart, and it is part of the device's iCloud or
+computer backups.
 
 One external-agent artifact is missing from the table because it is not ours to
 delete: the **push callback address Brain Buddy registered with the agent**. It
@@ -180,6 +195,11 @@ complete with respect to what the server has. The consequence is worth naming
 rather than burying: an export taken while a phone holds unsent changes will
 not match what that phone displays, and the mobile client shows no per-change
 marker that would explain the difference (spec 006, FR-007).
+
+Also excluded: **iOS changes that have not reached the server yet**, and everything an
+iOS device holds while it has never been signed in ("On this iPhone"). The controller
+does not hold them. Unlike the mobile client, the iOS app says so in words ("Offline —
+3 changes waiting"), so a difference between an export and the phone is visible there.
 
 Also excluded: the **web last-used agent preference**. The controller never receives
 this connection ID/timestamp pair, so the export is complete with respect to what the

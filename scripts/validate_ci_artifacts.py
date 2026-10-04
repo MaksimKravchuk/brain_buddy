@@ -629,6 +629,8 @@ def _path_filter_errors(workflow_text: str) -> list[str]:
         "backend",
         "frontend",
         "mobile",
+        "ios-kit",
+        "ios-app",
         "docker",
         "mutation-base",
         "mutation-head",
@@ -731,6 +733,10 @@ LANE_DEPENDENCY_LIMITS = {
     "backend": {"changes"},
     "frontend": {"changes"},
     "mobile": {"changes"},
+    # The native iOS lanes are service lanes of the same kind: the package on
+    # Linux and the app on macOS read only the changed-stack decision.
+    "ios-kit": {"changes"},
+    "ios-app": {"changes"},
     # The whole-stack lane. It consumes nothing the service lanes produce, but
     # it may wait for them so a failing linter or unit test stops the run before
     # anything pays to boot the stack. It may wait for NOTHING ELSE: not mobile

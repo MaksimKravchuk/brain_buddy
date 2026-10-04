@@ -1,0 +1,23 @@
+.build/
+.build-linux/
+.swiftpm/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+*.xcuserstate
+
+# Written by `xcodegen generate` from project.yml (with the .xcodeproj above).
+# project.yml is the source of truth; edit it, not these.
+/BrainBuddy/Resources/Info.plist
+/BrainBuddy/Resources/BrainBuddy.entitlements
+/BrainBuddyWidgets/Info.plist
+/BrainBuddyWidgets/BrainBuddyWidgets.entitlements
+
+# Signing material and build products never belong in git. CI writes its
+# App Store Connect key to $RUNNER_TEMP and deletes it after the job.
+*.p8
+private_keys/
+*.xcarchive/
+*.ipa
+*.xcresult/

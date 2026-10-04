@@ -124,6 +124,7 @@ jobs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
       mobile: ${{ steps.decide.outputs.mobile }}
+      ios: ${{ steps.decide.outputs.ios }}
       floor-backend: ${{ steps.decide.outputs.floor-backend }}
       floor-frontend: ${{ steps.decide.outputs.floor-frontend }}
       floor-mobile: ${{ steps.decide.outputs.floor-mobile }}
@@ -153,6 +154,7 @@ jobs:
           backend=true
           frontend=true
           mobile=true
+          ios=true
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base='${{ github.event.pull_request.base.sha }}'
@@ -180,6 +182,11 @@ jobs:
                 # (chunk hashing, the byte-identical manifest hash), so a
                 # backend-only change that breaks it must not slip past.
                 printf '%s\n' "${changed}" | grep -Eq '^(mobile|backend)/' || mobile=false
+                # The native app builds from ios/ alone: nothing outside it
+                # (apart from the shared surfaces above) is compiled into it
+                # or read by its tests. Its sync tests run against the Swift
+                # fake server in ios/, so a backend change is not an input.
+                printf '%s\n' "${changed}" | grep -q '^ios/' || ios=false
               fi
             else
               echo "could not read the diff against ${base}; exercising every stack"
@@ -208,8 +215,9 @@ jobs:
             echo "backend=${backend}"
             echo "frontend=${frontend}"
             echo "mobile=${mobile}"
+            echo "ios=${ios}"
           } >> "$GITHUB_OUTPUT"
-          echo "backend=${backend} frontend=${frontend} mobile=${mobile}"
+          echo "backend=${backend} frontend=${frontend} mobile=${mobile} ios=${ios}"
 
       # The mutation gate's scope is computed separately and far more narrowly
       # than the stack filter above: ADR-0004 requirement 1 runs it only over
@@ -626,6 +634,128 @@ jobs:
         env:
           EXPO_NO_TELEMETRY: "1"
         run: npx expo export --platform ios
+
+  # The native iOS app (ios/, docs/native-ios-app.md) as two service lanes.
+  # They live here, not in a workflow of their own, for the reason the secret
+  # scan does: a trunk candidate lands on the `Full CI` verdict alone, so an
+  # iOS check anywhere else is advisory and a candidate could land with its
+  # package tests red or its app unbuilt. Their results are Swift Testing and
+  # xcodebuild output, not Allure: nothing here feeds `allure-report`.
+  #
+  # The package lane: every BrainBuddyKit target builds and passes its tests on
+  # Linux (ios/AGENTS.md), where the GTD rules and the sync engine are tested.
+  ios-kit:
+    name: iOS kit on Linux (Swift 6.2)
+    runs-on: ubuntu-latest
+    container: swift:6.2-noble
+    timeout-minutes: 20
+    needs: changes
+    env:
+      RUN: ${{ needs.changes.outputs.ios }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ios/BrainBuddyKit
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Show the toolchain
+        if: env.RUN == 'true'
+        run: swift --version
+
+      - name: Build the package
+        if: env.RUN == 'true'
+        run: swift build
+
+      - name: Test the package
+        if: env.RUN == 'true'
+        run: swift test --parallel
+
+  # The app lane: the XcodeGen project builds the app, the widget extension and
+  # the package for the simulator (unsigned), and the package tests pass on
+  # macOS too. With nothing iOS to check it runs its no-op on Linux instead of
+  # queueing for a macOS runner, and still reports success.
+  ios-app:
+    name: iOS app on macOS (Xcode 26)
+    runs-on: ${{ needs.changes.outputs.ios == 'true' && 'macos-26' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    needs: changes
+    env:
+      RUN: ${{ needs.changes.outputs.ios }}
+      # XcodeGen is the release zip of this version, checked against this
+      # SHA-256 and against `xcodegen --version`. Bump both together, taking the
+      # hash from the downloaded asset (`shasum -a 256 xcodegen.zip`); ios.yml
+      # pins the same pair for the TestFlight archive.
+      XCODEGEN_VERSION: "2.46.0"
+      XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Select the newest Xcode 26
+        if: env.RUN == 'true'
+        run: bash ios/scripts/select-xcode.sh
+
+      - name: Install XcodeGen (pinned, checksum-verified)
+        if: env.RUN == 'true'
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/xcodegen.zip"
+          curl --fail --location --silent --show-error --output "${archive}" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+          echo "${XCODEGEN_SHA256}  ${archive}" | shasum -a 256 --check
+          unzip -q "${archive}" -d "${RUNNER_TEMP}"
+          version="$("${RUNNER_TEMP}/xcodegen/bin/xcodegen" --version)"
+          echo "${version}"
+          if [[ "${version}" != *"${XCODEGEN_VERSION}"* ]]; then
+            echo "::error::Expected XcodeGen ${XCODEGEN_VERSION}, got: ${version}"
+            exit 1
+          fi
+          echo "${RUNNER_TEMP}/xcodegen/bin" >> "${GITHUB_PATH}"
+
+      - name: Generate the Xcode project
+        if: env.RUN == 'true'
+        working-directory: ios
+        run: xcodegen generate --spec project.yml
+
+      # The raw log is kept for the failure artifact; the console gets
+      # xcbeautify's annotations when the runner has it.
+      - name: Build app and widgets for the iOS Simulator
+        if: env.RUN == 'true'
+        working-directory: ios
+        run: |
+          # Report every target's errors in one run instead of stopping at the first.
+          defaults write com.apple.dt.Xcode IDEBuildingContinueBuildingAfterErrors -bool YES
+          xcodebuild \
+            -project BrainBuddy.xcodeproj \
+            -scheme BrainBuddy \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            -resultBundlePath "${RUNNER_TEMP}/BrainBuddy.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 \
+            | tee "${RUNNER_TEMP}/xcodebuild.log" \
+            | if command -v xcbeautify >/dev/null 2>&1; then xcbeautify --renderer github-actions; else cat; fi
+
+      - name: Test the package on macOS
+        if: env.RUN == 'true'
+        working-directory: ios/BrainBuddyKit
+        run: swift test --parallel
+
+      - name: Upload build logs
+        if: failure() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-app-logs-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/xcodebuild.log
+            ${{ runner.temp }}/BrainBuddy.xcresult
+          if-no-files-found: ignore
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
   # ADR-0004 requirement 2: the pull request's scoped score is compared against
   # the base revision measured over the same scope. An absolute floor alone is
@@ -1184,6 +1314,8 @@ jobs:
       - backend
       - frontend
       - mobile
+      - ios-kit
+      - ios-app
       - mutation-base
       - mutation-head
       - mutation-gate
@@ -1381,6 +1513,8 @@ jobs:
       - backend
       - frontend
       - mobile
+      - ios-kit
+      - ios-app
       - mutation-base
       - mutation-head
       - mutation-gate

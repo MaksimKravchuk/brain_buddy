@@ -13,7 +13,7 @@ while IFS= read -r -d '' path; do
       needed=true
       echo "Deploy-relevant change: ${path}" >&2
       ;;
-    .github/*|.specify/*|.claude/*|.design-sync/*|docs/*|specs/*|mobile/*|scripts/*|*.md|Makefile|.gitignore|LICENSE|.env.example)
+    .github/*|.specify/*|.claude/*|.design-sync/*|docs/*|specs/*|mobile/*|ios/*|scripts/*|*.md|Makefile|.gitignore|LICENSE|.env.example)
       ;;
     *)
       needed=true
