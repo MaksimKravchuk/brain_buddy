@@ -201,7 +201,8 @@ final class OfflineWorkspaceTests: XCTestCase {
         await reopened.restore()
         let loadedReopenedReview = await reopened.loadWaitingReviewTasks()
         let reopenedReview = try XCTUnwrap(loadedReopenedReview)
-        XCTAssertEqual(reopenedReview.count, 101)
+        XCTAssertEqual(reopenedReview.count, 100)
+        XCTAssertFalse(reopenedReview.contains { $0.id == source.id })
         XCTAssertEqual(reopened.sidebarCounts?.next, 1)
 
         _ = try await store.archiveProject(project, idempotencyKey: UUID())
@@ -209,6 +210,39 @@ final class OfflineWorkspaceTests: XCTestCase {
         let archivedFollowUp = await model.createFollowUp(for: source, title: "Ask landlord again")
         XCTAssertFalse(archivedFollowUp)
         XCTAssertEqual(model.error, "Restore this project before creating a follow-up in it.")
+    }
+
+    @MainActor
+    func testReviewedFollowUpIsAtomicAndReplaySafe() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-reviewed-follow-up-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let source = try await store.createTask(
+            title: "Wait for Sam", state: .waiting, waitingFor: "Sam", idempotencyKey: UUID()
+        )
+        let key = UUID()
+        let first = try await store.createReviewedFollowUp(
+            for: source, title: "Ask Sam for an update", idempotencyKey: key
+        )
+        let replay = try await store.createReviewedFollowUp(
+            for: source, title: "Ask Sam for an update", idempotencyKey: key
+        )
+        XCTAssertEqual(replay.id, first.id)
+        XCTAssertEqual(first.state, TaskList.next.rawValue)
+        let original = try await store.getTask(source.id)
+        XCTAssertEqual(original.state, TaskList.waiting.rawValue)
+        XCTAssertEqual(original.revision, source.revision)
+        XCTAssertEqual(original.waiting_since, source.waiting_since)
+
+        let reopenedStore = LocalGTDStore(fileURL: fileURL)
+        let next = try await reopenedStore.listTasks(query: TaskQuery(state: .next))
+        XCTAssertEqual(next.items.map(\.id), [first.id])
+        let reopened = BrainBuddyModel(store: reopenedStore)
+        await reopened.restore()
+        let review = await reopened.loadWaitingReviewTasks()
+        XCTAssertTrue(try XCTUnwrap(review).isEmpty)
     }
 
     @MainActor
@@ -250,6 +284,51 @@ final class OfflineWorkspaceTests: XCTestCase {
         XCTAssertNil(next.waiting_since)
         let cancelledAfterRestart = try await reopenedStore.getTask(cancelled.id)
         XCTAssertEqual(cancelledAfterRestart.state, "cancelled")
+    }
+
+    @MainActor
+    func testKeepWaitingResumesAfterRestartOrTaskChange() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("brainbuddy-keep-waiting-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("tasks.json")
+        let store = LocalGTDStore(fileURL: fileURL)
+        let task = try await store.createTask(
+            title: "Wait for a reply", state: .waiting,
+            waitingFor: "Sam", idempotencyKey: UUID()
+        )
+        let key = UUID()
+        let first = try await store.markWaitingReviewed(task, idempotencyKey: key)
+        let replay = try await store.markWaitingReviewed(task, idempotencyKey: key)
+        XCTAssertEqual(replay.revision, first.revision)
+        XCTAssertEqual(first.revision, task.revision)
+        XCTAssertEqual(first.waiting_since, task.waiting_since)
+        XCTAssertFalse(store.waitingReviewDue(task, before: Date().addingTimeInterval(-7 * 24 * 60 * 60)))
+        XCTAssertTrue(store.waitingReviewDue(task, before: Date().addingTimeInterval(1)))
+
+        let reopenedStore = LocalGTDStore(fileURL: fileURL)
+        let reopened = BrainBuddyModel(store: reopenedStore)
+        await reopened.restore()
+        let afterRestart = await reopened.loadWaitingReviewTasks()
+        XCTAssertTrue(try XCTUnwrap(afterRestart).isEmpty)
+        let changed = try await reopenedStore.updateTask(
+            task, changes: TaskChanges(title: .set("Wait for Sam's revised reply")), idempotencyKey: UUID()
+        )
+        let afterChange = await reopened.loadWaitingReviewTasks()
+        XCTAssertEqual(try XCTUnwrap(afterChange).map(\.id), [task.id])
+        do {
+            _ = try await reopenedStore.markWaitingReviewed(task, idempotencyKey: UUID())
+            XCTFail("A stale review decision must not be accepted")
+        } catch let error as APIError {
+            XCTAssertEqual(error.statusCode, 409)
+        }
+        let kept = await reopened.keepWaiting(changed)
+        XCTAssertTrue(kept)
+        let afterSecondReview = await reopened.loadWaitingReviewTasks()
+        XCTAssertTrue(try XCTUnwrap(afterSecondReview).isEmpty)
+        let current = try await reopenedStore.getTask(task.id)
+        XCTAssertEqual(current.revision, changed.revision)
+        XCTAssertEqual(current.waiting_since, task.waiting_since)
     }
 
     @MainActor
