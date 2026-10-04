@@ -3533,23 +3533,26 @@ private struct SomedayReviewView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 let item = items[index]
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(item.title).font(.title3.weight(.semibold))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if let details = item.details, !details.isEmpty {
-                        Text(details)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(4)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(item.title).font(.title3.weight(.semibold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if let details = item.details, !details.isEmpty {
+                            Text(details)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let projectID = item.project_id {
+                            Text("Project · \((model.projects + model.archivedProjects).first(where: { $0.id == projectID })?.name ?? "Unknown project")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    if let projectID = item.project_id {
-                        Text("Project · \((model.projects + model.archivedProjects).first(where: { $0.id == projectID })?.name ?? "Unknown project")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
                 }
-                .padding(18)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .scrollIndicators(.visible)
 
                 if enteringNext {
                     VStack(alignment: .leading, spacing: 10) {
@@ -3596,7 +3599,6 @@ private struct SomedayReviewView: View {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
             }
-            Spacer(minLength: 0)
         }
         .padding(24)
         .frame(width: 640, height: 440)
