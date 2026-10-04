@@ -29,7 +29,7 @@ struct SmartAddDraft {
         guard let name = previewProjectName(in: projects) else { return nil }
         if archivedProjectName != nil { return "Archived project: \(name) — restore it first" }
         if case .name = project { return "Create project: \(name)" }
-        return "◈ \(name)"
+        return "Project: \(name)"
     }
 
     func previewTagLabels(in tags: [BrainBuddyTag]) -> [String] {

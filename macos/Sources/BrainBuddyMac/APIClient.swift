@@ -179,6 +179,7 @@ struct BrainBuddyProject: Codable, Identifiable {
     var last_reviewed_at: String? = nil
     var last_review_decision: ProjectReviewDecision? = nil
     var review_has_changes: Bool? = nil
+    var review_task_signature: String? = nil
 }
 
 enum ProjectReviewDecision: String, Codable, CaseIterable, Identifiable {
