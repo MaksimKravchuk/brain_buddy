@@ -2788,7 +2788,7 @@ struct ContentView: View {
                             .font(.caption.weight(.semibold))
                             .lineLimit(1)
                     }
-                    Text("↪ \(smartCaptureState.title)")
+                    Text("Will save in \(smartCaptureState.title)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -2798,8 +2798,14 @@ struct ContentView: View {
                 }
                 let projectLabel = smartDraft.previewProjectLabel(in: model.projects)
                 let tagLabels = smartDraft.previewTagLabels(in: model.tags)
-                if projectLabel != nil || !tagLabels.isEmpty {
-                    Text(([projectLabel].compactMap { $0 } + tagLabels).joined(separator: " · "))
+                Text(([projectLabel ?? "No project"] + (tagLabels.isEmpty ? ["No tags"] : tagLabels))
+                    .joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.hasAppliedTaskFilter || !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || model.priorityFilter != .all {
+                    Text("Current search or priority filter may hide the new task from this list.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
