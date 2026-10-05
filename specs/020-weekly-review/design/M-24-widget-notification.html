@@ -22,6 +22,12 @@ figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);mar
 .inb{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;color:var(--sky700);background:rgba(14,165,233,.14);border-radius:999px;padding:2px 7px}
 .cap{width:26px;height:26px;border-radius:50%;background:var(--sky500);color:#fff;display:grid;place-items:center;font-size:18px;line-height:1}
 .ask{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--ind700);background:var(--ind50);border:1px solid var(--ind200);border-radius:999px;padding:1px 7px;white-space:nowrap}
+.lk{position:relative;cursor:pointer;text-decoration:none}
+.lk::after{content:"";position:absolute;inset:-12px -6px}
+.flow{width:390px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--s700)}
+.mini{width:180px;height:300px;border-radius:24px;background:var(--s50);border:1px solid var(--s300);padding:16px 12px;display:flex;flex-direction:column;gap:8px;box-shadow:var(--raised)}
+.mini .h{font-size:11px;color:var(--s500)}.mini .tt{font-size:15px;font-weight:600}
+.mini .o{min-height:22px;border:1px solid var(--s200);border-radius:6px;background:#fff;font-size:10px;padding:3px 6px}
 .big{font-size:40px;font-weight:600;line-height:1;letter-spacing:-.02em}
 .r{display:flex;align-items:center;gap:6px;font-size:14px;min-height:26px}
 .r .c{width:16px;height:16px;border:1.5px solid var(--s400);border-radius:50%;flex:none;margin-right:6px}
@@ -50,14 +56,14 @@ figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);mar
 
 <header class="doc">
   <h1>M-24 · Next actions widget with the "asks for a decision" count, M-25 · the weekly notification — iOS</h1>
-  <p><b>M-24</b> extends <code>NextActionsWidget</code> (list = Next actions) with one indigo chip, "N ask", next to the existing count (FR-037). The chip appears only when N &gt; 0; zero is not shown. Rows, completion buttons, Inbox badge and capture link are unchanged. The widget never syncs; the count is computed from the shared store like the rest of the entry, and the timeline also refreshes at the next marker change (at least at midnight, as today). When the widget is configured for "Today", no chip is shown. VoiceOver: "3 tasks ask for a decision".</p>
-  <p><b>M-25</b>: exactly one local notification per week at the chosen day and time (FR-036), no follow-ups, no counts, no task titles on the lock screen. Tapping opens the review entry (M-11).</p>
+  <p><b>M-24</b> extends <code>NextActionsWidget</code> (list = Next actions) with one indigo chip, "N ask", next to the existing count (FR-037). The chip appears only when N &gt; 0; zero is not shown. <b>The chip is tappable</b> (owner decision 3). In medium and large it is a WidgetKit <code>Link</code> to <code>brainbuddy://review/decisions</code>, with a 44 × 44 pt hit area, and opens the review's decision step at its first card (M-16). If onboarding was never done, it opens onboarding (M-12) first. If a review is open, the link resumes that review at its decision step; otherwise it starts a quick review at the decision step, with Wins and Inbox marked skipped. <b>Small widget</b>: WidgetKit gives a small widget a single tap target, so the chip there can't be a separate link. Its tap URL stays "open Next" as today (see design.md). Rows, completion buttons, Inbox badge and capture link are unchanged. The widget never syncs; the count is computed from the shared store like the rest of the entry, and the timeline also refreshes at the next marker change (at least at midnight, as today). When the widget is configured for "Today", no chip is shown. VoiceOver: "3 tasks ask for a decision".</p>
+  <p><b>M-25</b>: at most one local notification per week at the chosen day and time (FR-036). There is no notification if a complete or partial review happened in the preceding 6 days. No follow-ups, no counts, and no task titles on the lock screen. Tapping opens the review entry (M-11). The web sends no notifications.</p>
 </header>
 
 <div class="frames">
 
 <figure>
-<figcaption><b>M-24 · small, medium, large (default)</b>3 tasks ask for a decision out of 7 next actions.</figcaption>
+<figcaption><b>M-24 · small, medium, large (default)</b>3 tasks ask for a decision out of 7 next actions. In medium and large the "3 ask ›" chip is a link with its own hit area, so the rest of the header and the rows keep their current behaviour. In small, the chip is display-only (WidgetKit's single tap target).</figcaption>
 <div class="home">
   <div class="w s" aria-label="Next actions widget, small">
     <div class="wh"><svg class="i"><use href="#i-next"/></svg>Next actions</div>
@@ -66,13 +72,13 @@ figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);mar
     <div class="r" style="margin-top:auto"><span class="c"></span><span class="t">Call the plumber</span></div>
   </div>
   <div class="w m" aria-label="Next actions widget, medium">
-    <div class="wh"><svg class="i"><use href="#i-next"/></svg>Next actions <span class="n">7</span><span class="ask" aria-label="3 tasks ask for a decision"><svg class="i" style="width:11px;height:11px"><use href="#i-ask"/></svg>3 ask</span><span class="sp"></span><span class="inb"><svg class="i" style="width:11px;height:11px"><use href="#i-tray"/></svg>3</span><span class="cap">+</span></div>
+    <div class="wh"><svg class="i"><use href="#i-next"/></svg>Next actions <span class="n">7</span><a class="ask lk" role="link" tabindex="0" aria-label="3 tasks ask for a decision. Open the review's decision step"><svg class="i" style="width:11px;height:11px"><use href="#i-ask"/></svg>3 ask ›</a><span class="sp"></span><span class="inb"><svg class="i" style="width:11px;height:11px"><use href="#i-tray"/></svg>3</span><span class="cap">+</span></div>
     <div class="r"><span class="c"></span><span class="t">Call the plumber about the leak</span></div>
     <div class="r"><span class="c"></span><span class="t">Renovate the bathroom</span></div>
     <div class="r"><span class="c"></span><span class="t">Send venue questions to Anna</span><span class="d">16 Oct</span></div>
   </div>
   <div class="w l" aria-label="Next actions widget, large">
-    <div class="wh"><svg class="i"><use href="#i-next"/></svg>Next actions <span class="n">7</span><span class="ask" aria-label="3 tasks ask for a decision"><svg class="i" style="width:11px;height:11px"><use href="#i-ask"/></svg>3 ask</span><span class="sp"></span><span class="inb"><svg class="i" style="width:11px;height:11px"><use href="#i-tray"/></svg>3</span><span class="cap">+</span></div>
+    <div class="wh"><svg class="i"><use href="#i-next"/></svg>Next actions <span class="n">7</span><a class="ask lk" role="link" tabindex="0" aria-label="3 tasks ask for a decision. Open the review's decision step"><svg class="i" style="width:11px;height:11px"><use href="#i-ask"/></svg>3 ask ›</a><span class="sp"></span><span class="inb"><svg class="i" style="width:11px;height:11px"><use href="#i-tray"/></svg>3</span><span class="cap">+</span></div>
     <div class="r"><span class="c"></span><span class="t">Call the plumber about the leak</span></div>
     <div class="r"><span class="c"></span><span class="t">Renovate the bathroom</span></div>
     <div class="r"><span class="c"></span><span class="t">Sort the paperwork drawer</span></div>
@@ -107,6 +113,21 @@ figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);mar
 </figure>
 
 <figure>
+<figcaption><b>M-24 · chip tapped → decision step</b>The deep link opens the review's decision step at the first card, oldest first, which is the M-16 default frame. While the app opens, the queue is computed locally, so this works offline.</figcaption>
+<div class="flow">
+  <div class="w m" style="width:170px;height:auto;padding:12px" aria-hidden="true"><div class="wh"><svg class="i"><use href="#i-next"/></svg>Next <span class="n">7</span></div><a class="ask lk" role="link" tabindex="-1" style="align-self:flex-start;outline:2px solid var(--sky500);outline-offset:3px"><svg class="i" style="width:11px;height:11px"><use href="#i-ask"/></svg>3 ask ›</a></div>
+  <span style="font-size:20px;color:var(--s500)">→</span>
+  <div class="mini" aria-label="Review decision step, first card">
+    <span class="h">Leave · Quick · 3 of 4 · Skip</span>
+    <span class="h">1 of 3 · oldest first</span>
+    <span class="tt">Update the CV</span>
+    <span class="h">20 days in Next · no project</span>
+    <span class="o">Done</span><span class="o">Reformulate</span><span class="o">Find a first step</span><span class="o">Move to Waiting for…</span><span class="o">Release to Someday</span>
+  </div>
+</div>
+</figure>
+
+<figure>
 <figcaption><b>M-25 · weekly notification (default)</b>Friday 16:00 local. Neutral, short, no count of tasks, no "you missed" language. One per week; nothing follows if it is ignored.</figcaption>
 <div class="lock">
   <div class="dt">Friday 9 October</div>
@@ -123,11 +144,12 @@ figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);mar
 <div class="spec">
   <b>Schedule</b>: the chosen local day and time; follows time-zone changes (US5-5).<br>
   <b>Frequency</b>: at most one per week; no follow-up, snooze or escalation (FR-036).<br>
+  <b>Skip rule</b>: no notification that week if a complete or partial review happened in the preceding 6 days, on any device. The check runs when the slot arrives; on iOS the pending local notification is cancelled when a qualifying review is recorded.<br>
+  <b>Web</b>: no notifications at all. The only web cue is the sidebar "Last review: N days ago" line (D-01).<br>
   <b>Tap</b>: opens the review entry (M-11): onboarding is already done by then, so it goes to While you were away / restart / resume / mode picker as applicable.<br>
   <b>Permission declined</b>: nothing is sent and nothing nags; see M-12.<br>
   <b>Offline</b>: a local notification, so it fires without a network.<br>
   <b>Content</b>: no task titles, no counts, no streak or "missed" wording (FR-038).<br>
-  <b>Open question</b>: whether to skip the week's notification when a review already happened since the last slot (design.md, Unresolved).
 </div>
 </figure>
 

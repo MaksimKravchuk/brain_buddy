@@ -76,6 +76,7 @@ figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var
 <header class="doc">
   <h1>M-03 · Decision card — iOS sheet (large detent)</h1>
   <p>Opened from the marker chip in M-01, from "Decide" in M-02, or one card at a time in the review (M-16). It is the same card in all three places (FR-010). One task, one decision. The optional reason sits above the decisions; picking one highlights a fitting decision without hiding or disabling any (FR-007). The decision list keeps the same order whatever is recommended, so the person's muscle memory is never broken.</p>
+  <p><b>Decided (owner, 2026-10-05):</b> outside the review, the card is a large-detent sheet over Next. Every applied decision shows an Undo toast for about 5 seconds.</p>
   <p>One-tap decisions: Done, Release to Someday, Cancel. Two-step decisions open a short form (M-04): Reformulate, Find a first step, Move to Waiting for, Keep 7 more days. The sheet scrolls when the content is taller than the screen; the decisions are in the lower, thumb-reachable half.</p>
   <p><b>Reason → recommended decision</b>: Unclear → Reformulate · Too big → Find a first step · Missing information → Find a first step · Waiting on someone → Move to Waiting for · Unpleasant / no energy → Find a first step · No longer matters → Cancel.</p>
 </header>
@@ -254,7 +255,7 @@ figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var
 </figure>
 
 <figure>
-<figcaption><b>M-03 · decision applied</b>The sheet closes, the row leaves Next (or loses its marker), and a confirmation toast names what happened. No Undo is drawn: the spec does not require one for card decisions (see design.md, Unresolved).</figcaption>
+<figcaption><b>M-03 · decision applied, with Undo</b>The sheet closes and the row leaves Next (or loses its marker). A toast names what happened and offers Undo for about 5 seconds, like Process inbox (owner decision 4). Undo restores the task exactly as it was, including its clock, extension and receipts. It sits above the tab bar, never over a decision.</figcaption>
 <div class="phone">
   <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
   <div class="under">Next actions</div>
@@ -265,7 +266,7 @@ figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var
       <div class="row"><span class="chk"></span><div><div class="t">Book a dentist appointment</div><span class="mk"><svg class="i"><use href="#i-ask"/></svg>Asks for a decision</span></div></div>
     </div>
   </div>
-  <div class="toast" role="status"><svg class="i" style="color:var(--sky700)"><use href="#i-archive"/></svg><span>"Renovate the bathroom" released to Someday</span></div>
+  <div class="toast" role="status"><svg class="i" style="color:var(--sky700)"><use href="#i-archive"/></svg><span style="flex:1">"Renovate the bathroom" released to Someday</span><button style="border:0;background:none;color:var(--sky700);font-weight:600;min-height:44px;min-width:44px;padding:0 6px" aria-label="Undo: return Renovate the bathroom to Next">Undo</button></div>
 </div>
 </figure>
 

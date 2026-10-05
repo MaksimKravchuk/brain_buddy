@@ -56,13 +56,13 @@ figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var
 
 <header class="doc">
   <h1>M-16 · Review step: tasks that ask for a decision — iOS</h1>
-  <p>The same decision card as M-03 and the same forms as M-04, laid out full-screen inside the review instead of as a sheet. One card at a time, oldest formulation first (US4-3, FR-034). The list is fixed when the step opens; a threshold change during the review does not reshuffle it (edge case). After each decision the next card slides in (brand easing, 200 ms; instant with Reduce Motion) with a one-line note of what just happened.</p>
+  <p>The same decision card as M-03 and the same forms as M-04, laid out full-screen inside the review instead of as a sheet. One card at a time, oldest formulation first (US4-3, FR-034). The list is fixed when the step opens; a threshold change during the review does not reshuffle it (edge case). After each decision the next card slides in (brand easing, 200 ms; instant with Reduce Motion) with a one-line note of what just happened and an Undo that lasts about 5 seconds.</p>
 </header>
 
 <div class="frames">
 
 <figure>
-<figcaption><b>M-16 · default (first card)</b>Position and order are stated. "Skip" in the bar skips the whole step; skipping one card is "Not now", which leaves it asking.</figcaption>
+<figcaption><b>M-16 · default (first card)</b>Position and order are stated. "Skip" in the bar skips the whole step. "Not now" passes one card (FR-034a): the task keeps asking for a decision, and auto-park continues on schedule. This is also the card the widget's "N ask" chip opens (M-24).</figcaption>
 <div class="phone">
   <div class="sb"><span>16:12</span><span>●●● 100%</span></div>
   <div class="nb"><button>Leave</button><span class="ttl">Quick · 3 of 4</span><button>Skip</button></div>
@@ -88,13 +88,13 @@ figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var
 </figure>
 
 <figure>
-<figcaption><b>M-16 · next card, after a decision</b>A single status line confirms the previous decision; the person stays in flow. Here the reason chosen is "Too big", so "Find a first step" is recommended.</figcaption>
+<figcaption><b>M-16 · next card, after a decision, with Undo</b>A status line confirms the previous decision and offers Undo for about 5 seconds (owner decision 4). Undo reverts the task and brings its card back as the current card. Here the reason chosen is "Too big", so "Find a first step" is recommended.</figcaption>
 <div class="phone">
   <div class="sb"><span>16:13</span><span>●●● 100%</span></div>
   <div class="nb"><button>Leave</button><span class="ttl">Quick · 3 of 4</span><button>Skip</button></div>
   <div class="steps" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="c"></i><i></i></div>
   <div class="body">
-    <div class="done" role="status"><svg class="i"><use href="#i-check"/></svg>"Update the CV" released to Someday</div>
+    <div class="done" role="status"><svg class="i"><use href="#i-check"/></svg><span style="flex:1">"Update the CV" released to Someday</span><button style="border:0;background:none;color:var(--sky700);font-weight:600;min-height:44px;min-width:44px;padding:0 4px;margin:-10px -4px" aria-label="Undo: return Update the CV to Next and show its card again">Undo</button></div>
     <div class="pos"><span>2 of 5 · oldest first</span><span>Asks for a decision</span></div>
     <h2 class="ttl2">Renovate the bathroom</h2>
     <p class="meta">15 days in Next · Home</p>
@@ -143,7 +143,7 @@ figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var
 </figure>
 
 <figure>
-<figcaption><b>M-16 · some left undecided ("Not now")</b>The person passed on 2 cards. Said plainly, without pressure; they keep asking in Next, and the review can still finish.</figcaption>
+<figcaption><b>M-16 · some left undecided ("Not now")</b>The person passed on 2 cards (FR-034a). Said plainly, without pressure; the auto-park schedule is unchanged and the review can still finish. A decision step that ends with any "Not now" is excluded from the SC-002 measurement.</figcaption>
 <div class="phone">
   <div class="sb"><span>16:18</span><span>●●● 100%</span></div>
   <div class="nb"><button>Leave</button><span class="ttl">Quick · 3 of 4</span><button>Skip</button></div>
@@ -151,7 +151,7 @@ figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var
   <div class="empty">
     <svg class="i"><use href="#i-check"/></svg>
     <h2>3 of 5 decided</h2>
-    <p>2 still ask for a decision. They'll be in Next whenever you're ready.</p>
+    <p>2 still ask for a decision. They stay in Next whenever you're ready, and move to Someday on their usual date if nothing is decided.</p>
   </div>
   <div class="foot"><button class="btn pri">Next: summary</button></div>
 </div>

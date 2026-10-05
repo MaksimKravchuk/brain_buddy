@@ -82,7 +82,7 @@ figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);mar
 <header class="doc">
   <h1>D-02 · Decision dialog with the AI navigator — web</h1>
   <p>A 560 px modal dialog (20 px radius, floating shadow, light blurred scrim) opened from a marker chip in D-01, from the task's inline detail, or embedded in the review (D-03). Content, order, reason → recommendation mapping and copy match M-03/M-04. Keyboard: focus lands on the dialog title; Tab moves through reasons then decisions; number keys 1–7 pick a decision; Esc closes without changes and returns focus to the marker chip that opened it.</p>
-  <p>On web every suggestion uses the cloud provider, so the first "Suggest" always goes through consent (FR-024). Every failure shows a correlation ID (FR-025, FR-045). Server round-trips show a pending state on the chosen control only.</p>
+  <p>On web every suggestion uses the cloud provider, so the first "Suggest" always goes through consent (FR-024). Every failure shows a correlation ID (FR-025, FR-045). Server round-trips show a pending state on the chosen control only. Every applied decision shows an Undo toast for about 5 seconds (owner decision 4).</p>
 </header>
 
 <div class="grid">
@@ -195,6 +195,19 @@ figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);mar
     <div class="banner" role="status"><svg class="i"><use href="#i-wifi-off"/></svg><span><b>You're offline.</b> Decisions need a connection on the web. Retry when you're back online.</span></div>
     <div class="opts"><button class="opt" disabled><svg class="i"><use href="#i-check"/></svg>Done</button><button class="opt" disabled><svg class="i"><use href="#i-pencil"/></svg>Reformulate</button></div>
   </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-02 · decision applied, with Undo</b>The dialog closes and the row updates. A toast (bottom-left, floating shadow) names the decision and offers Undo for about 5 seconds, like Process inbox (owner decision 4). Focus moves to the next row; the toast is announced politely and reachable with Tab.</figcaption>
+<div class="stage" style="height:360px">
+  <div class="bgl" style="color:var(--s900)">Next actions</div>
+  <div style="margin:0 30px;border-top:1px solid var(--s200);background:#fff">
+    <div style="height:44px;display:flex;align-items:center;padding-left:44px;border-bottom:1px solid var(--s200);font-size:14px;font-weight:500">Call the plumber about the leak</div>
+    <div style="height:44px;display:flex;align-items:center;padding-left:44px;border-bottom:1px solid var(--s200);font-size:14px;font-weight:500">Sort the paperwork drawer</div>
+    <div style="height:44px;display:flex;align-items:center;padding-left:44px;border-bottom:1px solid var(--s200);font-size:14px;font-weight:500">Draft the launch FAQ</div>
+  </div>
+  <div role="status" style="position:absolute;left:30px;bottom:24px;width:420px;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);border:1px solid var(--s200);border-radius:20px;box-shadow:var(--float);padding:8px 8px 8px 14px;display:flex;align-items:center;gap:10px;font-size:13px"><svg class="i" style="color:var(--sky700)"><use href="#i-archive"/></svg><span style="flex:1">"Renovate the bathroom" released to Someday</span><button class="btn gh" aria-label="Undo: return Renovate the bathroom to Next">Undo</button></div>
 </div>
 </figure>
 

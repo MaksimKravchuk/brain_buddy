@@ -3,7 +3,7 @@
 **Feature**: `specs/020-weekly-review/`
 **Spec**: `spec.md` (Clarifications settled: 2026-10-05)
 **Screens**: `design/*.html` — self-contained static HTML, inline CSS, inline SVG icons, no CDN, no external fonts, no script
-**Human sign-off**: pending
+**Human sign-off**: approved by Max on 2026-10-05, with decisions 1–6 (see Sign-off)
 
 <!--
   Produced by /speckit-design via the design-architect subagent, after
@@ -53,8 +53,8 @@ or mode picker M-11 → steps M-13 … M-22.
 
 | id | surface | screen | purpose | FR refs |
 |---|---|---|---|---|
-| M-01 | mobile (iOS Next tab) | Next actions with age markers | Shows fresh / ageing / asks for a decision / moves to Someday tomorrow per task; entry to the card from the marker | FR-003a, FR-004, FR-010, FR-012, FR-038, FR-039, FR-040 |
-| M-02 | mobile (iOS task detail) | "This wording" section in task detail | States formulation age in words, the due-date pause, extension and park facts; "Decide" from the task on any day | FR-001, FR-003, FR-003a, FR-009, FR-010, FR-012 |
+| M-01 | mobile (iOS Next tab) | Next actions with age markers | Shows "asks for a decision" and "moves to Someday tomorrow" per task (ageing is detail-only); the marker opens the card as a sheet | FR-003a, FR-004, FR-010, FR-012, FR-038, FR-039, FR-040 |
+| M-02 | mobile (iOS task detail) | "This wording" section in task detail | States formulation age in words, including the ageing marker (shown only here), the due-date pause, extension and park facts; "Decide" from the task on any day | FR-001, FR-003, FR-003a, FR-004, FR-009, FR-010, FR-012 |
 | M-03 | mobile (iOS sheet) | Decision card | One task, one decision: seven decisions, optional stall reason with a recommendation, third-stall offer, stale handling | FR-005, FR-006, FR-007, FR-009, FR-010, FR-011, FR-040, FR-045 |
 | M-04 | mobile (inside M-03) | Decision card follow-up forms | Reformulate, find a first step ("Was: …"), Waiting for (who/what), keep 7 more days (reason required) | FR-001, FR-002, FR-006, FR-008, FR-009, FR-019 |
 | M-05 | mobile (inside M-04) | AI navigator, on-device | 1–3 proposals from Apple's on-device model; pick fills, confirm writes; clarifying question; offline | FR-019, FR-020, FR-021, FR-022 |
@@ -68,7 +68,7 @@ or mode picker M-11 → steps M-13 … M-22.
 | M-13 | mobile (review step) | Wins of the week (+ shared step chrome, leave) | First step, before any backlog: completed tasks and their count | FR-028, FR-029 |
 | M-14 | mobile (review step, full) | Mind sweep | Capture anything on the mind into Inbox | FR-028, FR-029 |
 | M-15 | mobile (review step) | Inbox to zero | ">15 items" choice; one item at a time via Process inbox | FR-028, FR-030, FR-034 |
-| M-16 | mobile (review step) | Tasks that ask for a decision | The M-03 card one at a time, oldest first | FR-028, FR-034, FR-006 |
+| M-16 | mobile (review step) | Tasks that ask for a decision | The M-03 card one at a time, oldest first; "Not now" passes a card; Undo after each decision | FR-028, FR-034, FR-034a, FR-006 |
 | M-17 | mobile (review step, full) | The rest of Next with capacity mirror | Count, 4-week weekly average, implied weeks; no limit | FR-028, FR-031 |
 | M-18 | mobile (review step, full) | Waiting for, older than 7 days | One at a time: keep waiting / follow-up / return to Next / cancel | FR-028, FR-032, FR-034 |
 | M-19 | mobile (review step, full) | Projects without a next action | Add or suggest a next action per project | FR-019, FR-028 |
@@ -76,9 +76,9 @@ or mode picker M-11 → steps M-13 … M-22.
 | M-21 | mobile (review step, full) | Dates in the next 14 days | Read-only look ahead | FR-028 |
 | M-22 | mobile (review step) | Summary | Counts per decision type, next review date, optional "Clear how to start the week?" | FR-033, FR-038, SC-003, SC-007 |
 | M-23 | mobile (iOS Settings) | Weekly review and Suggestions settings | Day, time, threshold, last review; on-device status, fallback choice, delete model, cloud consent revoke | FR-023, FR-023a, FR-024, FR-035, FR-038, FR-039 |
-| M-24 | mobile (iOS widget) | Next actions widget with "N ask" | Shows how many tasks ask for a decision | FR-037 |
-| M-25 | mobile (iOS notification) | Weekly review notification | The single weekly cue | FR-036, FR-038 |
-| D-01 | desktop (web) | Next actions with age markers + Weekly review sidebar entry | Web markers (as M-01) and the working entry replacing "Coming soon" | FR-003a, FR-004, FR-010, FR-012, FR-038, FR-039, FR-042, FR-045 |
+| M-24 | mobile (iOS widget) | Next actions widget with "N ask" | Shows how many tasks ask for a decision; in medium and large the chip deep-links into the review's decision step | FR-037 |
+| M-25 | mobile (iOS notification) | Weekly review notification | The single weekly cue, skipped if a complete or partial review happened in the preceding 6 days; iOS only | FR-036, FR-038 |
+| D-01 | desktop (web) | Next actions with age markers + Weekly review sidebar entry | Web markers (as M-01, no ageing in the list) and the working entry replacing "Coming soon"; the sidebar "Last review" line is the web's only review cue | FR-003a, FR-004, FR-010, FR-012, FR-038, FR-039, FR-042, FR-045 |
 | D-02 | desktop (web dialog) | Decision dialog with the AI navigator | M-03/M-04/M-05/M-07 content in a 560 px dialog; cloud-only navigator | FR-005 – FR-011, FR-019 – FR-021, FR-024, FR-025, FR-045 |
 | D-03 | desktop (web route) | Weekly review shell | Focused route with step rail; hosts M-09 … M-22 content; onboarding dialog | FR-015, FR-017, FR-027 – FR-035, FR-045 |
 | D-04 | desktop (web settings) | Weekly review and Suggestions settings | M-23 minus on-device rows | FR-024, FR-035, FR-038, FR-039, FR-045 |
@@ -110,15 +110,20 @@ Files:
 | `design/D-03-review-shell.html` | D-03 |
 | `design/D-04-settings.html` | D-04 |
 
-### Marker system (M-01, D-01, M-17, M-24)
+### Marker system (M-01, M-02, D-01, M-17, M-24)
 
-| state | rule (threshold T) | visual | interactive |
-|---|---|---|---|
-| fresh | age < T/2 | none | — |
-| ageing | T/2 ≤ age < T | slate-100 chip, slate-600 text, Lucide `Hourglass`, "Ageing" | no |
-| asks for a decision | age ≥ T (or ≥ T+7 after extension) | indigo-50 chip, indigo-200 border, indigo-700 text, `CircleHelp`, "Asks for a decision" | opens the card |
-| moves to Someday tomorrow | within 24 h of auto-park | amber-50 / amber-200 / amber-800 (warning semantic, not the reserved needs-you alias), `Archive`, "Moves to Someday tomorrow" | opens the card |
-| future due date | due date after today | no age marker; the existing rose due chip only | — |
+By owner decision 2 (2026-10-05), list surfaces (M-01, D-01, M-17, and the
+widget rows) show **only** "asks for a decision" and "moves to Someday
+tomorrow". "Ageing" is shown only in task detail: M-02 on iOS, and the same
+"This wording" block in the web task's inline detail.
+
+| state | rule (threshold T) | visual | where shown | interactive |
+|---|---|---|---|---|
+| fresh | age < T/2 | none | — | — |
+| ageing | T/2 ≤ age < T | slate-100 chip, slate-600 text, Lucide `Hourglass`, "Ageing" | task detail only (M-02, web inline detail); **never in lists** | no |
+| asks for a decision | age ≥ T (or ≥ T+7 after extension) | indigo-50 chip, indigo-200 border, indigo-700 text, `CircleHelp`, "Asks for a decision" | lists and detail | opens the card |
+| moves to Someday tomorrow | within 24 h of auto-park | amber-50 / amber-200 / amber-800 (warning semantic, not the reserved needs-you alias), `Archive`, "Moves to Someday tomorrow" | lists and detail | opens the card |
+| future due date | due date after today | no age marker; the existing rose due chip only; detail says "Paused until the due date" | — | — |
 
 Rose stays reserved for real due dates and destructive controls. No age state
 uses rose, red, an error icon, or the word for a missed deadline (FR-004,
@@ -136,7 +141,7 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default | Next tab open | Rows grouped by project; marker in each row's metadata line; future-due task shows only its due chip | "Ageing", "Asks for a decision", "Moves to Someday tomorrow" | FR-003a, FR-004, FR-010, SC-006 |
+| default | Next tab open | Rows grouped by project. Only asking and moves-tomorrow rows carry a marker; fresh and ageing rows have none. A future-due task shows only its due chip. Tapping a marker opens the M-03 sheet. | "Asks for a decision", "Moves to Someday tomorrow" | FR-003a, FR-004, FR-010, SC-006 |
 | loading | cold launch while the local store opens, > 300 ms | Four static placeholder rows; markers arrive with the rows | — | — |
 | empty (first run) | no next actions | Today's empty state, nothing about age | "No next actions" / "Process your inbox to choose what comes next." | — |
 | empty (filtered to nothing) | Tag/priority filter matches nothing | Different copy, count of hidden tasks, "Clear filter" | "No next actions tagged errands" / "7 next actions are hidden by this filter." | — |
@@ -150,7 +155,7 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
 | default (asks) | task asks for a decision | Marker, age in days, reassurance, what doesn't restart the clock, "Decide" | "The wording hasn't moved for a while. That's feedback on the wording, not on you. Changing notes, Tags, project or priority doesn't restart the clock." | FR-001, FR-003, FR-010 |
-| ageing / fresh | age < T | Ageing: date it will ask; fresh: days only; no Decide | "Asks for a decision from Wed 14 Oct if the wording stays the same." | FR-004 |
+| ageing / fresh | age < T | Ageing: the "Ageing" chip (its only place on iOS) and the date it will ask. Fresh: days only. No Decide. | "Asks for a decision from Wed 14 Oct if the wording stays the same." | FR-004 |
 | clock paused | future due date | Paused chip and date | "The clock starts on Fri 16 Oct. Until then this task won't ask for a decision or move to Someday." | FR-003a |
 | moves to Someday tomorrow | within 24 h of park | Exact park time; reassurance; Decide | "If nothing is decided, it moves to Someday / maybe on Sat 10 Oct at 09:14. Nothing is lost, and you can bring it back in one tap." | FR-012, SC-006 |
 | kept 7 more days | extension used | Reason quoted back; new ask and park dates; no further extension | "Kept on Mon 5 Oct. Asks again on Mon 12 Oct; moves to Someday on Mon 19 Oct if still undecided." | FR-009 |
@@ -171,7 +176,8 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | extension already used | formulation already extended | "Keep 7 more days" absent; quiet reason line | "You've already kept this wording 7 more days once." | FR-009 |
 | third stalled wording | 3rd consecutive formulation reached the threshold | Gentle offer above reasons: "Think it through" (canvas) / "Release to Someday"; nothing blocked | "This is the third wording in a row that has stalled. Sometimes the task isn't the problem…" | FR-005 |
 | stale | task changed elsewhere since the card opened | Nothing applied; was/now diff; current state; Close | "This task changed on another device, so nothing was applied. Here's the current version." | FR-011 |
-| decision applied | any decision confirmed | Sheet closes; row updates; confirmation toast (no Undo — see Unresolved) | ""Renovate the bathroom" released to Someday" | FR-006, FR-010 |
+| decision applied, with Undo | any decision confirmed | Sheet closes and the row updates. A toast names the decision and offers Undo for about 5 s, like Process inbox. Undo restores the task exactly, including clock, extension and receipts. | ""Renovate the bathroom" released to Someday" · "Undo" | FR-006, FR-010, owner decision 4 |
+| undo window expired | ~5 s pass | Toast fades. The decision stands and is changeable later through ordinary task moves. | — | owner decision 4 |
 | error | offline decision rejected by the server after sync (non-stale) | Reason, correlation ID, "Try again" / "Choose again" | "Your decision "Move to Waiting for" couldn't be saved to your account. The task is still in Next." + Ref | FR-011, FR-045 |
 | offline / interrupted | no connection; or app killed with the card open | Works offline, queued; killed before a choice → nothing applied, card opens fresh | "Offline. Decisions are saved on this iPhone and sync later." | FR-040 |
 | loading | **n/a** on iOS — decisions apply to the local store immediately (web: D-02 saving) | — | — | — |
@@ -271,7 +277,8 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 |---|---|---|---|---|
 | default | no complete/partial review for 21+ days | Neutral welcome; count; Release / Keep; "See which ones" | "Your last review was 26 days ago. Gaps happen. Let's make Next fit the week ahead." | FR-017, FR-038 |
 | list expanded | "See which ones" | Read-only titles with age | "17 next actions are older than 4 weeks" | FR-017 |
-| released | Release | Confirmation, new Next count, Undo | "17 tasks released to Someday / maybe. Next now holds 12 tasks." | FR-017, US2-7 |
+| released | Release | Confirmation, new Next count, and Undo, which lasts until the person leaves this screen (owner default) | "17 tasks released to Someday / maybe. Next now holds 12 tasks." | FR-017, US2-7 |
+| set up but never reviewed | onboarded 21+ days ago, no review yet | Same offer; heading without "Welcome back" or any wording implying the person was away | "Your first review / Let's make Next fit the week ahead." | FR-017, FR-038 |
 | undone | Undo | Everything restored including clocks | "Undone. All 17 are back in Next as they were." | FR-017 |
 | partial failure | some tasks changed elsewhere meanwhile | Named; Undo covers only the released | "2 tasks changed on another device in the meantime, so they stayed in Next…" | FR-011, FR-017 |
 | empty | nothing older than 4 weeks | Welcome without an offer | "Nothing in Next is older than 4 weeks, so let's go straight in." | FR-017 |

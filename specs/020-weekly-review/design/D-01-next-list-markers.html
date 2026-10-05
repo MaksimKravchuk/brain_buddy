@@ -88,12 +88,12 @@ button.mk:hover{box-shadow:var(--raised)}
 
 <header class="doc">
   <h1>D-01 · Next actions with age markers, and the working Weekly review entry — web</h1>
-  <p>Same marker rules and copy as M-01, placed in the compact 44 px row (spec 017) between the title and the Tag pills. The marker chips "Asks for a decision" and "Moves to Someday tomorrow" are buttons that open the decision dialog (D-02); "Ageing" is plain text. Rose stays only on real due dates.</p>
+  <p>Same marker rules and copy as M-01, placed in the compact 44 px row (spec 017) between the title and the Tag pills. The marker chips "Asks for a decision" and "Moves to Someday tomorrow" are buttons that open the decision dialog (D-02). Fresh and ageing tasks show no marker in the list (owner decision 2026-10-05). "Ageing" appears only in the web task's inline detail, in the same "This wording" block as M-02. Rose stays only on real due dates.</p>
   <p>In the sidebar, the disabled "Weekly review — Coming soon" button in <code>AppShell.tsx</code> becomes a working link (FR-042), outside the four primary lists so it never reads as a fifth list (ADR-0006). Its second line is the neutral "Last review: N days ago" (FR-038).</p>
 </header>
 
 <figure>
-<figcaption><b>D-01 · default</b>All marker states, a task paused by a future due date (no marker), and the enabled sidebar entry.</figcaption>
+<figcaption><b>D-01 · default</b>Both list markers. Two tasks show no marker: "Draft the launch FAQ", which is ageing (that shows only in detail), and a task paused by a future due date. The sidebar entry is enabled.</figcaption>
 <div class="screen">
   <div class="top">
     <div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9.1 3.3-.2 4.3-.9 1-.6 1.9-1.8 2.7-3.6-2.4-.5-4-.3-5-.1-.4.1-.7.3-.9.6z"/></svg>Brain Buddy</div>
@@ -123,7 +123,7 @@ button.mk:hover{box-shadow:var(--raised)}
           <div class="row" role="listitem"><span class="chk"></span><span class="tt">Call the plumber about the leak</span><span class="rm"><span class="tag">calls</span></span><span class="proj">Home</span></div>
           <div class="row" role="listitem"><span class="chk"></span><span class="tt">Renovate the bathroom</span><span class="rm"><button class="mk ask" aria-label="Asks for a decision. Open decision for Renovate the bathroom"><svg class="i"><use href="#i-ask"/></svg>Asks for a decision</button><span class="tag">home</span></span><span class="proj">Home</span></div>
           <div class="row" role="listitem"><span class="chk"></span><span class="tt">Sort the paperwork drawer</span><span class="rm"><button class="mk park" aria-label="Moves to Someday tomorrow. Open decision for Sort the paperwork drawer"><svg class="i"><use href="#i-archive"/></svg>Moves to Someday tomorrow</button></span><span class="proj">Home</span></div>
-          <div class="row" role="listitem"><span class="chk"></span><span class="tt">Draft the launch FAQ</span><span class="rm"><span class="mk age"><svg class="i"><use href="#i-hourglass"/></svg>Ageing</span><span class="tag">deep-work</span></span><span class="proj">Launch review</span></div>
+          <div class="row" role="listitem"><span class="chk"></span><span class="tt">Draft the launch FAQ</span><span class="rm"><span class="tag">deep-work</span></span><span class="proj">Launch review</span></div>
           <div class="row" role="listitem"><span class="chk"></span><span class="tt">Send venue questions to Anna</span><span class="rm"><span class="due">Fri 16 Oct</span><span class="tag">calls</span></span><span class="proj">Launch review</span></div>
           <div class="row" role="listitem"><span class="chk"></span><span class="tt">Review the pricing page copy</span><span class="rm"><span class="tag">laptop</span></span><span class="proj">Launch review</span></div>
           <div class="row" role="listitem"><span class="chk"></span><span class="tt">Book a dentist appointment</span><span class="rm"><button class="mk ask" aria-label="Asks for a decision. Open decision for Book a dentist appointment"><svg class="i"><use href="#i-ask"/></svg>Asks for a decision</button><span class="tag">calls</span></span><span class="proj">No project</span></div>
@@ -153,11 +153,11 @@ button.mk:hover{box-shadow:var(--raised)}
   </div>
   <div class="mini"><h2>Next actions</h2><p style="margin:0;font-size:12px;color:var(--s500)"><b>offline / interrupted</b> · web is not offline-first: the list stays visible, markers keep showing, decisions are disabled with the reason</p>
     <div class="banner" role="status"><svg class="i"><use href="#i-wifi-off"/></svg><span><b>You're offline.</b> Decisions need a connection. Retry when you're back online.</span></div>
-    <div class="tl"><div class="row"><span class="chk"></span><span class="tt">Renovate the bathroom</span><span class="rm"><button class="mk ask" disabled aria-disabled="true" style="opacity:.6"><svg class="i"><use href="#i-ask"/></svg>Asks for a decision</button></span><span class="proj">Home</span></div><div class="row"><span class="chk"></span><span class="tt">Draft the launch FAQ</span><span class="rm"><span class="mk age"><svg class="i"><use href="#i-hourglass"/></svg>Ageing</span></span><span class="proj">Launch review</span></div></div>
+    <div class="tl"><div class="row"><span class="chk"></span><span class="tt">Renovate the bathroom</span><span class="rm"><button class="mk ask" disabled aria-disabled="true" style="opacity:.6"><svg class="i"><use href="#i-ask"/></svg>Asks for a decision</button></span><span class="proj">Home</span></div><div class="row"><span class="chk"></span><span class="tt">Draft the launch FAQ</span><span class="rm"></span><span class="proj">Launch review</span></div></div>
   </div>
   <div class="mini"><h2>Next actions</h2><p style="margin:0;font-size:12px;color:var(--s500)"><b>threshold just changed</b> · one-time note after Settings (D-04), FR-039</p>
     <div class="banner info" role="status"><svg class="i"><use href="#i-info"/></svg><span style="flex:1">Your threshold is now 7 days. 4 tasks ask for a decision. Nothing moves to Someday before Fri 16 Oct.</span><button class="btn gh" style="min-height:28px;padding:0 6px">OK</button></div>
-    <div class="tl"><div class="row"><span class="chk"></span><span class="tt">Draft the launch FAQ</span><span class="rm"><button class="mk ask"><svg class="i"><use href="#i-ask"/></svg>Asks for a decision</button></span><span class="proj">Launch review</span></div><div class="row"><span class="chk"></span><span class="tt">Call the plumber about the leak</span><span class="rm"><span class="mk age"><svg class="i"><use href="#i-hourglass"/></svg>Ageing</span></span><span class="proj">Home</span></div></div>
+    <div class="tl"><div class="row"><span class="chk"></span><span class="tt">Draft the launch FAQ</span><span class="rm"><button class="mk ask"><svg class="i"><use href="#i-ask"/></svg>Asks for a decision</button></span><span class="proj">Launch review</span></div><div class="row"><span class="chk"></span><span class="tt">Call the plumber about the leak</span><span class="rm"></span><span class="proj">Home</span></div></div>
   </div>
 </div>
 </figure>
