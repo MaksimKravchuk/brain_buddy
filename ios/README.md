@@ -149,14 +149,26 @@ is also pinned to a commit SHA (with its tag in a comment).
 
 ## TestFlight
 
-`ios.yml` starts when CI completes on a push to `main`. If that run passed
-and its commit changed `ios/`, it uploads that commit to TestFlight once a
-reviewer approves the `testflight` deployment, so every build there passed
-`ios-kit` and `ios-app` first. A manual run on `main` uploads the current
-`main`. The commit is compared with its first parent, which covers a trunk
-landing and a merged or squashed pull request; if several commits are pushed
-at once only the last one is checked, so dispatch the workflow for anything
-that missed an upload. Until the owner finishes the
+`ios.yml` uploads from `main` and from feature branches.
+
+- **`main`**: it starts when CI completes on a push to `main`. If that run
+  passed and its commit changed `ios/`, it uploads that commit, so every
+  `main` build passed `ios-kit` and `ios-app` first. The commit is compared
+  with its first parent, which covers a trunk landing and a merged or
+  squashed pull request; if several commits are pushed at once only the last
+  one is checked, so dispatch the workflow for anything that missed an
+  upload.
+- **Any other branch** (except `trunk-candidate/**` and `dependabot/**`):
+  every push that touches `ios/` uploads that commit straight away, without
+  waiting for CI, for fast feedback on a phone. A newer push to the same
+  branch cancels the older upload. The build carries `<branch> @ <commit>`
+  in Settings → About (the `BBBuildLabel` Info.plist key, from
+  `BB_BUILD_LABEL`), and the same text plus the commit subject goes into
+  TestFlight's *What to Test* (`ci/testflight_notes.py`, best effort).
+- **Manual run** (*Actions → iOS TestFlight → Run workflow*): uploads the
+  chosen branch.
+
+Until the owner finishes the
 setup below, the `testflight` job writes what is missing to the run summary
 ("TestFlight upload skipped: configure …") and stays green.
 
@@ -195,16 +207,16 @@ setup below, the `testflight` job writes what is missing to the run summary
    to a suspected leak is to revoke the key in *Users and Access →
    Integrations* at once and create a new one.
 4. **GitHub environment.** *Settings → Environments → New environment*, named
-   `testflight`. Both protection rules below are required, not suggestions:
-   - *Deployment branches and tags*: **Selected branches → `main`**. This
-     branch policy, not the workflow's `if`, is what keeps the key away from
-     pull requests and other branches, as the `production` environment does
-     for Fly.
-   - *Required reviewers*: at least one person, with **Prevent self-review**
-     checked, and **Allow administrators to bypass configured protection
-     rules** unchecked. Every upload then waits for someone other than the
-     person who triggered it, so one compromised or careless GitHub account
-     can't get code signed and shipped with the Admin key on its own.
+   `testflight`.
+   - *Deployment branches and tags*: **No restriction**, so branch builds
+     can use the key. This is a deliberate trade-off for fast feedback:
+     anyone who can push a branch to this repository can get it signed and
+     uploaded with the Admin key (pull requests from forks cannot, they get
+     no secrets). To tighten it later, restrict the policy to a pattern such
+     as `main` and `claude/*`.
+   - *Required reviewers*: none. A reviewer gate would make every branch
+     push wait for a click; add one (with **Prevent self-review**) if more
+     people get push access.
    - Secrets:
      - `APP_STORE_CONNECT_API_KEY_ID`: the key id
      - `APP_STORE_CONNECT_API_ISSUER_ID`: the issuer id
@@ -221,25 +233,28 @@ setup below, the `testflight` job writes what is missing to the run summary
    Info.plist answers the export-compliance question, so builds are not held
    for it.
 
-Then run the workflow on `main` (*Actions → iOS TestFlight → Run
-workflow*), or land a change under `ios/`.
+Then run the workflow (*Actions → iOS TestFlight → Run workflow*), push a
+branch that changes `ios/`, or land a change under `ios/`.
 
 ### What the job does
 
-1. Waits for a reviewer's approval (the environment's rule), then selects the
-   newest Xcode 26, installs the pinned XcodeGen and generates the project.
+1. Selects the newest Xcode 26, installs the pinned XcodeGen and generates the project.
 2. Writes the key to `$RUNNER_TEMP/private_keys/AuthKey_<key id>.p8` (mode 600).
 3. `xcodebuild archive` (Release, `generic/platform=iOS`) with
-   `DEVELOPMENT_TEAM`, `CURRENT_PROJECT_VERSION` and, if set,
+   `DEVELOPMENT_TEAM`, `CURRENT_PROJECT_VERSION`, `BB_BUILD_LABEL` and, if set,
    `BB_BUNDLE_ID_PREFIX` on the command line, and `-allowProvisioningUpdates`
    with the API key: automatic signing creates or refreshes the certificates
    and profiles it needs.
 4. `xcodebuild -exportArchive` with `ci/ExportOptions.plist` (the team id is
    added to a temporary copy): method `app-store-connect`, destination
    `upload`, so the export uploads the build and its symbols directly.
-5. Deletes the key, whatever happened, as soon as the export step is over:
+5. Writes `<branch> @ <commit> — <subject>` into the build's *What to Test*
+   through the App Store Connect API (`ci/testflight_notes.py`: standard
+   library and the system `openssl` only, polls up to 15 minutes for the
+   build to appear; a failure only warns).
+6. Deletes the key, whatever happened, as soon as those steps are over:
    before the summary, the log redaction and the artifact upload.
-6. Writes the bundle id, version, build and commit to the run summary. On
+7. Writes the bundle id, version, build, branch and commit to the run summary. On
    failure it uploads the archive and export logs, with the key id and issuer
    id redacted.
 
@@ -247,7 +262,8 @@ workflow*), or land a change under `ios/`.
 
 - Build number (`CFBundleVersion`) = the workflow's run number +
   `IOS_BUILD_NUMBER_OFFSET`. App Store Connect needs it to go up. The run
-  number counts every CI completion on `main`, uploads or not, so builds skip
+  number is shared by `main` and branch uploads and counts every CI
+  completion on `main`, uploads or not, so builds skip
   numbers; that is fine. If builds were uploaded from somewhere else with
   higher numbers, raise the offset past them.
 - Re-running a failed run keeps its run number. That is fine when the upload
@@ -263,7 +279,8 @@ public repositories. On a private repository, macOS minutes are billed at a
 multiple of the Linux rate (10× at the time of writing; check GitHub's
 current pricing). `ios-app` takes a macOS runner for pull requests that touch
 `ios/` or a shared surface and for every push to `main` or
-`trunk-candidate/**`; `testflight` only for uploads.
+`trunk-candidate/**`; `testflight` for every upload, including each push
+to a feature branch that touches `ios/`.
 
 ### When the upload fails
 

@@ -1,17 +1,31 @@
 name: iOS TestFlight
 
 # Uploads the native iOS app (docs/native-ios-app.md, ios/README.md) to
-# TestFlight. The build and test lanes are `ios-kit` and `ios-app` in ci.yml,
-# inside the `Full CI` verdict a candidate lands on; this workflow only runs
+# TestFlight, from main and from feature branches.
+#
+# main: the build and test lanes are `ios-kit` and `ios-app` in ci.yml, inside
+# the `Full CI` verdict a candidate lands on; for main this workflow only runs
 # after that verdict is in. It starts when CI completes on a push to main, and
-# uploads when that run succeeded and its commit changed ios/, so every build
-# in TestFlight is a commit whose package tests passed and whose app built.
-# Manual dispatch on main uploads the current main regardless.
+# uploads when that run succeeded and its commit changed ios/, so every main
+# build in TestFlight is a commit whose package tests passed and whose app
+# built.
+#
+# Branches: every push to another branch that touches ios/ uploads that commit
+# straight away, without waiting for CI, so a change can be tried on a phone
+# within minutes. The branch and commit are written into the build (Settings →
+# About) and into TestFlight's "What to Test". A newer push to the same branch
+# cancels the older branch upload. Manual dispatch uploads the chosen ref,
+# whatever branch it is.
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
     branches: ["main"]
+  push:
+    # main uploads through workflow_run above, after CI; trunk-candidate/**
+    # refs become main; dependabot never touches ios/.
+    branches-ignore: ["main", "trunk-candidate/**", "dependabot/**"]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
   workflow_dispatch:
 
 permissions:
@@ -28,9 +42,11 @@ env:
   XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
 
 jobs:
-  # Which commit to upload, and whether to. Only a successful CI run of a push
-  # to main in this repository counts: a pull request from a fork can have a
-  # branch named main too, and workflow_run would fire for its CI run.
+  # Which commit to upload, and whether to. A branch push (already filtered to
+  # ios/ changes) and a manual dispatch always upload. Of the CI completions,
+  # only a successful CI run of a push to main in this repository counts: a
+  # pull request from a fork can have a branch named main too, and
+  # workflow_run would fire for its CI run.
   #
   # "Changed ios/" is the commit against its first parent, which is the whole
   # change for a trunk landing (one commit on main) and for a merged or
@@ -40,6 +56,7 @@ jobs:
     name: Decide what to upload
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -48,6 +65,7 @@ jobs:
     outputs:
       upload: ${{ steps.decide.outputs.upload }}
       sha: ${{ steps.decide.outputs.sha }}
+      branch: ${{ steps.decide.outputs.branch }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,12 +78,14 @@ jobs:
         id: decide
         env:
           EVENT: ${{ github.event_name }}
-          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           sha="$(git rev-parse HEAD)"
           echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
-          if [ "${EVENT}" = "workflow_dispatch" ]; then
-            if [ "${REF}" = "refs/heads/main" ]; then upload=true; else upload=false; fi
+          echo "branch=${RUN_BRANCH:-${REF_NAME}}" >> "${GITHUB_OUTPUT}"
+          if [ "${EVENT}" = "workflow_dispatch" ] || [ "${EVENT}" = "push" ]; then
+            upload=true
           elif ! changed="$(git diff --name-only HEAD^ HEAD 2>/dev/null)"; then
             echo "could not read the parent of ${sha}; uploading"
             upload=true
@@ -80,10 +100,9 @@ jobs:
   # Signs with automatic, cloud-managed signing through an App Store Connect
   # API key and uploads the archive. Until the owner configures the
   # `testflight` environment the job reports what is missing and stays green.
-  # That environment must allow only the `main` branch and require a reviewer
-  # other than the person who triggered the run (ios/README.md): those
-  # protection rules, not the `if`s above, are what keep the Admin key away
-  # from other refs and from a single account acting alone.
+  # That environment's branch policy must allow the branches you upload from
+  # (ios/README.md); anyone who can push such a branch can get it signed and
+  # uploaded with the Admin key, which the owner accepted for fast feedback.
   testflight:
     name: Upload to TestFlight
     needs: decide
@@ -92,11 +111,12 @@ jobs:
     environment: testflight
     # On the upload job, not the workflow: every CI completion on main starts
     # this workflow, and a workflow-level group would let those no-op runs
-    # displace a pending upload. Uploads never overlap and are never
-    # cancelled mid-flight; a newer one queues.
+    # displace a pending upload. One group per branch: main uploads never
+    # overlap and are never cancelled mid-flight (a newer one queues); a newer
+    # push to a feature branch cancels that branch's older upload.
     concurrency:
-      group: ios-testflight
-      cancel-in-progress: false
+      group: ios-testflight-${{ needs.decide.outputs.branch }}
+      cancel-in-progress: ${{ github.event_name == 'push' }}
     timeout-minutes: 60
     defaults:
       run:
@@ -204,12 +224,18 @@ jobs:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           BUNDLE_ID_PREFIX: ${{ vars.IOS_BUNDLE_ID_PREFIX }}
           BUILD_NUMBER: ${{ steps.config.outputs.build-number }}
+          BRANCH: ${{ needs.decide.outputs.branch }}
+          COMMIT: ${{ needs.decide.outputs.sha }}
         # Automatic signing archives with a development profile (so the team
         # needs one registered device, README step 1) and the export below
         # re-signs for the App Store. Forcing CODE_SIGN_IDENTITY to Apple
         # Distribution here fails with "conflicting provisioning settings".
         run: |
-          overrides=("DEVELOPMENT_TEAM=${APPLE_TEAM_ID}" "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}")
+          overrides=(
+            "DEVELOPMENT_TEAM=${APPLE_TEAM_ID}"
+            "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}"
+            "BB_BUILD_LABEL=${BRANCH} @ ${COMMIT:0:7}"
+          )
           if [ -n "${BUNDLE_ID_PREFIX}" ]; then
             overrides+=("BB_BUNDLE_ID_PREFIX=${BUNDLE_ID_PREFIX}")
           fi
@@ -247,6 +273,31 @@ jobs:
             -authenticationKeyIssuerID "${API_ISSUER_ID}" 2>&1 \
             | tee "${RUNNER_TEMP}/xcodebuild-export.log"
 
+      # Best effort: a build without notes is still a good build, so a failure
+      # here only warns. Runs before the key is removed, and uses only the
+      # system python3 and openssl, so no third-party code sees the key.
+      - name: Write the branch into TestFlight's What to Test
+        if: steps.config.outputs.configured == 'true'
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          BRANCH: ${{ needs.decide.outputs.branch }}
+          COMMIT: ${{ needs.decide.outputs.sha }}
+        run: |
+          plist="${RUNNER_TEMP}/BrainBuddy.xcarchive/Info.plist"
+          read_key() { /usr/libexec/PlistBuddy -c "Print :ApplicationProperties:$1" "${plist}"; }
+          subject="$(git log -1 --format=%s "${COMMIT}" 2>/dev/null || true)"
+          python3 ios/ci/testflight_notes.py \
+            --key "${RUNNER_TEMP}/private_keys/AuthKey_${API_KEY_ID}.p8" \
+            --key-id "${API_KEY_ID}" \
+            --issuer-id "${API_ISSUER_ID}" \
+            --bundle-id "$(read_key CFBundleIdentifier)" \
+            --version "$(read_key CFBundleShortVersionString)" \
+            --build "$(read_key CFBundleVersion)" \
+            --notes "${BRANCH} @ ${COMMIT:0:7}${subject:+ — ${subject}}"
+
       # The last step that needs the key is above. Delete it now, whatever
       # happened, so it is gone before any later step runs — above all the
       # third-party upload-artifact action below.
@@ -257,6 +308,7 @@ jobs:
       - name: Summarize the upload
         if: steps.config.outputs.configured == 'true'
         env:
+          BRANCH: ${{ needs.decide.outputs.branch }}
           COMMIT: ${{ needs.decide.outputs.sha }}
         run: |
           plist="${RUNNER_TEMP}/BrainBuddy.xcarchive/Info.plist"
@@ -269,6 +321,7 @@ jobs:
             echo "| Bundle id | \`$(read_key CFBundleIdentifier)\` |"
             echo "| Version | \`$(read_key CFBundleShortVersionString)\` |"
             echo "| Build | \`$(read_key CFBundleVersion)\` |"
+            echo "| Branch | \`${BRANCH}\` |"
             echo "| Commit | \`${COMMIT}\` |"
             echo
             echo "App Store Connect processes the build before it appears in TestFlight."

@@ -191,6 +191,9 @@ struct SettingsScreen: View {
     private var aboutSection: some View {
         Section {
             LabeledContent("Version", value: Self.versionDescription)
+            if let buildLabel = Self.buildLabel {
+                LabeledContent("Build", value: buildLabel)
+            }
             VStack(alignment: .leading, spacing: BBSpacing.s1) {
                 Text("Works offline")
                 Text(offlineExplanation)
@@ -266,6 +269,14 @@ struct SettingsScreen: View {
             return "\(version) (\(build))"
         }
         return version
+    }
+
+    /// "<branch> @ <commit>" on TestFlight builds (BB_BUILD_LABEL in
+    /// project.yml); nil on local builds.
+    static var buildLabel: String? {
+        let label = Bundle.main.infoDictionary?["BBBuildLabel"] as? String
+        guard let label, !label.isEmpty else { return nil }
+        return label
     }
 }
 
