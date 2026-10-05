@@ -310,9 +310,16 @@ What rollback still cannot do, and what to tell people:
 
 ## TestFlight and App Store
 
-The native app in `ios/` is built and uploaded to TestFlight by
-`.github/workflows/ios.yml` once CI has passed on `main` (see `ios/README.md`).
-After the compatible web API is live:
+**There is no iOS relay release yet.** The Expo client that carried the agent
+surfaces was removed, and the native app in `ios/` defers agent surfaces to
+pass 3 (`docs/native-ios-app.md`); no Swift build can show an agent run. Until
+pass 3 ships them, an iOS relay smoke cannot be performed, so do not treat any
+TestFlight or App Store build as relay evidence and do not submit one on the
+strength of this runbook. The rollout gate above still holds for any
+previously installed Expo build.
+
+When pass 3 adds agent surfaces, the release becomes (the native app is
+uploaded to TestFlight by `.github/workflows/ios.yml`, see `ios/README.md`):
 
 1. Confirm the `ios-kit` and `ios-app` CI lanes are green on the exact release
    SHA, and record the TestFlight build ID, git SHA, version, and build number.
