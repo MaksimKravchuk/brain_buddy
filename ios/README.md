@@ -158,14 +158,15 @@ is also pinned to a commit SHA (with its tag in a comment).
   squashed pull request; if several commits are pushed at once only the last
   one is checked, so dispatch the workflow for anything that missed an
   upload.
-- **Any other branch** (except `trunk-candidate/**` and `dependabot/**`):
-  every push that touches `ios/` uploads that commit straight away, without
-  waiting for CI, for fast feedback on a phone. The build carries `<branch> @ <commit>`
+- **Any other branch**: nothing uploads automatically. Run the workflow on
+  that branch (*Actions → iOS TestFlight → Run workflow*, pick the branch) to
+  upload its head straight away, without waiting for CI, for fast feedback
+  on a phone. The build carries `<branch> @ <commit>`
   in Settings → About (the `BBBuildLabel` Info.plist key, from
   `BB_BUILD_LABEL`), and the same text plus the commit subject goes into
   TestFlight's *What to Test* (`ci/testflight_notes.py`, best effort).
-- **Manual run** (*Actions → iOS TestFlight → Run workflow*): uploads the
-  chosen branch.
+- **Manual run on `main`** uploads the current `main`, whether or not it
+  changed `ios/`.
 
 Uploads from all branches, `main` included, run one at a time, because the
 build number is the run number and App Store Connect rejects a build whose
@@ -215,12 +216,12 @@ setup below, the `testflight` job writes what is missing to the run summary
    `testflight`.
    - *Deployment branches and tags*: **No restriction**, so branch builds
      can use the key. This is a deliberate trade-off for fast feedback:
-     anyone who can push a branch to this repository can get it signed and
+     anyone with write access can dispatch any branch and get it signed and
      uploaded with the Admin key (pull requests from forks cannot, they get
      no secrets). To tighten it later, restrict the policy to a pattern such
      as `main` and `claude/*`.
    - *Required reviewers*: none. A reviewer gate would make every branch
-     push wait for a click; add one (with **Prevent self-review**) if more
+     upload wait for a second click; add one (with **Prevent self-review**) if more
      people get push access.
    - Secrets:
      - `APP_STORE_CONNECT_API_KEY_ID`: the key id
@@ -238,8 +239,8 @@ setup below, the `testflight` job writes what is missing to the run summary
    Info.plist answers the export-compliance question, so builds are not held
    for it.
 
-Then run the workflow (*Actions → iOS TestFlight → Run workflow*), push a
-branch that changes `ios/`, or land a change under `ios/`.
+Then run the workflow on a branch (*Actions → iOS TestFlight → Run
+workflow*), or land a change under `ios/`.
 
 ### What the job does
 
@@ -284,8 +285,8 @@ public repositories. On a private repository, macOS minutes are billed at a
 multiple of the Linux rate (10× at the time of writing; check GitHub's
 current pricing). `ios-app` takes a macOS runner for pull requests that touch
 `ios/` or a shared surface and for every push to `main` or
-`trunk-candidate/**`; `testflight` for every upload, including each push
-to a feature branch that touches `ios/`.
+`trunk-candidate/**`; `testflight` for every upload, including each
+dispatched branch build.
 
 ### When the upload fails
 

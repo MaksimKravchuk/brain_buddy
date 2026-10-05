@@ -10,22 +10,17 @@ name: iOS TestFlight
 # build in TestFlight is a commit whose package tests passed and whose app
 # built.
 #
-# Branches: every push to another branch that touches ios/ uploads that commit
-# straight away, without waiting for CI, so a change can be tried on a phone
-# within minutes. The branch and commit are written into the build (Settings →
-# About) and into TestFlight's "What to Test". Uploads from all branches run
-# one at a time (see the testflight job's concurrency). Manual dispatch uploads
-# the chosen ref, whatever branch it is.
+# Branches: nothing uploads on its own. Dispatch the workflow on a branch
+# (Actions → iOS TestFlight → Run workflow, or the API) to upload that
+# branch's head straight away, without waiting for CI, so a change can be
+# tried on a phone within minutes. The branch and commit are written into the
+# build (Settings → About) and into TestFlight's "What to Test". Uploads from
+# all branches run one at a time (see the testflight job's concurrency).
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
     branches: ["main"]
-  push:
-    # main uploads through workflow_run above, after CI; trunk-candidate/**
-    # refs become main; dependabot never touches ios/.
-    branches-ignore: ["main", "trunk-candidate/**", "dependabot/**"]
-    paths: ["ios/**", ".github/workflows/ios.yml"]
   workflow_dispatch:
 
 permissions:
@@ -42,8 +37,8 @@ env:
   XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
 
 jobs:
-  # Which commit to upload, and whether to. A branch push (already filtered to
-  # ios/ changes) and a manual dispatch always upload. Of the CI completions,
+  # Which commit to upload, and whether to. A manual dispatch always uploads
+  # the ref it was started on. Of the CI completions,
   # only a successful CI run of a push to main in this repository counts: a
   # pull request from a fork can have a branch named main too, and
   # workflow_run would fire for its CI run.
@@ -56,7 +51,6 @@ jobs:
     name: Decide what to upload
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'push' ||
       (github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -84,7 +78,7 @@ jobs:
           sha="$(git rev-parse HEAD)"
           echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
           echo "branch=${RUN_BRANCH:-${REF_NAME}}" >> "${GITHUB_OUTPUT}"
-          if [ "${EVENT}" = "workflow_dispatch" ] || [ "${EVENT}" = "push" ]; then
+          if [ "${EVENT}" = "workflow_dispatch" ]; then
             upload=true
           elif ! changed="$(git diff --name-only HEAD^ HEAD 2>/dev/null)"; then
             echo "could not read the parent of ${sha}; uploading"
@@ -101,8 +95,9 @@ jobs:
   # API key and uploads the archive. Until the owner configures the
   # `testflight` environment the job reports what is missing and stays green.
   # That environment's branch policy must allow the branches you upload from
-  # (ios/README.md); anyone who can push such a branch can get it signed and
-  # uploaded with the Admin key, which the owner accepted for fast feedback.
+  # (ios/README.md); anyone with write access can dispatch a branch and get it
+  # signed and uploaded with the Admin key, which the owner accepted for fast
+  # feedback.
   testflight:
     name: Upload to TestFlight
     needs: decide
