@@ -11,12 +11,22 @@ outcome).
 NavigatorInput
   kind:             first_step | reformulate | project_next_action
   task_title:       string?   (absent for project_next_action)
-  task_notes:       string?   (≤ 20 000; truncated to the last 4 000 chars for the prompt, see §3)
+  task_notes:       string?   (≤ 20 000; when the prompt budget is exceeded, the oldest part is dropped and `notes_truncated = true` — research NC-3 default)
   stall_reason:     unclear | too_big | missing_info | waiting_on_someone | no_energy | no_longer_matters | null
   project_name:     string?   (null for a task without a project)
   open_task_titles: [string]  (≤ 20, other open tasks in the same project, excluding this task, most recently updated first)
-  language_hint:    BCP-47 language of task_title (else project_name), detected on device
+  language_hint:    BCP-47 dominant language of title + notes (else project_name), detected on device
+                    (`NLLanguageRecognizer` on Apple platforms; browser-side heuristic on web, server
+                    does not re-detect)
 ```
+
+**Prompt budget** (NC-3 default): the builder measures the assembled prompt (Apple:
+`tokenCount(for:)` on iOS 26.4+, else 3 characters per token; cloud: 3 characters per
+token against `BRAIN_BUDDY_REVIEW_NAVIGATOR_MAX_INPUT_TOKENS`, default 6 000) and, only
+if it exceeds the budget, drops the oldest notes text first. Title, stall reason,
+project name and sibling titles are never dropped. The UI shows "Used the latest part
+of your notes." when `notes_truncated`. Apple's window is 4,096 tokens on iOS 26.x and
+8,192 on iOS 27 (`research-on-device-model.md` §1).
 
 Nothing else: no ids, dates, tags, due dates, other projects, account data or history.
 The same value is built by `NavigatorInputBuilder` in
@@ -89,15 +99,20 @@ actions for this project."
 
 **Structured output**:
 
-- Apple Foundation Models: guided generation with a `@Generable` type
-  `NavigatorGeneration { @Guide(.count(0...3)) proposals: [String];
-  clarifyingQuestion: String? }` in the app target (`#if canImport(FoundationModels)`).
+- Apple Foundation Models: guided generation with a `@Generable` type in the app target
+  (`#if canImport(FoundationModels)`), shape per `research-on-device-model.md` §1
+  "Guided generation fit": `NavigatorReply { kind: .steps | .question;
+  @Guide(.maximumCount(3)) steps: [String]; question: String? }`. Instructions begin
+  "The person's locale is <id>." and "You MUST respond in <language>." (Apple's
+  documented pinning phrase); §2 validation still runs because pinning is not reliable.
 - Cloud (OpenAI chat completions, the same adapter style as
   `backend/app/ai/title_completion.py`): JSON schema response format
   `{"proposals": string[≤3], "clarifying_question": string | null}`; `max_tokens` from
   `BRAIN_BUDDY_REVIEW_NAVIGATOR_MAX_OUTPUT_TOKENS` (default 300); temperature 0.4.
-- Downloaded on-device model: the same JSON shape, parsed and validated by §2; the
-  runtime adapter is decided in `research-on-device-model.md`.
+- Downloaded on-device model (PR-09, iOS/macOS 27+): the same `@Generable` reply through
+  `LanguageModelSession` backed by `CoreAILanguageModel` (recommended runtime,
+  `research-on-device-model.md` §3), so prompt, schema and §2 validation are shared
+  with the Apple-model path.
 
 ## 4. `NavigatorModel` protocol (Swift, `BrainBuddyCore`, Linux-testable)
 
@@ -129,9 +144,9 @@ Implementations:
 
 | type | location | notes |
 |---|---|---|
-| `AppleNavigatorModel` | `ios/BrainBuddy/Navigator/AppleNavigatorModel.swift` | `SystemLanguageModel.default.availability` → reasons; `supportsLocale(_:)` / `supportedLanguages` for the language check; app target only |
+| `AppleNavigatorModel` | `ios/BrainBuddy/Navigator/AppleNavigatorModel.swift` | `SystemLanguageModel.default.availability` → reasons; the detected task language must be in `supportedLanguages` (`supportsLocale` checks only the user's locale); `unsupportedLanguageOrLocale` thrown at `respond` maps to `unavailable(.unsupportedLanguage)`; app target only |
 | `CloudNavigatorModel` | `ios/BrainBuddyKit/Sources/BrainBuddyAPI/NavigatorAPI.swift` | calls §7 of `contracts/http.md`; maps reasons to `NavigatorError` |
-| `DownloadedNavigatorModel` | app target, later slice (PR-09) | behind the same protocol; may not ship in the first iOS navigator release |
+| `DownloadedNavigatorModel` | app target, later slice (PR-09) | Core AI + Qwen3-1.7B 4-bit from an Apple-hosted Background Assets pack, `#available(iOS 27, macOS 27, *)` + memory check; reports `.notDownloaded` / `.deviceNotEligible` otherwise; may not ship in the first navigator release (NC-2) |
 | `StubNavigatorModel` | `ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/` | deterministic for package tests |
 
 `NavigatorRouter` (Core) chooses: Apple model if `available` for the language →
@@ -141,11 +156,18 @@ It never falls back silently from on-device to cloud (constitution I).
 
 ## 5. Evaluation set (SC-005)
 
-`backend/tests/fixtures/navigator_eval_set.json`: ≥ 40 **synthetic** stalled tasks
-(RU and EN, each stall reason, thin and rich inputs, projects with open tasks). No real
-user data. A deterministic test checks the validator against recorded outputs; a manual,
-approval-gated run (`/verify-live` class: spends provider money) records accept/edit
-judgements and personal-fact violations in `specs/020-weekly-review/evidence/`.
+Method and gate: `research-on-device-model.md` §4. Fixtures:
+`backend/tests/fixtures/navigator/eval_v1.json`, ~48 **synthetic** cases (24 RU, 12 EN,
+12 RU/EN code-switched; every stall reason and none; ~25% where the right output is one
+question; notes that name people/places/amounts vs none; 0/5/20 sibling titles), each with
+`expected_kind`, `allowed_entities` and `sibling_titles`. No real user data. A
+deterministic pytest runs the §2 validator and the automatic screens over recorded
+outputs. Generating outputs is manual: cloud runs spend provider money and are
+approval-gated (never unattended or from a subagent); on-device runs use the same
+quantized artifact on a Mac plus ~10 spot checks on an iPhone. Owner blind grading
+(accept / edit / reject); gate ≥ 50 % accepted overall **and** in the Russian subset, 0
+confirmed invented facts. Only fixtures, recorded synthetic outputs and aggregate scores
+are committed (`specs/020-weekly-review/evidence/`).
 The owner's real-task acceptance rate is measured from `review_decisions.ai_use`
 counts (ids and codes only), never from text.
 

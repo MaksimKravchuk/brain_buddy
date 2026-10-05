@@ -141,11 +141,21 @@ admission, rate limiting) under its own `BRAIN_BUDDY_REVIEW_NAVIGATOR_*` setting
 The exact navigator input set is fixed by spec FR-019 and enforced by a strict request
 schema. Proposal text never enters logs, metrics or events.
 
-A downloadable on-device model would be the first third-party runtime dependency in
-the iOS app (`ios/AGENTS.md`: "No third-party dependencies"). This record does not
-grant that exception; it is decided separately (see the feature's
-`research-on-device-model.md`) and the dependency, if any, lands behind the
-`NavigatorModel` protocol without blocking the rest of the feature.
+Apple's on-device model does not support Russian (16 languages on iOS 26.x and 27;
+see the feature's `research-on-device-model.md`), so the choice in FR-023 is the normal
+path for Russian tasks. Routing is per task language, never silently to the cloud.
+
+A downloadable on-device model (recommended: Core AI + Qwen3-1.7B 4-bit in an
+Apple-hosted Background Assets pack, iOS/macOS 27+ only) would be the first third-party
+runtime dependency in the iOS app (`ios/AGENTS.md`: "No third-party dependencies").
+**This record does not grant that exception.** A second ADR, drafted with the slice
+that adds the model (PR-09) and gated on the owner's answer to research NC-2, amends
+that rule for one vetted package in the app target only (never `BrainBuddyCore`),
+records the license review (model Apache-2.0, runtime BSD/MIT), pinned versions and
+asset-pack provenance. Until then the navigator ships with Apple's model and the
+consented cloud provider behind the `NavigatorModel` protocol. Apple Private Cloud
+Compute, if ever used, counts as a cloud provider requiring FR-024 consent (research
+NC-4 default).
 
 ### 6. Rollout
 

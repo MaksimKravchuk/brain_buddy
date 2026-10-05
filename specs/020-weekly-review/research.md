@@ -7,8 +7,8 @@ the current repository; where a fact could not be verified it says so.
 
 ## Open owner questions
 
-Two product-level items. The plan proceeds on the stated default; neither blocks
-increment 1's backend or the iOS core.
+Four product-level items. The plan proceeds on the stated defaults; none blocks
+increment 1 (US1/US2) on any platform. NC-2 – NC-4 affect only increment 2.
 
 - **NEEDS CLARIFICATION (owner) NC-1 — when does an extension made late end?**
   FR-009/FR-012 say an extension moves "the threshold and the auto-park point" 7 days
@@ -23,15 +23,42 @@ increment 1's backend or the iOS core.
   other reading, only `formulation.py`/`Formulation.swift` and the vectors change.
 - **NEEDS CLARIFICATION (owner) NC-2 — the downloadable on-device model.** Shipping
   one (FR-023 (a), FR-023a) means the first third-party runtime dependency in the iOS
-  app, against `ios/AGENTS.md` ("No third-party dependencies"), and a ~1 GB download.
-  The options and a recommendation are in `research-on-device-model.md` (separate
-  research). Question for the owner once that file lands: *approve the dependency
-  exception and the chosen model/size/device floor, or ship increment 2 with Apple's
-  model + cloud only and add the download later?* **Default**: PR-07 ships Apple's model
+  app, against `ios/AGENTS.md` ("No third-party dependencies"), a ~1 GB download, and
+  (per the recommendation in `research-on-device-model.md` §3: Core AI +
+  Qwen3-1.7B 4-bit via an Apple-hosted Background Assets pack, Gemma 4 E2B as eval
+  contender, MLX Swift as plan B) availability only on iOS/macOS 27 with enough memory
+  while the app keeps targeting iOS 26. Questions for the owner (that file's §3.6
+  (iii), (iv)): *approve the dependency exception and a ~1 GB (Qwen3-1.7B) or ~2.6 GB
+  (Gemma 4 E2B) download; accept that iOS 26.x users get only the cloud choice for
+  Russian tasks?* **Default**: PR-08 ships Apple's model
   and the cloud choice (FR-022, FR-023 (b), FR-024 – FR-026); while PR-09 has not
   landed, M-06 offers only the cloud choice and "Not now". FR-023 (a) and FR-023a are
   satisfied only by PR-09, so increment 2 is not accepted against those two
-  requirements until it lands or the owner amends the spec.
+  requirements until it lands or the owner amends the spec. If no candidate clears the
+  SC-005 evaluation gate, the fallback in `research-on-device-model.md` §3.5 applies
+  (cloud-only for unsupported languages; amend FR-023 (a) to "when a qualifying model
+  is available") — a spec change only the owner can make.
+- **NEEDS CLARIFICATION (owner) NC-3 — navigator input larger than the on-device
+  context window.** FR-019 says the input is *exactly* title, notes, stall reason,
+  project name and up to 20 sibling titles. Apple's on-device model has a 4,096-token
+  window on iOS 26.x (8,192 on iOS 27) shared by instructions, schema, input and output
+  (`research-on-device-model.md` §1 "Context window"), which leaves roughly 2,500
+  tokens for notes on iOS 26. Question: *when the notes do not fit, should the
+  navigator (a) use the most recent part of the notes and say so, (b) send fewer
+  sibling titles first, or (c) refuse and offer the cloud/download choice?*
+  **Default**: (a) — budget with `tokenCount(for:)` (iOS 26.4+; a 3-characters-per-token
+  estimate before that), keep all fields except notes intact, truncate notes
+  oldest-first, and show "Used the latest part of your notes." The cloud path uses the
+  same budget rule with its own limit so both paths see the same input shape.
+- **NEEDS CLARIFICATION (owner) NC-4 — is Apple Private Cloud Compute a "cloud
+  provider"?** iOS 27 offers `PrivateCloudComputeLanguageModel` behind the same
+  `LanguageModel` protocol (`research-on-device-model.md` §1 "iOS 27 additions"). Task
+  content leaves the device, so it cannot satisfy FR-022; it would be a variant of
+  FR-023 (b). It also needs a managed entitlement, Small Business Program enrolment and
+  < 2M first-time downloads, and its Russian support is unverified. **Default**: treat
+  PCC as a cloud provider requiring FR-024 consent naming "Apple Private Cloud
+  Compute", and do not build it in this feature unless the owner asks; the
+  `NavigatorModel` protocol admits it later without changes elsewhere.
 
 ## R1. Where Weekly Review lives in the backend
 
@@ -221,7 +248,7 @@ increment 1's backend or the iOS core.
   vars (documented in `.env.example`):
   `BRAIN_BUDDY_REVIEW_NAVIGATOR_PROVIDER=disabled`,
   `_MODEL=gpt-4o-mini`, `_API_KEY_ENV=OPENAI_API_KEY`, `_TIMEOUT_SECONDS=8`,
-  `_MAX_OUTPUT_TOKENS=300`, `_MAX_COST_USD=0.01` (per-call admission from token
+  `_MAX_INPUT_TOKENS=6000`, `_MAX_OUTPUT_TOKENS=300`, `_MAX_COST_USD=0.01` (per-call admission from token
   estimate, the reconciler's admission pattern), `_MAX_DAILY_COST_USD=0.20` (per owner,
   table `navigator_usage`). Rate limit: 20 calls / 10 min per owner via
   `backend/app/core/rate_limit.py`. Startup fails loudly when the provider is
@@ -245,13 +272,32 @@ increment 1's backend or the iOS core.
   completion's per-request checkbox) and immediate revocation (so re-checked per
   request). No per-owner AI consent store exists today.
 
-### Apple on-device model (summary; full research in `research-on-device-model.md`)
+### Apple on-device model and the downloadable model (summary)
 
-- **Decision placeholder**: the model choice for FR-023 (a) and the language-coverage
-  conclusions are owned by `research-on-device-model.md`, written separately. This plan
-  depends only on the `NavigatorModel` protocol (contracts/navigator.md §4), so either
-  outcome fits without changing US1/US2 or the cloud path.
-- **What this stage verified (2026-10-05)**:
+Full research, evidence flags and sources: `research-on-device-model.md` (separate
+document; not repeated here).
+
+- **Decision**: route per task, never per device. Classify the task text's language
+  with `NLLanguageRecognizer` (first-party NaturalLanguage, app target); use
+  `SystemLanguageModel` only when it is `.available` **and** the detected language is in
+  `supportedLanguages`; keep the thrown `unsupportedLanguageOrLocale` as a backstop;
+  otherwise show the FR-023 choice with the reason from `UnavailableReason` or
+  "language not supported". **Apple's model does not support Russian on iOS 26.x or
+  iOS 27** (16 languages; secondary sources, primary pages blocked), so for the owner's
+  Russian tasks the FR-023 choice is the normal path, not an edge case.
+- **Decision (option (a), slice PR-09)**: as recommended in that file §3: Core AI +
+  `CoreAILanguageModel` behind the iOS 27 `LanguageModel` protocol, Qwen3-1.7B 4-bit
+  (Apache-2.0) in an Apple-hosted Background Assets pack downloaded on explicit request,
+  gated by `#available(iOS 27, macOS 27, *)` and a memory check (with the
+  `increased-memory-limit` entitlement); Gemma 4 E2B as the evaluation contender; MLX
+  Swift as plan B. Deployment target stays iOS 26. A separate ADR (drafted with PR-09)
+  amends `ios/AGENTS.md` "No third-party dependencies" for that one package, app target
+  only, never `BrainBuddyCore`. Subject to NC-2.
+- **Why this does not block anything else**: the plan depends only on the
+  `NavigatorModel` protocol (contracts/navigator.md §4) and on Core-side input
+  assembly and output validation, which stay Linux-testable; PR-09 adds one
+  implementation.
+- **What this stage itself verified (2026-10-05)**, consistent with that file:
   - Apple documentation for `SystemLanguageModel` (fetched from developer.apple.com):
     iOS/iPadOS/macOS 26.0+; availability via `availability` with
     `.unavailable(.deviceNotEligible | .modelNotReady | …)`;

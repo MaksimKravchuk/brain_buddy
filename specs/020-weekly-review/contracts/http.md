@@ -254,6 +254,7 @@ validation: `contracts/navigator.md`.
 | status | `detail.reason` | when | design state |
 |---|---|---|---|
 | 400 | `navigator_consent_required` | no current consent row for the configured provider, or request consent mismatch | M-07 consent / consent after revoke |
+| 400 | `navigator_input_too_large` | estimated input above `BRAIN_BUDDY_REVIEW_NAVIGATOR_MAX_INPUT_TOKENS` (clients truncate notes first, contracts/navigator.md §1) | generic error + Ref |
 | 404 | `weekly_review_disabled` | flag off | — |
 | 429 | `navigator_rate_limited` (+ `Retry-After`) | per-owner rate limit | M-07 timeout-style copy |
 | 429 | `navigator_cost_cap` | per-call or daily cost cap | M-07 "usage limit", no retry |
