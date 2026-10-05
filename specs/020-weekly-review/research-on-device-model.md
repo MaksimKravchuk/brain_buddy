@@ -147,7 +147,8 @@ and the
 - **Spec question (FR-019):** the input is "exactly" the notes. When the notes
   exceed the budget, do we truncate them (and say so) or refuse? The proposal
   is to budget with `tokenCount(for:)` and truncate oldest-first with a visible
-  notice.
+  notice. *Superseded by the owner's decision of 2026-10-05 (research.md NC-3, spec
+  FR-019): drop the middle of the notes and keep the beginning and the latest lines.*
 
 ### Device floor
 

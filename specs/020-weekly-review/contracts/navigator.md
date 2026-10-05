@@ -11,7 +11,7 @@ outcome).
 NavigatorInput
   kind:             first_step | reformulate | project_next_action
   task_title:       string?   (absent for project_next_action)
-  task_notes:       string?   (≤ 20 000; when the prompt budget is exceeded, the oldest part is dropped and `notes_truncated = true` — research NC-3 default)
+  task_notes:       string?   (≤ 20 000; when the prompt budget is exceeded, the middle of the notes is dropped (beginning and most recent lines kept) and `notes_truncated = true` — owner decision NC-3, FR-019)
   stall_reason:     unclear | too_big | missing_info | waiting_on_someone | no_energy | no_longer_matters | null
   project_name:     string?   (null for a task without a project)
   open_task_titles: [string]  (≤ 20, other open tasks in the same project, excluding this task, most recently updated first)
@@ -20,12 +20,13 @@ NavigatorInput
                     does not re-detect)
 ```
 
-**Prompt budget** (NC-3 default): the builder measures the assembled prompt (Apple:
+**Prompt budget** (owner decision NC-3): the builder measures the assembled prompt (Apple:
 `tokenCount(for:)` on iOS 26.4+, else 3 characters per token; cloud: 3 characters per
 token against `BRAIN_BUDDY_REVIEW_NAVIGATOR_MAX_INPUT_TOKENS`, default 6 000) and, only
-if it exceeds the budget, drops the oldest notes text first. Title, stall reason,
-project name and sibling titles are never dropped. The UI shows "Used the latest part
-of your notes." when `notes_truncated`. Apple's window is 4,096 tokens on iOS 26.x and
+if it exceeds the budget, drops the middle of the notes. The beginning and the most
+recently added lines are kept. Title, stall reason, project name and sibling titles are
+never dropped. When `notes_truncated` is set, the UI shows "Part of the notes was not
+considered." Apple's window is 4,096 tokens on iOS 26.x and
 8,192 on iOS 27 (`research-on-device-model.md` §1).
 
 Nothing else: no ids, dates, tags, due dates, other projects, account data or history.
@@ -146,7 +147,7 @@ Implementations:
 |---|---|---|
 | `AppleNavigatorModel` | `ios/BrainBuddy/Navigator/AppleNavigatorModel.swift` | `SystemLanguageModel.default.availability` → reasons; the detected task language must be in `supportedLanguages` (`supportsLocale` checks only the user's locale); `unsupportedLanguageOrLocale` thrown at `respond` maps to `unavailable(.unsupportedLanguage)`; app target only |
 | `CloudNavigatorModel` | `ios/BrainBuddyKit/Sources/BrainBuddyAPI/NavigatorAPI.swift` | calls §7 of `contracts/http.md`; maps reasons to `NavigatorError` |
-| `DownloadedNavigatorModel` | app target, later slice (PR-09) | Core AI + Qwen3-1.7B 4-bit from an Apple-hosted Background Assets pack, `#available(iOS 27, macOS 27, *)` + memory check; reports `.notDownloaded` / `.deviceNotEligible` otherwise; may not ship in the first navigator release (NC-2) |
+| `DownloadedNavigatorModel` | app target, later slice (PR-09) | Core AI + Qwen3-1.7B 4-bit from an Apple-hosted Background Assets pack, `#available(iOS 27, macOS 27, *)` + memory check; reports `.notDownloaded` / `.deviceNotEligible` otherwise; late slice approved by the owner (NC-2) |
 | `StubNavigatorModel` | `ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/` | deterministic for package tests |
 
 `NavigatorRouter` (Core) chooses: Apple model if `available` for the language →

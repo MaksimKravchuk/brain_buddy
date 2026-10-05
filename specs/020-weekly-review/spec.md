@@ -60,7 +60,7 @@ Optionally they say what got in the way. The card is reachable from the task on 
 4. **Given** a task that asks for a decision, **When** the person changes only letter case, whitespace or punctuation of the title, **Then** the formulation age does not restart.
 5. **Given** a task that asks for a decision, **When** the person chooses "find a first step" and saves a new title, **Then** the old title is preserved in the task's notes as "Was: …" and the formulation age restarts.
 6. **Given** a task that asks for a decision, **When** the person picks the stall reason "too big", **Then** "find a first step" is visually recommended. The person may still choose any decision.
-7. **Given** a task that asks for a decision and has not been extended, **When** the person chooses "keep 7 more days" with a reason, **Then** the marker clears for 7 days and both the threshold and the auto-park date move 7 days later.
+7. **Given** a task that asks for a decision and has not been extended, **When** the person chooses "keep 7 more days" with a reason, **Then** the marker clears for 7 days from the day of the extension. The task asks again 7 days after the extension day and is auto-parked 14 days after it (for example, extended on day 18 with a 14-day threshold: asks again on day 25, parked on day 32).
 8. **Given** a formulation already extended once, **When** its card opens, **Then** "keep 7 more days" is not offered.
 9. **Given** a task in Next, **When** the person edits only notes, tags, project, priority or subtasks, **Then** its formulation age does not change.
 9a. **Given** a task in Next for 20 days with a due date 10 days from now, **When** the person views Next, **Then** it shows no age marker. Auto-park does not happen before the due date. On the due date its age counts from that day.
@@ -243,7 +243,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 - **FR-006**: For a task that asks for a decision, users MUST be able to choose: done; reformulate; find a first step; move to Waiting (with who/what); release to Someday; cancel; or keep 7 more days.
 - **FR-007**: Users MUST be able to optionally record a stall reason: unclear, too big, missing information, waiting on someone, unpleasant/no energy, no longer matters. Choosing a reason MUST visually recommend a fitting decision without restricting choice.
 - **FR-008**: "Find a first step" MUST preserve the previous title in the task's notes as "Was: <old title>" and start a new formulation.
-- **FR-009**: "Keep 7 more days" MUST require a reason, MUST be available once per formulation, and MUST shift both the threshold and the auto-park point by 7 days.
+- **FR-009**: "Keep 7 more days" MUST require a reason, MUST be available once per formulation. It is measured from the day of the extension, not from the original threshold: the formulation asks for a decision again 7 days after the extension day, and its auto-park point becomes 14 days after the extension day.
 - **FR-010**: The decision card MUST be reachable from the task itself on any day, not only inside a review, and decisions made there MUST be recorded the same way as in-review decisions.
 - **FR-011**: Every decision MUST be applied through the existing idempotent, owner-serialized task operations and MUST be rejected as stale if the task changed since the card was shown.
 - **FR-048**: After any decision (decision card, Inbox, Waiting, Someday), System MUST offer **Undo** for a few seconds, as the existing Process inbox does. Undo restores the task's previous state, title and formulation clock, and removes the recorded decision.
@@ -251,7 +251,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 
 **Auto-park and return**
 
-- **FR-012**: System MUST move an undecided formulation from Next to Someday when its age reaches threshold + 7 days (or + 14 days if extended), preserving project, tags, notes and due date, and marking it as parked automatically with the time.
+- **FR-012**: System MUST move an undecided formulation from Next to Someday when its age reaches threshold + 7 days (or, if extended, 14 days after the extension day, per FR-009), preserving project, tags, notes and due date, and marking it as parked automatically with the time.
 - **FR-013**: Auto-park MUST NOT apply to a task whose formulation, state or extension changed after the park became due. Applying it twice to the same formulation MUST have no additional effect and MUST NOT create a sync conflict.
 - **FR-014**: Auto-park MUST run whether or not any client is open, for accounts with server sync, and on-device for account-less iOS use.
 - **FR-015**: System MUST show auto-parked tasks the person has not yet seen on a "while you were away" screen at the next review or app open, with one-tap return per task and a return-all action. Returned tasks start a new formulation.
@@ -265,6 +265,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
   - **Input**: exactly the task's title, notes and optional stall reason, the project's name, and the titles of up to 20 other open tasks in the same project. Nothing else is sent, regardless of model.
   - **Project without a next action**: the input is the project name and its open task titles.
   - **No duplicates**: proposals MUST NOT duplicate an open task already in that project.
+  - **Too long for the model**: if the input exceeds the model's context window, the middle of the notes is dropped. The beginning and the most recently added lines are kept. The card says "part of the notes was not considered". The cloud provider receives exactly the same reduced input as the on-device model.
 - **FR-020**: A proposal MUST NOT be written to any task until the person confirms it, optionally after editing.
 - **FR-021**: Proposals MUST NOT introduce personal facts (people, places, amounts, dates) absent from the task. When information is insufficient, the navigator asks one clarifying question instead. The person's answer is appended to the task's notes (a normal notes edit, which does not touch the formulation clock), and the navigator runs again on the updated input.
 - **FR-022**: On iOS and macOS, System MUST use Apple's on-device model when it is available. In that case no task content leaves the device, and the feature works offline.
@@ -272,7 +273,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
   - (a) download a separate on-device model that supports the task's language, if the device can run it — the download size is shown before it starts, and once installed the model serves suggestions with no task content leaving the device, including offline;
   - (b) use the cloud provider, subject to FR-024.
 
-  The person's choice is remembered and changeable in settings.
+  The person's choice is remembered and changeable in settings. Option (a) is offered only where the device and OS can run the downloadable model (iOS/macOS 27 or later with enough memory, per plan). It is delivered in a late slice; until then, and on older systems, only (b) is offered. Apple Private Cloud Compute, if ever used, counts as a cloud provider under FR-024; it is not built now.
 - **FR-049**: The separate on-device model MUST be downloaded only on explicit request, MUST be deletable in settings, and MUST NOT be required for any non-AI part of the feature. Download failure or lack of storage MUST be shown with a retry and the cloud alternative.
 - **FR-024**: Every cloud-provider request (web, and the Apple-platform cloud choice under FR-023) MUST be preceded by a one-time consent that names the provider and lists the data sent. Consent MUST be revocable in settings, and a revoked consent MUST stop requests immediately.
 - **FR-025**: Cloud-provider requests MUST respect existing provider cost caps. Failures (timeout, cap, provider error, malformed output) MUST be shown with a correlation ID and leave the review usable without AI.

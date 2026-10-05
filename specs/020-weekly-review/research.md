@@ -5,60 +5,31 @@
 Format per decision: Decision / Rationale / Alternatives considered. Facts are cited to
 the current repository; where a fact could not be verified it says so.
 
-## Open owner questions
+## Owner decisions (formerly open questions NC-1 – NC-4)
 
-Four product-level items. The plan proceeds on the stated defaults; none blocks
-increment 1 (US1/US2) on any platform. NC-2 – NC-4 affect only increment 2.
+Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
 
-- **NEEDS CLARIFICATION (owner) NC-1 — when does an extension made late end?**
-  FR-009/FR-012 say an extension moves "the threshold and the auto-park point" 7 days
-  later ("+14 days if extended", i.e. relative to the threshold). US1-7 says "the
-  marker clears for 7 days", and design M-02 shows dates relative to the extension day
-  ("Kept on Mon 5 Oct. Asks again on Mon 12 Oct; moves to Someday on Mon 19 Oct").
-  The two agree only when the extension is made on the threshold day. Question:
-  *If someone extends on day 19 of a 14-day threshold, should it ask again on day 26
-  (7 days after the extension, design) or day 21 (threshold + 7, FR-012)?* **Default
-  used by this plan**: relative to the extension day, `ask_at = max(threshold instant,
-  extended_at) + 7 d`, `park_due_at = ask_at + 7 d` (R6). If the owner chooses the
-  other reading, only `formulation.py`/`Formulation.swift` and the vectors change.
-- **NEEDS CLARIFICATION (owner) NC-2 — the downloadable on-device model.** Shipping
-  one (FR-023 (a), FR-049) means the first third-party runtime dependency in the iOS
-  app, against `ios/AGENTS.md` ("No third-party dependencies"), a ~1 GB download, and
-  (per the recommendation in `research-on-device-model.md` §3: Core AI +
-  Qwen3-1.7B 4-bit via an Apple-hosted Background Assets pack, Gemma 4 E2B as eval
-  contender, MLX Swift as plan B) availability only on iOS/macOS 27 with enough memory
-  while the app keeps targeting iOS 26. Questions for the owner (that file's §3.6
-  (iii), (iv)): *approve the dependency exception and a ~1 GB (Qwen3-1.7B) or ~2.6 GB
-  (Gemma 4 E2B) download; accept that iOS 26.x users get only the cloud choice for
-  Russian tasks?* **Default**: PR-08 ships Apple's model
-  and the cloud choice (FR-022, FR-023 (b), FR-024 – FR-026); while PR-09 has not
-  landed, M-06 offers only the cloud choice and "Not now". FR-023 (a) and FR-049 are
-  satisfied only by PR-09, so increment 2 is not accepted against those two
-  requirements until it lands or the owner amends the spec. If no candidate clears the
-  SC-005 evaluation gate, the fallback in `research-on-device-model.md` §3.5 applies
-  (cloud-only for unsupported languages; amend FR-023 (a) to "when a qualifying model
-  is available") — a spec change only the owner can make.
-- **NEEDS CLARIFICATION (owner) NC-3 — navigator input larger than the on-device
-  context window.** FR-019 says the input is *exactly* title, notes, stall reason,
-  project name and up to 20 sibling titles. Apple's on-device model has a 4,096-token
-  window on iOS 26.x (8,192 on iOS 27) shared by instructions, schema, input and output
-  (`research-on-device-model.md` §1 "Context window"), which leaves roughly 2,500
-  tokens for notes on iOS 26. Question: *when the notes do not fit, should the
-  navigator (a) use the most recent part of the notes and say so, (b) send fewer
-  sibling titles first, or (c) refuse and offer the cloud/download choice?*
-  **Default**: (a) — budget with `tokenCount(for:)` (iOS 26.4+; a 3-characters-per-token
-  estimate before that), keep all fields except notes intact, truncate notes
-  oldest-first, and show "Used the latest part of your notes." The cloud path uses the
-  same budget rule with its own limit so both paths see the same input shape.
-- **NEEDS CLARIFICATION (owner) NC-4 — is Apple Private Cloud Compute a "cloud
-  provider"?** iOS 27 offers `PrivateCloudComputeLanguageModel` behind the same
-  `LanguageModel` protocol (`research-on-device-model.md` §1 "iOS 27 additions"). Task
-  content leaves the device, so it cannot satisfy FR-022; it would be a variant of
-  FR-023 (b). It also needs a managed entitlement, Small Business Program enrolment and
-  < 2M first-time downloads, and its Russian support is unverified. **Default**: treat
-  PCC as a cloud provider requiring FR-024 consent naming "Apple Private Cloud
-  Compute", and do not build it in this feature unless the owner asks; the
-  `NavigatorModel` protocol admits it later without changes elsewhere.
+- **NC-1 — late extension**: measured from the extension day. `ask_at = extended_at + 7 d`,
+  `park_due_at = extended_at + 14 d` (FR-009, FR-012, US1-7). Example: extended on
+  day 18 of a 14-day threshold → asks again on day 25, parked on day 32. The design
+  frame M-04 "Keep until Thu 15 Oct" (with today Fri 9 Oct) is a copy slip to correct
+  during implementation: it must read Fri 16 Oct.
+- **NC-2 — downloadable on-device model**: approved as a **late slice** (PR-09). The
+  owner approves the iOS third-party dependency exception (to be recorded in its own ADR
+  with PR-09) and a download of roughly 1–2.6 GB; the final model (Qwen3-1.7B 4-bit vs
+  Gemma 4 E2B) is chosen by the offline SC-005 evaluation
+  (`research-on-device-model.md` §3). Until PR-09 lands, and on iOS/macOS 26, Russian
+  tasks use the consented cloud choice (FR-023 (b)). If no candidate passes the
+  evaluation, the fallback in `research-on-device-model.md` §3.5 needs an owner spec
+  amendment.
+- **NC-3 — input larger than the context window**: drop the **middle** of the notes,
+  keep the beginning and the most recently added lines, keep every other field intact,
+  and show "part of the notes was not considered" (FR-019). Budget with
+  `tokenCount(for:)` (iOS 26.4+; a 3-characters-per-token estimate before that). The
+  cloud path receives exactly the same reduced input.
+- **NC-4 — Apple Private Cloud Compute**: counts as a cloud provider under FR-024
+  (consent naming "Apple Private Cloud Compute"); not built in this feature
+  (FR-023 note). The `NavigatorModel` protocol admits it later without changes elsewhere.
 
 ## R1. Where Weekly Review lives in the backend
 
@@ -147,7 +118,7 @@ increment 1 (US1/US2) on any platform. NC-2 – NC-4 affect only increment 2.
 ## R6. Extension arithmetic
 
 - **Decision**: `ask_at = max(start + T, extended_at) + 7 d`;
-  `park_due_at = max(ask_at + 7 d, floors)` (NC-1 default).
+  `park_due_at = max(ask_at + 7 d, floors)` (NC-1, owner decision).
 - **Rationale**: matches US1-7 ("clears for 7 days") and M-02's dates; equals FR-012's
   "+14" when extended on the threshold day.
 - **Alternatives**: threshold-relative (FR-012 literal): an extension made on day 20
@@ -292,7 +263,7 @@ document; not repeated here).
   `increased-memory-limit` entitlement); Gemma 4 E2B as the evaluation contender; MLX
   Swift as plan B. Deployment target stays iOS 26. A separate ADR (drafted with PR-09)
   amends `ios/AGENTS.md` "No third-party dependencies" for that one package, app target
-  only, never `BrainBuddyCore`. Subject to NC-2.
+  only, never `BrainBuddyCore`. Approved as a late slice (NC-2).
 - **Why this does not block anything else**: the plan depends only on the
   `NavigatorModel` protocol (contracts/navigator.md §4) and on Core-side input
   assembly and output validation, which stay Linux-testable; PR-09 adds one

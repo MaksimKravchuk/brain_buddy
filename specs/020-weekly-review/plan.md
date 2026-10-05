@@ -52,7 +52,7 @@ concurrency); macOS POC Swift (`macos/Package.swift`, macOS 26).
 OpenAI HTTP adapter style (`httpx`), and `NaturalLanguage` (`NLLanguageRecognizer`,
 first-party) for task-language routing. A downloadable on-device model runtime
 (recommended Core AI `coreai-models` package, iOS 27+) would be the first third-party iOS
-dependency; it is isolated in slice PR-09 and gated by NC-2 and its own ADR
+dependency; it is isolated in slice PR-09 and approved by the owner as a late slice (NC-2) and gated by its own ADR
 (research.md R13; `research-on-device-model.md`).
 
 **Storage**: backend `<data_dir>/tasks.sqlite3` (Tasks module): new optional task payload
@@ -97,7 +97,7 @@ each; ~40 new endpoints-or-fields across 3 clients; 29 designed screens.
 - **Spec workflow** — PASS. `intake.md`, `spec.md` (Clarifications session 2026-10-05,
   no NEEDS CLARIFICATION markers), `checklists/requirements.md` and the signed-off
   `design.md` exist. Two owner questions found during planning are recorded in
-  research.md (NC-1 – NC-4) with defaults; none changes increment 1's contracts.
+  research.md (NC-1 – NC-4), resolved by the owner on 2026-10-05; none changes increment 1's contracts.
 - **Consent & Safety** — PASS with design. On-device navigator needs no consent and sends
   nothing (FR-022). Cloud requires a persisted per-owner per-provider consent that the
   server re-checks on every request; revocation stops the next request; no silent
@@ -423,15 +423,15 @@ widget targets; the web gets one feature folder. Router and module file names av
   (`research-on-device-model.md` §1), so the router classifies the task text with
   `NLLanguageRecognizer` first and goes straight to the M-06 choice for unsupported
   languages; `unsupportedLanguageOrLocale` thrown at `respond` is the backstop. Input
-  budget: Apple's window is 4,096 tokens on iOS 26.x; notes are truncated oldest-first
-  with a visible note (research NC-3 default; contracts/navigator.md §1).
+  budget: Apple's window is 4,096 tokens on iOS 26.x; the middle of the notes is dropped
+  (beginning and most recent lines kept) with a visible note (owner decision NC-3; contracts/navigator.md §1).
 - **Downloadable model** (FR-023 (a), FR-049): slice PR-09, behind the same protocol;
   recommended Core AI + Qwen3-1.7B 4-bit in an Apple-hosted Background Assets pack,
   iOS/macOS 27+ with a memory check and the `increased-memory-limit` entitlement
   (`ios/project.yml`), free-space check declared in `ios/Shared/PrivacyInfo.xcprivacy`;
-  needs a dependency-exception ADR and the owner's answer to NC-2. M-06 download states
+  needs a dependency-exception ADR; the owner approved it as a late slice (NC-2). M-06 download states
   (progress, interrupted, storage, installed) and M-23 delete-with-confirmation are built
-  in PR-09. Apple Private Cloud Compute is not built (NC-4 default: it would count as a
+  in PR-09. Apple Private Cloud Compute is not built (owner decision NC-4: it would count as a
   cloud provider).
 - **Web**: D-02 navigator states (consent dialog focusing "Not now", proposals radio
   group, timeout/cost cap/malformed banners with Ref); D-04 cloud consent switch naming
@@ -567,7 +567,7 @@ owner's approval there. Classes per ADR-0008 / `scripts/classify_path_risk.py`
 | PR-06 | 1 | Mac "Weekly review · coming later" row | — | `macos/Sources/BrainBuddyMac/ContentView.swift`, `macos/Tests/BrainBuddyMacTests/*` | SHIP |
 | PR-07 | 2 | Backend navigator: adapter, consent, usage caps, routes, env | PR-02 | `backend/app/modules/tasks/navigator.py`, `backend/app/api/review_navigator.py`, `backend/app/core/{config.py,rate_limit.py}`, `backend/app/container.py`, `.env.example`, tests | **ASK** (mech.: `.env.example`; sem.: provider credentials, new egress, consent) |
 | PR-08 | 2 | iOS navigator: protocol, router, validator, Apple model, cloud client, M-05, M-06 (cloud choice), M-07, M-08, M-19 AI states, M-23 Suggestions | PR-04, PR-07 | `ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift`, `…/BrainBuddyAPI/NavigatorAPI.swift`, `ios/BrainBuddy/Navigator/*`, `ios/BrainBuddy/Screens/Review/*` | SHOW |
-| PR-09 | 2 (late; may slip) | Downloadable on-device model: dependency-exception ADR, Core AI runtime + model pack, M-06 download states, M-23 delete (FR-023 (a), FR-049); SC-005 eval gate | PR-08, NC-2 | `ios/BrainBuddy/Navigator/DownloadedNavigatorModel.swift` (new), `ios/project.yml`, `ios/Shared/PrivacyInfo.xcprivacy`, `docs/decisions/` (new ADR), `backend/tests/fixtures/navigator/eval_v1.json` | **ASK** (third-party dependency exception, external model download, new entitlement) |
+| PR-09 | 2 (late; may slip) | Downloadable on-device model: dependency-exception ADR, Core AI runtime + model pack, M-06 download states, M-23 delete (FR-023 (a), FR-049); SC-005 eval gate | PR-08 | `ios/BrainBuddy/Navigator/DownloadedNavigatorModel.swift` (new), `ios/project.yml`, `ios/Shared/PrivacyInfo.xcprivacy`, `docs/decisions/` (new ADR), `backend/tests/fixtures/navigator/eval_v1.json` | **ASK** (third-party dependency exception, external model download, new entitlement) |
 | PR-10 | 2 | Web navigator in D-02; D-04 consent switch | PR-05, PR-07 | `frontend/src/features/review/*`, `frontend/src/api/review.ts` | SHOW |
 | PR-11 | 3 | Backend review flow: runs, queues, capacity, receipts, bulk release, restart, regularity, next review | PR-07 | `backend/app/modules/tasks/review_flow.py`, `backend/app/api/review_flow.py`, `backend/app/api/__init__.py`, tests | SHOW |
 | PR-12 | 3 | iOS review: M-10, M-11, M-12, M-13 – M-22, M-23 schedule, M-24 widget, M-25 notification, Lists entry | PR-08, PR-11 | `ios/BrainBuddy/Screens/{Review,Browse,Settings}/*`, `ios/BrainBuddy/Review/*`, `ios/BrainBuddyWidgets/*`, `ios/BrainBuddy/App/*`, `docs/native-ios-app.md` | SHOW |
@@ -597,7 +597,16 @@ schedule/notification/onboarding; (4) macOS after Mac sync.
   derives risk **high** for this feature: the review run needs the recorded human sign-off
   (ADR-0012).
 
-## Inconsistencies found while planning (spec/design not edited)
+## Inconsistencies found while planning
+
+Status after the owner's decisions and the spec amendments of 2026-10-05:
+- **Resolved in spec.md**: items 1 (edge-case note), 2 (NC-1: measured from the
+  extension day), 3 (renumbered FR-046 – FR-050), 4 (D-11 attribution) and 5 (FR-005:
+  canvas only where it exists).
+- **Remaining work in this plan**:
+  - item 2: the M-04 date copy, which is corrected during implementation;
+  - item 6: new web UI in PR-13;
+  - item 7: no impact.
 
 1. **Archived-project states are unreachable today.** Archiving a project clears
    `project_id` on its tasks on the backend (`service.py:989-1012`) and on iOS
@@ -608,10 +617,10 @@ schedule/notification/onboarding; (4) macOS after Mac sync.
    (`project_archived` reason) defensively and tests it with a fixture, nothing more.
 2. **Extension arithmetic** FR-009/FR-012 vs US1-7 and M-02 (NC-1). Also M-04 "Keep until
    Thu 15 Oct" with today Fri 9 Oct is 6 days, matching neither reading.
-3. **Lettered requirement ids** (FR-046, FR-047, FR-048, FR-049, FR-050) are not
-   recognised by `scripts/check_requirement_coverage.py:44` or the PR-срезы validator in
-   `scripts/check_spec_kit_specs.py:165-166, 212-214`; they cannot be gate-enforced or
-   listed in a slice manifest (R19).
+3. **Lettered requirement ids** (formerly FR-003a, FR-010a, FR-011a, FR-023a, FR-034a)
+   were not recognised by `scripts/check_requirement_coverage.py:44` or the PR-срезы
+   validator in `scripts/check_spec_kit_specs.py:165-166, 212-214`. Resolved: they were
+   renumbered FR-046 – FR-050 (R19).
 4. **D-11 attribution**: spec Assumptions and intake cite "ADR-0006 (… D-11)"; D-11 is in
    `docs/vnext-cloud-design-build-contract.md:757`, not ADR-0006.
 5. **Third-stall "Think it through" on iOS**: FR-005/M-03 offer the thinking canvas, but
@@ -626,7 +635,7 @@ schedule/notification/onboarding; (4) macOS after Mac sync.
 
 ## Constitution Check (post-design)
 
-- Spec workflow — PASS (NC-1 – NC-4 recorded with defaults; inconsistencies listed for
+- Spec workflow — PASS (NC-1 – NC-4 resolved by the owner; inconsistencies listed for
   the owner; no spec/design edits by this stage).
 - Consent & Safety — PASS: strict navigator input, per-request consent re-check,
   no silent fallback, content-free logs with a test, export + purge of every new record,
@@ -650,4 +659,4 @@ Delivery risk: **HIGH / ASK** remains for the feature (PR-01, PR-02, PR-07, PR-0
 |---|---|---|
 | Review records stored in the Tasks module's SQLite file instead of ADR-0001's separate Review module | atomic decision + task write, exact Undo, one idempotency record per decision | separate store needs a saga for every decision and a second export/purge path (R1); recorded by ADR-0027 |
 | Clock rule implemented three times (Python, Swift, TS key only) | iOS must work offline/account-less; web shows the cosmetic-edit note | server-only rule cannot serve offline iOS; mitigated by one byte-identical vector file with a drift test (R3) |
-| Possible first third-party iOS dependency (PR-09) | FR-023 (a) downloadable on-device model; Apple's model has no Russian | isolated behind `NavigatorModel`, app target only, gated by NC-2, a dependency-exception ADR and its own ASK slice; Core AI's raw framework without the package would need a hand-written tokenizer/decoder (`research-on-device-model.md` §2) |
+| Possible first third-party iOS dependency (PR-09) | FR-023 (a) downloadable on-device model; Apple's model has no Russian | isolated behind `NavigatorModel`, app target only, approved by the owner (NC-2), gated by a dependency-exception ADR and its own ASK slice; Core AI's raw framework without the package would need a hand-written tokenizer/decoder (`research-on-device-model.md` §2) |

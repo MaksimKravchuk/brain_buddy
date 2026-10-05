@@ -149,13 +149,13 @@ A downloadable on-device model (recommended: Core AI + Qwen3-1.7B 4-bit in an
 Apple-hosted Background Assets pack, iOS/macOS 27+ only) would be the first third-party
 runtime dependency in the iOS app (`ios/AGENTS.md`: "No third-party dependencies").
 **This record does not grant that exception.** A second ADR, drafted with the slice
-that adds the model (PR-09) and gated on the owner's answer to research NC-2, amends
+that adds the model (PR-09) and approved by the owner as a late slice (research NC-2), amends
 that rule for one vetted package in the app target only (never `BrainBuddyCore`),
 records the license review (model Apache-2.0, runtime BSD/MIT), pinned versions and
 asset-pack provenance. Until then the navigator ships with Apple's model and the
 consented cloud provider behind the `NavigatorModel` protocol. Apple Private Cloud
 Compute, if ever used, counts as a cloud provider requiring FR-024 consent (research
-NC-4 default).
+owner decision NC-4).
 
 ### 6. Rollout
 
