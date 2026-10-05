@@ -1,0 +1,188 @@
+# ADR-0027 (draft): Native-task Weekly Review, the formulation clock, and auto-park
+
+<!--
+  DRAFT produced by /speckit-plan for specs/020-weekly-review. It is not an
+  accepted record. Slice PR-01 copies it to
+  docs/decisions/0027-native-task-weekly-review-and-auto-park.md with
+  Status: Accepted once the owner signs it off. Number check (2026-10-05): 0021
+  and 0025 are each used twice under docs/decisions/; no file or text in docs/,
+  specs/, scripts/, .specify/, .claude/, AGENTS.md, CLAUDE.md or README.md uses
+  0027, so 0027 is the next unused number.
+-->
+
+- **Status**: Proposed (draft for owner sign-off)
+- **Date**: 2026-10-05
+- **Decision owner**: Max (founder)
+- **Supersedes in part**: ADR-0006, only "Weekly Review remains explicitly deferred"
+  (Context, lines 29-31), audit row B-09's "do not turn `due Sun` into product state
+  until Weekly Review cadence is separately accepted" (line 81), and the UI-control
+  row "Weekly review coming later — keep visibly non-interactive until its accepted
+  workflow exists" (line 322). Build-contract open item D-11
+  (`docs/vnext-cloud-design-build-contract.md:757`, "Define cadence, timezone, and
+  due calculation before showing a badge") is closed by this record.
+- **Amends**: ADR-0001, only the **Review** module row (line 61), the
+  `WeeklyReview`/`WeeklyReviewOutcome` model (lines 266-293), the
+  `/weekly-reviews` endpoints (lines 468-470) and the `reviews/{owner_id}/…json`
+  storage line (line 619), for **native tasks**. The capture-based review model stays
+  reserved for the Organize/Capture tranche and is not built here.
+- **Narrows**: ADR-0019/ADR-0021 flag rule: adds one runtime-managed flag,
+  `weekly_review`, default OFF.
+- **Related**: spec `specs/020-weekly-review/` (spec, design, plan), ADR-0002
+  (`weekly_review_voice` stays a later phase), ADR-0008, ADR-0012, ADR-0020,
+  ADR-0022, constitution Principle I.
+
+## Context
+
+The constitution's primary loop names a "smart Weekly Review" stage. Every accepted
+record so far deferred it: ADR-0006 keeps it visibly "coming later", ADR-0001 models a
+review over **captures** (atomic items in `proposed / needs_clarification / approved /
+deferred`) that the product never built, and the macOS POC's local Waiting/Someday
+review is explicitly read-only with respect to GTD state.
+
+The owner has decided (intake D1-D4, spec Clarifications 2026-10-05) that:
+
+1. a Next action may not keep the same wording ("formulation") past a user-chosen
+   threshold (7/14/21/28 days, default 14) without a decision;
+2. a formulation still undecided 7 days after the threshold is moved from Next to
+   Someday automatically ("auto-park"), visibly and reversibly;
+3. the review runs over native tasks on iOS and web (macOS after Mac sync), with a
+   schedule, one notification on iOS, and an AI navigator that only proposes.
+
+None of that fits the capture-based model, and point 2 contradicts the standing
+principle that nothing changes a task's GTD state without the person.
+
+## Decision
+
+### 1. Native-task review lives in the Tasks module
+
+Weekly Review for native tasks is part of `backend/app/modules/tasks/`. Its records
+(review settings, review sessions, review decisions, receipts, park
+acknowledgements, bulk releases, navigator consent and usage) are stored in the
+Tasks module's own SQLite file `tasks.sqlite3`, beside the tasks they refer to,
+written under the same owner command lock (`TaskRepository.command_lock`) and the
+same idempotency machinery (`_serialized_write`, `idempotency_records`).
+
+Reason: every review decision changes a task and records the decision in **one**
+owner-serialized transaction. Splitting the records into a separate module and store
+would make "task changed but decision not recorded" (and the reverse) possible,
+break Undo (FR-011a), and require a cross-store saga the product does not need.
+
+ADR-0001's separate **Review** module remains the home for a future capture-based or
+cross-module review. This record does not create it.
+
+The non-voice review code does not use the path token `weekly_review`: the forward
+guard `test_weekly_review_modules_reuse_the_shared_voice_workflow_if_present`
+(`backend/tests/test_voice_workflow_architecture.py:250`) is kept and its docstring
+is clarified to say it guards the ADR-0002 `weekly_review_voice` operation.
+Voice-led review, when built, still reuses `app.workflows.voice_brain_dump`.
+
+### 2. The formulation clock is task data; the rule is shared and normative
+
+Each task carries a formulation clock while it is in Next: a formulation id, its start
+instant, the one-time extension (instant and reason), a park floor, and a count of
+consecutive stalled formulations. A new formulation starts when a task enters Next
+(create, move, reopen, return from Someday) and when its title changes
+substantively while in Next. The substantive-change rule and the classification rule
+(fresh / ageing / asks for a decision / moves to Someday tomorrow / paused by a
+future due date) are specified once in
+`specs/020-weekly-review/contracts/formulation-clock.md` and implemented
+identically by the backend (`app/modules/tasks/formulation.py`), the iOS core
+(`BrainBuddyCore`) and the web (derived instants only). One JSON vector file,
+copied byte-for-byte into each test tree and checked for drift, is the parity oracle.
+
+Markers are **derived**. ADR-0006's four open lists are unchanged; there is no fifth
+list and no new lifecycle state. "Asks for a decision" is not a state.
+
+### 3. Auto-park is the single automatic GTD state change
+
+The system may move a task from Next to Someday without the person's action in
+exactly one case: its current formulation is undecided at its park-due instant
+(threshold + 7 days, later if extended or floored). No other automatic change to any
+task's GTD state, title, notes or organization is allowed by this feature, and the
+AI navigator never writes without confirmation.
+
+Auto-park:
+
+- runs server-side in the existing maintenance thread for activated owners with
+  server sync, and on-device for account-less iOS;
+- is idempotent per formulation: a second park of the same formulation, from any
+  device or the server, has no effect and produces no sync conflict;
+- is skipped when the formulation, state or extension changed after the park
+  became due (re-checked under the owner lock);
+- never fires earlier than: 14 days after the feature first becomes active for the
+  owner (FR-016), 7 days after a threshold change (FR-039), 7 days after a due-date
+  change on that task (FR-003a); and never without the "moves to Someday tomorrow"
+  marker having been derivable for the preceding 24 hours (SC-006);
+- keeps project, tags, notes, due date and priority, and records the park instant
+  and its origin on the task;
+- yields to an explicit decision the person made, on another device, against the
+  pre-park version of the same formulation before the park instant (spec edge case
+  "Offline for a long time").
+
+The server's park time is authoritative once synced. A device whose clock runs ahead
+never causes an early server park.
+
+### 4. Cadence, time zone and the review notification are product state
+
+ADR-0006 B-09 is lifted: review day/time (default Friday 16:00), IANA time zone and
+threshold are stored per owner. iOS schedules at most one local notification per
+week, skipped when a complete or partial review happened in the preceding 6 days;
+the web sends none. No streaks, no escalation, no follow-up reminders.
+
+### 5. AI navigator: on-device first, cloud only under per-owner consent
+
+On Apple platforms the navigator uses Apple's on-device model when available. When
+it is unavailable the person chooses between a separately downloaded on-device
+model and the cloud provider. Every cloud request requires a current, per-owner,
+per-provider consent that the server re-checks at request time; revocation stops
+requests immediately. The cloud path reuses the existing provider-adapter and
+cost-cap conventions (`BRAIN_BUDDY_*_PROVIDER/_MODEL/_API_KEY_ENV`, per-call cost
+admission, rate limiting) under its own `BRAIN_BUDDY_REVIEW_NAVIGATOR_*` settings.
+The exact navigator input set is fixed by spec FR-019 and enforced by a strict request
+schema. Proposal text never enters logs, metrics or events.
+
+A downloadable on-device model would be the first third-party runtime dependency in
+the iOS app (`ios/AGENTS.md`: "No third-party dependencies"). This record does not
+grant that exception; it is decided separately (see the feature's
+`research-on-device-model.md`) and the dependency, if any, lands behind the
+`NavigatorModel` protocol without blocking the rest of the feature.
+
+### 6. Rollout
+
+All of the above is behind the runtime-managed flag `weekly_review` (default OFF,
+ADR-0019 store). While the flag is off, web and iOS keep today's non-interactive
+"coming later" entry and the design skill keeps describing that state; the skill text
+and its validator test change to "flag-gated; visibly deferred while off" in the same
+slice that accepts this record. The Mac shows a non-interactive "Weekly review ·
+coming later" row until Mac↔backend sync exists (separate spec).
+
+## Consequences
+
+**Positive.** The core rule ("no formulation sits in Next unexamined") holds even
+when reviews are missed. Decisions, Undo and auto-park are atomic with the task
+change. The review works offline on iOS and account-less. Parity is testable from one
+rule and one vector file.
+
+**Negative.** The Tasks module grows (formulation clock, review records, navigator
+adapter). `TaskResponse` and the iOS `TaskDTO`/`TaskRecord` gain fields; the iOS
+`StoreDocument` moves to version 2. The maintenance thread gains a per-owner sweep.
+A due date that keeps moving forward defers the rule (accepted; measured, not
+blocked).
+
+**Risks.** Clock skew between devices and server (bounded by server authority);
+the first automatic state change could surprise people (mitigated by the 24-hour
+marker, the "while you were away" screen, one-tap return, the 14-day grace and
+onboarding copy); on-device model language coverage (Russian unverified).
+
+## Alternatives considered
+
+- **Separate Review module and store (ADR-0001 as written).** Rejected: no atomic
+  decision + task write, no Undo without compensation, a cross-store purge/export.
+- **Derive the clock from `updated_at` / `waiting_since`.** Rejected: notes, tags and
+  project edits bump `updated_at`, and iOS Undo re-stamps `updatedAt` with a new
+  issue time, so the clock would restart on edits FR-003 says must not restart it.
+- **No auto-park, markers only.** Rejected by owner decision D1: the rule must hold
+  when reviews collapse.
+- **Auto-park client-side only.** Rejected: FR-014 requires parking with no client
+  open for synced accounts, and two clients would race.
+- **A fifth "Stalled" list.** Rejected: ADR-0006 four open lists; markers are derived.
