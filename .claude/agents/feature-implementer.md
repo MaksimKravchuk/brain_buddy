@@ -42,7 +42,6 @@ you used:
 
 - `BRAIN_BUDDY_DATA_DIR` — never share the file store or `tasks.sqlite3`.
 - backend port (default 8000) and frontend port (default 5173).
-- `BRAIN_BUDDY_MOBILE_IT_PORT` for the mobile integration harness.
 - `BRAIN_BUDDY_E2E_PROJECT` — `scripts/run_playwright_e2e.sh` deletes shared
   Playwright allure and report directories on start, which destroys a
   concurrent agent's in-flight evidence.
@@ -107,7 +106,7 @@ TASKS: <n> done / <n> total
 TESTS ADDED: <n>  (<file::name> → covers NNN-FR-###)
 
 SELF-VERIFY
-  backend  <pass|fail>   frontend <pass|fail>   mobile <pass|fail>
+  backend  <pass|fail>   frontend <pass|fail>
   e2e      <pass|fail|not applicable>
 
 DEVIATIONS FROM THE PLAN

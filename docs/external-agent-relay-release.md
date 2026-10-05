@@ -1,7 +1,10 @@
 # External-agent relay release
 
-This is the release procedure for the web relay and Expo iOS client. It does
+This is the release procedure for the web relay and the iOS client. It does
 not authorize landing, deployment, rollout expansion, or App Store submission.
+The Expo iOS client this procedure was first written for was removed in
+2026-10; the native SwiftUI app in `ios/` is the only iPhone client, and its
+agent surfaces are pass 3 in `docs/native-ios-app.md`.
 
 ## ASK candidate and production web release
 
@@ -307,21 +310,16 @@ What rollback still cannot do, and what to tell people:
 
 ## TestFlight and App Store
 
-From `mobile/`, after the compatible web API is live:
+The native app in `ios/` is built and uploaded to TestFlight by
+`.github/workflows/ios.yml` once CI has passed on `main` (see `ios/README.md`).
+After the compatible web API is live:
 
-1. Verify EAS/Expo and Apple credentials with `npx eas-cli whoami` and
-   `npx eas-cli project:info`; do not commit credentials.
-2. Run mobile tests, typecheck, integration, and
-   `npx expo export --platform ios` on the exact release SHA.
-3. Build with
-   `npx eas-cli build --platform ios --profile production` and record the build
-   ID, git SHA, version, and build number.
-4. Submit that build with
-   `npx eas-cli submit --platform ios --profile production --id <BUILD_ID>`.
-5. Smoke the TestFlight build with the internal rollout, including rollout-OFF
+1. Confirm the `ios-kit` and `ios-app` CI lanes are green on the exact release
+   SHA, and record the TestFlight build ID, git SHA, version, and build number.
+2. Smoke the TestFlight build with the internal rollout, including rollout-OFF
    behavior for an existing run. Complete App Store privacy/metadata and submit
    the tested build for Apple review.
-6. Claim availability only after App Store Connect reports it available and a
+3. Claim availability only after App Store Connect reports it available and a
    clean-device install succeeds.
 
 For an iOS incident, set the server flag OFF, stop phased release or remove the

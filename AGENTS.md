@@ -3,16 +3,15 @@
 ## Project Structure & Module Organization
 - `backend/`: FastAPI app under `app/` with repositories, services, and `tests/` (pytest).
 - `frontend/`: Vite React client under `src/`; Vitest specs live in `src/**/__tests__/`.
-- `mobile/`: Expo (React Native) iOS-first client; Jest specs in `src/**/__tests__/`, real-backend integration suite in `integration/`. See `mobile/AGENTS.md`.
-- `ios/`: native offline-first SwiftUI app (iOS 26) with an XcodeGen project and the Linux-testable `BrainBuddyKit` package; CI lanes `ios-kit`/`ios-app` in `ci.yml`, TestFlight in `.github/workflows/ios.yml`. See `ios/AGENTS.md` and `docs/native-ios-app.md`.
+- `ios/`: the iPhone client — a native offline-first SwiftUI app (iOS 26) with an XcodeGen project and the Linux-testable `BrainBuddyKit` package; CI lanes `ios-kit`/`ios-app` in `ci.yml`, TestFlight in `.github/workflows/ios.yml`. See `ios/AGENTS.md` and `docs/native-ios-app.md`.
 - `docs/`: Architecture, API, troubleshooting, performance, and smoke runbooks.
 - `deploy/`: Container assets (nginx config).
 - `scripts/`: Utility scripts such as `smoke_test.sh`.
 
 ## Build, Test, and Development Commands
 - `make dev-backend` / `make dev-frontend`: run backend with uvicorn reload and Vite dev server.
-- `make test-backend` / `make test-frontend` / `make test-mobile` / `make test-e2e`: each runs its suite **plus** the coverage floor and the Allure taxonomy validator. The bare runner (`cd backend && pytest`) skips both gates.
-- `make verify-all`: the whole chain in CI order — `check-specs validate-ci verify-backend verify-frontend verify-mobile test-e2e`. Run this before reporting a change done.
+- `make test-backend` / `make test-frontend` / `make test-e2e`: each runs its suite **plus** the coverage floor and the Allure taxonomy validator. The bare runner (`cd backend && pytest`) skips both gates.
+- `make verify-all`: the whole chain in CI order — `check-specs validate-ci verify-backend verify-frontend test-e2e`. Run this before reporting a change done.
 - `npm run build` (frontend) / `docker compose up --build`: produce production bundles and compose stack.
 - `./scripts/smoke_test.sh`: call core API endpoints against the compose stack.
 
@@ -24,9 +23,8 @@
 ## Testing Guidelines
 - Backend uses pytest with FastAPI TestClient; mirror test names after module under test (`test_tree_service.py`).
 - Frontend leverages Vitest + Testing Library; place component specs beside feature folders.
-- Mobile uses Jest; specs live in `mobile/src/**/__tests__/`. See `mobile/AGENTS.md`.
-- Every pytest, Vitest, Jest, and Playwright product test must emit Allure Report 3 taxonomy: non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Use the central helpers in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, `mobile/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; override explicitly only when a test needs narrower labels. See `docs/test-allure-taxonomy.md`.
-- Coverage floors (`backend/`, `frontend/`, `mobile/coverage-floor.json`) may only ratchet upward, and there is no per-file escape hatch — `scripts/validate_ci_artifacts.py coverage-suppressions` rejects every `istanbul ignore` form in `frontend/src` and `mobile/src`.
+- Every pytest, Vitest, and Playwright product test must emit Allure Report 3 taxonomy: non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Use the central helpers in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; override explicitly only when a test needs narrower labels. See `docs/test-allure-taxonomy.md`.
+- Coverage floors (`backend/`, `frontend/coverage-floor.json`) may only ratchet upward, and there is no per-file escape hatch — `scripts/validate_ci_artifacts.py coverage-suppressions` rejects every `istanbul ignore` form in `frontend/src`.
 - Ensure new features include targeted tests; run both test suites before pushing.
 
 ## Minimal Sufficient Delivery
@@ -61,8 +59,8 @@ These criteria apply only when rendered UI, copy, navigation, interaction, respo
 
 ### Engineering Quality
 
-- All applicable required suites pass on the exact candidate SHA: backend pytest, frontend Vitest, Playwright product E2E, and, when mobile is affected, mobile Jest and real-backend integration tests. Skipped required checks are not passes.
-- New or changed behavior has targeted tests. Every applicable pytest, Vitest, Jest, and Playwright product test satisfies the Allure Report 3 taxonomy enforced by `scripts/validate_allure_taxonomy.py`: non-empty `epic`, `feature`, and `story`, a human-readable title, and at least one named step.
+- All applicable required suites pass on the exact candidate SHA: backend pytest, frontend Vitest, Playwright product E2E, and, when the native iOS app is affected, the `ios-kit` and `ios-app` lanes. Skipped required checks are not passes.
+- New or changed behavior has targeted tests. Every applicable pytest, Vitest, and Playwright product test satisfies the Allure Report 3 taxonomy enforced by `scripts/validate_allure_taxonomy.py`: non-empty `epic`, `feature`, and `story`, a human-readable title, and at least one named step.
 - Required Spec Kit artifacts and accepted ADRs match the implemented behavior, and `python3 scripts/check_spec_kit_specs.py` passes when feature artifacts are affected. Hermes-managed outcomes additionally require the receipts and exact-SHA evidence defined by ADR-0010.
 - Affected critical operations, errors, and state transitions produce production-safe logs at an appropriate level with a request or correlation identifier where available. Critical-path exceptions must not be silently swallowed, and logs must not contain secrets or sensitive payloads.
 - Monitoring requirements must be concrete and proportional to the change. Existing reachability, production-smoke, canary, and structured-log signals must remain healthy. When a change introduces a new metric or alert requirement, its signal, threshold, owner, and response must be defined before it becomes a Done gate.
@@ -99,7 +97,7 @@ These criteria apply only when rendered UI, copy, navigation, interaction, respo
 - Autonomous delivery, visual preview eligibility, and production release/rollback authority are governed by `docs/decisions/0003-autonomous-delivery-guardrails.md` and `docs/autonomous-delivery-runbook.md`.
 - Verified trunk serial landing (PR-less SHIP/SHOW delivery, Ship/Show/Ask classification, feature-flag rollout, deploy rollback) is governed by `docs/decisions/0008-verified-trunk-serial-landing.md`, which partially supersedes ADR-0003. ADR-0023 makes planning and independent evidence proportionate for eligible test-stage SHIP/SHOW slices without changing exact-SHA delivery controls.
 - The spec review gate is ADR-0011 (portable stage), amended by ADR-0012 (risk classes, escalation, gate integrity) and ADR-0014 (hybrid reviewer fallback with recorded degradation).
-- Mutation-testing scope is ADR-0004, split into observed and enforced tiers by ADR-0016, extended to the frontend by ADR-0013 and to mobile by ADR-0015. **ADR-0016 was accepted as ADR-0011**: two agents took the same number on 2026-08-10, and it was renumbered on 2026-08-13. Read any older "ADR-0011" reference in context.
+- Mutation-testing scope is ADR-0004, split into observed and enforced tiers by ADR-0016, extended to the frontend by ADR-0013 (and, until the Expo client was removed in 2026-10, to mobile by the now-superseded ADR-0015). **ADR-0016 was accepted as ADR-0011**: two agents took the same number on 2026-08-10, and it was renumbered on 2026-08-13. Read any older "ADR-0011" reference in context.
 
 ## Proportionate Spec Kit Workflow
 - The canonical Spec Kit instructions are in `.specify/agent-commands/` (generic
@@ -133,8 +131,8 @@ it grow; this is a summary, not an append-only log.
   `app/services/` -> `app/repositories/`, wired in `app/container.py`.
 - Frontend: TypeScript (strict), React, Vite, Zustand, React Query, Tailwind;
   Vitest + Testing Library, Playwright for e2e.
-- Mobile: Expo SDK 57 / React Native 0.86 / TypeScript strict / expo-router;
-  Jest. See `mobile/AGENTS.md`.
+- iOS: SwiftUI (iOS 26), XcodeGen, `BrainBuddyKit` Swift package. See
+  `ios/AGENTS.md`.
 - Persistence: file-backed tree data under `backend/data` with a 16-entry LRU
   cache, plus `tasks.sqlite3` for the task module.
 - Deploy: Docker/Compose locally, Nginx in the frontend image, Fly.io in

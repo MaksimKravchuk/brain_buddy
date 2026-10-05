@@ -369,11 +369,11 @@ class DeployContractTest(unittest.TestCase):
 
     def test_deploy_classifier_mutant_fails_policy_only_assertion(self) -> None:
         text = DEPLOY_CLASSIFIER.read_text(encoding="utf-8")
-        inert_arm = ".github/*|.specify/*|.claude/*|.design-sync/*|docs/*|specs/*|mobile/*|ios/*|scripts/*|*.md|Makefile|.gitignore|LICENSE|.env.example)"
+        inert_arm = ".github/*|.specify/*|.claude/*|.design-sync/*|docs/*|specs/*|ios/*|scripts/*|*.md|Makefile|.gitignore|LICENSE|.env.example)"
         self.assertIn(inert_arm, text)
         mutant = _temp_workflow(text.replace(inert_arm, inert_arm + "\n                needed=true", 1))
         try:
-            policy_only = ("mobile/src/app.tsx", "docs/deploy.md")
+            policy_only = ("ios/BrainBuddy/App/RootView.swift", "docs/deploy.md")
             self.assertNotEqual(self._classify(policy_only, mutant), "needed=false")
         finally:
             mutant.unlink()
@@ -418,7 +418,7 @@ class DeployContractTest(unittest.TestCase):
     def test_policy_only_landing_skips_runtime_deploy(self) -> None:
         """The deploy gate must not treat delivery machinery as image input."""
 
-        self.assertEqual(self._classify(("docs/deploy.md", "mobile/app.tsx")), "needed=false")
+        self.assertEqual(self._classify(("docs/deploy.md", "specs/README.md")), "needed=false")
 
     def test_native_ios_landing_skips_runtime_deploy(self) -> None:
         """The iOS app ships through TestFlight, never through the Fly image."""

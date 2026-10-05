@@ -109,10 +109,9 @@ frontend/
 │   └── **/__tests__/   # Vitest + Testing Library
 └── tests/              # Playwright e2e
 
-mobile/
-├── src/                # Expo / React Native, iOS-first
-│   └── **/__tests__/   # Jest
-└── integration/        # real api client vs a disposable local backend
+ios/
+├── BrainBuddy/         # SwiftUI app (iOS 26), XcodeGen project
+└── BrainBuddyKit/      # Linux-testable Swift package (GTD rules, sync engine)
 
 specs/[###-feature]/    # this feature's Spec Kit artifacts
 docs/decisions/         # ADRs — accepted records bind the plan

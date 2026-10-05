@@ -130,8 +130,8 @@ in `intake.md` rather than dropping it.
    deletion and purge — and is never feature-flagged. Ask what this feature
    adds to that, not whether it is needed.
 7. **Existing-system dependencies.** Which surfaces this touches: backend
-   services, canvas, tasks module, mobile, AI providers. Whether the mobile
-   client must change.
+   services, canvas, tasks module, the native iOS app, AI providers. Whether
+   the iOS client must change.
 8. **Definition of done.** What the human wants to see to believe it works.
    This is the seed of the acceptance criteria — press for something
    observable, not "it works".

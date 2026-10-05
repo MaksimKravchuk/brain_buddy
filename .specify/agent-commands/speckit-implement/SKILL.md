@@ -93,8 +93,7 @@ counterproductive here:
   directories on start, destroying a concurrent agent's in-flight evidence.
 
 When lanes do run in parallel, each needs a distinct `BRAIN_BUDDY_DATA_DIR`,
-backend port, frontend port, `BRAIN_BUDDY_MOBILE_IT_PORT` and
-`BRAIN_BUDDY_E2E_PROJECT`. A worktree isolates none of those.
+backend port, frontend port and `BRAIN_BUDDY_E2E_PROJECT`. A worktree isolates none of those.
 
 ## Gates that survive this change
 
@@ -132,7 +131,7 @@ slice:    PR-NN (or single-PR)   PR: <URL or not opened>
 tasks:    <n>/<n>              commits: <shas>
 tests added: <n>
 
-SELF-VERIFY: backend <pass|fail> frontend <pass|fail> mobile <pass|fail> e2e <pass|fail|n/a>
+SELF-VERIFY: backend <pass|fail> frontend <pass|fail> e2e <pass|fail|n/a>
 LANDING CLASS: SHIP | SHOW | ASK  (per classify_path_risk.py)
 
 DEVIATIONS

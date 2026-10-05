@@ -1,6 +1,6 @@
-.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs install-mobile typecheck-mobile test-mobile integration-mobile build-mobile ci-mobile \
-	verify-all verify-backend verify-frontend verify-mobile typecheck-frontend lint-mobile format-backend format-check-backend mutation-backend mutation-frontend \
-	mutation-mobile mutation-gate-backend
+.PHONY: install-backend install-frontend dev-backend dev-frontend lint-backend lint-frontend test-backend ci-backend test-frontend test-e2e build-frontend ci-frontend validate-ci check-specs \
+	verify-all verify-backend verify-frontend typecheck-frontend format-backend format-check-backend mutation-backend mutation-frontend \
+	mutation-gate-backend
 
 install-backend:
 	cd backend && python -m pip install -e .[dev]
@@ -141,9 +141,8 @@ validate-ci:
 	python3 scripts/validate_ci_artifacts.py workflow --ci .github/workflows/ci.yml --frontend-vite-config frontend/vite.config.ts --disallow-workflow frontend/.github/workflows/playwright.yml
 	python3 scripts/validate_ci_artifacts.py mutation-workflow \
 		--workflow .github/workflows/mutation-quality.yml \
-		--frontend-stryker-config frontend/stryker.config.json \
-		--mobile-stryker-config mobile/stryker.config.json
-	python3 scripts/validate_ci_artifacts.py coverage-suppressions --path frontend/src --path mobile/src
+		--frontend-stryker-config frontend/stryker.config.json
+	python3 scripts/validate_ci_artifacts.py coverage-suppressions --path frontend/src
 	python3 scripts/validate_ci_artifacts.py mutation-scope --config frontend/stryker.config.json --enforced frontend/mutation-enforced-scope.txt
 	python3 scripts/validate_trunk_delivery.py trunk-ci --ci .github/workflows/ci.yml
 	python3 scripts/validate_trunk_delivery.py deploy --workflow .github/workflows/deploy-fly-production.yml
@@ -160,58 +159,13 @@ check-specs:
 	python3 scripts/check_gate_integrity.py
 	python3 scripts/check_requirement_coverage.py specs/019-miro-like-crt-canvas
 
-# --- Mobile (Expo / React Native, mobile/) ---
-
-install-mobile:
-	cd mobile && npm install
-
-typecheck-mobile:
-	cd mobile && npx tsc --noEmit
-
-lint-mobile:
-	cd mobile && npx eslint .
-
-test-mobile:
-	rm -rf mobile/allure-results && mkdir -p mobile/allure-results
-	touch mobile/allure-results/.run-started-at
-	cd mobile && npx jest --coverage
-	python3 scripts/validate_coverage_floor.py --stack mobile --format istanbul-summary \
-		--report mobile/coverage/coverage-summary.json --floor mobile/coverage-floor.json
-	python3 scripts/validate_allure_taxonomy.py --path mobile/allure-results --label mobile-jest \
-		--since-file mobile/allure-results/.run-started-at
-
-# Report-only, like mutation-backend: the deterministic-core scope lives in
-# mobile/stryker.config.json and is fixed by ADR-0015.
-mutation-mobile:
-	cd mobile && rm -rf mutation-artifacts .stryker-tmp reports
-	cd mobile && npx stryker run || true
-	python3 scripts/mutation_gate.py summarize-stryker \
-		--report mobile/mutation-artifacts/mutation-report.json \
-		--summary-out mobile/mutation-artifacts/observed-summary.txt \
-		--survivors-out mobile/mutation-artifacts/observed-survivors.txt
-
-# Boots its own disposable backend (requires backend deps: make install-backend)
-integration-mobile:
-	cd mobile && npm run integration
-
-build-mobile:
-	cd mobile && npx expo export --platform ios
-
-# Includes integration-mobile: the CI mobile job runs it, and omitting it here
-# let a locally-green change still fail CI. Requires make install-backend —
-# the integration harness boots its own disposable backend.
-ci-mobile: typecheck-mobile lint-mobile test-mobile integration-mobile build-mobile
-
 # --- Aggregate verification (mirrors the CI job graph) ---
 
 verify-backend: ci-backend
 
 verify-frontend: ci-frontend
 
-verify-mobile: ci-mobile
-
 # The chain an implementation or verification agent runs before reporting done.
 # Prerequisites the individual targets do not install:
-#   make install-backend                                       (integration-mobile)
 #   cd frontend && npx playwright install --with-deps chromium (test-e2e)
-verify-all: check-specs validate-ci verify-backend verify-frontend verify-mobile test-e2e
+verify-all: check-specs validate-ci verify-backend verify-frontend test-e2e

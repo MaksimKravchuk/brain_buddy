@@ -457,13 +457,13 @@ export default defineConfig({
         closed -- it was closed only by the accident that the string appeared
         nowhere else.
 
-        Anchored to the key, so all three stacks are checked the same way.
+        Anchored to the key, so every stack is checked the same way. (The
+        `MOBILE` key went with the Expo client in 2026-10.)
         """
         workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
         text = workflow.read_text(encoding="utf-8")
 
         stacks = (
-            ("MOBILE", "mobile"),
             ("BACKEND", "backend"),
             ("FRONTEND", "frontend"),
         )
@@ -578,7 +578,7 @@ export default defineConfig({
     def test_workflow_rejects_an_aggregation_predicate_that_ignores_the_e2e_lane(
         self,
     ) -> None:
-        """The fourth uploading lane must be in the predicate, not just the other three.
+        """The e2e uploading lane must be in the predicate, not just the stacks.
 
         `e2e` uploads `playwright-allure-results`, which matches the
         `*-allure-results` pattern the aggregation downloads, under a bare
@@ -627,13 +627,13 @@ export default defineConfig({
         )
 
         with tempfile.TemporaryDirectory() as tmp:
-            # The literal pre-fix workflow: three stacks, no e2e term.
-            three_stacks = Path(tmp) / "ci-three-stacks.yml"
-            three_stacks.write_text(
+            # The literal pre-fix workflow: the stacks only, no e2e term.
+            stacks_only = Path(tmp) / "ci-stacks-only.yml"
+            stacks_only.write_text(
                 text.replace(' || [ "$E2E" = "true" ]; then', "; then"),
                 encoding="utf-8",
             )
-            dropped_term = self.run_validator("workflow", "--ci", str(three_stacks))
+            dropped_term = self.run_validator("workflow", "--ci", str(stacks_only))
 
             no_binding = Path(tmp) / "ci-no-e2e-binding.yml"
             no_binding.write_text(text.replace(binding, ""), encoding="utf-8")
@@ -652,7 +652,7 @@ export default defineConfig({
             0,
             f"a predicate ignoring the e2e lane must fail: {dropped_term.stdout}",
         )
-        self.assertIn("predicate over the four uploading lanes", dropped_term.stderr)
+        self.assertIn("predicate over the three uploading lanes", dropped_term.stderr)
 
         self.assertNotEqual(
             dropped_binding.returncode,
@@ -840,7 +840,7 @@ jobs:
     needs:
       - backend
       - frontend
-      - mobile
+      - ios-kit
       - spec-kit
     steps:
       - run: make test-e2e
@@ -852,7 +852,7 @@ jobs:
 
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("e2e job declares needs it does not consume", completed.stderr)
-        self.assertIn("mobile", completed.stderr)
+        self.assertIn("ios-kit", completed.stderr)
         self.assertIn("spec-kit", completed.stderr)
         # The legitimate cost gates must not be reported as surplus.
         self.assertNotIn("'backend'", completed.stderr)
@@ -959,7 +959,6 @@ jobs:
     outputs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
-      mobile: ${{ steps.decide.outputs.mobile }}
       ios: ${{ steps.decide.outputs.ios }}
     steps:
       - id: decide
@@ -971,19 +970,6 @@ jobs:
       - name: Ruff lint
         if: env.RUN == 'true'
         run: ruff check app tests
-  mobile:
-    env:
-      RUN: ${{ needs.changes.outputs.mobile }}
-    steps:
-      - name: Type check
-        if: env.RUN == 'true'
-        run: npm run typecheck
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: mobile-allure-results
-          path: mobile/allure-results
-          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
   ios-kit:
     needs: changes
     env:
@@ -1050,7 +1036,6 @@ jobs:
     needs:
       - changes
       - backend
-      - mobile
       - ios-kit
       - ios-app
       - frontend
@@ -1112,7 +1097,6 @@ jobs:
     needs:
       - changes
       - backend
-      - mobile
       - ios-kit
       - ios-app
       - frontend
@@ -1127,10 +1111,9 @@ jobs:
         env:
           BACKEND: ${{ needs.changes.outputs.backend == 'true' && needs.backend.result != 'skipped' }}
           FRONTEND: ${{ needs.changes.outputs.frontend == 'true' && needs.frontend.result != 'skipped' }}
-          MOBILE: ${{ needs.changes.outputs.mobile == 'true' && needs.mobile.result != 'skipped' }}
           E2E: ${{ needs.e2e.result != 'skipped' }}
         run: |
-          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ] || [ "$E2E" = "true" ]; then
+          if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$E2E" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -1509,43 +1492,6 @@ jobs:
         self.assertNotEqual(missing_evidence.returncode, 0)
         self.assertIn("frontend-mutation-report", missing_evidence.stderr)
 
-    def test_mutation_workflow_requires_the_mobile_campaign_and_its_evidence(self) -> None:
-        workflow = REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"
-        text = workflow.read_text(encoding="utf-8")
-
-        with tempfile.TemporaryDirectory() as tmp:
-            without_mobile = Path(tmp) / "mutation.yml"
-            without_mobile.write_text(
-                text.replace("  mobile-observed-mutation:", "  mobile-disabled:"),
-                encoding="utf-8",
-            )
-            missing_job = self.run_validator(
-                "mutation-workflow", "--workflow", str(without_mobile)
-            )
-
-            narrowed = Path(tmp) / "mutation-narrowed.yml"
-            narrowed.write_text(
-                text.replace("src/lifecycle/guards.ts", "src/lifecycle/nothing.ts"),
-                encoding="utf-8",
-            )
-            missing_scope = self.run_validator("mutation-workflow", "--workflow", str(narrowed))
-
-            without_evidence = Path(tmp) / "mutation-no-evidence.yml"
-            without_evidence.write_text(
-                text.replace("name: mobile-mutation-report", "name: something-else"),
-                encoding="utf-8",
-            )
-            missing_evidence = self.run_validator(
-                "mutation-workflow", "--workflow", str(without_evidence)
-            )
-
-        self.assertNotEqual(missing_job.returncode, 0)
-        self.assertIn("mobile observed-scope job", missing_job.stderr)
-        self.assertNotEqual(missing_scope.returncode, 0)
-        self.assertIn("src/lifecycle/guards.ts", missing_scope.stderr)
-        self.assertNotEqual(missing_evidence.returncode, 0)
-        self.assertIn("mobile-mutation-report", missing_evidence.stderr)
-
     def test_the_repository_mutation_workflow_satisfies_every_campaign(self) -> None:
         completed = self.run_validator(
             "mutation-workflow",
@@ -1553,21 +1499,19 @@ jobs:
             str(REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"),
             "--frontend-stryker-config",
             str(REPO_ROOT / "frontend" / "stryker.config.json"),
-            "--mobile-stryker-config",
-            str(REPO_ROOT / "mobile" / "stryker.config.json"),
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def _workflow_with_stryker_configs(self, tmp: Path, **mutate: list[str]) -> list[str]:
-        """Validator args pointing at doctored copies of the Stryker configs."""
+        """Validator args pointing at a doctored copy of the Stryker config."""
 
         args = [
             "mutation-workflow",
             "--workflow",
             str(REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"),
         ]
-        for stack, flag in (("frontend", "--frontend-stryker-config"), ("mobile", "--mobile-stryker-config")):
+        for stack, flag in (("frontend", "--frontend-stryker-config"),):
             source = REPO_ROOT / stack / "stryker.config.json"
             config = json.loads(source.read_text(encoding="utf-8"))
             if stack in mutate:
@@ -1577,27 +1521,12 @@ jobs:
             args += [flag, str(target)]
         return args
 
-    def test_narrowing_the_mobile_stryker_config_fails_even_with_the_workflow_intact(
+    def test_narrowing_the_frontend_stryker_config_fails_even_with_the_workflow_intact(
         self,
     ) -> None:
-        # The workflow's header comment names every mobile module, so a check
+        # The workflow's header comment names every frontend module, so a check
         # that only reads the workflow would pass here. The config is what the
         # campaign obeys.
-        full = json.loads(
-            (REPO_ROOT / "mobile" / "stryker.config.json").read_text(encoding="utf-8")
-        )["mutate"]
-        narrowed = [path for path in full if path != "src/lifecycle/guards.ts"]
-
-        with tempfile.TemporaryDirectory() as tmp:
-            completed = self.run_validator(
-                *self._workflow_with_stryker_configs(Path(tmp), mobile=narrowed)
-            )
-
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("src/lifecycle/guards.ts", completed.stderr)
-        self.assertIn("mobile observed", completed.stderr)
-
-    def test_narrowing_the_frontend_stryker_config_fails_the_same_way(self) -> None:
         full = json.loads(
             (REPO_ROOT / "frontend" / "stryker.config.json").read_text(encoding="utf-8")
         )["mutate"]
@@ -1616,13 +1545,13 @@ jobs:
         # Widening without an ADR is a scope change too; it must not slip in
         # under a validator that only looks for missing entries.
         full = json.loads(
-            (REPO_ROOT / "mobile" / "stryker.config.json").read_text(encoding="utf-8")
+            (REPO_ROOT / "frontend" / "stryker.config.json").read_text(encoding="utf-8")
         )["mutate"]
 
         with tempfile.TemporaryDirectory() as tmp:
             completed = self.run_validator(
                 *self._workflow_with_stryker_configs(
-                    Path(tmp), mobile=[*full, "src/theme/tokens.ts"]
+                    Path(tmp), frontend=[*full, "src/theme/tokens.ts"]
                 )
             )
 
@@ -1638,7 +1567,7 @@ jobs:
                 "mutation-workflow",
                 "--workflow",
                 str(REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"),
-                "--mobile-stryker-config",
+                "--frontend-stryker-config",
                 str(broken),
             )
 
@@ -1651,7 +1580,7 @@ jobs:
                 "mutation-workflow",
                 "--workflow",
                 str(REPO_ROOT / ".github" / "workflows" / "mutation-quality.yml"),
-                "--mobile-stryker-config",
+                "--frontend-stryker-config",
                 str(Path(tmp) / "absent.json"),
             )
 
@@ -2000,13 +1929,11 @@ class CoverageSuppressionTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 1)
         self.assertIn("does not exist", completed.stderr)
 
-    def test_the_repository_frontend_and_mobile_sources_are_clean(self) -> None:
+    def test_the_repository_frontend_sources_are_clean(self) -> None:
         completed = self.run_validator(
             "coverage-suppressions",
             "--path",
             "frontend/src",
-            "--path",
-            "mobile/src",
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)

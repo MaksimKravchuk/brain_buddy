@@ -27,8 +27,8 @@ Classification rules are ordered and fail closed toward ASK:
 
 1. ASK directory prefixes and CI entry points (``.github/``, ``scripts/``,
    ``deploy/``, ``backend/data/``, ``Makefile``).
-2. ASK exact paths: EAS release configuration (``mobile/eas.json``) and the API
-   modules that wire session auth and per-owner privacy enforcement (``backend/app/api/dependencies.py``,
+2. ASK exact paths: the API modules that wire session auth and per-owner
+   privacy enforcement (``backend/app/api/dependencies.py``,
    ``middleware.py``, ``routes.py``, ``tasks.py``) — their names carry no
    auth token, so they are listed explicitly.
 3. ASK filenames (``fly*.toml``, ``Dockerfile*``, ``docker-compose*``,
@@ -64,11 +64,10 @@ ASK_PREFIXES: tuple[tuple[str, str], ...] = (
 
 ASK_TOP_LEVEL_FILES: frozenset[str] = frozenset({"Makefile"})
 
-# Release/auth surfaces whose names carry no risk token: EAS build/submission
-# configuration and API modules that wire session auth and per-owner privacy
-# enforcement. Exact paths only: sibling paths stay SHIP.
+# Auth surfaces whose names carry no risk token: API modules that wire session
+# auth and per-owner privacy enforcement. Exact paths only: sibling paths stay
+# SHIP.
 ASK_EXACT_PATHS: dict[str, str] = {
-    "mobile/eas.json": "mobile release build/submission configuration",
     "backend/app/api/dependencies.py": (
         "auth/per-owner privacy enforcement surface (session dependencies)"
     ),

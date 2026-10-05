@@ -119,7 +119,7 @@ def validate_coverage_floor(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--stack", choices=("backend", "frontend", "mobile"), required=True
+        "--stack", choices=("backend", "frontend"), required=True
     )
     parser.add_argument(
         "--format", dest="report_format", choices=tuple(READERS), required=True

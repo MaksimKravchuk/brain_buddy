@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-Targets live in the `Makefile`; per-package scripts in `frontend/package.json`
-and `mobile/package.json`. Only the things those files don't tell you:
+Targets live in the `Makefile`; per-package scripts in `frontend/package.json`.
+Only the things those files don't tell you:
 
 - `make test-backend` runs pytest locally, then the coverage floor and the
   Allure taxonomy validator. For the bare test loop use `cd backend && pytest`;
@@ -17,7 +17,7 @@ and `mobile/package.json`. Only the things those files don't tell you:
 - `cp .env.example .env` before `docker compose up --build`. **`.env.example` is
   the authoritative environment-variable reference** — it documents the voice/STT
   provider, feature-flag, cost-cap and retention variables, not just the basics.
-- Mobile has its own notes in `mobile/CLAUDE.md`.
+- The native iOS app has its own notes in `ios/AGENTS.md`.
 - Spec Kit CLI installs with isolated `uv` tooling, never inside the application
   backend/frontend environments — see `docs/spec-kit-workflow.md`.
 - Editing `.claude/settings.json`, the `Makefile`, or anything else in
@@ -29,8 +29,8 @@ and `mobile/package.json`. Only the things those files don't tell you:
 Coverage floors live in `frontend/coverage-floor.json` and may only ratchet
 upward. There is no per-file escape hatch: `scripts/validate_ci_artifacts.py
 coverage-suppressions` rejects `istanbul ignore file` and every range form in
-`frontend/src` and `mobile/src`, because an excluded file is reported as neither
-covered nor uncovered — it silently leaves the measurement.
+`frontend/src`, because an excluded file is reported as neither covered nor
+uncovered — it silently leaves the measurement.
 
 ## Tool use
 
@@ -137,5 +137,4 @@ failure is never to raise that number. See `docs/allure-quality-gate.md`.
 - **Style:** enforced mechanically by `.pre-commit-config.yaml` and CI (black, ruff, mypy, import-linter, eslint, tsc). Read `backend/pyproject.toml` for the active ruff rule set and complexity ceilings rather than assuming a subset.
 - **Backend tests:** mirror module name (`test_tree_service.py`); use the `api_client` / service fixtures from `conftest.py`; clear `TreeService`'s 16-entry LRU cache between tests.
 - **Frontend tests:** Vitest + Testing Library in `src/**/__tests__/`; Playwright e2e in `frontend/tests/`.
-- **Allure taxonomy:** every pytest, Vitest, Jest and Playwright product test must emit non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Central defaults live in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, `mobile/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; use explicit Allure decorators/helpers only for narrower overrides. See `docs/test-allure-taxonomy.md`.
-  Mobile is the one runner whose steps cannot come from a hook: in `allure-jest` a step follows the executing scope, and during `beforeEach`/`afterEach` that scope is the fixture, not the test. Labels bind from a hook, the step does not — so `mobile/src/test/allureTaxonomy.ts` sets the labels in `beforeEach` and wraps each test body in a step instead.
+- **Allure taxonomy:** every pytest, Vitest and Playwright product test must emit non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Central defaults live in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; use explicit Allure decorators/helpers only for narrower overrides. See `docs/test-allure-taxonomy.md`.

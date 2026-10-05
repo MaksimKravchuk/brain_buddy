@@ -4074,7 +4074,7 @@ class TestCheckDelivery:
     ) -> None:
         """**Check again** acts on the run the user was looking at, or on none.
 
-        `mobile/AGENTS.md` requires every mutation to name the revision it was
+        The client contract requires every mutation to name the revision it was
         composed against, and a resend is a mutation with a message on the wire
         at the end of it: a check sent from a cached run that has since moved
         would be answering a question the user is no longer being asked.

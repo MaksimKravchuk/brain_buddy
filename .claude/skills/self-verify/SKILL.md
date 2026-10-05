@@ -1,7 +1,7 @@
 ---
 name: "self-verify"
 description: "Canonical, key-free verification command table per surface: what to run, in what order, with the prerequisites the Makefile omits and the coverage floors that gate merge."
-argument-hint: "Optional surface: backend | frontend | mobile | e2e | all"
+argument-hint: "Optional surface: backend | frontend | e2e | all"
 compatibility: "Requires the repository toolchain installed"
 metadata:
   author: "brainbuddy"
@@ -26,22 +26,23 @@ That target mirrors the CI job graph. Run it before reporting any change done.
 When you need to scope down, use the per-surface tables below — but say which
 surfaces you skipped and why.
 
-"Mirrors" is a property that has to be maintained, not a promise. `test-mobile`
-omitted the Allure taxonomy validator that CI runs, so a locally-green agent
-could still fail CI on `mobile-jest`. When you add a validator to a CI job, add
-it to the matching make target in the same change.
+"Mirrors" is a property that has to be maintained, not a promise. A make target
+that omits a validator its CI job runs lets a locally-green agent still fail CI.
+When you add a validator to a CI job, add it to the matching make target in the
+same change.
+
+The native iOS app (`ios/`) is verified by the `ios-kit` and `ios-app` CI
+lanes, not by `make verify-all`; see `ios/AGENTS.md` for running them locally.
 
 ## Prerequisites the Makefile does not install
 
-These are the two failures most often misdiagnosed as broken code:
+This is the failure most often misdiagnosed as broken code:
 
 ```bash
-make install-backend                      # required before make integration-mobile
 cd frontend && npx playwright install --with-deps chromium   # required before make test-e2e
 ```
 
-`make integration-mobile` boots its own disposable backend and needs the
-backend package importable. `make test-e2e` needs a real browser.
+`make test-e2e` needs a real browser.
 
 ## Backend
 
@@ -78,7 +79,7 @@ local run fails on the same regression CI would catch.
 
 There is no coverage escape hatch: `validate_ci_artifacts.py
 coverage-suppressions` rejects `istanbul ignore file` and every range form in
-`frontend/src` and `mobile/src`. A file excluded from the report is not counted
+`frontend/src`. A file excluded from the report is not counted
 as uncovered, it is not counted at all — four modules once hid 2,385 lines that
 way while the floor still read green.
 
@@ -93,36 +94,6 @@ python3 scripts/mutation_gate.py check-stryker \
 ```
 
 Watch mode while iterating: `cd frontend && npm run test:watch`
-
-## Mobile
-
-```bash
-make typecheck-mobile     # tsc --noEmit
-make lint-mobile          # eslint, every eslint-config-expo rule enforced
-make test-mobile          # jest + the coverage floor + allure taxonomy
-make integration-mobile   # real api client vs a disposable local backend
-make build-mobile         # expo export --platform ios
-make ci-mobile            # all of the above
-make mutation-mobile      # report-only, NOT part of ci-mobile (~5 min)
-```
-
-Floors, in `mobile/coverage-floor.json` and enforced by
-`scripts/validate_coverage_floor.py`: **statements ≥ 94%, branches ≥ 88%,
-functions ≥ 95%, lines ≥ 94%**. The floor may only ratchet upward, and CI
-checks a branch that edits it against the base branch's copy.
-
-`make mutation-mobile` runs the ADR-0015 deterministic-core campaign
-(`src/braindump/{machine,manifest,uploader,waveform}.ts`,
-`src/lifecycle/guards.ts`, `src/config/serverUrl.ts`). It is report-only and
-does not gate merge; the last recorded score is 99.35% with two documented
-non-behavioral survivors.
-
-`make ci-mobile` includes `integration-mobile`. It did not always — a
-locally-green agent could still fail CI — so do not substitute an older
-recollection of this target.
-
-Set `BRAIN_BUDDY_MOBILE_IT_PORT` when another agent may be running; the
-harness otherwise picks `8700 + random(200)` and two agents can collide.
 
 ## End-to-end
 
@@ -148,19 +119,13 @@ make validate-ci     # the validator unit tests + workflow contract checks
 
 ## The Allure taxonomy contract
 
-Every pytest, Vitest, Jest and Playwright **product** test must emit non-empty
+Every pytest, Vitest and Playwright **product** test must emit non-empty
 `epic`, `feature`, `story`, a human-readable title, and at least one named
 step. Use the central helpers and override only for narrower labels:
 
 - `backend/tests/allure_taxonomy.py`
 - `frontend/src/test/allureTaxonomy.ts`
 - `frontend/tests/allure.fixtures.ts`
-- `mobile/src/test/allureTaxonomy.ts`
-
-Mobile is the one runner whose step cannot come from a hook: in `allure-jest` a
-step follows the executing scope, and during `beforeEach` that scope is the
-fixture rather than the test. So the mobile helper binds labels in `beforeEach`
-and wraps each test body in a step.
 
 Name tests so acceptance can trace them: include the **feature-qualified**
 requirement id in the test name or Allure story — `006-FR-001`, or
@@ -187,7 +152,6 @@ A git worktree does **not** isolate these. Set each explicitly:
 | file store + `tasks.sqlite3` | `BRAIN_BUDDY_DATA_DIR` |
 | backend port (8000) | uvicorn `--port` |
 | frontend port (5173) | vite `--port` |
-| mobile integration port | `BRAIN_BUDDY_MOBILE_IT_PORT` |
 | Playwright artifact dirs | `BRAIN_BUDDY_E2E_PROJECT` |
 
 ## Reporting

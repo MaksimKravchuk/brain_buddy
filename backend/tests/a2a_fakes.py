@@ -684,60 +684,6 @@ class FakeA2AClient:
         return [call for call in self.calls if call[0] == method]
 
 
-def _serve_forever() -> None:  # pragma: no cover - exercised as a subprocess
-    """Run one fake agent until the parent kills it.
-
-    The mobile integration harness needs a *real* agent on a real socket: it
-    drives the shipped TypeScript client against a real backend, so a
-    Python-side double would prove nothing about that path. This entry point is
-    what that harness spawns. It prints the chosen port on stdout as its ready
-    signal — the port is bound to 0, so the parent cannot know it in advance and
-    a fixed one would collide with a parallel lane.
-    """
-
-    import argparse
-    import signal
-
-    parser = argparse.ArgumentParser(description="A loopback A2A agent for tests.")
-    parser.add_argument("--bearer-token", default=None)
-    parser.add_argument("--declares-extension", action="store_true")
-    parser.add_argument("--dedup", action="store_true")
-    parser.add_argument("--push-notifications", action="store_true")
-    parser.add_argument("--legacy-card-shape", action="store_true")
-    parser.add_argument(
-        "--not-an-agent",
-        action="store_true",
-        help="Serve no card at the well-known location.",
-    )
-    args = parser.parse_args()
-
-    agent = FakeA2AAgent(
-        bearer_token=args.bearer_token,
-        declares_extension=args.declares_extension,
-        dedup=args.dedup,
-        push_notifications=args.push_notifications,
-        legacy_card_shape=args.legacy_card_shape,
-    )
-    if args.not_an_agent:
-        # A socket that answers but has no card is its own product category
-        # (`a2a_not_an_agent`), and the harness has to be able to produce it.
-        agent.serves_card = False
-    agent.start()
-    print(f"PORT={agent.port}", flush=True)
-
-    stopping = threading.Event()
-    signal.signal(signal.SIGTERM, lambda *_: stopping.set())
-    signal.signal(signal.SIGINT, lambda *_: stopping.set())
-    try:
-        stopping.wait()
-    finally:
-        agent.stop()
-
-
-if __name__ == "__main__":  # pragma: no cover - subprocess entry point
-    _serve_forever()
-
-
 __all__ = [
     "EXTENSION_HEADER",
     "A2AResult",

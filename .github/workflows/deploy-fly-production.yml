@@ -237,7 +237,7 @@ jobs:
           fi
 
       # The Fly apps serve only the backend and frontend; landings that touch
-      # nothing they are built from (the mobile app, docs, specs, agent
+      # nothing they are built from (the native apps, docs, specs, agent
       # config, root markdown) do not need a production release. The gate is
       # fail-open: an unreadable parent, an empty listing, or ANY path
       # outside the known-inert set falls through to a normal deploy.

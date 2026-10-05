@@ -13,8 +13,8 @@ disable-model-invocation: true
 > or background session. A human must explicitly approve each live drive.
 >
 > The free, deterministic, key-free equivalent for everyday verification is
-> the **`self-verify`** skill; `make integration-mobile` covers the real API
-> client against a disposable local backend with no paid provider involved.
+> the **`self-verify`** skill; `make test-e2e` drives the real web client
+> against a disposable local stack with no paid provider involved.
 > Reach for this skill only when the thing under test *is* the live provider
 > integration.
 
