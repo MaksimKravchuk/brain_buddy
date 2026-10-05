@@ -3,8 +3,9 @@
 The native, offline-first Brain Buddy app for iPhone and iPad: SwiftUI on
 iOS 26 with Liquid Glass. Every GTD action works without a network; the server
 is somewhere to sync to. The design, the data model and the sync rules are in
-[`docs/native-ios-app.md`](../docs/native-ios-app.md). This app sits beside the
-Expo client in `mobile/` and grew out of the macOS prototype in `macos/`.
+[`docs/native-ios-app.md`](../docs/native-ios-app.md). It is the iPhone client
+(the Expo client that used to live in `mobile/` was removed) and grew out of
+the macOS prototype in `macos/`.
 
 Agent and contributor rules are in [`AGENTS.md`](AGENTS.md).
 
@@ -121,8 +122,8 @@ sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests
 ## CI
 
 The app is built and tested by two lanes of the main CI,
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml). Like the backend,
-frontend and mobile lanes they are part of `Full CI`, the verdict a pull
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml). Like the backend
+and frontend lanes they are part of `Full CI`, the verdict a pull
 request merges on and a trunk candidate lands on, so no change reaches `main`
 with the package tests red or the app unbuilt.
 
