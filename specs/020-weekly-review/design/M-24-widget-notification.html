@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M-24 · Next actions widget count, M-25 · Weekly notification (iOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--ind50:#eef2ff;--ind200:#c7d2fe;--ind700:#4338ca;--rose700:#be123c;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+header.doc{margin:0 0 22px;max-width:1100px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600)}
+.frames{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;max-width:390px;min-height:52px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.home{width:390px;padding:24px 22px;background:var(--s300);border-radius:32px;display:flex;flex-wrap:wrap;gap:22px}
+.i{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.w{background:#fff;border-radius:22px;padding:14px;box-shadow:var(--raised);display:flex;flex-direction:column;gap:6px}
+.w.s{width:158px;height:158px}.w.m{width:346px;height:158px}.w.l{width:346px;height:364px}
+.wh{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600}
+.wh .i{color:var(--sky500)}
+.wh .n{color:var(--s500)}
+.wh .sp{flex:1}
+.inb{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;color:var(--sky700);background:rgba(14,165,233,.14);border-radius:999px;padding:2px 7px}
+.cap{width:26px;height:26px;border-radius:50%;background:var(--sky500);color:#fff;display:grid;place-items:center;font-size:18px;line-height:1}
+.ask{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--ind700);background:var(--ind50);border:1px solid var(--ind200);border-radius:999px;padding:1px 7px;white-space:nowrap}
+.big{font-size:40px;font-weight:600;line-height:1;letter-spacing:-.02em}
+.r{display:flex;align-items:center;gap:6px;font-size:14px;min-height:26px}
+.r .c{width:16px;height:16px;border:1.5px solid var(--s400);border-radius:50%;flex:none;margin-right:6px}
+.r .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r .d{font-size:11px;color:var(--s500)}
+.more{font-size:11px;color:var(--s500);margin-top:auto}
+.lock{width:390px;height:520px;border-radius:44px;background:var(--s700);color:#fff;padding:60px 14px 0;display:flex;flex-direction:column;align-items:center;gap:4px}
+.lock .dt{font-size:16px;font-weight:500;opacity:.85}.lock .tm{font-size:76px;font-weight:600;letter-spacing:-.02em;line-height:1}
+.nt{margin-top:40px;width:100%;background:rgba(248,250,252,.9);backdrop-filter:blur(8px);color:var(--s900);border-radius:20px;padding:12px 14px;display:flex;gap:10px;box-shadow:var(--float)}
+.nt .ap{width:38px;height:38px;border-radius:9px;background:var(--sky500);flex:none;display:grid;place-items:center;color:#fff}
+.nt .ap svg{width:22px;height:22px;stroke:#fff;fill:none;stroke-width:2}
+.nt .tx{flex:1;font-size:14px;line-height:1.35}
+.nt .hd{display:flex;justify-content:space-between;font-size:12px;color:var(--s500);margin-bottom:1px}
+.nt b{display:block;font-size:15px}
+.spec{width:390px;background:#fff;border:1px solid var(--s200);border-radius:14px;padding:14px;font-size:12px;color:var(--s700);line-height:1.55}
+.spec b{color:var(--s900)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-next" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></symbol>
+<symbol id="i-ask" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+<symbol id="i-tray" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+<symbol id="i-sprout" viewBox="0 0 24 24"><path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9.1 3.3-.2 4.3-.9 1-.6 1.9-1.8 2.7-3.6-2.4-.5-4-.3-5-.1-.4.1-.7.3-.9.6z"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>M-24 · Next actions widget with the "asks for a decision" count, M-25 · the weekly notification — iOS</h1>
+  <p><b>M-24</b> extends <code>NextActionsWidget</code> (list = Next actions) with one indigo chip, "N ask", next to the existing count (FR-037). The chip appears only when N &gt; 0; zero is not shown. Rows, completion buttons, Inbox badge and capture link are unchanged. The widget never syncs; the count is computed from the shared store like the rest of the entry, and the timeline also refreshes at the next marker change (at least at midnight, as today). When the widget is configured for "Today", no chip is shown. VoiceOver: "3 tasks ask for a decision".</p>
+  <p><b>M-25</b>: exactly one local notification per week at the chosen day and time (FR-036), no follow-ups, no counts, no task titles on the lock screen. Tapping opens the review entry (M-11).</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>M-24 · small, medium, large (default)</b>3 tasks ask for a decision out of 7 next actions.</figcaption>
+<div class="home">
+  <div class="w s" aria-label="Next actions widget, small">
+    <div class="wh"><svg class="i"><use href="#i-next"/></svg>Next actions</div>
+    <div class="big">7</div>
+    <span class="ask" aria-label="3 tasks ask for a decision"><svg class="i" style="width:11px;height:11px"><use href="#i-ask"/></svg>3 ask</span>
+    <div class="r" style="margin-top:auto"><span class="c"></span><span class="t">Call the plumber</span></div>
+  </div>
+  <div class="w m" aria-label="Next actions widget, medium">
+    <div class="wh"><svg class="i"><use href="#i-next"/></svg>Next actions <span class="n">7</span><span class="ask" aria-label="3 tasks ask for a decision"><svg class="i" style="width:11px;height:11px"><use href="#i-ask"/></svg>3 ask</span><span class="sp"></span><span class="inb"><svg class="i" style="width:11px;height:11px"><use href="#i-tray"/></svg>3</span><span class="cap">+</span></div>
+    <div class="r"><span class="c"></span><span class="t">Call the plumber about the leak</span></div>
+    <div class="r"><span class="c"></span><span class="t">Renovate the bathroom</span></div>
+    <div class="r"><span class="c"></span><span class="t">Send venue questions to Anna</span><span class="d">16 Oct</span></div>
+  </div>
+  <div class="w l" aria-label="Next actions widget, large">
+    <div class="wh"><svg class="i"><use href="#i-next"/></svg>Next actions <span class="n">7</span><span class="ask" aria-label="3 tasks ask for a decision"><svg class="i" style="width:11px;height:11px"><use href="#i-ask"/></svg>3 ask</span><span class="sp"></span><span class="inb"><svg class="i" style="width:11px;height:11px"><use href="#i-tray"/></svg>3</span><span class="cap">+</span></div>
+    <div class="r"><span class="c"></span><span class="t">Call the plumber about the leak</span></div>
+    <div class="r"><span class="c"></span><span class="t">Renovate the bathroom</span></div>
+    <div class="r"><span class="c"></span><span class="t">Sort the paperwork drawer</span></div>
+    <div class="r"><span class="c"></span><span class="t">Draft the launch FAQ</span></div>
+    <div class="r"><span class="c"></span><span class="t">Send venue questions to Anna</span><span class="d">16 Oct</span></div>
+    <div class="r"><span class="c"></span><span class="t">Review the pricing page copy</span></div>
+    <div class="r"><span class="c"></span><span class="t">Book a dentist appointment</span></div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-24 · nothing asks (empty) and store unavailable (error)</b>No chip at zero. The unavailable state is today's existing widget state, unchanged.</figcaption>
+<div class="home">
+  <div class="w s" aria-label="Next actions widget, small, nothing asks">
+    <div class="wh"><svg class="i"><use href="#i-next"/></svg>Next actions</div>
+    <div class="big">7</div>
+    <div class="r" style="margin-top:auto"><span class="c"></span><span class="t">Call the plumber</span></div>
+  </div>
+  <div class="w s" aria-label="Widget unavailable">
+    <svg class="i" style="width:20px;height:20px;color:var(--sky500)"><use href="#i-tray"/></svg>
+    <div style="margin-top:auto;font-size:14px;font-weight:600">Open Brain Buddy</div>
+    <div style="font-size:12px;color:var(--s500)">Your lists show here once the app can read them.</div>
+  </div>
+  <div class="w m" aria-label="Next actions widget, medium, nothing asks">
+    <div class="wh"><svg class="i"><use href="#i-next"/></svg>Next actions <span class="n">7</span><span class="sp"></span><span class="inb"><svg class="i" style="width:11px;height:11px"><use href="#i-tray"/></svg>3</span><span class="cap">+</span></div>
+    <div class="r"><span class="c"></span><span class="t">Call the plumber about the leak</span></div>
+    <div class="r"><span class="c"></span><span class="t">Draft the launch FAQ</span></div>
+    <div class="r"><span class="c"></span><span class="t">Review the pricing page copy</span></div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-25 · weekly notification (default)</b>Friday 16:00 local. Neutral, short, no count of tasks, no "you missed" language. One per week; nothing follows if it is ignored.</figcaption>
+<div class="lock">
+  <div class="dt">Friday 9 October</div>
+  <div class="tm">16:00</div>
+  <div class="nt" role="img" aria-label="Notification: Weekly review. Your review time. The quick one takes about 5 minutes.">
+    <span class="ap"><svg><use href="#i-sprout"/></svg></span>
+    <div class="tx"><div class="hd"><span>BRAIN BUDDY</span><span>now</span></div><b>Weekly review</b>Your review time. The quick one takes about 5 minutes.</div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-25 · rules</b>Not a screen: the delivery rules the plan must implement.</figcaption>
+<div class="spec">
+  <b>Schedule</b>: the chosen local day and time; follows time-zone changes (US5-5).<br>
+  <b>Frequency</b>: at most one per week; no follow-up, snooze or escalation (FR-036).<br>
+  <b>Tap</b>: opens the review entry (M-11): onboarding is already done by then, so it goes to While you were away / restart / resume / mode picker as applicable.<br>
+  <b>Permission declined</b>: nothing is sent and nothing nags; see M-12.<br>
+  <b>Offline</b>: a local notification, so it fires without a network.<br>
+  <b>Content</b>: no task titles, no counts, no streak or "missed" wording (FR-038).<br>
+  <b>Open question</b>: whether to skip the week's notification when a review already happened since the last slot (design.md, Unresolved).
+</div>
+</figure>
+
+</div>
+</body>
+</html>

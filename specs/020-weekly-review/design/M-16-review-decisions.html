@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M-16 · Review step: tasks that ask for a decision (iOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--ind50:#eef2ff;--ind200:#c7d2fe;--ind700:#4338ca;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1100px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600)}
+.frames{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;min-height:52px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.phone{width:390px;height:851px;background:var(--s50);border-radius:44px;overflow:hidden;position:relative;display:flex;flex-direction:column;box-shadow:var(--raised);border:1px solid var(--s300)}
+.sb{height:47px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font-size:15px;font-weight:600}
+.nb{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 8px}
+.nb .ttl{font-size:15px;font-weight:600;color:var(--s600)}
+.nb button{min-width:44px;min-height:44px;border:0;background:none;color:var(--sky700);font-size:17px;padding:0 8px}
+.steps{display:flex;gap:4px;padding:0 20px 10px;flex:none}.steps i{flex:1;height:4px;border-radius:2px;background:var(--s200)}.steps i.d{background:var(--sky500)}.steps i.c{background:var(--sky700)}.steps i.s{background:var(--s300)}
+.body{flex:1;overflow:hidden;padding:2px 16px 12px;display:flex;flex-direction:column;gap:11px}
+.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.pos{display:flex;justify-content:space-between;font-size:13px;color:var(--s500)}
+.lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin:2px 4px -4px}
+.ttl2{font-size:22px;font-weight:600;letter-spacing:-.015em;line-height:1.25;margin:0}
+.meta{font-size:13px;color:var(--s500);margin:-6px 0 0}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{min-height:44px;padding:0 13px;border-radius:999px;border:1px solid var(--s200);background:#fff;font-size:14px;color:var(--s700)}
+.list{background:#fff;border:1px solid var(--s200);border-radius:14px;overflow:hidden;flex:none}
+.opt{display:flex;align-items:center;gap:12px;width:100%;min-height:48px;padding:6px 14px;background:#fff;border:0;border-top:1px solid var(--s200);text-align:left;font-size:16px;font-weight:500}
+.opt:first-child{border-top:0}
+.opt .ic{width:30px;height:30px;border-radius:8px;background:var(--s100);color:var(--s600);display:grid;place-items:center;flex:none}
+.done{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--s600);background:#fff;border:1px solid var(--s200);border-radius:12px;padding:8px 12px}
+.done .i{color:var(--sky700);width:16px;height:16px}
+.foot{flex:none;padding:10px 16px 30px;border-top:1px solid var(--s200);background:rgba(248,250,252,.95);display:flex;flex-direction:column;gap:8px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:50px;border-radius:12px;border:1px solid transparent;font-size:16px;font-weight:600;padding:0 16px}
+.btn.pri{background:var(--sky700);color:#fff}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:8px;padding:0 28px}
+.empty .i{width:40px;height:40px;color:var(--s400);stroke-width:1.5}
+.empty h2{font-size:20px;font-weight:600;margin:4px 0 0}.empty p{margin:0;font-size:15px;color:var(--s500);line-height:1.45}
+.note{border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700);display:flex;gap:8px;align-items:flex-start}
+.note.info{background:var(--sky50);border-color:var(--sky200);color:var(--sky700)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.17 6.81a2.83 2.83 0 0 0-4-4L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/></symbol>
+<symbol id="i-step" viewBox="0 0 24 24"><path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4M4 13h4"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+<symbol id="i-cal-plus" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>M-16 · Review step: tasks that ask for a decision — iOS</h1>
+  <p>The same decision card as M-03 and the same forms as M-04, laid out full-screen inside the review instead of as a sheet. One card at a time, oldest formulation first (US4-3, FR-034). The list is fixed when the step opens; a threshold change during the review does not reshuffle it (edge case). After each decision the next card slides in (brand easing, 200 ms; instant with Reduce Motion) with a one-line note of what just happened.</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>M-16 · default (first card)</b>Position and order are stated. "Skip" in the bar skips the whole step; skipping one card is "Not now", which leaves it asking.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:12</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Quick · 3 of 4</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="c"></i><i></i></div>
+  <div class="body">
+    <div class="pos"><span>1 of 5 · oldest first</span><span>Asks for a decision</span></div>
+    <h2 class="ttl2">Update the CV</h2>
+    <p class="meta">20 days in Next · no project</p>
+    <p class="lbl">What got in the way? · optional</p>
+    <div class="chips"><button class="chip">Unclear</button><button class="chip">Too big</button><button class="chip">Missing information</button><button class="chip">Waiting on someone</button><button class="chip">No longer matters</button><button class="chip">Unpleasant / no energy</button></div>
+    <div class="list" role="group" aria-label="Decisions">
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-check"/></svg></span>Done</button>
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-pencil"/></svg></span>Reformulate</button>
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-step"/></svg></span>Find a first step</button>
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-clock"/></svg></span>Move to Waiting for…</button>
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-archive"/></svg></span>Release to Someday</button>
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-x"/></svg></span>Cancel task</button>
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-cal-plus"/></svg></span>Keep 7 more days</button>
+    </div>
+    <button class="btn" style="background:none;color:var(--sky700);min-height:44px">Not now</button>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-16 · next card, after a decision</b>A single status line confirms the previous decision; the person stays in flow. Here the reason chosen is "Too big", so "Find a first step" is recommended.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:13</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Quick · 3 of 4</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="c"></i><i></i></div>
+  <div class="body">
+    <div class="done" role="status"><svg class="i"><use href="#i-check"/></svg>"Update the CV" released to Someday</div>
+    <div class="pos"><span>2 of 5 · oldest first</span><span>Asks for a decision</span></div>
+    <h2 class="ttl2">Renovate the bathroom</h2>
+    <p class="meta">15 days in Next · Home</p>
+    <p class="lbl">What got in the way? · optional</p>
+    <div class="chips"><button class="chip">Unclear</button><button class="chip" style="background:var(--sky50);border-color:var(--sky500);color:var(--sky700);font-weight:600" aria-pressed="true">Too big</button><button class="chip">Missing information</button><button class="chip">Waiting on someone</button><button class="chip">No longer matters</button><button class="chip">Unpleasant / no energy</button></div>
+    <div class="list" role="group" aria-label="Decisions">
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-check"/></svg></span>Done</button>
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-pencil"/></svg></span>Reformulate</button>
+      <button class="opt" style="background:var(--sky50);box-shadow:inset 0 0 0 1.5px var(--sky500)"><span class="ic" style="background:#fff;color:var(--sky700)"><svg class="i"><use href="#i-step"/></svg></span><span style="flex:1">Find a first step</span><span style="font-size:11px;font-weight:600;color:var(--sky700);background:#fff;border:1px solid var(--sky200);border-radius:999px;padding:2px 8px">Recommended</span></button>
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-clock"/></svg></span>Move to Waiting for…</button>
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-archive"/></svg></span>Release to Someday</button>
+      <button class="opt"><span class="ic"><svg class="i"><use href="#i-x"/></svg></span>Cancel task</button>
+    </div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-16 · all decided</b>End of the queue. Counts only; SC-002 holds when nothing past the threshold is left undecided.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:18</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Quick · 3 of 4</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="c"></i><i></i></div>
+  <div class="empty">
+    <svg class="i"><use href="#i-check"/></svg>
+    <h2>All 5 decided</h2>
+    <p>Nothing in Next is waiting for a decision now.</p>
+  </div>
+  <div class="foot"><button class="btn pri">Next: summary</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-16 · empty (nothing asks)</b>No task asks for a decision this week. The step finishes with nothing to decide.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:12</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Full · 4 of 10</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="empty">
+    <svg class="i"><use href="#i-check"/></svg>
+    <h2>Nothing asks for a decision</h2>
+    <p>Every next action has a wording that's still fresh.</p>
+  </div>
+  <div class="foot"><button class="btn pri">Next: the rest of Next</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-16 · some left undecided ("Not now")</b>The person passed on 2 cards. Said plainly, without pressure; they keep asking in Next, and the review can still finish.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:18</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Quick · 3 of 4</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="c"></i><i></i></div>
+  <div class="empty">
+    <svg class="i"><use href="#i-check"/></svg>
+    <h2>3 of 5 decided</h2>
+    <p>2 still ask for a decision. They'll be in Next whenever you're ready.</p>
+  </div>
+  <div class="foot"><button class="btn pri">Next: summary</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-16 · threshold changed during the review</b>Changed on another device mid-review. The queue stays as it was; a quiet note says the new threshold applies next time.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:14</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Quick · 3 of 4</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="c"></i><i></i></div>
+  <div class="body">
+    <div class="note info" role="status"><svg class="i"><use href="#i-info"/></svg><span>Your threshold changed to 21 days. This list stays as it is; new markers apply from your next look at Next.</span></div>
+    <div class="pos"><span>3 of 5 · oldest first</span><span>Asks for a decision</span></div>
+    <h2 class="ttl2">Book a dentist appointment</h2>
+    <p class="meta">17 days in Next · no project</p>
+  </div>
+</div>
+</figure>
+
+</div>
+</body>
+</html>

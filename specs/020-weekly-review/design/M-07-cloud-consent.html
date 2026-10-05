@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M-07 · Cloud provider consent and failures (iOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1100px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600)}
+.frames{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;min-height:52px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.phone{width:390px;height:851px;background:var(--s50);border-radius:44px;overflow:hidden;position:relative;display:flex;flex-direction:column;box-shadow:var(--raised);border:1px solid var(--s300)}
+.sb{height:47px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font-size:15px;font-weight:600}
+.scrim{position:absolute;inset:0;background:rgba(15,23,42,.35)}
+.sheet{position:absolute;left:0;right:0;bottom:0;top:58px;background:var(--s50);border-radius:20px 20px 0 0;display:flex;flex-direction:column;box-shadow:var(--float)}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--s300);margin:6px auto 0;flex:none}
+.nb{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 8px}
+.nb .ttl{font-size:17px;font-weight:600}
+.nb button{min-width:44px;min-height:44px;border:0;background:none;color:var(--sky700);font-size:17px;padding:0 8px;display:inline-flex;align-items:center}
+.sbody{flex:1;overflow:hidden;padding:2px 16px 16px;display:flex;flex-direction:column;gap:12px}
+.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ctx{font-size:13px;color:var(--s500);margin:0}
+.h2{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0;line-height:1.3}
+.p{font-size:15px;color:var(--s600);line-height:1.45;margin:0}
+.sent{background:#fff;border:1px solid var(--s200);border-radius:14px;padding:12px 14px}
+.sent .lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin:0 0 6px}
+.sent ul{margin:0;padding:0 0 0 18px;font-size:14px;line-height:1.6;color:var(--s900)}
+.sent .not{margin:8px 0 0;font-size:13px;color:var(--s600)}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:50px;border-radius:12px;border:1px solid transparent;font-size:16px;font-weight:600;padding:0 16px}
+.btn.pri{background:var(--sky700);color:#fff}.btn.sec{background:#fff;border-color:var(--s200);color:var(--s900)}.btn.gh{background:none;color:var(--sky700);min-height:44px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.spacer{flex:1}
+.help{font-size:12px;color:var(--s500);margin:0;line-height:1.45}
+.note{border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700);display:flex;gap:8px;align-items:flex-start}
+.note.warn{background:var(--amb50);border-color:var(--amb200);color:var(--amb800)}
+.ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--s600)}
+.field{width:100%;min-height:52px;border:1px solid var(--s200);border-radius:12px;background:#fff;padding:13px 12px;font-size:16px}
+.ph{color:var(--s400)}
+.nav{background:#fff;border:1px solid var(--s200);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.navh{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--s700)}.navh .i{color:var(--sky700)}
+.prop{display:flex;gap:10px;align-items:flex-start;width:100%;min-height:48px;padding:11px 12px;border:1px solid var(--s200);border-radius:10px;background:var(--s50);text-align:left;font-size:15px;line-height:1.35}
+.prop .rb{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--s300);flex:none;margin-top:1px;background:#fff}
+.prov{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--s500)}
+.skel{background:var(--s200);border-radius:6px;height:14px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+<symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z"/></symbol>
+<symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+<symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01M8.5 16.43a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M5 13a10 10 0 0 1 5.24-2.76M2 2l20 20"/></symbol>
+<symbol id="i-retry" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>M-07 · Cloud provider consent, cloud suggestions and failures (iOS)</h1>
+  <p>Every cloud request is preceded by a one-time consent that names the provider and lists exactly what is sent (FR-024, Clarification 3): title, notes, chosen reason, project name, and titles of up to 20 other open tasks in the project. The same list is used for on-device and cloud. Consent is per provider, revocable in Settings, and a revoked consent stops requests immediately. Web (D-02) uses the same screen and copy in a dialog.</p>
+  <p>Every cloud failure names the cause, shows the correlation ID (FR-025, FR-045), and leaves the card usable. Provider name is illustrative.</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>M-07 · consent</b>Shown once, before the first cloud request. Nothing has been sent yet. "Not now" returns to the card with suggestions off.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="d1">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl">Cloud suggestions</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <h2 class="h2" id="d1">Send task details to OpenAI for suggestions?</h2>
+      <p class="p">OpenAI processes them to suggest a first step. Nothing has been sent yet.</p>
+      <div class="sent">
+        <p class="lbl">Sent with each suggestion request</p>
+        <ul>
+          <li>The task's title</li>
+          <li>The task's notes</li>
+          <li>The reason you picked, if any</li>
+          <li>The project's name</li>
+          <li>Titles of up to 20 other open tasks in that project</li>
+        </ul>
+        <p class="not">Nothing else is sent.</p>
+      </div>
+      <p class="help">We ask once. You can turn this off in Settings, and requests stop immediately.</p>
+      <div class="spacer"></div>
+      <button class="btn pri">Allow and suggest</button>
+      <button class="btn gh">Not now</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-07 · consent again after revoke</b>US3-6: consent was revoked in Settings; tapping "Suggest" sends nothing and shows the consent again, with a line saying so.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="d2">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl">Cloud suggestions</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <div class="note"><svg class="i"><use href="#i-shield"/></svg><span>You turned cloud suggestions off on Wed 7 Oct. Nothing has been sent since.</span></div>
+      <h2 class="h2" id="d2">Send task details to OpenAI for suggestions?</h2>
+      <div class="sent">
+        <p class="lbl">Sent with each suggestion request</p>
+        <ul><li>The task's title</li><li>The task's notes</li><li>The reason you picked, if any</li><li>The project's name</li><li>Titles of up to 20 other open tasks in that project</li></ul>
+        <p class="not">Nothing else is sent.</p>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn pri">Allow and suggest</button>
+      <button class="btn gh">Not now</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-07 · declined → card without AI</b>US3-5: declining leaves the form fully usable. The Suggest button stays, so the person can change their mind later.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="d3">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="d3">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · reason: too big</p>
+      <div class="field" role="textbox" aria-label="First step"><span class="ph">Something you could start in 10 minutes</span></div>
+      <p class="help">Nothing was sent. Write your own step, or ask for suggestions later.</p>
+      <button class="btn sec"><svg class="i"><use href="#i-compass"/></svg>Suggest a first step</button>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save first step</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-07 · cloud loading → proposals</b>While waiting: static placeholders and "Stop". Proposals carry a provider line instead of the on-device line.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="d4">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="d4">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · reason: too big</p>
+      <div class="nav" aria-busy="true">
+        <div class="navh"><svg class="i"><use href="#i-cloud"/></svg>Asking OpenAI…</div>
+        <div class="skel" style="width:80%"></div><div class="skel" style="width:66%"></div>
+        <button class="btn gh">Stop</button>
+      </div>
+      <p class="ctx" style="margin-top:6px">Then:</p>
+      <div class="nav" role="radiogroup" aria-label="Suggested first steps">
+        <div class="navh"><svg class="i"><use href="#i-compass"/></svg>Pick one to edit</div>
+        <button class="prop" role="radio" aria-checked="false"><span class="rb"></span>Measure the bathroom walls and floor</button>
+        <button class="prop" role="radio" aria-checked="false"><span class="rb"></span>Write down what you'd change first</button>
+        <div class="prov"><svg class="i" style="width:14px;height:14px"><use href="#i-cloud"/></svg>Suggested by OpenAI from this task's details.</div>
+        <button class="btn gh">None of these</button>
+      </div>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-07 · error: timeout or provider error</b>Actionable message, correlation ID, retry, and the card stays usable (FR-025). Malformed output uses the same frame with "The answer couldn't be used".</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="d5">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="d5">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · reason: too big</p>
+      <div class="field" role="textbox" aria-label="First step"><span class="ph">Something you could start in 10 minutes</span></div>
+      <div class="note warn" role="alert" style="flex-direction:column;gap:6px"><div style="display:flex;gap:8px"><svg class="i"><use href="#i-cloud"/></svg><span>OpenAI didn't answer in time. You can try again or write your own step.</span></div><span class="ref">Ref 2b9e41d7-a1c3</span></div>
+      <button class="btn sec"><svg class="i"><use href="#i-retry"/></svg>Try again</button>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save first step</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-07 · error: cost cap reached</b>The existing provider cost cap is hit. No retry button, because retrying can't succeed; says when it is expected back if known.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="d6">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="d6">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · reason: too big</p>
+      <div class="field" role="textbox" aria-label="First step"><span class="ph">Something you could start in 10 minutes</span></div>
+      <div class="note warn" role="alert" style="flex-direction:column;gap:6px"><div style="display:flex;gap:8px"><svg class="i"><use href="#i-info"/></svg><span>Cloud suggestions have reached their usage limit for now. Everything else works as usual.</span></div><span class="ref">Ref 9c04e2aa-55f0</span></div>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save first step</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-07 · offline (cloud path)</b>No request is attempted. If the downloadable model is an option on this iPhone, it is mentioned because it works offline once installed.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>✈︎ 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="d7">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="d7">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · reason: too big</p>
+      <div class="field" role="textbox" aria-label="First step"><span class="ph">Something you could start in 10 minutes</span></div>
+      <div class="note" role="status"><svg class="i"><use href="#i-wifi-off"/></svg><span>You're offline. Cloud suggestions need a connection. You can still write your own step and save it.</span></div>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save first step</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-07 · no account (local-only iOS)</b>Edge case: account-less use. Cloud suggestions are a server feature and say so; on-device options still apply.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="d8">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="d8">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom</p>
+      <div class="field" role="textbox" aria-label="First step"><span class="ph">Something you could start in 10 minutes</span></div>
+      <div class="note" role="status"><svg class="i"><use href="#i-info"/></svg><span>Cloud suggestions need a Brain Buddy account. Suggestions on this iPhone don't.</span></div>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save first step</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+</div>
+</body>
+</html>

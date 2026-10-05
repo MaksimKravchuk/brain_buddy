@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>D-03 · Weekly review shell (web)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--ind50:#eef2ff;--ind200:#c7d2fe;--ind700:#4338ca;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--rose50:#fff1f2;--rose200:#fecdd3;--rose700:#be123c;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-feature-settings:"cv11","ss01","ss03";-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1200px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600);max-width:1000px}
+figure{margin:0 0 30px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;max-width:1100px}figcaption b{color:var(--s900);font-size:13px;margin-right:6px}
+.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.scr{position:relative;width:1100px;height:620px;background:var(--s50);border:1px solid var(--s300);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--raised)}
+.top{height:56px;flex:none;display:flex;align-items:center;gap:12px;padding:0 20px;background:rgba(255,255,255,.94);border-bottom:1px solid var(--s200)}
+.top .t{font-size:14px;font-weight:600;display:flex;gap:8px;align-items:center}.top .t .i{color:var(--sky700)}
+.top .m{font-size:12px;color:var(--s500)}
+.top .sp{flex:1}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;border-radius:8px;border:1px solid transparent;font-size:13px;font-weight:600;padding:0 14px}
+.btn.pri{background:var(--sky700);color:#fff}.btn.sec{background:#fff;border-color:var(--s200);color:var(--s900)}.btn.gh{background:none;color:var(--sky700)}
+.btn.lg{min-height:44px;font-size:14px;padding:0 18px}
+.btn[disabled]{opacity:.45}
+.wrap{flex:1;display:grid;grid-template-columns:240px 1fr;min-height:0}
+.rail{background:#fff;border-right:1px solid var(--s200);padding:18px 12px;display:flex;flex-direction:column;gap:2px}
+.rail .h{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin:0 10px 6px}
+.st{display:flex;align-items:center;gap:10px;min-height:34px;padding:0 10px;border-radius:8px;font-size:13px;color:var(--s600)}
+.st .dot{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--s300);display:grid;place-items:center;flex:none;font-size:10px}
+.st.done .dot{background:var(--sky500);border-color:var(--sky500);color:#fff}
+.st.skip{color:var(--s400)}.st.skip .dot{border-style:dashed}
+.st.cur{background:var(--sky50);color:var(--sky700);font-weight:600}.st.cur .dot{border:5px solid var(--sky700)}
+.st small{margin-left:auto;font-size:11px;color:var(--s400);font-weight:400}
+.main{padding:28px 40px;overflow:hidden;display:flex;flex-direction:column;align-items:center}
+.col{width:100%;max-width:600px;display:flex;flex-direction:column;gap:14px}
+.h1{font-size:24px;font-weight:600;letter-spacing:-.02em;margin:0}
+.p{font-size:14px;color:var(--s600);line-height:1.5;margin:0}
+.pos{display:flex;justify-content:space-between;font-size:12px;color:var(--s500)}
+.card{background:#fff;border:1px solid var(--s200);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--soft)}
+.lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin:2px 0 -4px}
+.tt{font-size:18px;font-weight:600;margin:0}.meta{font-size:12px;color:var(--s500);margin:-6px 0 0}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{min-height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--s200);background:#fff;font-size:13px;color:var(--s700)}
+.opts{border:1px solid var(--s200);border-radius:12px;overflow:hidden}
+.opt{display:flex;align-items:center;gap:10px;width:100%;min-height:40px;padding:6px 12px;background:#fff;border:0;border-top:1px solid var(--s200);text-align:left;font-size:14px;font-weight:500}
+.opt:first-child{border-top:0}.opt .os{font-size:12px;font-weight:400;color:var(--s500);margin-left:6px}
+.mode{display:flex;flex-direction:column;gap:6px;text-align:left;background:#fff;border:1px solid var(--s200);border-radius:14px;padding:18px;width:100%}
+.mode:hover{box-shadow:var(--raised);border-color:var(--s300)}
+.mode .mh{display:flex;justify-content:space-between;align-items:baseline;font-size:17px;font-weight:600}.mode .mh span{font-size:13px;font-weight:500;color:var(--s500)}
+.mode .md{font-size:13px;color:var(--s600);line-height:1.5}
+.resume{background:var(--sky50);border:1.5px solid var(--sky500);border-radius:14px;padding:16px 18px;display:flex;align-items:center;gap:16px}
+.resume div{flex:1}.resume b{display:block;font-size:15px}.resume span{font-size:13px;color:var(--s700)}
+.list{background:#fff;border:1px solid var(--s200);border-radius:12px;overflow:hidden}
+.row{display:flex;gap:10px;align-items:center;padding:8px 14px;min-height:48px;border-top:1px solid var(--s200);font-size:14px}.row:first-child{border-top:0}
+.row .rt{flex:1}.row .m{display:block;font-size:12px;color:var(--s500)}
+.ok{display:inline-flex;gap:4px;align-items:center;font-size:12px;color:var(--s600)}.ok .i{color:var(--sky700)}
+.mirror{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.mirror div b{display:block;font-size:30px;font-weight:600;letter-spacing:-.02em}.mirror div span{font-size:12px;color:var(--s500)}
+.counts{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--s200);border-radius:12px;overflow:hidden;background:#fff}
+.counts div{padding:10px 12px;border-left:1px solid var(--s200);border-top:1px solid var(--s200);font-size:12px;color:var(--s600)}
+.counts div:nth-child(4n+1){border-left:0}.counts div:nth-child(-n+4){border-top:0}
+.counts b{display:block;font-size:20px;color:var(--s900);font-weight:600}
+.counts .z,.counts .z b{color:var(--s400)}
+.qa{display:flex;gap:8px}.qa button{min-height:40px;min-width:120px;border-radius:8px;border:1px solid var(--s200);background:#fff;font-size:14px;font-weight:500}
+.banner{display:flex;gap:8px;align-items:flex-start;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700)}
+.banner.warn{background:var(--amb50);border-color:var(--amb200);color:var(--amb800)}
+.banner.info{background:var(--sky50);border-color:var(--sky200);color:var(--sky700)}
+.ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--s600)}
+.seg{display:inline-flex;background:var(--s100);border-radius:8px;padding:3px;gap:3px}
+.seg button{min-height:32px;padding:0 14px;border:0;background:none;border-radius:6px;font-size:13px;font-weight:500;color:var(--s600)}
+.seg button.on{background:#fff;box-shadow:var(--soft);color:var(--s900);font-weight:600}
+.sel{min-height:36px;border:1px solid var(--s200);border-radius:6px;background:#fff;padding:0 10px;font-size:13px;display:inline-flex;align-items:center;gap:20px}
+.scrim{position:absolute;inset:0;background:rgba(248,250,252,.8);backdrop-filter:blur(4px)}
+.dlg{position:absolute;left:50%;top:40px;transform:translateX(-50%);width:560px;background:#fff;border:1px solid var(--s200);border-radius:20px;box-shadow:var(--float);padding:22px;display:flex;flex-direction:column;gap:12px}
+.pt{display:flex;gap:10px;font-size:13px;color:var(--s600);line-height:1.5}.pt b{color:var(--s900)}
+.skel{background:var(--s200);border-radius:6px;height:12px}
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;width:1100px}
+.mini{height:250px;background:var(--s50);border:1px solid var(--s300);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--raised)}
+.mini h3{margin:0;font-size:16px;font-weight:600}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-review" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.17 6.81a2.83 2.83 0 0 0-4-4L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/></symbol>
+<symbol id="i-step" viewBox="0 0 24 24"><path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4M4 13h4"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+<symbol id="i-xc" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+<symbol id="i-cal-plus" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+<symbol id="i-next" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+<symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+<symbol id="i-ask" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+<symbol id="i-today" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+<symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01M8.5 16.43a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M5 13a10 10 0 0 1 5.24-2.76M2 2l20 20"/></symbol>
+<symbol id="i-retry" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>D-03 · Weekly review shell — web</h1>
+  <p>The review is a focused route (<code>/review</code>) that hides the GTD sidebar: a top bar with mode and "Leave", a 240 px step rail on the left (done / skipped / current, read-only — steps are not jumpable, to keep one thing at a time), and a single 600 px content column. Each step's content and copy are the iOS ones (M-09 to M-22); this file shows the layouts that materially differ on desktop plus the shell's own states. Keyboard: "Skip step" and "Leave" are reachable at the top; focus moves to the step heading on every step change; Esc in a nested dialog returns to the step.</p>
+  <p>Web acceptance cites D-03 together with the matching M- id for step content.</p>
+</header>
+
+<figure>
+<figcaption><b>D-03 · entry: resume or mode picker</b>Same choices as M-11. Resume first when a review is open on any device (US4-7).</figcaption>
+<div class="scr">
+  <div class="top"><span class="t"><svg class="i"><use href="#i-review"/></svg>Weekly review</span><span class="m">Last review: 9 days ago</span><span class="sp"></span><button class="btn gh">Close</button></div>
+  <div class="main"><div class="col">
+    <h1 class="h1">Pick up where you left off?</h1>
+    <div class="resume"><div><b>Full review · step 4 of 10</b><span>Started today at 12:40 on iPhone. 6 decisions made so far.</span></div><button class="btn pri lg">Continue</button></div>
+    <p class="lbl" style="margin-top:8px">Or start a new one</p>
+    <button class="mode"><span class="mh">Quick<span>about 5 min</span></span><span class="md">Wins of the week, Inbox, tasks that ask for a decision, summary.</span></button>
+    <button class="mode"><span class="mh">Full<span>about 20 min</span></span><span class="md">Get clear, get current, get creative: wins, mind sweep, Inbox, decisions, the rest of Next, Waiting, projects, Someday, upcoming dates, summary.</span></button>
+    <p class="p" style="font-size:12px;color:var(--s500)">Skip any step. Stop any time; what you've done is kept and you can continue on any device.</p>
+  </div></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-03 · onboarding (first time)</b>M-12 as a dialog over the entry. Native selects for day and time; segmented threshold.</figcaption>
+<div class="scr">
+  <div class="top"><span class="t"><svg class="i"><use href="#i-review"/></svg>Weekly review</span><span class="sp"></span><button class="btn gh">Close</button></div>
+  <div class="scrim"></div>
+  <section class="dlg" role="dialog" aria-modal="true" aria-labelledby="ob">
+    <h2 id="ob" style="margin:0;font-size:20px;font-weight:600;letter-spacing:-.015em">A weekly reset</h2>
+    <div class="pt"><svg class="i" style="color:var(--sky700);margin-top:2px"><use href="#i-review"/></svg><span><b>Why.</b> Once a week: see what you got done, empty your head, and choose what's next.</span></div>
+    <div class="pt"><svg class="i" style="color:var(--sky700);margin-top:2px"><use href="#i-ask"/></svg><span><b>When a task stalls.</b> If a next action keeps the same wording for 14 days, it asks for a decision. A stall is feedback on the wording, not on you.</span></div>
+    <div class="pt"><svg class="i" style="color:var(--sky700);margin-top:2px"><use href="#i-archive"/></svg><span><b>If it stays undecided.</b> 7 days later it moves to Someday / maybe. You'll see what moved and can bring it back in one click. It's the only thing the app moves on its own. Tasks you already have get at least 14 days.</span></div>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><label class="p" style="font-size:13px">Day <span class="sel">Friday ▾</span></label><label class="p" style="font-size:13px">Time <span class="sel">16:00 ▾</span></label></div>
+    <div style="display:flex;gap:12px;align-items:center"><span class="p" style="font-size:13px">Ask for a decision after</span><div class="seg" role="radiogroup" aria-label="Ask for a decision after"><button role="radio" aria-checked="false">7 days</button><button class="on" role="radio" aria-checked="true">14 days</button><button role="radio" aria-checked="false">21 days</button><button role="radio" aria-checked="false">28 days</button></div></div>
+    <p class="p" style="font-size:12px;color:var(--s500)">Times are in your local time zone. One reminder on your review day (delivery channel on web: see design.md, Unresolved).</p>
+    <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn pri lg">Continue</button></div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-03 · While you were away</b>M-09 content; rows as a compact list with a per-row "Return to Next" button and "Return all" in the footer.</figcaption>
+<div class="scr">
+  <div class="top"><span class="t"><svg class="i"><use href="#i-review"/></svg>Weekly review</span><span class="sp"></span><button class="btn gh">Close</button></div>
+  <div class="main"><div class="col">
+    <h1 class="h1">While you were away</h1>
+    <p class="p">These 4 tasks stayed undecided, so they moved to Someday / maybe to keep Next honest. Nothing was deleted. Bring back anything that still matters.</p>
+    <div class="list">
+      <div class="row"><span class="rt">Learn basic Portuguese<span class="m">Parked Thu 8 Oct · Personal</span></span><button class="btn sec">Return to Next</button></div>
+      <div class="row"><span class="rt">Clean out the garage<span class="m">Back in Next with a fresh start</span></span><span class="ok" role="status"><svg class="i"><use href="#i-check"/></svg>Returned</span></div>
+      <div class="row"><span class="rt">Update the CV<span class="m">Parked Tue 6 Oct · no project</span></span><button class="btn sec">Return to Next</button></div>
+      <div class="row"><span class="rt">Return the old router<span class="m">Parked Thu 8 Oct · Old flat (archived)</span></span><button class="btn sec" disabled aria-label="Return unavailable: project Old flat is archived">Project archived</button></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn sec lg">Return the other 2 to Next</button><button class="btn pri lg">Continue</button></div>
+  </div></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-03 · restart mode</b>M-10 content: neutral welcome, one reversible bulk release; shown here after release with Undo.</figcaption>
+<div class="scr">
+  <div class="top"><span class="t"><svg class="i"><use href="#i-review"/></svg>Weekly review</span><span class="sp"></span><button class="btn gh">Close</button></div>
+  <div class="main"><div class="col">
+    <h1 class="h1">Welcome back</h1>
+    <p class="p">Your last review was 26 days ago. Gaps happen. Let's make Next fit the week ahead.</p>
+    <div class="card"><b style="font-size:16px">17 next actions are older than 4 weeks</b><p class="p">Release them to Someday / maybe in one go? They keep their project, Tags and notes, and you can undo this right away.</p><div style="display:flex;gap:8px"><button class="btn pri lg"><svg class="i"><use href="#i-archive"/></svg>Release 17 to Someday</button><button class="btn sec lg">Keep them and start the review</button><button class="btn gh">See which ones</button></div></div>
+    <p class="lbl">After release</p>
+    <div class="banner info" role="status"><svg class="i"><use href="#i-check"/></svg><span style="flex:1">17 tasks released to Someday / maybe. Next now holds 12 tasks.</span><button class="btn sec"><svg class="i"><use href="#i-undo"/></svg>Undo</button></div>
+  </div></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-03 · decision step with rail</b>One card at a time, oldest first (M-16 content; D-02 card inline instead of in a dialog). The rail shows a skipped step as dashed.</figcaption>
+<div class="scr">
+  <div class="top"><span class="t"><svg class="i"><use href="#i-review"/></svg>Weekly review · Full</span><span class="sp"></span><button class="btn gh">Skip step</button><button class="btn sec">Leave</button></div>
+  <div class="wrap">
+    <nav class="rail" aria-label="Review steps">
+      <p class="h">Get clear</p>
+      <div class="st done"><span class="dot">✓</span>Wins of the week</div>
+      <div class="st skip"><span class="dot"></span>Mind sweep<small>skipped</small></div>
+      <div class="st done"><span class="dot">✓</span>Inbox<small>10</small></div>
+      <div class="st cur" aria-current="step"><span class="dot"></span>Decisions<small>2 of 5</small></div>
+      <p class="h" style="margin-top:10px">Get current</p>
+      <div class="st"><span class="dot"></span>The rest of Next</div>
+      <div class="st"><span class="dot"></span>Waiting for</div>
+      <div class="st"><span class="dot"></span>Projects</div>
+      <p class="h" style="margin-top:10px">Get creative</p>
+      <div class="st"><span class="dot"></span>Someday / maybe</div>
+      <div class="st"><span class="dot"></span>Next 14 days</div>
+      <div class="st"><span class="dot"></span>Summary</div>
+    </nav>
+    <div class="main" style="padding-top:22px"><div class="col">
+      <div class="banner" role="status" style="padding:6px 10px"><svg class="i" style="color:var(--sky700)"><use href="#i-check"/></svg>"Update the CV" released to Someday</div>
+      <div class="pos"><span>2 of 5 · oldest first</span><span>Asks for a decision</span></div>
+      <div class="card">
+        <p class="tt">Renovate the bathroom</p><p class="meta">15 days in Next · Home</p>
+        <p class="lbl">What got in the way? · optional</p>
+        <div class="chips"><button class="chip">Unclear</button><button class="chip">Too big</button><button class="chip">Missing information</button><button class="chip">Waiting on someone</button><button class="chip">Unpleasant / no energy</button><button class="chip">No longer matters</button></div>
+        <div class="opts">
+          <button class="opt"><svg class="i"><use href="#i-check"/></svg>Done</button>
+          <button class="opt"><svg class="i"><use href="#i-pencil"/></svg>Reformulate</button>
+          <button class="opt"><svg class="i"><use href="#i-step"/></svg>Find a first step</button>
+          <button class="opt"><svg class="i"><use href="#i-clock"/></svg>Move to Waiting for…</button>
+          <button class="opt"><svg class="i"><use href="#i-archive"/></svg>Release to Someday</button>
+          <button class="opt"><svg class="i"><use href="#i-xc"/></svg>Cancel task</button>
+          <button class="opt"><svg class="i"><use href="#i-cal-plus"/></svg>Keep 7 more days</button>
+        </div>
+        <button class="btn gh" style="align-self:flex-start">Not now</button>
+      </div>
+    </div></div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-03 · Waiting step (one at a time) and capacity mirror</b>Two step layouts that use the wider column: the four Waiting decisions in one row of buttons; the mirror as three figures.</figcaption>
+<div class="scr">
+  <div class="top"><span class="t"><svg class="i"><use href="#i-review"/></svg>Weekly review · Full</span><span class="sp"></span><button class="btn gh">Skip step</button><button class="btn sec">Leave</button></div>
+  <div class="wrap">
+    <nav class="rail" aria-label="Review steps">
+      <div class="st done"><span class="dot">✓</span>Wins of the week</div><div class="st done"><span class="dot">✓</span>Mind sweep</div><div class="st done"><span class="dot">✓</span>Inbox</div><div class="st done"><span class="dot">✓</span>Decisions</div><div class="st done"><span class="dot">✓</span>The rest of Next</div><div class="st cur" aria-current="step"><span class="dot"></span>Waiting for<small>1 of 3</small></div><div class="st"><span class="dot"></span>Projects</div><div class="st"><span class="dot"></span>Someday / maybe</div><div class="st"><span class="dot"></span>Next 14 days</div><div class="st"><span class="dot"></span>Summary</div>
+    </nav>
+    <div class="main"><div class="col">
+      <p class="lbl">Previous step · the rest of Next</p>
+      <div class="card"><div class="mirror"><div><b>41</b><span>next actions</span></div><div><b>9</b><span>done per week, last 4 weeks</span></div><div><b>~4½</b><span>weeks of work at that pace</span></div></div><p class="p" style="font-size:12px">No limit. Just a mirror, so you can choose with your eyes open.</p></div>
+      <div class="pos" style="margin-top:6px"><span>1 of 3</span><span>Waiting for more than 7 days</span></div>
+      <div class="card"><p class="tt">Quote for the bathroom tiles</p><p class="meta">Waiting on: the tile shop · since Thu 24 Sep (15 days) · Home</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec"><svg class="i"><use href="#i-clock"/></svg>Keep waiting</button><button class="btn sec"><svg class="i"><use href="#i-plus"/></svg>Create a follow-up</button><button class="btn sec"><svg class="i"><use href="#i-next"/></svg>Return to Next</button><button class="btn sec"><svg class="i"><use href="#i-xc"/></svg>Cancel task</button></div>
+        <p class="p" style="font-size:12px;color:var(--s500)">Keep waiting checks in again in 7 days.</p></div>
+    </div></div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-03 · summary</b>M-22 content in a 4-column grid: counts per decision type, next review date, the optional question.</figcaption>
+<div class="scr">
+  <div class="top"><span class="t"><svg class="i"><use href="#i-review"/></svg>Weekly review · Full</span><span class="sp"></span></div>
+  <div class="main"><div class="col">
+    <h1 class="h1">Review done</h1>
+    <div class="counts" role="list" aria-label="Decisions in this review">
+      <div role="listitem">Done<b>3</b></div><div role="listitem">Reformulated<b>2</b></div><div role="listitem">First step<b>2</b></div><div role="listitem">To Waiting for<b>1</b></div>
+      <div role="listitem">To Someday<b>4</b></div><div role="listitem">Cancelled<b>1</b></div><div role="listitem" class="z">Kept 7 more days<b>0</b></div><div role="listitem">Inbox processed<b>10</b></div>
+    </div>
+    <div class="banner"><svg class="i" style="color:var(--sky700)"><use href="#i-today"/></svg>Next review: Fri 16 Oct, 16:00</div>
+    <div class="card" role="group" aria-labelledby="cq"><b id="cq" style="font-size:15px">Clear how to start the week? <span style="font-size:12px;color:var(--s500);font-weight:400">optional</span></b><div class="qa"><button aria-pressed="false">Yes</button><button aria-pressed="false">Not really</button></div></div>
+    <div style="display:flex;justify-content:flex-end"><button class="btn pri lg">Done</button></div>
+  </div></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-03 · shell states</b>Loading, error and offline for the whole review on the web.</figcaption>
+<div class="three">
+  <div class="mini" aria-busy="true"><h3>loading</h3><p class="p" style="font-size:12px">Placeholder after 300 ms while the open review and step content load. Static, no shimmer.</p><div class="skel" style="width:60%;height:18px"></div><div class="skel" style="width:90%"></div><div class="skel" style="width:80%"></div><div class="skel" style="width:85%"></div></div>
+  <div class="mini"><h3>error</h3><div class="banner warn" role="alert" style="flex-direction:column;gap:4px"><span>We couldn't load your review. Your progress is safe.</span><span class="ref">Ref 0d71c5b2-e9a4</span></div><button class="btn pri" style="align-self:flex-start"><svg class="i"><use href="#i-retry"/></svg>Retry</button></div>
+  <div class="mini"><h3>offline / interrupted</h3><div class="banner" role="status"><svg class="i"><use href="#i-wifi-off"/></svg><span><b>You're offline.</b> Decisions made so far are saved. Retry when you're back online, here or on another device.</span></div><button class="btn sec" style="align-self:flex-start">Retry</button></div>
+</div>
+</figure>
+
+</body>
+</html>

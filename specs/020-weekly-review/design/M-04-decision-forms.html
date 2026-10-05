@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M-04 · Decision card follow-up forms (iOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1100px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600)}
+.frames{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;min-height:52px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.phone{width:390px;height:851px;background:var(--s50);border-radius:44px;overflow:hidden;position:relative;display:flex;flex-direction:column;box-shadow:var(--raised);border:1px solid var(--s300)}
+.sb{height:47px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font-size:15px;font-weight:600}
+.scrim{position:absolute;inset:0;background:rgba(15,23,42,.35)}
+.sheet{position:absolute;left:0;right:0;bottom:0;top:58px;background:var(--s50);border-radius:20px 20px 0 0;display:flex;flex-direction:column;box-shadow:var(--float)}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--s300);margin:6px auto 0;flex:none}
+.nb{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 8px}
+.nb .ttl{font-size:17px;font-weight:600}
+.nb button{min-width:44px;min-height:44px;border:0;background:none;color:var(--sky700);font-size:17px;padding:0 8px;display:inline-flex;align-items:center}
+.sbody{flex:1;overflow:hidden;padding:2px 16px 16px;display:flex;flex-direction:column;gap:12px}
+.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin:2px 4px -4px}
+.ctx{font-size:13px;color:var(--s500);margin:0}
+.h2{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0;line-height:1.3}
+.field{width:100%;min-height:52px;border:1px solid var(--s200);border-radius:12px;background:#fff;padding:13px 12px;font-size:16px;line-height:1.35}
+.field.on{border:1.5px solid var(--sky500)}
+.ph{color:var(--s400)}
+.caret{display:inline-block;width:2px;height:18px;background:var(--sky500);vertical-align:-3px;margin-left:1px}
+.help{font-size:12px;color:var(--s500);margin:-4px 4px 0;line-height:1.45}
+.note{border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700);display:flex;gap:8px;align-items:flex-start}
+.note.warn{background:var(--amb50);border-color:var(--amb200);color:var(--amb800)}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:50px;border-radius:12px;border:1px solid transparent;font-size:16px;font-weight:600;padding:0 16px}
+.btn.pri{background:var(--sky700);color:#fff}.btn.sec{background:#fff;border-color:var(--s200);color:var(--s900)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.spacer{flex:1}
+.was{display:flex;gap:8px;align-items:flex-start;background:#fff;border:1px dashed var(--s300);border-radius:12px;padding:10px 12px;font-size:13px;color:var(--s600);line-height:1.45}
+.list{background:#fff;border:1px solid var(--s200);border-radius:14px;overflow:hidden}
+.kv{display:flex;align-items:flex-start;gap:10px;min-height:48px;padding:12px 14px;border-top:1px solid var(--s200);font-size:15px}.kv:first-child{border-top:0}
+.kv .k{color:var(--s500);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;width:62px;padding-top:2px}
+.nbp{height:44px;display:flex;align-items:center;padding:0 8px}.nbp button{min-height:44px;border:0;background:none;color:var(--sky700);font-size:17px;display:inline-flex;align-items:center}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+<symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+<symbol id="i-notes" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M10 13H8M16 17H8"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>M-04 · Decision card follow-up forms — iOS (pushed inside the M-03 sheet)</h1>
+  <p>The four two-step decisions. Each is one field and one confirming button; "Back" returns to the card with the reason still selected. The keyboard opens with the field focused. "Suggest" (Compass icon) on Reformulate and Find a first step opens the navigator (M-05); it writes nothing until the person confirms (FR-020).</p>
+  <p>Dates assume "Renovate the bathroom" entered Next on Thu 24 Sep with a 14-day threshold; today is Fri 9 Oct.</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>M-04 · Reformulate</b>Prefilled with the current wording, cursor at the end. A substantive change restarts the clock (FR-001/FR-002).</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="a1">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="a1">Reformulate</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · 15 days in Next</p>
+      <p class="h2">What will you actually do?</p>
+      <div class="field on" role="textbox" aria-label="New wording">Renovate the bathroom<span class="caret"></span></div>
+      <p class="help">Name a visible action. A new wording starts a fresh clock.</p>
+      <button class="btn sec"><svg class="i"><use href="#i-compass"/></svg>Suggest wording</button>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save new wording</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-04 · Reformulate, cosmetic edit only</b>FR-002: only case, spacing or punctuation changed. Saving is allowed, but the person is told the clock keeps running, before they save, not after.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="a2">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="a2">Reformulate</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · 15 days in Next</p>
+      <p class="h2">What will you actually do?</p>
+      <div class="field on" role="textbox" aria-label="New wording">Renovate the Bathroom.<span class="caret"></span></div>
+      <div class="note" role="status"><svg class="i"><use href="#i-info"/></svg><span>Only capitals or punctuation changed, so this is still the same wording and the clock keeps running.</span></div>
+      <button class="btn sec"><svg class="i"><use href="#i-compass"/></svg>Suggest wording</button>
+      <div class="spacer"></div>
+      <button class="btn pri">Save anyway</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-04 · Find a first step</b>Empty field; the old wording is shown as what will be kept in notes (FR-008). Save is disabled until there is text.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="a3">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="a3">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · reason: too big</p>
+      <p class="h2">What's the very first thing you'd do?</p>
+      <div class="field on" role="textbox" aria-label="First step"><span class="caret"></span><span class="ph">Something you could start in 10 minutes</span></div>
+      <div class="was"><svg class="i"><use href="#i-notes"/></svg><span>The old wording stays in this task's notes as<br><b>Was: Renovate the bathroom</b></span></div>
+      <button class="btn sec"><svg class="i"><use href="#i-compass"/></svg>Suggest a first step</button>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save first step</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-04 · first step saved (result in task detail)</b>One atomic change: new title, old title prepended to notes, fresh clock. The task stays in Next, same project and Tags.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:03</span><span>●●● 100%</span></div>
+  <div class="nbp"><button><svg class="i"><use href="#i-chev-l"/></svg>Next</button></div>
+  <div class="sbody" style="padding-top:4px">
+    <p class="h2" style="font-size:22px">Measure the bathroom walls for tiles</p>
+    <p class="ctx" style="margin-top:-6px">Next actions · Home · 0 days in Next</p>
+    <div class="list">
+      <div class="kv"><span class="k">Notes</span><span>Was: Renovate the bathroom<br><span style="color:var(--s500)">Budget around the spring bonus.</span></span></div>
+      <div class="kv"><span class="k">Project</span><span>Home</span></div>
+      <div class="kv"><span class="k">Tags</span><span>home</span></div>
+    </div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-04 · Move to Waiting for</b>Reuses the existing "Waiting for…" prompt from Process inbox: who or what, required.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="a5">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="a5">Waiting for</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom</p>
+      <p class="h2">Who or what are you waiting for?</p>
+      <div class="field on" role="textbox" aria-label="Waiting for">Landlord's OK on the budget<span class="caret"></span></div>
+      <p class="help">It moves to Waiting for. The review checks in on it after 7 days.</p>
+      <div class="spacer"></div>
+      <button class="btn pri">Move to Waiting for</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-04 · Keep 7 more days, reason empty</b>FR-009: a reason is required; the button stays disabled and says why. The dates it will move to are stated up front.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="a6">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="a6">Keep 7 more days</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · 15 days in Next</p>
+      <p class="h2">Why does this wording still fit?</p>
+      <div class="field on" role="textbox" aria-label="Reason, required" aria-required="true"><span class="caret"></span><span class="ph">One line is enough</span></div>
+      <p class="help">Asks again on Thu 15 Oct. If still undecided, it moves to Someday on Thu 22 Oct. You can do this once for this wording.</p>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled aria-describedby="why6">Keep until Thu 15 Oct</button>
+      <p class="help" id="why6" style="text-align:center">Add a reason to continue</p>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-04 · Keep 7 more days, ready</b>With a reason the button enables. The marker clears for 7 days (US1-7).</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="a7">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="a7">Keep 7 more days</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · 15 days in Next</p>
+      <p class="h2">Why does this wording still fit?</p>
+      <div class="field on" role="textbox" aria-label="Reason, required">Starting after the landlord replies on Monday<span class="caret"></span></div>
+      <p class="help">Asks again on Thu 15 Oct. If still undecided, it moves to Someday on Thu 22 Oct. You can do this once for this wording.</p>
+      <div class="spacer"></div>
+      <button class="btn pri">Keep until Thu 15 Oct</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+</div>
+</body>
+</html>
