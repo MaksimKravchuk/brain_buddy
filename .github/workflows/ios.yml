@@ -13,9 +13,9 @@ name: iOS TestFlight
 # Branches: every push to another branch that touches ios/ uploads that commit
 # straight away, without waiting for CI, so a change can be tried on a phone
 # within minutes. The branch and commit are written into the build (Settings →
-# About) and into TestFlight's "What to Test". A newer push to the same branch
-# cancels the older branch upload. Manual dispatch uploads the chosen ref,
-# whatever branch it is.
+# About) and into TestFlight's "What to Test". Uploads from all branches run
+# one at a time (see the testflight job's concurrency). Manual dispatch uploads
+# the chosen ref, whatever branch it is.
 on:
   workflow_run:
     workflows: ["CI"]
@@ -111,12 +111,15 @@ jobs:
     environment: testflight
     # On the upload job, not the workflow: every CI completion on main starts
     # this workflow, and a workflow-level group would let those no-op runs
-    # displace a pending upload. One group per branch: main uploads never
-    # overlap and are never cancelled mid-flight (a newer one queues); a newer
-    # push to a feature branch cancels that branch's older upload.
+    # displace a pending upload. One group for every branch: the build number
+    # is the run number and App Store Connect rejects a build whose number is
+    # not higher than the last upload, so uploads must reach Apple in run
+    # order. They never overlap and are never cancelled mid-flight; GitHub
+    # keeps at most one waiting run, so a newer upload from any branch
+    # replaces the one waiting (dispatch again for anything that dropped).
     concurrency:
-      group: ios-testflight-${{ needs.decide.outputs.branch }}
-      cancel-in-progress: ${{ github.event_name == 'push' }}
+      group: ios-testflight
+      cancel-in-progress: false
     timeout-minutes: 60
     defaults:
       run:

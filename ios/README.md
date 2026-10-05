@@ -160,13 +160,18 @@ is also pinned to a commit SHA (with its tag in a comment).
   upload.
 - **Any other branch** (except `trunk-candidate/**` and `dependabot/**`):
   every push that touches `ios/` uploads that commit straight away, without
-  waiting for CI, for fast feedback on a phone. A newer push to the same
-  branch cancels the older upload. The build carries `<branch> @ <commit>`
+  waiting for CI, for fast feedback on a phone. The build carries `<branch> @ <commit>`
   in Settings → About (the `BBBuildLabel` Info.plist key, from
   `BB_BUILD_LABEL`), and the same text plus the commit subject goes into
   TestFlight's *What to Test* (`ci/testflight_notes.py`, best effort).
 - **Manual run** (*Actions → iOS TestFlight → Run workflow*): uploads the
   chosen branch.
+
+Uploads from all branches, `main` included, run one at a time, because the
+build number is the run number and App Store Connect rejects a build whose
+number is not higher than the last one uploaded. GitHub keeps at most one
+upload waiting: a newer one, from any branch, replaces it. If a `main` upload
+was replaced that way, dispatch the workflow on `main` again.
 
 Until the owner finishes the
 setup below, the `testflight` job writes what is missing to the run summary
