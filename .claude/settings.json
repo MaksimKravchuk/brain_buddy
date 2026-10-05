@@ -53,7 +53,14 @@
       "Grep",
       "Glob",
       "mcp__github__pull_request_read",
-      "mcp__github__get_job_logs"
+      "mcp__github__get_job_logs",
+      "Bash(uv run ruff check *)",
+      "Bash(uv run mypy *)",
+      "mcp__Claude_Browser__find",
+      "mcp__Claude_Browser__read_page",
+      "mcp__Claude_Browser__read_console_messages",
+      "mcp__plugin_mem0_mem0__search_memories",
+      "mcp__ccd_pr__get_status"
     ],
     "ask": [
       "Bash(./scripts/submit_to_trunk.sh:*)",
