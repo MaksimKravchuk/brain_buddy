@@ -54,6 +54,9 @@ regexTarget = "line"
 # Both spellings the harness has used. The scan runs per commit over a PR's
 # whole range, so an earlier commit's `ACCOUNT_PASSWORD` still has to be
 # recognised after a later one renamed it — same synthetic value, same file.
+# The Expo client (mobile/) was removed in 2026-10; the entry stays because a
+# trunk-candidate push scans full history, and its tracked fixture line now
+# lives in scripts/fixtures/secret-scan/historical-synthetic.txt.
 regexes = ['''^\s*const (password|ACCOUNT_PASSWORD) = "correct-horse-battery-staple-1";\s*$''']
 
 [[allowlists]]

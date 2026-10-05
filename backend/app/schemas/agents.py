@@ -341,7 +341,7 @@ class AgentCheckDeliveryRequest(StrictBaseModel):
     What it does carry is the revision the user was looking at when they asked.
     The check can end in a message on the wire, so it is a mutation like any
     other, and every mutation names the state it was composed against
-    (`mobile/AGENTS.md`): a check replayed from a stale cached run would resend
+    (the client contract: `Idempotency-Key` + `expected_revision`): a check replayed from a stale cached run would resend
     for a state nobody is being shown any more. Optional, so a client that has
     not adopted it yet still checks exactly as before.
     """

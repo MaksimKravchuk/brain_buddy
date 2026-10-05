@@ -181,7 +181,7 @@ class ValidateCoverageFloorTests(unittest.TestCase):
             exit_code = main(
                 [
                     "--stack",
-                    "mobile",
+                    "frontend",
                     "--format",
                     ISTANBUL_SUMMARY,
                     "--report",

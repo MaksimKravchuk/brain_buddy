@@ -16,10 +16,6 @@ from pathlib import Path
 REQUIRED_ARTIFACTS = {
     "backend-allure-results": "backend/allure-results",
     "frontend-allure-results": "frontend/allure-results",
-    # Mobile was the one lane whose tests produced no Allure evidence, so the
-    # aggregate report spoke for two stacks out of three while reading as if it
-    # covered the product.
-    "mobile-allure-results": "mobile/allure-results",
     "playwright-allure-results": "frontend/allure-results/playwright",
     "allure-report-html": "allure-report",
     # Additional to the report above, never a replacement. The uploaded path is
@@ -103,25 +99,6 @@ FRONTEND_MUTATION_EVIDENCE = (
     "name: frontend-mutation-evidence-allure-results",
 )
 
-# The mobile campaign (ADR-0015), same shape again. `check_mutate_scope`
-# compares this against the `mutate` array in mobile/stryker.config.json, which
-# is the list the campaign obeys — the workflow's header comment only describes
-# it.
-MOBILE_MUTATION_SCOPE = (
-    "src/braindump/machine.ts",
-    "src/braindump/manifest.ts",
-    "src/braindump/uploader.ts",
-    "src/braindump/waveform.ts",
-    "src/lifecycle/guards.ts",
-    "src/config/serverUrl.ts",
-)
-
-MOBILE_MUTATION_EVIDENCE = (
-    "--scope-label mobile",
-    "name: mobile-mutation-report",
-    "name: mobile-mutation-evidence-allure-results",
-)
-
 FRONTEND_CI_REQUIREMENTS = (
     ("frontend lint step", "npm run lint"),
     ("frontend coverage test step", "npm run test:coverage"),
@@ -167,9 +144,10 @@ EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
 # It must, however, name every lane that uploads. This comment previously said
 # only `backend` and `frontend` upload results, that the `e2e` job "derives its
 # own RUN from those two", and that `mobile` uploads none. Each claim decayed
-# separately, and each time the predicate was left behind. Four artifacts match
-# the `*-allure-results` download pattern today: backend, frontend, mobile and
-# playwright.
+# separately, and each time the predicate was left behind. Three artifacts match
+# the `*-allure-results` download pattern today: backend, frontend and
+# playwright. (The Expo `mobile` lane also uploaded until the Expo client was
+# removed in 2026-10; drop a lane from this set only when its job is deleted.)
 #
 # The step anchors below are deliberately two-line, binding the guard to the
 # `if:` on the specific steps it protects. A bare "if: steps.aggregate..."
@@ -182,19 +160,19 @@ EXECUTED_ALLURE_STATUSES = {"passed", "failed", "broken"}
 ALLURE_AGGREGATION_REQUIREMENTS = (
     ("Allure aggregation short-circuit step", "      - name: Decide whether there is anything to aggregate\n        id: aggregate"),
     (
-        # Four, not three, and not two. This set has been wrong twice for the
-        # same reason: a lane started uploading Allure results and the
-        # invariant was not moved with it. First `mobile`, when the Jest suite
-        # gained taxonomy — a mobile-only pull request then skipped every
-        # aggregation step and still went green. Then `e2e`, which uploads
-        # `playwright-allure-results` under a bare `always()` in a job that is
-        # never path filtered, so it produces results on a docs-only run where
-        # all three stacks are false; the aggregation short-circuited and threw
-        # a complete Playwright suite away. An invariant that names the wrong
-        # set is worse than none: it reads as coverage of exactly the case it
-        # misses.
-        "Allure aggregation predicate over the four uploading lanes",
-        'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ] || [ "$MOBILE" = "true" ]'
+        # Every uploading lane, and no fewer. This set has been wrong twice for
+        # the same reason: a lane started uploading Allure results and the
+        # invariant was not moved with it. First the (since removed) Expo
+        # `mobile` lane, when its Jest suite gained taxonomy — a mobile-only
+        # pull request then skipped every aggregation step and still went
+        # green. Then `e2e`, which uploads `playwright-allure-results` under a
+        # bare `always()` in a job that is never path filtered, so it produces
+        # results on a docs-only run where every stack is false; the
+        # aggregation short-circuited and threw a complete Playwright suite
+        # away. An invariant that names the wrong set is worse than none: it
+        # reads as coverage of exactly the case it misses.
+        "Allure aggregation predicate over the three uploading lanes",
+        'if [ "$BACKEND" = "true" ] || [ "$FRONTEND" = "true" ]'
         ' || [ "$E2E" = "true" ]; then',
     ),
     # Selected-to-run is not produced-something. A stack job is skipped when
@@ -205,14 +183,15 @@ ALLURE_AGGREGATION_REQUIREMENTS = (
     # under `always()`, and that is the run whose report a person most needs;
     # requiring success hid it precisely then.
     #
-    # Listing all three matters as much as the predicate itself: the shell line
-    # below can name MOBILE while the environment binds it to a constant, and
-    # the invariant would still pass over exactly the regression it claims to
-    # prevent. That is the defect this file's own header warns about.
+    # Listing every stack matters as much as the predicate itself: the shell
+    # line below can name FRONTEND while the environment binds it to a
+    # constant, and the invariant would still pass over exactly the regression
+    # it claims to prevent. That is the defect this file's own header warns
+    # about.
     #
-    # Hence anchored to the environment key, not a bare substring. Naming all
-    # three was necessary and not sufficient: the unanchored form asked whether
-    # the expression existed anywhere in the workflow, so binding `MOBILE` to a
+    # Hence anchored to the environment key, not a bare substring. Naming every
+    # stack was necessary and not sufficient: the unanchored form asked whether
+    # the expression existed anywhere in the workflow, so binding a key to a
     # constant and leaving the real conjunction on an unread sibling key passed.
     # The hole was closed only by the accident that each string appeared exactly
     # once. `KEY: ${{ ... }}` binds the predicate to the variable the shell
@@ -227,19 +206,14 @@ ALLURE_AGGREGATION_REQUIREMENTS = (
         "          FRONTEND: ${{ needs.changes.outputs.frontend == 'true'"
         " && needs.frontend.result != 'skipped' }}\n",
     ),
-    (
-        "Allure predicate conjoins selection with the mobile job actually running",
-        "          MOBILE: ${{ needs.changes.outputs.mobile == 'true'"
-        " && needs.mobile.result != 'skipped' }}\n",
-    ),
-    # One conjunct, not two, and that asymmetry is the point. The three stack
+    # One conjunct, not two, and that asymmetry is the point. The stack
     # lanes are path filtered, so "was it selected" is a real question for them.
     # `e2e` is deliberately never path filtered and its upload carries a bare
     # `always()` with no RUN guard, so the job produces results whenever it is
     # not skipped -- there is no `changes.outputs.e2e` to conjoin, and adding
     # one would reintroduce the bug by making a docs-only run look empty.
     #
-    # Anchored to the key for the same reason as the three above: the shell line
+    # Anchored to the key for the same reason as the two above: the shell line
     # can name E2E while the environment binds it to a constant.
     (
         "Allure predicate accounts for the never-path-filtered e2e lane",
@@ -628,7 +602,6 @@ def _path_filter_errors(workflow_text: str) -> list[str]:
     for job in (
         "backend",
         "frontend",
-        "mobile",
         "ios-kit",
         "ios-app",
         "docker",
@@ -732,15 +705,14 @@ LANE_DEPENDENCY_LIMITS = {
     # cheap checks everything else is allowed to wait for.
     "backend": {"changes"},
     "frontend": {"changes"},
-    "mobile": {"changes"},
     # The native iOS lanes are service lanes of the same kind: the package on
     # Linux and the app on macOS read only the changed-stack decision.
     "ios-kit": {"changes"},
     "ios-app": {"changes"},
     # The whole-stack lane. It consumes nothing the service lanes produce, but
     # it may wait for them so a failing linter or unit test stops the run before
-    # anything pays to boot the stack. It may wait for NOTHING ELSE: not mobile
-    # (which ships in neither image), and not docker.
+    # anything pays to boot the stack. It may wait for NOTHING ELSE: not the
+    # iOS lanes (which ship in neither image), and not docker.
     "e2e": {"backend", "frontend"},
     # The image build, ordered after E2E for cache locality: the two build
     # byte-identical images, so running them in parallel paid the same build
@@ -1042,7 +1014,6 @@ def check_mutate_scope(config: Path, expected: tuple[str, ...], label: str) -> l
 def validate_mutation_workflow(
     workflow: Path,
     frontend_stryker_config: Path | None = None,
-    mobile_stryker_config: Path | None = None,
 ) -> int:
     """Reject a mutation workflow that can misrepresent its scope or evidence."""
 
@@ -1081,25 +1052,10 @@ def validate_mutation_workflow(
                 f"mutation workflow is missing frontend evidence artifact: {evidence}"
             )
 
-    if "  mobile-observed-mutation:" not in workflow_text:
-        errors.append("mutation workflow is missing the mobile observed-scope job")
-    for path in MOBILE_MUTATION_SCOPE:
-        if path not in workflow_text:
-            errors.append(f"mutation workflow is missing mobile observed scope: {path}")
-    for evidence in MOBILE_MUTATION_EVIDENCE:
-        if evidence not in workflow_text:
-            errors.append(
-                f"mutation workflow is missing mobile evidence artifact: {evidence}"
-            )
-
-    # The configs are the scope; the workflow only describes it.
+    # The config is the scope; the workflow only describes it.
     if frontend_stryker_config is not None:
         errors += check_mutate_scope(
             frontend_stryker_config, FRONTEND_MUTATION_SCOPE, "frontend observed"
-        )
-    if mobile_stryker_config is not None:
-        errors += check_mutate_scope(
-            mobile_stryker_config, MOBILE_MUTATION_SCOPE, "mobile observed"
         )
 
     if errors:
@@ -1321,11 +1277,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="frontend Stryker config whose 'mutate' list must match the known scope",
     )
-    mutation_workflow.add_argument(
-        "--mobile-stryker-config",
-        type=Path,
-        help="mobile Stryker config whose 'mutate' list must match the known scope",
-    )
 
     product_e2e_results = subparsers.add_parser(
         "product-e2e-results",
@@ -1371,7 +1322,6 @@ def main(argv: list[str] | None = None) -> int:
         return validate_mutation_workflow(
             args.workflow,
             frontend_stryker_config=args.frontend_stryker_config,
-            mobile_stryker_config=args.mobile_stryker_config,
         )
     if args.command == "product-e2e-results":
         return validate_native_product_e2e_results(args.path)

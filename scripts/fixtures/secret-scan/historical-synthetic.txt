@@ -20,3 +20,12 @@ Original line: 764
 Context: test_reporting_v2_accepts_a_fixed_external_golden_vector fixes the
 signing bytes and patches token_urlsafe to return this synthetic constant.
         fixed_secret = "golden-vector-signing-secret-v2"
+
+Original commit: b61840e4800df70204467d771fe08fb4f9b35c0f
+Original path: mobile/integration/run.ts
+Original line: 96
+Context: the Expo client's real-backend integration harness signed up a
+throwaway account with this synthetic password (an earlier revision spelled
+the constant ACCOUNT_PASSWORD). The Expo client was removed in 2026-10, but the
+line stays in history, which a trunk-candidate full-history scan still reads.
+    const password = "correct-horse-battery-staple-1";

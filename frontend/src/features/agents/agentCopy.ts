@@ -153,8 +153,7 @@ function isCommandable(run: RunGuardInput): boolean {
  * Whether this run is actually waiting on the user right now.
  *
  * Gated on the live state rather than on `question_text` alone, so a question
- * the run has already moved past can never resurface as a control. The two
- * clients keep the same rule (`mobile/src/lifecycle/agentGuards.ts`).
+ * the run has already moved past can never resurface as a control.
  */
 export function awaitsAnswer(
   run: Pick<AgentRunResponse, "question_text" | "needs_user" | "reported_state">

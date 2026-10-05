@@ -70,17 +70,3 @@ repos:
         language: system
         files: ^frontend/.*\.(ts|tsx)$
         pass_filenames: false
-
-      - id: mobile-eslint
-        name: mobile eslint
-        entry: bash -c 'cd mobile && npm run lint'
-        language: system
-        files: ^mobile/.*\.(ts|tsx|js|jsx)$
-        pass_filenames: false
-
-      - id: mobile-typecheck
-        name: mobile tsc --noEmit
-        entry: bash -c 'cd mobile && npm run typecheck'
-        language: system
-        files: ^mobile/.*\.(ts|tsx)$
-        pass_filenames: false

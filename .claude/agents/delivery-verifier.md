@@ -1,6 +1,6 @@
 ---
 name: delivery-verifier
-description: Runs the Brain Buddy verification chain (check-specs, validate-ci, ci-backend, ci-frontend, ci-mobile, test-e2e) and reports only failures with root causes and the exact command to reproduce. Use proactively after implementation lands in a worktree and before acceptance. Do not use to fix failures, and do not use for the paid live voice drive (that is the verify-live skill).
+description: Runs the Brain Buddy verification chain (check-specs, validate-ci, ci-backend, ci-frontend, test-e2e) and reports only failures with root causes and the exact command to reproduce. Use proactively after implementation lands in a worktree and before acceptance. Do not use to fix failures, and do not use for the paid live voice drive (that is the verify-live skill).
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
@@ -17,8 +17,8 @@ caller decides what to change.
 ## Never run
 
 - The `verify-live` skill or anything driving real Deepgram / OpenAI traffic.
-  It costs money and requires human approval. `make integration-mobile` is the
-  free deterministic equivalent.
+  It costs money and requires human approval. `make verify-all` (the
+  `self-verify` skill) is the free deterministic equivalent.
 - `./scripts/submit_to_trunk.sh`, `git push`, or any deploy command.
 
 ## Procedure
@@ -34,8 +34,7 @@ covers everything:
 2. `make validate-ci`
 3. `make ci-backend`
 4. `make ci-frontend`
-5. `make ci-mobile`
-6. `make test-e2e`
+5. `make test-e2e`
 
 Skip a surface only when the diff genuinely cannot affect it, and say in the
 report which surface you skipped and why. Never skip silently.

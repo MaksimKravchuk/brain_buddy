@@ -5,8 +5,8 @@ Status: pass 1 in progress (GTD). Owner: BrainBuddy. Code: `ios/`.
 Brain Buddy for iPhone and iPad, written in SwiftUI for iOS 26 with Liquid
 Glass. The organising principle is autonomy: **every GTD action works without
 a network**, and the server is a place to sync to, not a place to ask
-permission from. This app sits next to the Expo client in `mobile/`; it does
-not replace it yet.
+permission from. This app is the iPhone client; the earlier Expo client in
+`mobile/` was removed in 2026-10.
 
 ## Passes
 

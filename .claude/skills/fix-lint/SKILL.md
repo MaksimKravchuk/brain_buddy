@@ -10,7 +10,6 @@ description: Rule-code to fix mapping for BrainBuddy's configured linters — ru
 ```bash
 make lint-backend        # ruff check + black --check + mypy + lint-imports
 make lint-frontend       # cd frontend && eslint . --max-warnings=0
-make typecheck-mobile    # cd mobile && npx tsc --noEmit
 ```
 
 Individually, from `backend/`:
@@ -187,12 +186,6 @@ ignored.
 
 `npm run build` runs `tsc --noEmit` first, so a type error fails the build even
 when ESLint passes.
-
-Mobile has its own flat config in `mobile/eslint.config.js`, aligned with the
-frontend's; run it with `make lint-mobile`. Two rules are off there with their
-reasoning in the config — `react-hooks/refs` and
-`react-hooks/set-state-in-effect` — because the existing code does not satisfy
-them. Do not add to that list; every other rule is enforced.
 
 ## Suppressions carry their reason and their expiry
 

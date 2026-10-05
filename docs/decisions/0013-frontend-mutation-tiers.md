@@ -162,7 +162,8 @@ wrong:
   alongside the backend campaign and blocks nothing.
 - Coverage can no longer be quietly narrowed:
   `validate_ci_artifacts.py coverage-suppressions` rejects file-level and range
-  exclusions in `frontend/src` and `mobile/src`, and requires a written
+  exclusions in `frontend/src` (and, until the Expo client was removed in
+  2026-10, `mobile/src`), and requires a written
   justification on a narrow `ignore next`.
 - Three kinds of remedy are now in play for a survivor, where the backend had
   two. Kill it with a focused test; document it as equivalent; or delete the

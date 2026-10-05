@@ -21,7 +21,7 @@ Runbooks: `docs/fly-deployment.md`, `docs/fly-review-apps.md`.
 ## The CI job graph
 
 `.github/workflows/ci.yml` runs as parallel lanes joined only by `full-ci`: one
-per service (`backend`, `frontend`, `mobile` — each its own
+per service (`backend`, `frontend` — each its own
 lint/type/unit/integration — and the native app's `ios-kit` and `ios-app`, all
 path filtered by the `changes` job), plus `workflow-lint`, `spec-kit`, the
 mutation gate, `docker` and `e2e`. `ios.yml` only uploads to TestFlight, after

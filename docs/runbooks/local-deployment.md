@@ -12,8 +12,6 @@ Install these with your preferred user-scoped runtime manager:
 - npm
 - GNU Make
 
-The mobile client is optional and uses Node.js 22.13.1 from `mobile/.nvmrc`, because Expo SDK 57 requires Node.js 22.13.x or newer.
-
 The version files are guidance, not installers. For example, `pyenv` reads `.python-version`, while the required `nvm use` reads the `.nvmrc` in the current directory.
 
 ## Install
@@ -83,13 +81,6 @@ npm run build
 
 Before reporting a repository change done, follow `AGENTS.md`; its required gates are broader than this startup check.
 
-## Optional mobile setup
+## Optional native iOS setup
 
-```bash
-cd mobile
-nvm use
-npm ci
-npm start
-```
-
-Native iOS/Android execution still requires the corresponding Expo/device host prerequisites; this repository does not install or modify them.
+The native iOS app under `ios/` needs Xcode on macOS (or a Swift toolchain on Linux for the `BrainBuddyKit` package tests); see `ios/README.md` and `docs/native-ios-app.md`. This repository does not install or modify those host prerequisites.

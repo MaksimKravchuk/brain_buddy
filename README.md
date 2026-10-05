@@ -29,8 +29,7 @@ See [Product direction: executable next actions](docs/product-direction.md) for 
 
 ### Prerequisites
 - Python 3.11 with the `venv` module (see `.python-version`)
-- Node.js 20.19.0 for the web frontend; mobile uses 22.13.1 (see each
-  stack's `.nvmrc`)
+- Node.js 20.19.0 for the web frontend (see `frontend/.nvmrc`)
 - nvm available to the shell, npm, and GNU Make
 
 For a reproducible host setup, runtime selection, and verification commands,

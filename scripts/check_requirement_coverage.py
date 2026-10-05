@@ -45,22 +45,19 @@ DEFINITION_RE = re.compile(r"^\s*[-*]\s*\*\*((?:FR|SC)-\d+)\*\*", re.MULTILINE)
 FEATURE_NUMBER_RE = re.compile(r"^(\d{3})-")
 
 # Trees that hold nothing but tests: every file in them is evidence, whatever
-# it is called. `mobile/integration/run.ts` is the case that exposed the bug —
-# it was listed as a test tree and then filtered out again by the name hints
-# below, so every integration assertion in the repository was invisible to this
-# gate. A tree named here asserts its own contents; do not add a broad one.
+# it is called. The (since removed) Expo client's `mobile/integration/run.ts`
+# is the case that exposed the bug — it was listed as a test tree and then
+# filtered out again by the name hints below, so every integration assertion in
+# the repository was invisible to this gate. A tree named here asserts its own
+# contents; do not add a broad one.
 DEDICATED_TEST_TREES = (
     "backend/tests",
     "frontend/tests",
-    "mobile/integration",
 )
 
 # Trees that hold product code with tests mixed in, where a filename hint is
 # the only way to tell them apart.
-MIXED_TEST_TREES = (
-    "frontend/src",
-    "mobile/src",
-)
+MIXED_TEST_TREES = ("frontend/src",)
 
 TEST_TREES = DEDICATED_TEST_TREES + MIXED_TEST_TREES
 TEST_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx")

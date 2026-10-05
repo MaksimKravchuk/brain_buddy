@@ -26,8 +26,8 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 | Runtime feature-flag rollout store (flag modes plus the **account ids** an operator selected — no email, display name, credential or member content) | `data/feature_flags.sqlite3` | Life of the deployment; an account's id is removed from every cohort on account purge | Purge (`FeatureFlagOverrideRepository.scrub_user`) |
 | Server logs (correlation IDs and bounded content-free operation metadata; CRT may include opaque tree id, revision, outcome, error code and duration; never graph text or request/response bodies) | process stdout / Fly logs | Fly's log retention | Platform; application purge cannot erase platform logs |
 | **Admin access records** (an operator looked up, or revoked sessions for, one account; or changed a runtime feature flag's mode, cleared its override, or added or removed one selected account; or read the flag list, resolving its cohorts: operator account id, resolved target account id where the operation names one, flag name, action, outcome, and per-read flag and resolved-account counts — no email, display name, or request body) | process stdout / Fly logs | Fly's log retention | Platform |
-| Mobile pending classification queue (task, project and tag **ids**) | device `AsyncStorage`, key `bb.pendingClassification.<server>.<account>` | 30 days from last edit, or immediately on a deliberate identity transition | Mobile client sweep across all stored identities (spec 006, FR-011/FR-018) |
-| Mobile cached project and Tag lists (user-authored **names**) | device `AsyncStorage`, key `bb.classificationCache.<server>.<account>` | 30 days from last fetch, or immediately on a deliberate identity transition — including when the queue is empty | Mobile client sweep (spec 006, FR-011/FR-018) |
+| Mobile pending classification queue (task, project and tag **ids**; Expo client, removed 2026-10 — builds already installed only) | device `AsyncStorage`, key `bb.pendingClassification.<server>.<account>` | 30 days from last edit, or immediately on a deliberate identity transition | Mobile client sweep across all stored identities (spec 006, FR-011/FR-018) |
+| Mobile cached project and Tag lists (user-authored **names**; Expo client, removed 2026-10 — builds already installed only) | device `AsyncStorage`, key `bb.classificationCache.<server>.<account>` | 30 days from last fetch, or immediately on a deliberate identity transition — including when the queue is empty | Mobile client sweep (spec 006, FR-011/FR-018) |
 | Web last-used agent preference (connection **id** and confirmation timestamp only; no Task content, address, or credential) | browser `localStorage`, key `bb.taskAgent.lastUsed.v1.<server>.<account>` | Eligible for 30 days from last confirmed hand-off; removed on sign-out/identity transition, invalid eligibility, and by a cross-identity startup/focus/interval sweep after expiry | Web preference lifecycle binding (spec 017, FR-008/FR-017) |
 | CRT unsynchronized drafts (user-authored graph/layout content, immutable in-flight save snapshot, queued commands and idempotency-key UUID) | browser `localStorage`, namespaced by origin/account/tree or pre-canonical create attempt | Eligible for 30 days from last edit/use; on next startup/focus/interval after expiry the stale draft stays outside the canvas and offers backup, recover (resetting the clock), or discard; all departing-owner keys on the active origin are removed after the pending-work decision on sign-out/account switch/account deletion | Web CRT recovery lifecycle (spec 019, FR-018–FR-020) |
 | CRT last-tree preference (owner id, tree id, origin and last-use timestamp; no graph content) | browser `localStorage`, namespaced by origin/account | 30 days from last use; removed by startup/focus/interval expiry sweep and with all departing-owner CRT keys on same-browser identity transition | Web CRT preference lifecycle (spec 019, FR-003/FR-020) |
@@ -40,7 +40,9 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 The device and browser rows (mobile, web, CRT and iOS) are the only entries in this table
 an account purge cannot reach: the server can revoke every session, but it cannot delete
 bytes on a phone or in a browser. The Expo mobile client's native sweep provides its
-device stores' 30-day physical bound as specified by feature 006. The web preference becomes unusable at 30 days and its
+device stores' 30-day physical bound as specified by feature 006; that client's source
+was removed from the repository in 2026-10, so its rows describe only builds that were
+already installed. The web preference becomes unusable at 30 days and its
 cross-identity sweep removes expired bytes whenever BrainBuddy next starts, regains
 focus, or reaches its sweep interval. CRT drafts likewise become ineligible for automatic
 application at 30 days and require the one stale-recovery decision when the app next runs.
@@ -190,7 +192,7 @@ audio appears only while it is inside its 24-hour retention window.
 CRT mutation receipts are included in the idempotency-record exclusion above: canonical response bodies are transient replay copies retained exactly 30 days, then redacted into content-free owner tombstones. Tree cleanup retains those tombstones to prevent old-key reuse; account purge physically erases them. CRT platform observability lines are also excluded under the disposition documented above.
 
 Also excluded: **mobile pending classification changes that have not yet
-reached the server.** The controller does not hold them, so the export is
+reached the server** (the removed Expo client; builds already installed only). The controller does not hold them, so the export is
 complete with respect to what the server has. The consequence is worth naming
 rather than burying: an export taken while a phone holds unsent changes will
 not match what that phone displays, and the mobile client shows no per-change
@@ -198,7 +200,7 @@ marker that would explain the difference (spec 006, FR-007).
 
 Also excluded: **iOS changes that have not reached the server yet**, and everything an
 iOS device holds while it has never been signed in ("On this iPhone"). The controller
-does not hold them. Unlike the mobile client, the iOS app says so in words ("Offline —
+does not hold them. Unlike the removed Expo mobile client, the iOS app says so in words ("Offline —
 3 changes waiting"), so a difference between an export and the phone is visible there.
 
 Also excluded: the **web last-used agent preference**. The controller never receives

@@ -123,16 +123,21 @@ class RequirementCoverageTests(unittest.TestCase):
     def test_dedicated_test_tree_is_scanned_regardless_of_filename(self):
         """A tree that holds nothing but tests must not be re-filtered by name.
 
-        `mobile/integration/run.ts` was listed as a test tree and then discarded
-        by the filename hints, so every integration assertion in the repository
-        was invisible to this gate: a feature could name an id only from an
-        integration test and still be reported as untraced.
+        The (since removed) Expo client's `mobile/integration/run.ts` was listed
+        as a test tree and then discarded by the filename hints, so every
+        integration assertion in the repository was invisible to this gate: a
+        feature could name an id only from an integration test and still be
+        reported as untraced. The remaining dedicated trees happen to carry a
+        hint in their own path, so the property is pinned with a hint-free
+        tree patched in.
         """
         module = load_module()
+        module.DEDICATED_TEST_TREES = ("client/integration",)
+        module.TEST_TREES = module.DEDICATED_TEST_TREES + module.MIXED_TEST_TREES
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "mobile" / "integration").mkdir(parents=True)
-            (root / "mobile" / "integration" / "run.ts").write_text(
+            (root / "client" / "integration").mkdir(parents=True)
+            (root / "client" / "integration" / "run.ts").write_text(
                 'assert(ok, "006-FR-004 create-then-attach lands both");',
                 encoding="utf-8",
             )
@@ -146,8 +151,8 @@ class RequirementCoverageTests(unittest.TestCase):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "mobile" / "src" / "features").mkdir(parents=True)
-            (root / "mobile" / "src" / "features" / "widget.ts").write_text(
+            (root / "frontend" / "src" / "features").mkdir(parents=True)
+            (root / "frontend" / "src" / "features" / "widget.ts").write_text(
                 "export const x = 1;", encoding="utf-8"
             )
 

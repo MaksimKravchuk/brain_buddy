@@ -1,9 +1,15 @@
 # ADR-0015: Give the mobile client a deterministic-core mutation scope
 
 Date: 2026-08-10
-Status: Accepted
+Status: Superseded — Expo client removed (2026-10)
 Decision owner: BrainBuddy
 Related: ADR-0004, ADR-0006, ADR-0016, ADR-0013
+
+> **Superseded (2026-10).** The Expo / React Native client in `mobile/` was
+> deleted; the native SwiftUI app in `ios/` is the only iPhone client. The
+> mobile Stryker campaign, its `mutation-quality.yml` job, `make
+> mutation-mobile` and the validator entries this record describes were removed
+> with it. The record is kept unchanged below as history.
 
 ## Context
 

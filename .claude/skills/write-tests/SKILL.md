@@ -1,6 +1,6 @@
 ---
 name: write-tests
-description: How BrainBuddy tests are written and judged — Allure taxonomy, the backend fixture chain, mutation testing as the real feedback loop, and the Vitest/Jest patterns.
+description: How BrainBuddy tests are written and judged — Allure taxonomy, the backend fixture chain, mutation testing as the real feedback loop, and the Vitest patterns.
 ---
 
 # Writing tests in BrainBuddy
@@ -10,7 +10,6 @@ description: How BrainBuddy tests are written and judged — Allure taxonomy, th
 ```bash
 make test-backend        # pytest + coverage floor + taxonomy validation
 make test-frontend       # vitest --coverage + coverage floor + taxonomy validation
-make test-mobile         # jest --coverage + coverage floor
 ```
 
 While iterating on the backend, skip the coverage and Allure plugins — the
@@ -257,7 +256,7 @@ must import `{ expect, test }` from `./allure.fixtures`.
 
 **There is no coverage escape hatch.** `validate_ci_artifacts.py
 coverage-suppressions` rejects `istanbul ignore file` and every range form in
-`frontend/src` and `mobile/src`, and requires a written justification on a
+`frontend/src`, and requires a written justification on a
 narrow `ignore next`. Four modules once carried a file-level pragma: 2,385 lines
 went unmeasured while the floor read green, because an excluded file is not
 reported as uncovered — it is not reported at all.
@@ -302,22 +301,3 @@ TypeScript than in Python — **delete the mutant's home**. An unreachable defau
 parameter, a defensive `?? ""` behind a value that cannot be null, a guard no
 caller can trigger: each produces a mutant no test can ever kill, and removing it
 is a simplification the type system was already asking for.
-
-## Mobile Jest
-
-`mobile/jest.config.js` uses the `jest-expo` preset, matches
-`**/__tests__/**/*.test.ts(x)`, ignores `mobile/integration/`, and sets
-`clearMocks: true` — so do not hand-roll mock resets.
-
-```bash
-make typecheck-mobile   # tsc --noEmit, strict
-make test-mobile        # unit only
-make integration-mobile # real api client vs a disposable local backend
-```
-
-Unit tests here are for the wire-protocol logic the client must not get wrong —
-chunk hashing, manifest hash, lifecycle guards (see `mobile/AGENTS.md`).
-`mobile/src/lifecycle/__tests__/guards.test.ts` is the pattern: `it.each` over
-the full state enumeration, asserting whole result objects with `toEqual` rather
-than probing one field, so a new state cannot slip through untested. There is no
-Allure taxonomy gate on the mobile suite.

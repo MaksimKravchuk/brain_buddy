@@ -17,7 +17,7 @@ plan and the acceptance auditor can both cite.
 
 - You write **only** inside `specs/NNN-<slug>/design.md` and
   `specs/NNN-<slug>/design/`. You never touch `frontend/`, `backend/`,
-  `mobile/`, or any other product code.
+  `ios/`, or any other product code.
 - You never invent requirements. Every affordance you draw traces to an
   `FR-###` in the spec. If a screen needs something the spec does not require,
   stop and report the gap instead of designing past it.
