@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M-02 · Task detail, formulation section (iOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--ind50:#eef2ff;--ind200:#c7d2fe;--ind700:#4338ca;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--rose50:#fff1f2;--rose200:#fecdd3;--rose700:#be123c;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1100px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600)}
+.frames{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;min-height:52px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.phone{width:390px;height:851px;background:var(--s50);border-radius:44px;overflow:hidden;position:relative;display:flex;flex-direction:column;box-shadow:var(--raised);border:1px solid var(--s300)}
+.sb{height:47px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font-size:15px;font-weight:600}
+.nb{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 8px}
+.nb button{min-width:44px;min-height:44px;border:0;background:none;color:var(--sky700);font-size:17px;display:inline-flex;align-items:center;gap:2px;padding:0 8px}
+.body{flex:1;overflow:hidden;padding:4px 16px 16px;display:flex;flex-direction:column;gap:12px}
+.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.title{font-size:22px;font-weight:600;letter-spacing:-.015em;line-height:1.25;margin:0}
+.where{font-size:13px;color:var(--s500);margin:-6px 0 0}
+.lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin:2px 4px -4px}
+.card{background:#fff;border:1px solid var(--s200);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.fl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:15px}
+.help{font-size:12px;color:var(--s500);line-height:1.45;margin:0}
+.mk{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 8px;font-size:12px;font-weight:500;border:1px solid;line-height:1.35}
+.mk .i{width:12px;height:12px;stroke-width:2}
+.mk.age{background:var(--s100);border-color:var(--s200);color:var(--s600)}
+.mk.ask{background:var(--ind50);border-color:var(--ind200);color:var(--ind700)}
+.mk.park{background:var(--amb50);border-color:var(--amb200);color:var(--amb800)}
+.mk.plain{background:var(--s100);border-color:var(--s200);color:var(--s600)}
+.due{background:var(--rose50);border:1px solid var(--rose200);color:var(--rose700);border-radius:999px;padding:1px 7px;font-size:12px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:50px;border-radius:12px;border:1px solid transparent;font-size:16px;font-weight:600;padding:0 16px}
+.btn.pri{background:var(--sky700);color:#fff}.btn.sec{background:#fff;border-color:var(--s200);color:var(--s900)}
+.list{background:#fff;border:1px solid var(--s200);border-radius:14px;overflow:hidden}
+.kv{display:flex;justify-content:space-between;align-items:center;min-height:48px;padding:0 14px;border-top:1px solid var(--s200);font-size:16px}.kv:first-child{border-top:0}
+.kv .k{color:var(--s500);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;width:70px}
+.kv .v{flex:1;color:var(--s900)}.kv .c{color:var(--s400)}
+.tag{background:var(--s100);color:var(--s600);border-radius:999px;padding:2px 8px;font-size:13px;margin-right:4px}
+.quote{border-left:2px solid var(--s200);padding-left:10px;color:var(--s600);font-size:14px;margin:0}
+.note{border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700);display:flex;gap:8px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+<symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="i-hourglass" viewBox="0 0 24 24"><path d="M5 22h14M5 2h14M17 22v-4.17a2 2 0 0 0-.59-1.42L12 12l-4.41 4.41A2 2 0 0 0 7 17.83V22M7 2v4.17a2 2 0 0 0 .59 1.42L12 12l4.41-4.41A2 2 0 0 0 17 6.17V2"/></symbol>
+<symbol id="i-ask" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M10 15V9M14 15V9"/></symbol>
+<symbol id="i-cal-plus" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>M-02 · Task detail — "This wording" section (iOS)</h1>
+  <p>A new section at the top of the existing pushed task detail, above Project / Tags / Due. It states the current formulation age in words, and is the "from the task itself, any day" entry to the decision card (FR-010). "Decide" appears only when the task asks for a decision or moves to Someday tomorrow. The rows below are today's detail screen, unchanged.</p>
+  <p>The section is computed locally, so it has no loading or network-error state of its own; the screen's states are the formulation states shown here.</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>M-02 · asks for a decision</b>Age, the marker, a reminder of what does not restart the clock (FR-003), and Decide → M-03.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Next</button><button aria-label="More actions"><svg class="i"><use href="#i-more"/></svg></button></div>
+  <div class="body">
+    <h1 class="title">Renovate the bathroom</h1>
+    <p class="where">Next actions · Home</p>
+    <p class="lbl">This wording</p>
+    <div class="card">
+      <div class="fl"><span class="mk ask"><svg class="i"><use href="#i-ask"/></svg>Asks for a decision</span><span>15 days in Next</span></div>
+      <p class="help">The wording hasn't moved for a while. That's feedback on the wording, not on you. Changing notes, Tags, project or priority doesn't restart the clock.</p>
+      <button class="btn pri">Decide</button>
+    </div>
+    <div class="list">
+      <div class="kv"><span class="k">Project</span><span class="v">Home</span><svg class="i c"><use href="#i-chev-r"/></svg></div>
+      <div class="kv"><span class="k">Tags</span><span class="v"><span class="tag">home</span></span><svg class="i c"><use href="#i-chev-r"/></svg></div>
+      <div class="kv"><span class="k">Due</span><span class="v" style="color:var(--s400)">Add a date</span><svg class="i c"><use href="#i-chev-r"/></svg></div>
+      <div class="kv"><span class="k">Priority</span><span class="v">Normal</span><svg class="i c"><use href="#i-chev-r"/></svg></div>
+    </div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-02 · ageing / fresh</b>No Decide button: the card is for tasks that ask. Ageing says when it will ask; a fresh task shows only "N days in Next".</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Next</button><button aria-label="More actions"><svg class="i"><use href="#i-more"/></svg></button></div>
+  <div class="body">
+    <h1 class="title">Draft the launch FAQ</h1>
+    <p class="where">Next actions · Launch review</p>
+    <p class="lbl">This wording</p>
+    <div class="card">
+      <div class="fl"><span class="mk age"><svg class="i"><use href="#i-hourglass"/></svg>Ageing</span><span>9 days in Next</span></div>
+      <p class="help">Asks for a decision from Wed 14 Oct if the wording stays the same.</p>
+    </div>
+    <p class="lbl" style="margin-top:10px">Fresh task, same section</p>
+    <div class="card">
+      <div class="fl"><span>2 days in Next</span></div>
+    </div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-02 · clock paused by a future due date</b>FR-003a. Moving or removing the date re-evaluates immediately; the line updates in place.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Next</button><button aria-label="More actions"><svg class="i"><use href="#i-more"/></svg></button></div>
+  <div class="body">
+    <h1 class="title">Send venue questions to Anna</h1>
+    <p class="where">Next actions · Launch review</p>
+    <p class="lbl">This wording</p>
+    <div class="card">
+      <div class="fl"><span class="mk plain"><svg class="i"><use href="#i-pause"/></svg>Paused until the due date</span></div>
+      <p class="help">The clock starts on Fri 16 Oct. Until then this task won't ask for a decision or move to Someday.</p>
+    </div>
+    <div class="list">
+      <div class="kv"><span class="k">Due</span><span class="v"><span class="due">Fri 16 Oct</span></span><svg class="i c"><use href="#i-chev-r"/></svg></div>
+    </div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-02 · moves to Someday tomorrow</b>States exactly when, and that it can be returned. Amber, not rose; no alarm wording.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Next</button><button aria-label="More actions"><svg class="i"><use href="#i-more"/></svg></button></div>
+  <div class="body">
+    <h1 class="title">Sort the paperwork drawer</h1>
+    <p class="where">Next actions · Home</p>
+    <p class="lbl">This wording</p>
+    <div class="card">
+      <div class="fl"><span class="mk park"><svg class="i"><use href="#i-archive"/></svg>Moves to Someday tomorrow</span><span>20 days in Next</span></div>
+      <p class="help">If nothing is decided, it moves to Someday / maybe on Sat 10 Oct at 09:14. Nothing is lost, and you can bring it back in one tap.</p>
+      <button class="btn pri">Decide</button>
+    </div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-02 · kept 7 more days</b>After the one-time extension (FR-009): the reason is shown back, with the new dates.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Next</button><button aria-label="More actions"><svg class="i"><use href="#i-more"/></svg></button></div>
+  <div class="body">
+    <h1 class="title">Order the new kitchen tap</h1>
+    <p class="where">Next actions · Home</p>
+    <p class="lbl">This wording</p>
+    <div class="card">
+      <div class="fl"><span class="mk plain"><svg class="i"><use href="#i-cal-plus"/></svg>Kept 7 more days</span><span>18 days in Next</span></div>
+      <p class="quote">"Waiting to measure the sink first"</p>
+      <p class="help">Kept on Mon 5 Oct. Asks again on Mon 12 Oct; moves to Someday on Mon 19 Oct if still undecided. This wording can't be extended again.</p>
+    </div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-02 · parked automatically (task now in Someday)</b>FR-012 marking, shown on the task. Returning uses the existing "Move to Next actions" transition, which starts a new formulation.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Someday</button><button aria-label="More actions"><svg class="i"><use href="#i-more"/></svg></button></div>
+  <div class="body">
+    <h1 class="title">Learn basic Portuguese</h1>
+    <p class="where">Someday / maybe · Personal</p>
+    <div class="card">
+      <div class="fl"><span class="mk plain"><svg class="i"><use href="#i-archive"/></svg>Parked automatically</span></div>
+      <p class="help">Moved here on Thu 8 Oct at 09:14, after 21 days in Next without a decision. Project, Tags, notes and due date were kept.</p>
+    </div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-02 · parked, project archived</b>Edge case: auto-park still applies; returning to Next needs the project restored first, as today's project rules require.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Someday</button><button aria-label="More actions"><svg class="i"><use href="#i-more"/></svg></button></div>
+  <div class="body">
+    <h1 class="title">Return the old router</h1>
+    <p class="where">Someday / maybe · Old flat (archived)</p>
+    <div class="card">
+      <div class="fl"><span class="mk plain"><svg class="i"><use href="#i-archive"/></svg>Parked automatically</span></div>
+      <p class="help">Moved here on Thu 8 Oct at 09:14. Its project "Old flat" is archived, so restore the project before moving this back to Next actions.</p>
+    </div>
+  </div>
+</div>
+</figure>
+
+</div>
+</body>
+</html>
