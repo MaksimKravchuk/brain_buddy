@@ -42,6 +42,9 @@ settings:
     # Connect rejects the upload. CI overrides CURRENT_PROJECT_VERSION.
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+    # "<branch> @ <commit>" for TestFlight uploads, set by ios.yml and shown in
+    # Settings → About; empty for local builds, which hides the row.
+    BB_BUILD_LABEL: ""
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_USER_SCRIPT_SANDBOXING: YES
@@ -82,6 +85,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
         BBAppGroupIdentifier: $(BB_APP_GROUP_ID)
+        BBBuildLabel: $(BB_BUILD_LABEL)
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
