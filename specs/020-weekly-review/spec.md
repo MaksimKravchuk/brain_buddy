@@ -15,11 +15,23 @@ This feature implements the **smart Weekly Review** stage of the constitution's 
 ## Vocabulary
 
 - **Formulation**: a task's title while the task is in Next. A substantive title change starts a new formulation. Moving the task into Next also starts a new one.
-- **Formulation age**: time since the current formulation started.
+- **Formulation age**: time since the current formulation started. For a task with a future due date, it is time since the later of the formulation start and the start of the due date (FR-003a).
 - **Threshold**: the user-chosen age (7, 14, 21 or 28 days; default 14) after which a formulation **asks for a decision**.
 - **Asks for a decision**: a derived marker, not a list. ADR-0006's four open lists are unchanged.
 - **Auto-park**: the system moves a formulation that is still undecided **7 days after the threshold** from Next to Someday.
 - **Extension**: a one-time, reasoned "keep 7 more days" for one formulation.
+- **On-device model**: Apple's built-in model, or a separately downloaded model that runs on the device (FR-023). No task content leaves the device.
+- **Cloud provider**: a remote AI provider, used only with consent (FR-024).
+
+## Clarifications
+
+### Session 2026-10-05
+
+- Q: If Apple's on-device model does not support Russian, what does the navigator do with Russian-language tasks on iPhone and Mac? → A: Offer a choice: download a separate on-device model that supports the language, or use the cloud provider under consent.
+- Q: What counts as a partial review for regularity and for postponing restart mode? → A: A review in which at least one item decision was made (Inbox, decision card, Waiting or Someday), or at least one step was finished that had nothing to decide. Merely opening the review does not count.
+- Q: What data does the navigator see when proposing a first step? → A: The task's title, notes and chosen stall reason, the project name, and the titles of up to 20 other open tasks in the same project. The same set applies to on-device and cloud, and it is exactly what the cloud consent lists.
+- Q: How is a Next task with a future due date treated? → A: Its clock is paused until the due date. Formulation age counts from the later of the formulation start and the start of the due date (local day). Such a task never ages, asks for a decision or gets auto-parked before its due date.
+- Q: After "keep in Someday", how many days until the item reappears in the Someday step? → A: 30 days, unless the task changes earlier. At most 7 items are shown per review.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -50,7 +62,8 @@ Optionally they say what got in the way. The card is reachable from the task on 
 6. **Given** a task that asks for a decision, **When** the person picks the stall reason "too big", **Then** "find a first step" is visually recommended. The person may still choose any decision.
 7. **Given** a task that asks for a decision and has not been extended, **When** the person chooses "keep 7 more days" with a reason, **Then** the marker clears for 7 days and both the threshold and the auto-park date move 7 days later.
 8. **Given** a formulation already extended once, **When** its card opens, **Then** "keep 7 more days" is not offered.
-9. **Given** a task in Next, **When** the person edits only notes, tags, project, priority, due date or subtasks, **Then** its formulation age does not change.
+9. **Given** a task in Next, **When** the person edits only notes, tags, project, priority or subtasks, **Then** its formulation age does not change.
+9a. **Given** a task in Next for 20 days with a due date 10 days from now, **When** the person views Next, **Then** it shows no age marker. Auto-park does not happen before the due date. On the due date its age counts from that day.
 10. **Given** a task leaves Next (done, cancelled, Waiting, Someday, Inbox) and later returns to Next, **Then** a new formulation starts at the moment of return.
 
 ---
@@ -80,27 +93,37 @@ After 3 or more weeks without a review, the review opens in a restart mode. It o
 
 ### User Story 3 - The AI navigator proposes a first step (Priority: P2)
 
-From the decision card, during "find a first step" or "reformulate", the person asks for a suggestion. The navigator proposes 1–3 concrete first steps. It takes into account the task's title, notes, project and the chosen stall reason. The person picks one, edits it if needed, and confirms. Nothing is written without confirmation.
+From the decision card, during "find a first step" or "reformulate", the person asks for a suggestion. The navigator proposes 1–3 concrete first steps. It takes into account the task's title, notes and chosen stall reason, and the project with its other open tasks (FR-019). The person picks one, edits it if needed, and confirms. Nothing is written without confirmation.
 
 For a project without a next action, the same navigator proposes a first next action.
 
-On iPhone and Mac the navigator uses Apple's on-device model: nothing leaves the device and it works offline. When the on-device model is unavailable, the person is told so and offered the server provider under a separate one-time consent. On web the server provider is used under the same one-time consent.
+On iPhone and Mac the navigator uses Apple's on-device model: nothing leaves the device and it works offline. When Apple's model is unavailable (for example, it does not support the task's language), the person is told so and chooses between:
+- downloading a separate on-device model that supports the language (its size is shown; afterwards nothing leaves the device);
+- using the cloud provider under a separate one-time consent.
+
+On web the cloud provider is used under the same one-time consent.
 
 **Why this priority**: Owner decision D4. Proposing a first step is what the competitor brief identifies as the unoccupied "AI suggests, you decide" position. The rule (US1/US2) is valuable without it, so it is P2.
 
-**Independent Test**: With a stubbed on-device model and a stubbed server provider, request suggestions for seeded stalled tasks. Verify 1–3 proposals, no write before confirmation, the consent flow, fallback messaging, offline behaviour, and that no task content reaches logs.
+**Independent Test**: With a stubbed on-device model and a stubbed cloud provider, request suggestions for seeded stalled tasks. Verify 1–3 proposals, no write before confirmation, the consent flow, fallback messaging, offline behaviour, and that no task content reaches logs.
 
 **Acceptance Scenarios**:
 
 1. **Given** an Apple device with the on-device model available, **When** the person taps "suggest" on a stalled task, **Then** 1–3 first-step proposals appear in the task's language, without any server request and without a consent prompt. A short note says they come from the on-device model.
 2. **Given** a proposal, **When** the person picks it, **Then** it fills the title field for editing. The task changes only after the person confirms.
 3. **Given** the person dismisses all proposals, **Then** the task is unchanged.
-4. **Given** an Apple device where the on-device model is unavailable (unsupported device, Apple Intelligence off, or unsupported task language), **When** the person taps "suggest", **Then** they are told the on-device model is unavailable and why. They are offered the named server provider, which requires consent first.
-5. **Given** web with no prior consent, **When** the person taps "suggest", **Then** a consent screen names the provider and lists what is sent (title, notes, project, chosen reason). Declining leaves the card fully usable without AI.
-6. **Given** consent was revoked in settings, **When** the person taps "suggest" with the server provider, **Then** no request is sent and the consent screen appears again.
+4. **Given** an Apple device where Apple's on-device model is unavailable (unsupported device, Apple Intelligence off, or unsupported task language), **When** the person taps "suggest", **Then** they are told why and offered two choices:
+   - download a separate on-device model, with its download size shown, if the device can run it;
+   - use the named cloud provider, which requires consent first.
+
+   Choosing neither leaves the card fully usable without AI.
+4a. **Given** the person chose to download the separate on-device model, **When** the download completes, **Then** suggestions for that language run on the device without any server request, including offline. The person can delete the model in settings to free space.
+4b. **Given** the download is interrupted or there is not enough storage, **Then** the person sees why, can retry or switch to the cloud choice, and the card stays usable.
+5. **Given** web with no prior consent, **When** the person taps "suggest", **Then** a consent screen names the provider and lists what is sent (title, notes, chosen reason, project name, and titles of up to 20 other open tasks in the project). Declining leaves the card fully usable without AI.
+6. **Given** consent was revoked in settings, **When** the person taps "suggest" with the cloud provider, **Then** no request is sent and the consent screen appears again.
 7. **Given** the task has too little information to propose a grounded step, **Then** the navigator asks one clarifying question instead of inventing facts about the person's life (names, places, amounts not present in the task).
 8. **Given** a project without a next action, **When** the person asks for a suggestion, **Then** 1–3 proposals for a first next action appear, and confirming one creates it in Next in that project.
-9. **Given** the server provider fails, times out or hits the cost cap, **Then** the person sees an actionable message with a correlation ID and can continue without AI.
+9. **Given** the cloud provider fails, times out or hits the cost cap, **Then** the person sees an actionable message with a correlation ID and can continue without AI.
 
 ---
 
@@ -141,7 +164,8 @@ Every step can be skipped. The review can be left and resumed later, and a parti
 5. **Given** a Waiting item older than 7 days, **When** the Waiting step runs, **Then** the person can keep waiting (it returns in 7 days unless it changes), create a follow-up next action, return it to Next with an editable title, or cancel it.
 6. **Given** a Someday item not reviewed in 30 days, **When** the Someday step runs, **Then** at most 7 such items are shown. The person can keep (it returns in 30 days unless it changes), move to Next with a concrete title, or cancel.
 7. **Given** a review left at step 4, **When** the person returns on the same or another device, **Then** it resumes at step 4 with earlier decisions kept.
-8. **Given** a review the person ends early, **Then** it is recorded as partial and counts toward review regularity.
+8. **Given** a review the person ends early after making at least one decision, **Then** it is recorded as partial and counts toward review regularity.
+8a. **Given** a review the person opens and leaves without any decision or finished step, **Then** it is recorded as abandoned and does not count toward regularity.
 9. **Given** the summary, **Then** it shows counts per decision (done, reformulated, first step, Waiting, Someday, cancelled, extended, Inbox processed) and the date of the next scheduled review.
 10. **Given** the review step lists, **Then** no screen shows more than one decision at a time in steps 3, 4, 6 and 8.
 
@@ -187,13 +211,13 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 
 - **Offline for a long time (iOS/Mac)**: markers are computed on the device from the local clock. Auto-park found due on the device is applied locally and reconciled with the server without duplicates (US2-6). A server-side park that arrives while the device has pending local decisions for the same task resolves in favour of the person's explicit decision when it was made before the park time; otherwise the person sees the task in "while you were away".
 - **Clock skew**: a device clock ahead of or behind the server must not park a task early. The server's park time is authoritative once synced.
-- **Account-less iOS use**: the whole feature works locally (including auto-park and on-device AI). Server-only parts (server AI, cross-device resume) are unavailable and say so.
-- **Task with a due date in Next**: subject to the same rule. A due date does not stop the clock or exempt the task.
+- **Account-less iOS use**: the whole feature works locally (including auto-park and on-device AI). Server-only parts (cloud AI, cross-device resume) are unavailable and say so.
+- **Task with a due date in Next**: the clock is paused until the due date (FR-003a). From the due date on, the normal rule applies. A due date that keeps being pushed forward is a known way to defer the rule. The supporting metrics count how often due dates on Next tasks are moved, to watch for this, but the system does not block it.
 - **Task in an archived project**: auto-park still moves it to Someday. Returning it to Next requires restoring the project first, consistent with existing project rules.
 - **Recurring or repeatedly reformulated tasks**: when the same task asks for a decision for the third consecutive formulation, the card gently offers Someday or examining the problem on the thinking canvas, without blocking any decision.
 - **Huge backlog on first use**: the post-release grace period (US2-8) and restart mode prevent dozens of tasks from asking at once on day one.
 - **Concurrent edits**: a decision made on one device against a task that changed elsewhere is rejected as stale and shown again with current data. It is never silently applied to the wrong formulation.
-- **Server AI failures**: consent denied, consent revoked mid-session, provider timeout, cost cap reached, malformed response. Each fails visibly with a correlation ID and leaves the card usable.
+- **Cloud AI failures**: consent denied, consent revoked mid-session, provider timeout, cost cap reached, malformed response. Each fails visibly with a correlation ID and leaves the card usable.
 - **On-device AI unavailable mid-session** (model downloading, Apple Intelligence turned off): same fallback as US3-4.
 - **Interrupted review** (app killed, phone call, device switch): progress and decisions made so far are kept; resume works (US4-7).
 - **Threshold changed during an open review**: the decision step's list is not reshuffled under the person. New markers apply on the next visit to the step.
@@ -207,6 +231,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 - **FR-001**: System MUST record, for every task in Next, when its current formulation started. The start is set when a task is created in Next, moved or reopened into Next, or returned from auto-park, and when its title changes substantively while in Next.
 - **FR-002**: A title change MUST count as substantive only if the titles differ after ignoring letter case, surrounding and repeated whitespace, and punctuation.
 - **FR-003**: Edits to notes, tags, project, priority, due date or subtasks MUST NOT change the formulation start.
+- **FR-003a**: For a task with a due date, formulation age MUST be measured from the later of the formulation start and the start of the due date in the user's local time zone. A task whose due date is in the future therefore shows no age marker and is never auto-parked before that date. Setting, moving or removing the due date re-evaluates the age immediately. Auto-park can never become due earlier than 7 days after such a change.
 - **FR-004**: System MUST show each Next task as **fresh** (age below half the threshold), **ageing** (half the threshold or more), **asks for a decision** (threshold or more) or **moves to Someday tomorrow** (within 24 hours of auto-park). It MUST NOT use error colouring or the word "overdue" for formulation age.
 - **FR-005**: System MUST count how many consecutive formulations of the same task reached "asks for a decision", and offer Someday or the thinking canvas on the third, without blocking any decision.
 
@@ -231,20 +256,28 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 
 **AI navigator**
 
-- **FR-019**: On request from the decision card or for a project without a next action, System MUST produce 1–3 proposed first steps in the task's language, using the task's title, notes, project and optional stall reason.
+- **FR-019**: On request from the decision card or for a project without a next action, System MUST produce 1–3 proposed first steps in the task's language.
+  - **Input**: exactly the task's title, notes and optional stall reason, the project's name, and the titles of up to 20 other open tasks in the same project. Nothing else is sent, regardless of model.
+  - **Project without a next action**: the input is the project name and its open task titles.
+  - **No duplicates**: proposals MUST NOT duplicate an open task already in that project.
 - **FR-020**: A proposal MUST NOT be written to any task until the person confirms it, optionally after editing.
 - **FR-021**: Proposals MUST NOT introduce personal facts (people, places, amounts, dates) absent from the task. When information is insufficient, the navigator asks one clarifying question instead.
 - **FR-022**: On iOS and macOS, System MUST use Apple's on-device model when it is available. In that case no task content leaves the device, and the feature works offline.
-- **FR-023**: When the on-device model is unavailable (unsupported device, Apple Intelligence off, model not ready, unsupported language), System MUST say so and why. It MAY then offer the server provider, subject to FR-024.
-- **FR-024**: Every server-provider request (web, and the Apple-platform fallback) MUST be preceded by a one-time consent that names the provider and lists the data sent. Consent MUST be revocable in settings, and a revoked consent MUST stop requests immediately.
-- **FR-025**: Server-provider requests MUST respect existing provider cost caps. Failures (timeout, cap, provider error, malformed output) MUST be shown with a correlation ID and leave the review usable without AI.
+- **FR-023**: When Apple's on-device model is unavailable (unsupported device, Apple Intelligence off, model not ready, unsupported language), System MUST say so and why. It MUST then offer the person a choice:
+  - (a) download a separate on-device model that supports the task's language, if the device can run it — the download size is shown before it starts, and once installed the model serves suggestions with no task content leaving the device, including offline;
+  - (b) use the cloud provider, subject to FR-024.
+
+  The person's choice is remembered and changeable in settings.
+- **FR-023a**: The separate on-device model MUST be downloaded only on explicit request, MUST be deletable in settings, and MUST NOT be required for any non-AI part of the feature. Download failure or lack of storage MUST be shown with a retry and the cloud alternative.
+- **FR-024**: Every cloud-provider request (web, and the Apple-platform cloud choice under FR-023) MUST be preceded by a one-time consent that names the provider and lists the data sent. Consent MUST be revocable in settings, and a revoked consent MUST stop requests immediately.
+- **FR-025**: Cloud-provider requests MUST respect existing provider cost caps. Failures (timeout, cap, provider error, malformed output) MUST be shown with a correlation ID and leave the review usable without AI.
 - **FR-026**: System MUST record whether a confirmed decision used an AI proposal (used as-is, edited, or not used), without storing the proposal text in logs or metrics.
 
 **Guided review**
 
 - **FR-027**: Users MUST be able to start a quick or full review at any time, regardless of the schedule.
 - **FR-028**: The quick review MUST consist of: wins of the week, Inbox to zero, decisions, summary. The full review MUST consist of: wins, mind sweep, Inbox to zero, decisions, rest of Next with capacity mirror, Waiting older than 7 days, projects without a next action, Someday pass (at most 7 items not reviewed in 30 days), dates in the next 14 days, summary.
-- **FR-029**: Every step MUST be skippable, the review MUST be resumable on any of the user's devices, and an ended-early review MUST be recorded as partial.
+- **FR-029**: Every step MUST be skippable, and the review MUST be resumable on any of the user's devices. A review ended early MUST be recorded as **partial** only if it contains at least one item decision (Inbox, decision card, Waiting or Someday) or at least one finished step with nothing to decide. Otherwise it is **abandoned**. Only completed and partial reviews count toward regularity (SC-001) and postpone restart mode (FR-017). Merely opening the review never counts.
 - **FR-030**: The Inbox step MUST offer "10 now / all / release the rest to Someday" when Inbox holds more than 15 items.
 - **FR-031**: The capacity mirror MUST state the Next count, the average weekly completions over the last 4 weeks, and the implied number of weeks. It MUST NOT enforce any limit.
 - **FR-032**: "Keep waiting" and "keep in Someday" MUST hide the item from those steps for 7 and 30 days respectively, unless the task changes earlier.
@@ -275,11 +308,12 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 
 - **Formulation clock** (on a task): when the current formulation started, how many consecutive formulations reached the threshold, and whether the one-time extension was used.
 - **Park marker** (on a task): whether and when the task was parked, whether by the person or automatically, and whether the person has seen it on "while you were away".
-- **Review session**: one review by one owner. Holds mode (quick/full), status (open, completed, partial), start and end times, current step for resume, per-decision counts, and the optional "clear start" answer.
+- **Review session**: one review by one owner. Holds mode (quick/full), status (open, completed, partial, abandoned), start and end times, current step for resume, per-decision counts, and the optional "clear start" answer.
 - **Review decision**: one decision on one task. Holds the decision type, optional stall reason and reason text, whether an AI proposal was used, the time, and optionally the review session it belongs to (decisions can be made outside a review).
 - **Review receipt**: "keep waiting" or "keep in Someday" for one task, with the date until which it stays out of the step.
 - **Review settings**: review day, time, time zone and threshold per owner.
 - **AI navigator consent**: per owner and provider; when granted and when revoked.
+- **Navigator preference** (per device): when Apple's on-device model is unavailable, whether the person chose the downloadable on-device model or the cloud provider, and whether the downloadable model is installed.
 
 ## Success Criteria *(mandatory)*
 
@@ -299,9 +333,9 @@ Measured per active user over the first 8 weeks after their first review.
 
 - Persona: a broad audience of GTD practitioners and newcomers, with users with ADHD as the design centre. The product is not positioned as "an ADHD app".
 - Language follows the rest of the product today. AI answers in the task's language. Full localisation is out of scope.
-- Apple's on-device model requires iOS 26 / macOS 26 on an Apple Intelligence-capable device with Apple Intelligence enabled. Whether it supports Russian is **unverified** (checked 2026-10-05). If it does not, Russian-language tasks use the consented server fallback on Apple platforms.
-- The server provider and per-call budget for the navigator reuse the existing provider and cost-cap configuration; the exact choice is a planning decision.
-- Waiting and Someday review behaviour (7- and 30-day receipts) follows the macOS POC pattern, with Someday lengthened from 7 to 30 days to reduce noise.
+- Apple's on-device model requires iOS 26 / macOS 26 on an Apple Intelligence-capable device with Apple Intelligence enabled. Whether it supports Russian is **unverified** (checked 2026-10-05). If it does not, Russian-language tasks on Apple platforms go through the FR-023 choice: a downloadable on-device model or the consented cloud provider. Which downloadable model to use, its size and its device requirements are planning decisions. Its suggestions are held to the same SC-005 bar.
+- The cloud provider and per-call budget for the navigator reuse the existing provider and cost-cap configuration; the exact choice is a planning decision.
+- Waiting and Someday review behaviour follows the macOS POC receipt pattern. Waiting returns after 7 days. Someday returns after 30 days, confirmed in clarification (the POC uses 7).
 - Mac↔backend sync is delivered as a separate feature spec; US6 depends on it.
 - This feature requires superseding or amending ADR-0006 (Weekly Review deferred, no cadence or due state, D-11), ADR-0001's capture-based review model, and the macOS POC principle that review never changes GTD state automatically. That will be recorded in a new ADR during planning.
 
