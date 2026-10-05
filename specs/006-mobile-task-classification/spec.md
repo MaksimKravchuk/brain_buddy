@@ -4,7 +4,14 @@
 
 **Created**: 2026-08-10
 
-**Status**: Draft
+**Status**: Retired (2026-10-05). The Expo client this feature specified was
+removed with `mobile/`, and its tests went with it, so the FR/SC ids below have
+no implementation and no traced evidence; `check_requirement_coverage.py` is
+expected to report them uncovered and is not run against this feature. Kept as
+history only. Project and tag assignment in the native app (`ios/`) is
+specified in `docs/native-ios-app.md`; any new client work needs a new feature
+spec, not an amendment here. The backend `mobile_task_classification` flag this
+feature introduced is unaffected.
 
 **Input**: Business intake at `intake.md`, produced by `/speckit-interview` with
 the founder on 2026-08-10. The scope boundary and non-goals in §4 of that
