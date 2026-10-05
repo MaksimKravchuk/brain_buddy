@@ -1,7 +1,7 @@
 # Contract: Formulation clock and marker classification (shared rule)
 
 **Feature**: `specs/020-weekly-review/` · **Requirements**: FR-001, FR-002, FR-003,
-FR-003a, FR-004, FR-005, FR-009, FR-012, FR-013, FR-016, FR-017, FR-039 · **Design**:
+FR-046, FR-004, FR-005, FR-009, FR-012, FR-013, FR-016, FR-017, FR-039 · **Design**:
 marker system table in `design.md` (M-01, M-02, D-01, M-17, M-24)
 
 This file is normative for all three implementations:
@@ -63,7 +63,7 @@ FR-039); `activated_at` (FR-016).
 | title changed while in Next, substantive | close current formulation (§4), then start a new one as above |
 | title changed while in Next, cosmetic | no clock change |
 | notes, tags, project, priority, subtasks, comments, waiting_for edited | no clock change (FR-003) |
-| due date set, moved or removed while in Next | `formulation_park_floor_at = max(existing, now + 7 d)` (FR-003a); start unchanged |
+| due date set, moved or removed while in Next | `formulation_park_floor_at = max(existing, now + 7 d)` (FR-046); start unchanged |
 | task leaves Next (any destination, any actor) | close current formulation (§4); all formulation fields `null` except `consecutive_stalled_formulations` |
 | decision `extend` | `formulation_extended_at = now`, reason stored; allowed only when classification is `asks` or `moves_tomorrow` and no extension exists |
 | auto-park | as "leaves Next" to Someday, plus `parked = {at: now, by: "auto", formulation_id, from_revision}` |

@@ -15,7 +15,7 @@ This feature implements the **smart Weekly Review** stage of the constitution's 
 ## Vocabulary
 
 - **Formulation**: a task's title while the task is in Next. A substantive title change starts a new formulation. Moving the task into Next also starts a new one.
-- **Formulation age**: time since the current formulation started. For a task with a future due date, it is time since the later of the formulation start and the start of the due date (FR-003a).
+- **Formulation age**: time since the current formulation started. For a task with a future due date, it is time since the later of the formulation start and the start of the due date (FR-046).
 - **Threshold**: the user-chosen age (7, 14, 21 or 28 days; default 14) after which a formulation **asks for a decision**.
 - **Asks for a decision**: a derived marker, not a list. ADR-0006's four open lists are unchanged.
 - **Auto-park**: the system moves a formulation that is still undecided **7 days after the threshold** from Next to Someday.
@@ -212,8 +212,8 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 - **Offline for a long time (iOS/Mac)**: markers are computed on the device from the local clock. Auto-park found due on the device is applied locally and reconciled with the server without duplicates (US2-6). A server-side park that arrives while the device has pending local decisions for the same task resolves in favour of the person's explicit decision when it was made before the park time; otherwise the person sees the task in "while you were away".
 - **Clock skew**: a device clock ahead of or behind the server must not park a task early. The server's park time is authoritative once synced.
 - **Account-less iOS use**: the whole feature works locally (including auto-park and on-device AI). Server-only parts (cloud AI, cross-device resume) are unavailable and say so.
-- **Task with a due date in Next**: the clock is paused until the due date (FR-003a). From the due date on, the normal rule applies. A due date that keeps being pushed forward is a known way to defer the rule. The supporting metrics count how often due dates on Next tasks are moved, to watch for this, but the system does not block it.
-- **Task in an archived project**: auto-park still moves it to Someday. Returning it to Next requires restoring the project first, consistent with existing project rules.
+- **Task with a due date in Next**: the clock is paused until the due date (FR-046). From the due date on, the normal rule applies. A due date that keeps being pushed forward is a known way to defer the rule. The supporting metrics count how often due dates on Next tasks are moved, to watch for this, but the system does not block it.
+- **Task in an archived project**: today, archiving a project clears the project from its tasks on backend and iOS, so this state cannot occur yet (ADR-0020's lossless archive is accepted but not implemented). Once lossless archive exists, the rule is: auto-park still moves such a task to Someday, and returning it to Next requires restoring the project first.
 - **Recurring or repeatedly reformulated tasks**: when the same task asks for a decision for the third consecutive formulation, the card gently offers Someday or examining the problem on the thinking canvas, without blocking any decision.
 - **Huge backlog on first use**: the post-release grace period (US2-8) and restart mode prevent dozens of tasks from asking at once on day one.
 - **Concurrent edits**: a decision made on one device against a task that changed elsewhere is rejected as stale and shown again with current data. It is never silently applied to the wrong formulation.
@@ -231,12 +231,12 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 - **FR-001**: System MUST record, for every task in Next, when its current formulation started. The start is set when a task is created in Next, moved or reopened into Next, or returned from auto-park, and when its title changes substantively while in Next.
 - **FR-002**: A title change MUST count as substantive only if the titles differ after ignoring letter case, surrounding and repeated whitespace, and punctuation.
 - **FR-003**: Edits to notes, tags, project, priority, due date or subtasks MUST NOT change the formulation start.
-- **FR-003a**: For a task with a due date, formulation age MUST be measured from the later of the formulation start and the start of the due date in the user's local time zone. A task whose due date is in the future therefore shows no age marker and is never auto-parked before that date. Setting, moving or removing the due date re-evaluates the age immediately. Auto-park can never become due earlier than 7 days after such a change.
+- **FR-046**: For a task with a due date, formulation age MUST be measured from the later of the formulation start and the start of the due date in the user's local time zone. A task whose due date is in the future therefore shows no age marker and is never auto-parked before that date. Setting, moving or removing the due date re-evaluates the age immediately. Auto-park can never become due earlier than 7 days after such a change.
 - **FR-004**: System MUST classify each Next task as **fresh** (age below half the threshold), **ageing** (half the threshold or more), **asks for a decision** (threshold or more) or **moves to Someday tomorrow** (within 24 hours of auto-park).
   - **In lists**: only "asks for a decision" and "moves to Someday tomorrow" are shown as markers.
   - **In task detail**: "ageing" is shown only there (design sign-off: keep long lists calm).
   - **Wording**: System MUST NOT use error colouring or the word "overdue" for formulation age.
-- **FR-005**: System MUST count how many consecutive formulations of the same task reached "asks for a decision", and offer Someday or the thinking canvas on the third, without blocking any decision.
+- **FR-005**: System MUST count how many consecutive formulations of the same task reached "asks for a decision", and offer Someday on the third, without blocking any decision. It also offers the thinking canvas, but only where the canvas exists (web today; iOS has no canvas).
 
 **Decision card**
 
@@ -246,8 +246,8 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 - **FR-009**: "Keep 7 more days" MUST require a reason, MUST be available once per formulation, and MUST shift both the threshold and the auto-park point by 7 days.
 - **FR-010**: The decision card MUST be reachable from the task itself on any day, not only inside a review, and decisions made there MUST be recorded the same way as in-review decisions.
 - **FR-011**: Every decision MUST be applied through the existing idempotent, owner-serialized task operations and MUST be rejected as stale if the task changed since the card was shown.
-- **FR-011a**: After any decision (decision card, Inbox, Waiting, Someday), System MUST offer **Undo** for a few seconds, as the existing Process inbox does. Undo restores the task's previous state, title and formulation clock, and removes the recorded decision.
-- **FR-010a**: On iPhone, the decision card opened from a task outside the review MUST appear as a large sheet over the list. Inside the review it is full-screen.
+- **FR-048**: After any decision (decision card, Inbox, Waiting, Someday), System MUST offer **Undo** for a few seconds, as the existing Process inbox does. Undo restores the task's previous state, title and formulation clock, and removes the recorded decision.
+- **FR-047**: On iPhone, the decision card opened from a task outside the review MUST appear as a large sheet over the list. Inside the review it is full-screen.
 
 **Auto-park and return**
 
@@ -273,7 +273,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
   - (b) use the cloud provider, subject to FR-024.
 
   The person's choice is remembered and changeable in settings.
-- **FR-023a**: The separate on-device model MUST be downloaded only on explicit request, MUST be deletable in settings, and MUST NOT be required for any non-AI part of the feature. Download failure or lack of storage MUST be shown with a retry and the cloud alternative.
+- **FR-049**: The separate on-device model MUST be downloaded only on explicit request, MUST be deletable in settings, and MUST NOT be required for any non-AI part of the feature. Download failure or lack of storage MUST be shown with a retry and the cloud alternative.
 - **FR-024**: Every cloud-provider request (web, and the Apple-platform cloud choice under FR-023) MUST be preceded by a one-time consent that names the provider and lists the data sent. Consent MUST be revocable in settings, and a revoked consent MUST stop requests immediately.
 - **FR-025**: Cloud-provider requests MUST respect existing provider cost caps. Failures (timeout, cap, provider error, malformed output) MUST be shown with a correlation ID and leave the review usable without AI.
 - **FR-026**: System MUST record whether a confirmed decision used an AI proposal (used as-is, edited, or not used), without storing the proposal text in logs or metrics.
@@ -288,7 +288,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 - **FR-032**: "Keep waiting" and "keep in Someday" MUST hide the item from those steps for 7 and 30 days respectively, unless the task changes earlier.
 - **FR-033**: The summary MUST show counts per decision type and the next scheduled review, and ask once "Clear how to start the week? yes / not really". The answer is optional.
 - **FR-034**: Steps that involve decisions (Inbox, decisions, Waiting, Someday) MUST present one item at a time.
-- **FR-034a**: In the decision step, the person MUST be able to set one card aside with "Not now" without deciding. The task stays "asks for a decision", its auto-park schedule is unchanged, and the next card is shown.
+- **FR-050**: In the decision step, the person MUST be able to set one card aside with "Not now" without deciding. The task stays "asks for a decision", its auto-park schedule is unchanged, and the next card is shown.
 
 **Schedule, cue, onboarding, settings**
 
@@ -328,7 +328,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 Measured per active user over the first 8 weeks after their first review.
 
 - **SC-001**: Users complete at least a partial review in at least 3 of every 4 weeks.
-- **SC-002**: Immediately after every completed review whose decision step was finished with no card set aside ("Not now", FR-034a), 0 Next formulations older than the user's threshold remain without a decision.
+- **SC-002**: Immediately after every completed review whose decision step was finished with no card set aside ("Not now", FR-050), 0 Next formulations older than the user's threshold remain without a decision.
 - **SC-003**: At least 70% of answered reviews end with "clear how to start the week: yes".
 - **SC-004**: On the owner's real task set, the median quick review takes 5 minutes or less and the median full review 20 minutes or less.
 - **SC-005**: On the owner's stalled tasks, at least 50% of AI first-step proposals are accepted (as-is or edited). In a reviewed evaluation set, 0 proposals introduce personal facts absent from the task.
@@ -343,7 +343,7 @@ Measured per active user over the first 8 weeks after their first review.
 - The cloud provider and per-call budget for the navigator reuse the existing provider and cost-cap configuration; the exact choice is a planning decision.
 - Waiting and Someday review behaviour follows the macOS POC receipt pattern. Waiting returns after 7 days. Someday returns after 30 days, confirmed in clarification (the POC uses 7).
 - Mac↔backend sync is delivered as a separate feature spec; US6 depends on it.
-- This feature requires superseding or amending ADR-0006 (Weekly Review deferred, no cadence or due state, D-11), ADR-0001's capture-based review model, and the macOS POC principle that review never changes GTD state automatically. That will be recorded in a new ADR during planning.
+- This feature requires superseding or amending ADR-0006 (Weekly Review deferred, no cadence or due state), and must close open decision D-11 in `docs/vnext-cloud-design-build-contract.md`. It also requires amending ADR-0001's capture-based review model, and the macOS POC principle that review never changes GTD state automatically. That will be recorded in a new ADR during planning.
 
 ## Out of Scope
 

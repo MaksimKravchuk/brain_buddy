@@ -22,7 +22,7 @@ increment 1 (US1/US2) on any platform. NC-2 – NC-4 affect only increment 2.
   extended_at) + 7 d`, `park_due_at = ask_at + 7 d` (R6). If the owner chooses the
   other reading, only `formulation.py`/`Formulation.swift` and the vectors change.
 - **NEEDS CLARIFICATION (owner) NC-2 — the downloadable on-device model.** Shipping
-  one (FR-023 (a), FR-023a) means the first third-party runtime dependency in the iOS
+  one (FR-023 (a), FR-049) means the first third-party runtime dependency in the iOS
   app, against `ios/AGENTS.md` ("No third-party dependencies"), a ~1 GB download, and
   (per the recommendation in `research-on-device-model.md` §3: Core AI +
   Qwen3-1.7B 4-bit via an Apple-hosted Background Assets pack, Gemma 4 E2B as eval
@@ -32,7 +32,7 @@ increment 1 (US1/US2) on any platform. NC-2 – NC-4 affect only increment 2.
   (Gemma 4 E2B) download; accept that iOS 26.x users get only the cloud choice for
   Russian tasks?* **Default**: PR-08 ships Apple's model
   and the cloud choice (FR-022, FR-023 (b), FR-024 – FR-026); while PR-09 has not
-  landed, M-06 offers only the cloud choice and "Not now". FR-023 (a) and FR-023a are
+  landed, M-06 offers only the cloud choice and "Not now". FR-023 (a) and FR-049 are
   satisfied only by PR-09, so increment 2 is not accepted against those two
   requirements until it lands or the owner amends the spec. If no candidate clears the
   SC-005 evaluation gate, the fallback in `research-on-device-model.md` §3.5 applies
@@ -167,7 +167,7 @@ increment 1 (US1/US2) on any platform. NC-2 – NC-4 affect only increment 2.
 - **Alternatives**: client issues the plain task command then a separate "record
   decision" call (two requests, can half-fail, Undo cannot be exact).
 
-## R8. Undo (FR-011a)
+## R8. Undo (FR-048)
 
 - **Decision**: server-side undo by snapshot (`review_decisions.undo.task_before`),
   allowed while the task revision is unchanged; the decision row is deleted. Clients
@@ -379,7 +379,7 @@ document; not repeated here).
 
 - **Fact**: `scripts/check_requirement_coverage.py` scans only `backend/tests`,
   `frontend/tests`, `frontend/src` and suffixes `.py .ts .tsx .js .jsx` (lines 53-64).
-  FR-010a, FR-022, FR-023, FR-023a, FR-036, FR-037 and the Mac part of FR-041 are
+  FR-047, FR-022, FR-023, FR-049, FR-036, FR-037 and the Mac part of FR-041 are
   satisfied only in Swift.
 - **Decision**: extend the script to scan `ios/BrainBuddyKit/Tests` and `macos/Tests`
   with `.swift` (the iOS app target has no test target today; `ios/project.yml:181-185`
@@ -390,7 +390,7 @@ document; not repeated here).
   `check-specs` recipe in `Makefile` (ASK, guarded) when increment 1 lands.
 - **Alternatives**: contrived backend/web tests naming iOS-only requirements (evidence
   that does not test the behaviour).
-- **Lettered ids**: FR-003a, FR-010a, FR-011a, FR-023a and FR-034a do not match the
+- **Lettered ids**: FR-046, FR-047, FR-048, FR-049 and FR-050 do not match the
   definition regex `((?:FR|SC)-\d+)\*\*` in either `check_requirement_coverage.py:44`
   or `check_spec_kit_specs.py:165-166`, so the gate cannot enforce them and they cannot
   be listed in `## PR-срезы` `requirements`. Tests still name them (`020_FR_003a_…`);

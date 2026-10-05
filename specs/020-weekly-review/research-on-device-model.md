@@ -281,7 +281,7 @@ cost, and its feasibility is **[U]**.
     third-party host sees the user's IP, the version is pinned, and the pack
     goes through review.
   - Per-pack size cap: **[U]**. Only total and count limits were found.
-- **Storage UX (FR-023a):**
+- **Storage UX (FR-049):**
   - Show the size before download, and check free space first. Free-space
     reads are a required-reason API, so add a `PrivacyInfo.xcprivacy` entry per
     `ios/AGENTS.md`.

@@ -53,12 +53,12 @@ or mode picker M-11 → steps M-13 … M-22.
 
 | id | surface | screen | purpose | FR refs |
 |---|---|---|---|---|
-| M-01 | mobile (iOS Next tab) | Next actions with age markers | Shows "asks for a decision" and "moves to Someday tomorrow" per task (ageing is detail-only); the marker opens the card as a sheet | FR-003a, FR-004, FR-010, FR-012, FR-038, FR-039, FR-040 |
-| M-02 | mobile (iOS task detail) | "This wording" section in task detail | States formulation age in words, including the ageing marker (shown only here), the due-date pause, extension and park facts; "Decide" from the task on any day | FR-001, FR-003, FR-003a, FR-004, FR-009, FR-010, FR-012 |
+| M-01 | mobile (iOS Next tab) | Next actions with age markers | Shows "asks for a decision" and "moves to Someday tomorrow" per task (ageing is detail-only); the marker opens the card as a sheet | FR-046, FR-004, FR-010, FR-012, FR-038, FR-039, FR-040 |
+| M-02 | mobile (iOS task detail) | "This wording" section in task detail | States formulation age in words, including the ageing marker (shown only here), the due-date pause, extension and park facts; "Decide" from the task on any day | FR-001, FR-003, FR-046, FR-004, FR-009, FR-010, FR-012 |
 | M-03 | mobile (iOS large-detent sheet over Next, decided) | Decision card | One task, one decision: seven decisions, optional stall reason with a recommendation, third-stall offer, stale handling, Undo toast after a decision | FR-005, FR-006, FR-007, FR-009, FR-010, FR-011, FR-040, FR-045 |
 | M-04 | mobile (inside M-03) | Decision card follow-up forms | Reformulate, find a first step ("Was: …"), Waiting for (who/what), keep 7 more days (reason required) | FR-001, FR-002, FR-006, FR-008, FR-009, FR-019 |
 | M-05 | mobile (inside M-04) | AI navigator, on-device | 1–3 proposals from Apple's on-device model; pick fills, confirm writes; clarifying question; offline | FR-019, FR-020, FR-021, FR-022 |
-| M-06 | mobile (inside M-04) | On-device model unavailable: choice and download | Says why; offers downloadable on-device model (size shown) or cloud; download progress, interruption, storage | FR-023, FR-023a |
+| M-06 | mobile (inside M-04) | On-device model unavailable: choice and download | Says why; offers downloadable on-device model (size shown) or cloud; download progress, interruption, storage | FR-023, FR-049 |
 | M-07 | mobile (inside M-04) | Cloud consent and cloud failures | One-time consent naming provider and exact data; revoked re-consent; timeout/cap/offline with correlation ID | FR-024, FR-025, FR-045 |
 | M-08 | mobile (iOS project screen) | Project without a next action — AI first next action | Proposes a first next action and creates it in Next on confirm | FR-019, FR-020, FR-021 |
 | M-09 | mobile (sheet / first review screen) | While you were away | Lists unseen auto-parked tasks; one-tap return each; return all | FR-012, FR-015 |
@@ -68,17 +68,17 @@ or mode picker M-11 → steps M-13 … M-22.
 | M-13 | mobile (review step) | Wins of the week (+ shared step chrome, leave) | First step, before any backlog: completed tasks and their count | FR-028, FR-029 |
 | M-14 | mobile (review step, full) | Mind sweep | Capture anything on the mind into Inbox | FR-028, FR-029 |
 | M-15 | mobile (review step) | Inbox to zero | ">15 items" choice; one item at a time via Process inbox | FR-028, FR-030, FR-034 |
-| M-16 | mobile (review step) | Tasks that ask for a decision | The M-03 card one at a time, oldest first; "Not now" passes a card; Undo after each decision | FR-028, FR-034, FR-034a, FR-006 |
+| M-16 | mobile (review step) | Tasks that ask for a decision | The M-03 card one at a time, oldest first; "Not now" passes a card; Undo after each decision | FR-028, FR-034, FR-050, FR-006 |
 | M-17 | mobile (review step, full) | The rest of Next with capacity mirror | Count, 4-week weekly average, implied weeks; no limit | FR-028, FR-031 |
 | M-18 | mobile (review step, full) | Waiting for, older than 7 days | One at a time: keep waiting / follow-up / return to Next / cancel | FR-028, FR-032, FR-034 |
 | M-19 | mobile (review step, full) | Projects without a next action | Add or suggest a next action per project | FR-019, FR-028 |
 | M-20 | mobile (review step, full) | Someday pass | Max 7 items not reviewed in 30 days; keep / move to Next with a concrete title / cancel | FR-028, FR-032, FR-034 |
 | M-21 | mobile (review step, full) | Dates in the next 14 days | Read-only look ahead | FR-028 |
 | M-22 | mobile (review step) | Summary | Counts per decision type, next review date, optional "Clear how to start the week?" | FR-033, FR-038, SC-003, SC-007 |
-| M-23 | mobile (iOS Settings) | Weekly review and Suggestions settings | Day, time, threshold, last review; on-device status, fallback choice, delete model, cloud consent revoke | FR-023, FR-023a, FR-024, FR-035, FR-038, FR-039 |
+| M-23 | mobile (iOS Settings) | Weekly review and Suggestions settings | Day, time, threshold, last review; on-device status, fallback choice, delete model, cloud consent revoke | FR-023, FR-049, FR-024, FR-035, FR-038, FR-039 |
 | M-24 | mobile (iOS widget) | Next actions widget with "N ask" | Shows how many tasks ask for a decision; in medium and large the chip deep-links into the review's decision step | FR-037 |
 | M-25 | mobile (iOS notification) | Weekly review notification | The single weekly cue, skipped if a complete or partial review happened in the preceding 6 days; iOS only | FR-036, FR-038 |
-| D-01 | desktop (web) | Next actions with age markers + Weekly review sidebar entry | Web markers (as M-01, no ageing in the list) and the working entry replacing "Coming soon"; the sidebar "Last review" line is the web's only review cue | FR-003a, FR-004, FR-010, FR-012, FR-038, FR-039, FR-042, FR-045 |
+| D-01 | desktop (web) | Next actions with age markers + Weekly review sidebar entry | Web markers (as M-01, no ageing in the list) and the working entry replacing "Coming soon"; the sidebar "Last review" line is the web's only review cue | FR-046, FR-004, FR-010, FR-012, FR-038, FR-039, FR-042, FR-045 |
 | D-02 | desktop (web dialog) | Decision dialog with the AI navigator | M-03/M-04/M-05/M-07 content in a 560 px dialog; cloud-only navigator | FR-005 – FR-011, FR-019 – FR-021, FR-024, FR-025, FR-045 |
 | D-03 | desktop (web route) | Weekly review shell | Focused route with step rail; hosts M-09 … M-22 content; onboarding dialog | FR-015, FR-017, FR-027 – FR-035, FR-045 |
 | D-04 | desktop (web settings) | Weekly review and Suggestions settings | M-23 minus on-device rows | FR-024, FR-035, FR-038, FR-039, FR-045 |
@@ -141,7 +141,7 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default | Next tab open | Rows grouped by project. Only asking and moves-tomorrow rows carry a marker; fresh and ageing rows have none. A future-due task shows only its due chip. Tapping a marker opens the M-03 sheet. | "Asks for a decision", "Moves to Someday tomorrow" | FR-003a, FR-004, FR-010, SC-006 |
+| default | Next tab open | Rows grouped by project. Only asking and moves-tomorrow rows carry a marker; fresh and ageing rows have none. A future-due task shows only its due chip. Tapping a marker opens the M-03 sheet. | "Asks for a decision", "Moves to Someday tomorrow" | FR-046, FR-004, FR-010, SC-006 |
 | loading | cold launch while the local store opens, > 300 ms | Four static placeholder rows; markers arrive with the rows | — | — |
 | empty (first run) | no next actions | Today's empty state, nothing about age | "No next actions" / "Process your inbox to choose what comes next." | — |
 | empty (filtered to nothing) | Tag/priority filter matches nothing | Different copy, count of hidden tasks, "Clear filter" | "No next actions tagged errands" / "7 next actions are hidden by this filter." | — |
@@ -156,7 +156,7 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 |---|---|---|---|---|
 | default (asks) | task asks for a decision | Marker, age in days, reassurance, what doesn't restart the clock, "Decide" | "The wording hasn't moved for a while. That's feedback on the wording, not on you. Changing notes, Tags, project or priority doesn't restart the clock." | FR-001, FR-003, FR-010 |
 | ageing / fresh | age < T | Ageing: the "Ageing" chip (its only place on iOS) and the date it will ask. Fresh: days only. No Decide. | "Asks for a decision from Wed 14 Oct if the wording stays the same." | FR-004 |
-| clock paused | future due date | Paused chip and date | "The clock starts on Fri 16 Oct. Until then this task won't ask for a decision or move to Someday." | FR-003a |
+| clock paused | future due date | Paused chip and date | "The clock starts on Fri 16 Oct. Until then this task won't ask for a decision or move to Someday." | FR-046 |
 | moves to Someday tomorrow | within 24 h of park | Exact park time; reassurance; Decide | "If nothing is decided, it moves to Someday / maybe on Sat 10 Oct at 09:14. Nothing is lost, and you can bring it back in one tap." | FR-012, SC-006 |
 | kept 7 more days | extension used | Reason quoted back; new ask and park dates; no further extension | "Kept on Mon 5 Oct. Asks again on Mon 12 Oct; moves to Someday on Mon 19 Oct if still undecided." | FR-009 |
 | parked automatically | task in Someday via auto-park | Parked chip and facts kept | "Moved here on Thu 8 Oct at 09:14, after 21 days in Next without a decision. Project, Tags, notes and due date were kept." | FR-012 |
@@ -176,8 +176,8 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | extension already used | formulation already extended | "Keep 7 more days" absent; quiet reason line | "You've already kept this wording 7 more days once." | FR-009 |
 | third stalled wording | 3rd consecutive formulation reached the threshold | Gentle offer above reasons: "Think it through" (canvas) / "Release to Someday"; nothing blocked | "This is the third wording in a row that has stalled. Sometimes the task isn't the problem…" | FR-005 |
 | stale | task changed elsewhere since the card opened | Nothing applied; was/now diff; current state; Close | "This task changed on another device, so nothing was applied. Here's the current version." | FR-011 |
-| decision applied, with Undo | any decision confirmed | Sheet closes and the row updates. A toast names the decision and offers Undo for about 5 s, like Process inbox. Undo restores the task exactly, including clock, extension and receipts. | ""Renovate the bathroom" released to Someday" · "Undo" | FR-006, FR-010, FR-011a |
-| undo window expired | ~5 s pass | Toast fades. The decision stands and is changeable later through ordinary task moves. | — | FR-011a |
+| decision applied, with Undo | any decision confirmed | Sheet closes and the row updates. A toast names the decision and offers Undo for about 5 s, like Process inbox. Undo restores the task exactly, including clock, extension and receipts. | ""Renovate the bathroom" released to Someday" · "Undo" | FR-006, FR-010, FR-048 |
+| undo window expired | ~5 s pass | Toast fades. The decision stands and is changeable later through ordinary task moves. | — | FR-048 |
 | error | offline decision rejected by the server after sync (non-stale) | Reason, correlation ID, "Try again" / "Choose again" | "Your decision "Move to Waiting for" couldn't be saved to your account. The task is still in Next." + Ref | FR-011, FR-045 |
 | offline / interrupted | no connection; or app killed with the card open | Works offline, queued; killed before a choice → nothing applied, card opens fresh | "Offline. Decisions are saved on this iPhone and sync later." | FR-040 |
 | loading | **n/a** on iOS — decisions apply to the local store immediately (web: D-02 saving) | — | — | — |
@@ -218,12 +218,12 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default: choice (language) | Apple's model doesn't support the task's language | Reason; two choices (download with size, cloud); "Not now"; remembered | "Apple's on-device model doesn't support Russian yet." / "Download 1.1 GB" / "Continue with cloud" | FR-023, FR-023a |
+| default: choice (language) | Apple's model doesn't support the task's language | Reason; two choices (download with size, cloud); "Not now"; remembered | "Apple's on-device model doesn't support Russian yet." / "Download 1.1 GB" / "Continue with cloud" | FR-023, FR-049 |
 | choice (Apple Intelligence off / model not ready) | other unavailability reasons | Same layout, reason line differs | "Apple Intelligence is turned off on this iPhone." / "Apple's model is still getting ready." | FR-023 |
 | choice (device can't run models) | unsupported device | Download shown unavailable with reason; cloud and Not now | "Not available on this iPhone." | FR-023 |
-| loading: downloading | "Download" | Progress bar in bytes, time estimate, "Cancel download", card stays usable | "420 MB of 1.1 GB · about 3 minutes on Wi-Fi" | FR-023a |
-| offline / interrupted | connection lost mid-download | Why, "Retry download" (resumes), cloud alternative | "The connection dropped at 420 MB of 1.1 GB." | FR-023a |
-| error: not enough storage | before or during download | Numbers, "Try again", cloud alternative; nothing deleted for the person | "The model needs 1.1 GB. This iPhone has 640 MB free." | FR-023a |
+| loading: downloading | "Download" | Progress bar in bytes, time estimate, "Cancel download", card stays usable | "420 MB of 1.1 GB · about 3 minutes on Wi-Fi" | FR-049 |
+| offline / interrupted | connection lost mid-download | Why, "Retry download" (resumes), cloud alternative | "The connection dropped at 420 MB of 1.1 GB." | FR-049 |
+| error: not enough storage | before or during download | Numbers, "Try again", cloud alternative; nothing deleted for the person | "The model needs 1.1 GB. This iPhone has 640 MB free." | FR-049 |
 | installed → suggestions | download complete | Proposals in the task's language, on-device note, offline OK | "Suggested on this iPhone by the downloaded model. Works offline." | FR-023 (a), FR-022 |
 | empty (first run / filtered) | **n/a** | — | — | — |
 | partial failure | **n/a** — a download either completes or is resumable | — | — | — |
@@ -349,9 +349,9 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
 | default | step opens, or the widget's "N ask" chip is tapped | M-03 card full-screen, "1 of 5 · oldest first", "Not now" | — | FR-034, US4-3, FR-037 |
-| next card, with Undo | a decision made | One status line with Undo (~5 s), then the next card. Undo reverts the task and brings its card back as current. | ""Update the CV" released to Someday" · "Undo" | FR-034, FR-011a |
+| next card, with Undo | a decision made | One status line with Undo (~5 s), then the next card. Undo reverts the task and brings its card back as current. | ""Update the CV" released to Someday" · "Undo" | FR-034, FR-048 |
 | all decided | queue empty | Count | "All 5 decided / Nothing in Next is waiting for a decision now." | SC-002 |
-| some left | "Not now" used | Neutral count. Those tasks keep asking and auto-park continues on schedule. This review is excluded from the SC-002 measurement. | "3 of 5 decided / 2 still ask for a decision. They stay in Next whenever you're ready, and move to Someday on their usual date if nothing is decided." | FR-034a, SC-002 |
+| some left | "Not now" used | Neutral count. Those tasks keep asking and auto-park continues on schedule. This review is excluded from the SC-002 measurement. | "3 of 5 decided / 2 still ask for a decision. They stay in Next whenever you're ready, and move to Someday on their usual date if nothing is decided." | FR-050, SC-002 |
 | empty | nothing asks | Finishes with nothing to decide | "Nothing asks for a decision" | FR-029 |
 | threshold changed mid-review | change on another device | Queue unchanged; note | "Your threshold changed to 21 days. This list stays as it is…" | FR-039, edge case |
 | stale | a card's task changed elsewhere | M-03 stale pattern in place | — | FR-011 |
@@ -375,7 +375,7 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | default | step opens | One item: who/what, since; four decisions | "Keep waiting · Checks in again in 7 days" | FR-032, FR-034, US4-5 |
 | follow-up | "Create a follow-up" | Required field; creates a Next action in the same project; original keeps a 7-day receipt | "What will you do to follow up?" | US4-5 |
 | return to Next | "Return to Next" | Editable prefilled title | "What's the next action now?" | US4-5 |
-| next item, with Undo | any Waiting decision applied | Status line with Undo (~5 s) above the next item | ""Pick up the drill from Sam" moved to Next actions" · "Undo" | FR-011a |
+| next item, with Undo | any Waiting decision applied | Status line with Undo (~5 s) above the next item | ""Pick up the drill from Sam" moved to Next actions" · "Undo" | FR-048 |
 | archived project | follow-up in archived project | Follow-up blocked with reason (as macOS POC) | "Restore this archived project before creating a follow-up in it." | edge case |
 | empty | nothing older than 7 days | Finishes with nothing to decide | "Nothing to chase" | FR-029 |
 | stale | changed elsewhere | M-03 stale pattern | — | FR-011 |
@@ -398,7 +398,7 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 |---|---|---|---|---|
 | default | step opens | One of at most 7; keep / move to Next / cancel; auto-park label where relevant | "Keep in Someday · Looks again in 30 days" | FR-032, FR-034, US4-6 |
 | move to Next | "Move to Next" | Required concrete title | "What's the first concrete action?" | US4-6 |
-| next item, with Undo | any Someday decision applied | Status line with Undo (~5 s) above the next item | ""Build a raised bed" kept in Someday · looks again in 30 days" · "Undo" | FR-011a |
+| next item, with Undo | any Someday decision applied | Status line with Undo (~5 s) above the next item | ""Build a raised bed" kept in Someday · looks again in 30 days" · "Undo" | FR-048 |
 | empty | nothing due a look | One line | "Nothing in Someday needs a look this week." | FR-029 |
 | stale | changed elsewhere | M-03 stale pattern | — | FR-011 |
 | offline | no connection | Works locally | — | FR-040 |
@@ -428,9 +428,9 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default | Settings | Weekly review and Suggestions sections | "Last review: 9 days ago" / "Cloud suggestions · OpenAI · allowed since Sat 3 Oct" | FR-023, FR-023a, FR-024, FR-035, FR-038 |
+| default | Settings | Weekly review and Suggestions sections | "Last review: 9 days ago" / "Cloud suggestions · OpenAI · allowed since Sat 3 Oct" | FR-023, FR-049, FR-024, FR-035, FR-038 |
 | threshold changed | new threshold | Note with the earliest possible park date | "Markers in Next update now. Because of this change, nothing moves to Someday before Fri 16 Oct." | FR-039 |
-| delete model (confirm) | Delete downloaded model | Alert stating what is freed and what changes | "Delete the downloaded model? Frees 1.1 GB…" | FR-023a |
+| delete model (confirm) | Delete downloaded model | Alert stating what is freed and what changes | "Delete the downloaded model? Frees 1.1 GB…" | FR-049 |
 | empty (first run) | nothing set up | Defaults; "Not yet"; "Not downloaded"; "Ask me"; consent off | "Last review: Not yet" | FR-023, FR-038 |
 | revoked | toggle off | Immediate stop, note | "Cloud suggestions are off. Nothing will be sent to OpenAI." | FR-024 |
 | offline | no connection | Editable; sync later; revoke effective at once | "Offline — 2 changes waiting." | FR-024, FR-040 |
@@ -486,7 +486,7 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | error: cost cap | cap reached | Banner, Ref, no retry | as M-07 | FR-025, FR-045 |
 | error: save failed | decision request failed (non-stale) | Banner in the dialog, Ref, Retry; nothing changed | "Couldn't save your decision. Nothing was changed." + Ref | FR-045 |
 | stale | 409/stale | Existing web heading "Task changed elsewhere"; diff; Close | "Task changed elsewhere / Nothing was applied." | FR-011 |
-| decision applied, with Undo | server confirmed | Dialog closes, row updates, and a bottom-left toast offers Undo for ~5 s. Focus goes to the next row. | ""Renovate the bathroom" released to Someday" · "Undo" | FR-006, FR-011a |
+| decision applied, with Undo | server confirmed | Dialog closes, row updates, and a bottom-left toast offers Undo for ~5 s. Focus goes to the next row. | ""Renovate the bathroom" released to Someday" · "Undo" | FR-006, FR-048 |
 | offline / interrupted | offline; tab closed mid-dialog | Decisions disabled with reason; closing applies nothing | "You're offline. Decisions need a connection on the web." | FR-040 |
 | empty (first run / filtered) | **n/a** | — | — | — |
 | partial failure | **n/a** — single command (as M-03) | — | — | — |
@@ -499,7 +499,7 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | onboarding | first time | M-12 as a dialog with selects and a segmented threshold. It states that the web sends no reminders. | "The web doesn't send reminders; the sidebar shows when your last review was." | FR-035, FR-036 |
 | While you were away | unseen parks | M-09 as a list | as M-09 | FR-015 |
 | restart mode | 21+ days | M-10 with Undo | as M-10 | FR-017 |
-| step with rail | any step | 240 px rail (done / skipped / current, not jumpable) and a single 600 px column. The decision, Waiting and Someday steps show an Undo status line for ~5 s after each decision. "Not now" passes a card. | — | FR-028, FR-029, FR-034, FR-034a, FR-011a |
+| step with rail | any step | 240 px rail (done / skipped / current, not jumpable) and a single 600 px column. The decision, Waiting and Someday steps show an Undo status line for ~5 s after each decision. "Not now" passes a card. | — | FR-028, FR-029, FR-034, FR-050, FR-048 |
 | Waiting / capacity mirror | full steps | Wider layouts of M-17 and M-18 | as M-17, M-18 | FR-031, FR-032 |
 | summary | last step | 4-column counts grid, next review, question | as M-22 | FR-033 |
 | loading | route load > 300 ms | Static placeholders | — | — |
@@ -547,7 +547,7 @@ completion buttons, project/Tag pickers) are not listed.
 | M-03, D-02 | Stale "Close" | Dismisses after a rejected stale decision | FR-011 |
 | M-03 | Error "Try again" / "Choose again" | Retries the rejected decision / reopens the choices | FR-011, FR-045 |
 | D-02 | Number keys 1–7 | Keyboard shortcut for the seven decisions | FR-006 |
-| M-03, M-16, M-18, M-20, D-02, D-03 | "Undo" in the toast or status line (~5 s) | Reverts the decision just applied, exactly (clock, extension, receipts); in steps the card comes back as current | FR-011a |
+| M-03, M-16, M-18, M-20, D-02, D-03 | "Undo" in the toast or status line (~5 s) | Reverts the decision just applied, exactly (clock, extension, receipts); in steps the card comes back as current | FR-048 |
 | M-04, D-02 | Title field + "Save new wording" / "Save anyway" | Applies a reformulation | FR-001, FR-002, FR-006 |
 | M-04, D-02 | First-step field + "Save first step" | New title; old title to notes as "Was: …" | FR-008 |
 | M-04 | Waiting for field + "Move to Waiting for" | Moves to Waiting with who/what | FR-006 |
@@ -560,12 +560,12 @@ completion buttons, project/Tag pickers) are not listed.
 | M-05 | Clarifying answer field + "Add to notes and suggest again" | Appends the answer to notes, re-runs | FR-021 |
 | M-05 | "I'll write my own step" | Closes the question | FR-021 |
 | M-05 | Try again (on-device error) | Re-runs on device | FR-022 |
-| M-06 | "Download 1.1 GB" | Starts the explicit model download | FR-023, FR-023a |
+| M-06 | "Download 1.1 GB" | Starts the explicit model download | FR-023, FR-049 |
 | M-06 | "Continue with cloud" / "Use OpenAI in the cloud instead" | Goes to consent (M-07) | FR-023, FR-024 |
 | M-06, M-07 | Not now | Closes; card usable without AI | FR-023, FR-024 |
-| M-06 | Cancel download | Stops and discards the partial download | FR-023a |
-| M-06 | Retry download / Try again (storage) | Retries the download | FR-023a |
-| M-06 | Back to the card | Leaves the download running | FR-023a |
+| M-06 | Cancel download | Stops and discards the partial download | FR-049 |
+| M-06 | Retry download / Try again (storage) | Retries the download | FR-049 |
+| M-06 | Back to the card | Leaves the download running | FR-049 |
 | M-07, D-02 | Allow and suggest | Grants one-time consent, sends the request | FR-024 |
 | M-07, M-08, D-02 | Try again (cloud) | Retries after a provider failure | FR-025 |
 | M-08, M-19 | "Suggest a next action" / "Suggest" | Runs the navigator for a project | FR-019 |
@@ -592,7 +592,7 @@ completion buttons, project/Tag pickers) are not listed.
 | M-13 – M-21 | "Next: <step>" | Finishes the step | FR-028 |
 | M-14 | Capture field + Add | Adds an item to Inbox | FR-028 |
 | M-15 | Process 10 now / Process all / Process 10, release the rest | Inbox overload choice | FR-030 |
-| M-16, D-03 | Not now (single card) | Leaves this task asking for a decision and moves on; auto-park continues on schedule | FR-034a |
+| M-16, D-03 | Not now (single card) | Leaves this task asking for a decision and moves on; auto-park continues on schedule | FR-050 |
 | M-18, D-03 | Keep waiting | 7-day receipt | FR-032 |
 | M-18, D-03 | Create a follow-up + field + Create | New Next action in the same project | FR-028 (US4-5) |
 | M-18, D-03 | Return to Next + editable title | Moves to Next with that title | FR-028 (US4-5) |
@@ -604,14 +604,14 @@ completion buttons, project/Tag pickers) are not listed.
 | M-22, D-03 | Done | Closes the completed review | FR-033 |
 | M-23, D-04 | Day / Time / "Ask for a decision after" | Change review settings | FR-035, FR-039 |
 | M-23 | "When it isn't available" picker | Remembered fallback choice (downloaded model / cloud / ask me) | FR-023 |
-| M-23 | Delete downloaded model → Delete / Cancel | Removes the downloaded model | FR-023a |
+| M-23 | Delete downloaded model → Delete / Cancel | Removes the downloaded model | FR-049 |
 | M-23, D-04 | Cloud suggestions switch | Grants (via consent) or revokes cloud consent | FR-024 |
 | M-23, D-04 | Retry (settings error) | Retries saving | FR-045 |
 | M-24 | "N ask ›" chip: a link in medium/large; display-only in small (the small widget opens Next) | Shows the count; opens the review's decision step at the first card | FR-037 |
 | M-25 | Notification tap | Opens the review entry | FR-036 |
 
 Display-only surfaces carrying requirements: "N days in Next" and help line
-(M-02: FR-001, FR-003), paused line (M-02: FR-003a), parked facts (M-02, M-09,
+(M-02: FR-001, FR-003), paused line (M-02: FR-046), parked facts (M-02, M-09,
 M-20: FR-012), "Last review: N days ago" (M-11, M-23, D-01, D-04: FR-038),
 onboarding promises (M-12: FR-016, FR-018), capacity mirror (M-17: FR-031),
 on-device note (M-05: FR-022), correlation IDs on every failure (FR-045).
@@ -628,16 +628,16 @@ on-device note (M-05: FR-022), correlation IDs on every failure (FR-045).
 - **FR-043** (storage, export, purge): no UI surface (backend/behaviour); the existing ZIP export and purge cover it without new controls.
 - **FR-044** (logs and metrics content): no UI surface (backend/behaviour).
 
-All other FR-001 … FR-045, including FR-003a, FR-023a and the new FR-034a,
+All other FR-001 … FR-045, including FR-046, FR-049 and the new FR-050,
 map to at least one affordance or display surface above.
 
 ### Affordances with no requirement
 
 None. The sign-off decisions are now in spec.md:
 
-- Undo maps to FR-011a.
+- Undo maps to FR-048.
 - The widget chip's deep link maps to FR-037.
-- "Not now" on a single card maps to FR-034a.
+- "Not now" on a single card maps to FR-050.
 - The list-only markers map to FR-004.
 - The notification skip rule and the web's no-notification rule map to FR-036.
 
@@ -710,12 +710,12 @@ reflected in the screens:
 
 1. **Clarifying-question answer path (FR-021 vs FR-019).** The answer is appended to the task's notes as an ordinary, visible notes edit with no clock change, and the navigator runs again (M-05). For an empty project, the answer is typed straight in as the next action (M-08).
 2. **FR-030.** "Process 10 now, then release the remainder to Someday" (M-15).
-3. **Undo for decisions.** Every card decision shows an Undo toast or status line for about 5 s, like Process inbox. This covers the in-list sheet (M-03), the review decision step (M-16), Waiting (M-18), Someday (M-20) and web (D-02, D-03). Spec: FR-011a.
+3. **Undo for decisions.** Every card decision shows an Undo toast or status line for about 5 s, like Process inbox. This covers the in-list sheet (M-03), the review decision step (M-16), Waiting (M-18), Someday (M-20) and web (D-02, D-03). Spec: FR-048.
 4. **Restart bulk-release Undo (FR-017).** It lasts until the person leaves the restart screen (M-10).
 5. **Notifications (FR-036).** No notification in a week where a complete or partial review happened in the preceding 6 days. The web sends no notifications; its only cue is the sidebar "Last review" line (M-25, D-01, D-03 onboarding copy).
 6. **Wins** means the last 7 days (M-13).
 7. **Restart for someone onboarded but never reviewed.** Same neutral restart offer, with no "Welcome back" or "you've been away" wording (M-10, "set up but never reviewed").
-8. **"Not now" on a single card** maps to the new FR-034a. The task keeps asking and auto-park continues on schedule. SC-002 is measured only over reviews whose decision step finished with no "Not now" (M-16, D-03).
+8. **"Not now" on a single card** maps to the new FR-050. The task keeps asking and auto-park continues on schedule. SC-002 is measured only over reviews whose decision step finished with no "Not now" (M-16, D-03).
 
 ## Notes for the plan
 
@@ -732,7 +732,7 @@ Approved by **Max** on **2026-10-05**, with these decisions:
 2. **Marker prominence**: lists (M-01, D-01, M-17) show only "Asks for a decision" and "Moves to Someday tomorrow". "Ageing" appears only in task detail (M-02 and the web inline task detail).
 3. **Widget**: the "N ask" chip in the header is tappable and deep-links straight into the review's decision step at the first card (M-24 → M-16). It is a link in medium and large. In small, the chip is display-only and the widget keeps opening Next (follow-up owner decision; FR-037 scoped to medium and large).
 4. **Undo**: every card decision (M-03, M-16, D-02, D-03) and every Waiting/Someday decision (M-18, M-20) shows an Undo toast for a few seconds, like Process inbox.
-5. **"Not now"** stays on a single card in the decision step. The task remains "asks for a decision" and auto-park continues on schedule (FR-034a). SC-002 is measured only over reviews whose decision step finished with no "Not now".
+5. **"Not now"** stays on a single card in the decision step. The task remains "asks for a decision" and auto-park continues on schedule (FR-050). SC-002 is measured only over reviews whose decision step finished with no "Not now".
 6. **Notification**: none for a week if a complete or partial review happened in the preceding 6 days. The web has no notifications, only the sidebar "Last review" line.
 
 Choices the owner left as designed:

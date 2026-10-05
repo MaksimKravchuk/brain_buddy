@@ -65,7 +65,7 @@ same idempotency machinery (`_serialized_write`, `idempotency_records`).
 Reason: every review decision changes a task and records the decision in **one**
 owner-serialized transaction. Splitting the records into a separate module and store
 would make "task changed but decision not recorded" (and the reverse) possible,
-break Undo (FR-011a), and require a cross-store saga the product does not need.
+break Undo (FR-048), and require a cross-store saga the product does not need.
 
 ADR-0001's separate **Review** module remains the home for a future capture-based or
 cross-module review. This record does not create it.
@@ -111,7 +111,7 @@ Auto-park:
   became due (re-checked under the owner lock);
 - never fires earlier than: 14 days after the feature first becomes active for the
   owner (FR-016), 7 days after a threshold change (FR-039), 7 days after a due-date
-  change on that task (FR-003a); and never without the "moves to Someday tomorrow"
+  change on that task (FR-046); and never without the "moves to Someday tomorrow"
   marker having been derivable for the preceding 24 hours (SC-006);
 - keeps project, tags, notes, due date and priority, and records the park instant
   and its origin on the task;

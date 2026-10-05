@@ -89,7 +89,7 @@ PK `(owner_id, id)`; index `(owner_id, status, started_at)`.
 | `current_step` | step code | resume point (US4-7) |
 | `steps` | map step code → `pending \| finished \| skipped`, plus `finished_empty: bool` | |
 | `decision_queue` | list of task ids, oldest first | snapshot taken when the decision step first opens; ids only (edge case "threshold changed during an open review") |
-| `set_aside_task_ids` | list of task ids | "Not now" (FR-034a); non-empty excludes the session from SC-002 |
+| `set_aside_task_ids` | list of task ids | "Not now" (FR-050); non-empty excludes the session from SC-002 |
 | `counts` | `{done, reformulated, first_step, waiting, someday, cancelled, extended, inbox_processed}` | maintained from E4 inside the same transaction; `inbox_processed` from progress events |
 | `qualifying_activity` | bool | true after ≥ 1 item decision or ≥ 1 step finished with nothing to decide (FR-029) |
 | `clear_start` | `yes \| not_really \| null` | FR-033 |
@@ -138,7 +138,7 @@ keep_waiting, follow_up, return_to_next, keep_someday`.
 Extension reason text lives on the task (E1), not here, so it has one source and is
 exported with the task. Stall reason is a code, never free text.
 
-**Undo** (FR-011a): allowed while `task.revision == task_revision_after` (no change
+**Undo** (FR-048): allowed while `task.revision == task_revision_after` (no change
 since). It restores `undo.task_before` field-for-field with `revision + 1`, deletes
 any follow-up task created by the decision, deletes any receipt it created,
 decrements the session counter, and **deletes the decision row**. Otherwise 409.

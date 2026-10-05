@@ -82,7 +82,7 @@ figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);mar
 <header class="doc">
   <h1>D-02 · Decision dialog with the AI navigator — web</h1>
   <p>A 560 px modal dialog (20 px radius, floating shadow, light blurred scrim) opened from a marker chip in D-01, from the task's inline detail, or embedded in the review (D-03). Content, order, reason → recommendation mapping and copy match M-03/M-04. Keyboard: focus lands on the dialog title; Tab moves through reasons then decisions; number keys 1–7 pick a decision; Esc closes without changes and returns focus to the marker chip that opened it.</p>
-  <p>On web every suggestion uses the cloud provider, so the first "Suggest" always goes through consent (FR-024). Every failure shows a correlation ID (FR-025, FR-045). Server round-trips show a pending state on the chosen control only. Every applied decision shows an Undo toast for about 5 seconds (FR-011a).</p>
+  <p>On web every suggestion uses the cloud provider, so the first "Suggest" always goes through consent (FR-024). Every failure shows a correlation ID (FR-025, FR-045). Server round-trips show a pending state on the chosen control only. Every applied decision shows an Undo toast for about 5 seconds (FR-048).</p>
 </header>
 
 <div class="grid">
@@ -199,7 +199,7 @@ figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);mar
 </figure>
 
 <figure>
-<figcaption><b>D-02 · decision applied, with Undo</b>The dialog closes and the row updates. A toast (bottom-left, floating shadow) names the decision and offers Undo for about 5 seconds, like Process inbox (FR-011a). Focus moves to the next row; the toast is announced politely and reachable with Tab.</figcaption>
+<figcaption><b>D-02 · decision applied, with Undo</b>The dialog closes and the row updates. A toast (bottom-left, floating shadow) names the decision and offers Undo for about 5 seconds, like Process inbox (FR-048). Focus moves to the next row; the toast is announced politely and reachable with Tab.</figcaption>
 <div class="stage" style="height:360px">
   <div class="bgl" style="color:var(--s900)">Next actions</div>
   <div style="margin:0 30px;border-top:1px solid var(--s200);background:#fff">

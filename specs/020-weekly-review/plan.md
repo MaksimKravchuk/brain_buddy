@@ -332,14 +332,14 @@ widget targets; the web gets one feature folder. Router and module file names av
   `close_formulation`, `start_formulation` exactly per
   [contracts/formulation-clock.md](contracts/formulation-clock.md). `TaskService`
   calls them inside `create_task`, `smart_add_task`, `update_task`, `transition_task`
-  (FR-001 – FR-003, FR-003a). Notes, tags, project, priority, subtask and comment edits
+  (FR-001 – FR-003, FR-046). Notes, tags, project, priority, subtask and comment edits
   pass through untouched (FR-003).
 - `ReviewService.decide` (`POST /tasks/{id}/decisions`, http §3) under
   `_serialized_write`: checks `expected_revision` and `formulation_id` (FR-011),
   applies the type table (FR-006, FR-008, FR-009), records the decision with stall
   reason code (FR-007), `ai_use` (FR-026), undo snapshot, and session counter when in a
   review (FR-010: same path in and out of a review).
-- `ReviewService.undo_decision` (FR-011a), allowed while the task revision is unchanged.
+- `ReviewService.undo_decision` (FR-048), allowed while the task revision is unchanged.
 - `TaskResponse.formulation` carries raw fields plus derived `ask_at` / `park_due_at` /
   `paused_until` and `consecutive_stalled` (FR-004, FR-005).
 - Settings `PUT /review/settings` threshold change sets the owner park floor (FR-039).
@@ -349,7 +349,7 @@ widget targets; the web gets one feature folder. Router and module file names av
   and applies `decideTask` / `undoDecision`.
 - M-01: `TaskRow` metadata shows only `asks` and `moves_tomorrow` chips (indigo
   `questionmark.circle` / amber `archivebox`, text + icon, 44 pt hit area); tapping opens
-  M-03 as a `.large` detent sheet (FR-010a). States: default, loading (static rows after
+  M-03 as a `.large` detent sheet (FR-047). States: default, loading (static rows after
   300 ms), empty first-run/filtered (existing copy), error (store unreadable, no Ref),
   offline ("Offline — 2 changes waiting"), threshold-changed note.
 - M-02: "This wording" section in `TaskDetailScreen` with every M-02 state (asks,
@@ -425,7 +425,7 @@ widget targets; the web gets one feature folder. Router and module file names av
   languages; `unsupportedLanguageOrLocale` thrown at `respond` is the backstop. Input
   budget: Apple's window is 4,096 tokens on iOS 26.x; notes are truncated oldest-first
   with a visible note (research NC-3 default; contracts/navigator.md §1).
-- **Downloadable model** (FR-023 (a), FR-023a): slice PR-09, behind the same protocol;
+- **Downloadable model** (FR-023 (a), FR-049): slice PR-09, behind the same protocol;
   recommended Core AI + Qwen3-1.7B 4-bit in an Apple-hosted Background Assets pack,
   iOS/macOS 27+ with a memory check and the `increased-memory-limit` entitlement
   (`ios/project.yml`), free-space check declared in `ios/Shared/PrivacyInfo.xcprivacy`;
@@ -448,7 +448,7 @@ widget targets; the web gets one feature folder. Router and module file names av
   for restart (FR-017) and Inbox remainder (FR-030), regularity instant for restart mode.
 - **iOS**: review cover with shared step chrome (Leave/Skip at top, primary action at
   bottom, "N of M"), each step's states as designed; decision step reuses M-03
-  full-screen with "Not now" (FR-034a) and Undo status line; Inbox step reuses
+  full-screen with "Not now" (FR-050) and Undo status line; Inbox step reuses
   `ProcessInboxScreen` item view; one item at a time in steps 3, 4, 6, 8 (FR-034).
   Offline: everything local via outbox; cross-device resume after sync (M-11 offline).
 - **Web**: `/review` route (`ReviewShell`, 240 px non-focusable rail, 600 px column,
@@ -538,7 +538,7 @@ rise; no coverage suppressions in `frontend/src`.
 |---|---|---|
 | pytest — pure rule | `test_review_formulation.py`, `test_review_formulation_vectors.py` | every vector; boundaries ±1 s; DST; floors; extension at T/T+3/T+6; third stall; copies byte-identical |
 | pytest — service/API | `test_review_decisions_api.py` | each decision type; stale revision; stale formulation; idempotent replay and mismatch; first-step "Was:"; extension once; follow-up in archived project; undo exact restore incl. clock; undo after change → 409; owner isolation → 404; flag off → 404; FR-003 non-restarting edits through PATCH |
-| pytest — sweep | `test_review_auto_park.py` | due/not due; 24 h marker precedes park (SC-006); FR-016 floor at activation; FR-039 floor; FR-003a floor; skip after reformulate/move/extend; double park no-op; device park with server not due → `applied:false`; yield rule both sides of `parked.at`; archived project; sweep failure isolation; driven by calling `_run_review_maintenance_sweep(container)` directly |
+| pytest — sweep | `test_review_auto_park.py` | due/not due; 24 h marker precedes park (SC-006); FR-016 floor at activation; FR-039 floor; FR-046 floor; skip after reformulate/move/extend; double park no-op; device park with server not due → `applied:false`; yield rule both sides of `parked.at`; archived project; sweep failure isolation; driven by calling `_run_review_maintenance_sweep(container)` directly |
 | pytest — privacy | `test_review_export_purge.py`, log-capture test | every new table exported/excluded per data-model; purge removes all; purge idempotent; no sentinel text in logs |
 | pytest — navigator | `test_review_navigator.py` | strict input schema rejects extra fields; consent missing/revoked/mismatch; rate limit; per-call and daily cap; timeout; malformed; duplicate filtering; grounding filter; deterministic provider in TEST; startup failure without key |
 | pytest — flow | `test_review_flow_api.py` | quick/full steps; partial vs abandoned; resume; replace open; queue snapshot stable after threshold change; capacity numbers (41 / 9 per week); receipts 7/30 days and revision invalidation; bulk release partial + undo; restart eligibility at 21 days incl. onboarded-never-reviewed |
@@ -567,7 +567,7 @@ owner's approval there. Classes per ADR-0008 / `scripts/classify_path_risk.py`
 | PR-06 | 1 | Mac "Weekly review · coming later" row | — | `macos/Sources/BrainBuddyMac/ContentView.swift`, `macos/Tests/BrainBuddyMacTests/*` | SHIP |
 | PR-07 | 2 | Backend navigator: adapter, consent, usage caps, routes, env | PR-02 | `backend/app/modules/tasks/navigator.py`, `backend/app/api/review_navigator.py`, `backend/app/core/{config.py,rate_limit.py}`, `backend/app/container.py`, `.env.example`, tests | **ASK** (mech.: `.env.example`; sem.: provider credentials, new egress, consent) |
 | PR-08 | 2 | iOS navigator: protocol, router, validator, Apple model, cloud client, M-05, M-06 (cloud choice), M-07, M-08, M-19 AI states, M-23 Suggestions | PR-04, PR-07 | `ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift`, `…/BrainBuddyAPI/NavigatorAPI.swift`, `ios/BrainBuddy/Navigator/*`, `ios/BrainBuddy/Screens/Review/*` | SHOW |
-| PR-09 | 2 (late; may slip) | Downloadable on-device model: dependency-exception ADR, Core AI runtime + model pack, M-06 download states, M-23 delete (FR-023 (a), FR-023a); SC-005 eval gate | PR-08, NC-2 | `ios/BrainBuddy/Navigator/DownloadedNavigatorModel.swift` (new), `ios/project.yml`, `ios/Shared/PrivacyInfo.xcprivacy`, `docs/decisions/` (new ADR), `backend/tests/fixtures/navigator/eval_v1.json` | **ASK** (third-party dependency exception, external model download, new entitlement) |
+| PR-09 | 2 (late; may slip) | Downloadable on-device model: dependency-exception ADR, Core AI runtime + model pack, M-06 download states, M-23 delete (FR-023 (a), FR-049); SC-005 eval gate | PR-08, NC-2 | `ios/BrainBuddy/Navigator/DownloadedNavigatorModel.swift` (new), `ios/project.yml`, `ios/Shared/PrivacyInfo.xcprivacy`, `docs/decisions/` (new ADR), `backend/tests/fixtures/navigator/eval_v1.json` | **ASK** (third-party dependency exception, external model download, new entitlement) |
 | PR-10 | 2 | Web navigator in D-02; D-04 consent switch | PR-05, PR-07 | `frontend/src/features/review/*`, `frontend/src/api/review.ts` | SHOW |
 | PR-11 | 3 | Backend review flow: runs, queues, capacity, receipts, bulk release, restart, regularity, next review | PR-07 | `backend/app/modules/tasks/review_flow.py`, `backend/app/api/review_flow.py`, `backend/app/api/__init__.py`, tests | SHOW |
 | PR-12 | 3 | iOS review: M-10, M-11, M-12, M-13 – M-22, M-23 schedule, M-24 widget, M-25 notification, Lists entry | PR-08, PR-11 | `ios/BrainBuddy/Screens/{Review,Browse,Settings}/*`, `ios/BrainBuddy/Review/*`, `ios/BrainBuddyWidgets/*`, `ios/BrainBuddy/App/*`, `docs/native-ios-app.md` | SHOW |
@@ -608,7 +608,7 @@ schedule/notification/onboarding; (4) macOS after Mac sync.
    (`project_archived` reason) defensively and tests it with a fixture, nothing more.
 2. **Extension arithmetic** FR-009/FR-012 vs US1-7 and M-02 (NC-1). Also M-04 "Keep until
    Thu 15 Oct" with today Fri 9 Oct is 6 days, matching neither reading.
-3. **Lettered requirement ids** (FR-003a, FR-010a, FR-011a, FR-023a, FR-034a) are not
+3. **Lettered requirement ids** (FR-046, FR-047, FR-048, FR-049, FR-050) are not
    recognised by `scripts/check_requirement_coverage.py:44` or the PR-срезы validator in
    `scripts/check_spec_kit_specs.py:165-166, 212-214`; they cannot be gate-enforced or
    listed in a slice manifest (R19).

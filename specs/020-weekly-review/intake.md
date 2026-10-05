@@ -118,7 +118,7 @@ Supporting (not gating): distribution of decisions and stall reasons; re-stall r
 - **AI providers**: Apple on-device Foundation Models on iOS/macOS (requires iOS 26 / macOS 26 and an Apple Intelligence-capable device with Apple Intelligence enabled); server provider, consent-gated and named, on web and as the Apple-platform fallback.
 - **macOS**: `macos/` is a local-only POC today; the Mac part of this feature depends on a separate Mac↔backend sync capability.
 - **Primary loop impact**: implements the "smart Weekly Review" stage of the constitution's loop for native tasks; feeds back into clarify (reformulation / first step) and organize (Someday, Waiting). Voice-led review (ADR-0002) stays a later phase.
-- **Decision records to supersede/amend**: ADR-0006 and the design skill ("Weekly Review deferred, no cadence, no due state"; D-11), ADR-0001's capture-based review model, and the macOS POC principle "review never changes GTD state automatically" (auto-park is the first automatic state change).
+- **Decision records to supersede/amend**: ADR-0006 and the design skill ("Weekly Review deferred, no cadence, no due state"); open decision D-11 in `docs/vnext-cloud-design-build-contract.md`; ADR-0001's capture-based review model, and the macOS POC principle "review never changes GTD state automatically" (auto-park is the first automatic state change).
 
 ## 8. Definition of done
 
