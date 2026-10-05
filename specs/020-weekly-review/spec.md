@@ -55,7 +55,7 @@ Optionally they say what got in the way. The card is reachable from the task on 
 **Acceptance Scenarios**:
 
 1. **Given** a task that entered Next 15 days ago with an unchanged title and a 14-day threshold, **When** the person views Next, **Then** the task shows "asks for a decision" and nothing is coloured as an error or labelled "overdue".
-2. **Given** a task in Next for 9 days with a 14-day threshold, **When** the person views Next, **Then** it shows the "ageing" marker. **Given** 3 days, **Then** it shows no age marker.
+2. **Given** a task in Next for 9 days with a 14-day threshold, **When** the person views Next, **Then** the list shows no marker for it, and its task detail shows "ageing". **Given** 3 days, **Then** neither the list nor the detail shows an age marker.
 3. **Given** a task that asks for a decision, **When** the person reformulates it with a substantively different title, **Then** the task stays in Next, its formulation age restarts at zero, and its marker disappears.
 4. **Given** a task that asks for a decision, **When** the person changes only letter case, whitespace or punctuation of the title, **Then** the formulation age does not restart.
 5. **Given** a task that asks for a decision, **When** the person chooses "find a first step" and saves a new title, **Then** the old title is preserved in the task's notes as "Was: …" and the formulation age restarts.
@@ -159,7 +159,7 @@ Every step can be skipped. The review can be left and resumed later, and a parti
 
 1. **Given** completed tasks this week, **When** the review starts, **Then** the first step lists them with their count, before any backlog is shown.
 2. **Given** more than 15 Inbox items, **When** the Inbox step opens, **Then** the person can choose to process 10 now, process all, or release the rest to Someday. Items are processed one at a time.
-3. **Given** tasks that ask for a decision, **When** the decision step runs, **Then** they appear one card at a time, oldest first, with the same card as US1.
+3. **Given** tasks that ask for a decision, **When** the decision step runs, **Then** they appear one card at a time, oldest first, with the same card as US1. "Not now" sets a card aside without a decision: the task keeps asking and its auto-park schedule is unchanged.
 4. **Given** 41 tasks in Next and an average of 9 completions per week over the last 4 weeks, **When** the full review shows the rest of Next, **Then** it states the count, the weekly average and roughly how many weeks of work that is. No limit is enforced.
 5. **Given** a Waiting item older than 7 days, **When** the Waiting step runs, **Then** the person can keep waiting (it returns in 7 days unless it changes), create a follow-up next action, return it to Next with an editable title, or cancel it.
 6. **Given** a Someday item not reviewed in 30 days, **When** the Someday step runs, **Then** at most 7 such items are shown. The person can keep (it returns in 30 days unless it changes), move to Next with a concrete title, or cancel.
@@ -184,8 +184,8 @@ On the chosen day the person gets one notification. On iOS, the Next Actions wid
 **Acceptance Scenarios**:
 
 1. **Given** a person who has never reviewed, **When** they open the review, **Then** the onboarding screen appears once, with default Friday 16:00 local and threshold 14, both changeable.
-2. **Given** a review slot passes without a review, **Then** exactly one notification is sent for that week. There is no follow-up reminder.
-3. **Given** 3 tasks ask for a decision, **Then** the iOS Next Actions widget shows 3.
+2. **Given** no review in the preceding 6 days, **When** the review slot arrives, **Then** exactly one notification is sent for that week. There is no follow-up reminder. **Given** a partial or complete review on Wednesday, **Then** no notification is sent that Friday.
+3. **Given** 3 tasks ask for a decision, **Then** the iOS Next Actions widget shows 3. Tapping it opens the review's decision step at the first card.
 4. **Given** the person changes the threshold from 28 to 7, **Then** markers update at once. No task is auto-parked earlier than 7 days after the change because of that change.
 5. **Given** the person changes their time zone, **Then** the review slot follows the new local time.
 6. **Given** any review-related screen or message, **Then** none shows a streak, a streak loss, red error styling for age, or the word "overdue" for formulation age.
@@ -232,7 +232,10 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 - **FR-002**: A title change MUST count as substantive only if the titles differ after ignoring letter case, surrounding and repeated whitespace, and punctuation.
 - **FR-003**: Edits to notes, tags, project, priority, due date or subtasks MUST NOT change the formulation start.
 - **FR-003a**: For a task with a due date, formulation age MUST be measured from the later of the formulation start and the start of the due date in the user's local time zone. A task whose due date is in the future therefore shows no age marker and is never auto-parked before that date. Setting, moving or removing the due date re-evaluates the age immediately. Auto-park can never become due earlier than 7 days after such a change.
-- **FR-004**: System MUST show each Next task as **fresh** (age below half the threshold), **ageing** (half the threshold or more), **asks for a decision** (threshold or more) or **moves to Someday tomorrow** (within 24 hours of auto-park). It MUST NOT use error colouring or the word "overdue" for formulation age.
+- **FR-004**: System MUST classify each Next task as **fresh** (age below half the threshold), **ageing** (half the threshold or more), **asks for a decision** (threshold or more) or **moves to Someday tomorrow** (within 24 hours of auto-park).
+  - **In lists**: only "asks for a decision" and "moves to Someday tomorrow" are shown as markers.
+  - **In task detail**: "ageing" is shown only there (design sign-off: keep long lists calm).
+  - **Wording**: System MUST NOT use error colouring or the word "overdue" for formulation age.
 - **FR-005**: System MUST count how many consecutive formulations of the same task reached "asks for a decision", and offer Someday or the thinking canvas on the third, without blocking any decision.
 
 **Decision card**
@@ -243,6 +246,8 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 - **FR-009**: "Keep 7 more days" MUST require a reason, MUST be available once per formulation, and MUST shift both the threshold and the auto-park point by 7 days.
 - **FR-010**: The decision card MUST be reachable from the task itself on any day, not only inside a review, and decisions made there MUST be recorded the same way as in-review decisions.
 - **FR-011**: Every decision MUST be applied through the existing idempotent, owner-serialized task operations and MUST be rejected as stale if the task changed since the card was shown.
+- **FR-011a**: After any decision (decision card, Inbox, Waiting, Someday), System MUST offer **Undo** for a few seconds, as the existing Process inbox does. Undo restores the task's previous state, title and formulation clock, and removes the recorded decision.
+- **FR-010a**: On iPhone, the decision card opened from a task outside the review MUST appear as a large sheet over the list. Inside the review it is full-screen.
 
 **Auto-park and return**
 
@@ -251,7 +256,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 - **FR-014**: Auto-park MUST run whether or not any client is open, for accounts with server sync, and on-device for account-less iOS use.
 - **FR-015**: System MUST show auto-parked tasks the person has not yet seen on a "while you were away" screen at the next review or app open, with one-tap return per task and a return-all action. Returned tasks start a new formulation.
 - **FR-016**: For tasks already in Next when the feature first becomes active for a user, System MUST NOT auto-park any of them earlier than 14 days after that moment.
-- **FR-017**: When no review (complete or partial) happened for 21 days or more, the next review MUST open in restart mode. It offers one reversible action that releases every Next task older than 4 weeks to Someday.
+- **FR-017**: When no review (complete or partial) happened for 21 days or more, the next review MUST open in restart mode. It offers one action that releases every Next task older than 4 weeks to Someday. That action can be undone until the person leaves the restart screen. A person who completed onboarding but never reviewed sees the same neutral restart copy, without "you've been away".
 - **FR-018**: The only automatic change to a task's GTD state this feature makes is Next → Someday auto-park. No other task change happens without the person's action.
 
 **AI navigator**
@@ -261,7 +266,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
   - **Project without a next action**: the input is the project name and its open task titles.
   - **No duplicates**: proposals MUST NOT duplicate an open task already in that project.
 - **FR-020**: A proposal MUST NOT be written to any task until the person confirms it, optionally after editing.
-- **FR-021**: Proposals MUST NOT introduce personal facts (people, places, amounts, dates) absent from the task. When information is insufficient, the navigator asks one clarifying question instead.
+- **FR-021**: Proposals MUST NOT introduce personal facts (people, places, amounts, dates) absent from the task. When information is insufficient, the navigator asks one clarifying question instead. The person's answer is appended to the task's notes (a normal notes edit, which does not touch the formulation clock), and the navigator runs again on the updated input.
 - **FR-022**: On iOS and macOS, System MUST use Apple's on-device model when it is available. In that case no task content leaves the device, and the feature works offline.
 - **FR-023**: When Apple's on-device model is unavailable (unsupported device, Apple Intelligence off, model not ready, unsupported language), System MUST say so and why. It MUST then offer the person a choice:
   - (a) download a separate on-device model that supports the task's language, if the device can run it — the download size is shown before it starts, and once installed the model serves suggestions with no task content leaving the device, including offline;
@@ -276,26 +281,27 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 **Guided review**
 
 - **FR-027**: Users MUST be able to start a quick or full review at any time, regardless of the schedule.
-- **FR-028**: The quick review MUST consist of: wins of the week, Inbox to zero, decisions, summary. The full review MUST consist of: wins, mind sweep, Inbox to zero, decisions, rest of Next with capacity mirror, Waiting older than 7 days, projects without a next action, Someday pass (at most 7 items not reviewed in 30 days), dates in the next 14 days, summary.
+- **FR-028**: "Wins of the week" means tasks completed in the last 7 days. The quick review MUST consist of: wins of the week, Inbox to zero, decisions, summary. The full review MUST consist of: wins, mind sweep, Inbox to zero, decisions, rest of Next with capacity mirror, Waiting older than 7 days, projects without a next action, Someday pass (at most 7 items not reviewed in 30 days), dates in the next 14 days, summary.
 - **FR-029**: Every step MUST be skippable, and the review MUST be resumable on any of the user's devices. A review ended early MUST be recorded as **partial** only if it contains at least one item decision (Inbox, decision card, Waiting or Someday) or at least one finished step with nothing to decide. Otherwise it is **abandoned**. Only completed and partial reviews count toward regularity (SC-001) and postpone restart mode (FR-017). Merely opening the review never counts.
-- **FR-030**: The Inbox step MUST offer "10 now / all / release the rest to Someday" when Inbox holds more than 15 items.
+- **FR-030**: When Inbox holds more than 15 items, the Inbox step MUST offer three choices: "process 10 now", "process all", or "process 10 now, then release the remainder to Someday".
 - **FR-031**: The capacity mirror MUST state the Next count, the average weekly completions over the last 4 weeks, and the implied number of weeks. It MUST NOT enforce any limit.
 - **FR-032**: "Keep waiting" and "keep in Someday" MUST hide the item from those steps for 7 and 30 days respectively, unless the task changes earlier.
 - **FR-033**: The summary MUST show counts per decision type and the next scheduled review, and ask once "Clear how to start the week? yes / not really". The answer is optional.
 - **FR-034**: Steps that involve decisions (Inbox, decisions, Waiting, Someday) MUST present one item at a time.
+- **FR-034a**: In the decision step, the person MUST be able to set one card aside with "Not now" without deciding. The task stays "asks for a decision", its auto-park schedule is unchanged, and the next card is shown.
 
 **Schedule, cue, onboarding, settings**
 
 - **FR-035**: Before the first review, System MUST show one onboarding screen explaining the review, the threshold rule and auto-park, and collecting review day/time (default Friday 16:00 local) and threshold (7/14/21/28, default 14).
-- **FR-036**: System MUST send at most one review notification per week, at the chosen local day and time, with no follow-ups.
-- **FR-037**: The iOS Next Actions widget MUST show the number of tasks that ask for a decision.
+- **FR-036**: On iOS (and macOS after Mac sync), System MUST send at most one review notification per week, at the chosen local day and time, with no follow-ups. No notification is sent for a week if a complete or partial review happened in the preceding 6 days. Web sends no notifications; it shows the time since the last review in the navigation.
+- **FR-037**: The iOS Next Actions widget MUST show the number of tasks that ask for a decision. Tapping that count MUST open the review's decision step at its first card.
 - **FR-038**: System MUST show the time since the last review in neutral wording, and MUST NOT show streaks or streak loss.
 - **FR-039**: Changing the threshold MUST update markers immediately, and MUST NOT cause any task to be auto-parked earlier than 7 days after the change.
 
 **Platforms and parity**
 
 - **FR-040**: iOS and web MUST offer US1–US5 with equivalent behaviour over the same account. iOS MUST support every non-server part offline.
-- **FR-041**: macOS MUST offer US1–US5 over the same synced account once Mac↔backend sync exists. Until then, the Mac Weekly Review entry MUST remain visibly "coming later".
+- **FR-041**: macOS MUST offer US1–US5 over the same synced account once Mac↔backend sync exists. Until then, the Mac app MUST show a non-interactive "Weekly review · coming later" entry. That is a small pre-sync change, because the Mac app has no such entry today.
 - **FR-042**: The existing disabled "Weekly review — coming soon" entries on web and iOS MUST be replaced by the working entry when the feature is active.
 
 **Data, privacy, observability**
@@ -322,7 +328,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 Measured per active user over the first 8 weeks after their first review.
 
 - **SC-001**: Users complete at least a partial review in at least 3 of every 4 weeks.
-- **SC-002**: Immediately after every completed review, 0 Next formulations older than the user's threshold remain without a decision.
+- **SC-002**: Immediately after every completed review whose decision step was finished with no card set aside ("Not now", FR-034a), 0 Next formulations older than the user's threshold remain without a decision.
 - **SC-003**: At least 70% of answered reviews end with "clear how to start the week: yes".
 - **SC-004**: On the owner's real task set, the median quick review takes 5 minutes or less and the median full review 20 minutes or less.
 - **SC-005**: On the owner's stalled tasks, at least 50% of AI first-step proposals are accepted (as-is or edited). In a reviewed evaluation set, 0 proposals introduce personal facts absent from the task.
