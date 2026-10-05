@@ -441,7 +441,7 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default | N > 0 tasks ask | Indigo "N ask" chip beside the count in small, medium and large. In medium and large it is a link ("3 ask ›") with a 44 × 44 pt hit area. WidgetKit gives a small widget only one tap target, so to meet FR-037 the small widget's tap URL becomes the decision step while N > 0. At N = 0 it opens Next as today. Its completion button still works in place. | "3 ask ›" (VoiceOver: "3 tasks ask for a decision. Open the review's decision step") | FR-037, US5-3 |
+| default | N > 0 tasks ask | Indigo "N ask" chip beside the count in small, medium and large. In medium and large it is a link ("3 ask ›") with a 44 × 44 pt hit area. WidgetKit gives a small widget only one tap target. Owner decision on 2026-10-05: the small widget only shows the chip, and tapping it opens Next as today. FR-037 scopes the deep link to medium and large. Its completion button still works in place. | "3 ask ›" (VoiceOver: "3 tasks ask for a decision. Open the review's decision step") | FR-037, US5-3 |
 | chip tapped | tap on the chip (medium/large) | App opens on the review's decision step at the first card (M-16). If never onboarded, M-12 comes first. An open review resumes at its decision step; otherwise a quick review starts there with Wins and Inbox marked skipped. | — | FR-037, FR-027 |
 | empty | N = 0 | No chip | — | FR-037 |
 | configured for Today | widget list = Today | No chip | — | FR-037 |
@@ -607,7 +607,7 @@ completion buttons, project/Tag pickers) are not listed.
 | M-23 | Delete downloaded model → Delete / Cancel | Removes the downloaded model | FR-023a |
 | M-23, D-04 | Cloud suggestions switch | Grants (via consent) or revokes cloud consent | FR-024 |
 | M-23, D-04 | Retry (settings error) | Retries saving | FR-045 |
-| M-24 | "N ask ›" chip: a link in medium/large; in small, the whole widget while N > 0 | Shows the count; opens the review's decision step at the first card | FR-037 |
+| M-24 | "N ask ›" chip: a link in medium/large; display-only in small (the small widget opens Next) | Shows the count; opens the review's decision step at the first card | FR-037 |
 | M-25 | Notification tap | Opens the review entry | FR-036 |
 
 Display-only surfaces carrying requirements: "N days in Next" and help line
@@ -659,7 +659,7 @@ Voice-led review and review of agent-delegated work are out of scope.
 ## Mobile viability
 
 - **Viewport**: every M- frame is drawn at 390 × 851 with no horizontal scroll. Long sheets (M-03, M-12) scroll vertically. The decision list sits in the lower half for thumb reach.
-- **Tap targets**: 44 pt minimum everywhere. Reason chips and decision rows are 44–54 pt. Marker chips are about 22 pt tall but have a 44 × 44 pt hit area through an invisible inset (`button.mk::after`), and the whole row also opens the task. In medium and large widgets, the "N ask ›" chip is a link with a 44 × 44 pt hit area; in the small widget the whole widget is the target while N > 0. Undo buttons in toasts and status lines are 44 × 44 pt.
+- **Tap targets**: 44 pt minimum everywhere. Reason chips and decision rows are 44–54 pt. Marker chips are about 22 pt tall but have a 44 × 44 pt hit area through an invisible inset (`button.mk::after`), and the whole row also opens the task. In medium and large widgets, the "N ask ›" chip is a link with a 44 × 44 pt hit area; in the small widget the chip is display-only and the widget opens Next. Undo buttons in toasts and status lines are 44 × 44 pt.
 - **One-handed reach**: primary actions are in the bottom bar (review steps) or the lower half of the sheet (card). "Leave" / "Skip" are at the top, deliberately harder to hit by accident.
 - **Destructive actions**:
   - "Delete downloaded model" asks first: "Frees 1.1 GB. Suggestions for languages Apple's model doesn't support will need the download again, or the cloud. Your tasks aren't affected."
@@ -720,7 +720,7 @@ reflected in the screens:
 ## Notes for the plan
 
 - **Mac (FR-041).** A small pre-sync Mac change is needed: a non-interactive "Weekly review · coming later" row in the Mac sidebar, because the Mac app has none today. Separately, the Mac's existing POC "Review Waiting for" / "Review Someday" sheets overlap M-18/M-20, and their fate after Mac sync is a planning call.
-- **Small widget.** WidgetKit gives `systemSmall` a single tap target, so the "N ask" chip can't be a separate link there. To satisfy FR-037's "tapping that count MUST open the decision step", the small widget's `widgetURL` is the decision step while N > 0 and Next actions (today's behaviour) when N = 0. Its in-place completion button is unaffected. This changes today's small-widget tap target whenever something asks. The owner should confirm; the alternative is to amend FR-037 to cover only medium and large.
+- **Small widget.** WidgetKit gives `systemSmall` a single tap target, so the "N ask" chip can't be a separate link there. **Decided by the owner on 2026-10-05:** the small widget shows the chip as display-only, and its `widgetURL` stays Next actions (today's behaviour). FR-037 was amended to scope the deep link to medium and large. Its in-place completion button is unaffected.
 - **Widget deep link with no open review** starts a quick review at the decision step, with Wins and Inbox marked skipped. Decisions made there count as review decisions (FR-029 partial/complete rules apply).
 - **Design-skill deferral string** (see Design authority). The ADR, then the skill and validator-test update, must land with or before implementation.
 
@@ -730,7 +730,7 @@ Approved by **Max** on **2026-10-05**, with these decisions:
 
 1. **Decision card on iPhone outside the review**: a large-detent sheet over Next (M-03). Inside the review it is full-screen (M-16).
 2. **Marker prominence**: lists (M-01, D-01, M-17) show only "Asks for a decision" and "Moves to Someday tomorrow". "Ageing" appears only in task detail (M-02 and the web inline task detail).
-3. **Widget**: the "N ask" chip in the header is tappable and deep-links straight into the review's decision step at the first card (M-24 → M-16). It is a link in medium and large. In small, the whole widget opens the decision step while N > 0 (see Notes for the plan).
+3. **Widget**: the "N ask" chip in the header is tappable and deep-links straight into the review's decision step at the first card (M-24 → M-16). It is a link in medium and large. In small, the chip is display-only and the widget keeps opening Next (follow-up owner decision; FR-037 scoped to medium and large).
 4. **Undo**: every card decision (M-03, M-16, D-02, D-03) and every Waiting/Someday decision (M-18, M-20) shows an Undo toast for a few seconds, like Process inbox.
 5. **"Not now"** stays on a single card in the decision step. The task remains "asks for a decision" and auto-park continues on schedule (FR-034a). SC-002 is measured only over reviews whose decision step finished with no "Not now".
 6. **Notification**: none for a week if a complete or partial review happened in the preceding 6 days. The web has no notifications, only the sidebar "Last review" line.

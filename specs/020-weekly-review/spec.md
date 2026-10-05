@@ -185,7 +185,7 @@ On the chosen day the person gets one notification. On iOS, the Next Actions wid
 
 1. **Given** a person who has never reviewed, **When** they open the review, **Then** the onboarding screen appears once, with default Friday 16:00 local and threshold 14, both changeable.
 2. **Given** no review in the preceding 6 days, **When** the review slot arrives, **Then** exactly one notification is sent for that week. There is no follow-up reminder. **Given** a partial or complete review on Wednesday, **Then** no notification is sent that Friday.
-3. **Given** 3 tasks ask for a decision, **Then** the iOS Next Actions widget shows 3. Tapping it opens the review's decision step at the first card.
+3. **Given** 3 tasks ask for a decision, **Then** the iOS Next Actions widget shows 3. In the medium and large widget, tapping the count opens the review's decision step at the first card. Tapping the small widget opens Next.
 4. **Given** the person changes the threshold from 28 to 7, **Then** markers update at once. No task is auto-parked earlier than 7 days after the change because of that change.
 5. **Given** the person changes their time zone, **Then** the review slot follows the new local time.
 6. **Given** any review-related screen or message, **Then** none shows a streak, a streak loss, red error styling for age, or the word "overdue" for formulation age.
@@ -294,7 +294,7 @@ The Mac app offers the same markers, card, auto-park visibility, review and on-d
 
 - **FR-035**: Before the first review, System MUST show one onboarding screen explaining the review, the threshold rule and auto-park, and collecting review day/time (default Friday 16:00 local) and threshold (7/14/21/28, default 14).
 - **FR-036**: On iOS (and macOS after Mac sync), System MUST send at most one review notification per week, at the chosen local day and time, with no follow-ups. No notification is sent for a week if a complete or partial review happened in the preceding 6 days. Web sends no notifications; it shows the time since the last review in the navigation.
-- **FR-037**: The iOS Next Actions widget MUST show the number of tasks that ask for a decision. Tapping that count MUST open the review's decision step at its first card.
+- **FR-037**: The iOS Next Actions widget MUST show the number of tasks that ask for a decision. In the medium and large widget, tapping that count MUST open the review's decision step at its first card. The small widget, which has a single tap target, shows the count and keeps opening Next.
 - **FR-038**: System MUST show the time since the last review in neutral wording, and MUST NOT show streaks or streak loss.
 - **FR-039**: Changing the threshold MUST update markers immediately, and MUST NOT cause any task to be auto-parked earlier than 7 days after the change.
 
