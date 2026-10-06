@@ -1,0 +1,55 @@
+{
+  "planning_review": {
+    "run_id": "021-mac-sync-c2",
+    "risk": "high",
+    "status": "founder-accepted",
+    "reviewers": [
+      "requirements-consistency",
+      "architecture-consistency",
+      "testability-evidence",
+      "privacy-consent-security",
+      "ux-accessibility-mobile",
+      "adversarial-high-risk"
+    ],
+    "founder_acceptance": {
+      "accepted_by": "Max (product owner)",
+      "accepted_on": "2026-10-06",
+      "expires_on": "2026-11-05",
+      "rationale": "Two review campaigns, the cap, ran on a high-risk package (credentials, first data egress from the Mac, migration of real local data, an API semantics change). Campaign 1 raised 63 findings (2 blocking) and campaign 2 raised 65 (2 blocking); neither raised a product decision, and all 128 were fixed with none rejected (review-c1-disposition.md, review-c2-disposition.md). The verdict stayed technical-changes-required only because no third campaign is allowed to confirm the campaign-2 fixes. The owner accepts the residual risk that a fix is incomplete, chiefly in the legacy Mac import, bounded by the compensating measures below. Panel caveat: every lens ran through a Claude-backed adapter (ADR-0025 exception chosen by the owner) on one provider: campaign 1 used Sonnet 5.5 and Fable 5.1 with Opus 5.5 on UX; campaign 2 used Sonnet 5.5 and Opus 5.5 (the owner removed Fable for cost). Opus 5.5 also authored the spec and plan, so the panel is correlated and partly self-review; every lens is recorded as degraded and model-unverified.",
+      "compensating_measures": [
+        "Every PR slice from tasks.md gets its own independent review and full CI before landing, per ADR-0008 and ADR-0023; ASK-class slices need the owner's recorded approval.",
+        "Each slice's PR description lists the review-c1/c2 dispositions it implements, so a reviewer can check that the planned fix actually landed in code.",
+        "Before the owner upgrades their own Mac, the legacy import is dry-run on a copy of the owner's real local data folder (quickstart Scenario 6 step 0, BRAINBUDDY_MAC_DATA_DIR override); the app never deletes the pre-upgrade backup.",
+        "/speckit-accept runs before release and maps every FR and SC to a named executable test or recorded host evidence with fresh Allure or tree-hash evidence; a reject verdict blocks the release.",
+        "The owner uses Mac, iPhone and web on one account for one week of normal work (SC-007) before the feature is called done.",
+        "If any slice changes spec.md, plan.md or a contract beyond the dispositions, that change gets a targeted review (Sonnet or Opus) instead of relying on this acceptance."
+      ],
+      "campaign_history": [
+        {
+          "run_id": "021-mac-sync-c1",
+          "status": "technical-changes-required"
+        },
+        {
+          "run_id": "021-mac-sync-c2",
+          "status": "technical-changes-required"
+        }
+      ],
+      "artifacts_digest_after_fixes": "e8dab1b5fd6154a5238c20ebdbe4ae46b0105eaeb686bdff08c65ee99a85a8b7",
+      "review_runtime": "Claude Code headless adapter, SHA-256 pinned per model: opus-5-5 15eca6f0192ac098f04ecdf5a73306480b8fb56da61c9eceaa66451ea6528a55, sonnet-5-5 89a1902c324243ea4b0dc6e84a96f9a4e579d545f6c62d71135c88449642ea33, fable-5-1 ad7f92066760499486445c647e6b68c0aec8b905823a6ba0e2ec3f6cde43376b (campaign 1 only)"
+    },
+    "post_acceptance_review": {
+      "reason": "Compensating measure 6: contract, plan, data-model and design edits made at /speckit-checklist and /speckit-analyze (6a6f617) were reviewed instead of relying on the acceptance.",
+      "reviewed_range": "1092334..6a6f617 (contracts/*, data-model.md, design.md, design/X-06, plan.md, quickstart.md; tasks.md sanity check)",
+      "reviewer": "claude-sonnet-5-5 subagent, read-only",
+      "date": "2026-10-06",
+      "verdict": "changes-required",
+      "findings": {
+        "blocking": 1,
+        "important": 1,
+        "advisory": 3
+      },
+      "resolution": "Fixed in b9ddd61. B1: tasks.md lacked the brainbuddy-pr-slices/v1 manifest (the validator skipped the absent section); the manifest is appended, covers T001-T139 once each, all FR/SC, plan.md path counts, depends_on, and cross-feature external_depends_on/serialize_with on 020 slices; the validator now parses it. I1: the dry run (BRAINBUDDY_MAC_DATA_DIR) now also skips the launch-time Keychain cleanup and makes no Keychain call until a sign-in inside the dry run (mac-app-host §1, step 4, §8; data-model E9; privacy CHK026; T096/T102/T103/T119). A1: the web rename clash names the server's 409 message. A2 kept. A3: 'added at /speckit-analyze'. Three visible-copy alignments raised by the review (undated signOutBackup sentence; duplicateProjectName copy for the rename clash; 'Old flat · archived' picker label) align the design with existing kit copy and change no owner decision; accepted by the coordinator under the owner's delegation for this feature.",
+      "artifacts_digest_after_fixes": "862e80eb01918f55515a019af6fb656c994a5a576f63025f6e4e5a72e774301c"
+    }
+  }
+}
