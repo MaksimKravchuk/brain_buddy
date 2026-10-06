@@ -12,6 +12,7 @@ import hashlib
 import logging
 import secrets
 import uuid
+from contextlib import suppress
 from datetime import timedelta
 
 from argon2 import PasswordHasher
@@ -69,6 +70,11 @@ class AuthService:
     ) -> None:
         self.user_repo = user_repo
         self.session_repo = session_repo
+        if session_repo.store.db_path != user_repo.store.db_path:
+            raise ValueError(
+                "User and session repositories must share Identity storage."
+            )
+        self.session_repo.store = self.user_repo.store
         self.invite_repo = invite_repo
         self.password_policy = password_policy
         self.session_settings = session_settings
@@ -100,11 +106,30 @@ class AuthService:
         self._validate_password_format(raw)
 
     def _verify_password(self, raw: str, hashed: str) -> bool:
+        if not hashed:
+            self._dummy_verify(raw)
+            return False
         try:
             self._hasher.verify(hashed, raw)
             return True
-        except (VerifyMismatchError, InvalidHashError):
+        except InvalidHashError:
+            self._dummy_verify(raw)
             return False
+        except VerifyMismatchError:
+            return False
+
+    def _dummy_verify(self, raw: str) -> None:
+        with suppress(VerifyMismatchError):
+            self._hasher.verify(self._dummy_hash, raw)
+
+    @staticmethod
+    def same_authority(snapshot: User, fresh: User) -> bool:
+        return (
+            snapshot.id == fresh.id
+            and snapshot.email == fresh.email
+            and snapshot.password_hash == fresh.password_hash
+            and snapshot.auth_version == fresh.auth_version
+        )
 
     def _validate_password_format(self, raw: str) -> None:
         policy = self.password_policy
@@ -125,7 +150,16 @@ class AuthService:
     def hash_session_token(token: str) -> str:
         return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
-    def _create_session(self, user_id: str) -> tuple[str, Session]:
+    def _create_session(
+        self,
+        user_id: str,
+        *,
+        auth_method: str = "password",
+        provider_binding_id: str | None = None,
+    ) -> tuple[str, Session]:
+        user = self.user_repo.get_by_id(user_id)
+        if user is None:
+            raise InvalidCredentialsError()
         raw_token = secrets.token_urlsafe(32)
         token_hash = self.hash_session_token(raw_token)
         now = utcnow()
@@ -134,6 +168,10 @@ class AuthService:
             user_id=user_id,
             created_at=now,
             expires_at=now + timedelta(seconds=self.session_settings.max_age_seconds),
+            auth_version=user.auth_version,
+            auth_method=auth_method,
+            confirmed_at=now,
+            provider_binding_id=provider_binding_id,
         )
         self.session_repo.create(session)
         return raw_token, session
@@ -142,10 +180,36 @@ class AuthService:
         if not raw_token:
             return None
         token_hash = self.hash_session_token(raw_token)
-        session = self.session_repo.get(token_hash)
-        if session is None:
-            return None
-        return self.user_repo.get_by_id(session.user_id)
+        with self.user_repo.store.transaction():
+            session = self.session_repo.get(token_hash)
+            if session is None:
+                return None
+            user = self.user_repo.get_by_id(session.user_id)
+            if (
+                user is None
+                or user.auth_version != session.auth_version
+                or user.deletion_requested_at is not None
+                or (
+                    user.email in self.reserved_emails
+                    and session.auth_method != "password"
+                )
+            ):
+                self.session_repo.delete(token_hash)
+                return None
+            if session.auth_method in {"google", "apple"}:
+                with self.user_repo.store.connection() as connection:
+                    binding = connection.execute(
+                        "SELECT provider,state FROM auth_identity_bindings WHERE id=? AND user_id=?",
+                        (session.provider_binding_id, user.id),
+                    ).fetchone()
+                    if (
+                        binding is None
+                        or binding["state"] != "active"
+                        or binding["provider"] != session.auth_method
+                    ):
+                        self.session_repo.delete(token_hash)
+                        return None
+            return user
 
     def logout(self, raw_token: str | None) -> None:
         if not raw_token:
@@ -248,14 +312,9 @@ class AuthService:
         same generic error, before any session is created: the account is
         past the point of no return and must never be resurrected mid-purge.
 
-        The initial `get_by_email` read above is only ever a stale snapshot
-        — a concurrent purge can mark, scrub and delete the account at any
-        point after it. So the fresh-marker mutate below always runs, even
-        when that snapshot shows no marker at all: an unmarked snapshot must
-        not let a purge that starts mid-call slip past the check. A second
-        race window remains between that mutate and session creation, so
-        once the session exists we re-read the user one more time and roll
-        the session back if a purge landed in that gap too.
+        Verify the password outside the write lock, then recheck that exact
+        credential/version and the deletion marker in the same transaction
+        as cancellation and session creation. Any failure rolls back both.
         """
 
         normalized_email = self.user_repo.normalize_email(email)
@@ -269,10 +328,13 @@ class AuthService:
         if not self._verify_password(password, user.password_hash):
             raise InvalidCredentialsError()
 
+        checked_user = user
         cancelled = False
 
         def _refresh_marker(fresh: User) -> User:
             nonlocal cancelled
+            if not self.same_authority(checked_user, fresh):
+                raise InvalidCredentialsError()
             if fresh.deletion_requested_at is None:
                 return fresh
             if utcnow() >= fresh.deletion_requested_at + self.deletion_grace:
@@ -286,8 +348,13 @@ class AuthService:
             # marker there so a concurrent purge that has already advanced
             # it to past-due (or deleted the account outright) cannot be
             # resurrected by that stale read.
-            user = self.user_repo.mutate(user.id, _refresh_marker)
-        except NotFoundError:
+            with self.user_repo.store.transaction():
+                user = self.user_repo.mutate(user.id, _refresh_marker)
+                raw_token, session = self._create_session(user.id)
+                post_check = self.user_repo.get_by_id(user.id)
+                if post_check is None or post_check.deletion_requested_at is not None:
+                    raise InvalidCredentialsError()
+        except (NotFoundError, ConflictError):
             # Purged between the credential check and the write — the
             # account is gone; behave like any bad credential.
             raise InvalidCredentialsError() from None
@@ -295,16 +362,6 @@ class AuthService:
         deletion_cancelled = cancelled
         if deletion_cancelled:
             logger.info("Login cancelled pending deletion for %s", user.id)
-
-        raw_token, session = self._create_session(user.id)
-
-        # Close the later window: a purge that starts after the fresh
-        # mutate above but completes before this point must not leave the
-        # just-created session orphaned once it deletes the account.
-        post_check = self.user_repo.get_by_id(user.id)
-        if post_check is None or post_check.deletion_requested_at is not None:
-            self.session_repo.delete(session.token_hash)
-            raise InvalidCredentialsError()
 
         return user, raw_token, deletion_cancelled
 
@@ -338,28 +395,38 @@ class AuthService:
         normalized = self.user_repo.normalize_email(email)
         existing = self.user_repo.get_by_email(normalized)
 
-        if existing is None:
-            user_id = f"user_{uuid.uuid4().hex[:12]}"
-            user = User(
-                id=user_id,
-                email=normalized,
-                password_hash=self.hash_password(password),
-                created_at=utcnow(),
-            )
-            created = self.user_repo.create(user)
-            logger.info("Seeded admin account %s", normalized)
-            return created
+        if existing is not None and self._verify_password(
+            password, existing.password_hash
+        ):
+            with self.user_repo.store.transaction():
+                fresh = self.user_repo.get_by_email(normalized)
+                if fresh is not None and self.same_authority(existing, fresh):
+                    logger.debug("Admin account %s already up to date", fresh.id)
+                    return fresh
 
-        if not self._verify_password(password, existing.password_hash):
-            updated = existing.model_copy(
-                update={"password_hash": self.hash_password(password)}
-            )
-            self.user_repo.save(updated)
-            logger.info("Rotated admin password for %s", normalized)
-            return updated
-
-        logger.debug("Admin account %s already up to date", normalized)
-        return existing
+        new_hash = self.hash_password(password)
+        with self.user_repo.store.transaction():
+            fresh = self.user_repo.get_by_email(normalized)
+            if fresh is None:
+                created = self.user_repo.create(
+                    User(
+                        id=f"user_{uuid.uuid4().hex[:12]}",
+                        email=normalized,
+                        password_hash=new_hash,
+                        created_at=utcnow(),
+                    )
+                )
+                outcome = "Seeded"
+                updated = created
+            else:
+                updated = self.user_repo.mutate(
+                    fresh.id,
+                    lambda fresh: fresh.model_copy(update={"password_hash": new_hash}),
+                )
+                self.session_repo.delete_all_for_user(fresh.id)
+                outcome = "Rotated password for"
+        logger.info("%s admin account %s", outcome, updated.id)
+        return updated
 
 
 __all__ = [

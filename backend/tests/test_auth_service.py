@@ -178,10 +178,8 @@ def test_login_stale_snapshot_cannot_clear_a_marker_purge_advances_mid_call(
     If a purge's hard-purge marker step lands in the window between login's
     initial read (which sees a cancellable, within-grace marker) and its
     cancellation `mutate` call, the mutate's own fresh re-check must see the
-    now-past-due marker and refuse — not blindly clear whatever the stale
-    snapshot showed, and not create a session. A narrow hook on
-    `UserRepository.mutate` reproduces this interleaving deterministically,
-    without sleeps or real threads standing in for the concurrent purge.
+    now-past-due marker and refuse. The verification hook runs before the
+    Identity transaction starts, when another writer can actually commit.
     """
 
     code = _create_invite(container)
@@ -196,26 +194,23 @@ def test_login_stale_snapshot_cannot_clear_a_marker_purge_advances_mid_call(
     pending = container.user_repo.get_by_id(user.id)
     assert pending is not None and pending.deletion_requested_at is not None
 
-    real_mutate = container.user_repo.mutate
+    real_verify = container.auth_service._verify_password
     triggered = False
 
-    def _mutate_with_purge_barrier(user_id, mutator):
+    def _verify_with_purge_barrier(raw, hashed):
         nonlocal triggered
+        verified = real_verify(raw, hashed)
         if not triggered:
             triggered = True
-            # Stand in for a concurrent `purge_account` whose hard-purge
-            # marker step lands in the gap between login's snapshot read
-            # and this `mutate` call — `.save()` bypasses `mutate` itself so
-            # the barrier doesn't recurse into this hook.
-            fresh = container.user_repo.get_by_id(user_id)
+            fresh = container.user_repo.get_by_id(user.id)
             assert fresh is not None
             cutoff = utcnow() - container.account_service.deletion_grace
             container.user_repo.save(
                 fresh.model_copy(update={"deletion_requested_at": cutoff})
             )
-        return real_mutate(user_id, mutator)
+        return verified
 
-    container.user_repo.mutate = _mutate_with_purge_barrier  # type: ignore[method-assign]
+    container.auth_service._verify_password = _verify_with_purge_barrier  # type: ignore[method-assign]
 
     with pytest.raises(InvalidCredentialsError):
         container.auth_service.login(
@@ -245,10 +240,9 @@ def test_login_unmarked_snapshot_purge_interposes_before_fresh_mutate(
     between that read and login's write-locked mutate, the now-mandatory
     fresh mutate must still observe it — even though the stale snapshot it
     started with carried no marker at all — and refuse before any session is
-    created. A hook on the first `UserRepository.mutate` call reproduces this
-    deterministically: on the old code path (which only calls `mutate` when
-    the stale snapshot already carries a marker) the hook never fires, the
-    purge never runs, and login sails through — this must fail red first.
+    created. A verification hook commits the purge before the write
+    transaction begins; it does not inject a pretend concurrent writer
+    inside that same atomic transaction.
     """
 
     code = _create_invite(container)
@@ -259,21 +253,22 @@ def test_login_unmarked_snapshot_purge_interposes_before_fresh_mutate(
     )
     assert user.deletion_requested_at is None
 
-    real_mutate = container.user_repo.mutate
+    real_verify = container.auth_service._verify_password
     triggered = False
 
-    def _mutate_with_purge_barrier(user_id, mutator):
+    def _verify_with_purge_barrier(raw, hashed):
         nonlocal triggered
+        verified = real_verify(raw, hashed)
         if not triggered:
             triggered = True
             # Stand in for a concurrent purge that starts and completes in
             # full — marker, cohort/session scrub, and final user delete —
             # in the gap between login's stale snapshot read and this
             # `mutate` call.
-            container.account_service.purge_account(user_id)
-        return real_mutate(user_id, mutator)
+            container.account_service.purge_account(user.id)
+        return verified
 
-    container.user_repo.mutate = _mutate_with_purge_barrier  # type: ignore[method-assign]
+    container.auth_service._verify_password = _verify_with_purge_barrier  # type: ignore[method-assign]
 
     with pytest.raises(InvalidCredentialsError):
         container.auth_service.login(
@@ -286,19 +281,10 @@ def test_login_unmarked_snapshot_purge_interposes_before_fresh_mutate(
     assert container.session_repo.delete_all_for_user(user.id) == 0
 
 
-def test_login_purge_interposes_between_fresh_mutate_and_session_create(
+def test_022_FR_014_session_failure_rolls_back_deletion_cancellation(
     container,
 ) -> None:
-    """Closing the fresh-mutate window isn't enough on its own — a purge can
-    also land between that mutate and session creation.
-
-    A hook on `_create_session` reproduces a purge (marker, scrub, and final
-    user delete) that completes entirely in that narrower gap, after login's
-    fresh check has already passed but before the session row exists. Once
-    the session is created, login must re-read the user, notice the account
-    is gone, delete the just-created session, and refuse — never return a
-    token for a session whose owner no longer exists.
-    """
+    """Account refresh and session issuance either commit together or neither."""
 
     code = _create_invite(container)
     user, _ = container.auth_service.signup(
@@ -306,22 +292,19 @@ def test_login_purge_interposes_between_fresh_mutate_and_session_create(
         password="very-long-password",
         invite_code=code,
     )
-    assert user.deletion_requested_at is None
-
-    real_create_session = container.auth_service._create_session
+    container.account_service.request_deletion(
+        user, current_password="very-long-password"
+    )
+    pending = container.user_repo.get_by_id(user.id)
+    assert pending is not None and pending.deletion_requested_at is not None
     triggered = False
 
-    def _create_session_with_purge_barrier(user_id):
+    def _create_session_failure(user_id):
         nonlocal triggered
-        if not triggered:
-            triggered = True
-            # Stand in for a concurrent purge that starts and completes in
-            # full after login's fresh marker check but before the session
-            # row is written.
-            container.account_service.purge_account(user_id)
-        return real_create_session(user_id)
+        triggered = True
+        raise InvalidCredentialsError()
 
-    container.auth_service._create_session = _create_session_with_purge_barrier  # type: ignore[method-assign]
+    container.auth_service._create_session = _create_session_failure  # type: ignore[method-assign]
 
     with pytest.raises(InvalidCredentialsError):
         container.auth_service.login(
@@ -329,6 +312,7 @@ def test_login_purge_interposes_between_fresh_mutate_and_session_create(
         )
 
     assert triggered
-    assert container.user_repo.get_by_id(user.id) is None
-    # The session created just before the post-check must not survive it.
+    fresh = container.user_repo.get_by_id(user.id)
+    assert fresh is not None
+    assert fresh.deletion_requested_at == pending.deletion_requested_at
     assert container.session_repo.delete_all_for_user(user.id) == 0

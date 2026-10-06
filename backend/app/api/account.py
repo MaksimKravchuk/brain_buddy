@@ -105,16 +105,23 @@ def update_profile(
 )
 def change_email(
     payload: EmailChangeRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     account_service: AccountService = Depends(get_account_service),
     task_service: TaskService = Depends(get_task_service),
+    auth_service: AuthService = Depends(get_auth_service),
+    config: AppConfig = Depends(get_config_dep),
 ) -> AccountResponse:
     _check_sensitive_rate_limit(current_user)
     completed_task_count = task_service.completed_task_count(owner_id=current_user.id)
+    raw_token = request.cookies.get(config.session.cookie_name)
     user = account_service.change_email(
         current_user,
         new_email=payload.new_email,
         current_password=payload.current_password,
+        keep_token_hash=(
+            auth_service.hash_session_token(raw_token) if raw_token else None
+        ),
     )
     return _account_response(
         user,
