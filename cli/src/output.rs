@@ -166,10 +166,11 @@ pub fn format(cli: &Cli, r: &Request, mut value: Value, selectors: &[String]) ->
     Ok(result)
 }
 
-pub fn scoped_schema(document: Value, method: &str, path: &str) -> Result<Value> {
+pub fn scoped_schema(document: Value, method: &str, path: &str, api_prefix: &str) -> Result<Value> {
+    let mounted_path = format!("{api_prefix}{path}");
     let operation = document
         .get("paths")
-        .and_then(|p| p.get(path))
+        .and_then(|p| p.get(&mounted_path))
         .and_then(|p| p.get(method.to_ascii_lowercase()))
         .cloned()
         .ok_or_else(|| Error::invalid("Schema operation is not available."))?;

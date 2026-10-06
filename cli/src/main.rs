@@ -46,7 +46,7 @@ fn run(cli: Cli) -> Result<Value> {
         let config = config::Config::load(&cli)?;
         let credential = credential::load(&config)?;
         let reply = request::send(&request::client()?, &config, &request, Some(&credential))?;
-        return output::scoped_schema(reply.value, &args.method, &args.path);
+        return output::scoped_schema(reply.value, &args.method, &args.path, &config.api_prefix);
     }
     let request = command::compile(&cli)?;
     let fields = output::validate_fields(&cli, &request)?;

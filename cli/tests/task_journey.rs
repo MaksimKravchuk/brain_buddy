@@ -62,6 +62,10 @@ fn real_capture_replay_search_edit_conflict_complete_024_fr_001_024_fr_005_024_f
         })
         .unwrap()
     };
+    let schema = invoke(&["schema", "POST", "/tasks"], 0);
+    assert_eq!(schema["data"]["path"], "/tasks");
+    assert_eq!(schema["data"]["method"], "POST");
+    assert!(schema["data"]["schemas"].get("TaskCreateRequest").is_some());
     let created = invoke(
         &[
             "task",
