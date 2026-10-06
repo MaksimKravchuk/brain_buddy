@@ -5,15 +5,17 @@ copies the iOS DTO tests and Vitest decode. Every model forbids unknown fields
 (``StrictBaseModel``). Client-supplied ids have one fixed shape per field
 (``<prefix>_<lowercase uuid>``, at most 64 characters), so no free text can
 travel in an id into tables, exports or logs; fields that refer to an existing
-record also accept the server-minted ``<prefix>_<12 hex>`` shape.
+record also accept the server-minted ``<prefix>_<12 hex>`` shape. Every
+instant is an ``AwareDatetime``: a value without an offset is ambiguous and is
+refused with 422 (``Z`` and explicit offsets are accepted).
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints, model_validator
+from pydantic import AwareDatetime, Field, StringConstraints, model_validator
 from pydantic_core import PydanticCustomError
 
 from .common import StrictBaseModel
@@ -48,6 +50,12 @@ __all__ = [
 CLIENT_ID_MAX_LENGTH = 64
 NAVIGATOR_NOTES_BUDGET_CHARS = 6_000
 """contracts/navigator.md §1 ``NOTES_BUDGET_CHARS``: clients send reduced notes."""
+NAVIGATOR_NOTES_SEPARATOR = "\n…\n"
+"""The line ``reduce_notes`` puts between the kept head and tail (navigator.md §1)."""
+NAVIGATOR_NOTES_MAX_CHARS = NAVIGATOR_NOTES_BUDGET_CHARS + len(
+    NAVIGATOR_NOTES_SEPARATOR
+)
+"""Longest reduced note: head (≤ 2 000) + separator + tail (≤ 4 000) scalars."""
 
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 _SERVER_ID = r"[0-9a-f]{12}"
@@ -83,6 +91,10 @@ NavigatorRequestId = Annotated[
     str, StringConstraints(pattern=rf"^{_UUID}$", min_length=36, max_length=36)
 ]
 ShortText = Annotated[str, StringConstraints(min_length=1, max_length=500)]
+ReasonText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+]
+"""A free-text reason: stripped first, so whitespace alone is empty (422)."""
 ReviewTime = Annotated[
     str, StringConstraints(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 ]
@@ -156,11 +168,11 @@ class DecisionRequest(StrictBaseModel):
     stall_reason: StallReason | None = None
     title: ShortText | None = None
     waiting_for: ShortText | None = None
-    reason: ShortText | None = None
+    reason: ReasonText | None = None
     session_id: SessionRef | None = None
     ai_use: AiUse = "none"
     navigator_request_id: NavigatorRequestId | None = None
-    client_decided_at: datetime | None = None
+    client_decided_at: AwareDatetime | None = None
     new_formulation_id: NewFormulationId | None = None
     follow_up_task_id: FollowUpTaskId | None = None
 
@@ -202,7 +214,7 @@ class DecisionRecordResponse(StrictBaseModel):
     type: DecisionType
     task_id: str
     session_id: str | None
-    decided_at: datetime
+    decided_at: AwareDatetime
     substantive: bool | None
     stall_reason: StallReason | None
     ai_use: AiUse
@@ -212,7 +224,7 @@ class DecisionRecordResponse(StrictBaseModel):
 class ReviewReceiptResponse(StrictBaseModel):
     task_id: str
     kind: ReceiptKind
-    hidden_until: datetime
+    hidden_until: AwareDatetime
     task_revision: int = Field(ge=1)
 
 
@@ -255,9 +267,9 @@ class ReviewSettingsResponse(StrictBaseModel):
     review_weekday: int = Field(ge=1, le=7)
     review_time: ReviewTime
     time_zone: str
-    onboarded_at: datetime | None
-    activated_at: datetime | None
-    owner_park_floor_at: datetime | None
+    onboarded_at: AwareDatetime | None
+    activated_at: AwareDatetime | None
+    owner_park_floor_at: AwareDatetime | None
     revision: int = Field(ge=1)
 
 
@@ -265,7 +277,7 @@ class LastCountedReviewResponse(StrictBaseModel):
     session_id: str
     status: Literal["completed", "partial"]
     origin: ReviewOrigin
-    ended_at: datetime | None
+    ended_at: AwareDatetime | None
     counts: SessionCounts
     clear_start: ClearStart | None
 
@@ -273,7 +285,7 @@ class LastCountedReviewResponse(StrictBaseModel):
 class UnseenParkResponse(StrictBaseModel):
     task_id: str
     formulation_id: str
-    parked_at: datetime
+    parked_at: AwareDatetime
 
 
 class ReviewStateCounts(StrictBaseModel):
@@ -290,9 +302,9 @@ class SessionResponse(StrictBaseModel):
     entry: ReviewEntry
     origin: ReviewOrigin
     status: SessionStatus
-    started_at: datetime
-    last_activity_at: datetime
-    ended_at: datetime | None
+    started_at: AwareDatetime
+    last_activity_at: AwareDatetime
+    ended_at: AwareDatetime | None
     current_step: StepCode | None
     steps: dict[StepCode, StepStatus]
     active_seconds_by_step: dict[StepCode, Annotated[int, Field(ge=0)]]
@@ -308,16 +320,16 @@ class ReviewStateResponse(StrictBaseModel):
 
     settings: ReviewSettingsResponse
     explainer_seen: bool
-    grace_until: datetime | None
-    last_counted_review_at: datetime | None
+    grace_until: AwareDatetime | None
+    last_counted_review_at: AwareDatetime | None
     last_counted_review: LastCountedReviewResponse | None
-    next_review_at: datetime
+    next_review_at: AwareDatetime
     restart_mode: bool
     open_session: SessionResponse | None
     unseen_parks: list[UnseenParkResponse]
     counts: ReviewStateCounts
     receipts: list[ReviewReceiptResponse]
-    server_now: datetime
+    server_now: AwareDatetime
 
 
 class ExplainerAcknowledgeRequest(StrictBaseModel):
@@ -478,8 +490,8 @@ class BulkReleaseUndoResponse(StrictBaseModel):
 
 # -------------------------------------------------------------- §7 navigator
 class NavigatorConsentResponse(StrictBaseModel):
-    granted_at: datetime
-    revoked_at: datetime | None
+    granted_at: AwareDatetime
+    revoked_at: AwareDatetime | None
     consent_text_version: int = Field(ge=1)
 
 
@@ -506,8 +518,7 @@ class NavigatorRequestConsent(StrictBaseModel):
 class NavigatorTaskInput(StrictBaseModel):
     title: ShortText
     notes: (
-        Annotated[str, StringConstraints(max_length=NAVIGATOR_NOTES_BUDGET_CHARS)]
-        | None
+        Annotated[str, StringConstraints(max_length=NAVIGATOR_NOTES_MAX_CHARS)] | None
     ) = None
     stall_reason: StallReason | None = None
 

@@ -845,7 +845,7 @@ last `acceptance` entry.
       ],
       "depends_on": ["PR-01"],
       "tests": [
-        "cd backend && pytest tests/test_review_clock_seam.py tests/test_review_formulation.py tests/test_review_formulation_vectors.py tests/test_review_flow_vectors.py tests/test_review_wire_fixtures.py -q",
+        "cd backend && pytest tests/test_review_clock_seam.py tests/test_review_formulation.py tests/test_review_formulation_vectors.py tests/test_review_flow_vectors.py tests/test_review_wire_fixtures.py -q --no-cov",
         "cd backend && pytest -q",
         "make test-backend",
         "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-001,020-FR-002,020-FR-003,020-FR-004,020-FR-005,020-FR-007,020-FR-009,020-FR-012,020-FR-015,020-FR-016,020-FR-017,020-FR-019,020-FR-028,020-FR-029,020-FR-031,020-FR-032,020-FR-036,020-FR-039,020-FR-045,020-FR-046,020-FR-051,020-SC-004"

@@ -218,7 +218,12 @@ def due_start(due_date: date, time_zone: str) -> datetime:
 def derive_instants(
     clock: TaskClock, settings: OwnerClockSettings
 ) -> DerivedInstants | None:
-    """§4 for a started clock in Next of an activated owner, else ``None``."""
+    """§4 for a started clock in Next of an activated owner, else ``None``.
+
+    ``paused_until = due_start`` if ``due_start > formulation_started_at``,
+    else null; the class is ``paused`` iff ``paused_until`` is set and
+    ``now < paused_until`` (``classify_instants``).
+    """
 
     started = clock.formulation_started_at
     if settings.activated_at is None or clock.state != "next" or started is None:

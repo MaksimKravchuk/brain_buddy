@@ -1941,6 +1941,64 @@
         "restart_eligible": true,
         "third_stall": false
       }
+    },
+    {
+      "id": "C-061",
+      "note": "due day starting exactly at the formulation start: never paused, even before it",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T22:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-09-25",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-09-24T21:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-10-01T22:00:00Z",
+        "ask_at": "2026-10-08T22:00:00Z",
+        "park_due_at": "2026-10-15T22:00:00Z",
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-062",
+      "note": "due day starting before the formulation start: not paused while now < due_start",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-09-24",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-09-23T21:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
     }
   ],
   "transitions": [
@@ -4578,6 +4636,41 @@
         }
       ],
       "expect": []
+    },
+    {
+      "id": "Q-003",
+      "note": "equal ask_at: the earlier formulation_started_at goes first, even with the later id",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "now": "2026-10-09T09:14:00Z",
+      "tasks": [
+        {
+          "id": "task_a",
+          "state": "next",
+          "formulation_started_at": "2026-09-23T22:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_b",
+          "state": "next",
+          "formulation_started_at": "2026-09-20T10:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": "2026-09-24",
+          "consecutive_stalled_formulations": 0
+        }
+      ],
+      "expect": [
+        "task_b",
+        "task_a"
+      ]
     }
   ]
 }

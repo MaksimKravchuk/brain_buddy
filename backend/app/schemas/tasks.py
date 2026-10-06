@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 from pydantic_core import PydanticCustomError
 
 from .common import StrictBaseModel
@@ -225,21 +225,21 @@ class TaskFormulationResponse(StrictBaseModel):
     """
 
     id: str
-    started_at: datetime
-    extended_at: datetime | None
+    started_at: AwareDatetime
+    extended_at: AwareDatetime | None
     extension_reason: str | None
-    park_floor_at: datetime | None
+    park_floor_at: AwareDatetime | None
     consecutive_stalled: int = Field(ge=0)
-    ageing_at: datetime | None
-    ask_at: datetime | None
-    park_due_at: datetime | None
-    paused_until: datetime | None
+    ageing_at: AwareDatetime | None
+    ask_at: AwareDatetime | None
+    park_due_at: AwareDatetime | None
+    paused_until: AwareDatetime | None
 
 
 class TaskParkResponse(StrictBaseModel):
     """Set only by auto-park; ``clock_before`` stays server-side (http §2)."""
 
-    at: datetime
+    at: AwareDatetime
     formulation_id: str
 
 
