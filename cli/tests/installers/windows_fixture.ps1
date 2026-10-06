@@ -1,5 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$Binary)
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 $root = Join-Path $env:LOCALAPPDATA ('bb-installer-fixture-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root | Out-Null
 try {

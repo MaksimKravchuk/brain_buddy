@@ -39,6 +39,7 @@ try {
     $stage = Join-Path $InstallDir ('.bb-install-' + [Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($stage) | Out-Null
     Add-Type -AssemblyName System.Net.Http
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     function Download-ReleaseFile([string]$Name, [long]$Limit) {
