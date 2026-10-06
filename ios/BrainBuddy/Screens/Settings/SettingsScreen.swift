@@ -3,8 +3,9 @@ import BrainBuddyWorkspace
 import SwiftUI
 import UIKit
 
-/// Account, sync and about. Everything here reads the workspace; the only
-/// network actions are signing in and out and "Sync now".
+/// Account, sync, the weekly review's threshold and about. Everything here
+/// reads the workspace; the only network actions are signing in and out and
+/// "Sync now".
 struct SettingsScreen: View {
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
@@ -24,6 +25,8 @@ struct SettingsScreen: View {
             } else if !workspace.issues.isEmpty {
                 Section { syncIssuesLink }
             }
+            // Weekly review (spec 020, M-23); shown only while it is exposed.
+            ReviewSettingsSection()
             aboutSection
         }
         .navigationTitle("Settings")

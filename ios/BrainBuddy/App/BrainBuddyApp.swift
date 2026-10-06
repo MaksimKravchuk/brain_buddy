@@ -20,6 +20,9 @@ struct BrainBuddyApp: App {
         let workspace = usesPreviewData
             ? Workspace.preview()
             : Workspace.live(appGroupID: AppConstants.appGroupID)
+        // The weekly review's account-less release switch (spec 020), set
+        // before the first load so load-time upkeep sees it.
+        workspace.accountlessReviewEnabled = ReviewExposure.accountlessReleaseSwitch
         // App Intents that run inside the app process reuse this workspace
         // instead of opening a second copy of the store (ios/Shared).
         SharedWorkspace.adopt(workspace)
@@ -53,6 +56,10 @@ struct BrainBuddyApp: App {
     private func loadIfNeeded() async {
         guard !workspace.isLoaded else { return }
         await workspace.load()
+        // Weekly review upkeep on load (spec 020, ios-commands §5): local
+        // retention (`runLocalReviewMaintenance()`) and, while the review is
+        // exposed, the due auto-parks (`applyDueAutoParks()`). Idempotent.
+        workspace.runReviewUpkeep()
     }
 
     private func scenePhaseChanged(to phase: ScenePhase) {
@@ -63,6 +70,8 @@ struct BrainBuddyApp: App {
                     await workspace.reloadIfChangedExternally()
                     // Sync on foreground (docs: "on launch and foreground").
                     if workspace.account != nil { await workspace.syncNow() }
+                    // Weekly review upkeep on foreground (spec 020).
+                    workspace.runReviewUpkeep()
                 }
                 WidgetCenter.shared.reloadAllTimelines()
             }
@@ -146,6 +155,9 @@ enum BackgroundRefresh {
     static func run(_ workspace: Workspace) async {
         if !workspace.isLoaded { await workspace.load() }
         await workspace.syncNow()
+        // Weekly review upkeep on background refresh (spec 020): retention
+        // and due auto-parks, written with the flush below.
+        workspace.runReviewUpkeep()
         await workspace.flush()
         WidgetCenter.shared.reloadAllTimelines()
         schedule(for: workspace)

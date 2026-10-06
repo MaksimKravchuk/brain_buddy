@@ -91,6 +91,8 @@ private struct TaskDetailForm: View {
     @State private var moveInitialList: OpenList?
     @State private var isReopening = false
     @State private var isEditingTags = false
+    /// The decision card (M-03) opened from "This wording" (M-02).
+    @State private var isDeciding = false
     @FocusState private var focus: DetailField?
 
     init(task: TaskRecord) {
@@ -114,6 +116,9 @@ private struct TaskDetailForm: View {
             }
             .sheet(isPresented: $isEditingTags) {
                 TaskTagsSheet(taskID: task.id)
+            }
+            .sheet(isPresented: $isDeciding) {
+                DecisionCardSheet(taskID: task.id)
             }
     }
 
@@ -165,6 +170,11 @@ private struct TaskDetailForm: View {
     private var form: some View {
         Form {
             titleSection
+            // Spec 020, M-02: the wording's age and "Decide" (only while exposed).
+            FormulationSection(task: task) {
+                commitAll()
+                isDeciding = true
+            }
             statusSection
             if task.state == .waiting {
                 waitingSection

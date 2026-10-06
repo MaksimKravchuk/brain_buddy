@@ -1,6 +1,31 @@
 import BrainBuddyCore
 import BrainBuddyWorkspace
 import SwiftUI
+import UIKit
+
+/// Whether the weekly review is shown (spec 020, contracts/ios-commands.md
+/// §8). Signed in, the workspace answers it from the account's
+/// `weekly_review` flag: `GET /review/state` answers only while the flag is
+/// effective (`Workspace.reviewExposed`). Account-less, it is the build's
+/// release switch, the Info.plist key `BBWeeklyReviewLocal` from
+/// `ios/project.yml`: YES in Debug, NO in Release until the owner turns it on
+/// (account-less parks have no server and no remote kill switch). While the
+/// review is not exposed nothing of it shows and Lists keeps its "coming
+/// later" row.
+enum ReviewExposure {
+    static let accountlessInfoKey = "BBWeeklyReviewLocal"
+
+    /// The account-less release switch; NO when the key is missing.
+    static var accountlessReleaseSwitch: Bool {
+        let value = Bundle.main.object(forInfoDictionaryKey: accountlessInfoKey)
+        if let flag = value as? Bool { return flag }
+        // A `$(SETTING)` in the plist arrives as the string "YES" or "NO".
+        if let text = value as? String {
+            return ["yes", "true", "1"].contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        }
+        return false
+    }
+}
 
 /// The app's root: a quiet loading state, a recovery screen when the stored
 /// file cannot be read, and otherwise the tab view.
@@ -27,10 +52,17 @@ struct RootView: View {
 ///
 /// The capture sheet and Process inbox host their own toasts, next to their
 /// bottom buttons, so an Undo never covers the controls.
+///
+/// Weekly review (spec 020): at app open, before anything else, the auto-park
+/// explainer (M-26) while it is needed, then "While you were away" (M-09)
+/// when unseen parks exist and it was not shown today. A capture asked for
+/// meanwhile (a deep link, ⌘N) waits until they close.
 private struct MainTabView: View {
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
     @Environment(ToastCenter.self) private var toasts
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var startupSheet: ReviewStartupSheet?
 
     var body: some View {
         @Bindable var router = router
@@ -64,8 +96,29 @@ private struct MainTabView: View {
         .tabViewSidebarBottomBar {
             CaptureAccessory(drawsGlass: true)
         }
-        .sheet(item: $router.capture) { context in
+        // A capture waits while a review startup sheet is up, then shows.
+        .sheet(
+            item: Binding(
+                get: { startupSheet == nil ? self.router.capture : nil },
+                set: { self.router.capture = $0 }
+            )
+        ) { context in
             CaptureSheet(context: context)
+        }
+        .sheet(item: $startupSheet, onDismiss: startupSheetDismissed) { sheet in
+            switch sheet {
+            case .explainer: AutoParkExplainerSheet()
+            case .whileAway: WhileYouWereAwaySheet()
+            }
+        }
+        .task { presentStartupSheetIfDue() }
+        .onChange(of: workspace.reviewExposed) { _, _ in presentStartupSheetIfDue() }
+        .onChange(of: workspace.explainerNeeded) { _, _ in presentStartupSheetIfDue() }
+        .onChange(of: workspace.unseenParks().count) { _, _ in presentStartupSheetIfDue() }
+        .onChange(of: router.capture == nil) { _, _ in presentStartupSheetIfDue() }
+        .onChange(of: router.isProcessingInbox) { _, _ in presentStartupSheetIfDue() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { presentStartupSheetIfDue() }
         }
         // A capture asked for while Process inbox was open (⌘N, a deep link)
         // shows once the cover has gone.
@@ -78,6 +131,41 @@ private struct MainTabView: View {
             if let problem { toasts.showError(problem) }
         }
     }
+
+    // MARK: Review startup sheets (M-26, M-09)
+
+    /// Presents the explainer while it is needed (FR-051), otherwise "While
+    /// you were away" once a calendar day while parks are unseen (FR-015),
+    /// never over a capture or Process inbox.
+    private func presentStartupSheetIfDue() {
+        guard startupSheet == nil, router.capture == nil, !router.isProcessingInbox, workspace.isLoaded,
+            workspace.reviewExposed
+        else { return }
+        if workspace.explainerNeeded {
+            startupSheet = .explainer
+        } else if workspace.whileAwayShouldShowAtAppOpen() {
+            // Shown today, whether it is continued or swiped away.
+            workspace.markWhileAwayShown()
+            startupSheet = .whileAway
+        }
+    }
+
+    private func startupSheetDismissed() {
+        // The sheet appeared without a tap: VoiceOver goes back to the
+        // screen, starting at its navigation title (design "Keyboard and focus").
+        UIAccessibility.post(notification: .screenChanged, argument: nil)
+        presentStartupSheetIfDue()
+    }
+}
+
+/// A sheet the weekly review shows at app open, in this order.
+private enum ReviewStartupSheet: String, Identifiable {
+    /// M-26.
+    case explainer
+    /// M-09.
+    case whileAway
+
+    var id: String { rawValue }
 }
 
 /// One tab: its navigation stack, the shared route table, and the toast host.
