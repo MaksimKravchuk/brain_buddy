@@ -1,5 +1,6 @@
 mod common;
 use serde_json::{Value, json};
+#[cfg(unix)]
 use std::process::Command;
 
 fn config_dir() -> tempfile::TempDir {

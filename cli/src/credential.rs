@@ -127,6 +127,7 @@ fn native_read(entry: &keyring::Entry) -> Result<Zeroizing<String>> {
         .map_err(|_| Error::store("Credential Manager entry is unavailable."))
 }
 
+#[cfg(unix)]
 fn file_path(config: &Config, locator: &str) -> Result<std::path::PathBuf> {
     crate::storage::valid_locator(locator)?;
     Ok(config.dir.join(format!("{locator}.credential")))

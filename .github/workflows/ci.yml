@@ -1230,10 +1230,10 @@ jobs:
           XDG_DATA_HOME: ${{ runner.temp }}/bb-keyring
           XDG_RUNTIME_DIR: ${{ runner.temp }}/bb-runtime
         run: |
-          dbus-run-session -- bash -ec '
+          dbus-run-session -- bash -e <<'BB_NATIVE'
             printf synthetic-native-store-password | gnome-keyring-daemon --unlock --components=secrets
             python3 scripts/check_cli_native.py --target "${{ matrix.target }}" --source-sha "${CANDIDATE_SHA}" --binary cli/target/release/bb --output cli/target/native-evidence.json
-          '
+          BB_NATIVE
       - name: Execute macOS15 native credential and installer checks
         if: runner.os == 'macOS'
         run: |

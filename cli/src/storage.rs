@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::{Read, Write},
     path::Path,
 };
@@ -35,6 +35,7 @@ pub fn directory(path: &Path, create: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn options() -> OpenOptions {
     let mut options = OpenOptions::new();
     #[cfg(unix)]
@@ -45,6 +46,11 @@ fn options() -> OpenOptions {
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
     }
     options
+}
+
+#[cfg(not(unix))]
+fn options() -> OpenOptions {
+    OpenOptions::new()
 }
 
 pub fn read(path: &Path, limit: usize) -> Result<Vec<u8>> {
@@ -100,7 +106,7 @@ pub fn write(path: &Path, bytes: &[u8]) -> Result<()> {
         file.sync_all().map_err(|_| unavailable())?;
         fs::rename(&temp, path).map_err(|_| unavailable())?;
         #[cfg(unix)]
-        File::open(parent)
+        fs::File::open(parent)
             .and_then(|dir| dir.sync_all())
             .map_err(|_| unavailable())?;
         Ok(())

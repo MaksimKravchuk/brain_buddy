@@ -60,6 +60,7 @@ pub fn sessions_with_hook(
                     Err(_) => return captured,
                 }
             };
+            socket.set_nonblocking(false).unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(3)))
                 .unwrap();
@@ -150,6 +151,7 @@ pub fn exchange(
                 }
             }
         };
+        socket.set_nonblocking(false).unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
