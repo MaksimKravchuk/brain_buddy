@@ -3,14 +3,19 @@
 import asyncio
 import json
 import multiprocessing
+import os
 import re
 import sqlite3
+import subprocess
+import sys
 import zipfile
 from datetime import UTC, datetime, timedelta
 
 import allure
 import pytest
+from fastapi.testclient import TestClient
 
+from app import create_app
 from app.exceptions import RepositoryError, StorageUnavailableError
 from app.repositories.cli_auth import CliAuthRepository
 from app.repositories.feature_flag import FlagMode, FlagOverride
@@ -48,6 +53,28 @@ def approve(client, grant):
         json={"user_code": grant["user_code"], "decision": "approve"},
         headers={"Origin": "https://app.example.com"},
     )
+
+
+def test_024_FR_013_library_import_does_not_start_a_web_application(
+    tmp_path, anonymous_api_client
+):
+    environment = os.environ.copy()
+    data_root = tmp_path / "library-only"
+    environment["BRAIN_BUDDY_DATA_DIR"] = str(data_root)
+    environment["BRAIN_BUDDY_ENV"] = "test"
+    result = subprocess.run(
+        [sys.executable, "-c", "from app.core.config import AppConfig"],
+        env=environment,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert not data_root.exists(), "Library import initialized application storage"
+    with TestClient(create_app()) as explicit_client:
+        health = explicit_client.get("/health")
+        assert health.status_code == 200
+        assert health.json() == anonymous_api_client.get("/health").json()
 
 
 def test_024_FR_013_014_SC_004_approval_mints_distinct_session_once(live_cli):
@@ -228,9 +255,11 @@ def test_024_FR_013_independent_processes_commit_exactly_one_session(live_cli):
         for _ in range(2)
     ]
     try:
+        # Identity startup has an exclusive migration lock. Finish each bootstrap
+        # before starting the next; only the exchange work races at the barrier.
         for child in children:
             child.start()
-        assert ready.get(timeout=30) and ready.get(timeout=30)
+            assert ready.get(timeout=30)
         go.set()
         outcomes = sorted([results.get(timeout=20), results.get(timeout=20)])
         assert outcomes == ["authorization_consumed", "issued"]
