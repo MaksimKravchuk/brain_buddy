@@ -86,6 +86,7 @@ MANAGED_FLAGS: tuple[str, ...] = (
     "external_agent_relay",
     "task_title_autocomplete",
     "crt_canvas",
+    "task_mcp",
 )
 """The runtime-manageable flags after ADR-0019 and later inventory ADRs.
 
@@ -100,6 +101,7 @@ _ADR_0019_MANAGED_FLAGS: frozenset[str] = frozenset(
 _POST_ADR_0019_DEFAULT_OFF_FLAGS: tuple[str, ...] = (
     "task_title_autocomplete",
     "crt_canvas",
+    "task_mcp",
 )
 
 _LEGACY_JSON_MANAGED_FLAGS: frozenset[str] = frozenset(
@@ -430,6 +432,7 @@ class FeatureFlagOverrideRepository(BaseRepository):
         valid_upgrade_sources = {
             _ADR_0019_MANAGED_FLAGS,
             _ADR_0019_MANAGED_FLAGS | {"task_title_autocomplete"},
+            _ADR_0019_MANAGED_FLAGS | {"task_title_autocomplete", "crt_canvas"},
             frozenset(MANAGED_FLAGS),
         }
         if frozenset(present) not in valid_upgrade_sources:

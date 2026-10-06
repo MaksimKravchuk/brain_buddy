@@ -40,7 +40,6 @@ from app.schemas.tasks import (
     TaskState,
     TaskTransitionRequest,
 )
-from app.services import AuthService
 
 logger = logging.getLogger(__name__)
 _Result = TypeVar("_Result")
@@ -55,16 +54,25 @@ _WRITE = ToolAnnotations(
 class SessionTokenVerifier(TokenVerifier):
     """Use existing revocable sessions; MCP never accepts browser cookies."""
 
-    def __init__(self, auth_service: AuthService) -> None:
-        self.auth_service = auth_service
+    def __init__(self, container: Container) -> None:
+        self.container = container
 
     async def verify_token(self, token: str) -> AccessToken | None:
-        user = await to_thread.run_sync(self.auth_service.get_user_for_token, token)
-        if user is None:
-            return None
-        return AccessToken(
-            token=token, client_id=user.id, subject=user.id, scopes=["tasks"]
-        )
+        def verify() -> AccessToken | None:
+            user = self.container.auth_service.get_user_for_token(token)
+            if user is None:
+                return None
+            admitted = self.container.feature_flag_service.is_effective(
+                "task_mcp", user
+            )
+            return AccessToken(
+                token=token,
+                client_id=user.id,
+                subject=user.id,
+                scopes=["tasks"] if admitted else [],
+            )
+
+        return await to_thread.run_sync(verify)
 
 
 def build_task_mcp(container: Container, config: AppConfig) -> FastMCP[None]:
@@ -95,6 +103,8 @@ def build_task_mcp(container: Container, config: AppConfig) -> FastMCP[None]:
             user = container.auth_service.get_user_for_token(token.token)
             if user is None:
                 raise ToolError("Authentication required; sign in again.")
+            if not container.feature_flag_service.is_effective("task_mcp", user):
+                raise ToolError("Task MCP is unavailable for this account.")
             return operation(user.id)
 
         try:
@@ -233,7 +243,7 @@ def install_task_mcp(app: FastAPI, container: Container, config: AppConfig) -> N
     mcp_app.add_middleware(AuthContextMiddleware)
     mcp_app.add_middleware(
         AuthenticationMiddleware,
-        backend=BearerAuthBackend(SessionTokenVerifier(container.auth_service)),
+        backend=BearerAuthBackend(SessionTokenVerifier(container)),
     )
     app.mount(f"{config.api_prefix}/mcp", mcp_app)
     original_lifespan = app.router.lifespan_context

@@ -1,7 +1,8 @@
 # Task MCP implementation plan
 
 References: [spec.md](spec.md), [design.md](design.md), ADR-0001 service ownership,
-ADR-0006 task lifecycle, `docs/auth.md`, ADR-0008 and ADR-0023 delivery boundaries.
+ADR-0006 task lifecycle, `docs/auth.md`, ADR-0019 SQLite flag ownership,
+ADR-0022 capability rollout, ADR-0008 and ADR-0023 delivery boundaries.
 
 Use official Python MCP SDK `mcp>=1.30,<2` in `backend/app/api/mcp.py`.
 FastMCP owns protocol/schema handling and a stateless JSON Streamable HTTP
@@ -15,10 +16,16 @@ No tool takes an owner ID. Authentication is required even for discovery.
 
 Reuse TaskService and the existing API task projection. Create and cancel retain
 the same locks, revision checks, receipt persistence and reference validation.
-No task enum, database schema, repository or frontend change. Configure default-OFF
-exposure and an explicit Host allowlist; browser Origins remain disallowed.
+No task enum or task database schema change. Add `task_mcp` to the existing
+runtime flag inventory and its established transactional default-OFF upgrade
+path; preserve earlier modes/cohorts. Config enables the transport, while the
+SQLite flag admits accounts. Both bearer verification and the worker recheck
+the current audience; a degraded store refuses access. The member flag projection
+also requires transport availability. The generic Admin Portal needs no new
+controls; privacy copy updates the managed inventory count. Configure an explicit
+Host allowlist; browser Origins remain disallowed.
 
-Bounded acceptance covers design states D-01–D-09 in `test_task_mcp.py`, including
+Bounded acceptance covers design states D-01–D-10 in `test_task_mcp.py`, including
 an official SDK client and cross-owner behavior. Run existing backend/frontend
 quality gates and applicable repository checks; document any environment blockers.
 
