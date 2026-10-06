@@ -44,6 +44,62 @@ struct ReducerReviewReplayTests {
         }
     }
 
+    // MARK: - N1: an Undo of a decision whose snapshot only the server has
+
+    @Test("020-FR-048 a queued Undo of a decision known only from the server's answer waits for the server, not refused")
+    func undoOfServerOnlyDecisionStaysQueued() throws {
+        var task = Review.nextTask("t1", started: t0, serverRevision: 2)
+        task.state = .someday
+        task.formulation = nil
+        var base = Review.state([task])
+        base.review.decisions[Review.decision(1)] = ReviewDecision(
+            id: Review.decision(1), taskID: "t1", type: .someday, decidedAt: Review.now, undo: nil, taskAfter: TaskStamp(task),
+            snapshotOnServer: true
+        )
+        let undo = Review.op(.undoDecision(Review.decision(1)), at: Review.now.addingTimeInterval(5))
+        let result = OutboxReplayer.replay([undo], onto: base)
+        #expect(result.rejected.isEmpty)
+        #expect(result.outbox.map(\.id) == [undo.id])
+        #expect(result.state == base, "nothing to restore on the device; the server answers")
+
+        // A snapshot this device dropped (retention) is still refused.
+        var purged = base
+        purged.review.decisions[Review.decision(1)]?.snapshotOnServer = false
+        #expect(OutboxReplayer.replay([undo], onto: purged).rejected.map(\.error) == [.undoUnavailable])
+    }
+
+    // MARK: - N5: operations on a follow-up whose decision waits for the server
+
+    @Test("020-FR-010 edits queued on a follow-up whose decision the replay keeps unapplied wait with it")
+    func followUpEditsWait() throws {
+        var done = Review.task("w1", title: "Quote from Ann", state: .completed)
+        done.serverID = "task_w1"
+        done.serverRevision = 3
+        let base = Review.state([done])
+        let followUp: TaskID = "task_00000000-0000-4000-8000-000000000009"
+        let decide = Review.op(
+            Review.decide(.followUp, "w1", title: "Ask Ann", newFormulation: Review.form(2), followUp: followUp), at: Review.now
+        )
+        let note = Review.op(
+            .createSubtask(.init(taskID: followUp, subtaskID: "s1", title: "Find her number")), at: Review.now.addingTimeInterval(1)
+        )
+        let result = OutboxReplayer.replay([decide, note], onto: base)
+        #expect(result.rejected.isEmpty, "the edit waits with its decision, not refused as taskNotFound")
+        #expect(result.outbox.map(\.id) == [decide.id, note.id])
+        #expect(result.state.tasks[followUp] == nil)
+
+        // The server's answer brings the follow-up: the edit then applies.
+        var answered = base
+        answered.tasks[followUp] = Review.task(followUp, title: "Ask Ann", state: .next)
+        let after = OutboxReplayer.replay([note], onto: answered)
+        #expect(after.rejected.isEmpty)
+        #expect(after.state.tasks[followUp]?.subtasks.map(\.title) == ["Find her number"])
+
+        // A follow-up nobody waits for is still refused.
+        let orphan = OutboxReplayer.replay([note], onto: base)
+        #expect(orphan.rejected.map(\.error) == [.taskNotFound])
+    }
+
     // MARK: - B2 / Codex 1: a yield with an unknown clock_before
 
     @Test("020-FR-009 020-FR-012 an extension made before a server park whose clock the device lacks is replayed, not refused")
@@ -203,6 +259,78 @@ struct ReducerReviewReplayTests {
         #expect(Set(signedIn.bulkReleases.keys) == [Review.bulk(2)])
         #expect(Set(signedIn.sessions.keys) == [ended.id, open.id])
         #expect(!ReviewRetention.isDue(signedIn, now: now, signedIn: true))
+    }
+
+    // MARK: - N2: retention keeps a decision a queued Undo names
+
+    @Test("020-FR-043 020-FR-048 signed in, retention keeps a decision a queued Undo names, without its snapshot")
+    func retentionKeepsDecisionAQueuedUndoNames() throws {
+        let now = Review.now
+        let old = now.addingTimeInterval(-8 * Review.day)
+        let task = Review.nextTask("t1", started: t0)
+        let decided = ReviewDecision(
+            id: Review.decision(1), taskID: "t1", type: .someday, decidedAt: old, undo: DecisionUndo(taskBefore: task),
+            taskAfter: TaskStamp(task)
+        )
+        var review = ReviewState(decisions: [decided.id: decided])
+        #expect(ReviewRetention.isDue(review, now: now, signedIn: true, keeping: [decided.id]), "the snapshot still expires")
+        ReviewRetention.apply(to: &review, now: now, signedIn: true, keeping: [decided.id])
+        #expect(review.decisions[decided.id] != nil, "kept, so the queued Undo is not replayed as already done")
+        #expect(review.decisions[decided.id]?.undo == nil, "the 7-day snapshot bound still holds")
+        #expect(review.decisions[decided.id]?.snapshotOnServer == true, "an acknowledged decision: the server answers")
+        #expect(!ReviewRetention.isDue(review, now: now, signedIn: true, keeping: [decided.id]))
+
+        // Its Undo stays queued for the server instead of vanishing as satisfied.
+        var base = Review.state([task])
+        base.review = review
+        let undo = Review.op(.undoDecision(decided.id), at: now)
+        let result = OutboxReplayer.replay([undo], onto: base)
+        #expect(result.rejected.isEmpty)
+        #expect(result.outbox.map(\.id) == [undo.id])
+
+        // Once no Undo names it, the record goes as before.
+        ReviewRetention.apply(to: &review, now: now, signedIn: true)
+        #expect(review.decisions.isEmpty)
+
+        // Account-less there is no server copy: the record stays unmarked.
+        var accountless = ReviewState(decisions: [decided.id: decided])
+        ReviewRetention.apply(to: &accountless, now: now, signedIn: false, keeping: [decided.id])
+        #expect(accountless.decisions[decided.id]?.undo == nil)
+        #expect(accountless.decisions[decided.id]?.snapshotOnServer == false)
+    }
+
+    // MARK: - N3: recorded idle closes are read from the state
+
+    @Test("020-FR-029 a recorded idle close stays while the run underneath is open and goes once it ended otherwise")
+    func recordedIdleClosesFromState() throws {
+        let started = Review.now.addingTimeInterval(-10 * Review.day)
+        var open = ReviewSession(id: Review.session(1), mode: .quick, entry: .list, origin: .ios, startedAt: started)
+        open.lastActivityAt = started
+        var qualified = open
+        qualified.id = Review.session(2)
+        qualified.qualifyingActivity = true
+        var finished = open
+        finished.id = Review.session(3)
+        finished.status = .completed
+        finished.endedAt = Review.now
+        var replaced = open
+        replaced.id = Review.session(4)
+        replaced.status = .abandoned
+        replaced.endedAt = Review.now
+        var elsewhere = open
+        elsewhere.id = Review.session(5)
+        elsewhere.status = .abandoned
+        elsewhere.endedElsewhere = true
+        let recorded = [open.id, qualified.id, finished.id, replaced.id, elsewhere.id, Review.session(6)]
+        var replayed = GTDState()
+        for session in [open, qualified, finished, replaced, elsewhere] { replayed.review.sessions[session.id] = session }
+
+        // What a replay-based check keeps: the runs the replay still has open.
+        let byReplay = recorded.filter { replayed.review.sessions[$0]?.status == .open }
+        var shown = replayed
+        ReviewSessionUpkeep.closeIdle(recorded, in: &shown)
+        #expect(ReviewSessionUpkeep.recordedIdleCloses(recorded, in: shown) == byReplay)
+        #expect(byReplay == [open.id, qualified.id])
     }
 
     // MARK: - E3 qualifying activity

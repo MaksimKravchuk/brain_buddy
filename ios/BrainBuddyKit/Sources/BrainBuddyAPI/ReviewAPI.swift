@@ -638,6 +638,11 @@ public struct SessionDTO: Codable, Hashable, Sendable {
     }
 }
 
+/// Just the id of a session object.
+struct SessionIDOnly: Decodable {
+    let id: String
+}
+
 /// `GET /review/state` (http §5).
 public struct ReviewStateDTO: Codable, Hashable, Sendable {
     public var settings: ReviewSettingsDTO
@@ -652,6 +657,9 @@ public struct ReviewStateDTO: Codable, Hashable, Sendable {
     public var counts: ReviewStateCountsDTO
     public var receipts: [ReceiptDTO]
     public var serverNow: Date
+    /// The id of an open session sent in a shape this build cannot read
+    /// (`openSession` is nil then): it is still open on the server.
+    public var unreadableOpenSessionID: String?
 
     public init(
         settings: ReviewSettingsDTO, explainerSeen: Bool, graceUntil: Date?, lastCountedReviewAt: Date?,
@@ -697,6 +705,11 @@ public struct ReviewStateDTO: Codable, Hashable, Sendable {
         nextReviewAt = try values.decode(Date.self, forKey: .nextReviewAt)
         restartMode = try values.decodeIfPresent(Bool.self, forKey: .restartMode) ?? false
         openSession = values.decodeLossy(SessionDTO.self, forKey: .openSession)
+        if openSession == nil {
+            // Present but unreadable (an unknown mode or status): keep its id,
+            // so the merge does not take this device's open review as ended.
+            unreadableOpenSessionID = values.decodeLossy(SessionIDOnly.self, forKey: .openSession)?.id
+        }
         unseenParks = try values.decodeLossyList(UnseenParkDTO.self, forKey: .unseenParks)
         counts = try values.decode(ReviewStateCountsDTO.self, forKey: .counts)
         receipts = try values.decodeLossyList(ReceiptDTO.self, forKey: .receipts)

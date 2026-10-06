@@ -385,8 +385,8 @@ public enum OutboxCompactor {
 }
 
 extension GTDCommand {
-    /// The task a task-scoped command acts on.
-    fileprivate var taskID: TaskID? {
+    /// The task a task-scoped command acts on (compaction and replay).
+    var taskID: TaskID? {
         switch self {
         case .createTask(let create): create.taskID
         case .updateTask(let update): update.taskID

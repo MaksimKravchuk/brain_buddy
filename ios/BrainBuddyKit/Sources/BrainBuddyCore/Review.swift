@@ -394,13 +394,20 @@ public struct ReviewDecision: Identifiable, Hashable, Sendable, Codable {
     /// The decided task right after the decision; Undo needs it unchanged.
     public var taskAfter: TaskStamp
     public var yieldedAutoPark: Bool
+    /// The Undo snapshot is the server's, not this device's: the decision is
+    /// known only from the server's answer (the replay could not record it),
+    /// or retention dropped the local snapshot while an Undo still names it.
+    /// A queued Undo is then left for the server to answer instead of being
+    /// refused here.
+    public var snapshotOnServer: Bool
 
     public init(
         id: DecisionID, taskID: TaskID, type: DecisionType, sessionID: ReviewSessionID? = nil, decidedAt: Date,
         formulationID: FormulationID? = nil, stallReason: StallReason? = nil, substantive: Bool? = nil,
         aiUse: AIUse = .none, reasonText: String? = nil, undo: DecisionUndo? = nil, taskAfter: TaskStamp,
-        yieldedAutoPark: Bool = false
+        yieldedAutoPark: Bool = false, snapshotOnServer: Bool = false
     ) {
+        self.snapshotOnServer = snapshotOnServer
         self.id = id
         self.taskID = taskID
         self.type = type
@@ -414,6 +421,29 @@ public struct ReviewDecision: Identifiable, Hashable, Sendable, Codable {
         self.undo = undo
         self.taskAfter = taskAfter
         self.yieldedAutoPark = yieldedAutoPark
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, taskID, type, sessionID, decidedAt, formulationID, stallReason, substantive, aiUse, reasonText, undo
+        case taskAfter, yieldedAutoPark, snapshotOnServer
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(DecisionID.self, forKey: .id)
+        taskID = try values.decode(TaskID.self, forKey: .taskID)
+        type = try values.decode(DecisionType.self, forKey: .type)
+        sessionID = try values.decodeIfPresent(ReviewSessionID.self, forKey: .sessionID)
+        decidedAt = try values.decode(Date.self, forKey: .decidedAt)
+        formulationID = try values.decodeIfPresent(FormulationID.self, forKey: .formulationID)
+        stallReason = try values.decodeIfPresent(StallReason.self, forKey: .stallReason)
+        substantive = try values.decodeIfPresent(Bool.self, forKey: .substantive)
+        aiUse = try values.decodeIfPresent(AIUse.self, forKey: .aiUse) ?? AIUse.none
+        reasonText = try values.decodeIfPresent(String.self, forKey: .reasonText)
+        undo = try values.decodeIfPresent(DecisionUndo.self, forKey: .undo)
+        taskAfter = try values.decode(TaskStamp.self, forKey: .taskAfter)
+        yieldedAutoPark = try values.decodeIfPresent(Bool.self, forKey: .yieldedAutoPark) ?? false
+        snapshotOnServer = try values.decodeIfPresent(Bool.self, forKey: .snapshotOnServer) ?? false
     }
 }
 
@@ -901,27 +931,35 @@ public struct LocalReviewState: Hashable, Sendable, Codable {
 /// an ended run keeps no progress ids. Signed in, the server holds the
 /// history, so the device also drops decisions and bulk releases once their
 /// Undo is gone and ended runs after 35 days (`lastCountedReview` comes from
-/// the server then). Account-less, the store is the only copy: nothing but
-/// the snapshots is dropped.
+/// the server then). A decision a queued Undo names is kept instead, without
+/// its snapshot and marked `snapshotOnServer` (a signed-in base holds only
+/// acknowledged decisions), so the server answers that Undo (200, or 409
+/// `undo_unavailable` with its Ref) rather than the replay taking it as done.
+/// Account-less, the store is the only copy: nothing but the snapshots is dropped.
 public enum ReviewRetention {
     public static let snapshotWindow: TimeInterval = 7 * FormulationRule.day
     public static let endedRunWindow: TimeInterval = 35 * FormulationRule.day
 
     /// Whether `apply` would change `review`.
-    public static func isDue(_ review: ReviewState, now: Date, signedIn: Bool) -> Bool {
+    public static func isDue(
+        _ review: ReviewState, now: Date, signedIn: Bool, keeping referenced: Set<DecisionID> = []
+    ) -> Bool {
         var copy = review
-        apply(to: &copy, now: now, signedIn: signedIn)
+        apply(to: &copy, now: now, signedIn: signedIn, keeping: referenced)
         return copy != review
     }
 
-    public static func apply(to review: inout ReviewState, now: Date, signedIn: Bool) {
+    public static func apply(
+        to review: inout ReviewState, now: Date, signedIn: Bool, keeping referenced: Set<DecisionID> = []
+    ) {
         let cutoff = now.addingTimeInterval(-snapshotWindow)
         for (id, decision) in review.decisions where decision.decidedAt <= cutoff {
-            if signedIn {
+            if signedIn, !referenced.contains(id) {
                 review.decisions[id] = nil
-            } else if decision.undo != nil {
-                review.decisions[id]?.undo = nil
+                continue
             }
+            if decision.undo != nil { review.decisions[id]?.undo = nil }
+            if signedIn { review.decisions[id]?.snapshotOnServer = true }
         }
         for (id, record) in review.bulkReleases where record.createdAt <= cutoff {
             if signedIn {
@@ -963,6 +1001,19 @@ public enum ReviewSessionUpkeep {
             session.status = .ended(by: .idleClose, qualifyingActivity: session.qualifyingActivity)
             session.endedAt = session.lastActivityAt.addingTimeInterval(ReviewSession.idleCloseAfter)
             state.review.sessions[id] = session
+        }
+    }
+
+    /// The recorded idle closes a state built with `closeIdle` still needs,
+    /// read from that state alone (no replay): a run showing exactly the end
+    /// `closeIdle` writes is still open underneath (or was ended the same way,
+    /// where keeping the record changes nothing). A run finished, replaced,
+    /// ended elsewhere or no longer held drops out.
+    public static func recordedIdleCloses(_ ids: [ReviewSessionID], in state: GTDState) -> [ReviewSessionID] {
+        ids.filter { id in
+            guard let session = state.review.sessions[id], !session.endedElsewhere else { return false }
+            return session.status == .ended(by: .idleClose, qualifyingActivity: session.qualifyingActivity)
+                && session.endedAt == session.lastActivityAt.addingTimeInterval(ReviewSession.idleCloseAfter)
         }
     }
 }

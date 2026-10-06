@@ -92,13 +92,26 @@ struct ReviewWireTests {
         let actual = WireLeaves(try JSONSerialization.jsonObject(with: encoded))
         for (path, value) in expected.values {
             guard let decoded = actual.values[path] else {
-                // A zero counter is not kept (SessionCounts stores non-zero ones).
-                #expect(value == "0", "\(entry.id): \(path) = \(value) was dropped")
+                // Only a zero counter may drop out (SessionCounts stores non-zero ones).
+                #expect(WireLeaves.isZeroCounter(path, value), "\(entry.id): \(path) = \(value) was dropped")
                 continue
             }
             #expect(WireLeaves.same(value, decoded), "\(entry.id): \(path) is \(decoded), expected \(value)")
         }
         #expect(Set(actual.values.keys).subtracting(expected.values.keys).isEmpty, "\(entry.id): fields the server never sent")
+    }
+
+    @Test("020-FR-011 the round-trip check excuses only a dropped zero counter, nothing else that reads 0")
+    func onlyZeroCountersMayDrop() {
+        #expect(WireLeaves.isZeroCounter("counts.someday", "0"))
+        #expect(WireLeaves.isZeroCounter("open_session.counts.complete", "0"))
+        #expect(WireLeaves.isZeroCounter("session_counts.waiting", "0"))
+        #expect(!WireLeaves.isZeroCounter("counts.someday", "2"), "a non-zero counter is data")
+        #expect(!WireLeaves.isZeroCounter("open_session.set_aside_count", "0"))
+        #expect(!WireLeaves.isZeroCounter("task.revision", "0"))
+        #expect(!WireLeaves.isZeroCounter("restart_mode", "0"), "false reads as 0")
+        #expect(!WireLeaves.isZeroCounter("open_session.counts", "0"))
+        #expect(!WireLeaves.isZeroCounter("counts.someday.extra", "0"))
     }
 
     @Test("020-FR-011 invalid response bodies are not taken as valid")
@@ -125,6 +138,27 @@ struct ReviewWireTests {
         #expect(error.reason == "id_conflict")
         #expect(!error.isRetryable)
         #expect(error.referenceID == "corr_8b1d4f6a2c9e")
+    }
+
+    @Test(
+        "020-FR-029 020-FR-045 an open session in a mode or status this build cannot read keeps its id",
+        arguments: [("mode", "marathon"), ("status", "paused")]
+    )
+    func unreadableOpenSessionKeepsItsID(_ field: String, _ value: String) throws {
+        var state = try #require(try JSONSerialization.jsonObject(with: Self.entry("W-030").body) as? [String: Any])
+        var open = try #require(state["open_session"] as? [String: Any])
+        let id = try #require(open["id"] as? String)
+        open[field] = value
+        state["open_session"] = open
+        let decoded = try decoder.decode(ReviewStateDTO.self, from: JSONSerialization.data(withJSONObject: state))
+        #expect(decoded.openSession == nil, "left out, not fatal")
+        #expect(decoded.unreadableOpenSessionID == id, "but still known to be open")
+
+        let readable = try decoder.decode(ReviewStateDTO.self, from: Self.entry("W-030").body)
+        #expect(readable.openSession?.id == id && readable.unreadableOpenSessionID == nil)
+        state["open_session"] = NSNull()
+        let none = try decoder.decode(ReviewStateDTO.self, from: JSONSerialization.data(withJSONObject: state))
+        #expect(none.openSession == nil && none.unreadableOpenSessionID == nil)
     }
 
     @Test("020-FR-045 unknown values on the response side are tolerated, not fatal")
@@ -341,6 +375,14 @@ struct WireLeaves {
         default:
             values[path] = "\(value)"
         }
+    }
+
+    /// A zero member of a session counts object (`counts.<kind>` or
+    /// `session_counts.<kind>`, at any depth): the only leaf a DTO may drop.
+    static func isZeroCounter(_ path: String, _ value: String) -> Bool {
+        let parts = path.split(separator: ".")
+        guard value == "0", parts.count >= 2 else { return false }
+        return ["counts", "session_counts"].contains(parts[parts.count - 2])
     }
 
     /// Equal text, or the same instant written with another precision.

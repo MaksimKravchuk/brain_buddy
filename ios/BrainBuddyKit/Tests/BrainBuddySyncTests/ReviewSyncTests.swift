@@ -430,6 +430,87 @@ struct ReviewSyncTests {
         #expect(document.base.review.sessions[Self.session(1)]?.counts[type.countsAs] == 1)
     }
 
+    @Test("020-FR-048 an Undo queued behind a decision whose answer was lost, with a pull between, reaches the server")
+    func undoBehindLostDecision() async throws {
+        let (harness, phone) = try await activated()
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        harness.clock.advance(by: 15 * Self.day)
+        try await phone.review(decide(.someday, "t1", 1, formulation: Self.form(1)))
+        try await loseResponse(on: phone, matching: FakeServerTransport.path("tasks/", method: .post))
+        try await phone.review(.undoDecision(Self.decision(1)))
+        #expect(try await phone.current().tasks["t1"]?.state == .next, "undone on the device")
+        phone.transport.inject(.status(503), times: 1, matching: FakeServerTransport.path("tasks/", method: .post))
+        for _ in 0..<4 {
+            harness.clock.advance(by: 60)
+            await phone.sync()
+        }
+        let document = try await phone.document()
+        #expect(document.issues.isEmpty, "\(document.issues.map(\.message))")
+        #expect(document.outbox.isEmpty)
+        #expect(harness.snapshot.task(titled: "Renovate the bathroom")?.state == .next, "the Undo reached the server")
+        #expect(harness.server.reviewSnapshot(email: SyncHarness.email).decisionIDs.isEmpty)
+        #expect(try await phone.current().tasks["t1"]?.state == .next)
+    }
+
+    @Test("020-FR-048 that queued Undo, when the task changed on another device meanwhile, is refused by the server with its Ref")
+    func undoBehindLostDecisionRefusedByServer() async throws {
+        let (harness, phone) = try await activated()
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        harness.clock.advance(by: 15 * Self.day)
+        try await phone.review(decide(.someday, "t1", 1, formulation: Self.form(1)))
+        try await loseResponse(on: phone, matching: FakeServerTransport.path("tasks/", method: .post))
+        try await phone.review(.undoDecision(Self.decision(1)))
+        let tablet = await harness.device()
+        try await tablet.signIn()
+        let onTablet = try #require(try await tablet.current().task(titled: "Renovate the bathroom"))
+        try await tablet.review(.updateTask(.init(taskID: onTablet.id, changes: TaskChanges(details: .set("Tiles first")))))
+        await tablet.sync()
+        phone.transport.inject(.status(503), times: 1, matching: FakeServerTransport.path("tasks/", method: .post))
+        for _ in 0..<4 {
+            harness.clock.advance(by: 60)
+            await phone.sync()
+        }
+        let document = try await phone.document()
+        let issue = try #require(document.issues.first)
+        #expect(document.issues.count == 1)
+        guard case .undoDecision(Self.decision(1)) = issue.command else {
+            Issue.record("expected the Undo to be set aside, got \(issue.command)")
+            return
+        }
+        #expect(issue.referenceID != nil, "the server's refusal, not the device's")
+        #expect(document.outbox.isEmpty)
+        #expect(harness.snapshot.task(titled: "Renovate the bathroom")?.state == .someday)
+        #expect(try await phone.current().tasks["t1"]?.state == .someday)
+    }
+
+    @Test("020-FR-029 an open review the server sends in a shape this build cannot read is not ended on the device")
+    func unreadableOpenSession() throws {
+        let epoch = Date(timeIntervalSince1970: 1_790_000_000)
+        let id = Self.session(1)
+        let session = ReviewSession(id: id, mode: .quick, entry: .list, origin: .ios, startedAt: epoch)
+        var state = ReviewStateDTO(
+            settings: ReviewSettingsDTO(
+                thresholdDays: 14, reviewWeekday: 7, reviewTime: "18:00", timeZone: "UTC", onboardedAt: epoch,
+                activatedAt: epoch, ownerParkFloorAt: nil, revision: 1
+            ),
+            explainerSeen: true, graceUntil: nil, lastCountedReviewAt: nil, lastCountedReview: nil,
+            nextReviewAt: epoch.addingTimeInterval(7 * Self.day), restartMode: false, openSession: nil, unseenParks: [],
+            counts: ReviewStateCountsDTO(asksForDecision: 0, movesTomorrow: 0), receipts: [], serverNow: epoch
+        )
+        state.unreadableOpenSessionID = id.rawValue
+        var document = StoreDocument()
+        document.base.review.sessions[id] = session
+        document.mergeReviewState(state, now: epoch.addingTimeInterval(60))
+        #expect(document.base.review.sessions[id] == session, "kept open, not ended elsewhere")
+        #expect(document.base.review.server?.openSessionID == id)
+
+        // Another unreadable run is open on the server: this device's was replaced.
+        state.unreadableOpenSessionID = Self.session(2).rawValue
+        document.mergeReviewState(state, now: epoch.addingTimeInterval(120))
+        #expect(document.base.review.sessions[id]?.endedElsewhere == true)
+        #expect(document.base.review.sessions[Self.session(2)] == nil, "nothing to show for a run this build cannot read")
+    }
+
     @Test(
         "020-FR-009 020-FR-012 an offline Keep 7 more days, then a server park, then sync (with and without a pull first)",
         arguments: [false, true]

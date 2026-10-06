@@ -242,6 +242,13 @@ extension GTDReducer {
         _ id: DecisionID, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
         guard let decision = state.review.decisions[id] else { return try satisfied(mode, else: .undoUnavailable) }
+        if decision.undo == nil, decision.snapshotOnServer, mode == .replay {
+            // Only the server has the snapshot (`snapshotOnServer`): keep the
+            // queued Undo for the server to answer (200, 409 undo_unavailable
+            // with its Ref, or 404 naming the decision: already undone).
+            // Nothing changes here until that answer arrives.
+            return .applied
+        }
         guard let undo = decision.undo, let task = state.tasks[decision.taskID], decision.taskAfter.matches(task) else {
             throw .undoUnavailable
         }

@@ -439,16 +439,22 @@ extension Workspace {
         let current = state
         let local = self.local
         let staleDrafts = local.formDrafts.filter { !Self.isLive($0.key, $0.value, in: current, now: instant) }.map(\.key)
-        // Idle closes stay recorded while the replay still shows the run open.
-        let replayed = OutboxReplayer.replay(document.outbox + unpersisted, onto: document.base, activatedAt: local.activatedAt).state
-        let keptClosed = local.idleClosedSessions.filter { replayed.review.sessions[$0]?.status == .open }
+        // Recorded idle closes stay while the run underneath is still open,
+        // read from `state` (which shows them closed): no extra replay.
+        let keptClosed = ReviewSessionUpkeep.recordedIdleCloses(local.idleClosedSessions, in: current)
         let closed = keptClosed + idle.filter { !keptClosed.contains($0) }
+        // A decision a queued Undo names keeps its record, so that Undo is
+        // answered (or refused visibly) rather than replayed as already done.
+        let pending = document.outbox + unpersisted
+        let undone = Set(pending.compactMap { operation -> DecisionID? in
+            if case .undoDecision(let id) = operation.command { id } else { nil }
+        })
         let expiresSnapshots =
-            ReviewRetention.isDue(document.base.review, now: instant, signedIn: signedIn)
-            || (document.outbox + unpersisted).contains { Self.retainsSnapshot($0, before: cutoff) }
+            ReviewRetention.isDue(document.base.review, now: instant, signedIn: signedIn, keeping: undone)
+            || pending.contains { Self.retainsSnapshot($0, before: cutoff) }
         guard expiresSnapshots || !staleDrafts.isEmpty || closed != local.idleClosedSessions else { return }
         edit { document in
-            ReviewRetention.apply(to: &document.base.review, now: instant, signedIn: signedIn)
+            ReviewRetention.apply(to: &document.base.review, now: instant, signedIn: signedIn, keeping: undone)
             document.outbox = document.outbox.map { operation in
                 guard Self.retainsSnapshot(operation, before: cutoff) else { return operation }
                 var operation = operation

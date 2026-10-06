@@ -344,7 +344,7 @@ extension StoreDocument {
                     formulationID: decide.formulationID, stallReason: decide.stallReason,
                     substantive: answer.decision.substantive, aiUse: decide.aiUse,
                     reasonText: decide.type == .extend ? decide.reason : nil, undo: nil, taskAfter: TaskStamp(task),
-                    yieldedAutoPark: answer.decision.yieldedAutoPark
+                    yieldedAutoPark: answer.decision.yieldedAutoPark, snapshotOnServer: true
                 )
             }
             guard var decision = base.review.decisions[decide.decisionID] else { return true }
@@ -447,7 +447,8 @@ extension StoreDocument {
     mutating func mergeReviewState(_ state: ReviewStateDTO, now: Date) {
         var review = base.review
         review.settings = state.settings.settings
-        let openID = state.openSession.map { ReviewSessionID($0.id) }
+        // An open session this build cannot read is still open: only its id is used.
+        let openID = (state.openSession?.id ?? state.unreadableOpenSessionID).map { ReviewSessionID($0) }
         for session in review.sessions.values where session.status == .open && session.id != openID {
             // Finished or replaced on another device ("review ended elsewhere").
             var ended = session

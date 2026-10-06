@@ -67,6 +67,8 @@ public enum OutboxReplayer {
         var rejected: [RejectedOperation] = []
         /// Decisions the replay could not apply, kept for the server to answer.
         var unapplied = Set<DecisionID>()
+        /// Follow-up tasks those decisions create.
+        var waitingFollowUps = Set<TaskID>()
         kept.reserveCapacity(pending.count)
         var index = pending.startIndex
         while index < pending.endIndex {
@@ -78,12 +80,19 @@ public enum OutboxReplayer {
                 kept.append(operation)
                 continue
             }
+            if let task = command.taskID, waitingFollowUps.contains(task), state.tasks[task] == nil {
+                // An edit of a follow-up whose decision waits for the server:
+                // the task exists once the server answers; the edit waits too.
+                kept.append(operation)
+                continue
+            }
             let outcome: ApplyOutcome
             do throws(GTDValidationError) {
                 outcome = try GTDReducer.apply(command, at: operation.issuedAt, to: &state, mode: .replay)
             } catch {
                 if case .decideTask(let decide) = operation.command {
                     unapplied.insert(decide.decisionID)
+                    if let followUp = decide.followUpTaskID { waitingFollowUps.insert(followUp) }
                     // Spec 020: a decision is never refused by the replay. It
                     // may already be applied (an answer lost before a pull) or
                     // yield to a park; the server answers it under the same

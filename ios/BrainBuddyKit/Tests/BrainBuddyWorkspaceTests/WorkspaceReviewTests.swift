@@ -243,6 +243,52 @@ import Testing
         #expect(workspace.state == workspace.replayedState.closingIdle(workspace.localReview))
     }
 
+    @Test("020-FR-043 020-FR-048 signed in, an Undo queued offline past the 7-day window is answered by the server, not dropped as done")
+    func expiredQueuedUndoReachesTheServer() async throws {
+        let world = World()
+        world.server.setWeeklyReview(email: World.email, enabled: true)
+        let phone = await world.device()
+        let workspace = phone.workspace
+        workspace.deviceTimeZone = { Self.berlin }
+        try await phone.signIn()
+        await workspace.syncNow()
+        try workspace.acknowledgeExplainer()
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        await workspace.syncNow()
+        world.clock.advance(by: 15 * Self.day)
+        let decision = try workspace.decide(.someday, on: task)
+        await workspace.syncNow()
+        #expect(world.snapshot.tasks.values.first?.state == .someday)
+        #expect(workspace.document.outbox.isEmpty)
+
+        // Offline: Undo inside the window, then 8 days pass before the device syncs.
+        phone.transport.inject(.offline, times: 1_000)
+        try workspace.undoDecision(decision)
+        #expect(workspace.task(task)?.state == .next)
+        world.clock.advance(by: 8 * Self.day)
+        workspace.runLocalReviewMaintenance()
+        await workspace.flush()
+        let kept = try #require(workspace.document.base.review.decisions[decision], "kept for the queued Undo")
+        #expect(kept.undo == nil, "its snapshot expired on the device")
+        #expect(kept.snapshotOnServer)
+        #expect(workspace.document.outbox.map(\.command) == [.undoDecision(decision)])
+
+        phone.transport.clearFaults()
+        phone.transport.clearLog()
+        await workspace.syncNow()
+        #expect(
+            phone.transport.requests.contains { $0.method == .post && $0.url.path.hasSuffix("/undo") },
+            "the Undo was sent, not replayed as already done"
+        )
+        // The fake server keeps the snapshot; the real one may answer 409
+        // undo_unavailable, which is set aside with its Ref (ReviewSyncTests).
+        #expect(workspace.issues.isEmpty, "\(workspace.issues.map(\.message))")
+        #expect(workspace.document.outbox.isEmpty)
+        #expect(world.snapshot.tasks.values.first?.state == .next)
+        #expect(workspace.task(task)?.state == .next)
+        #expect(workspace.state.review.decisions[decision] == nil)
+    }
+
     // MARK: - Runs (T135)
 
     @Test("020-SC-007 an offline quick review with 3 decisions keeps its counts")
@@ -464,6 +510,31 @@ import Testing
         #expect(hidden.state.review.decisions[decision]?.undo == nil, "undo snapshots are nulled with the review hidden")
         #expect(hidden.state.review.sessions[session]?.status == .partial, "idle runs close with the review hidden")
         #expect(hidden.document.outbox.allSatisfy { if case .autoParkTask = $0.command { false } else { true } })
+    }
+
+    @Test("020-FR-029 020-FR-043 review upkeep replays nothing, with or without a recorded idle close")
+    func upkeepDoesNotReplay() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        for n in 0..<20 { _ = try nextTask("Task \(n)", in: workspace) }
+        await workspace.flush()
+        let replays = workspace.fullReplayCount
+        workspace.runReviewUpkeep()
+        workspace.runReviewUpkeep()
+        #expect(workspace.fullReplayCount == replays, "nothing to close: no replay")
+
+        let session = try workspace.startReview(mode: .quick, entry: .list)
+        clock.advance(by: 7 * Self.day + 60)
+        workspace.runReviewUpkeep()
+        await workspace.flush()
+        #expect(workspace.localReview.idleClosedSessions == [session])
+        #expect(workspace.state.review.sessions[session]?.status == .abandoned)
+        let afterClose = workspace.fullReplayCount
+        workspace.runReviewUpkeep()
+        workspace.runReviewUpkeep()
+        #expect(workspace.fullReplayCount == afterClose, "a recorded close is read from the state: no replay")
+        #expect(workspace.localReview.idleClosedSessions == [session], "still open underneath: kept")
+        #expect(workspace.state == workspace.replayedState.closingIdle(workspace.localReview))
     }
 
     @Test("020-FR-015 020-FR-030 lists go out within the server limits: 200 park acknowledgements, 500 tasks per release")
