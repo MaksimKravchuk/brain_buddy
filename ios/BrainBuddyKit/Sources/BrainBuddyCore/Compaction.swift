@@ -71,7 +71,8 @@ public enum OutboxCompactor {
     // MARK: - Review pairs
 
     /// An unsent decision and its Undo cancel out (with a follow-up the
-    /// decision created), provided nothing after the decision used either task.
+    /// decision created), provided nothing after the decision used either
+    /// task, nor (for a decision in a review) changed a review run.
     private static func cancelDecision(_ id: DecisionID, in outbox: inout [PendingOperation]) -> Bool {
         guard
             let index = outbox.lastIndex(where: {
@@ -81,6 +82,16 @@ public enum OutboxCompactor {
         else { return false }
         let tasks = Set([decide.taskID] + (decide.followUpTaskID.map { [$0] } ?? []))
         guard outbox[(index + 1)...].allSatisfy({ !$0.command.touchesAny(of: tasks) }) else { return false }
+        if decide.sessionID != nil {
+            let touchesRun = outbox[(index + 1)...].contains { operation in
+                switch operation.command {
+                case .review(.startSession), .review(.progressSession), .review(.finishSession): true
+                case .decideTask(let other): other.sessionID == decide.sessionID
+                default: false
+                }
+            }
+            guard !touchesRun else { return false }
+        }
         outbox.remove(at: index)
         return true
     }
@@ -411,6 +422,10 @@ extension GTDCommand {
         case .bulkRelease(let release):
             return release.taskIDs.contains(where: tasks.contains)
         case .undoDecision, .undoBulkRelease:
+            return true
+        case .archiveProject, .deleteTag:
+            // They rewrite every task of the project or tag, which the
+            // compactor cannot see: assume they touch.
             return true
         case .review(.acknowledgeParks(let items)):
             return items.contains { tasks.contains($0.taskID) }

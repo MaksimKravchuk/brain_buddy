@@ -134,7 +134,7 @@ extension SyncEngine {
             // (spec 020): its writes are never set aside or reverted.
             try? await noteFailure(error, of: operation, clearingClock: clearingClock, context)
             throw error
-        case .notFound where operation.command.isUndoDecision:
+        case .notFound where operation.command.isAlreadyUndone(error.kind):
             // Already undone (a retry whose first delivery applied): the goal holds.
             try await acknowledge(operation, with: .accepted, context)
             summary.changed = true
@@ -172,7 +172,15 @@ extension SyncEngine {
             try await setAside(operation, message: error.message, referenceID: error.referenceID, context)
         default:
             // 400, 404, 422 and other 4xx, idempotency conflicts, and conflicts that keep coming back.
-            try await setAside(operation, message: error.message, referenceID: error.referenceID, context)
+            // A decision says where the task is now (design M-03 error rows).
+            let base = try await loadDocument().base
+            let message =
+                if case .decideTask(let decide) = operation.command, let task = base.tasks[decide.taskID] {
+                    ReviewCopy.decisionNotSaved(decide.type, title: task.title, list: task.state)
+                } else {
+                    error.message
+                }
+            try await setAside(operation, message: message, referenceID: error.referenceID, context)
             try await pull(context)
             summary.changed = true
         }
@@ -486,6 +494,15 @@ extension GTDCommand {
 
     var isUndoDecision: Bool {
         if case .undoDecision = self { true } else { false }
+    }
+
+    /// A 404 that names this Undo's decision: it is already undone (http §3).
+    /// A 404 for anything else (a route, a proxy) is a real failure.
+    func isAlreadyUndone(_ kind: APIError.Kind) -> Bool {
+        guard case .undoDecision(let id) = self, case .notFound(let resource, let identifier) = kind,
+            let resource, resource.lowercased().contains("decision")
+        else { return false }
+        return identifier == nil || identifier == id.rawValue
     }
 
     /// Task creates and edits, which replay keeps without references that

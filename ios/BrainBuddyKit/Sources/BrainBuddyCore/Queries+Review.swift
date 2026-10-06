@@ -108,6 +108,22 @@ public enum ReviewRules {
         guard let onboardedAt else { return false }
         return now.timeIntervalSince(lastCountedReviewAt ?? onboardedAt) >= restartAfter
     }
+
+    /// E3 / FR-029: whether finishing `step` now is qualifying activity. A
+    /// step with items to decide qualifies only when its queue is empty; Wins,
+    /// the mind sweep, the rest of Next and Dates have nothing to decide; the
+    /// summary never qualifies.
+    public static func hasNothingToDecide(_ step: ReviewStep, in state: GTDState, now: Date) -> Bool {
+        switch step {
+        case .summary: false
+        case .wins, .mindSweep, .restOfNext, .dates: true
+        case .inbox: !state.tasks.values.contains { $0.state == .inbox }
+        case .decisions: GTDQueries.decisionQueue(in: state, now: now).isEmpty
+        case .waiting: GTDQueries.waitingDue(in: state, now: now).isEmpty
+        case .someday: GTDQueries.somedayDue(in: state, now: now).eligibleTotal == 0
+        case .projects: GTDQueries.projectsNeedingNextAction(in: state).isEmpty
+        }
+    }
 }
 
 /// Spec 020 queries (contracts/ios-commands.md §6). Classification uses the

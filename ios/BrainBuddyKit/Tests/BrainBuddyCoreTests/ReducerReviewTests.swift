@@ -201,9 +201,8 @@ struct ReducerReviewTests {
         let undoAt = Review.now.addingTimeInterval(4)
         try Review.apply(.undoDecision(Review.decision(1)), at: undoAt, to: &state)
         try Review.apply(.undoDecision(Review.decision(2)), at: undoAt, to: &state)
-        var expected = original
-        expected.updatedAt = undoAt
-        #expect(state.tasks["t1"] == expected)
+        // Field for field, `updatedAt` included (as compaction's cancel leaves it).
+        #expect(state.tasks["t1"] == original)
         #expect(state.tasks["task_follow"] == nil)
         #expect(state.tasks["w1"]?.waitingFor == waiting.waitingFor)
         #expect(state.review.decisions.isEmpty)
@@ -261,16 +260,55 @@ struct ReducerReviewTests {
         arguments: ReviewVectors.section(ReviewVectors.formulation, "transitions")
     )
     func compactedReplayKeepsClocks(_ vector: Vector) throws {
-        guard let scenario = try CompactionScenario(vector) else { return }
-        let plain = OutboxReplayer.replay(scenario.operations, onto: Review.state([], settings: scenario.settings)).state
+        guard let scenario = try CompactionScenario(vector) else {
+            // Owner-level events, the yield, the undos and refused events are
+            // not a queued command of one task; FormulationTests runs every
+            // one of the 65 vectors through the rule itself.
+            #expect(Self.notQueued.contains(vector["event"]?["type"]?.string ?? "") || vector["expect"]?["error"] != nil
+                || vector["expect"]?["applied"]?.bool == false, "\(vector.id) skipped without a reason")
+            return
+        }
+        let plainResult = OutboxReplayer.replay(scenario.operations, onto: Review.state([], settings: scenario.settings))
         var compacted: [PendingOperation] = []
         for operation in scenario.operations {
             compacted = OutboxCompactor.appending(operation, to: compacted, clockAware: true)
         }
-        let folded = OutboxReplayer.replay(compacted, onto: Review.state([], settings: scenario.settings)).state
-        let lhs = plain.tasks["t1"].map(ClockFields.init)
-        let rhs = folded.tasks["t1"].map(ClockFields.init)
+        let foldedResult = OutboxReplayer.replay(compacted, onto: Review.state([], settings: scenario.settings))
+        #expect(plainResult.rejected.isEmpty, "\(vector.id): \(plainResult.rejected)")
+        #expect(foldedResult.rejected.isEmpty, "\(vector.id): \(foldedResult.rejected)")
+        let lhs = plainResult.state.tasks["t1"].map(ClockFields.init)
+        let rhs = foldedResult.state.tasks["t1"].map(ClockFields.init)
         #expect(lhs == rhs)
+        // And both match the vector where the queued scenario reproduces the
+        // vector's starting point (state, formulation id and start).
+        let expect = try #require(vector["expect"])
+        let task = try #require(foldedResult.state.tasks["t1"])
+        if let state = expect["state"]?.string { #expect(task.state.rawValue == state, "\(vector.id)") }
+        if let id = expect["formulation_id"] {
+            #expect(task.formulation?.id.rawValue == id.string, "\(vector.id)")
+        }
+        if let started = expect["formulation_started_at"], scenario.reproducesStart {
+            #expect(task.formulation?.startedAt == ReviewVectors.instant(started), "\(vector.id)")
+        }
+        if let title = expect["title"]?.string { #expect(task.title == title, "\(vector.id)") }
+    }
+
+    static let notQueued: Set = [
+        "activate", "yield_reversal", "time_zone_change", "repair", "sweep_gap", "threshold_change", "undo_decision",
+        "bulk_release", "undo_bulk_release",
+    ]
+
+    @Test("020-FR-001 the compaction scenarios cover every queued-command vector")
+    func compactionCoverage() throws {
+        let vectors = ReviewVectors.section(ReviewVectors.formulation, "transitions")
+        var covered = 0
+        for vector in vectors where try CompactionScenario(vector) != nil { covered += 1 }
+        let queued = vectors.filter { vector in
+            !Self.notQueued.contains(vector["event"]?["type"]?.string ?? "") && vector["expect"]?["error"] == nil
+                && vector["expect"]?["applied"]?.bool != false
+        }
+        #expect(covered == queued.count)
+        #expect(vectors.count == 65)
     }
 
     struct ClockFields: Hashable {
@@ -292,6 +330,9 @@ struct ReducerReviewTests {
     struct CompactionScenario {
         var settings: ReviewSettings
         var operations: [PendingOperation]
+        /// The queued creation starts the clock where the vector's did (no
+        /// activation clamp moves it).
+        var reproducesStart = false
 
         init?(_ vector: Vector) throws {
             let before = try #require(vector["before"])
@@ -324,6 +365,19 @@ struct ReducerReviewTests {
                 )
             }
             let newID = event["new_formulation_id"]?.string.map { FormulationID($0) }
+            if let started = ReviewVectors.instant(before["formulation_started_at"]) {
+                reproducesStart = settings.activatedAt.map { started > $0 } ?? true
+            }
+            if event["type"]?.string == "create_in_next" {
+                self.operations = [
+                    Review.op(
+                        .createTask(.init(taskID: "t1", title: event["title"]?.string ?? "Call Bob", list: .next, newFormulationID: newID)),
+                        at: now
+                    )
+                ]
+                reproducesStart = settings.activatedAt.map { now > $0 } ?? true
+                return
+            }
             let command: GTDCommand
             switch event["type"]?.string {
             case "update_title":

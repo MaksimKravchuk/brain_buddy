@@ -483,6 +483,8 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
     case extensionReasonRequired
     case extensionReasonTooLong
     case reviewNotFound
+    /// More items than one request takes (bulk release 500, park acknowledgements 200).
+    case tooManyItems
 
     public var message: String {
         switch self {
@@ -527,6 +529,7 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
         case .extensionReasonRequired: "Add a reason to continue."
         case .extensionReasonTooLong: "Keep the reason under \(GTDLimits.title) characters."
         case .reviewNotFound: "This review is no longer on this device."
+        case .tooManyItems: "That's more than can be saved at once. Try fewer tasks."
         }
     }
 }

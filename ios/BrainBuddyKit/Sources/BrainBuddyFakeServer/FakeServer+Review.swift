@@ -21,6 +21,8 @@ struct FakeReviewData: Sendable {
     var parkAcks: [String: FakeParkAck] = [:]
     var bulkReleases: [String: FakeBulkRelease] = [:]
     var consents: [String: NavigatorConsent] = [:]
+    /// The owner's last effective sweep (the 24 h gap rule).
+    var lastSweepAt: Date?
 }
 
 struct FakeDecision: Sendable {
@@ -137,8 +139,11 @@ extension FakeBrainBuddyServer {
         }
     }
 
-    /// One run of the exposure part of the maintenance sweep: parks every due
-    /// task of every activated owner whose flag is on.
+    /// One run of the exposure part of the maintenance sweep for every
+    /// activated owner whose flag is on (formulation-clock §3): after a gap of
+    /// 24 h or more since the owner's last effective run, every park is
+    /// floored for 7 days; a Next task without a clock is repaired with 14
+    /// days of grace; then every due task parks.
     @discardableResult
     public func runAutoParkSweep() -> Int {
         let date = FakeBrainBuddyServer.serverTime(now())
@@ -146,15 +151,38 @@ extension FakeBrainBuddyServer {
             var parked = 0
             for owner in state.owners.keys.sorted() where state.accounts[owner]?.weeklyReview == true {
                 guard var data = state.owners[owner], data.review.settings.activatedAt != nil else { continue }
-                for id in data.tasks.keys.sorted() {
-                    if var task = data.tasks[id], data.park(&task, now: date) {
-                        data.tasks[id] = task
-                        parked += 1
-                    }
+                if let last = data.review.lastSweepAt, date.timeIntervalSince(last) >= FakeBrainBuddyServer.sweepGap {
+                    let floored = FormulationRule.applySweepGap(data.clockSettings, now: date)
+                    data.review.settings.ownerParkFloorAt = floored.ownerParkFloorAt
                 }
+                for id in data.tasks.keys.sorted() {
+                    guard var task = data.tasks[id] else { continue }
+                    if task.state == .next, task.formulation == nil {
+                        let repairID = FormulationID(ClientID.derived("form", from: "repair|\(id)|\(task.revision)"))
+                        task.clocked = FormulationRule.repairClock(task.clocked, now: date, formulationID: repairID)
+                    }
+                    if data.park(&task, now: date) { parked += 1 }
+                    data.tasks[id] = task
+                }
+                data.review.lastSweepAt = date
                 state.owners[owner] = data
             }
             return parked
+        }
+    }
+
+    /// The gap after which a sweep floors every park (formulation-clock §3).
+    public static let sweepGap: TimeInterval = 86_400
+
+    /// Test hook: a Next task loses its clock, as an old client's save or a
+    /// rollback leaves it (the sweep repairs it).
+    public func dropClock(email: String, title: String) {
+        state.withLock { state in
+            guard let owner = state.accountIDsByEmail[email.lowercased()], var data = state.owners[owner],
+                let id = data.tasks.values.first(where: { $0.title == title })?.id
+            else { return }
+            data.tasks[id]?.formulation = nil
+            state.owners[owner] = data
         }
     }
 
@@ -216,6 +244,38 @@ extension OwnerData {
             parkedAt: now, fromRevision: marker.fromRevision ?? task.revision - 1
         )
         return true
+    }
+
+    /// E3 / FR-029 on the server's rows (as `ReviewRules.hasNothingToDecide`).
+    func hasNothingToDecide(_ step: ReviewStep, now: Date) -> Bool {
+        func hidden(_ task: TaskRow, _ kind: ReceiptKind) -> Bool {
+            guard let receipt = review.receipts["\(task.id)|\(kind.rawValue)"] else { return false }
+            return now < receipt.hiddenUntil && receipt.taskRevision == task.revision
+        }
+        switch step {
+        case .summary: return false
+        case .wins, .mindSweep, .restOfNext, .dates: return true
+        case .inbox: return !tasks.values.contains { $0.state == .inbox }
+        case .decisions:
+            return !tasks.values.contains { task in
+                task.state == .next && FormulationRule.classify(task.clocked, settings: clockSettings, now: now).asksForDecision
+            }
+        case .waiting:
+            return !tasks.values.contains { task in
+                guard task.state == .waiting, let since = task.waitingSince else { return false }
+                return now.timeIntervalSince(since) > ReviewRules.waitingAge && !hidden(task, .waiting)
+            }
+        case .someday:
+            return !tasks.values.contains { task in
+                guard task.state == .someday else { return false }
+                if let parked = task.parked, now.timeIntervalSince(parked.at) < ReviewRules.recentPark { return false }
+                return !hidden(task, .someday)
+            }
+        case .projects:
+            return !projects.values.contains { project in
+                project.state == .active && !tasks.values.contains { $0.projectID == project.id && $0.state == .next }
+            }
+        }
     }
 
     var unseenParks: [UnseenParkDTO] {
@@ -454,6 +514,10 @@ extension ServerState {
         let reason = try body.string("reason", max: 500).map(PythonText.strip)
         let sessionID = try body.reference("session_id", prefix: "review")
         let aiUse = try body.value("ai_use", as: AIUse.self) ?? AIUse.none
+        // The navigator's request id is the 36-character lowercase UUID it answered with.
+        if let request = try body.string("navigator_request_id"), !ClientID.isValid("n_" + request, prefix: "n") {
+            throw .validation(["body", "navigator_request_id"], "String should match pattern", type: "string_pattern_mismatch")
+        }
         let clientDecidedAt = try body.instant("client_decided_at")
         let newFormulationID = try body.clientID("new_formulation_id", prefix: "form")
         let followUpID = try body.clientID("follow_up_task_id", prefix: "task")
@@ -656,7 +720,13 @@ extension ServerState {
             throw .validation(["body", "threshold_days"], "Input should be 7, 14, 21 or 28", type: "literal_error")
         }
         let weekday = try body.optionalInt("review_weekday")
+        if let weekday, !(1...7).contains(weekday) {
+            throw .validation(["body", "review_weekday"], "Input should be between 1 and 7", type: "less_than_equal")
+        }
         let time = try body.string("review_time")
+        if let time, ReviewClock.wallTime(time) == nil {
+            throw .validation(["body", "review_time"], "String should match pattern", type: "string_pattern_mismatch")
+        }
         let zone = try body.string("time_zone", min: 1, max: 64)
         let onboarded = try body.bool("onboarded")
         let expected = try body.int("expected_revision", minimum: 1)
@@ -771,7 +841,8 @@ extension ServerState {
                 let status = step?["status"]?.stringValue.flatMap(StepStatus.init(rawValue:))
             {
                 session.steps[code] = (session.steps[code] ?? .pending).merged(with: status)
-                if status == .finished, code != .summary { session.qualifying = true }
+                // E3: a finished step qualifies only when it had nothing to decide.
+                if status == .finished, data.hasNothingToDecide(code, now: now) { session.qualifying = true }
             }
             if let code = active?["code"]?.stringValue.flatMap(ReviewStep.init(rawValue:)),
                 case .number(let seconds)? = active?["seconds"]

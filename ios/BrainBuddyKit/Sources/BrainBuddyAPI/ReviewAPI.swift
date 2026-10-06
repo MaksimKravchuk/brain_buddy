@@ -299,7 +299,8 @@ public struct NavigatorConsentGrantBody: Codable, Hashable, Sendable {
 
 public struct DecisionRecordDTO: Codable, Hashable, Sendable {
     public var id: String
-    public var type: DecisionType
+    /// Nil for a type this build does not know (`LenientDecoding`).
+    public var type: DecisionType?
     public var taskID: String
     public var sessionID: String?
     public var decidedAt: Date
@@ -309,7 +310,7 @@ public struct DecisionRecordDTO: Codable, Hashable, Sendable {
     public var yieldedAutoPark: Bool
 
     public init(
-        id: String, type: DecisionType, taskID: String, sessionID: String?, decidedAt: Date, substantive: Bool?,
+        id: String, type: DecisionType?, taskID: String, sessionID: String?, decidedAt: Date, substantive: Bool?,
         stallReason: StallReason?, aiUse: AIUse, yieldedAutoPark: Bool = false
     ) {
         self.id = id
@@ -336,13 +337,13 @@ public struct DecisionRecordDTO: Codable, Hashable, Sendable {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
-        type = try values.decode(DecisionType.self, forKey: .type)
+        type = try values.decodeCode(DecisionType.self, forKey: .type)
         taskID = try values.decode(String.self, forKey: .taskID)
         sessionID = try values.decodeIfPresent(String.self, forKey: .sessionID)
         decidedAt = try values.decode(Date.self, forKey: .decidedAt)
         substantive = try values.decodeIfPresent(Bool.self, forKey: .substantive)
-        stallReason = try values.decodeIfPresent(StallReason.self, forKey: .stallReason)
-        aiUse = try values.decode(AIUse.self, forKey: .aiUse)
+        stallReason = try values.decodeCode(StallReason.self, forKey: .stallReason)
+        aiUse = try values.decodeCode(AIUse.self, forKey: .aiUse) ?? AIUse.none
         yieldedAutoPark = try values.decodeIfPresent(Bool.self, forKey: .yieldedAutoPark) ?? false
     }
 }
@@ -390,6 +391,15 @@ public struct DecisionResponseDTO: Codable, Hashable, Sendable {
         case decision, task, receipt
         case createdTask = "created_task"
         case sessionCounts = "session_counts"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        decision = try values.decode(DecisionRecordDTO.self, forKey: .decision)
+        task = try values.decode(TaskDTO.self, forKey: .task)
+        createdTask = try values.decodeIfPresent(TaskDTO.self, forKey: .createdTask)
+        receipt = values.decodeLossy(ReceiptDTO.self, forKey: .receipt)
+        sessionCounts = try values.decodeIfPresent(SessionCounts.self, forKey: .sessionCounts)
     }
 }
 
@@ -493,6 +503,16 @@ public struct LastCountedReviewDTO: Codable, Hashable, Sendable {
         case endedAt = "ended_at"
         case clearStart = "clear_start"
     }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sessionID = try values.decode(String.self, forKey: .sessionID)
+        status = try values.decode(ReviewSessionStatus.self, forKey: .status)
+        origin = try values.decodeCode(ReviewOrigin.self, forKey: .origin) ?? .web
+        endedAt = try values.decodeIfPresent(Date.self, forKey: .endedAt)
+        counts = try values.decodeIfPresent(SessionCounts.self, forKey: .counts) ?? SessionCounts()
+        clearStart = try values.decodeCode(ClearStart.self, forKey: .clearStart)
+    }
 }
 
 public struct UnseenParkDTO: Codable, Hashable, Sendable {
@@ -583,6 +603,29 @@ public struct SessionDTO: Codable, Hashable, Sendable {
         case clearStart = "clear_start"
     }
 
+    /// Mode and status are required; an unknown entry reads as `list`
+    /// (metrics only), an unknown origin as `web` (another device), and
+    /// unknown steps or counters are dropped.
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        mode = try values.decode(ReviewMode.self, forKey: .mode)
+        entry = try values.decodeCode(ReviewEntry.self, forKey: .entry) ?? .list
+        origin = try values.decodeCode(ReviewOrigin.self, forKey: .origin) ?? .web
+        status = try values.decode(ReviewSessionStatus.self, forKey: .status)
+        startedAt = try values.decode(Date.self, forKey: .startedAt)
+        lastActivityAt = try values.decode(Date.self, forKey: .lastActivityAt)
+        endedAt = try values.decodeIfPresent(Date.self, forKey: .endedAt)
+        currentStep = try values.decodeCode(ReviewStep.self, forKey: .currentStep)
+        steps = try values.decodeCodeMap(.steps, keyedBy: ReviewStep.self, values: StepStatus.self)
+        activeSecondsByStep = try values.decodeCodeMap(.activeSecondsByStep, keyedBy: ReviewStep.self, values: Int.self)
+        counts = try values.decodeIfPresent(SessionCounts.self, forKey: .counts) ?? SessionCounts()
+        setAsideCount = try values.decodeIfPresent(Int.self, forKey: .setAsideCount) ?? 0
+        qualifyingActivity = try values.decodeIfPresent(Bool.self, forKey: .qualifyingActivity) ?? false
+        clearStart = try values.decodeCode(ClearStart.self, forKey: .clearStart)
+        revision = try values.decodeIfPresent(Int.self, forKey: .revision) ?? 1
+    }
+
     /// As the device keeps it; `local` keeps what only the device knows.
     public func session(keeping local: ReviewSession?) -> ReviewSession {
         ReviewSession(
@@ -640,6 +683,24 @@ public struct ReviewStateDTO: Codable, Hashable, Sendable {
         case openSession = "open_session"
         case unseenParks = "unseen_parks"
         case serverNow = "server_now"
+    }
+
+    /// An open session or summary this build cannot read is left out, as is
+    /// a receipt or park entry it cannot read; the rest of the state stands.
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        settings = try values.decode(ReviewSettingsDTO.self, forKey: .settings)
+        explainerSeen = try values.decodeIfPresent(Bool.self, forKey: .explainerSeen) ?? false
+        graceUntil = try values.decodeIfPresent(Date.self, forKey: .graceUntil)
+        lastCountedReviewAt = try values.decodeIfPresent(Date.self, forKey: .lastCountedReviewAt)
+        lastCountedReview = values.decodeLossy(LastCountedReviewDTO.self, forKey: .lastCountedReview)
+        nextReviewAt = try values.decode(Date.self, forKey: .nextReviewAt)
+        restartMode = try values.decodeIfPresent(Bool.self, forKey: .restartMode) ?? false
+        openSession = values.decodeLossy(SessionDTO.self, forKey: .openSession)
+        unseenParks = try values.decodeLossyList(UnseenParkDTO.self, forKey: .unseenParks)
+        counts = try values.decode(ReviewStateCountsDTO.self, forKey: .counts)
+        receipts = try values.decodeLossyList(ReceiptDTO.self, forKey: .receipts)
+        serverNow = try values.decode(Date.self, forKey: .serverNow)
     }
 }
 
@@ -780,6 +841,21 @@ public struct NavigatorSuggestionResponseDTO: Codable, Hashable, Sendable {
         case requestID = "request_id"
         case notesTruncated = "notes_truncated"
         case clarifyingQuestion = "clarifying_question"
+    }
+
+    /// Exactly one of `proposals` and `clarifying_question` (http §7).
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        requestID = try values.decode(String.self, forKey: .requestID)
+        provider = try values.decode(String.self, forKey: .provider)
+        notesTruncated = try values.decodeIfPresent(Bool.self, forKey: .notesTruncated) ?? false
+        proposals = try values.decodeIfPresent([String].self, forKey: .proposals)
+        clarifyingQuestion = try values.decodeIfPresent(String.self, forKey: .clarifyingQuestion)
+        guard (proposals == nil) != (clarifyingQuestion == nil) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .proposals, in: values, debugDescription: "Exactly one of proposals and clarifying_question."
+            )
+        }
     }
 }
 

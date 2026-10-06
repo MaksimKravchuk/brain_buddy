@@ -79,12 +79,16 @@ extension GTDReducer {
         guard var task = state.tasks[command.taskID] else { throw .taskNotFound }
         let settings = clockSettings(state)
         var yielded = false
+        /// The clock before the park is not on this device (another device or
+        /// the sweep parked the task): the server, which keeps it, decides.
+        var clockUnknown = false
         if command.type.decidesOnFormulation, task.state == .someday, let marker = task.parked,
             marker.formulationID == command.formulationID, date < marker.at
         {
             // The yield rule (http §3): a decision made before the park on the
             // parked formulation reverses it. The server decides on push; the
             // device shows the same outcome meanwhile.
+            clockUnknown = marker.clockBefore == nil
             var clock = marker.clockBefore ?? FormulationClock(id: marker.formulationID, startedAt: marker.at)
             clock.id = marker.formulationID
             task.state = .next
@@ -119,7 +123,9 @@ extension GTDReducer {
             )
             receipt = (.someday, .release)
         case .returnToNext:
-            let title = try FieldRules.title(command.title ?? task.title)
+            // http §3 requires `title`; an archived project is refused as for a follow-up.
+            let title = try FieldRules.title(command.title ?? "")
+            if let project = task.projectID, working.projects[project]?.state == .archived { throw .projectArchived }
             _ = try transitionTask(
                 .init(taskID: task.id, action: .move, toList: .next, newFormulationID: command.newFormulationID), at: date,
                 in: &working, mode: .interactive
@@ -151,13 +157,17 @@ extension GTDReducer {
             let reason = NameNormalizer.stripped(command.reason ?? "")
             guard !reason.isEmpty else { throw .extensionReasonRequired }
             guard FieldRules.length(reason) <= GTDLimits.title else { throw .extensionReasonTooLong }
-            do {
-                _ = try FormulationRule.extend(evaluationView(task, settings: settings), reason: reason, settings: settings, now: date)
-            } catch {
-                switch error {
-                case .decisionNotAllowed: throw .decisionNotAllowed
-                case .extensionAlreadyUsed: throw .extensionAlreadyUsed
-                case .extensionNotDue: throw .extensionNotDue
+            // A yield whose clock the device lacks skips the class checks:
+            // the server, which has the clock, accepts or refuses it.
+            if !clockUnknown {
+                do {
+                    _ = try FormulationRule.extend(evaluationView(task, settings: settings), reason: reason, settings: settings, now: date)
+                } catch {
+                    switch error {
+                    case .decisionNotAllowed: throw .decisionNotAllowed
+                    case .extensionAlreadyUsed: throw .extensionAlreadyUsed
+                    case .extensionNotDue: throw .extensionNotDue
+                    }
                 }
             }
             var updated = task
@@ -195,12 +205,24 @@ extension GTDReducer {
             )
         }
         guard let after = working.tasks[task.id] else { throw .taskNotFound }
+        var sessionBefore: DecisionUndo.SessionBefore?
+        if let sessionID = command.sessionID, var session = working.review.sessions[sessionID] {
+            let qualifiedBefore = session.qualifyingActivity
+            let activityBefore = session.lastActivityAt
+            session.counts[command.type.countsAs] += 1
+            session.qualifyingActivity = true
+            session.lastActivityAt = max(session.lastActivityAt, date)
+            working.review.sessions[sessionID] = session
+            sessionBefore = DecisionUndo.SessionBefore(
+                qualifyingActivity: qualifiedBefore, lastActivityAt: activityBefore, lastActivityAfter: session.lastActivityAt
+            )
+        }
         let undo =
             command.undoRetained
             ? DecisionUndo(
                 taskBefore: before, createdTaskID: createdTaskID,
                 createdTaskAfter: createdTaskID.flatMap { working.tasks[$0] }.map(TaskStamp.init),
-                receiptWritten: receipt?.kind, receiptReplaced: replaced
+                receiptWritten: receipt?.kind, receiptReplaced: replaced, sessionBefore: sessionBefore
             ) : nil
         working.review.decisions[command.decisionID] = ReviewDecision(
             id: command.decisionID, taskID: task.id, type: command.type, sessionID: command.sessionID, decidedAt: date,
@@ -208,12 +230,6 @@ extension GTDReducer {
             aiUse: command.aiUse, reasonText: reasonText, undo: undo, taskAfter: TaskStamp(after),
             yieldedAutoPark: yielded
         )
-        if let sessionID = command.sessionID, var session = working.review.sessions[sessionID] {
-            session.counts[command.type.countsAs] += 1
-            session.qualifyingActivity = true
-            session.lastActivityAt = max(session.lastActivityAt, date)
-            working.review.sessions[sessionID] = session
-        }
         state = working
         return .applied
     }
@@ -240,7 +256,10 @@ extension GTDReducer {
         restored.subtasks = task.subtasks
         restored.comments = task.comments
         restored.childrenSyncedAt = task.childrenSyncedAt
-        restored.updatedAt = date
+        // Field for field, `updatedAt` included: on this device an undone
+        // decision leaves the task as unchanged as a cancelled one, so later
+        // "changed since" checks (a release's Undo, a receipt) agree with
+        // compaction's cancel. The server's revision moves; its answer wins.
         working.tasks[task.id] = restored
         if let kind = undo.receiptWritten {
             working.review.removeReceipt(for: task.id, kind: kind)
@@ -248,6 +267,11 @@ extension GTDReducer {
         }
         if let sessionID = decision.sessionID, var session = working.review.sessions[sessionID] {
             session.counts[decision.type.countsAs] = max(0, session.counts[decision.type.countsAs] - 1)
+            // Nothing happened in the run since: it is as the decision found it.
+            if let before = undo.sessionBefore, session.lastActivityAt == before.lastActivityAfter {
+                session.qualifyingActivity = before.qualifyingActivity
+                session.lastActivityAt = before.lastActivityAt
+            }
             working.review.sessions[sessionID] = session
         }
         working.review.decisions[id] = nil
@@ -293,6 +317,7 @@ extension GTDReducer {
         _ command: GTDCommand.BulkRelease, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
         if state.review.bulkReleases[command.bulkID] != nil { return try satisfied(mode, else: .idAlreadyExists) }
+        guard command.taskIDs.count <= ReviewLimits.bulkReleaseItems else { throw .tooManyItems }
         let settings = clockSettings(state)
         var working = state
         var released: [BulkReleasedTask] = []
@@ -315,6 +340,7 @@ extension GTDReducer {
             changeList(of: &task, from: original, settings: settings, at: date, newFormulationID: nil)
             task.updatedAt = date
             working.tasks[id] = task
+            let replacedReceipt = working.review.receipt(for: id, kind: .someday)
             working.review.setReceipt(
                 ReviewReceipt(
                     taskID: id, kind: .someday, reviewedAt: date, hiddenUntil: date.addingTimeInterval(ReceiptKind.someday.hiddenFor),
@@ -324,7 +350,7 @@ extension GTDReducer {
             released.append(
                 BulkReleasedTask(
                     taskID: id, previousState: previous, clockBefore: command.undoRetained ? snapshot : nil,
-                    taskAfter: TaskStamp(task)
+                    taskAfter: TaskStamp(task), receiptReplaced: replacedReceipt
                 )
             )
         }
@@ -365,7 +391,9 @@ extension GTDReducer {
                 skipped.append(item.taskID)
                 continue
             }
-            if item.previousState == .next, item.clockBefore == nil { throw .undoUnavailable }
+            // A snapshot nulled by retention: the Undo is no longer available.
+            // A snapshot the device never had: the server restores the clock.
+            if item.previousState == .next, item.clockBefore == nil, item.clockKnown { throw .undoUnavailable }
             task.state = item.previousState.taskState
             task.parked = nil
             if let clock = item.clockBefore {
@@ -376,6 +404,7 @@ extension GTDReducer {
             working.tasks[item.taskID] = task
             if working.review.receipt(for: item.taskID, kind: .someday)?.bulkID == id {
                 working.review.removeReceipt(for: item.taskID, kind: .someday)
+                if let previous = item.receiptReplaced { working.review.setReceipt(previous) }
             }
             restored.append(item.taskID)
         }
@@ -402,6 +431,7 @@ extension GTDReducer {
             updateSettings(change, at: date, in: &state)
             return .applied
         case .acknowledgeParks(let items):
+            guard items.count <= ReviewLimits.parkAcknowledgements else { throw .tooManyItems }
             let new = items.filter { !state.review.parkAcks.contains($0) }
             guard !new.isEmpty else { return mode == .replay ? .alreadySatisfied : .applied }
             state.review.parkAcks += new
@@ -504,7 +534,9 @@ extension GTDReducer {
         if let step = progress.currentStep { session.currentStep = step }
         if let step = progress.step, let status = progress.stepStatus {
             session.steps[step] = (session.steps[step] ?? .pending).merged(with: status)
-            if status == .finished, step != .summary { session.qualifyingActivity = true }
+            if status == .finished, ReviewRules.hasNothingToDecide(step, in: state, now: date) {
+                session.qualifyingActivity = true
+            }
         }
         if let step = progress.activeStep, let seconds = progress.activeSeconds, seconds > 0 {
             session.activeSecondsByStep[step, default: 0] += seconds

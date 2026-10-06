@@ -146,8 +146,12 @@ public struct SessionCounts: Hashable, Sendable, Codable {
 
     public var total: Int { values.values.reduce(0, +) }
 
+    /// A counter this build does not know is dropped, not fatal.
     public init(from decoder: Decoder) throws {
-        self.init(try decoder.singleValueContainer().decode([SessionCounter: Int].self))
+        let raw = try decoder.singleValueContainer().decode([String: Int].self)
+        var values: [SessionCounter: Int] = [:]
+        for (name, count) in raw { if let counter = SessionCounter(rawValue: name) { values[counter] = count } }
+        self.init(values)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -343,16 +347,33 @@ public struct DecisionUndo: Hashable, Sendable, Codable {
     /// The receipt the decision wrote, and the one it replaced.
     public var receiptWritten: ReceiptKind?
     public var receiptReplaced: ReviewReceipt?
+    /// The run as the decision found it, so an Undo right after it takes the
+    /// decision's qualifying activity back too (as compaction's cancel does).
+    public var sessionBefore: SessionBefore?
+
+    public struct SessionBefore: Hashable, Sendable, Codable {
+        public var qualifyingActivity: Bool
+        public var lastActivityAt: Date
+        /// The run's `lastActivityAt` right after the decision.
+        public var lastActivityAfter: Date
+
+        public init(qualifyingActivity: Bool, lastActivityAt: Date, lastActivityAfter: Date) {
+            self.qualifyingActivity = qualifyingActivity
+            self.lastActivityAt = lastActivityAt
+            self.lastActivityAfter = lastActivityAfter
+        }
+    }
 
     public init(
         taskBefore: TaskRecord, createdTaskID: TaskID? = nil, createdTaskAfter: TaskStamp? = nil,
-        receiptWritten: ReceiptKind? = nil, receiptReplaced: ReviewReceipt? = nil
+        receiptWritten: ReceiptKind? = nil, receiptReplaced: ReviewReceipt? = nil, sessionBefore: SessionBefore? = nil
     ) {
         self.taskBefore = taskBefore
         self.createdTaskID = createdTaskID
         self.createdTaskAfter = createdTaskAfter
         self.receiptWritten = receiptWritten
         self.receiptReplaced = receiptReplaced
+        self.sessionBefore = sessionBefore
     }
 }
 
@@ -485,13 +506,44 @@ public struct BulkReleasedTask: Hashable, Sendable, Codable {
     /// Next tasks only; nulled 7 days after the release (R15).
     public var clockBefore: ReleasedClock?
     public var taskAfter: TaskStamp
+    /// False when the release is known only from the server's answer (the
+    /// device's replay found the task already released): the server keeps
+    /// the clock, and an Undo is left to it.
+    public var clockKnown: Bool
+    /// The Someday receipt the release replaced; its Undo puts it back.
+    public var receiptReplaced: ReviewReceipt?
 
-    public init(taskID: TaskID, previousState: OpenList, clockBefore: ReleasedClock?, taskAfter: TaskStamp) {
+    public init(
+        taskID: TaskID, previousState: OpenList, clockBefore: ReleasedClock?, taskAfter: TaskStamp, clockKnown: Bool = true,
+        receiptReplaced: ReviewReceipt? = nil
+    ) {
         self.taskID = taskID
         self.previousState = previousState
         self.clockBefore = clockBefore
         self.taskAfter = taskAfter
+        self.clockKnown = clockKnown
+        self.receiptReplaced = receiptReplaced
     }
+
+    enum CodingKeys: String, CodingKey {
+        case taskID, previousState, clockBefore, taskAfter, clockKnown, receiptReplaced
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        taskID = try values.decode(TaskID.self, forKey: .taskID)
+        previousState = try values.decode(OpenList.self, forKey: .previousState)
+        clockBefore = try values.decodeIfPresent(ReleasedClock.self, forKey: .clockBefore)
+        taskAfter = try values.decode(TaskStamp.self, forKey: .taskAfter)
+        clockKnown = try values.decodeIfPresent(Bool.self, forKey: .clockKnown) ?? true
+        receiptReplaced = try values.decodeIfPresent(ReviewReceipt.self, forKey: .receiptReplaced)
+    }
+}
+
+/// The most items one request takes (http §5, §6).
+public enum ReviewLimits {
+    public static let bulkReleaseItems = 500
+    public static let parkAcknowledgements = 200
 }
 
 public struct BulkSkippedTask: Hashable, Sendable, Codable {
@@ -840,6 +892,56 @@ public struct LocalReviewState: Hashable, Sendable, Codable {
         parkWarnings = try values.decodeIfPresent([TaskID: ParkWarning].self, forKey: .parkWarnings) ?? [:]
         parkBatchWaiting = try values.decodeIfPresent(Bool.self, forKey: .parkBatchWaiting) ?? false
         idleClosedSessions = try values.decodeIfPresent([ReviewSessionID].self, forKey: .idleClosedSessions) ?? []
+    }
+}
+
+/// The device copy's retention (data-model "Device-local retention", R15,
+/// contracts/ios-commands.md §5), signed in or not: content-bearing Undo and
+/// bulk-release clock snapshots are nulled 7 days after they were taken, and
+/// an ended run keeps no progress ids. Signed in, the server holds the
+/// history, so the device also drops decisions and bulk releases once their
+/// Undo is gone and ended runs after 35 days (`lastCountedReview` comes from
+/// the server then). Account-less, the store is the only copy: nothing but
+/// the snapshots is dropped.
+public enum ReviewRetention {
+    public static let snapshotWindow: TimeInterval = 7 * FormulationRule.day
+    public static let endedRunWindow: TimeInterval = 35 * FormulationRule.day
+
+    /// Whether `apply` would change `review`.
+    public static func isDue(_ review: ReviewState, now: Date, signedIn: Bool) -> Bool {
+        var copy = review
+        apply(to: &copy, now: now, signedIn: signedIn)
+        return copy != review
+    }
+
+    public static func apply(to review: inout ReviewState, now: Date, signedIn: Bool) {
+        let cutoff = now.addingTimeInterval(-snapshotWindow)
+        for (id, decision) in review.decisions where decision.decidedAt <= cutoff {
+            if signedIn {
+                review.decisions[id] = nil
+            } else if decision.undo != nil {
+                review.decisions[id]?.undo = nil
+            }
+        }
+        for (id, record) in review.bulkReleases where record.createdAt <= cutoff {
+            if signedIn {
+                review.bulkReleases[id] = nil
+            } else if record.released.contains(where: { $0.clockBefore != nil }) {
+                review.bulkReleases[id]?.released = record.released.map { item in
+                    var item = item
+                    item.clockBefore = nil
+                    return item
+                }
+            }
+        }
+        let runCutoff = now.addingTimeInterval(-endedRunWindow)
+        for (id, session) in review.sessions where session.status != .open {
+            if signedIn, (session.endedAt ?? session.lastActivityAt) <= runCutoff {
+                review.sessions[id] = nil
+            } else if !session.appliedProgress.isEmpty {
+                review.sessions[id]?.appliedProgress = []
+            }
+        }
     }
 }
 

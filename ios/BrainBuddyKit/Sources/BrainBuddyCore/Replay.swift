@@ -65,16 +65,34 @@ public enum OutboxReplayer {
         var pending = outbox
         var kept: [PendingOperation] = []
         var rejected: [RejectedOperation] = []
+        /// Decisions the replay could not apply, kept for the server to answer.
+        var unapplied = Set<DecisionID>()
         kept.reserveCapacity(pending.count)
         var index = pending.startIndex
         while index < pending.endIndex {
             let operation = pending[index]
             index += 1
             let command = GTDReducer.replayable(operation.command, in: state)
+            if case .undoDecision(let id) = command, unapplied.contains(id) {
+                // Its decision waits for the server's answer; so does the Undo.
+                kept.append(operation)
+                continue
+            }
             let outcome: ApplyOutcome
             do throws(GTDValidationError) {
                 outcome = try GTDReducer.apply(command, at: operation.issuedAt, to: &state, mode: .replay)
             } catch {
+                if case .decideTask(let decide) = operation.command {
+                    unapplied.insert(decide.decisionID)
+                    // Spec 020: a decision is never refused by the replay. It
+                    // may already be applied (an answer lost before a pull) or
+                    // yield to a park; the server answers it under the same
+                    // decision id (matching record, yield rule), and a real
+                    // conflict comes back as 409 with the "It's in <list> now"
+                    // copy and its Ref (ios-commands §4).
+                    kept.append(operation)
+                    continue
+                }
                 rejected.append(RejectedOperation(operation: operation, error: error))
                 continue
             }

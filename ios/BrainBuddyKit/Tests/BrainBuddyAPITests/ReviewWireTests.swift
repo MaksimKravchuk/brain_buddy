@@ -20,50 +20,157 @@ struct ReviewWireTests {
         var testDescription: String { "\(id) \(model)" }
     }
 
+    /// Every entry of the file; a malformed one stops the suite instead of
+    /// silently dropping out.
     static let entries: [Entry] = {
         guard let url = Bundle.module.url(forResource: "review_wire_fixtures", withExtension: "json", subdirectory: "Resources"),
             let data = try? Data(contentsOf: url),
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let entries = root["entries"] as? [[String: Any]]
         else { fatalError("Missing or unreadable test resource Resources/review_wire_fixtures.json") }
-        return entries.compactMap { entry in
+        return entries.map { entry in
             guard let id = entry["id"] as? String, let model = entry["model"] as? String,
                 let kind = entry["kind"] as? String, let valid = entry["valid"] as? Bool, let body = entry["body"],
                 let encoded = try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
-            else { return nil }
+            else { fatalError("Malformed wire fixture entry \(entry)") }
             let keys = (body as? [String: Any]).map { Set($0.filter { !($0.value is NSNull) }.keys) } ?? []
             return Entry(id: id, model: model, kind: kind, valid: valid, body: encoded, keys: keys)
         }
     }()
 
-    /// Response models the device decodes (the navigator's are PR-08's client,
-    /// decoded here too since the DTO exists).
+    /// Where each entry runs. Invalid request bodies run against the fake
+    /// server in `ReviewSyncTests.fakeServerRefusesInvalidBodies` (the device
+    /// never builds them); the navigator suggestion request belongs to the
+    /// PR-08 navigator client and has no body type here yet.
     static let responses = entries.filter { $0.kind == "response" && $0.valid && $0.model != "ErrorResponse" }
-    /// Request models the device sends (the navigator suggestion request is PR-08's).
+    static let errors = entries.filter { $0.model == "ErrorResponse" }
     static let requests = entries.filter { $0.kind == "request" && $0.valid && $0.model != "NavigatorSuggestionRequest" }
+    static let invalidResponses = entries.filter { $0.kind == "response" && !$0.valid }
+    static let invalidRequests = entries.filter { $0.kind == "request" && !$0.valid }
+    static let navigatorRequests = entries.filter { $0.model == "NavigatorSuggestionRequest" }
 
     private let decoder = BrainBuddyAPI.makeDecoder()
     private let encoder = BrainBuddyAPI.makeEncoder()
 
+    @Test("020-FR-011 every fixture entry is accounted for, exactly once")
+    func everyEntryRuns() {
+        #expect(Self.entries.count == 61)
+        let groups = [Self.responses, Self.errors, Self.requests, Self.invalidResponses, Self.invalidRequests]
+        var seen: [String] = groups.flatMap { $0.map(\.id) }
+        seen += Self.navigatorRequests.filter(\.valid).map(\.id)
+        #expect(seen.count == Set(seen).count, "no entry runs twice")
+        #expect(Set(seen) == Set(Self.entries.map(\.id)))
+        #expect(Set(Self.navigatorRequests.map(\.id)) == ["W-063", "W-064", "W-067", "W-R04", "W-R13"])
+        #expect(Set(Self.errors.map(\.id)) == ["W-070", "W-071"])
+        #expect(Set(Self.invalidResponses.map(\.id)) == ["W-R09", "W-R11"])
+    }
+
     // MARK: - Responses
 
-    @Test("020-FR-011 every valid response fixture decodes into its DTO", arguments: responses)
+    @Test("020-FR-011 every valid response fixture decodes into its DTO and re-encodes to the same fields", arguments: responses)
     func decodesResponse(_ entry: Entry) throws {
+        let encoded: Data
         switch entry.model {
-        case "TaskResponse": _ = try decoder.decode(TaskDTO.self, from: entry.body)
-        case "DecisionResponse": _ = try decoder.decode(DecisionResponseDTO.self, from: entry.body)
-        case "UndoDecisionResponse": _ = try decoder.decode(UndoDecisionResponseDTO.self, from: entry.body)
-        case "AutoParkResponse": _ = try decoder.decode(AutoParkResponseDTO.self, from: entry.body)
-        case "ReviewStateResponse": _ = try decoder.decode(ReviewStateDTO.self, from: entry.body)
-        case "ReviewSettingsResponse": _ = try decoder.decode(ReviewSettingsDTO.self, from: entry.body)
-        case "SessionResponse": _ = try decoder.decode(SessionDTO.self, from: entry.body)
-        case "QueueResponse": _ = try decoder.decode(QueueResponseDTO.self, from: entry.body)
-        case "BulkReleaseResponse": _ = try decoder.decode(BulkReleaseResponseDTO.self, from: entry.body)
-        case "BulkReleaseUndoResponse": _ = try decoder.decode(BulkReleaseUndoResponseDTO.self, from: entry.body)
-        case "NavigatorStatusResponse": _ = try decoder.decode(NavigatorStatusDTO.self, from: entry.body)
-        case "NavigatorSuggestionResponse": _ = try decoder.decode(NavigatorSuggestionResponseDTO.self, from: entry.body)
-        default: Issue.record("No DTO mapped for \(entry.model)")
+        case "TaskResponse": encoded = try encoder.encode(try decoder.decode(TaskDTO.self, from: entry.body))
+        case "DecisionResponse": encoded = try encoder.encode(try decoder.decode(DecisionResponseDTO.self, from: entry.body))
+        case "UndoDecisionResponse": encoded = try encoder.encode(try decoder.decode(UndoDecisionResponseDTO.self, from: entry.body))
+        case "AutoParkResponse": encoded = try encoder.encode(try decoder.decode(AutoParkResponseDTO.self, from: entry.body))
+        case "ReviewStateResponse": encoded = try encoder.encode(try decoder.decode(ReviewStateDTO.self, from: entry.body))
+        case "ReviewSettingsResponse": encoded = try encoder.encode(try decoder.decode(ReviewSettingsDTO.self, from: entry.body))
+        case "SessionResponse": encoded = try encoder.encode(try decoder.decode(SessionDTO.self, from: entry.body))
+        case "QueueResponse": encoded = try encoder.encode(try decoder.decode(QueueResponseDTO.self, from: entry.body))
+        case "BulkReleaseResponse": encoded = try encoder.encode(try decoder.decode(BulkReleaseResponseDTO.self, from: entry.body))
+        case "BulkReleaseUndoResponse": encoded = try encoder.encode(try decoder.decode(BulkReleaseUndoResponseDTO.self, from: entry.body))
+        case "NavigatorStatusResponse": encoded = try encoder.encode(try decoder.decode(NavigatorStatusDTO.self, from: entry.body))
+        case "NavigatorSuggestionResponse":
+            encoded = try encoder.encode(try decoder.decode(NavigatorSuggestionResponseDTO.self, from: entry.body))
+        default:
+            Issue.record("No DTO mapped for \(entry.model)")
+            return
         }
+        let expected = WireLeaves(try JSONSerialization.jsonObject(with: entry.body))
+        let actual = WireLeaves(try JSONSerialization.jsonObject(with: encoded))
+        for (path, value) in expected.values {
+            guard let decoded = actual.values[path] else {
+                // A zero counter is not kept (SessionCounts stores non-zero ones).
+                #expect(value == "0", "\(entry.id): \(path) = \(value) was dropped")
+                continue
+            }
+            #expect(WireLeaves.same(value, decoded), "\(entry.id): \(path) is \(decoded), expected \(value)")
+        }
+        #expect(Set(actual.values.keys).subtracting(expected.values.keys).isEmpty, "\(entry.id): fields the server never sent")
+    }
+
+    @Test("020-FR-011 invalid response bodies are not taken as valid")
+    func invalidResponses() throws {
+        // W-R11: exactly one of proposals and clarifying_question.
+        #expect(throws: (any Error).self) {
+            try decoder.decode(NavigatorSuggestionResponseDTO.self, from: Self.entry("W-R11").body)
+        }
+        // W-R09: set_aside_task_ids stays server-side; the device keeps only the count.
+        let session = try decoder.decode(SessionDTO.self, from: Self.entry("W-R09").body)
+        let keys = try #require(try JSONSerialization.jsonObject(with: encoder.encode(session)) as? [String: Any]).keys
+        #expect(!keys.contains("set_aside_task_ids"))
+    }
+
+    @Test("020-FR-045 a client id reused by another record (W-071) is a rejection with its Ref, not retried")
+    func idConflict() async throws {
+        let fixture = Self.entry("W-071")
+        let client = Fixture.client(
+            ScriptedTransport([.respond(HTTPResponse(statusCode: 409, headers: ["content-type": "application/json"], body: fixture.body))]),
+            store: Fixture.signedInStore()
+        )
+        let error = try #require(await expectAPIError { _ = try await client.session(id: "review_x") })
+        #expect(error.kind == .rejected)
+        #expect(error.reason == "id_conflict")
+        #expect(!error.isRetryable)
+        #expect(error.referenceID == "corr_8b1d4f6a2c9e")
+    }
+
+    @Test("020-FR-045 unknown values on the response side are tolerated, not fatal")
+    func lenientResponses() throws {
+        var state = try #require(try JSONSerialization.jsonObject(with: Self.entry("W-030").body) as? [String: Any])
+        var open = try #require(state["open_session"] as? [String: Any])
+        open["entry"] = "watch"
+        open["origin"] = "android"
+        open["current_step"] = "reflect"
+        var steps = try #require(open["steps"] as? [String: Any])
+        steps["reflect"] = "finished"
+        steps["inbox"] = "half_done"
+        open["steps"] = steps
+        var seconds = try #require(open["active_seconds_by_step"] as? [String: Any])
+        seconds["reflect"] = 5
+        open["active_seconds_by_step"] = seconds
+        var counts = try #require(open["counts"] as? [String: Any])
+        counts["celebrated"] = 2
+        open["counts"] = counts
+        state["open_session"] = open
+        var receipts = try #require(state["receipts"] as? [[String: Any]])
+        receipts.append(["task_id": "task_1a2b3c4d5e6f", "kind": "someday_plus", "hidden_until": "2026-10-12T10:00:00Z", "task_revision": 1])
+        state["receipts"] = receipts
+        var last = try #require(state["last_counted_review"] as? [String: Any])
+        last["status"] = "archived_by_admin"
+        state["last_counted_review"] = last
+
+        let decoded = try decoder.decode(ReviewStateDTO.self, from: JSONSerialization.data(withJSONObject: state))
+        let session = try #require(decoded.openSession)
+        #expect(session.currentStep == nil)
+        #expect(session.steps == [.wins: .finished, .decisions: .pending, .summary: .pending])
+        #expect(session.activeSecondsByStep[.wins] == 42 && session.activeSecondsByStep.count == 3)
+        #expect(session.counts[.firstStep] == 1 && session.counts.total == 1)
+        #expect(session.entry == .list, "an unknown entry (metrics only) reads as list")
+        #expect(session.origin == .web, "an unknown origin reads as another device")
+        #expect(decoded.receipts.map(\.taskID) == ["task_6d2f8b4a1c7e"], "an unknown receipt kind is dropped")
+        #expect(decoded.lastCountedReview == nil, "an unreadable summary is dropped, not fatal")
+
+        var response = try #require(try JSONSerialization.jsonObject(with: Self.entry("W-014").body) as? [String: Any])
+        var decision = try #require(response["decision"] as? [String: Any])
+        decision["type"] = "snooze"
+        decision["stall_reason"] = "bored"
+        decision["ai_use"] = "magic"
+        response["decision"] = decision
+        let answer = try decoder.decode(DecisionResponseDTO.self, from: JSONSerialization.data(withJSONObject: response))
+        #expect(answer.decision.type == nil && answer.decision.stallReason == nil && answer.decision.aiUse == AIUse.none)
     }
 
     @Test("020-FR-001 020-FR-012 TaskDTO carries the formulation and park marker, and decodes a body without them")
@@ -211,5 +318,35 @@ struct ReviewWireTests {
     static func entry(_ id: String) -> Entry {
         guard let entry = entries.first(where: { $0.id == id }) else { fatalError("No wire fixture \(id)") }
         return entry
+    }
+}
+
+/// The non-null leaves of a JSON value by path (`a.b`, `a[0].c`), as text.
+struct WireLeaves {
+    var values: [String: String] = [:]
+
+    init(_ value: Any) { collect(value, path: "") }
+
+    private mutating func collect(_ value: Any, path: String) {
+        switch value {
+        case is NSNull:
+            break
+        case let object as [String: Any]:
+            for (key, member) in object { collect(member, path: path.isEmpty ? key : "\(path).\(key)") }
+        case let array as [Any]:
+            for (index, item) in array.enumerated() { collect(item, path: "\(path)[\(index)]") }
+        case let number as NSNumber:
+            // Both sides go through JSONSerialization, so a Bool reads the same on each.
+            values[path] = number.stringValue
+        default:
+            values[path] = "\(value)"
+        }
+    }
+
+    /// Equal text, or the same instant written with another precision.
+    static func same(_ lhs: String, _ rhs: String) -> Bool {
+        if lhs == rhs { return true }
+        guard let left = WireDate.parse(lhs), let right = WireDate.parse(rhs) else { return false }
+        return left == right
     }
 }

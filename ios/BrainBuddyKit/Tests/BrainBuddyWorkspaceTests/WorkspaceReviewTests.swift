@@ -226,7 +226,7 @@ import Testing
         _ = try nextTask("Fresh", in: workspace)
         let session = try workspace.startReview(mode: .full, entry: .list)
         let decision = try workspace.decide(.someday, on: task, sessionID: session)
-        let bulk = try workspace.bulkRelease(.inboxRemainder, taskIDs: [inbox], sessionID: session)
+        let bulk = try #require(try workspace.bulkRelease(.inboxRemainder, taskIDs: [inbox], sessionID: session).first)
         _ = old
         #expect(workspace.state.review.decisions[decision]?.undo != nil)
         #expect(workspace.state.review.bulkReleases[bulk]?.released.first?.previousState == .inbox)
@@ -439,6 +439,137 @@ import Testing
         #expect(parked.allSatisfy { workspace.task($0)?.state == .someday })
         try workspace.dismissWhileAway()
         #expect(workspace.linkedExtensionNotices.isEmpty)
+    }
+
+    // MARK: - Review round on 3e0f799
+
+    @Test("020-FR-043 020-FR-052 local retention and idle close run while the review is hidden")
+    func retentionWithReviewHidden() async throws {
+        let store = InMemoryDocumentStore()
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(store: store, clock: clock)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        clock.advance(by: 15 * Self.day)
+        let session = try workspace.startReview(mode: .quick, entry: .list)
+        let decision = try workspace.decide(.someday, on: task, sessionID: session)
+        workspace.saveDraft("Order tiles", for: .projectNextAction("p1"))
+        await workspace.flush()
+
+        // The release switch is turned off; a week later the app starts.
+        clock.advance(by: 7 * Self.day + 60)
+        let hidden = await loadedWorkspace(store: store, clock: clock, ids: IDSequence(namespace: 2))
+        #expect(!hidden.reviewExposed)
+        await hidden.flush()
+        #expect(hidden.localReview.formDrafts.isEmpty, "drafts expire with the review hidden")
+        #expect(hidden.state.review.decisions[decision]?.undo == nil, "undo snapshots are nulled with the review hidden")
+        #expect(hidden.state.review.sessions[session]?.status == .partial, "idle runs close with the review hidden")
+        #expect(hidden.document.outbox.allSatisfy { if case .autoParkTask = $0.command { false } else { true } })
+    }
+
+    @Test("020-FR-015 020-FR-030 lists go out within the server limits: 200 park acknowledgements, 500 tasks per release")
+    func requestLimits() async throws {
+        var base = GTDState()
+        for n in 0..<201 {
+            var task = Fixture.serverTask(TaskID("p\(n)"), "Parked \(n)", state: .someday)
+            task.parked = ParkMarker(at: Fixture.epoch, formulationID: FormulationID.make(UUID()))
+            base.tasks[task.id] = task
+        }
+        for n in 0..<501 { base.tasks[TaskID("i\(n)")] = Fixture.serverTask(TaskID("i\(n)"), "Idea \(n)", state: .inbox) }
+        var document = StoreDocument(base: base)
+        document.generation = 1
+        let store = InMemoryDocumentStore(document: document)
+        let workspace = await loadedWorkspace(store: store)
+        workspace.accountlessReviewEnabled = true
+        #expect(workspace.unseenParks().count == 201)
+        try workspace.dismissWhileAway()
+        #expect(workspace.unseenParks().isEmpty)
+        let ids = try workspace.bulkRelease(.inboxRemainder, taskIDs: (0..<501).map { TaskID("i\($0)") })
+        #expect(ids.count == 2)
+        await workspace.flush()
+        let sizes = workspace.document.outbox.compactMap { operation -> Int? in
+            switch operation.command {
+            case .review(.acknowledgeParks(let items)): items.count
+            case .bulkRelease(let release): release.taskIDs.count
+            default: nil
+            }
+        }
+        #expect(sizes == [200, 1, 500, 1])
+        #expect((0..<501).allSatisfy { workspace.task(TaskID("i\($0)"))?.state == .someday })
+        try workspace.undoBulkRelease(ids)
+        #expect((0..<501).allSatisfy { workspace.task(TaskID("i\($0)"))?.state == .inbox })
+    }
+
+    @Test("020-FR-014 a failed linking step stops sign-in and leaves the device account-less and consistent")
+    func linkingFailureStopsSignIn() async throws {
+        let store = ControlledStore()
+        let sync = FakeSyncService(store: store)
+        let clock = TestClock()
+        let workspace = makeWorkspace(store: store, sync: sync, clock: clock)
+        await workspace.load()
+        workspace.accountlessReviewEnabled = true
+        workspace.deviceTimeZone = { Self.berlin }
+        try workspace.acknowledgeExplainer()
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        clock.advance(by: 20 * Self.day + 3_600)
+        #expect(workspace.applyDueAutoParks() == 0)
+        clock.advance(by: Self.day)
+        #expect(workspace.applyDueAutoParks() == 1)
+        await workspace.flush()
+        let before = try #require(try await store.load())
+
+        await store.failWrites(with: .io("disk full"))
+        await #expect(throws: WorkspaceError.self) {
+            try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "pw")
+        }
+        #expect(await sync.calls.allSatisfy { if case .signIn = $0 { false } else { true } }, "nothing is uploaded")
+        #expect(workspace.account == nil)
+        await store.failWrites(with: nil)
+        let after = try #require(try await store.load())
+        #expect(after.outbox == before.outbox, "the outbox is unchanged")
+        #expect(workspace.task(task)?.state == .someday)
+        #expect(workspace.state == workspace.replayedState)
+    }
+
+    @Test("020-FR-014 020-FR-040 linking a store migrated from v1: decisions on formulations the device derived are applied")
+    func linkingV1Store() async throws {
+        let world = World()
+        world.server.setWeeklyReview(email: World.email, enabled: true)
+        // A version 1 store: tasks created before spec 020 (no client formulation ids).
+        let old = await loadedWorkspace(clock: TestClock(world.clock.now()))
+        let waiting = try old.capture(CaptureDraft(text: "Get the quote", list: .next))
+        let reformulate = try old.capture(CaptureDraft(text: "Renovate the bathroom", list: .next))
+        await old.flush()
+        var object = try #require(
+            try JSONSerialization.jsonObject(with: StoreDocumentCoding.encode(old.document)) as? [String: Any]
+        )
+        object["version"] = 1
+        object["local"] = nil
+        var base = try #require(object["base"] as? [String: Any])
+        base["review"] = nil
+        object["base"] = base
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("store.json")
+        try JSONSerialization.data(withJSONObject: object).write(to: url)
+
+        let phone = await world.device(store: FileDocumentStore(fileURL: url))
+        let workspace = phone.workspace
+        #expect(workspace.loadError == nil)
+        workspace.accountlessReviewEnabled = true
+        workspace.deviceTimeZone = { Self.berlin }
+        try workspace.acknowledgeExplainer()
+        world.clock.advance(by: 15 * Self.day)
+        try workspace.decide(.waiting, on: waiting, waitingFor: "Ann")
+        try workspace.decide(.reformulate, on: reformulate, title: "Measure the bathroom wall")
+        await workspace.flush()
+
+        try await phone.signIn()
+        await workspace.syncNow()
+        #expect(workspace.issues.isEmpty, "\(workspace.issues.map(\.message))")
+        let server = world.snapshot.tasks.values
+        #expect(server.first { $0.title == "Get the quote" }?.state == .waiting)
+        #expect(server.first { $0.title == "Measure the bathroom wall" }?.state == .next)
+        #expect(world.server.reviewSnapshot(email: World.email).decisionIDs.count == 2)
     }
 }
 

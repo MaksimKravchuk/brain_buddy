@@ -57,6 +57,47 @@ public enum ReviewAccountLinking {
             return rewritten
         }
         for task in parkedTasks { converted.local.issuedAutoParks[task] = nil }
+        // Formulations the device derived (operations queued before the review
+        // was exposed, a store migrated from v1) are named, so the server
+        // starts the same ones and queued decisions on them apply.
+        converted.outbox = converted.outbox.map { operation in
+            operation.hasBeenSent ? operation : stampingDerivedFormulationID(operation)
+        }
         return converted
+    }
+
+    /// `operation` naming, where it starts a formulation without a client id,
+    /// the id the reducer derives for it (`GTDReducer.formulationID`), so
+    /// replay and server agree. Everything else is returned unchanged.
+    public static func stampingDerivedFormulationID(_ operation: PendingOperation) -> PendingOperation {
+        func derived(_ task: TaskID) -> FormulationID {
+            GTDReducer.formulationID(nil, task: task, at: operation.issuedAt)
+        }
+        var stamped = operation
+        switch operation.command {
+        case .createTask(var create) where create.list == .next && create.newFormulationID == nil:
+            create.newFormulationID = derived(create.taskID)
+            stamped.command = .createTask(create)
+        case .updateTask(var update) where update.changes.title.isChanged && update.newFormulationID == nil:
+            update.newFormulationID = derived(update.taskID)
+            stamped.command = .updateTask(update)
+        case .transitionTask(var transition)
+        where transition.toList == .next && (transition.action == .move || transition.action == .reopen)
+            && transition.newFormulationID == nil:
+            transition.newFormulationID = derived(transition.taskID)
+            stamped.command = .transitionTask(transition)
+        case .decideTask(var decide) where decide.newFormulationID == nil:
+            switch decide.type {
+            case .reformulate, .firstStep, .returnToNext: decide.newFormulationID = derived(decide.taskID)
+            case .followUp:
+                guard let followUp = decide.followUpTaskID else { return operation }
+                decide.newFormulationID = derived(followUp)
+            default: return operation
+            }
+            stamped.command = .decideTask(decide)
+        default:
+            return operation
+        }
+        return stamped
     }
 }

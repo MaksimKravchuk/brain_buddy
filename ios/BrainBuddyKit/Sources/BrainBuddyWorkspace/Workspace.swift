@@ -365,7 +365,7 @@ public final class Workspace {
         }
         // The engine uploads what is in the store, so everything must be there.
         await flush()
-        if account == nil { await convertLocalAutoParksForLinking() }
+        if account == nil { try await convertLocalAutoParksForLinking() }
         await installEventHandlerIfNeeded(sync)
         isSigningIn = true
         let linked: LinkedAccount

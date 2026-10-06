@@ -220,7 +220,11 @@ extension Workspace {
         let acks = unseenParks().compactMap { task in
             task.parked.map { ParkAck(taskID: task.id, formulationID: $0.formulationID, parkedAt: $0.at) }
         }
-        if !acks.isEmpty { try perform(.review(.acknowledgeParks(acks))) }
+        // At most 200 items per request (http §5).
+        let chunks = stride(from: 0, to: acks.count, by: ReviewLimits.parkAcknowledgements).map {
+            Array(acks[$0..<min($0 + ReviewLimits.parkAcknowledgements, acks.count)])
+        }
+        if !chunks.isEmpty { try perform(chunks.map { .review(.acknowledgeParks($0)) }) }
         let day = today
         edit { document in
             document.local.linkedExtensionNotices = []
@@ -261,17 +265,24 @@ extension Workspace {
 
     // MARK: - Bulk releases
 
+    /// Releases `taskIDs` in requests of at most 500 tasks (http §6), all or
+    /// nothing; returns one id per request, which `undoBulkRelease` takes back.
     @discardableResult
     public func bulkRelease(
         _ kind: BulkReleaseKindCode, taskIDs: [TaskID], sessionID: ReviewSessionID? = nil
-    ) throws(GTDValidationError) -> BulkID {
-        let id = BulkID.make(makeID())
-        try perform(.bulkRelease(.init(bulkID: id, kind: kind, sessionID: sessionID, taskIDs: taskIDs)))
-        return id
+    ) throws(GTDValidationError) -> [BulkID] {
+        let chunks = stride(from: 0, to: taskIDs.count, by: ReviewLimits.bulkReleaseItems).map {
+            Array(taskIDs[$0..<min($0 + ReviewLimits.bulkReleaseItems, taskIDs.count)])
+        }
+        let commands = chunks.map { chunk in
+            GTDCommand.BulkRelease(bulkID: BulkID.make(makeID()), kind: kind, sessionID: sessionID, taskIDs: chunk)
+        }
+        try perform(commands.map { .bulkRelease($0) })
+        return commands.map(\.bulkID)
     }
 
-    public func undoBulkRelease(_ id: BulkID) throws(GTDValidationError) {
-        try perform(.undoBulkRelease(id))
+    public func undoBulkRelease(_ ids: [BulkID]) throws(GTDValidationError) {
+        try perform(ids.map { .undoBulkRelease($0) })
     }
 
     // MARK: - Navigator consent (FR-024)
@@ -331,13 +342,31 @@ extension Workspace {
     /// A park follows at least this long a "Moves to Someday tomorrow" (SC-006).
     public nonisolated static let parkWarningLead: TimeInterval = 86_400
 
-    /// The zone, maintenance and auto-park steps, in that order; nothing
-    /// while the review is not exposed.
+    /// Local retention and the idle close always run (data-model local
+    /// retention, FR-043), whether or not the review is shown; the formulation
+    /// ids, the zone and auto-park only while it is exposed.
     public func runReviewUpkeep() {
-        guard isLoaded, loadError == nil, reviewExposed else { return }
-        sendDeviceTimeZoneIfChanged()
+        guard isLoaded, loadError == nil else { return }
         runLocalReviewMaintenance()
+        guard reviewExposed else { return }
+        stampUnsentFormulationIDs()
+        sendDeviceTimeZoneIfChanged()
         applyDueAutoParks()
+    }
+
+    /// Once the review is exposed, every unsent operation that starts a
+    /// formulation names the id the device derived for it, so the server
+    /// starts the same formulation and a queued decision on it is not
+    /// refused as stale (operations queued before exposure, a store migrated
+    /// from v1). Sent operations keep the body their key is bound to.
+    func stampUnsentFormulationIDs() {
+        let pending = (document.outbox + unpersisted).filter { !$0.hasBeenSent }
+        guard pending.contains(where: { ReviewAccountLinking.stampingDerivedFormulationID($0) != $0 }) else { return }
+        edit { document in
+            document.outbox = document.outbox.map { operation in
+                operation.hasBeenSent ? operation : ReviewAccountLinking.stampingDerivedFormulationID(operation)
+            }
+        }
     }
 
     /// Applies the parks that are due (ios-commands §5): never before
@@ -405,29 +434,21 @@ extension Workspace {
     public func runLocalReviewMaintenance() {
         let instant = now()
         let cutoff = instant.addingTimeInterval(-Self.localRetention)
+        let signedIn = account != nil
         let idle = ReviewSessionUpkeep.idleSessions(in: state, now: instant)
         let current = state
         let local = self.local
         let staleDrafts = local.formDrafts.filter { !Self.isLive($0.key, $0.value, in: current, now: instant) }.map(\.key)
-        let newIdle = idle.filter { !local.idleClosedSessions.contains($0) }
+        // Idle closes stay recorded while the replay still shows the run open.
+        let replayed = OutboxReplayer.replay(document.outbox + unpersisted, onto: document.base, activatedAt: local.activatedAt).state
+        let keptClosed = local.idleClosedSessions.filter { replayed.review.sessions[$0]?.status == .open }
+        let closed = keptClosed + idle.filter { !keptClosed.contains($0) }
         let expiresSnapshots =
-            document.base.review.decisions.values.contains { $0.undo != nil && $0.decidedAt <= cutoff }
-            || document.base.review.bulkReleases.values.contains { record in
-                record.createdAt <= cutoff && record.released.contains { $0.clockBefore != nil }
-            }
+            ReviewRetention.isDue(document.base.review, now: instant, signedIn: signedIn)
             || (document.outbox + unpersisted).contains { Self.retainsSnapshot($0, before: cutoff) }
-        guard expiresSnapshots || !staleDrafts.isEmpty || !newIdle.isEmpty else { return }
+        guard expiresSnapshots || !staleDrafts.isEmpty || closed != local.idleClosedSessions else { return }
         edit { document in
-            for (id, decision) in document.base.review.decisions where decision.undo != nil && decision.decidedAt <= cutoff {
-                document.base.review.decisions[id]?.undo = nil
-            }
-            for (id, record) in document.base.review.bulkReleases where record.createdAt <= cutoff {
-                document.base.review.bulkReleases[id]?.released = record.released.map { item in
-                    var item = item
-                    item.clockBefore = nil
-                    return item
-                }
-            }
+            ReviewRetention.apply(to: &document.base.review, now: instant, signedIn: signedIn)
             document.outbox = document.outbox.map { operation in
                 guard Self.retainsSnapshot(operation, before: cutoff) else { return operation }
                 var operation = operation
@@ -444,7 +465,7 @@ extension Workspace {
                 return operation
             }
             for key in staleDrafts { document.local.formDrafts[key] = nil }
-            document.local.idleClosedSessions += newIdle
+            document.local.idleClosedSessions = closed
         }
     }
 
@@ -462,24 +483,31 @@ extension Workspace {
     // MARK: - Account linking (ios-commands §7)
 
     /// Before an account-less store is uploaded: unsent local parks become
-    /// plain moves to Someday and unsent extensions are dropped and listed.
-    func convertLocalAutoParksForLinking() async {
-        let affected = (document.outbox + unpersisted).contains { operation in
+    /// plain moves to Someday, unsent extensions are dropped and listed, and
+    /// formulations the device derived are named. Runs when the review was
+    /// used on this device. A store that cannot be written stops the sign-in
+    /// (`WorkspaceError.storage`): uploading the unconverted outbox would send
+    /// parks the server answers `applied: false`.
+    func convertLocalAutoParksForLinking() async throws {
+        guard accountlessReviewEnabled || local.activatedAt != nil else { return }
+        let pending = document.outbox + unpersisted
+        let affected = pending.contains { operation in
             guard !operation.hasBeenSent else { return false }
             switch operation.command {
             case .autoParkTask: return true
-            case .decideTask(let decide): return decide.type == .extend
-            default: return false
+            case .decideTask(let decide) where decide.type == .extend: return true
+            default: return ReviewAccountLinking.stampingDerivedFormulationID(operation) != operation
             }
         }
         guard affected else { return }
         await flush()
+        if let storageError { throw WorkspaceError.storage(storageError) }
         do {
             _ = try await store.update { document in
                 document = ReviewAccountLinking.convertLocalAutoParks(document)
             }
         } catch {
-            return
+            throw WorkspaceError.storage(Self.storageMessage(for: error))
         }
         await refreshFromStore()
     }

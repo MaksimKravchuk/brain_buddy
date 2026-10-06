@@ -46,7 +46,7 @@ struct ReviewSyncTests {
         device.transport.clearFaults()
         let dropped = device.transport.exchanges.filter { $0.droppedResponse != nil }
         #expect(dropped.count == 1, "the server applied the request and its answer was lost")
-        #expect(dropped.first?.droppedResponse?.statusCode == 200)
+        #expect((200..<300).contains(dropped.first?.droppedResponse?.statusCode ?? 0))
         #expect(try await device.document().outbox.isEmpty == false, "the outcome is unknown: kept with its key")
     }
 
@@ -387,6 +387,284 @@ struct ReviewSyncTests {
         let after = try #require(harness.snapshot.task(titled: "Renovate the bathroom"))
         #expect(after.state == .next)
         #expect(after.formulation?.id == before.formulation?.id && after.formulation?.startedAt == before.formulation?.startedAt)
+    }
+
+    // MARK: - Pulls between a lost answer and its retry (review round on 3e0f799)
+
+    /// The answer to the matching request is lost, the device stays offline
+    /// for the rest of that cycle, then its next cycle meets one 503 on the
+    /// same route, so it pulls while the operation is still queued.
+    private func loseResponseThenPull(on device: Device, matching: @escaping FakeServerTransport.Matcher) async throws {
+        try await loseResponse(on: device, matching: matching)
+        device.transport.inject(.status(503), times: 1, matching: matching)
+        await device.sync()
+        device.transport.clearFaults()
+    }
+
+    @Test(
+        "020-FR-011 020-SC-007 a decision applied on the server, answer lost, then a pull: no sync issue, the decision is kept",
+        arguments: [DecisionType.someday, .complete, .reformulate]
+    )
+    func appliedDecisionThenPull(_ type: DecisionType) async throws {
+        let (harness, phone) = try await activated()
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        try await phone.review(.review(.startSession(StartSession(sessionID: Self.session(1), mode: .quick, entry: .list))))
+        await phone.sync()
+        harness.clock.advance(by: 15 * Self.day)
+        try await phone.review(
+            decide(
+                type, "t1", 1, formulation: Self.form(1), title: type == .reformulate ? "Call the tiler" : nil,
+                session: Self.session(1), newFormulation: type == .reformulate ? Self.form(2) : nil
+            )
+        )
+        try await loseResponseThenPull(on: phone, matching: FakeServerTransport.path("tasks/", method: .post))
+        harness.clock.advance(by: 60)
+        await phone.sync()
+
+        let document = try await phone.document()
+        #expect(document.issues.isEmpty, "the server applied the decision; no sync issue")
+        #expect(document.outbox.isEmpty)
+        #expect(harness.server.reviewSnapshot(email: SyncHarness.email).decisionIDs == [Self.decision(1).rawValue])
+        let decision = try #require(document.base.review.decisions[Self.decision(1)], "the decision record is kept")
+        #expect(decision.type == type && decision.sessionID == Self.session(1))
+        #expect(document.base.review.sessions[Self.session(1)]?.counts[type.countsAs] == 1)
+    }
+
+    @Test(
+        "020-FR-009 020-FR-012 an offline Keep 7 more days, then a server park, then sync (with and without a pull first)",
+        arguments: [false, true]
+    )
+    func extensionYieldsToServerPark(_ pullFirst: Bool) async throws {
+        let (harness, phone) = try await activated()
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        harness.clock.advance(by: 20 * Self.day)
+        try await phone.review(
+            .decideTask(.init(decisionID: Self.decision(1), taskID: "t1", type: .extend, formulationID: Self.form(1), reason: "Still right"))
+        )
+        harness.clock.advance(by: Self.day + 3_600)
+        #expect(harness.server.runAutoParkSweep() == 1)
+        if pullFirst {
+            phone.transport.inject(.status(503), times: 1, matching: FakeServerTransport.path("tasks/", method: .post))
+            await phone.sync()
+            phone.transport.clearFaults()
+            #expect(try await phone.document().issues.isEmpty, "the pulled park does not refuse the queued extension")
+            harness.clock.advance(by: 60)
+        }
+        await phone.sync()
+        let document = try await phone.document()
+        #expect(document.issues.isEmpty)
+        #expect(document.outbox.isEmpty)
+        let server = try #require(harness.snapshot.task(titled: "Renovate the bathroom"))
+        #expect(server.state == .next && server.formulation?.extendedAt != nil)
+        #expect(document.base.review.decisions[Self.decision(1)]?.yieldedAutoPark == true)
+    }
+
+    @Test("020-FR-017 a bulk release applied on the server, answer lost, then a pull: Undo still restores every task")
+    func bulkReleaseThenPull() async throws {
+        let (harness, phone) = try await activated()
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        harness.clock.advance(by: 29 * Self.day)
+        let before = try #require(harness.snapshot.task(titled: "Renovate the bathroom"))
+        try await phone.review(.bulkRelease(.init(bulkID: Self.bulk(1), kind: .restart, taskIDs: ["t1"])))
+        try await loseResponseThenPull(on: phone, matching: FakeServerTransport.path("review/bulk-releases", method: .post))
+        harness.clock.advance(by: 60)
+        await phone.sync()
+        var document = try await phone.document()
+        #expect(document.issues.isEmpty && document.outbox.isEmpty)
+        #expect(document.base.review.bulkReleases[Self.bulk(1)]?.released.map(\.taskID) == ["t1"], "taken from the server's answer")
+
+        try await phone.review(.undoBulkRelease(Self.bulk(1)))
+        await phone.sync()
+        document = try await phone.document()
+        #expect(document.issues.isEmpty && document.outbox.isEmpty)
+        let after = try #require(harness.snapshot.task(titled: "Renovate the bathroom"))
+        #expect(after.state == .next && after.formulation?.id == before.formulation?.id)
+        #expect(after.formulation?.startedAt == before.formulation?.startedAt)
+    }
+
+    @Test("020-FR-029 020-FR-045 a review start retried after the 24 h retention is a success; one review on the server")
+    func startSessionRetriedAfterRetention() async throws {
+        let (harness, phone) = try await activated()
+        try await phone.review(.review(.startSession(StartSession(sessionID: Self.session(1), mode: .quick, entry: .list))))
+        try await loseResponse(on: phone, matching: FakeServerTransport.path("review/sessions", method: .post))
+        harness.clock.advance(by: FakeBrainBuddyServer.idempotencyRetention + 3_600)
+        await phone.sync()
+        let document = try await phone.document()
+        #expect(document.issues.isEmpty && document.outbox.isEmpty)
+        let sessions = harness.server.reviewSnapshot(email: SyncHarness.email).sessions
+        #expect(Array(sessions.keys) == [Self.session(1).rawValue])
+        #expect(sessions[Self.session(1).rawValue]?.status == .open, "the retry replaced nothing")
+    }
+
+    @Test("020-FR-017 020-FR-045 a bulk release retried after the 24 h retention is a success, applied once")
+    func bulkReleaseRetriedAfterRetention() async throws {
+        let (harness, phone) = try await activated()
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        harness.clock.advance(by: 29 * Self.day)
+        try await phone.review(.bulkRelease(.init(bulkID: Self.bulk(1), kind: .restart, taskIDs: ["t1"])))
+        try await loseResponse(on: phone, matching: FakeServerTransport.path("review/bulk-releases", method: .post))
+        harness.clock.advance(by: FakeBrainBuddyServer.idempotencyRetention + 3_600)
+        await phone.sync()
+        let document = try await phone.document()
+        #expect(document.issues.isEmpty && document.outbox.isEmpty)
+        #expect(harness.server.reviewSnapshot(email: SyncHarness.email).bulkReleaseIDs == [Self.bulk(1).rawValue])
+        #expect(harness.snapshot.task(titled: "Renovate the bathroom")?.state == .someday)
+        #expect(document.base.review.bulkReleases[Self.bulk(1)]?.released.map(\.taskID) == ["t1"])
+    }
+
+    @Test("020-FR-011 a decision the server refuses is set aside with the M-03 copy naming where the task is, and its Ref")
+    func refusedDecisionCopy() async throws {
+        let (_, phone) = try await activated()
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        try await phone.review(decide(.someday, "t1", 1, formulation: Self.form(1)))
+        phone.transport.inject(.status(400), times: 1, matching: FakeServerTransport.path("tasks/", method: .post))
+        await phone.sync()
+        let issue = try #require(try await phone.document().issues.first)
+        #expect(issue.message == ReviewCopy.decisionNotSaved(.someday, title: "Renovate the bathroom", list: .next))
+        #expect(issue.referenceID != nil)
+    }
+
+    @Test("020-FR-048 an undo answered 404 for something other than the decision is not taken as success")
+    func undoNotFoundOtherResource() async throws {
+        let (harness, phone) = try await activated()
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        try await phone.review(decide(.someday, "t1", 1, formulation: Self.form(1)))
+        await phone.sync()
+        try await phone.review(.undoDecision(Self.decision(1)))
+        phone.transport.inject(.status(404), times: 1, matching: FakeServerTransport.path("review/decisions/", method: .post))
+        await phone.sync()
+        let document = try await phone.document()
+        #expect(document.issues.count == 1, "a 404 without the decision named is a real failure")
+        #expect(harness.snapshot.task(titled: "Renovate the bathroom")?.state == .someday)
+    }
+
+    // MARK: - The fake server against the golden invalid bodies (I4, I5)
+
+    /// The API test target's copy of the golden wire fixtures (PR-02), read
+    /// in place so no further copy is made.
+    static let invalidRequests: [(id: String, model: String, body: Data)] = {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("BrainBuddyAPITests/Resources/review_wire_fixtures.json")
+        guard let data = try? Data(contentsOf: url),
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let entries = root["entries"] as? [[String: Any]]
+        else { fatalError("Missing \(url.path)") }
+        return entries.compactMap { entry in
+            guard entry["valid"] as? Bool == false, entry["kind"] as? String == "request",
+                let id = entry["id"] as? String, let model = entry["model"] as? String, let body = entry["body"],
+                let encoded = try? JSONSerialization.data(withJSONObject: body)
+            else { return nil }
+            return (id, model, encoded)
+        }
+    }()
+
+    @Test("020-FR-045 the fake server refuses every invalid golden request body with 422, as the backend does")
+    func fakeServerRefusesInvalidBodies() async throws {
+        let (harness, phone) = try await activated()
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        let task = try #require(harness.snapshot.task(titled: "Renovate the bathroom")).id
+        try await phone.review(.review(.startSession(StartSession(sessionID: Self.session(1), mode: .quick, entry: .list))))
+        await phone.sync()
+        let navigator: Set = ["W-R04", "W-R13"]
+        #expect(
+            Set(Self.invalidRequests.map(\.id)) == ["W-R01", "W-R02", "W-R03", "W-R04", "W-R05", "W-R06", "W-R07", "W-R08", "W-R10", "W-R12", "W-R13", "W-R14", "W-R15"]
+        )
+        for entry in Self.invalidRequests where !navigator.contains(entry.id) {
+            let path: [String] =
+                switch entry.model {
+                case "DecisionRequest": ["tasks", task, "decisions"]
+                case "SessionProgressRequest": ["review", "sessions", Self.session(1).rawValue]
+                case "ReviewSettingsUpdateRequest": ["review", "settings"]
+                default: []
+                }
+            #expect(!path.isEmpty, "\(entry.id): no route for \(entry.model)")
+            let method: HTTPMethod =
+                switch entry.model {
+                case "SessionProgressRequest": .patch
+                case "ReviewSettingsUpdateRequest": .put
+                default: .post
+                }
+            let status = try await raw(phone, method, path, entry.body)
+            #expect(status == 422, "\(entry.id) \(entry.model)")
+        }
+    }
+
+    /// Sends `body` as the signed-in device, bypassing the client's own checks.
+    private func raw(_ device: Device, _ method: HTTPMethod, _ path: [String], _ body: Data) async throws -> Int {
+        let token = try #require(try device.tokens.token(for: FakeBrainBuddyServer.baseURL))
+        var url = FakeBrainBuddyServer.baseURL
+        for segment in path { url.appendPathComponent(segment) }
+        let request = HTTPRequest(
+            method: method, url: url,
+            headers: [
+                "Cookie": "\(BrainBuddyAPI.sessionCookieName)=\(token)", "Idempotency-Key": UUID().uuidString.lowercased(),
+                "Content-Type": "application/json",
+            ],
+            body: body
+        )
+        return try await device.transport.send(request).statusCode
+    }
+
+    @Test("020-FR-029 finishing a step qualifies the review only when the step had nothing to decide (E3), on the server too")
+    func qualifyingOnServer() async throws {
+        let (harness, phone) = try await activated()
+        try await phone.review(.createTask(.init(taskID: "i1", title: "Idea", list: .inbox)))
+        try await phone.review(.review(.startSession(StartSession(sessionID: Self.session(1), mode: .full, entry: .list))))
+        try await phone.review(
+            .review(.progressSession(SessionProgress(sessionID: Self.session(1), progressID: Self.progress(1), step: .inbox, stepStatus: .finished)))
+        )
+        await phone.sync()
+        var session = harness.server.reviewSnapshot(email: SyncHarness.email).sessions[Self.session(1).rawValue]
+        #expect(session?.qualifyingActivity == false, "the Inbox still had an item")
+        try await phone.review(
+            .review(.progressSession(SessionProgress(sessionID: Self.session(1), progressID: Self.progress(2), step: .wins, stepStatus: .finished)))
+        )
+        await phone.sync()
+        session = harness.server.reviewSnapshot(email: SyncHarness.email).sessions[Self.session(1).rawValue]
+        #expect(session?.qualifyingActivity == true)
+        #expect(try await phone.document().issues.isEmpty)
+    }
+
+    @Test("020-FR-035 the fake server range-checks the review day and time")
+    func fakeServerChecksWeekdayAndTime() async throws {
+        let (_, phone) = try await activated()
+        for body in [
+            #"{"review_weekday":8,"expected_revision":1}"#, #"{"review_weekday":0,"expected_revision":1}"#,
+            #"{"review_time":"25:00","expected_revision":1}"#, #"{"review_time":"9:5","expected_revision":1}"#,
+        ] {
+            #expect(try await raw(phone, .put, ["review", "settings"], Data(body.utf8)) == 422, "\(body)")
+        }
+    }
+
+    @Test("020-FR-012 the fake sweep floors parks after a gap of 24 h or more and repairs a missing clock")
+    func fakeSweepGapAndRepair() async throws {
+        let (harness, phone) = try await activated()
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        harness.clock.advance(by: Self.day)
+        #expect(harness.server.runAutoParkSweep() == 0)
+        // The sweep then does not run for 21 days: the gap floors every park
+        // for 7 days, so nothing parks at once.
+        harness.clock.advance(by: 21 * Self.day)
+        let gapAt = harness.clock.now()
+        #expect(harness.server.runAutoParkSweep() == 0, "a sweep gap of 24 h or more floors parks for 7 days")
+        #expect(harness.server.reviewSnapshot(email: SyncHarness.email).settings.ownerParkFloorAt == gapAt.addingTimeInterval(7 * Self.day))
+        var parked = 0
+        while harness.clock.now() < gapAt.addingTimeInterval(7 * Self.day + 3_600) {
+            harness.clock.advance(by: 12 * 3_600)
+            parked += harness.server.runAutoParkSweep()
+            if harness.clock.now() < gapAt.addingTimeInterval(7 * Self.day) {
+                #expect(parked == 0, "nothing parks before the floor")
+            }
+        }
+        #expect(parked == 1, "regular sweeps park once the floor passed")
+
+        // A Next task without a clock is repaired by the sweep, with 14 days of grace.
+        try await nextTask("Clean the gutter", id: "t2", form: 2, on: phone)
+        harness.server.dropClock(email: SyncHarness.email, title: "Clean the gutter")
+        harness.clock.advance(by: 3_600)
+        _ = harness.server.runAutoParkSweep()
+        let repaired = try #require(harness.snapshot.task(titled: "Clean the gutter")?.formulation)
+        #expect(repaired.parkFloorAt == harness.clock.now().addingTimeInterval(14 * Self.day))
     }
 
     // MARK: - Settings and consent (T151, T108)
