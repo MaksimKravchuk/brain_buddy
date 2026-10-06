@@ -161,7 +161,28 @@ extension StoreDocument {
             priority: dto.priority, waitingFor: dto.waitingFor, waitingSince: dto.waitingSince,
             completedAt: dto.completedAt, cancelledAt: dto.cancelledAt, orderKey: dto.orderKey,
             createdAt: dto.createdAt, updatedAt: dto.updatedAt, subtasks: existing?.subtasks ?? [],
-            comments: existing?.comments ?? [], childrenSyncedAt: existing?.childrenSyncedAt
+            comments: existing?.comments ?? [], childrenSyncedAt: existing?.childrenSyncedAt,
+            formulation: dto.formulation?.clock,
+            // The count is on the wire only with an open formulation; outside
+            // Next the device keeps what it knew (FR-005).
+            consecutiveStalledFormulations: dto.formulation?.consecutiveStalled
+                ?? existing?.consecutiveStalledFormulations ?? 0,
+            parked: dto.parked.map { park in
+                // The server keeps `clock_before`; a park this device made keeps
+                // its own, and a park made elsewhere of the formulation this
+                // device last saw in Next keeps that clock, so a decision made
+                // before the park can yield with the clock it was made on.
+                let local = existing?.parked.flatMap { $0.formulationID.rawValue == park.formulationID ? $0 : nil }
+                let seen = existing.flatMap { task in
+                    task.state == .next && task.formulation?.id.rawValue == park.formulationID ? task : nil
+                }
+                return ParkMarker(
+                    at: park.at, formulationID: FormulationID(park.formulationID),
+                    fromRevision: local?.fromRevision,
+                    clockBefore: local?.clockBefore ?? seen?.formulation,
+                    stalledBefore: local?.stalledBefore ?? seen?.consecutiveStalledFormulations ?? 0
+                )
+            }
         )
     }
 
@@ -257,9 +278,11 @@ extension StoreDocument {
 
     // MARK: - Acknowledgements
 
-    /// Writes a 2xx answer to `command` into the base. New records take the
+    /// Writes a 2xx answer to `operation` into the base. New records take the
     /// command's client id.
-    mutating func apply(_ record: ServerRecord, answering command: GTDCommand, now: Date) {
+    mutating func apply(_ record: ServerRecord, answering operation: PendingOperation, now: Date) {
+        if applyReview(record, answering: operation, now: now) { return }
+        let command = operation.command
         switch (command, record) {
         case (.createProject(let create), .project(let dto)):
             upsert(project: dto, as: create.projectID, now: now)
@@ -283,9 +306,196 @@ extension StoreDocument {
             upsert(tag: dto, now: now)
         case (_, .task(let dto)):
             upsert(task: dto, children: .keep, now: now)
-        case (_, .subtask), (_, .comment):
+        case (_, .subtask), (_, .comment), (_, .decision), (_, .undoneDecision), (_, .autoPark), (_, .reviewState),
+            (_, .reviewSettings), (_, .session), (_, .bulkRelease), (_, .bulkUndo), (_, .accepted):
             break
         }
+    }
+
+    // MARK: - Weekly review (spec 020)
+
+    /// The base task with this server id.
+    func baseTaskID(server id: String) -> TaskID? { base.tasks.values.first { $0.serverID == id }?.id }
+
+    /// Writes an acknowledged review command into the base: the command is
+    /// applied to the base (so it holds what was acknowledged, with the
+    /// device's own records such as an Undo snapshot), then the server's
+    /// answer overrides tasks, revisions and counts. Returns false for other
+    /// commands.
+    mutating func applyReview(_ record: ServerRecord, answering operation: PendingOperation, now: Date) -> Bool {
+        let command = operation.command
+        var scratch = base
+        _ = try? GTDReducer.apply(command, at: operation.issuedAt, to: &scratch, mode: .replay)
+        switch (command, record) {
+        case (.decideTask(let decide), .decision(let answer)):
+            base.review = scratch.review
+            upsert(task: answer.task, as: decide.taskID, children: .keep, now: now)
+            if let created = answer.createdTask, let followUp = decide.followUpTaskID {
+                upsert(task: created, as: followUp, children: .created(now), now: now)
+            }
+            guard let task = base.tasks[decide.taskID] else { return true }
+            if base.review.decisions[decide.decisionID] == nil {
+                // The base already reflected the decision (its answer was lost
+                // before a pull), so the replay could not record it: keep it as
+                // the server answered, without a local Undo snapshot.
+                base.review.decisions[decide.decisionID] = ReviewDecision(
+                    id: decide.decisionID, taskID: decide.taskID, type: decide.type,
+                    sessionID: answer.decision.sessionID.map { ReviewSessionID($0) }, decidedAt: operation.issuedAt,
+                    formulationID: decide.formulationID, stallReason: decide.stallReason,
+                    substantive: answer.decision.substantive, aiUse: decide.aiUse,
+                    reasonText: decide.type == .extend ? decide.reason : nil, undo: nil, taskAfter: TaskStamp(task),
+                    yieldedAutoPark: answer.decision.yieldedAutoPark, snapshotOnServer: true
+                )
+            }
+            guard var decision = base.review.decisions[decide.decisionID] else { return true }
+            decision.taskAfter = TaskStamp(task)
+            if let followUp = decide.followUpTaskID, let created = base.tasks[followUp] {
+                decision.undo?.createdTaskAfter = TaskStamp(created)
+            }
+            decision.substantive = answer.decision.substantive
+            decision.yieldedAutoPark = answer.decision.yieldedAutoPark
+            if answer.decision.sessionID == nil { decision.sessionID = nil }
+            base.review.decisions[decide.decisionID] = decision
+            if let receipt = answer.receipt {
+                base.review.setReceipt(
+                    ReviewReceipt(
+                        taskID: decide.taskID, kind: receipt.kind, reviewedAt: decision.decidedAt, hiddenUntil: receipt.hiddenUntil,
+                        source: decide.type == .someday ? .release : .keep, taskRevision: receipt.taskRevision,
+                        taskUpdatedAt: task.serverRevision == receipt.taskRevision ? task.updatedAt : nil,
+                        decisionID: decide.decisionID
+                    )
+                )
+            }
+            if let counts = answer.sessionCounts, let session = decision.sessionID {
+                base.review.sessions[session]?.counts = counts
+            }
+        case (.undoDecision(let id), .undoneDecision(let answer)):
+            let session = base.review.decisions[id]?.sessionID
+            base.review = scratch.review
+            base.review.decisions[id] = nil
+            upsert(task: answer.task, children: .keep, now: now)
+            if let deleted = answer.deletedTaskID, let local = baseTaskID(server: deleted) { base.tasks[local] = nil }
+            if let counts = answer.sessionCounts, let session { base.review.sessions[session]?.counts = counts }
+        case (.undoDecision(let id), .accepted):
+            // Already undone on the server (a retry whose first delivery
+            // applied): the goal holds; the next pull brings the task.
+            base.review = scratch.review
+            base.review.decisions[id] = nil
+        case (.autoParkTask(let park), .autoPark(let answer)):
+            upsert(task: answer.task, as: park.taskID, children: .keep, now: now)
+            if answer.applied { base.review.parkAcks.removeAll { $0.taskID == park.taskID } }
+        case (.review(.acknowledgeExplainer), .reviewState(let state)):
+            mergeReviewState(state, now: now)
+        case (.review(.updateSettings), .reviewSettings(let settings)):
+            base.review.settings = settings.settings
+        case (.review(.startSession(let start)), .session(let answer)):
+            base.review = scratch.review
+            base.review.sessions[start.sessionID] = answer.session(keeping: scratch.review.sessions[start.sessionID])
+        case (.review(.progressSession(let progress)), .session(let answer)):
+            let local = scratch.review.sessions[progress.sessionID]
+            base.review = scratch.review
+            var merged = answer.session(keeping: local)
+            merged.movedOnElsewhere = progress.currentStep != nil && answer.currentStep != progress.currentStep
+            base.review.sessions[progress.sessionID] = merged
+        case (.review(.finishSession(let finish)), .session(let answer)):
+            base.review = scratch.review
+            base.review.sessions[finish.sessionID] = answer.session(keeping: scratch.review.sessions[finish.sessionID])
+        case (.bulkRelease(let release), .bulkRelease(let answer)):
+            base.review = scratch.review
+            // The released set is the server's answer, not the replay's: a
+            // replay onto a base that already shows the release finds nothing
+            // eligible (an answer lost before a pull).
+            let replayed = base.review.bulkReleases[release.bulkID]
+            var record =
+                replayed
+                ?? BulkReleaseRecord(
+                    id: release.bulkID, kind: release.kind, sessionID: release.sessionID, createdAt: operation.issuedAt,
+                    released: [], skipped: []
+                )
+            let previous: OpenList = release.kind == .restart ? .next : .inbox
+            record.released = answer.released.compactMap { item in
+                guard let local = baseTaskID(server: item.taskID) else { return nil }
+                let stamp = TaskStamp(updatedAt: nil, serverRevision: item.revisionAfter)
+                if var known = replayed?.released.first(where: { $0.taskID == local }) {
+                    known.taskAfter = stamp
+                    return known
+                }
+                return BulkReleasedTask(
+                    taskID: local, previousState: previous, clockBefore: nil, taskAfter: stamp,
+                    clockKnown: previous != .next
+                )
+            }
+            record.skipped = answer.skipped.map { item in
+                BulkSkippedTask(taskID: baseTaskID(server: item.taskID) ?? TaskID(item.taskID), reason: item.reason)
+            }
+            base.review.bulkReleases[release.bulkID] = record
+        case (.undoBulkRelease, .bulkUndo):
+            base.review = scratch.review
+        case (.review, .accepted):
+            base.review = scratch.review
+        case (.decideTask, _), (.undoDecision, _), (.autoParkTask, _), (.bulkRelease, _), (.undoBulkRelease, _), (.review, _):
+            base.review = scratch.review
+        default:
+            return false
+        }
+        return true
+    }
+
+    /// `GET /review/state` into the base (and the clock offset into `local`):
+    /// settings, the counted-review facts, the open session, receipts, and
+    /// which parks were seen.
+    mutating func mergeReviewState(_ state: ReviewStateDTO, now: Date) {
+        var review = base.review
+        review.settings = state.settings.settings
+        // An open session this build cannot read is still open: only its id is used.
+        let openID = (state.openSession?.id ?? state.unreadableOpenSessionID).map { ReviewSessionID($0) }
+        for session in review.sessions.values where session.status == .open && session.id != openID {
+            // Finished or replaced on another device ("review ended elsewhere").
+            var ended = session
+            ended.status = ReviewSessionStatus.ended(by: .replace, qualifyingActivity: session.qualifyingActivity)
+            ended.endedElsewhere = true
+            review.sessions[session.id] = ended
+        }
+        if let open = state.openSession, let id = openID {
+            review.sessions[id] = open.session(keeping: review.sessions[id])
+        }
+        review.server = ReviewServerFacts(
+            exposed: true, lastCountedReviewAt: state.lastCountedReviewAt,
+            lastCountedReview: state.lastCountedReview.map {
+                LastCountedReview(
+                    sessionID: ReviewSessionID($0.sessionID), status: $0.status, origin: $0.origin, endedAt: $0.endedAt,
+                    counts: $0.counts, clearStart: $0.clearStart
+                )
+            },
+            nextReviewAt: state.nextReviewAt, restartMode: state.restartMode, openSessionID: openID, pulledAt: now
+        )
+        review.receipts = state.receipts.compactMap { receipt in
+            guard let id = baseTaskID(server: receipt.taskID), let task = base.tasks[id] else { return nil }
+            return ReviewReceipt(
+                taskID: id, kind: receipt.kind, reviewedAt: review.receipt(for: id, kind: receipt.kind)?.reviewedAt ?? now,
+                hiddenUntil: receipt.hiddenUntil, source: review.receipt(for: id, kind: receipt.kind)?.source ?? .keep,
+                taskRevision: receipt.taskRevision,
+                taskUpdatedAt: task.serverRevision == receipt.taskRevision ? task.updatedAt : nil
+            )
+        }
+        let unseen = Set(state.unseenParks.map { "\($0.taskID)|\($0.formulationID)" })
+        review.parkAcks = base.tasks.values.compactMap { task in
+            guard task.state == .someday, let marker = task.parked, let serverID = task.serverID,
+                !unseen.contains("\(serverID)|\(marker.formulationID.rawValue)")
+            else { return nil }
+            return ParkAck(taskID: task.id, formulationID: marker.formulationID, parkedAt: marker.at)
+        }
+        base.review = review
+        local.serverClockOffset = state.serverNow.timeIntervalSince(now)
+    }
+
+    /// A gated read answered `404 weekly_review_disabled` (or a server without
+    /// the review): hide the review, keep its state.
+    mutating func markReviewNotExposed(now: Date) {
+        var facts = base.review.server ?? ReviewServerFacts(exposed: false)
+        facts.exposed = false
+        facts.pulledAt = now
+        base.review.server = facts
     }
 
     // MARK: - Pulls
@@ -298,7 +508,8 @@ extension StoreDocument {
     static func pulledBase(
         from old: GTDState, tasks: [TaskDTO], projects: [ProjectDTO], tags: [TagDTO], now: Date
     ) -> GTDState {
-        var new = GTDState()
+        // The review state is pulled on its own (`mergeReviewState`).
+        var new = GTDState(review: old.review)
         var projectIDs: [String: ProjectID] = [:]
         for project in old.projects.values { if let sid = project.serverID { projectIDs[sid] = project.id } }
         var tagIDs: [String: TagID] = [:]
@@ -359,7 +570,7 @@ extension StoreDocument {
     mutating func rotateKeys(comparedTo old: GTDState) {
         for index in outbox.indices where outbox[index].hasBeenSent {
             let command = outbox[index].command
-            if command.expectedRevision(in: old) != command.expectedRevision(in: base) { outbox[index].rotateKey() }
+            if command.bodyRevisions(in: old) != command.bodyRevisions(in: base) { outbox[index].rotateKey() }
         }
     }
 
@@ -367,7 +578,7 @@ extension StoreDocument {
     /// merged creates rewrite later references, and rejected operations
     /// become sync issues.
     mutating func replayOutbox(now: Date) {
-        let result = OutboxReplayer.replay(outbox, onto: base)
+        let result = OutboxReplayer.replay(outbox, onto: base, activatedAt: local.activatedAt)
         outbox = result.outbox
         issues += result.rejected.map {
             SyncIssue(command: $0.operation.command, message: $0.error.message, occurredAt: now)

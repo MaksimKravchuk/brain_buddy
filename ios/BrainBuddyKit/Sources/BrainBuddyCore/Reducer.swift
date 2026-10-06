@@ -36,6 +36,12 @@ public enum GTDReducer {
         case .transitionSubtask(let transition): try transitionSubtask(transition, in: &state, mode: mode)
         case .createComment(let create): try createComment(create, at: date, in: &state, mode: mode)
         case .updateComment(let update): try updateComment(update, at: date, in: &state, mode: mode)
+        case .decideTask(let decide): try decideTask(decide, at: date, in: &state, mode: mode)
+        case .undoDecision(let id): try undoDecision(id, at: date, in: &state, mode: mode)
+        case .autoParkTask(let park): try autoParkTask(park, at: date, in: &state, mode: mode)
+        case .bulkRelease(let release): try bulkRelease(release, at: date, in: &state, mode: mode)
+        case .undoBulkRelease(let id): try undoBulkRelease(id, at: date, in: &state, mode: mode)
+        case .review(let command): try review(command, at: date, in: &state, mode: mode)
         }
     }
 
@@ -60,12 +66,17 @@ public enum GTDReducer {
         for task in state.tasks.values where task.state == taskState {
             maxOrderKey = max(maxOrderKey ?? task.orderKey, task.orderKey)
         }
-        state.tasks[command.taskID] = TaskRecord(
+        var task = TaskRecord(
             id: command.taskID, title: title, details: details, state: taskState,
             projectID: command.projectID, tagIDs: command.tagIDs, dueDate: command.dueDate,
             priority: command.priority, waitingFor: waitingFor, waitingSince: waitingFor == nil ? nil : date,
             orderKey: maxOrderKey.map { $0 + 1 } ?? 0, createdAt: date, updatedAt: date
         )
+        // A task created in Next starts its first formulation (spec 020, FR-001).
+        if taskState == .next {
+            startClock(&task, id: formulationID(command.newFormulationID, task: command.taskID, at: date), at: date)
+        }
+        state.tasks[command.taskID] = task
         return .applied
     }
 
@@ -123,6 +134,18 @@ public enum GTDReducer {
         case .set(let day): updated.dueDate = day
         }
         if updated == task { return try satisfied(mode, else: .nothingToChange) }
+        if task.state == .next {
+            // FR-001 / FR-002: a substantive title change closes the formulation
+            // and starts a new one; FR-046: a due-date change raises the floor.
+            if updated.title != task.title, FormulationKey.isSubstantive(from: task.title, to: updated.title) {
+                let settings = clockSettings(state)
+                closeClock(&updated, evaluating: task, settings: settings, at: date)
+                startClock(&updated, id: formulationID(command.newFormulationID, task: task.id, at: date), at: date)
+            }
+            if updated.dueDate != task.dueDate {
+                raiseClockFloor(&updated, to: date.addingTimeInterval(FormulationRule.dueDateFloor))
+            }
+        }
         updated.updatedAt = date
         state.tasks[command.taskID] = updated
         return .applied
@@ -134,6 +157,7 @@ public enum GTDReducer {
         _ command: GTDCommand.TransitionTask, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
         guard var task = state.tasks[command.taskID] else { throw .taskNotFound }
+        let original = task
         switch command.action {
         case .complete, .cancel:
             let terminal: TaskState = command.action == .complete ? .completed : .cancelled
@@ -159,6 +183,10 @@ public enum GTDReducer {
             }
             try enter(list, waitingFor: command.waitingFor, at: date, task: &task)
         }
+        changeList(
+            of: &task, from: original, settings: clockSettings(state), at: date,
+            newFormulationID: command.newFormulationID
+        )
         task.updatedAt = date
         state.tasks[command.taskID] = task
         return .applied

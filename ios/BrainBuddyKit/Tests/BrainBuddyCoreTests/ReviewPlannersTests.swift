@@ -1,0 +1,267 @@
+import BrainBuddyCore
+import Foundation
+import Testing
+
+/// The pure Core planners behind the app and widget (contracts/ios-commands.md
+/// §6; tasks.md T053, T087, T133, T151) and the flow-vector sections they own.
+@Suite("Review planners and copy (spec 020)")
+struct ReviewPlannersTests {
+    static let flow = ReviewVectors.flow
+
+    // MARK: Markers and copy (FR-004, FR-038, US5-6)
+
+    @Test("020-FR-004 020-FR-038 MarkerStyle never maps an age class to an error role; lists show only asks and moves tomorrow")
+    func markerStyle() {
+        for formulationClass in FormulationClass.allCases {
+            let style = MarkerStyle.for(formulationClass)
+            #expect(style.role != .destructive, "\(formulationClass) uses rose")
+            #expect(style.text.map(ReviewCopy.bannedTerms(in:)) ?? [] == [])
+        }
+        let listed = FormulationClass.allCases.filter { MarkerStyle.for($0).showsInLists }
+        #expect(Set(listed) == [.asks, .movesTomorrow, .parkDue])
+        #expect(MarkerStyle.for(.ageing).text == "Ageing" && !MarkerStyle.for(.ageing).showsInLists)
+        #expect(MarkerStyle.for(.parkDue).text == "Moves to Someday tomorrow", "until the park is applied")
+    }
+
+    @Test("020-FR-004 020-FR-038 every ReviewCopy entry is free of overdue and streak wording")
+    func copyHasNoBannedTerms() {
+        #expect(ReviewCopy.bannedTerms(in: "Three tasks are overdue") == ["overdue"], "the guard itself works")
+        #expect(ReviewCopy.bannedTerms(in: "Your 5-week streak!") == ["streak"])
+        #expect(ReviewCopy.bannedTerms(in: "It syncs later.").isEmpty, "whole words only")
+        let catalog = ReviewCopy.catalog
+        #expect(catalog.count > 80)
+        for entry in catalog {
+            #expect(ReviewCopy.bannedTerms(in: entry).isEmpty, "\(entry)")
+            #expect(!entry.isEmpty)
+        }
+    }
+
+    @Test("020-FR-037 020-FR-036 notification and widget strings come from ReviewCopy")
+    func notificationAndWidgetCopy() {
+        #expect(ReviewCopy.notificationTitle == "Weekly review")
+        #expect(ReviewCopy.notificationBody == "Your review time. The quick one takes about 5 minutes.")
+        #expect(ReviewCopy.widgetChip(3) == "3 ask ›")
+        #expect(ReviewCopy.widgetChipVoiceOver(3) == "3 tasks ask for a decision. Open the review's decision step")
+    }
+
+    // MARK: Decision card (FR-007, FR-047, FR-048)
+
+    @Test(
+        "020-FR-007 a stall reason recommends one decision; no reason recommends none",
+        arguments: ReviewVectors.section(flow, "stall_recommendation")
+    )
+    func stallRecommendation(_ vector: Vector) {
+        let reason = vector["stall_reason"]?.string.flatMap(StallReason.init(rawValue:))
+        #expect(StallReasonRecommendation.decision(for: reason)?.rawValue == vector["expect"]?.string)
+    }
+
+    @Test("020-FR-007 every decision stays enabled whatever the reason; clearing the reason clears the recommendation")
+    func recommendationNeverLimits() {
+        for reason in StallReason.allCases {
+            let recommended = StallReasonRecommendation.decision(for: reason)
+            #expect(recommended.map(StallReasonRecommendation.cardDecisions(extensionUsed: false).contains) == true)
+            #expect(StallReasonRecommendation.cardDecisions(extensionUsed: false).count == 7)
+        }
+        #expect(StallReasonRecommendation.decision(for: nil) == nil)
+        #expect(!StallReasonRecommendation.cardDecisions(extensionUsed: true).contains(.extend), "FR-009")
+    }
+
+    @Test("020-FR-048 the Undo window is about 5 s, at least 10 s with VoiceOver or Switch Control")
+    func undoWindow() {
+        #expect(UndoWindowPolicy.duration(voiceOver: false, switchControl: false) == 5)
+        #expect(UndoWindowPolicy.duration(voiceOver: true, switchControl: false) >= 10)
+        #expect(UndoWindowPolicy.duration(voiceOver: false, switchControl: true) >= 10)
+    }
+
+    @Test("020-FR-047 the decision card is a large sheet outside a review and full screen inside")
+    func cardPresentation() {
+        #expect(ReviewPresentation.decisionCard(inReview: false) == .largeSheet)
+        #expect(ReviewPresentation.decisionCard(inReview: true) == .fullScreen)
+    }
+
+    // MARK: While you were away (FR-015)
+
+    @Test(
+        "020-FR-015 at app open at most once a calendar day; always first in a review",
+        arguments: ReviewVectors.section(flow, "while_away")
+    )
+    func whileAway(_ vector: Vector) throws {
+        let context = try #require(vector["context"]?.string.flatMap(WhileAwayPresentation.Context.init(rawValue:)))
+        let shown = WhileAwayPresentation.shouldShow(
+            context: context, hasUnseen: vector["has_unseen"]?.bool ?? false, lastShownDay: ReviewVectors.day(vector["last_shown_day"]),
+            today: try #require(ReviewVectors.day(vector["today"]))
+        )
+        #expect(shown == vector["expect"]?.bool)
+    }
+
+    @Test("020-FR-015 dismissed today → not again today, shown tomorrow")
+    func whileAwayOncePerDay() {
+        let today = CalendarDay(year: 2026, month: 10, day: 9)!
+        #expect(WhileAwayPresentation.shouldShowAtAppOpen(lastShownDay: nil, today: today, hasUnseen: true))
+        #expect(!WhileAwayPresentation.shouldShowAtAppOpen(lastShownDay: today, today: today, hasUnseen: true))
+        #expect(WhileAwayPresentation.shouldShowAtAppOpen(lastShownDay: today, today: today.adding(days: 1), hasUnseen: true))
+        #expect(WhileAwayPresentation.shouldShow(context: .reviewStart, hasUnseen: true, lastShownDay: today, today: today))
+    }
+
+    // MARK: Active time (SC-004)
+
+    @Test(
+        "020-SC-004 active seconds per step: idle gaps over 2 minutes and background count 0",
+        arguments: ReviewVectors.section(flow, "active_time")
+    )
+    func activeTime(_ vector: Vector) throws {
+        var accumulator = ActiveTimeAccumulator()
+        for event in vector["events"]?.array ?? [] {
+            let at = try #require(ReviewVectors.instant(event["at"]))
+            let step = event["step"]?.string.flatMap(ReviewStep.init(rawValue:))
+            let kind: ActiveTimeAccumulator.Event
+            switch event["kind"]?.string {
+            case "enter_step": kind = .enterStep(try #require(step))
+            case "resume": kind = .resume(try #require(step))
+            case "interaction": kind = .interaction
+            case "background": kind = .background
+            case "foreground": kind = .foreground
+            case "leave": kind = .leave
+            case let other:
+                Issue.record("unknown active-time event \(other ?? "nil")")
+                return
+            }
+            accumulator.record(kind, at: at)
+        }
+        let expected = (vector["expect"]?.object ?? [:]).reduce(into: [ReviewStep: Int]()) { result, entry in
+            if let step = ReviewStep(rawValue: entry.key) { result[step] = entry.value.int }
+        }
+        #expect(accumulator.secondsByStep == expected)
+    }
+
+    // MARK: Layout (FR-033, design "Mobile viability")
+
+    @Test("020-FR-033 one summary column and a scrolling step bar exactly at accessibility sizes")
+    func layout() {
+        #expect(ReviewLayout.summaryColumns(isAccessibilitySize: true) == 1)
+        #expect(ReviewLayout.summaryColumns(isAccessibilitySize: false) == 2)
+        #expect(ReviewLayout.stepBarScrolls(isAccessibilitySize: true))
+        #expect(!ReviewLayout.stepBarScrolls(isAccessibilitySize: false))
+    }
+
+    // MARK: Schedule (FR-036)
+
+    @Test(
+        "020-FR-036 the weekly slot in the zone, skipped after a review in the 6 days before (gap and fold included)",
+        arguments: ReviewVectors.section(flow, "next_review")
+    )
+    func nextReview(_ vector: Vector) throws {
+        let raw = try #require(vector["settings"])
+        let zone = try #require(raw["time_zone"]?.string.flatMap(TimeZone.init(identifier:)))
+        let settings = ReviewSettings(reviewWeekday: raw["review_weekday"]?.int ?? 5, reviewTime: raw["review_time"]?.string ?? "")
+        let fire = ReviewReminderPlanner.nextFireDate(
+            settings: settings, lastCountedReview: ReviewVectors.instant(vector["last_counted_review_at"]),
+            now: try #require(ReviewVectors.instant(vector["now"])), timeZone: zone
+        )
+        #expect(ReviewVectors.iso(fire) == vector["expect"])
+    }
+
+    @Test("020-FR-036 two zones: the planner fires at Friday 16:00 where the device is, ignoring the stored zone")
+    func reminderFollowsTheDevice() throws {
+        let stored = ReviewSettings(reviewWeekday: 5, reviewTime: "16:00", timeZone: "Europe/Berlin")
+        let now = Review.instant("2026-10-07T12:00:00Z")
+        let newYork = try #require(TimeZone(identifier: "America/New_York"))
+        let berlin = try #require(TimeZone(identifier: "Europe/Berlin"))
+        let inNewYork = ReviewReminderPlanner.nextFireDate(settings: stored, lastCountedReview: nil, now: now, timeZone: newYork)
+        #expect(inNewYork == Review.instant("2026-10-09T20:00:00Z"), "Friday 16:00 New York time")
+        let inBerlin = ReviewReminderPlanner.nextFireDate(settings: stored, lastCountedReview: nil, now: now, timeZone: berlin)
+        #expect(inBerlin == Review.instant("2026-10-09T14:00:00Z"), "equals the server's next_review_at in the stored zone")
+        var otherZone = stored
+        otherZone.timeZone = "Asia/Tokyo"
+        #expect(ReviewReminderPlanner.nextFireDate(settings: otherZone, lastCountedReview: nil, now: now, timeZone: newYork) == inNewYork)
+    }
+
+    @Test("020-FR-036 a counted review in the 6 days before skips the slot; a review done without any step does not")
+    func reminderSkipsAfterACountedReview() throws {
+        let settings = ReviewSettings(reviewWeekday: 5, reviewTime: "16:00")
+        let utc = try #require(TimeZone(identifier: "UTC"))
+        let now = Review.instant("2026-10-07T12:00:00Z")
+        var sessions = [
+            ReviewSession(
+                id: Review.session(1), mode: .quick, entry: .list, origin: .web, status: .completedEmpty,
+                startedAt: Review.instant("2026-10-06T10:00:00Z"), endedAt: Review.instant("2026-10-06T10:05:00Z")
+            )
+        ]
+        let notCounted = ReviewReminderPlanner.nextFireDate(
+            settings: settings, lastCountedReview: ReviewSession.lastCountedReviewAt(sessions), now: now, timeZone: utc
+        )
+        #expect(notCounted == Review.instant("2026-10-09T16:00:00Z"))
+        sessions[0].status = .completed
+        let counted = ReviewReminderPlanner.nextFireDate(
+            settings: settings, lastCountedReview: ReviewSession.lastCountedReviewAt(sessions), now: now, timeZone: utc
+        )
+        #expect(counted == Review.instant("2026-10-16T16:00:00Z"))
+    }
+
+    @Test("020-FR-035 020-FR-046 DeviceZoneTracker: a change only when the device's own zone changed")
+    func deviceZone() throws {
+        let berlin = try #require(TimeZone(identifier: "Europe/Berlin"))
+        #expect(DeviceZoneTracker.change(lastObserved: "Europe/Berlin", current: berlin) == nil)
+        #expect(DeviceZoneTracker.change(lastObserved: "America/New_York", current: berlin)?.identifier == "Europe/Berlin")
+        #expect(DeviceZoneTracker.change(lastObserved: nil, current: berlin) == nil, "the first observation is recorded, not sent")
+    }
+
+    // MARK: Entry (FR-037)
+
+    @Test("020-FR-037 review routes: brainbuddy://review and brainbuddy://review/decisions")
+    func routes() throws {
+        #expect(ReviewRoute.parse(try #require(URL(string: "brainbuddy://review"))) == .review)
+        #expect(ReviewRoute.parse(try #require(URL(string: "brainbuddy://review/decisions"))) == .decisions)
+        #expect(ReviewRoute.parse(try #require(URL(string: "brainbuddy://review/other"))) == nil)
+        #expect(ReviewRoute.parse(try #require(URL(string: "brainbuddy://tasks/next"))) == nil)
+        #expect(ReviewRoute.parse(try #require(URL(string: "https://review/decisions"))) == nil)
+    }
+
+    @Test("020-FR-037 020-FR-027 the widget chip: explainer, onboarding, While you were away, restart before the decision step")
+    func entryOrder() {
+        let everything = ReviewEntryState(
+            explainerNeeded: true, onboarded: false, hasUnseenParks: true, restartMode: true, openSession: nil
+        )
+        #expect(
+            ReviewEntryPlanner.start(for: .widgetDecisions, state: everything)
+                == [.explainer, .onboarding, .whileAway, .restart, .quickReview(start: .decisions, skipping: [.wins, .inbox])]
+        )
+        let open = ReviewSession(
+            id: Review.session(1), mode: .full, entry: .list, origin: .web, startedAt: Review.now, currentStep: .waiting
+        )
+        let ready = ReviewEntryState(explainerNeeded: false, onboarded: true, hasUnseenParks: false, restartMode: false, openSession: open)
+        #expect(ReviewEntryPlanner.start(for: .widgetDecisions, state: ready) == [.resume(Review.session(1), step: .decisions)])
+        #expect(ReviewEntryPlanner.start(for: .list, state: ready) == [.resume(Review.session(1), step: .waiting)])
+        var fresh = ready
+        fresh.openSession = nil
+        #expect(ReviewEntryPlanner.start(for: .notification, state: fresh) == [.modePicker])
+    }
+
+    // MARK: Navigator proposals
+
+    @Test(
+        "020-FR-019 proposals equal to any open title of the project are dropped, sent or not",
+        arguments: ReviewVectors.section(flow, "duplicate_filter")
+    )
+    func duplicateFilter(_ vector: Vector) {
+        let kept = NavigatorProposalFilter.dropDuplicates(
+            vector["proposals"]?.array.compactMap(\.string) ?? [], currentTitle: vector["current_title"]?.string ?? "",
+            projectOpenTitles: vector["project_open_titles"]?.array.compactMap(\.string) ?? []
+        )
+        #expect(kept == vector["expect"]?.array.compactMap(\.string))
+    }
+
+    @Test("020-FR-028 every flow-vector section runs in Swift")
+    func everyFlowSectionRuns() {
+        let sections = Set(Self.flow.object.filter { if case .array = $0.value { true } else { false } }.keys)
+        #expect(Self.flow["schema"]?.string == "brainbuddy-review-flow-vectors/v1")
+        #expect(
+            sections == [
+                "steps", "wins", "capacity", "waiting_queue", "someday_queue", "restart", "session_status", "idle_close",
+                "qualifying_activity", "counted_review", "regularity", "next_review", "decision_queue",
+                "stall_recommendation", "active_time", "while_away", "duplicate_filter",
+            ]
+        )
+        #expect(sections.allSatisfy { !ReviewVectors.section(Self.flow, $0).isEmpty })
+    }
+}

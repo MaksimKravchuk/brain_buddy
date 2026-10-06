@@ -139,6 +139,19 @@ extension SyncIssuesScreen {
             return "Comment on \(taskPhrase(create.taskID, in: state))"
         case .updateComment(let update):
             return "Edit a comment on \(taskPhrase(update.taskID, in: state))"
+        case .decideTask(let decide):
+            return "Decide on \(taskPhrase(decide.taskID, in: state))"
+        case .undoDecision:
+            return "Undo a decision"
+        case .autoParkTask(let park):
+            return "Move \(taskPhrase(park.taskID, in: state)) to Someday / maybe"
+        case .bulkRelease(let release):
+            return release.taskIDs.count == 1
+                ? "Move 1 task to Someday / maybe" : "Move \(release.taskIDs.count) tasks to Someday / maybe"
+        case .undoBulkRelease:
+            return "Undo moving tasks to Someday / maybe"
+        case .review:
+            return "Save weekly review progress"
         }
     }
 

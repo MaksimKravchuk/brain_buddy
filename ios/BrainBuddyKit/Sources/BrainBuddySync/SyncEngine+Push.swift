@@ -30,7 +30,7 @@ extension SyncEngine {
             }
             let planned: PlannedRequest
             do {
-                planned = try PushPlanner.plan(operation.command, base: document.base)
+                planned = try PushPlanner.plan(operation, base: document.base)
             } catch {
                 try await setAside(operation, message: error.message, referenceID: nil, context)
                 summary.changed = true
@@ -109,7 +109,7 @@ extension SyncEngine {
                 doc.outbox.replaceSubrange(index...index, with: remainder)
             }
             let old = doc.base
-            doc.apply(record, answering: operation.command, now: date)
+            doc.apply(record, answering: operation, now: date)
             doc.sync.lastPushAt = date
             doc.sync.lastFailure = nil
             doc.rotateKeys(comparedTo: old)
@@ -128,10 +128,17 @@ extension SyncEngine {
         switch error.kind {
         case .unauthorized:
             throw error
-        case .network, .cancelled, .tokenStorage, .rateLimited:
-            // The outcome may be unknown: keep the operation and its key.
+        case .network, .cancelled, .tokenStorage, .rateLimited, .featureDisabled:
+            // The outcome may be unknown: keep the operation and its key. The
+            // weekly review switched off for the account is a back-off too
+            // (spec 020): its writes are never set aside or reverted.
             try? await noteFailure(error, of: operation, clearingClock: clearingClock, context)
             throw error
+        case .notFound where operation.command.isAlreadyUndone(error.kind):
+            // Already undone (a retry whose first delivery applied): the goal holds.
+            try await acknowledge(operation, with: .accepted, context)
+            summary.changed = true
+            summary.needsPull = true
         case .server where error.isRedirect:
             // A server or proxy misconfiguration: nothing processed the
             // request, so this says nothing about the operation. Keep it (and
@@ -144,7 +151,8 @@ extension SyncEngine {
             guard try await setAsideIfServerKeepsFailing(operation, error, context) else { throw error }
             summary.changed = true
         case .staleRevision where rounds <= 3:
-            summary.needsPull = try await refetch(after: operation, context) || summary.needsPull
+            summary.needsPull =
+                try await refetch(after: operation, referenceID: error.referenceID, context) || summary.needsPull
             summary.changed = true
         case .duplicateName where rounds <= 2 && operation.command.isNamedCreate:
             try await adoptExisting(for: operation, error, context)
@@ -164,7 +172,15 @@ extension SyncEngine {
             try await setAside(operation, message: error.message, referenceID: error.referenceID, context)
         default:
             // 400, 404, 422 and other 4xx, idempotency conflicts, and conflicts that keep coming back.
-            try await setAside(operation, message: error.message, referenceID: error.referenceID, context)
+            // A decision says where the task is now (design M-03 error rows).
+            let base = try await loadDocument().base
+            let message =
+                if case .decideTask(let decide) = operation.command, let task = base.tasks[decide.taskID] {
+                    ReviewCopy.decisionNotSaved(decide.type, title: task.title, list: task.state)
+                } else {
+                    error.message
+                }
+            try await setAside(operation, message: message, referenceID: error.referenceID, context)
             try await pull(context)
             summary.changed = true
         }
@@ -267,7 +283,9 @@ extension SyncEngine {
     /// operation whose goal now holds drops out), and give a surviving
     /// operation a new key, since its `expected_revision` changes. Returns
     /// whether a pull should follow (the record was archived or deleted).
-    private func refetch(after operation: PendingOperation, _ context: CycleContext) async throws -> Bool {
+    private func refetch(
+        after operation: PendingOperation, referenceID: String?, _ context: CycleContext
+    ) async throws -> Bool {
         let base = try await loadDocument().base
         let date = now()
         switch operation.command.conflictTarget {
@@ -285,6 +303,25 @@ extension SyncEngine {
                 references.write(into: &doc, now: date)
                 let old = doc.base
                 doc.upsert(task: task, children: .replace(date, known: known), now: date)
+                if let issue = Self.decisionIssue(for: operation, in: doc) {
+                    // The formulation decided on changed (and no yield applies):
+                    // set aside, naming the task's current list (ios-commands §4).
+                    doc.outbox.removeAll { $0.id == operation.id }
+                    doc.issues.append(
+                        SyncIssue(command: operation.command, message: issue, referenceID: referenceID, occurredAt: date)
+                    )
+                } else {
+                    Self.renewKey(of: operation, in: &doc)
+                }
+                doc.rotateKeys(comparedTo: old)
+                doc.replayOutbox(now: date)
+            }
+            return false
+        case .review?:
+            let state = try await context.client.reviewState()
+            try await update(context) { doc in
+                let old = doc.base
+                doc.mergeReviewState(state, now: date)
                 Self.renewKey(of: operation, in: &doc)
                 doc.rotateKeys(comparedTo: old)
                 doc.replayOutbox(now: date)
@@ -336,6 +373,25 @@ extension SyncEngine {
         try await setAside(operation, message: error.message, referenceID: error.referenceID, context)
         try await pull(context)
         return false
+    }
+
+    /// For a decision answered 409: the sync-issue copy when the formulation
+    /// it decided on is no longer the task's (as the queued operations before
+    /// it leave the task), unless the yield rule applies (the task is parked
+    /// for that formulation and the decision was made before the park, http
+    /// §3), in which case it is resent as is. Nil when it goes out again.
+    static func decisionIssue(for operation: PendingOperation, in doc: StoreDocument) -> String? {
+        guard case .decideTask(let decide) = operation.command, decide.type.decidesOnFormulation,
+            let index = doc.outbox.firstIndex(where: { $0.id == operation.id })
+        else { return nil }
+        let before = OutboxReplayer.replay(Array(doc.outbox[..<index]), onto: doc.base, activatedAt: doc.local.activatedAt)
+        guard let task = before.state.tasks[decide.taskID] else { return nil }
+        if task.state == .next, task.formulation?.id == decide.formulationID { return nil }
+        if let marker = task.parked, marker.formulationID == decide.formulationID {
+            if operation.issuedAt < marker.at { return nil }
+            return ReviewCopy.decisionNotSavedParked(title: task.title)
+        }
+        return ReviewCopy.decisionNotSaved(decide.type, title: task.title, list: task.state)
     }
 
     private static func renewKey(of operation: PendingOperation, in doc: inout StoreDocument) {
@@ -434,6 +490,19 @@ extension GTDCommand {
         case .createProject, .createTag: true
         default: false
         }
+    }
+
+    var isUndoDecision: Bool {
+        if case .undoDecision = self { true } else { false }
+    }
+
+    /// A 404 that names this Undo's decision: it is already undone (http §3).
+    /// A 404 for anything else (a route, a proxy) is a real failure.
+    func isAlreadyUndone(_ kind: APIError.Kind) -> Bool {
+        guard case .undoDecision(let id) = self, case .notFound(let resource, let identifier) = kind,
+            let resource, resource.lowercased().contains("decision")
+        else { return false }
+        return identifier == nil || identifier == id.rawValue
     }
 
     /// Task creates and edits, which replay keeps without references that
