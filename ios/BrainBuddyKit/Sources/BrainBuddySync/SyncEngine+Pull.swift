@@ -40,16 +40,46 @@ extension SyncEngine {
         for id in missingTags.sorted() {
             do { tags.append(try await client.getTag(id: id)) } catch { try Self.ignoreNotFound(error) }
         }
+        let review = try await pullReviewState(client)
         let date = now()
         let written = try await update(context) { [projects, tags] doc in
             let old = doc.base
             doc.base = StoreDocument.pulledBase(from: old, tasks: tasks, projects: projects, tags: tags, now: date)
+            switch review {
+            case .state(let state): doc.mergeReviewState(state, now: date)
+            case .notExposed: doc.markReviewNotExposed(now: date)
+            case .unavailable: break
+            }
             doc.rotateKeys(comparedTo: old)
             doc.replayOutbox(now: date)
             doc.sync.lastPullAt = date
             doc.sync.lastFailure = nil
         }
         lastSyncedAt = written.lastSyncedAt
+    }
+
+    enum ReviewPull: Sendable {
+        case state(ReviewStateDTO)
+        /// `404 weekly_review_disabled`, or a server without the review.
+        case notExposed
+        /// A server-side failure: the review state stays as it was.
+        case unavailable
+    }
+
+    /// `GET /review/state` after the task pull (spec 020, R16). Only the
+    /// network and the session stop the pull; the review being switched off
+    /// hides it while its local state is kept.
+    func pullReviewState(_ client: BrainBuddyAPIClient) async throws -> ReviewPull {
+        do {
+            return .state(try await client.reviewState())
+        } catch {
+            switch error.kind {
+            case .featureDisabled, .notFound: return .notExposed
+            case .network, .cancelled, .unauthorized, .tokenStorage: throw error
+            case .rateLimited, .staleRevision, .idempotencyConflict, .duplicateName, .rejected, .server, .decoding:
+                return .unavailable
+            }
+        }
     }
 
     static func ignoreNotFound(_ error: APIError) throws(APIError) {

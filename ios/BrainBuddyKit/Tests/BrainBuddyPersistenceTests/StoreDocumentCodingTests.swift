@@ -102,7 +102,7 @@ import Testing
         #expect(first == second)
         let text = try #require(String(data: first, encoding: .utf8))
         #expect(text.hasPrefix("{\"account\":"))
-        #expect(text.hasSuffix("\"version\":1}"))
+        #expect(text.hasSuffix("\"version\":2}"))
         #expect(text.contains("\"issuedAt\":\"2026-09-29T03:34:38.123456Z\""))
         #expect(text.contains("\"dueDate\":\"2026-10-02\""))
     }
@@ -125,9 +125,70 @@ import Testing
     }
 
     @Test func newerVersionsAreUnsupported() {
-        let data = Data(#"{"version":2,"generation":7,"shape":"from the future"}"#.utf8)
-        #expect(throws: DocumentStoreError.unsupportedVersion(2)) { try StoreDocumentCoding.decode(data) }
-        #expect(throws: DocumentStoreError.unsupportedVersion(2)) { try StoreDocumentCoding.generation(of: data) }
+        let data = Data(#"{"version":3,"generation":7,"shape":"from the future"}"#.utf8)
+        #expect(throws: DocumentStoreError.unsupportedVersion(3)) { try StoreDocumentCoding.decode(data) }
+        #expect(throws: DocumentStoreError.unsupportedVersion(3)) { try StoreDocumentCoding.generation(of: data) }
+    }
+
+    /// A version-1 store as an app before spec 020 wrote it: every stored
+    /// type, an outbox, issues, an account and sync metadata.
+    static let version1Store = #"""
+        {"account":{"displayName":"Sam","email":"sam@example.com","id":"user_1","linkedAt":"2026-09-25T00:13:20.500000Z","serverURL":"https:\/\/brain-buddy-frontend.fly.dev\/api"},"base":{"projects":{"project-1":{"color":"#0EA5E9","createdAt":"2026-09-25T00:13:20.500000Z","id":"project-1","name":"Home","serverID":"project_1","serverRevision":1,"state":"active"}},"tags":{"tag-1":{"createdAt":"2026-09-25T00:13:20.500000Z","id":"tag-1","name":"phone","state":"active"}},"tasks":{"task-1":{"childrenSyncedAt":"2026-09-25T00:13:20.500000Z","comments":[{"authorID":"user_1","body":"Left a message","createdAt":"2026-09-25T00:13:20.500000Z","id":"comment-1"}],"createdAt":"2026-09-25T00:13:20.500000Z","details":"Before Friday","dueDate":"2026-10-02","id":"task-1","orderKey":7,"priority":"high","projectID":"project-1","serverID":"task_1a2b3c4d5e6f","serverRevision":3,"state":"waiting","subtasks":[{"id":"subtask-1","orderKey":0,"state":"open","title":"Find the number"}],"tagIDs":["tag-1"],"title":"Call the plumber","updatedAt":"2026-09-26T03:46:40.000001Z","waitingFor":"Plumber","waitingSince":"2026-09-26T00:00:00.250000Z"},"task-2":{"comments":[],"createdAt":"2026-09-25T00:13:20.500000Z","id":"task-2","orderKey":0,"priority":"none","state":"next","subtasks":[],"tagIDs":[],"title":"Renovate the bathroom","updatedAt":"2026-09-25T00:13:20.500000Z"}}},"generation":4,"issues":[{"command":{"deleteTag":{"_0":"tag-1"}},"id":"6F0E1E0A-0B1C-4D2E-8F3A-4B5C6D7E8F90","message":"Not found","occurredAt":"2026-09-25T00:13:20.500000Z","referenceID":"ref-1"}],"outbox":[{"attempts":0,"command":{"createTask":{"_0":{"list":"next","priority":"none","tagIDs":[],"taskID":"task-3","title":"Call Bob"}}},"id":"0E7B8E3C-2C4A-4D6B-9F1E-3A5B7C9D1E2F","idempotencyKey":"00000000-0000-4000-8000-000000000091","issuedAt":"2026-09-29T03:34:38.123456Z"},{"attempts":2,"command":{"transitionTask":{"_0":{"action":"complete","taskID":"task-1"}}},"firstAttemptAt":"2026-09-25T00:13:20.500000Z","id":"7C8D9E0F-1A2B-4C3D-8E4F-5A6B7C8D9E0F","idempotencyKey":"00000000-0000-4000-8000-000000000092","issuedAt":"2026-09-29T03:34:38.123456Z","lastAttemptAt":"2026-09-29T03:34:38.123456Z","lastError":"timeout"}],"sync":{"lastPullAt":"2026-09-25T00:13:20.500000Z","lastPushAt":"2026-09-29T03:34:38.123456Z"},"version":1}
+        """#
+
+    @Test("020-FR-040 a version-1 store migrates to version 2 with empty review state and no data loss")
+    func version1MigratesToVersion2() throws {
+        let data = Data(Self.version1Store.utf8)
+        let migrated = try StoreDocumentCoding.decode(data)
+        #expect(migrated.version == 2)
+        #expect(migrated.base.review == .empty)
+        #expect(migrated.local == .empty)
+        #expect(migrated.local.activatedAt == nil)
+        #expect(migrated.local.formDrafts.isEmpty)
+        #expect(migrated.local.lastObservedTimeZone == nil)
+        #expect(migrated.local.linkedExtensionNotices.isEmpty)
+        // No data loss: every record, operation, issue and setting survives.
+        #expect(migrated.generation == 4)
+        #expect(migrated.account?.email == "sam@example.com")
+        #expect(migrated.base.tasks.count == 2 && migrated.base.projects.count == 1 && migrated.base.tags.count == 1)
+        let task = try #require(migrated.base.tasks["task-1"])
+        #expect(task.title == "Call the plumber" && task.serverRevision == 3 && task.waitingFor == "Plumber")
+        #expect(task.subtasks.map(\.title) == ["Find the number"] && task.comments.map(\.body) == ["Left a message"])
+        #expect(task.formulation == nil && task.consecutiveStalledFormulations == 0 && task.parked == nil)
+        #expect(migrated.outbox.count == 2 && migrated.outbox[1].lastError == "timeout")
+        guard case .createTask(let create) = migrated.outbox[0].command else {
+            Issue.record("the queued creation is gone")
+            return
+        }
+        #expect(create.title == "Call Bob" && create.newFormulationID == nil)
+        #expect(migrated.issues.map(\.message) == ["Not found"])
+        #expect(migrated.sync.lastPushAt != nil)
+        // Written again, it is a plain version-2 document that reads back the same.
+        #expect(try StoreDocumentCoding.decode(StoreDocumentCoding.encode(migrated)) == migrated)
+        // The migration step only adds what version 2 needs.
+        let step = try StoreDocumentCoding.migrate(data, fromVersion: 1)
+        let text = String(decoding: step, as: UTF8.self)
+        #expect(text.contains(#""version":2"#) && text.contains(#""local":{}"#) && text.contains(#""review":{}"#))
+    }
+
+    @Test("020-FR-040 review state and local state round-trip through the store format")
+    func reviewStateRoundTrips() throws {
+        var document = Fixtures.richDocument()
+        let started = Date(timeIntervalSinceReferenceDate: 812_000_000)
+        document.base.tasks["task-1"]?.formulation = FormulationClock(
+            id: "form_00000000-0000-4000-8000-000000000001", startedAt: started, extendedAt: started,
+            extensionReason: "Waiting for the quote", parkFloorAt: started
+        )
+        document.base.tasks["task-1"]?.consecutiveStalledFormulations = 2
+        document.base.review.settings = ReviewSettings(thresholdDays: 21, timeZone: "Europe/Berlin", activatedAt: started, revision: 3)
+        document.base.review.parkAcks = [ParkAck(taskID: "task-1", formulationID: "form_x", parkedAt: started)]
+        document.local = LocalReviewState(
+            activatedAt: started, explainerSeenLocally: true, issuedAutoParks: ["task-1": "form_x"],
+            formDrafts: [.decisionForm(.reformulate, task: "task-1", formulation: "form_x"): FormDraft(text: "Email Bob", savedAt: started)],
+            wywaLastShownDay: CalendarDay(year: 2026, month: 10, day: 9), serverClockOffset: -2.5,
+            lastObservedTimeZone: "Europe/Berlin", linkedExtensionNotices: ["task-1"]
+        )
+        #expect(try StoreDocumentCoding.decode(StoreDocumentCoding.encode(document)) == document)
     }
 
     @Test(arguments: ["", "not json", "[]", #"{"generation":1}"#, #"{"version":"1"}"#, #"{"version":1}"#, #"{"version":0}"#])

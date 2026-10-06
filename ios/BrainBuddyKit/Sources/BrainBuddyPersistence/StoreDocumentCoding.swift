@@ -116,7 +116,38 @@ public enum StoreDocumentCoding {
     /// goes up, for example `case 1: return try rewrite(data) { … }`.
     static func migrationStep(from version: Int, _ data: Data) throws(DocumentStoreError) -> Data {
         switch version {
+        case 1:
+            // Version 2 (spec 020): an empty `base.review` and `local`. Task
+            // clock fields are optional, so tasks pass through unchanged.
+            return try rewrite(data) { (document: inout [String: RawJSON]) throws(DocumentStoreError) in
+                guard case .object(var base) = document["base"] else { throw .unreadable("missing \"base\"") }
+                if base["review"] == nil { base["review"] = .object([:]) }
+                document["base"] = .object(base)
+                if document["local"] == nil { document["local"] = .object([:]) }
+                document["version"] = .integer(2)
+            }
         default: throw .unreadable("no migration from document version \(version)")
+        }
+    }
+
+    /// Rewrites the raw JSON object of a stored document.
+    static func rewrite(
+        _ data: Data, _ change: (inout [String: RawJSON]) throws(DocumentStoreError) -> Void
+    ) throws(DocumentStoreError) -> Data {
+        let decoded: RawJSON
+        do {
+            decoded = try JSONDecoder().decode(RawJSON.self, from: data)
+        } catch {
+            throw .unreadable(describe(error))
+        }
+        guard case .object(var document) = decoded else { throw .unreadable("the document is not a JSON object") }
+        try change(&document)
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            return try encoder.encode(RawJSON.object(document))
+        } catch {
+            throw .unreadable(describe(error))
         }
     }
 
@@ -182,6 +213,50 @@ public enum StoreDocumentCoding {
             return context.debugDescription + location(context.codingPath)
         default:
             return String(describing: error)
+        }
+    }
+}
+
+/// Any JSON value, for migration steps that rewrite a document without the
+/// Swift types of its version. Integers stay integers, so no value changes.
+enum RawJSON: Hashable, Sendable, Codable {
+    case null
+    case bool(Bool)
+    case integer(Int)
+    case double(Double)
+    case string(String)
+    case array([RawJSON])
+    case object([String: RawJSON])
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Int.self) {
+            self = .integer(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .double(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([RawJSON].self) {
+            self = .array(value)
+        } else {
+            self = .object(try container.decode([String: RawJSON].self))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null: try container.encodeNil()
+        case .bool(let value): try container.encode(value)
+        case .integer(let value): try container.encode(value)
+        case .double(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
         }
     }
 }

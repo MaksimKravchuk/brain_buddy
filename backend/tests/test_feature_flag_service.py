@@ -133,7 +133,9 @@ def _service(
     )
     return FeatureFlagService(
         repository=repository,
-        config=config,
+        # Generic rollout tests exercise an available MCP transport, like the
+        # default available relay capability below.
+        config=config.model_copy(update={"mcp_enabled": True}),
         user_repo=user_repo,
         admin_service=AdminService(
             user_repo=user_repo,
@@ -604,7 +606,7 @@ def test_010_FR_006_describe_emits_exactly_one_aggregate_record(
     assert len(records) == 1
     message = records[0].getMessage()
     assert "operator=user_op" in message
-    assert "flags=6" in message
+    assert "flags=7" in message
     assert "resolved_accounts=1" in message
     assert "chosen@example.com" not in message
 

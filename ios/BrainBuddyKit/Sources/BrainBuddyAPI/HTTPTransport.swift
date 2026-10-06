@@ -8,6 +8,8 @@ public enum HTTPMethod: String, Hashable, Sendable {
     case get = "GET"
     case post = "POST"
     case patch = "PATCH"
+    /// `PUT /review/settings` (spec 020).
+    case put = "PUT"
     case delete = "DELETE"
 }
 

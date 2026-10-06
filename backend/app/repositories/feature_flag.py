@@ -86,6 +86,7 @@ MANAGED_FLAGS: tuple[str, ...] = (
     "external_agent_relay",
     "task_title_autocomplete",
     "crt_canvas",
+    "task_mcp",
     "weekly_review",
 )
 """The runtime-manageable flags after ADR-0019 and later inventory ADRs.
@@ -101,6 +102,7 @@ _ADR_0019_MANAGED_FLAGS: frozenset[str] = frozenset(
 _POST_ADR_0019_DEFAULT_OFF_FLAGS: tuple[str, ...] = (
     "task_title_autocomplete",
     "crt_canvas",
+    "task_mcp",
     "weekly_review",
 )
 

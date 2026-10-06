@@ -26,29 +26,88 @@ import Foundation
 /// `updatedAt`, `orderKey` (a creation now lands directly in its final list),
 /// `waitingSince` (the entry time into Waiting), and a comment's `editedAt`
 /// (an edit folded into its creation is no edit to the server).
+///
+/// **Clock-aware** (spec 020, contracts/ios-commands.md §3): replay applies
+/// each operation at its `issuedAt`, so once the weekly review is exposed on
+/// the device (`clockAware: true`) a change that touches the formulation clock
+/// — a title or due-date edit, a move or a reopen — is never moved back to an
+/// earlier operation; notes, tags, project, priority, subtask and comment
+/// folds stay. An unsent decision followed by its Undo cancels out, and so
+/// does an unsent bulk release followed by its Undo. Session progress is
+/// never folded, so each change keeps its `progressID`.
 public enum OutboxCompactor {
     /// Appends `operation` to `outbox`, folding it into an earlier unsent
     /// operation when that keeps the replayed state identical (for example an
     /// edit of a task whose creation has not been sent yet). Operations with
     /// `hasBeenSent == true` are never modified.
-    public static func appending(_ operation: PendingOperation, to outbox: [PendingOperation]) -> [PendingOperation] {
+    public static func appending(
+        _ operation: PendingOperation, to outbox: [PendingOperation], clockAware: Bool = false
+    ) -> [PendingOperation] {
         var result = outbox
-        if !operation.hasBeenSent, fold(operation.command, into: &result) { return result }
+        if !operation.hasBeenSent, fold(operation.command, into: &result, clockAware: clockAware) { return result }
         result.append(operation)
         return result
     }
 
-    private static func fold(_ command: GTDCommand, into outbox: inout [PendingOperation]) -> Bool {
+    private static func fold(_ command: GTDCommand, into outbox: inout [PendingOperation], clockAware: Bool) -> Bool {
         switch command {
-        case .updateTask(let update): foldTaskEdit(update, into: &outbox)
-        case .transitionTask(let move) where move.action == .move: foldMove(move, into: &outbox)
-        case .transitionTask(let reopen) where reopen.action == .reopen: foldReopen(reopen, into: &outbox)
-        case .updateSubtask(let update): foldSubtaskEdit(update, into: &outbox)
-        case .updateComment(let update): foldCommentEdit(update, into: &outbox)
-        case .updateProject(let update): foldProjectEdit(update, into: &outbox)
-        case .renameTag(let rename): foldTagRename(rename, into: &outbox)
-        default: false
+        case .updateTask(let update):
+            if clockAware, update.changes.title.isChanged || update.changes.dueDate.isChanged { return false }
+            return foldTaskEdit(update, into: &outbox)
+        case .transitionTask(let move) where move.action == .move:
+            return clockAware ? false : foldMove(move, into: &outbox)
+        case .transitionTask(let reopen) where reopen.action == .reopen:
+            return clockAware ? false : foldReopen(reopen, into: &outbox)
+        case .updateSubtask(let update): return foldSubtaskEdit(update, into: &outbox)
+        case .updateComment(let update): return foldCommentEdit(update, into: &outbox)
+        case .updateProject(let update): return foldProjectEdit(update, into: &outbox)
+        case .renameTag(let rename): return foldTagRename(rename, into: &outbox)
+        case .undoDecision(let id): return cancelDecision(id, in: &outbox)
+        case .undoBulkRelease(let id): return cancelBulkRelease(id, in: &outbox)
+        default: return false
         }
+    }
+
+    // MARK: - Review pairs
+
+    /// An unsent decision and its Undo cancel out (with a follow-up the
+    /// decision created), provided nothing after the decision used either
+    /// task, nor (for a decision in a review) changed a review run.
+    private static func cancelDecision(_ id: DecisionID, in outbox: inout [PendingOperation]) -> Bool {
+        guard
+            let index = outbox.lastIndex(where: {
+                if case .decideTask(let decide) = $0.command { decide.decisionID == id } else { false }
+            }),
+            !outbox[index].hasBeenSent, case .decideTask(let decide) = outbox[index].command
+        else { return false }
+        let tasks = Set([decide.taskID] + (decide.followUpTaskID.map { [$0] } ?? []))
+        guard outbox[(index + 1)...].allSatisfy({ !$0.command.touchesAny(of: tasks) }) else { return false }
+        if decide.sessionID != nil {
+            let touchesRun = outbox[(index + 1)...].contains { operation in
+                switch operation.command {
+                case .review(.startSession), .review(.progressSession), .review(.finishSession): true
+                case .decideTask(let other): other.sessionID == decide.sessionID
+                default: false
+                }
+            }
+            guard !touchesRun else { return false }
+        }
+        outbox.remove(at: index)
+        return true
+    }
+
+    /// An unsent bulk release and its Undo cancel out when no operation after
+    /// the release used one of its tasks.
+    private static func cancelBulkRelease(_ id: BulkID, in outbox: inout [PendingOperation]) -> Bool {
+        guard
+            let index = outbox.lastIndex(where: {
+                if case .bulkRelease(let release) = $0.command { release.bulkID == id } else { false }
+            }),
+            !outbox[index].hasBeenSent, case .bulkRelease(let release) = outbox[index].command
+        else { return false }
+        guard outbox[(index + 1)...].allSatisfy({ !$0.command.touchesAny(of: Set(release.taskIDs)) }) else { return false }
+        outbox.remove(at: index)
+        return true
     }
 
     /// Walks back from `end` to the latest operation `isTarget` accepts and
@@ -140,6 +199,7 @@ public enum OutboxCompactor {
     /// or tag it references, or (for a waiting note) a transition.
     private static func editCanCross(_ operation: PendingOperation, task: TaskID, changes: TaskChanges) -> Bool {
         let command = operation.command
+        if command.isReviewCommand, command.touchesAny(of: [task]) { return false }
         if command.taskID == task {
             guard !operation.hasBeenSent else { return false }
             if case .transitionTask = command { return !changes.waitingFor.isChanged }
@@ -163,6 +223,7 @@ public enum OutboxCompactor {
     /// note (valid only in Waiting), or an archive or delete.
     private static func listChangeCanCross(_ operation: PendingOperation, task: TaskID) -> Bool {
         let command = operation.command
+        if command.isReviewCommand, command.touchesAny(of: [task]) { return false }
         if command.taskID == task {
             guard !operation.hasBeenSent else { return false }
             switch command {
@@ -240,6 +301,7 @@ public enum OutboxCompactor {
     }
 
     private static func childEditCanCross(_ operation: PendingOperation, task: TaskID) -> Bool {
+        if operation.command.isReviewCommand, operation.command.touchesAny(of: [task]) { return false }
         if operation.command.taskID == task { return !operation.hasBeenSent }
         switch operation.command {
         case .archiveProject, .deleteTag: return false
@@ -323,8 +385,8 @@ public enum OutboxCompactor {
 }
 
 extension GTDCommand {
-    /// The task a task-scoped command acts on.
-    fileprivate var taskID: TaskID? {
+    /// The task a task-scoped command acts on (compaction and replay).
+    var taskID: TaskID? {
         switch self {
         case .createTask(let create): create.taskID
         case .updateTask(let update): update.taskID
@@ -334,7 +396,45 @@ extension GTDCommand {
         case .transitionSubtask(let transition): transition.taskID
         case .createComment(let create): create.taskID
         case .updateComment(let update): update.taskID
-        case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag: nil
+        case .decideTask(let decide): decide.taskID
+        case .autoParkTask(let park): park.taskID
+        case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag, .undoDecision,
+            .bulkRelease, .undoBulkRelease, .review:
+            nil
+        }
+    }
+
+    /// Decisions, parks, bulk releases and review commands.
+    fileprivate var isReviewCommand: Bool {
+        switch self {
+        case .decideTask, .undoDecision, .autoParkTask, .bulkRelease, .undoBulkRelease, .review: true
+        default: false
+        }
+    }
+
+    /// Whether the command acts on one of `tasks` (a follow-up a decision
+    /// creates and every task of a bulk release included; an Undo or a review
+    /// command whose tasks are not in the command counts as touching).
+    fileprivate func touchesAny(of tasks: Set<TaskID>) -> Bool {
+        switch self {
+        case .decideTask(let decide):
+            return tasks.contains(decide.taskID) || decide.followUpTaskID.map(tasks.contains) == true
+        case .bulkRelease(let release):
+            return release.taskIDs.contains(where: tasks.contains)
+        case .undoDecision, .undoBulkRelease:
+            return true
+        case .archiveProject, .deleteTag:
+            // They rewrite every task of the project or tag, which the
+            // compactor cannot see: assume they touch.
+            return true
+        case .review(.acknowledgeParks(let items)):
+            return items.contains { tasks.contains($0.taskID) }
+        case .review(.progressSession(let progress)):
+            return progress.setAsideTaskID.map(tasks.contains) == true
+        case .review:
+            return false
+        default:
+            return taskID.map(tasks.contains) == true
         }
     }
 

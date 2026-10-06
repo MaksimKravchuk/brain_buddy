@@ -139,6 +139,8 @@ class FeatureFlagService:
             effective = False if entry is None else _entry_admits(entry, user)
             if name == _RELAY_FLAG:
                 effective = effective and self._relay_capability_available
+            if name == "task_mcp":
+                effective = effective and self.config.mcp_enabled
             resolved[name] = effective
         return resolved
 

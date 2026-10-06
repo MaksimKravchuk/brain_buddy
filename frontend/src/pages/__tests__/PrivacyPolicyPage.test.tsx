@@ -57,14 +57,14 @@ describe("PrivacyPolicyPage", () => {
     renderPolicy();
 
     // docs/data-retention.md names this page as the user-facing summary that
-    // must stay in sync with it. The runtime store now covers six managed flags
-    // (020 added weekly_review). The decided facts pinned here are what it holds,
-    // that purge scrubs it, and that it is outside the export.
+    // must stay in sync with it. The runtime store now covers seven managed flags
+    // (022 added task_mcp, 020 added weekly_review). The decided facts pinned here
+    // are what it holds, that purge scrubs it, and that it is outside the export.
     expect(screen.getByText(/one SQLite store/i)).toBeInTheDocument();
-    expect(screen.getByText(/covering six managed flags/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering seven managed flags/i)).toBeInTheDocument();
     expect(screen.getByText(/holds only your account id per flag/i)).toBeInTheDocument();
     expect(screen.getByText(/scrubbed when your account is purged/i)).toBeInTheDocument();
-    expect(screen.getByText(/covering six managed flags:.*excluded from your data export/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering seven managed flags:.*excluded from your data export/i)).toBeInTheDocument();
   });
 
   it("020-FR-043: names the weekly review settings and records, their export, purge and undo window", () => {

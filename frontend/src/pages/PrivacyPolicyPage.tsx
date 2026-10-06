@@ -116,7 +116,7 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
           <p>
             To turn a feature on or off for particular accounts we keep one SQLite store
-            covering six managed flags: it holds only your account id per flag, it is
+            covering seven managed flags: it holds only your account id per flag, it is
             scrubbed when your account is purged, and it is excluded from your data export.
           </p>
           <p>

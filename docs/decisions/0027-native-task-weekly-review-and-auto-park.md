@@ -27,7 +27,7 @@
   `weekly_review`, default OFF. Implementation note (slice PR-15): the post-marker
   upgrade now accepts any store that holds every ADR-0019 row and no unknown row, and
   adds each missing post-ADR-0019 row (`task_title_autocomplete`, `crt_canvas`,
-  `weekly_review`) as OFF with no cohort. Before, only the exact earlier row sets were
+  `task_mcp` from feature 022, `weekly_review`) as OFF with no cohort. Before, only the exact earlier row sets were
   upgraded, so a store that had lost one of those later rows stayed degraded until an
   operator repaired it; now the next start re-creates it OFF. A missing ADR-0019 row
   still leaves the store degraded.

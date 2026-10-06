@@ -70,6 +70,15 @@ public final class Workspace {
     @ObservationIgnored private(set) var document = StoreDocument()
     /// Commands applied to `state` but not written yet, oldest first.
     @ObservationIgnored private(set) var unpersisted: [PendingOperation] = []
+    /// Document edits that are not commands (device-local review state,
+    /// local retention), applied in order with the next write (spec 020).
+    @ObservationIgnored var pendingEdits: [@Sendable (inout StoreDocument) -> Void] = []
+    /// What the app's `NWPathMonitor` last reported.
+    @ObservationIgnored var networkIsAvailable = true
+    /// The account-less release switch (`BBWeeklyReviewLocal`, ios-commands §8).
+    @ObservationIgnored public var accountlessReviewEnabled = false
+    /// The device's current zone (`TimeZone.current`; tests inject one).
+    @ObservationIgnored public var deviceTimeZone: @Sendable () -> TimeZone = { TimeZone.current }
     /// Issues the user dismissed that are not removed on disk yet.
     @ObservationIgnored private var pendingDismissals: Set<SyncIssue.ID> = []
     /// The write loop, while it runs. Writes never overlap or reorder.
@@ -356,6 +365,7 @@ public final class Workspace {
         }
         // The engine uploads what is in the store, so everything must be there.
         await flush()
+        if account == nil { try await convertLocalAutoParksForLinking() }
         await installEventHandlerIfNeeded(sync)
         isSigningIn = true
         let linked: LinkedAccount
@@ -455,6 +465,7 @@ public final class Workspace {
 
     /// Informs the sync scheduler about connectivity (from NWPathMonitor in the app).
     public func networkAvailabilityChanged(isAvailable: Bool) {
+        networkIsAvailable = isAvailable
         guard let sync else { return }
         // Chained, so the engine sees the changes in the order they happened.
         let previous = networkUpdates
@@ -474,18 +485,30 @@ public final class Workspace {
 // MARK: - Applying commands
 
 extension Workspace {
-    private func perform(_ command: GTDCommand) throws(GTDValidationError) {
+    func perform(_ command: GTDCommand) throws(GTDValidationError) {
         try perform([command])
     }
 
     /// Applies `commands` all-or-nothing to `state`, queues them, and starts
-    /// a write. A rejected command leaves everything untouched.
-    private func perform(_ commands: [GTDCommand]) throws(GTDValidationError) {
+    /// a write. A rejected command leaves everything untouched. Once the
+    /// review is exposed, every command that may start a formulation carries
+    /// a client formulation id minted here (spec 020), sent as
+    /// `new_formulation_id`, so device and server name the same formulation.
+    /// Before that the reducer derives one (no id is drawn, so nothing else
+    /// changes while the feature is off).
+    func perform(_ commands: [GTDCommand]) throws(GTDValidationError) {
         let issuedAt = Self.storedPrecision(now())
+        let makeID = self.makeID
+        let commands =
+            reviewExposed ? commands.map { Self.stampingFormulationID($0) { FormulationID.make(makeID()) } } : commands
         var next = state
         for command in commands {
             try GTDReducer.apply(command, at: issuedAt, to: &next, mode: .interactive)
         }
+        ReviewActivation.apply(
+            to: &next, activatedAt: next.review.settings.activatedAt ?? local.activatedAt,
+            startsMissingClocks: next.review.server == nil
+        )
         state = next
         for command in commands {
             unpersisted.append(
@@ -494,6 +517,28 @@ extension Workspace {
         }
         pendingChangeCount = document.outbox.count + unpersisted.count
         schedulePersistence()
+    }
+
+    /// `command` with a fresh `form_<uuid>` where it may start a formulation
+    /// and has none.
+    nonisolated static func stampingFormulationID(
+        _ command: GTDCommand, _ makeFormulationID: () -> FormulationID
+    ) -> GTDCommand {
+        switch command {
+        case .createTask(var create) where create.list == .next && create.newFormulationID == nil:
+            create.newFormulationID = makeFormulationID()
+            return .createTask(create)
+        case .updateTask(var update) where update.changes.title.isChanged && update.newFormulationID == nil:
+            update.newFormulationID = makeFormulationID()
+            return .updateTask(update)
+        case .transitionTask(var transition)
+        where transition.toList == .next && (transition.action == .move || transition.action == .reopen)
+            && transition.newFormulationID == nil:
+            transition.newFormulationID = makeFormulationID()
+            return .transitionTask(transition)
+        default:
+            return command
+        }
     }
 
     /// A client id in the same form as `EntityID.random()`.
@@ -518,11 +563,17 @@ extension Workspace {
 // MARK: - Persistence
 
 extension Workspace {
-    private var hasPendingWrites: Bool { !unpersisted.isEmpty || !pendingDismissals.isEmpty }
+    private var hasPendingWrites: Bool { !unpersisted.isEmpty || !pendingDismissals.isEmpty || !pendingEdits.isEmpty }
+
+    /// Queues a document edit that is not a command and starts a write.
+    func edit(_ change: @escaping @Sendable (inout StoreDocument) -> Void) {
+        pendingEdits.append(change)
+        schedulePersistence()
+    }
 
     /// Starts the write loop unless it is running (it picks up new changes
     /// itself) or there is nothing to write.
-    private func schedulePersistence() {
+    func schedulePersistence() {
         guard writer == nil, hasPendingWrites, !writesSuspended else { return }
         writerToken += 1
         let token = writerToken
@@ -543,8 +594,9 @@ extension Workspace {
         while hasPendingWrites, !writesSuspended, epoch == self.epoch {
             let operations = unpersisted
             let dismissals = pendingDismissals
+            let edits = pendingEdits
             isWriting = true
-            let result = await write(operations, dismissing: dismissals)
+            let result = await write(operations, dismissing: dismissals, edits: edits, clockAware: reviewExposed)
             isWriting = false
             guard epoch == self.epoch else { return true }
             switch result {
@@ -556,8 +608,9 @@ extension Workspace {
             case .success(let written):
                 unpersisted.removeFirst(operations.count)
                 pendingDismissals.subtract(dismissals)
+                pendingEdits.removeFirst(edits.count)
                 if storageError != nil { storageError = nil }
-                adoptWritten(written)
+                adoptWritten(written, recomputing: !edits.isEmpty)
                 adoptDeferredDocument()
                 didPersist?()
                 if !operations.isEmpty, let sync { await sync.request(.localChange) }
@@ -569,14 +622,16 @@ extension Workspace {
     /// One read-modify-write under the store's lock (the file store keeps the
     /// process from being suspended while it holds the lock).
     private func write(
-        _ operations: [PendingOperation], dismissing dismissals: Set<SyncIssue.ID>
+        _ operations: [PendingOperation], dismissing dismissals: Set<SyncIssue.ID>,
+        edits: [@Sendable (inout StoreDocument) -> Void], clockAware: Bool
     ) async -> Result<StoreDocument, any Error> {
         do {
             let written = try await store.update { document in
                 for operation in operations {
-                    document.outbox = OutboxCompactor.appending(operation, to: document.outbox)
+                    document.outbox = OutboxCompactor.appending(operation, to: document.outbox, clockAware: clockAware)
                 }
                 if !dismissals.isEmpty { document.issues.removeAll { dismissals.contains($0.id) } }
+                for edit in edits { edit(&document) }
             }
             return .success(written)
         } catch {
@@ -587,10 +642,10 @@ extension Workspace {
     /// Adopts the document this workspace just wrote. When nobody else wrote
     /// in between, it is the held document plus the written commands, which
     /// `state` already shows: no replay needed.
-    private func adoptWritten(_ written: StoreDocument) {
+    private func adoptWritten(_ written: StoreDocument, recomputing: Bool = false) {
         let expectedGeneration = document.generation + 1
         document = written
-        if written.generation != expectedGeneration { recomputeState() }
+        if recomputing || written.generation != expectedGeneration { recomputeState() }
         refreshDerivedState()
     }
 
@@ -638,7 +693,8 @@ extension Workspace {
     /// Rebuilds `state` from the document and the unwritten commands.
     private func recomputeState() {
         fullReplayCount += 1
-        let replayed = OutboxReplayer.replay(document.outbox + unpersisted, onto: document.base).state
+        var replayed = OutboxReplayer.replay(document.outbox + unpersisted, onto: document.base, activatedAt: local.activatedAt).state
+        ReviewSessionUpkeep.closeIdle(local.idleClosedSessions, in: &replayed)
         if replayed != state { state = replayed }
     }
 
@@ -660,7 +716,7 @@ extension Workspace {
     /// Adopts the stored document when it is newer than the held one, and
     /// returns it (nil when there was nothing newer to read).
     @discardableResult
-    private func refreshFromStore() async -> StoreDocument? {
+    func refreshFromStore() async -> StoreDocument? {
         let storedGeneration: Int?
         do {
             storedGeneration = try await store.generation()
@@ -702,6 +758,7 @@ extension Workspace {
         if account == nil, !isSigningIn, epoch == self.epoch, let sync {
             await sync.discardStaleSessions(loggingOut: nil)
         }
+        if epoch == self.epoch { runReviewUpkeep() }
     }
 
     /// Back to an empty, local-only workspace (after sign-out).
@@ -709,6 +766,7 @@ extension Workspace {
         epoch += 1
         unpersisted = []
         pendingDismissals = []
+        pendingEdits = []
         deferredDocument = nil
         document = StoreDocument()
         syncStartedFor = nil
@@ -745,7 +803,10 @@ extension Workspace {
         case .documentChanged(let incoming):
             // Likewise a late document of the account that was just removed.
             if incoming.account != nil, account == nil, !isSigningIn { return }
+            let lastPull = document.sync.lastPullAt
             receive(incoming)
+            // After each pull (contracts/ios-commands.md §5).
+            if document.sync.lastPullAt != lastPull, !isSigningIn { runReviewUpkeep() }
         }
     }
 }

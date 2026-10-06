@@ -51,8 +51,11 @@ struct ServerState: Sendable {
             default: throw .routeNotFound
             }
         }
-        guard let resource = path.first, ["tasks", "projects", "tags"].contains(resource) else { throw .routeNotFound }
+        guard let resource = path.first, ["tasks", "projects", "tags", "review"].contains(resource) else {
+            throw .routeNotFound
+        }
         let owner = try authenticate(request)
+        if resource == "review" { return try routeReview(method, path, request, owner: owner, now: now) }
         let query = ListQuery(request.url)
         switch resource {
         case "projects":
@@ -88,6 +91,10 @@ struct ServerState: Sendable {
         case (.patch, 2): return try updateTask(path[1], request, owner: owner, now: now)
         case (.post, 3) where path[2] == "transitions":
             return try transitionTask(path[1], request, owner: owner, now: now)
+        case (.post, 3) where path[2] == "decisions":
+            return try decide(path[1], request, owner: owner, now: now)
+        case (.post, 3) where path[2] == "auto-park":
+            return try autoPark(path[1], request, owner: owner, now: now)
         case (.post, 3) where path[2] == "subtasks":
             return try createSubtask(path[1], request, owner: owner, now: now)
         case (.post, 3) where path[2] == "comments":
@@ -123,7 +130,10 @@ struct ServerState: Sendable {
     }
 
     private func meDTO(_ account: FakeAccount, deletionCancelled: Bool = false) -> MeDTO {
-        MeDTO(id: account.id, email: account.email, displayName: account.displayName, deletionCancelled: deletionCancelled)
+        MeDTO(
+            id: account.id, email: account.email, displayName: account.displayName, deletionCancelled: deletionCancelled,
+            featureFlags: ["weekly_review": account.weeklyReview]
+        )
     }
 
     /// `login`: a login within the deletion grace period cancels the deletion

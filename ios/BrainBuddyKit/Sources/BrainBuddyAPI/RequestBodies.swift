@@ -27,10 +27,13 @@ public struct TaskCreateBody: Encodable, Hashable, Sendable {
     public var priority: TaskPriority
     /// Required (non-blank) when `state` is `.waiting`; the server ignores it otherwise.
     public var waitingFor: String?
+    /// Spec 020: the formulation a creation in Next starts (`form_<uuid>`).
+    public var newFormulationID: String?
 
     public init(
         title: String, details: String? = nil, state: OpenList, projectID: String? = nil, tagIDs: [String] = [],
-        dueDate: CalendarDay? = nil, priority: TaskPriority = .none, waitingFor: String? = nil
+        dueDate: CalendarDay? = nil, priority: TaskPriority = .none, waitingFor: String? = nil,
+        newFormulationID: String? = nil
     ) {
         self.title = title
         self.details = details
@@ -40,6 +43,7 @@ public struct TaskCreateBody: Encodable, Hashable, Sendable {
         self.dueDate = dueDate
         self.priority = priority
         self.waitingFor = waitingFor
+        self.newFormulationID = newFormulationID
     }
 
     /// Builds the body for a queued `createTask`, mapping client ids to server
@@ -53,7 +57,8 @@ public struct TaskCreateBody: Encodable, Hashable, Sendable {
             title: command.title, details: command.details, state: command.list,
             projectID: try command.projectID.map(projectServerID), tagIDs: try command.tagIDs.map(tagServerID),
             dueDate: command.dueDate, priority: command.priority,
-            waitingFor: command.list == .waiting ? command.waitingFor : nil
+            waitingFor: command.list == .waiting ? command.waitingFor : nil,
+            newFormulationID: command.list == .next ? command.newFormulationID?.rawValue : nil
         )
     }
 
@@ -63,6 +68,7 @@ public struct TaskCreateBody: Encodable, Hashable, Sendable {
         case tagIDs = "tag_ids"
         case dueDate = "due_date"
         case waitingFor = "waiting_for"
+        case newFormulationID = "new_formulation_id"
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -75,6 +81,7 @@ public struct TaskCreateBody: Encodable, Hashable, Sendable {
         try values.encodeIfPresent(dueDate, forKey: .dueDate)
         try values.encode(priority, forKey: .priority)
         try values.encodeIfPresent(waitingFor, forKey: .waitingFor)
+        try values.encodeIfPresent(newFormulationID, forKey: .newFormulationID)
     }
 }
 
@@ -98,12 +105,14 @@ public struct TaskUpdateBody: Encodable, Hashable, Sendable {
     public var dueDate: FieldChange<CalendarDay>
     public var priority: FieldChange<TaskPriority>
     public var waitingFor: FieldChange<String>
+    /// Spec 020: the formulation a substantive title change starts (ignored otherwise).
+    public var newFormulationID: String?
 
     public init(
         expectedRevision: Int, title: FieldChange<String> = .unchanged, details: FieldChange<String> = .unchanged,
         projectID: FieldChange<String> = .unchanged, tagIDs: FieldChange<[String]> = .unchanged,
         dueDate: FieldChange<CalendarDay> = .unchanged, priority: FieldChange<TaskPriority> = .unchanged,
-        waitingFor: FieldChange<String> = .unchanged
+        waitingFor: FieldChange<String> = .unchanged, newFormulationID: String? = nil
     ) {
         self.expectedRevision = expectedRevision
         self.title = title
@@ -113,6 +122,7 @@ public struct TaskUpdateBody: Encodable, Hashable, Sendable {
         self.dueDate = dueDate
         self.priority = priority
         self.waitingFor = waitingFor
+        self.newFormulationID = newFormulationID
     }
 
     /// Converts Core's `TaskChanges` (client ids) into a PATCH body (server
@@ -144,10 +154,12 @@ public struct TaskUpdateBody: Encodable, Hashable, Sendable {
         case tagIDs = "tag_ids"
         case dueDate = "due_date"
         case waitingFor = "waiting_for"
+        case newFormulationID = "new_formulation_id"
     }
 
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encodeIfPresent(newFormulationID, forKey: .newFormulationID)
         try values.encode(expectedRevision, forKey: .expectedRevision)
         try values.encodeChange(title, forKey: .title)
         try values.encodeChange(details, forKey: .details)
@@ -168,14 +180,18 @@ public struct TaskTransitionBody: Encodable, Hashable, Sendable {
     /// Required (non-blank) when `toState` is `.waiting`.
     public var waitingFor: String?
     public var expectedRevision: Int
+    /// Spec 020: the formulation a move or reopen into Next starts.
+    public var newFormulationID: String?
 
     public init(
-        action: TaskTransitionAction, toState: OpenList? = nil, waitingFor: String? = nil, expectedRevision: Int
+        action: TaskTransitionAction, toState: OpenList? = nil, waitingFor: String? = nil, expectedRevision: Int,
+        newFormulationID: String? = nil
     ) {
         self.action = action
         self.toState = toState
         self.waitingFor = waitingFor
         self.expectedRevision = expectedRevision
+        self.newFormulationID = newFormulationID
     }
 
     /// Builds the body for a queued `transitionTask` in its canonical form:
@@ -188,7 +204,8 @@ public struct TaskTransitionBody: Encodable, Hashable, Sendable {
         case .move, .reopen:
             self.init(
                 action: command.action, toState: command.toList,
-                waitingFor: command.toList == .waiting ? command.waitingFor : nil, expectedRevision: expectedRevision
+                waitingFor: command.toList == .waiting ? command.waitingFor : nil, expectedRevision: expectedRevision,
+                newFormulationID: command.toList == .next ? command.newFormulationID?.rawValue : nil
             )
         }
     }
@@ -198,6 +215,7 @@ public struct TaskTransitionBody: Encodable, Hashable, Sendable {
         case toState = "to_state"
         case waitingFor = "waiting_for"
         case expectedRevision = "expected_revision"
+        case newFormulationID = "new_formulation_id"
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -206,6 +224,7 @@ public struct TaskTransitionBody: Encodable, Hashable, Sendable {
         try values.encodeIfPresent(toState, forKey: .toState)
         try values.encodeIfPresent(waitingFor, forKey: .waitingFor)
         try values.encode(expectedRevision, forKey: .expectedRevision)
+        try values.encodeIfPresent(newFormulationID, forKey: .newFormulationID)
     }
 }
 
