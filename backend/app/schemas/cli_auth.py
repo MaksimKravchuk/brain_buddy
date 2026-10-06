@@ -17,6 +17,7 @@ class DeviceRequest(DeviceStart):
 
 class DeviceDecision(DeviceRequest):
     decision: Literal["approve", "deny"]
+    expected_owner: str = Field(min_length=1, max_length=160)
 
 
 class DeviceToken(DeviceStart):

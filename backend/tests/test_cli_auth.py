@@ -50,9 +50,109 @@ def live_cli(api_client):
 def approve(client, grant):
     return client.post(
         "/api/auth/device/decision",
-        json={"user_code": grant["user_code"], "decision": "approve"},
+        json={
+            "user_code": grant["user_code"],
+            "decision": "approve",
+            "expected_owner": client.get("/api/auth/me")
+            .json()
+            .get("id", "missing-owner"),
+        },
         headers={"Origin": "https://app.example.com"},
     )
+
+
+@pytest.mark.parametrize("decision", ["approve", "deny"])
+def test_024_FR_013_decision_refuses_cookie_owner_changed_after_lookup(
+    live_cli, decision
+):
+    client, service = live_cli
+    source = client.cookies.get(client.app.state.config.session.cookie_name)
+    owner = service.auth.get_user_for_token(source)
+    other = owner.model_copy(
+        update={"id": "cli-other-owner", "email": "cli-other@example.com"}
+    )
+    service.auth.user_repo.create(other)
+    other_source, _ = service.auth._create_session(other.id)
+    grant = service.start()
+    headers = {"Origin": service.origin}
+    lookup = client.post(
+        "/api/auth/device/request",
+        json={"user_code": grant["user_code"]},
+        headers=headers,
+    )
+    assert lookup.status_code == 200
+    client.cookies.clear()
+    client.cookies.set(client.app.state.config.session.cookie_name, other_source)
+    assert client.get("/api/auth/me").json()["id"] == other.id
+    rejected = client.post(
+        "/api/auth/device/decision",
+        json={
+            "user_code": grant["user_code"],
+            "decision": decision,
+            "expected_owner": owner.id,
+        },
+        headers=headers,
+    )
+    assert rejected.status_code == 404
+    assert grant["user_code"] not in rejected.text
+    with service.repo.store.connection() as connection:
+        row = connection.execute("SELECT * FROM cli_device_grants").fetchone()
+        assert (
+            row["state"] == "pending"
+            and row["user_id"] is None
+            and row["source_hash"] is None
+        )
+        assert connection.execute("SELECT count(*) FROM sessions").fetchone()[0] == 2
+    assert lookup.json()["account"] == {"id": owner.id, "email": owner.email}
+
+
+@pytest.mark.parametrize("expected", [None, "", 1, "x" * 161])
+def test_024_FR_013_decision_requires_bounded_displayed_owner(live_cli, expected):
+    client, service = live_cli
+    grant = service.start()
+    body = {"user_code": grant["user_code"], "decision": "approve"}
+    if expected is not None:
+        body["expected_owner"] = expected
+    rejected = client.post(
+        "/api/auth/device/decision", json=body, headers={"Origin": service.origin}
+    )
+    assert rejected.status_code == 422
+    assert grant["user_code"] not in rejected.text
+    with service.repo.store.connection() as connection:
+        row = connection.execute("SELECT * FROM cli_device_grants").fetchone()
+        assert row["state"] == "pending" and row["user_id"] is None
+        assert connection.execute("SELECT count(*) FROM sessions").fetchone()[0] == 1
+
+
+def test_024_FR_013_first_decision_accepts_renewed_valid_session_for_same_displayed_owner(
+    live_cli,
+):
+    client, service = live_cli
+    source = client.cookies.get(client.app.state.config.session.cookie_name)
+    owner = service.auth.get_user_for_token(source)
+    grant = service.start()
+    lookup = client.post(
+        "/api/auth/device/request",
+        json={"user_code": grant["user_code"]},
+        headers={"Origin": service.origin},
+    )
+    assert lookup.json()["account"] == {"id": owner.id, "email": owner.email}
+    with service.repo.store.connection() as connection:
+        assert (
+            connection.execute("SELECT user_id FROM cli_device_grants").fetchone()[0]
+            is None
+        )
+    renewed, _ = service.auth._create_session(owner.id)
+    client.cookies.clear()
+    client.cookies.set(client.app.state.config.session.cookie_name, renewed)
+    assert approve(client, grant).status_code == 200
+    with service.repo.store.connection() as connection:
+        row = connection.execute("SELECT * FROM cli_device_grants").fetchone()
+        assert row["user_id"] == owner.id and row[
+            "source_hash"
+        ] == service.auth.hash_session_token(renewed)
+    service.clock = lambda: utcnow() + timedelta(seconds=6)
+    assert service.token(grant["device_code"])[0].id == owner.id
 
 
 def test_024_FR_013_library_import_does_not_start_a_web_application(
@@ -126,7 +226,13 @@ def test_024_FR_013_foreign_origin_never_decides(live_cli, origin):
     grant = client.post("/api/auth/device/start", json={}).json()
     response = client.post(
         "/api/auth/device/decision",
-        json={"user_code": grant["user_code"], "decision": "approve"},
+        json={
+            "user_code": grant["user_code"],
+            "decision": "approve",
+            "expected_owner": client.get("/api/auth/me")
+            .json()
+            .get("id", "missing-owner"),
+        },
         headers={} if origin is None else {"Origin": origin},
     )
     assert response.status_code == 403
@@ -461,7 +567,13 @@ def test_024_FR_013_browser_lookup_and_decisions_are_source_bound(live_cli):
     assert approve(client, grant).status_code == 200
     conflict = client.post(
         "/api/auth/device/decision",
-        json={"user_code": grant["user_code"], "decision": "deny"},
+        json={
+            "user_code": grant["user_code"],
+            "decision": "deny",
+            "expected_owner": client.get("/api/auth/me")
+            .json()
+            .get("id", "missing-owner"),
+        },
         headers=headers,
     )
     assert conflict.status_code == 409
@@ -560,7 +672,7 @@ def test_024_FR_013_provider_and_version_changes_prevent_issuance(
         user.id, auth_method=provider, provider_binding_id=binding_id
     )
     grant = service.start()
-    service.browser(grant["user_code"], source, "approve")
+    service.browser(grant["user_code"], source, "approve", expected_owner=user.id)
     with service.repo.store.transaction() as connection:
         if change == "generation":
             connection.execute(
@@ -606,7 +718,13 @@ def test_024_FR_013_denial_is_terminal_and_never_issues_a_session(live_cli):
     grant = service.start()
     denied = client.post(
         "/api/auth/device/decision",
-        json={"user_code": grant["user_code"], "decision": "deny"},
+        json={
+            "user_code": grant["user_code"],
+            "decision": "deny",
+            "expected_owner": client.get("/api/auth/me")
+            .json()
+            .get("id", "missing-owner"),
+        },
         headers={"Origin": service.origin},
     )
     assert denied.json() == {"state": "denied"}

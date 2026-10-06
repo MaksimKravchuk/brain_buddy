@@ -65,7 +65,11 @@ def _admit(request: Request, service: CliAuthService, *, browser: bool = False) 
 
 
 def _browser(
-    request: Request, service: CliAuthService, code: str, decision: str | None = None
+    request: Request,
+    service: CliAuthService,
+    code: str,
+    decision: str | None = None,
+    expected_owner: str | None = None,
 ) -> dict[str, object]:
     with service.browser_admission:
         key = _admit(request, service, browser=True)
@@ -74,6 +78,7 @@ def _browser(
                 code,
                 request.cookies.get(request.app.state.config.session.cookie_name),
                 decision,
+                expected_owner,
             )
         except CliAuthError as error:
             if error.status_code == 404:
@@ -124,7 +129,13 @@ async def decision(request: Request) -> dict[str, object]:
     payload = await _body(request, DeviceDecision)
 
     def execute() -> dict[str, object]:
-        result = _browser(request, service, payload.user_code, payload.decision)
+        result = _browser(
+            request,
+            service,
+            payload.user_code,
+            payload.decision,
+            payload.expected_owner,
+        )
         _log("decision")
         return result
 

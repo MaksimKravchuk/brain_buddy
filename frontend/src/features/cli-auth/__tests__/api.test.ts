@@ -6,11 +6,11 @@ describe("024-FR-013 bounded browser authorization transport", () => {
   it("posts a code as JSON with cookies and refuses redirects", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ state: "denied" }), { status: 200 }));
     vi.stubGlobal("fetch", fetcher);
-    expect(await cliAuthApi.decision("ABCD-EFGH", "deny", new AbortController().signal)).toEqual({ state: "denied" });
+    expect(await cliAuthApi.decision("ABCD-EFGH", "deny", "A", new AbortController().signal)).toEqual({ state: "denied" });
     const [url, options] = fetcher.mock.calls[0];
     expect(url).toMatch(/\/auth\/device\/decision$/);
     expect(url).not.toContain("ABCD");
-    expect(options).toMatchObject({ method: "POST", credentials: "include", redirect: "error", cache: "no-store", body: '{"user_code":"ABCD-EFGH","decision":"deny"}' });
+    expect(options).toMatchObject({ method: "POST", credentials: "include", redirect: "error", cache: "no-store", body: '{"user_code":"ABCD-EFGH","decision":"deny","expected_owner":"A"}' });
   });
   it("suppresses remote error content", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("private-sentinel", { status: 403 })));

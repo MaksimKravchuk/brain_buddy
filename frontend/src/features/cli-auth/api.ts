@@ -3,6 +3,7 @@ import { ApiError, getApiBaseUrl } from "../../api/client";
 export interface AuthorizationRequest {
   user_code: string; client_name: string; created_at: string; expires_at: string;
   state: "pending" | "approved" | "denied" | "consumed";
+  account: { id: string; email: string };
 }
 async function post<T>(path: string, body: object, signal: AbortSignal): Promise<T> {
   const controller = new AbortController();
@@ -26,5 +27,5 @@ async function post<T>(path: string, body: object, signal: AbortSignal): Promise
 }
 export const cliAuthApi = {
   request: (userCode: string, signal: AbortSignal) => post<AuthorizationRequest>("request", { user_code: userCode }, signal),
-  decision: (userCode: string, decision: "approve" | "deny", signal: AbortSignal) => post<{ state: "approved" | "denied" }>("decision", { user_code: userCode, decision }, signal)
+  decision: (userCode: string, decision: "approve" | "deny", expectedOwner: string, signal: AbortSignal) => post<{ state: "approved" | "denied" }>("decision", { user_code: userCode, decision, expected_owner: expectedOwner }, signal)
 };

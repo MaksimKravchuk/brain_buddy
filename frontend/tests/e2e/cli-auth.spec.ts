@@ -1,8 +1,63 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "../allure.fixtures";
-import { backendUrl, createUserViaApi, password } from "./gtdHelpers";
+import { backendUrl, createUserViaApi, loginThroughUi, password } from "./gtdHelpers";
 
 test.describe("024-FR-013 CLI browser approval", () => {
+  test("024-FR-013 approval refuses a shared-cookie account change until fresh lookup and explicit consent", async ({ page, request }, testInfo) => {
+    const emailA = await createUserViaApi(request, testInfo, "cli-owner-a");
+    const emailB = await createUserViaApi(request, testInfo, "cli-owner-b");
+    await loginThroughUi(page, emailA);
+    const started = await request.post(`${backendUrl}/api/auth/device/start`, { data: {} });
+    expect(started.status()).toBe(200);
+    const grant = await started.json();
+    const accountA = await test.step("show the authoritative lookup account before explicit approval", async () => {
+      const lookup = page.waitForResponse(value => new URL(value.url()).pathname === "/api/auth/device/request");
+      await page.goto(`/cli/authorize#user_code=${grant.user_code}`);
+      const accountA: { id: string; email: string } = (await (await lookup).json()).account;
+      expect(accountA.email).toBe(emailA);
+      await expect(page.getByRole("button", { name: "Approve access" })).toBeEnabled();
+      await expect(page.getByText(emailA, { exact: true })).toBeVisible();
+      return accountA;
+    });
+    const other = await page.context().newPage();
+    await test.step("change the actual shared cookie in another tab and refuse the stale account choice", async () => {
+      await other.goto("/");
+      expect(await other.evaluate(async credentials => (await fetch("/api/auth/login", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(credentials)
+      })).status, { email: emailB, password })).toBe(200);
+      await expect(page.getByText(emailA, { exact: true })).toBeVisible();
+      const response = page.waitForResponse(value => new URL(value.url()).pathname === "/api/auth/device/decision");
+      await page.getByRole("button", { name: "Approve access" }).click();
+      const rejected = await response;
+      expect(rejected.request().postDataJSON().expected_owner).toBe(accountA.id);
+      expect(rejected.status()).toBe(404);
+      await expect(page.getByRole("alert")).toContainText("could not confirm your decision");
+      expect(await page.evaluate(() => sessionStorage.getItem("brainbuddy.cli.authorization"))).not.toBeNull();
+      await expect(page.getByRole("button", { name: "Check code again" })).toBeEnabled();
+      await testInfo.attach("cli-account-changed-refusal", { body: await page.screenshot(), contentType: "image/png" });
+    });
+    await test.step("show the new lookup account and require a fresh explicit choice", async () => {
+      const lookup = page.waitForResponse(value => new URL(value.url()).pathname === "/api/auth/device/request");
+      await page.getByRole("button", { name: "Check code again" }).click();
+      const found = await (await lookup).json();
+      expect(found.state).toBe("pending");
+      expect(found.account.email).toBe(emailB);
+      await expect(page.getByText(emailB, { exact: true })).toBeVisible();
+      await expect(page.getByText(emailA, { exact: true })).toHaveCount(0);
+      const response = page.waitForResponse(value => new URL(value.url()).pathname === "/api/auth/device/decision");
+      await page.getByRole("button", { name: "Approve access" }).click();
+      const approved = await response;
+      expect(approved.request().postDataJSON().expected_owner).toBe(found.account.id);
+      expect(approved.status()).toBe(200);
+      await expect(page.getByRole("status")).toContainText("Access approved");
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      const issued = await request.post(`${backendUrl}/api/auth/device/token`, { data: { device_code: grant.device_code } });
+      expect(issued.status()).toBe(200);
+      expect((await issued.json()).account.email).toBe(emailB);
+      await request.post(`${backendUrl}/api/auth/logout`);
+    });
+    await other.close();
+  });
   test("024-SC-004 signed-out password return requires explicit approval and issues one session", async ({ page, request }, testInfo) => {
     const email = await createUserViaApi(request, testInfo, "cli-authorize");
     const started = await request.post(`${backendUrl}/api/auth/device/start`, { data: {} });

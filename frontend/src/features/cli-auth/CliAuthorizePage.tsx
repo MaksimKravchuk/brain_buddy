@@ -46,6 +46,7 @@ export function CliAuthorizePage(): React.JSX.Element {
       const saved = retainedCode();
       const deadline = Math.min(Date.parse(found.expires_at), saved?.userCode === normalized ? saved.expiresAt : Date.now() + 600000);
       if (!Number.isFinite(deadline) || deadline <= Date.now() || found.user_code !== normalized || found.client_name !== "BrainBuddy CLI") throw new Error("Invalid authorization request.");
+      if (typeof found.account?.id !== "string" || !/^[A-Za-z0-9_-]{1,160}$/.test(found.account.id) || typeof found.account.email !== "string" || !found.account.email || found.account.email.length > 320) throw new Error("Invalid authorization account.");
       setCode(normalized); expiry.current = deadline; rememberCode(normalized, deadline);
       if (found.state !== "pending") {
         clearCode(); setTerminal(found.state === "approved" || found.state === "consumed" ? "This request was already approved. Return to your CLI." : "Access denied. Start a new login in your CLI.");
@@ -62,7 +63,7 @@ export function CliAuthorizePage(): React.JSX.Element {
     controller.current?.abort(); const active = new AbortController(); controller.current = active;
     setBusy(true); setError("");
     try {
-      const answer = await cliAuthApi.decision(code, decision, active.signal);
+      const answer = await cliAuthApi.decision(code, decision, request.account.id, active.signal);
       if (active.signal.aborted) return;
       if (answer.state !== "approved" && answer.state !== "denied") throw new Error("Invalid decision response.");
       clearCode(); setRequest(null);
@@ -105,7 +106,7 @@ export function CliAuthorizePage(): React.JSX.Element {
     <section className="w-full max-w-lg rounded-xl bg-white p-6 shadow-sm" aria-labelledby="cli-title">
       <h1 id="cli-title" className="text-xl font-semibold">Authorize BrainBuddy CLI</h1>
       {!available ? <div ref={result} tabIndex={-1} role="alert" className="mt-4">CLI sign in is not available for this account.</div> : <>
-        <p className="mt-3">Signed in as <strong>{user?.email}</strong></p>
+        <p className="mt-3">Signed in as <strong>{request ? request.account.email : user?.email}</strong></p>
         <p className="mt-3">Approve only a code shown by your own CLI. Anyone with the resulting session can access your BrainBuddy account.</p>
         {!terminal && !request && <form className="mt-4" onSubmit={event => { event.preventDefault(); void check(code); }}>
           <label htmlFor="cli-code">Code from your CLI</label>

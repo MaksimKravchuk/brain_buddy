@@ -10,7 +10,7 @@ import { cliAuthApi } from "../api";
 
 vi.mock("../api", () => ({ cliAuthApi: { request: vi.fn(), decision: vi.fn() } }));
 const show = () => render(<MemoryRouter><CliAuthorizePage /></MemoryRouter>);
-const request = { user_code: "ABCD-EFGH", client_name: "BrainBuddy CLI", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 600000).toISOString(), state: "pending" as const };
+const request = { user_code: "ABCD-EFGH", client_name: "BrainBuddy CLI", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 600000).toISOString(), state: "pending" as const, account: { id: "A", email: "a@example.com" } };
 
 describe("024-FR-013 browser approval and safe return", () => {
   beforeEach(() => {
@@ -36,7 +36,7 @@ describe("024-FR-013 browser approval and safe return", () => {
     expect(cliAuthApi.decision).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Approve access" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Access approved");
-    expect(cliAuthApi.decision).toHaveBeenCalledWith("ABCD-EFGH", "approve", expect.any(AbortSignal));
+    expect(cliAuthApi.decision).toHaveBeenCalledWith("ABCD-EFGH", "approve", "A", expect.any(AbortSignal));
     expect(retainedCode()).toBeNull();
   });
   it("keeps an uncertain decision recoverable without claiming approval", async () => {
@@ -46,6 +46,39 @@ describe("024-FR-013 browser approval and safe return", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("could not confirm");
     expect(screen.queryByText("private-sentinel")).not.toBeInTheDocument();
     expect(retainedCode()?.userCode).toBe("ABCD-EFGH");
+  });
+  it("displays the server lookup owner when the local snapshot is stale", async () => {
+    vi.mocked(cliAuthApi.request).mockResolvedValue({ ...request, account: { id: "B", email: "b@example.com" } });
+    captureCode("#user_code=ABCD-EFGH"); show();
+    await screen.findByRole("button", { name: "Approve access" });
+    expect(screen.getByText("b@example.com")).toBeInTheDocument();
+    expect(screen.queryByText("a@example.com")).not.toBeInTheDocument();
+  });
+  it.each(["approve", "deny"] as const)("binds %s to the displayed lookup owner and requires a new choice after a cookie change", async decision => {
+    vi.mocked(cliAuthApi.decision).mockRejectedValueOnce(new ApiError("private-sentinel", 404, null));
+    captureCode("#user_code=ABCD-EFGH"); show();
+    await screen.findByRole("button", { name: "Approve access" });
+    vi.mocked(cliAuthApi.request).mockResolvedValue({ ...request, account: { id: "B", email: "b@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: decision === "approve" ? "Approve access" : "Deny access" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not confirm your decision");
+    expect(cliAuthApi.decision).toHaveBeenNthCalledWith(1, "ABCD-EFGH", decision, "A", expect.any(AbortSignal));
+    expect(retainedCode()?.userCode).toBe("ABCD-EFGH");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Check code again" }));
+    await waitFor(() => expect(screen.getByText("b@example.com")).toBeInTheDocument());
+    expect(screen.queryByText("a@example.com")).not.toBeInTheDocument();
+    expect(cliAuthApi.decision).toHaveBeenCalledTimes(1);
+    vi.mocked(cliAuthApi.decision).mockResolvedValue({ state: decision === "approve" ? "approved" : "denied" });
+    fireEvent.click(screen.getByRole("button", { name: decision === "approve" ? "Approve access" : "Deny access" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(decision === "approve" ? "Access approved" : "Access denied");
+    expect(cliAuthApi.decision).toHaveBeenNthCalledWith(2, "ABCD-EFGH", decision, "B", expect.any(AbortSignal));
+  });
+  it.each([undefined, { id: "bad owner", email: "a@example.com" }, { id: "A", email: 1 }, { id: "A", email: "" }, { id: "A", email: "x".repeat(321) }])("refuses malformed lookup account %j without falling back to the local owner", async account => {
+    vi.mocked(cliAuthApi.request).mockResolvedValue({ ...request, account } as unknown as Awaited<ReturnType<typeof cliAuthApi.request>>);
+    captureCode("#user_code=ABCD-EFGH"); show();
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not check this code");
+    expect(screen.queryByRole("button", { name: "Approve access" })).not.toBeInTheDocument();
+    expect(cliAuthApi.decision).not.toHaveBeenCalled();
   });
   it("expires tab state after ten minutes and falls back to manual entry", () => {
     vi.useFakeTimers(); captureCode("#user_code=ABCD-EFGH"); vi.advanceTimersByTime(600001);
@@ -153,7 +186,7 @@ describe("024-FR-013 browser approval and safe return", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("alert")).toHaveTextContent("could not confirm your decision");
     expect(retainedCode()?.userCode).toBe("ABCD-EFGH");
-    expect(vi.mocked(cliAuthApi.decision).mock.calls[0][2].aborted).toBe(true);
+    expect(vi.mocked(cliAuthApi.decision).mock.calls[0][3].aborted).toBe(true);
     await act(async () => finish?.({ state: "approved" }));
     expect(screen.queryByText(/Access approved/)).not.toBeInTheDocument();
     vi.mocked(cliAuthApi.request).mockResolvedValue({ ...request, state: "approved" });

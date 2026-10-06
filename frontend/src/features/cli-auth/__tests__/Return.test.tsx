@@ -34,7 +34,7 @@ describe("024-FR-013 shared sign-in returns to explicit CLI approval", () => {
     vi.clearAllMocks(); sessionStorage.clear(); captureCode("#user_code=ABCD-EFGH");
     useAuthStore.setState({ user: null, status: "anon", hydrate: vi.fn(async () => { useAuthStore.setState({ user, status: "authed" }); }) });
     vi.mocked(modernAuthApi.methods).mockResolvedValue({ google: true, apple: true, email: true, password: true, web_account_origin: null });
-    vi.mocked(cliAuthApi.request).mockResolvedValue({ user_code: "ABCD-EFGH", client_name: "BrainBuddy CLI", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 600000).toISOString(), state: "pending" });
+    vi.mocked(cliAuthApi.request).mockResolvedValue({ user_code: "ABCD-EFGH", client_name: "BrainBuddy CLI", created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 600000).toISOString(), state: "pending", account: user });
   });
   afterEach(() => { useAuthStore.setState(original); sessionStorage.clear(); history.replaceState(null, "", "/"); vi.restoreAllMocks(); });
   it.each(["google", "apple"] as const)("preserves the short code and clean destination through %s sign-in", async provider => {

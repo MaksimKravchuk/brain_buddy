@@ -164,7 +164,11 @@ class CliAuthService:
         return user, session, generation
 
     def browser(
-        self, code: str, raw_source: str | None, decision: str | None = None
+        self,
+        code: str,
+        raw_source: str | None,
+        decision: str | None = None,
+        expected_owner: str | None = None,
     ) -> dict[str, object]:
         if not raw_source:
             raise CliAuthError("cli_auth_unavailable", 404)
@@ -182,6 +186,8 @@ class CliAuthService:
                 user, session, generation = self._source(connection, source_hash, row)
                 state = row["state"]
                 if decision:
+                    if expected_owner != user.id:
+                        raise CliAuthError("cli_auth_unavailable", 404)
                     requested = "approved" if decision == "approve" else "denied"
                     if state != "pending" and state != requested:
                         raise CliAuthError("decision_conflict", 409)
@@ -211,6 +217,7 @@ class CliAuthService:
                         row["expires_at"], UTC
                     ).isoformat(),
                     "state": state,
+                    "account": {"id": user.id, "email": user.email},
                 }
         raise CliAuthError("cli_auth_unavailable", 404)
 
