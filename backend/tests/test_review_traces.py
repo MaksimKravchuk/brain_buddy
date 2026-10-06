@@ -151,6 +151,14 @@ def _replay(trace: dict[str, Any], client: TestClient, clock: FrozenClock) -> No
     for step in trace["steps"]:
         with allure.step(f"{trace['id']}: {step['name']}"):
             _run_step(step, client, clock, captured)
+            allure.attach(
+                json.dumps(
+                    {key: value for key, value in step.items() if key != "name"},
+                    sort_keys=True,
+                ),
+                name="Trace step",
+                attachment_type=allure.attachment_type.JSON,
+            )
 
 
 @pytest.mark.parametrize(
