@@ -3,9 +3,8 @@
 import logging
 import os
 import threading
-from collections.abc import Awaitable, Callable
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 
 from app.api import api_router
 from app.api.account import router as account_router
@@ -321,21 +320,8 @@ def create_app() -> FastAPI:
             if app.state.privacy_maintenance_thread is not None:
                 app.state.privacy_maintenance_thread.join(timeout=5)
 
-    app.add_middleware(CorrelationIdMiddleware)
+    app.add_middleware(CorrelationIdMiddleware, api_prefix=config.api_prefix)
     register_exception_handlers(app)
-
-    @app.middleware("http")
-    async def auth_privacy_headers(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        response = await call_next(request)
-        path = request.url.path
-        if path.startswith(
-            (f"{config.api_prefix}/auth/", f"{config.api_prefix}/account/")
-        ):
-            response.headers["Cache-Control"] = "no-store"
-            response.headers["Referrer-Policy"] = "no-referrer"
-        return response
 
     @app.on_event("shutdown")
     def close_auth_provider() -> None:
