@@ -19,7 +19,7 @@ public struct ProjectRecord {
 }
 ```
 
-New keys decode with `decodeIfPresent`. `StoreDocument.currentVersion` stays 1, and `StoreDocumentCoding.migrationStep` gains no case. A test decodes a v1 document written before 021 (fixture in `BrainBuddyPersistenceTests/StoreDocumentCodingTests.swift`).
+New keys decode with `decodeIfPresent`. `StoreDocument.currentVersion` is unchanged by 021 (1 today, 2 if 020 PR-03 lands first; review c2, G43), and `StoreDocumentCoding.migrationStep` gains no case from 021. A test decodes a v1 document written before 021 (fixture in `BrainBuddyPersistenceTests/StoreDocumentCodingTests.swift`).
 
 ## 2. Commands (`BrainBuddyCore/Commands.swift`)
 

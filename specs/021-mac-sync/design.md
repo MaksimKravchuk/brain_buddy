@@ -575,7 +575,7 @@ and failures appear only after 60 s, in one place.
   - The projects API must return archived projects (with their tasks reachable at `/projects/:id`).
   - An unarchive endpoint is needed.
   - The FR-027 neutral line needs the server to know which projects were archived before this change (for example, archived before the cutover). This applies to every client.
-- **Upgrade**: confirm the X-05 "partial read = unreadable" interpretation.
+- **Upgrade**: confirm the X-05 "partial read = unreadable" interpretation (planning confirmed it; planning review c2 revised it, see "Planning review c2 additions").
 - **Tooling**: widen `SCREEN_ID_RE` in `scripts/render_feature_report.py` to include `X-`.
 - **Gaps G-1 … G-6** are resolved (spec commit e50b144). Only G-7, the tooling item above, is left.
 - **iPhone Settings › Sync** keeps its existing behaviour (FR-019, "stay as they are"), with one exception: superseded by the FR-019 amendment (`b83d367`), its "Sync now" stays enabled while a sync runs and is single-flight, as on the Mac (M-01 "Settings › Sync, sync running"). The earlier note that it may stay disabled no longer applies.

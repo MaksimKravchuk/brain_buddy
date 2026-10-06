@@ -45,3 +45,13 @@
   - two edge cases ("Same-named archived projects", "The previous Mac store appears again after the update"); US1's independent test no longer says "delete"; US2-5's example no longer assumes a project delete route; a cross-reference corrected (FR-001, FR-018);
   - Assumptions: the backup wording corrected, and what the upgrade does not carry (deleted tags, retry receipts, a comment's edited time) stated;
   - no [NEEDS CLARIFICATION] marker was added. Two product choices raised by the review (OQ-1, OQ-2) have recommended defaults recorded in plan.md and do not block.
+- Validation: iteration 3 (2026-10-06, after planning review campaign `021-mac-sync-c2`, the last allowed; dispositions in `../review-c2-disposition.md`), all items still pass. OQ-1 and OQ-2 are decided under delegation (Clarifications, `95ce8de`); c2 raised no product decision. The spec changed minimally, with FR and SC numbering kept, no requirement added or lettered, and no owner decision (intake, Clarifications, design Sign-off) altered:
+  - FR-006: the periodic fetch runs while the app is running, also when its window is not frontmost (was "while it is active"), matching SC-001's "open" Mac;
+  - FR-007: tags sync name and deletion (no tag colour exists on any client); a task's position is assigned by the account and the Mac never sends an order;
+  - FR-015 and SC-004: the reference id is required for failures of a request to the server and for sync issues; purely local or offline failures carry none;
+  - FR-020: values are carried in the form the account stores them, adjusted by a fixed rule that keeps the full text, and listed in a local report; nothing is dropped silently (review blocking finding G02);
+  - FR-029: the one pre-sign-in request is ending a session opened earlier on this Mac, with no user data;
+  - US1-1 adds FR-013's 1 s threshold; US4-5 names the reachable trigger (a sign-in resolving to a different account);
+  - edge cases: "Same-named archived projects" states the one accepted change to manual order at the upgrade; the FR-033 case includes a workspace emptied by a sign-out;
+  - Assumptions: creation, cancellation and waiting-since times also restart at the first upload (review marks unaffected); the pre-021 online-mode session is ended at the first launch; the macOS Keychain prompt appears only at a sign-in the person started;
+  - every changed requirement stays testable and technology-agnostic, and each is traced to a named test or host-check line in plan.md "Test strategy".

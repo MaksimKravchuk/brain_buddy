@@ -827,19 +827,19 @@ After two review campaigns these remain, by design or by limit. Each has the com
 
 ## Planning review
 
-The `after_plan` hook (`/speckit-review`) is run by the owner. Campaign `021-mac-sync-c1` (`.specify/workflows/runs/021-mac-sync-c1/`) returned 63 technical findings (2 blocking, 37 important, 24 advisory) and no product decision; every finding is dispositioned in [review-c1-disposition.md](review-c1-disposition.md).
+The `after_plan` hook (`/speckit-review`) is run by the owner. Campaign `021-mac-sync-c1` (`.specify/workflows/runs/021-mac-sync-c1/`) returned 63 technical findings (2 blocking, 37 important, 24 advisory) and no product decision; every finding is dispositioned in [review-c1-disposition.md](review-c1-disposition.md). Campaign `021-mac-sync-c2`, the last allowed (cap 2), returned 65 technical findings (2 blocking, 32 important, 31 advisory) and no product decision; every finding is dispositioned in [review-c2-disposition.md](review-c2-disposition.md). The feature then goes to founder acceptance with the residual risks above.
 
 ## Constitution Check (post-design)
 
-- **Spec workflow** — PASS. Inconsistencies 1 – 5 are resolved (`0b9fffe`, `b83d367`, review c1); 6 – 8 are handled in the plan. Gap G-8 is resolved by X-08. Two owner questions from review c1 have recommended defaults that the plan follows.
+- **Spec workflow** — PASS. Inconsistencies 1 – 5 are resolved (`0b9fffe`, `b83d367`, review c1); 6 – 8 are handled in the plan. Gap G-8 is resolved by X-08. The two product choices from review c1 were decided under delegation (`95ce8de`); review c2 raised none, and its spec rewordings keep FR/SC numbering.
 - **Consent & Safety** — PASS:
-  - no egress before sign-in, tested with a counting transport;
+  - no egress before sign-in except ending a session opened earlier, to its own host and with no user data (FR-029 as amended), tested with a counting transport;
   - the credential only in the login keychain, never synchronizable, with its real at-rest disposition documented;
   - the pre-021 cookie session ended and its cookie removed;
   - content-free logs with tests on server and Mac, and an incoming correlation id that cannot inject log text;
-  - the import is non-destructive, fails closed, and never touches a workspace in use;
+  - the import is non-destructive, total over realistic data, fails closed, and never touches a workspace in use;
   - the server field is exported and purged;
-  - the device files are listed in `docs/data-retention.md` with the row text written in data-model.
+  - the device files are listed in `docs/data-retention.md` with the row text written in data-model, and the privacy policy says that device copies outlive the server's erasure until sign-out.
 - **Tests** — PASS: failing-first tests per slice, covering idempotency, retries, partial failure, crash recovery, offline replay, rollback-safe validation and every design state id.
 - **Contracts** — PASS:
   - the five contract files, `data-model.md` and this plan agree: E1 ↔ http §2, E3 / E4 ↔ kit §1 – §3, E5 / E6 ↔ sync-status, E7 / E8 / E10 ↔ mac-legacy-import and mac-app-host;
@@ -848,7 +848,7 @@ The `after_plan` hook (`/speckit-review`) is run by the owner. Campaign `021-mac
 - **Observability** — PASS: Ref on every surfaced failure, including timeouts; client attribution in the request log; Mac logs content-free.
 - **Mobile/resilience** — PASS: offline-first Mac and iPhone, the durable outbox, single instance, a crash-safe import, and no blocking first load.
 - **Delivery boundary** — PASS: slices with classes re-derived from the classifier; ASK slices named; cross-feature serialization stated.
-- **Design citation** — PASS: every user-story section cites its X-, M- and D- ids and states, X-08 included.
+- **Design citation** — PASS: every user-story section cites its X-, M- and D- ids and states, X-08 and X-09 included.
 
 Delivery risk: **HIGH / ASK** remains for the feature (PR-01, PR-02, PR-05, PR-08, PR-09, PR-10).
 
@@ -859,5 +859,6 @@ Delivery risk: **HIGH / ASK** remains for the feature (PR-01, PR-02, PR-05, PR-0
 | A second local file on the Mac (`mac-local.json`) beside the kit's `StoreDocument` | FR-023 keeps the review marks device-local and surviving sign-out; `StoreDocument` mirrors the account and is shared with the iPhone and widgets | putting Mac-only marks in `StoreDocument` forces a document version bump that collides with 020's v2 and leaks a Mac concept into the iPhone's core (R4) |
 | Polling on three clients (15 s tick, 30 s pull age; web 45 s refetch) instead of a change feed | SC-001's 60 s bound in both directions with both clients open | a change feed or push is out of scope (intake §4); a 60 s age with a 60 s tick misses SC-001, and a 45 s age leaves a worst case just over 60 s (R8) |
 | A staging file and an exclusive rename for the one-time import | the import must never write over a workspace in use, even when its own record is lost (FR-033) | writing `store.json` in place and trusting the sidecar record replaces a used workspace when `mac-local.json` is deleted or an older copy brings the legacy file back (review c1, F02) |
+| A process activity that keeps App Nap from stretching the Mac's timers while signed in | SC-001's 60 s with the Mac window covered or not frontmost (FR-006 as amended) | accepting throttling would make SC-001 hold only for a visible window, which the spec does not say (research R8; review c2, G64) |
 | One ADR change (lossless archive) split over two backend slices | a safe one-step image rollback at every point | a single slice makes rollback leave every task in a newly archived project uneditable (R9) |
 | A startup step runs at every backend boot instead of a one-time ledger row | marks archives made by older code during any rollback window | a ledger row runs once and misses them (R12) |
