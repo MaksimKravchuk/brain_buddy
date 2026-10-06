@@ -203,6 +203,16 @@ figure{margin:0;width:470px}figcaption{font-size:12px;line-height:1.45;color:var
 </div></div>
 </figure>
 
+<figure>
+<figcaption><b>X-03 · signed in, account deletion cancelled</b>FR-017. The sign-in succeeded and cancelled a deletion the person had requested. Before closing, the same sheet replaces its form with a short note in the iPhone's wording. It is not a separate dialog. Focus moves to the note, and VoiceOver reads its title and text. "OK" is the default button; Return or Esc closes the sheet. Sync has already started behind the sheet.</figcaption>
+<div class="stage"><div class="sheet" role="dialog" aria-labelledby="dc" aria-describedby="dcd">
+  <h2>Sign in to Brain Buddy</h2>
+  <div class="info" role="status" tabindex="-1" style="box-shadow:var(--focus)"><svg class="i" style="margin-top:2px"><use href="#i-info"/></svg><span><b id="dc">Your account deletion was cancelled</b><br><span id="dcd">Signing in cancels a deletion you requested in the last 14 days. Delete your account again on the web if you still want to.</span></span></div>
+  <div class="fld"><label>Email</label><span class="inp ro">alex@example.com</span></div>
+  <div class="bar"><button class="btn pri">OK</button></div>
+</div></div>
+</figure>
+
 </div>
 
 <figure style="width:auto;margin-top:34px">
@@ -228,9 +238,11 @@ figure{margin:0;width:470px}figcaption{font-size:12px;line-height:1.45;color:var
 </figure>
 
 <div class="note">
-  <h3>Not designed here: a gap reported to the plan</h3>
+  <h3>Account deletion cancelled by signing in (FR-017, gap G-3 resolved)</h3>
   <ul>
-    <li><b>Signing in cancels a pending account deletion.</b> The iPhone says so in an alert after sign-in ("Your account deletion was cancelled"). The spec has no requirement for the Mac, and FR-017's list of allowed dialogs does not include it. This mockup does not add it; see design.md "Requirements gaps".</li>
+    <li>The note appears only after a sign-in that actually cancelled a pending deletion. It is shown once, in this sheet, before the sheet closes. There is no extra alert.</li>
+    <li>The copy is the iPhone's (<code>SignInSheet.swift</code>): "Your account deletion was cancelled" / "Signing in cancels a deletion you requested in the last 14 days. Delete your account again on the web if you still want to."</li>
+    <li>Focus goes to the note, and "OK" is the only button. Return or Esc closes the sheet, and focus returns to the control that opened it.</li>
   </ul>
 </div>
 
