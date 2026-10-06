@@ -24,6 +24,121 @@ fn cookie() -> String {
 }
 
 #[cfg(unix)]
+fn assert_uncertain_exchange_preserves_connection(fault: common::ReplyFault, cancel: bool) {
+    use std::sync::{Arc, Mutex};
+    let dir = config_dir();
+    let path = dir.path().to_owned();
+    let before = Arc::new(Mutex::new(None));
+    let snapshot = before.clone();
+    let (results, captured) = common::sessions_with_reply_fault(
+        &[
+            &["auth", "login", "--no-browser", "--store", "file"],
+            &[
+                "auth",
+                "login",
+                "--no-browser",
+                "--store",
+                "file",
+                "--replace",
+            ],
+        ],
+        dir.path(),
+        vec![
+            (200, String::new(), start()),
+            (200, cookie(), issued()),
+            (200, String::new(), start()),
+            (200, cookie(), issued()),
+            (
+                409,
+                String::new(),
+                json!({"detail":{"code":"authorization_consumed"}}),
+            ),
+        ],
+        Some((3, fault)),
+        move |index, pid| {
+            if index == 2 {
+                let mut files = std::fs::read_dir(&path)
+                    .unwrap()
+                    .map(|entry| {
+                        let entry = entry.unwrap();
+                        (entry.file_name(), std::fs::read(entry.path()).unwrap())
+                    })
+                    .collect::<Vec<_>>();
+                files.sort();
+                *snapshot.lock().unwrap() = Some(files);
+            }
+            if index == 3 && cancel {
+                assert!(pid > 0);
+                assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGINT) }, 0);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        },
+    );
+    assert!(results[0].status.success());
+    assert_eq!(
+        captured.len(),
+        4,
+        "An uncertain token exchange must not be polled again"
+    );
+    assert!(
+        captured[3]
+            .headers
+            .starts_with("POST /api/auth/device/token ")
+    );
+    assert!(results[1].stdout.is_empty());
+    let output = String::from_utf8_lossy(&results[1].stderr);
+    assert!(!output.contains("private-device-proof-sentinel"));
+    assert!(!output.contains("new-session-secret-sentinel"));
+    assert!(!output.contains("authorization_consumed"));
+    let error: Value = serde_json::from_str(output.lines().last().unwrap()).unwrap();
+    assert_eq!(error["error"]["detail"]["new_session_may_exist"], true);
+    assert_eq!(error["error"]["detail"]["cleanup_uncertain"], true);
+    match fault {
+        common::ReplyFault::DropBeforeHeaders => {
+            assert_eq!(results[1].status.code(), Some(8));
+            assert_eq!(error["error"]["code"], "transport_error");
+            assert_eq!(error["error"]["delivery_unknown"], true);
+        }
+        common::ReplyFault::TruncatedSuccess => {
+            assert_eq!(results[1].status.code(), Some(9));
+            assert_eq!(error["error"]["mutation_confirmed"], true);
+            assert_eq!(error["error"]["delivery_unknown"], false);
+        }
+    }
+    let mut after = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (entry.file_name(), std::fs::read(entry.path()).unwrap())
+        })
+        .collect::<Vec<_>>();
+    after.sort();
+    assert_eq!(
+        Some(after),
+        *before.lock().unwrap(),
+        "Previous connection and credential must stay byte-identical"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn lost_token_reply_stops_polling_024_fr_007_024_fr_013() {
+    assert_uncertain_exchange_preserves_connection(common::ReplyFault::DropBeforeHeaders, false);
+}
+
+#[cfg(unix)]
+#[test]
+fn cancellation_cannot_hide_lost_token_reply_024_fr_007_024_fr_013() {
+    assert_uncertain_exchange_preserves_connection(common::ReplyFault::DropBeforeHeaders, true);
+}
+
+#[cfg(unix)]
+#[test]
+fn cancellation_cannot_hide_confirmed_token_reply_024_fr_007_024_fr_013() {
+    assert_uncertain_exchange_preserves_connection(common::ReplyFault::TruncatedSuccess, true);
+}
+
+#[cfg(unix)]
 #[test]
 fn cancellation_during_poll_reports_130_024_fr_013() {
     let dir = config_dir();

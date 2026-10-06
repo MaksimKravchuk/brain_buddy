@@ -294,10 +294,13 @@ fn login(
         ) {
             Ok(reply) => break reply,
             Err(mut error) => {
-                if error.mutation_confirmed == Some(true) {
+                if error.delivery_unknown == Some(true) || error.mutation_confirmed == Some(true) {
                     error.detail = Some(Box::new(
                         json!({"cleanup_uncertain":true,"new_session_may_exist":true}),
                     ));
+                    // The single-use exchange may already have issued a session.
+                    // Preserve that outcome even if cancellation arrived in flight.
+                    return Err(error);
                 }
                 if cancel.load(Ordering::SeqCst) {
                     let mut cancelled = canceled();
@@ -314,7 +317,6 @@ fn login(
                         interval =
                             interval.max(error.retry_after_seconds.unwrap_or(interval).min(600))
                     }
-                    "transport_error" => interval = (interval * 2).min(60),
                     _ => return Err(error),
                 }
             }

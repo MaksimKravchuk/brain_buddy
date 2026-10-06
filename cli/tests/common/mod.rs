@@ -47,6 +47,22 @@ pub fn sessions_with_hook_and_pid(
     actions: &[&[&str]],
     config: &std::path::Path,
     replies: Vec<(u16, String, Value)>,
+    hook: impl FnMut(usize, u32) + Send + 'static,
+) -> (Vec<Output>, Vec<Captured>) {
+    sessions_with_reply_fault(actions, config, replies, None, hook)
+}
+
+#[derive(Clone, Copy)]
+pub enum ReplyFault {
+    DropBeforeHeaders,
+    TruncatedSuccess,
+}
+
+pub fn sessions_with_reply_fault(
+    actions: &[&[&str]],
+    config: &std::path::Path,
+    replies: Vec<(u16, String, Value)>,
+    fault: Option<(usize, ReplyFault)>,
     mut hook: impl FnMut(usize, u32) + Send + 'static,
 ) -> (Vec<Output>, Vec<Captured>) {
     use std::sync::{
@@ -112,10 +128,18 @@ pub fn sessions_with_hook_and_pid(
                 body: serde_json::from_slice(&bytes[end..]).unwrap_or(Value::Null),
             });
             hook(captured.len() - 1, process_id.load(Ordering::SeqCst));
+            let reply_fault = fault
+                .filter(|(index, _)| *index == captured.len() - 1)
+                .map(|(_, fault)| fault);
+            if matches!(reply_fault, Some(ReplyFault::DropBeforeHeaders)) {
+                continue;
+            }
             let body = value.to_string().replace("FIXTURE_ORIGIN", &fixture_origin);
+            let length =
+                body.len() + usize::from(matches!(reply_fault, Some(ReplyFault::TruncatedSuccess)));
             let response = format!(
                 "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra_headers}\r\n{body}",
-                body.len()
+                length
             );
             let _ = socket.write_all(response.as_bytes());
         }

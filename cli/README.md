@@ -36,6 +36,8 @@ The default store is macOS Keychain, Windows Credential Manager or Linux Secret 
 
 `auth status` calls `/auth/me` and reports identity/source/expiry without a credential. `auth logout` revokes this session and clears its selected local entry. It reports local clearance and remote revocation separately; an offline revocation failure exits nonzero. Other browser sessions remain separate. If replacement cleanup reports failure, review the previous connection/session rather than assuming every old credential was erased.
 
+If the token exchange loses its reply, login stops polling with `delivery_unknown:true`, `new_session_may_exist:true` and `cleanup_uncertain:true`. An unreadable successful reply reports `mutation_confirmed:true` instead. Cancellation during that exchange preserves this outcome. The previous saved connection stays unchanged; the CLI cannot revoke a new token it never received. Review account recovery/session revocation with the server operator before starting a fresh login.
+
 For unattended jobs, supply `BB_SESSION_TOKEN` through your existing secret manager/environment, optionally `BB_SESSION_COOKIE_NAME` for a customized server. This credential is invocation-only; logout cannot erase a secret from an external manager. Never put a session value into command arguments, logs or a committed file.
 
 ## Agent quickstart
