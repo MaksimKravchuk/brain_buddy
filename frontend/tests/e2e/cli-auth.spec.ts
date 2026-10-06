@@ -43,5 +43,18 @@ test.describe("024-FR-013 CLI browser approval", () => {
       expect((await repeated.json()).detail.code).toBe("authorization_consumed");
       await request.post(`${backendUrl}/api/auth/logout`);
     });
+    await test.step("recover from an unavailable code with the real server reference", async () => {
+      await page.goto("/cli/authorize");
+      const unavailable = grant.user_code === "ABCD-EFGH" ? "JKLM-NPQR" : "ABCD-EFGH";
+      await page.getByLabel("Code from your CLI").fill(unavailable);
+      const response = page.waitForResponse(value => new URL(value.url()).pathname === "/api/auth/device/request");
+      await page.getByRole("button", { name: "Check code", exact: true }).click();
+      const rejected = await response;
+      expect(rejected.status()).toBe(404);
+      const reference = rejected.headers()["x-correlation-id"];
+      expect(reference).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/i);
+      await expect(page.getByRole("alert")).toContainText(`Reference: ${reference}`);
+      await expect(page.getByRole("button", { name: "Check code again" })).toBeEnabled();
+    });
   });
 });

@@ -16,6 +16,13 @@ describe("024-FR-013 bounded browser authorization transport", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("private-sentinel", { status: 403 })));
     await expect(cliAuthApi.request("ABCD-EFGH", new AbortController().signal)).rejects.toMatchObject({ status: 403, message: "CLI authorization could not complete.", payload: null });
   });
+  it.each(["12345678-1234-4234-8234-123456789abc", "private-header-sentinel", "", "a".repeat(500)])("retains only a safe correlation reference %s", async reference => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("private-body-sentinel", { status: 503, headers: { "X-Correlation-ID": reference } })));
+    await expect(cliAuthApi.request("ABCD-EFGH", new AbortController().signal)).rejects.toMatchObject({
+      status: 503, payload: null, message: "CLI authorization could not complete.",
+      correlationId: reference.startsWith("12345678-") ? reference : undefined
+    });
+  });
   it.each(["timeout", "cancelled", "already cancelled"])("aborts a %s request without extending the grant", async reason => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn((_url, options: RequestInit) => new Promise((_resolve, reject) => {

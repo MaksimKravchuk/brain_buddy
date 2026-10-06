@@ -16,7 +16,11 @@ async function post<T>(path: string, body: object, signal: AbortSignal): Promise
       credentials: "include", redirect: "error", cache: "no-store",
       signal: controller.signal, body: JSON.stringify(body)
     });
-    if (!response.ok) throw new ApiError("CLI authorization could not complete.", response.status, null);
+    if (!response.ok) {
+      const reference = response.headers.get("X-Correlation-ID");
+      const safeReference = reference && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reference) ? reference : undefined;
+      throw new ApiError("CLI authorization could not complete.", response.status, null, safeReference);
+    }
     return await response.json() as T;
   } finally { clearTimeout(timer); signal.removeEventListener("abort", abort); }
 }

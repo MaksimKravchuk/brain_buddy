@@ -8,6 +8,10 @@ import { ApiError } from "../../api/client";
 import { cliAuthApi, type AuthorizationRequest } from "./api";
 import { captureCode, clearCode, normalizeCode, rememberCode, retainedCode } from "./code";
 
+function failureCopy(failure: unknown, message: string): string {
+  return message + (failure instanceof ApiError && failure.correlationId ? ` Reference: ${failure.correlationId}` : "");
+}
+
 export function CliAuthorizeEntry(): React.JSX.Element {
   const location = useLocation(); const navigate = useNavigate();
   useLayoutEffect(() => {
@@ -48,7 +52,7 @@ export function CliAuthorizePage(): React.JSX.Element {
       } else setRequest(found);
     } catch (failure) {
       if (!active.signal.aborted) {
-        setError(failure instanceof ApiError && failure.status === 404 ? "This code is unavailable or expired. Check your CLI and try again." : "We could not check this code. Check your connection and try again.");
+        setError(failureCopy(failure, failure instanceof ApiError && failure.status === 404 ? "This code is unavailable or expired. Check your CLI and try again." : "We could not check this code. Check your connection and try again."));
         if (failure instanceof ApiError && failure.status === 404) clearCode();
       }
     } finally { if (!active.signal.aborted) setBusy(false); }
@@ -63,8 +67,8 @@ export function CliAuthorizePage(): React.JSX.Element {
       if (answer.state !== "approved" && answer.state !== "denied") throw new Error("Invalid decision response.");
       clearCode(); setRequest(null);
       setTerminal(answer.state === "approved" ? "Access approved. Return to your CLI to finish signing in." : "Access denied. Start a new login in your CLI.");
-    } catch {
-      if (!active.signal.aborted) setError("We could not confirm your decision. Check this code again before retrying.");
+    } catch (failure) {
+      if (!active.signal.aborted) setError(failureCopy(failure, "We could not confirm your decision. Check this code again before retrying."));
     } finally { if (!active.signal.aborted) setBusy(false); }
   }
   function expire(): void {

@@ -81,13 +81,23 @@ describe("024-FR-013 browser approval and safe return", () => {
     expect(retainedCode()).toBeNull();
   });
   it.each([404, 403, 0])("recovers from lookup status %s with fixed nonreflecting copy", async status => {
-    vi.mocked(cliAuthApi.request).mockRejectedValue(status ? new ApiError("private-sentinel", status, null) : new Error("private-sentinel"));
+    vi.mocked(cliAuthApi.request).mockRejectedValue(status ? new ApiError("private-sentinel", status, null, "12345678-1234-4234-8234-123456789abc") : new Error("private-sentinel"));
     captureCode("#user_code=ABCD-EFGH"); show();
     expect(await screen.findByRole("alert")).toHaveTextContent(status === 404 ? "unavailable or expired" : "could not check");
+    if (status) expect(screen.getByRole("alert")).toHaveTextContent("Reference: 12345678-1234-4234-8234-123456789abc");
     expect(screen.queryByText("private-sentinel")).not.toBeInTheDocument();
     vi.mocked(cliAuthApi.request).mockResolvedValue(request);
     fireEvent.click(screen.getByRole("button", { name: "Check code again" }));
     expect(await screen.findByRole("button", { name: "Approve access" })).toBeEnabled();
+  });
+  it("keeps an uncertain decision recoverable with its safe reference", async () => {
+    vi.mocked(cliAuthApi.decision).mockRejectedValue(new ApiError("private-sentinel", 503, null, "12345678-1234-4234-8234-123456789abc"));
+    captureCode("#user_code=ABCD-EFGH"); show();
+    fireEvent.click(await screen.findByRole("button", { name: "Approve access" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not confirm");
+    expect(screen.getByRole("alert")).toHaveTextContent("Reference: 12345678-1234-4234-8234-123456789abc");
+    expect(screen.queryByText("private-sentinel")).not.toBeInTheDocument();
+    expect(retainedCode()?.userCode).toBe("ABCD-EFGH");
   });
   it.each([{ expires_at: "invalid" }, { expires_at: "2000-01-01T00:00:00Z" }, { user_code: "JKLM-NPQR" }, { client_name: "Foreign client" }])("rejects malformed or expired request metadata %j", async override => {
     vi.mocked(cliAuthApi.request).mockResolvedValue({ ...request, ...override });
