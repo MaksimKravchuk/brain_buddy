@@ -42,6 +42,20 @@ figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var
 .note.warn{background:var(--amb50);border-color:var(--amb200);color:var(--amb800)}
 .ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--s600)}
 .help{font-size:12px;color:var(--s500);margin:0}
+.ax .nb .ttl{font-size:24px;color:var(--s700)}
+.ax .steps{overflow-x:auto;gap:6px;padding-bottom:12px}
+.ax .steps i{flex:none;width:56px;height:6px;border-radius:3px}
+.ax .body{overflow-y:auto;gap:16px}
+.ax .h1{font-size:40px;line-height:1.15}
+.ax .counts{grid-template-columns:1fr}
+.ax .counts div{font-size:24px;padding:12px 16px;border-right:0;gap:12px;flex-wrap:wrap}
+.ax .counts div:nth-child(-n+2){border-top:1px solid var(--s200)}
+.ax .counts div:first-child{border-top:0}
+.ax .counts b{font-size:28px}
+.ax .btn{font-size:26px;min-height:64px}
+.ax .nextrev{font-size:24px}
+.ax .q h2{font-size:26px}
+.ax .qa button{font-size:24px;min-height:60px}
 </style>
 </head>
 <body>
@@ -175,6 +189,36 @@ figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var
       <div role="listitem">To Someday<b>2</b></div><div role="listitem" class="z">Cancelled<b>0</b></div>
       <div role="listitem" class="z">Kept 7 more days<b>0</b></div><div role="listitem">Inbox processed<b>4</b></div>
       <div role="listitem" class="z">Kept as is<b>0</b></div><div role="listitem" class="z">Moved to Next<b>0</b></div>
+    </div>
+  </div>
+  <div class="foot"><button class="btn pri">Done</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-22 · accessibility text size (AX5)</b>Added 2026-10-06 by owner decision (Dynamic Type up to AX5 everywhere). The counts become one column, each label and number on one row, the label wrapping when needed; the body scrolls above the pinned Done (the next review and the question follow below the counts); the step bar scrolls sideways instead of shrinking. Same counts as the default frame.</figcaption>
+<div class="phone ax">
+  <div class="sb"><span>16:32</span><span>●●● 100%</span></div>
+  <div class="nb"><span class="ttl">Full · 10 of 10</span></div>
+  <div class="steps" role="group" aria-label="Step 10 of 10, scrolls sideways"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="body">
+    <h1 class="h1">Review done</h1>
+    <div class="counts" role="list" aria-label="Decisions in this review">
+      <div role="listitem">Done<b>3</b></div>
+      <div role="listitem">Reformulated<b>2</b></div>
+      <div role="listitem">First step<b>2</b></div>
+      <div role="listitem">To Waiting for<b>1</b></div>
+      <div role="listitem">To Someday<b>4</b></div>
+      <div role="listitem">Cancelled<b>1</b></div>
+      <div role="listitem" class="z">Kept 7 more days<b>0</b></div>
+      <div role="listitem">Inbox processed<b>10</b></div>
+      <div role="listitem">Kept as is<b>3</b></div>
+      <div role="listitem">Moved to Next<b>2</b></div>
+    </div>
+    <div class="nextrev"><svg class="i"><use href="#i-today"/></svg><span>Next review: Fri 16 Oct, 16:00</span></div>
+    <div class="q" role="group" aria-labelledby="q6">
+      <h2 id="q6">Clear how to start the week? <span class="opt">optional</span></h2>
+      <div class="qa" style="flex-direction:column"><button aria-pressed="false">Yes</button><button aria-pressed="false">Not really</button></div>
     </div>
   </div>
   <div class="foot"><button class="btn pri">Done</button></div>

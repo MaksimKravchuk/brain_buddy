@@ -147,6 +147,9 @@ quickstart.md, ADR = adr-draft.md.
 
 ## Owner notes (information or confirmation, not blockers)
 
+**Owner response 2026-10-06 (at `/speckit-tasks`)**: all six notes accepted as
+recommended (spec Clarifications "Session 2026-10-06 (after /speckit-tasks)").
+
 1. **Account-less staged exposure (RC-07).** The spec now records that account-less
    iOS gets the feature only when its release switch is turned on (after one clean
    threshold cycle of the synced path; plan PR-14). This narrows "the whole feature

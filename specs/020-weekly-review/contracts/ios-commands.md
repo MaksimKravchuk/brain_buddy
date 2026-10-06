@@ -65,7 +65,14 @@ with the device zone (FR-051; the command writes only the activation instant in
 `review.settings` — `local.activatedAt` when account-less — and nothing on any task; the
 task clocks change only through the deterministic post-replay activation step of §3,
 which runs because an activation instant is now known, so `review(…)` still mutates
-`GTDState.review` only); `updateSettings(ReviewSettingsChange)` → `PUT /review/settings`;
+`GTDState.review` only); `updateSettings(ReviewSettingsChange)` → `PUT /review/settings`
+(a zone change is queued only when the device's own zone changed: the workspace
+compares `TimeZone.current` with `local.lastObservedTimeZone` on load, on foreground
+and on the system time-zone-change notification, queues `updateSettings(timeZone:)`
+when they differ and then records the new zone; a pulled zone that differs from the
+device's is never a reason to send, http §5; `lastObservedTimeZone` is first set to the
+zone the device sends with the explainer acknowledgement or at onboarding, or, on a
+device that sends neither, to its zone when it first loads the review state);
 `acknowledgeParks([ParkAck])` → `POST /review/parks/acknowledge`;
 `startSession(StartSession)` (carries the client `sessionID`) → `POST /review/sessions`
 with `id` and `replace_open: true`;
@@ -176,6 +183,15 @@ early.
   `decideTask` naming a session the server does not know is recorded without a session
   (http §3), so no decision is lost (SC-007).
 
+- **Retry after the server's 24 h idempotency retention** (a lost response followed by
+  a long offline window): the device keeps the operation and its Idempotency-Key as
+  today and resends it. The server recognises a stored record that matches the retry
+  and answers as for a first delivery (http "Retry after the idempotency retention"),
+  so the device treats it as success; it is never set aside. Only a non-matching
+  record answers `id_conflict`, which is set aside with its Ref as before.
+  `ReviewSyncTests` and the golden trace "decision retried after the retention" cover
+  it (0 sync issues, the decision applied once).
+
 - **Feature turned off on the server** (rollback, cohort removal): every write a
   review command or `decideTask` / `undoDecision` / `autoParkTask` / `bulkRelease` /
   `undoBulkRelease` sends is accepted with the flag off (http "Gate"), so the outbox
@@ -238,6 +254,10 @@ http §6), `projectsNeedingNextAction(in:)` (reuses `ProjectSummary.needsNextAct
 `Queries.swift:183`), `datesAhead(in:today:days: 14)`,
 `lastCountedReview(in:)` (completed and partial only), `askCount(in:now:settings:)`
 (widget; the same aggregate as `decisionQueue`), `explainerNeeded(in:)` (FR-051).
+The `timeZone` that classification uses is the owner's stored `time_zone` (the
+formulation-clock owner input) when signed in, so a device sitting in another zone
+classifies due-dated tasks exactly as the server parks them; account-less, it is the
+device zone. Times shown to the person use the device zone.
 
 Pure Core functions for behaviour that otherwise lives only in app or widget targets
 (so it is Linux-testable, testability finding campaign 1):
@@ -283,7 +303,8 @@ Pure Core functions for behaviour that otherwise lives only in app or widget tar
 
 `StoreDocument.currentVersion` becomes 2. `StoreDocumentCoding.migrationStep(from: 1)`
 (`BrainBuddyPersistence/StoreDocumentCoding.swift:117`) adds an empty
-`base.review`/`local` and sets `local.activatedAt = nil` and `local.formDrafts = [:]`.
+`base.review`/`local` and sets `local.activatedAt = nil`, `local.formDrafts = [:]` and
+`local.lastObservedTimeZone = nil` (§2 `updateSettings`).
 Activation happens when the person first dismisses the auto-park explainer (M-26,
 FR-051), never at migration: account-less, that instant is `local.activatedAt`;
 signed in, the device queues `acknowledgeExplainer` and uses the server's
@@ -291,6 +312,30 @@ signed in, the device queues `acknowledgeExplainer` and uses the server's
 it was already seen elsewhere sends a harmless duplicate acknowledgement). Linking an
 account-less install to an account sends `acknowledgeExplainer` if the device had
 seen it and the account has no activation yet.
+
+**Account linking and local auto-parks** (owner decision 2026-10-06, offline-sync
+checklist CHK006; FR-014): the server re-evaluates a device park with its own clocks,
+which for tasks it is only now receiving start at upload, so it would answer
+`applied: false` and the pulled server task would move every account-less park back to
+Next. So `Workspace.signIn`, before the store is uploaded, runs the pure Core step
+`ReviewAccountLinking.convertLocalAutoParks(_:)` (`BrainBuddyCore/ReviewAccountLinking.swift`)
+over the unsent outbox:
+
+- every unsent `autoParkTask` becomes an ordinary `transitionTask` move to Someday at
+  the same position and `issuedAt` (no park marker, no `clockBefore`; the formulation
+  closes as for any move out of Next), so the server keeps the task in Someday;
+- the converted parks count as seen: the device drops their local park markers and any
+  unsent `acknowledgeParks` entries for them, so M-09 / "While you were away" does not
+  offer them again on this or any device;
+- every other queued operation — `decideTask`, `undoDecision`, sessions, bulk
+  releases, settings, consent, park acknowledgements of other tasks — is kept as queued
+  and pushed as usual under the ordinary rules of §4 (a decision the server rejects
+  becomes a visible Sync issue with its Ref).
+
+The step is deterministic and runs once per linking; a Swift test asserts that, after
+linking and one sync against `BrainBuddyFakeServer`, every account-less park is in
+Someday on the server with `parked` null, nothing is back in Next, and there are
+0 sync issues.
 
 `local.formDrafts: [DraftKey: String]` holds unsaved form text (FR-052), keyed by
 form kind + task id + formulation id (or session id + step item, or project id for a

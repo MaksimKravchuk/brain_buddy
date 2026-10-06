@@ -243,3 +243,10 @@ shown-then-abandoned request.
 - The cloud provider keeps what it received under its own retention (30 days for
   OpenAI API data); account purge cannot reach that copy (data-model "Export and
   purge").
+- **Other people's details** (owner decision 2026-10-06, privacy checklist CHK011):
+  notes and sibling titles are sent as written; nothing is redacted, so any names or
+  details of other people in them reach the cloud provider under the person's own
+  consent. The consent screen (M-07, D-02) says so in one line, "Notes are sent as
+  written, including any names in them.", and the privacy policy states it (PR-07).
+  The line does not change the list of data sent, so it needs no new
+  `consent_text_version` beyond the first.

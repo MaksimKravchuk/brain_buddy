@@ -4,7 +4,7 @@
 **Spec**: `spec.md` (Clarifications settled: 2026-10-05)
 **Screens**: `design/*.html` — self-contained static HTML, inline CSS, inline SVG icons, no CDN, no external fonts, no script
 **Human sign-off**: approved by Max on 2026-10-05, with decisions 1–6 (see Sign-off)
-**Amended**: 2026-10-06, after planning-review campaign 1 — owner decisions PD-1 – PD-3 (spec Clarifications "Session 2026-10-06") and the review's design findings; see "Amendments 2026-10-06". Amended again on 2026-10-06 after campaign 2 (state completeness, focus, D-06); see "Amendments 2026-10-06 (campaign 2)". Sign-off decisions 1–6 are unchanged.
+**Amended**: 2026-10-06, after planning-review campaign 1 — owner decisions PD-1 – PD-3 (spec Clarifications "Session 2026-10-06") and the review's design findings; see "Amendments 2026-10-06". Amended again on 2026-10-06 after campaign 2 (state completeness, focus, D-06); see "Amendments 2026-10-06 (campaign 2)". Amended a third time on 2026-10-06 after `/speckit-tasks` (owner decisions on the consent line and Dynamic Type); see "Amendments 2026-10-06 (after /speckit-tasks)". Sign-off decisions 1–6 are unchanged.
 
 <!--
   Produced by /speckit-design via the design-architect subagent, after
@@ -260,7 +260,7 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default: consent | first cloud "Suggest" | Provider named; exact five data items; "Nothing else is sent"; Allow / Not now | "Send task details to OpenAI for suggestions?" | FR-024 |
+| default: consent | first cloud "Suggest" | Provider named; exact five data items; "Nothing else is sent"; one line that notes go as written (owner decision 2026-10-06); Allow / Not now | "Send task details to OpenAI for suggestions?" / "Notes are sent as written, including any names in them." | FR-024 |
 | consent after revoke | consent revoked in M-23 | Note that nothing was sent since; consent again | "You turned cloud suggestions off on Wed 7 Oct. Nothing has been sent since." | FR-024, US3-6 |
 | declined | "Not now" | Form usable; Suggest still available | "Nothing was sent. Write your own step, or ask for suggestions later." | FR-024, US3-5 |
 | loading → proposals | allowed | Placeholder, "Stop"; proposals with provider line | "Asking OpenAI…" / "Suggested by OpenAI from this task's details." | FR-019, FR-020 |
@@ -483,6 +483,7 @@ review's projects step (D-03 hosting M-19). A web project-page entry is out of s
 | done without any step | every step was skipped, then Done (status `completed_empty`, PD-2) | The same calm "Review done" screen, next review date and question; no reproach and no mention that it doesn't count. It is not a counted review: "Last review" does not move, restart mode is not postponed and the weekly notification still comes | "Review done" / "Next review: Fri 16 Oct, 16:00" | FR-029, FR-033 |
 | offline | completed offline | Saved locally; syncs; visible on web after sync | "Offline. This review is saved on this iPhone and syncs when you're back online." | SC-007 |
 | partial failure | a decision rejected on sync | Named, Ref, counts reflect applied only | ""Book a dentist appointment" changed on another device before your decision synced…" | FR-011, FR-045 |
+| accessibility text size | Dynamic Type at an accessibility size (AX1 – AX5) | The counts become one column (label and number on one row, wrapping the label when needed); the whole body scrolls above the pinned Done; the step bar scrolls sideways (owner decision 2026-10-06, "Mobile viability") | as default | FR-033 |
 | loading / filtered | **n/a** | — | — | — |
 
 ### M-23 — Settings
@@ -854,7 +855,12 @@ Voice-led review and review of agent-delegated work are out of scope.
   - "Cancel task" has no confirmation (one or two taps per FR-006). It says "Stays findable under Cancelled", and like every card, Waiting and Someday decision it can be undone from the toast for about 5 s.
   - Bulk release (M-10) is undoable in place.
   - "Process 10, release the rest" states "Nothing is deleted".
-- **Dynamic Type**: at accessibility sizes the card's decision list scrolls with the content instead of being pinned, as Process inbox does today.
+- **Dynamic Type** (extended 2026-10-06 by owner decision, ux-a11y checklist CHK008): every iOS screen of this feature supports every size up to the largest accessibility size, AX5, with no truncated control and no clipped text:
+  - Content scrolls: every sheet and step body (M-03 – M-10, M-12 – M-22, M-26) scrolls vertically; at accessibility sizes the card's decision list scrolls with the content instead of being pinned, as Process inbox does today. Primary actions stay reachable in the bottom bar.
+  - The M-22 summary counts become one column at accessibility sizes (two columns otherwise).
+  - The review step bar (the "N of M" title and the step segments of M-13 – M-22) scrolls sideways at accessibility sizes instead of shrinking its text; Leave and Skip keep their 44 pt targets.
+  - The M-24 widget chip may wrap its label under the count; its link area stays at least 44 × 44 pt.
+  - The rule (one column and a scrolling step bar exactly at accessibility sizes) is a Core function with a Linux test; the screens themselves are checked at AX5 in the manual iOS evidence.
 - **Reduce Motion**: card-to-card transitions in M-16 are instant. No ambient animation anywhere in this feature.
 - **Contrast** (added 2026-10-06 by `/speckit-checklist`, no visual change): every text and icon in this feature meets WCAG 2.2 AA (4.5:1 text, 3:1 non-text). The new chips already do: indigo-700 on indigo-50 is 7.1:1, amber-800 on amber-50 is 6.8:1, slate-600 on slate-100 ("Ageing") is 6.9:1. The web is checked by the axe scans; iOS by the manual evidence entry for markers.
 
@@ -962,6 +968,19 @@ traceability gaps; no owner decision was needed or changed (details in
   mockups); the marker table states the extension rule as in NC-1; the M-03 error copy
   names the task's current list and has a "parked before the decision synced"
   variant; M-16 "all decided, one kept its wording"; M-08 "model question".
+
+## Amendments 2026-10-06 (after /speckit-tasks)
+
+Owner decisions taken when the task list was approved (spec Clarifications "Session
+2026-10-06 (after /speckit-tasks)"); sign-off decisions 1–6 are unchanged:
+
+- **Consent line** (privacy checklist CHK011): M-07 "default: consent" and "consent
+  again after revoke", and the D-02 consent dialog, add "Notes are sent as written,
+  including any names in them." below "Nothing else is sent." (mockups
+  `M-07-cloud-consent.html`, `D-02-decision-dialog.html`).
+- **Dynamic Type up to AX5** (ux-a11y checklist CHK008): "Mobile viability" now covers
+  every iOS screen; M-22 has a new "accessibility text size" state with a one-column
+  grid and a scrolling step bar (mockup `M-22-review-summary.html`, new frame).
 
 ## Notes for the plan
 

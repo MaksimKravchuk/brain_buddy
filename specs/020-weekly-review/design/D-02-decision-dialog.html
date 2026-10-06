@@ -133,14 +133,15 @@ figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);mar
 </figure>
 
 <figure>
-<figcaption><b>D-02 · cloud consent (first "Suggest" on web)</b>Names the provider and lists exactly what is sent. Nothing has been sent. Focus starts on "Not now" so consent is never given by a stray Enter.</figcaption>
+<figcaption><b>D-02 · cloud consent (first "Suggest" on web)</b>Names the provider and lists exactly what is sent, including the line that notes go as written (owner decision 2026-10-06). Nothing has been sent. Focus starts on "Not now" so consent is never given by a stray Enter.</figcaption>
 <div class="stage"><div class="bgl">Next actions</div><div class="scrim"></div>
   <section class="dlg" role="dialog" aria-modal="true" aria-labelledby="w3">
     <div class="dh"><h2 id="w3">Send task details to OpenAI for suggestions?</h2><button class="x" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
     <p class="fr">OpenAI processes them to suggest a first step. Nothing has been sent yet.</p>
     <div class="sent"><p class="lbl" style="margin:0">Sent with each suggestion request</p>
       <ul><li>The task's title</li><li>The task's notes</li><li>The reason you picked, if any</li><li>The project's name</li><li>Titles of up to 20 other open tasks in that project</li></ul>
-      <p>Nothing else is sent.</p></div>
+      <p>Nothing else is sent.</p>
+      <p>Notes are sent as written, including any names in them.</p></div>
     <p class="fr" style="font-size:12px;color:var(--s500)">We ask once. You can turn this off in Settings, and requests stop immediately.</p>
     <div class="acts"><button class="btn sec">Not now</button><button class="btn pri">Allow and suggest</button></div>
   </section>

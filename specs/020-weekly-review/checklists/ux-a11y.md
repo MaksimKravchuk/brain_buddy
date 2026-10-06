@@ -26,7 +26,7 @@ request, the items were evaluated by the agent against the artifacts as of
 - [x] CHK005 Are close / back / Escape / swipe / leave paths, the default choice ("Keep editing") and draft restore after an app kill or tab close all specified? [Completeness, Spec §FR-052; Design M-03, M-13, D-02, D-03]
 - [x] CHK006 Are VoiceOver focus targets defined for screens that appear without a tap (M-26, M-09, M-10, M-11, M-12) and after each dismissal? [Completeness, Design "Keyboard and focus"]
 - [x] CHK007 Are keyboard paths (tab order, focus traps, Escape order, number keys, the Undo shortcut, browser Back) defined for every web dialog and for the review route? [Completeness, Design "Keyboard and focus", D-02, D-03]
-- [ ] CHK008 Are Dynamic Type requirements defined beyond the decision card — the review step chrome and bottom bar, the summary counts grid, the explainer and While-you-were-away sheets, and the widget chip at accessibility sizes? [Gap, Design "Mobile viability"] — Open: only the card's decision list is specified.
+- [x] CHK008 Are Dynamic Type requirements defined beyond the decision card — the review step chrome and bottom bar, the summary counts grid, the explainer and While-you-were-away sheets, and the widget chip at accessibility sizes? [Gap, Design "Mobile viability"] — Resolved by owner decision 2026-10-06: every iOS screen up to AX5; content scrolls, the summary grid becomes one column, the step bar scrolls sideways, the widget chip may wrap with a 44 pt link area (design "Mobile viability" and M-22 "accessibility text size" with a new mockup frame; plan US4 and Test strategy; quickstart Scenario 5 step 12; tasks T133, T134, T137, T143, T155, T159, plus the AX5 entries in T092, T093, T094 and T116).
 - [x] CHK009 Are contrast requirements stated for the new marker chips, the "Ageing" chip and the recommendation styling? [Gap, Design "Marker system"] — Fixed: design "Mobile viability" now requires WCAG 2.2 AA and records the measured pairs (7.1:1, 6.8:1, 6.9:1); no visual change.
 
 ## Requirement Clarity
@@ -61,7 +61,7 @@ request, the items were evaluated by the agent against the artifacts as of
 
 ## Dependencies & Assumptions
 
-- [x] CHK028 Is the documented "Weekly review stays deferred" rule reconciled with the working entry? [Dependency, Design "Design authority"; Plan PR-01] — The plan schedules the design skill, its test and `docs/native-ios-app.md`; `ios/AGENTS.md` and `ios/README.md` carry the same rule and were added by tasks.md (T005, T156).
+- [x] CHK028 Is the documented "Weekly review stays deferred" rule reconciled with the working entry? [Dependency, Design "Design authority"; Plan PR-01] — The plan schedules the design skill, its test and `docs/native-ios-app.md`; `ios/AGENTS.md` and `ios/README.md` carry the same rule and were added by tasks.md (T005, T158).
 - [x] CHK029 Is the persona assumption (ADHD as the design centre, not positioned as "an ADHD app") reflected in the copy requirements? [Assumption, Spec Assumptions; Design copy columns]
 
 ## Pre-freeze evidence
@@ -76,4 +76,5 @@ request, the items were evaluated by the agent against the artifacts as of
 - Check items off as completed: `[x]`
 - Evaluation 2026-10-06: 28 of 29 items pass (2 after fixes), 1 open (CHK008); CHK030 not yet applicable.
 - Fixes made in this pass, outside the review dispositions: spec FR-052, data-model E10 / E11, contracts/ios-commands.md §7 (CHK004); design "Mobile viability" (CHK009).
+- Update 2026-10-06 (after `/speckit-tasks`): CHK008 closed by the owner's decision (Dynamic Type up to AX5 everywhere); now 29 of 29 items pass; CHK030 still not applicable. CHK028's task reference follows the renumbered tasks.md (T156 → T158).
 - Items are numbered sequentially for easy reference

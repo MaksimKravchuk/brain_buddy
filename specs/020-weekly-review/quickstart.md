@@ -120,7 +120,10 @@ fails until every requirement has a test, so it is the full-feature gate and joi
    During the OFF period, decision undo snapshots older than 7 days are nulled
    (retention runs whatever the flag state).
 10. Change the time zone eastward for an owner with a due-dated Next task. **Expect**:
-    `park_floor_at` ≥ change + 7 d.
+    `park_floor_at` ≥ change + 7 d. Then sign in a second device that sits in another
+    zone and has never changed zone, and open both repeatedly. **Expect**: the second
+    device sends no zone change; the stored zone and `park_floor_at` stay as they are
+    (http §5, FR-035).
 
 ## Scenario 3 — offline and account-less iOS (FR-014, FR-040, SC-007)
 
@@ -147,6 +150,15 @@ fails until every requirement has a test, so it is the full-feature gate and joi
 6. Account-less: dismiss the explainer at instant A, replay the store. **Expect**: every
    Next task's clock is clamped to A (post-replay activation step) and nothing parks
    before A + 14 d.
+7. Account-less with 3 local auto-parks (one seen on M-09, two not) and 2 decisions,
+   then sign in to an account against `BrainBuddyFakeServer`. **Expect**: the 3 tasks
+   are in Someday on the server with `parked` null, none is back in Next, M-09 shows
+   none of them, both decisions are applied, 0 sync issues (ios-commands §7, FR-014).
+8. Package test and trace: a decision is applied on the server, its response is lost,
+   the device stays offline for 2 days and retries with the same key. **Expect**: 200
+   as already applied (the server no longer holds the idempotency record but the
+   stored decision matches), the decision applied once, 0 sync issues. The same id
+   with a different task or type → 409 `id_conflict` (http "Client-supplied ids").
 
 ## Scenario 4 — navigator (US3; M-05 – M-08, D-02)
 
@@ -155,7 +167,8 @@ fails until every requirement has a test, so it is the full-feature gate and joi
    `disabled`: `GET /review/navigator` → `available: false`; web shows "Suggestions
    aren't available right now."
 1. Web, no consent, Suggest. **Expect**: consent screen names the provider and the five
-   data items; Not now → nothing sent (no request in the network log). The request body
+   data items, with the line "Notes are sent as written, including any names in
+   them."; Not now → nothing sent (no request in the network log). The request body
    of a later suggestion has no language field.
 2. Allow; Suggest. **Expect**: 1–3 proposals (deterministic provider); none equals an
    open task title; picking fills the field; the task changes only on Save; decision
@@ -236,6 +249,10 @@ fails until every requirement has a test, so it is the full-feature gate and joi
     "Discard what you typed?" first, then the Leave confirmation; "Keep going" stays on
     `/review`. A step whose queue request fails shows "We couldn't load this step" with
     Retry and Skip step.
+12. iOS at Dynamic Type AX5 (simulator, synthetic data): every review step, M-26, M-09,
+    M-03 and the summary. **Expect**: no clipped or truncated control; bodies scroll;
+    the summary counts are one column; the step bar scrolls sideways (design "Mobile
+    viability"; recorded in the manual iOS evidence).
 
 ## Scenario 7 — the auto-park explainer (FR-051, FR-016; M-26, D-05)
 

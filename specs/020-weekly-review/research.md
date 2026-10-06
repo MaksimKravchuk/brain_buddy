@@ -280,15 +280,21 @@ Recorded in spec.md Clarifications "Session 2026-10-06".
 
 - **Decision**: store the owner's IANA zone in `review_settings.time_zone`; clients
   send the device zone with the explainer acknowledgement (activation), at onboarding,
-  and whenever the device zone differs from the pulled one (US5-5). Sending it at
+  and afterwards only when the device's **own** zone changes (its last observed zone,
+  data-model E10 / E11), never because it differs from the pulled one (US5-5; owner
+  decision 2026-10-06: the earlier "whenever it differs" rule let two signed-in devices
+  in different zones alternate the setting, each change raising every due-dated Next
+  task's park floor). Sending it at
   activation matters: activation can precede onboarding by weeks, and until a zone
   arrives the server would compute `due_start` at UTC midnight while the device uses
   its own zone (campaign 2). Backend uses `zoneinfo` for
-  `due_start` and the review slot. iOS uses `TimeZone.current` for display and markers;
-  web uses `Intl.DateTimeFormat().resolvedOptions().timeZone`.
+  `due_start` and the review slot. iOS uses `TimeZone.current` for display, and the
+  stored zone (signed in) or the device zone (account-less) for markers
+  (ios-commands §6); web uses `Intl.DateTimeFormat().resolvedOptions().timeZone` for
+  display and the server's derived instants for markers.
 - **Rationale**: no user time zone exists anywhere today (`backend/app/schemas/auth.py`
-  `User` has none; all backend times are UTC). Differences between device zone and stored
-  zone last only until the next settings sync. A zone change moves `due_start` and so
+  `User` has none; all backend times are UTC). A device in another zone than the stored
+  one keeps classifying with the stored zone, so its markers agree with server parks. A zone change moves `due_start` and so
   can bring a due-anchored park forward by up to a day; every `time_zone` change
   therefore applies the FR-046 7-day floor to due-dated Next tasks
   (formulation-clock §3), keeping the 24-hour marker of SC-006 intact.

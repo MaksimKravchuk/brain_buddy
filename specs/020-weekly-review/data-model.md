@@ -90,7 +90,7 @@ One row per owner. Columns: `owner_id PK`, `revision`, `payload` (JSON).
 | `owner_park_floor_at` | datetime \| null | null | `threshold_changed_at + 7 d` on every change (FR-039) |
 | `review_weekday` | 1..7 (ISO, Monday = 1) | 5 (Friday) | |
 | `review_time` | `HH:MM` | `16:00` | local wall time |
-| `time_zone` | IANA name | `UTC` until a client sends one | validated with `zoneinfo`; clients send the device zone with the explainer acknowledgement (activation, http §5), on onboarding, and whenever the device zone differs from the pulled one (US5-5) |
+| `time_zone` | IANA name | `UTC` until a client sends one | validated with `zoneinfo`; set from the device zone by the activating explainer acknowledgement (http §5) and on onboarding; afterwards changed only when a device's **own** zone changes (that device's last observed zone, E10 / E11), never because a device's zone merely differs from the stored one (FR-035, US5-5; owner decision 2026-10-06) |
 | `revision` | int ≥ 1 | 1 | optimistic concurrency for PUT |
 
 ## E3. Review session — table `review_sessions`
@@ -276,7 +276,9 @@ real-use acceptance rate (plan Test strategy, read-out). Content-free. Rows olde
   save/discard/formulation change/sign-out or after 7 days), `wywaLastShownDay` (the
   local calendar day "While you were away" was last shown at app open, for the
   once-per-day rule of FR-015), `serverClockOffset` (last observed `server_now` minus
-  device time, signed in only; ios-commands §5).
+  device time, signed in only; ios-commands §5), `lastObservedTimeZone` (the IANA zone
+  this device last observed; a zone change is sent only when the device's current zone
+  differs from it, ios-commands §2; removed with the store on sign-out).
 
 Device-local retention mirrors the server (contracts/ios-commands.md §5
 `runLocalReviewMaintenance`): local decision undo snapshots and bulk-release clock
@@ -308,7 +310,9 @@ logged. `docs/data-retention.md` gets a row in PR-02.
 
 The web also keeps `bb.reviewWywaLastShown.v1.<origin>.<account>` (a local calendar
 day, no content) for the once-per-day rule of the While-you-were-away dialog (FR-015),
-removed on sign-out.
+removed on sign-out, and `bb.reviewLastZone.v1.<origin>.<account>` (the IANA zone this
+browser last observed; a zone change is sent only when the browser's current zone
+differs from it, http §5), removed on sign-out or account switch.
 
 ## Export and purge (FR-043)
 
@@ -323,7 +327,7 @@ removed on sign-out.
 | E7 (including any `clock_before` still retained) | `review/bulk_releases.json` | same |
 | E8 | `review/navigator_consents.json` | same |
 | E9 | excluded (operational cost counters), listed in `export_manifest.json` `excluded` | same |
-| navigator cloud input (title, notes, stall reason, project name, sibling titles) as received by the cloud provider | not exportable (held by the provider, not by Brain Buddy) | **not reachable by account purge**: the provider processes it under its data-processing terms and keeps it per its own policy (the privacy policy already states 30 days for OpenAI API data, `frontend/src/pages/PrivacyPolicyPage.tsx:176-181`). This is the one copy of this feature's content that survives purge by design; PR-07 states it in `docs/data-retention.md` and the privacy policy, and the consent copy (M-07, D-02) may say so in one line |
+| navigator cloud input (title, notes, stall reason, project name, sibling titles) as received by the cloud provider | not exportable (held by the provider, not by Brain Buddy) | **not reachable by account purge**: the provider processes it under its data-processing terms and keeps it per its own policy (the privacy policy already states 30 days for OpenAI API data, `frontend/src/pages/PrivacyPolicyPage.tsx:176-181`). This is the one copy of this feature's content that survives purge by design; PR-07 states it in `docs/data-retention.md` and the privacy policy. Notes and titles are sent as written, so names of other people in them are included: the consent copy (M-07, D-02) says "Notes are sent as written, including any names in them." and the privacy policy says the same (owner decision 2026-10-06) |
 
 `review_settings` holds the review day, time and **IANA time zone** (coarse location)
 for the account's life; the PR-02 privacy-policy wording for review settings names all

@@ -75,9 +75,26 @@ a server-minted id (`<prefix>_<12 hex>`, `app/utils/identifiers.py`), and nothin
 server adopts a supplied id when it creates the record. Ids are labels only, never
 authorization or idempotency inputs (constitution IV): a request that reuses an id
 already held by a record of the same owner, under a different Idempotency-Key, is 409
-`{"reason": "id_conflict"}` and changes nothing; only the same Idempotency-Key with the
-same body replays. When no id is supplied (web, older clients), the server mints one
-(`generate_id`). A pytest case sends a content-bearing id (sentinel text) and asserts
+`{"reason": "id_conflict"}` and changes nothing, unless the stored record matches the
+request (below); only the same Idempotency-Key with the same body replays. When no id is supplied (web, older clients), the server mints one
+(`generate_id`).
+
+**Retry after the idempotency retention** (owner decision 2026-10-06, offline-sync
+checklist CHK023): the server keeps idempotency records for 24 h
+(`IDEMPOTENCY_RETENTION`, `backend/app/modules/tasks/repository.py:39`). A device whose
+response was lost and that stays offline longer retries with the same
+Idempotency-Key, which the server no longer knows, and an id the earlier delivery
+already stored. When the stored record **matches** the retry, the server treats the
+retry as already applied: it changes nothing and answers with the success status and
+response shape of a first delivery, built from the stored record and the task as it
+now is. A match means the same owner, the same record kind and the same identifying
+fields: a decision (`decision_id`) with the same `task_id`, `type` and decided-on
+`formulation_id`; a session (`id`) with the same `mode` and `origin`; a bulk release
+(`id`) with the same `kind` and the same set of task ids. Only a record that does not
+match is `id_conflict`. A record that no longer exists (for example a decision undone
+since) is not matched; the request is then processed as new, and its own preconditions
+(`expected_revision`, eligibility) decide the outcome. Within the 24 h the ordinary
+Idempotency-Key replay applies, as before. A pytest case sends a content-bearing id (sentinel text) and asserts
 422 and that the sentinel reaches no log record.
 
 **Logs** (FR-044): one structured line per request on logger `app.modules.tasks.review`
@@ -228,7 +245,7 @@ Errors:
 | 400 | `extension_already_used` / `extension_not_due` | FR-009 | card hides the option; server is the backstop |
 | 400 | `project_archived` | `follow_up`/`return_to_next` into an archived project | M-18 archived, M-09 partial |
 | 404 | `{resource, id}` | task not found or not owned (path id) | |
-| 409 | `id_conflict` | a supplied client id is already used by another record | iOS sets aside with Ref (cannot happen with UUIDs in practice) |
+| 409 | `id_conflict` | a supplied client id is already used by a record that does not match this request ("Retry after the idempotency retention": a matching record answers 200 as already applied) | iOS sets aside with Ref (cannot happen with UUIDs in practice) |
 | 422 | (validation) | missing/oversized fields | |
 
 **Auto-park yield rule** (spec edge case "Offline for a long time"): the precondition is
@@ -341,12 +358,18 @@ formulation-clock §3 runs under the owner lock in the same transaction; when it
 already set nothing changes. Either way the response is the current
 `GET /review/state` body. Clients call it when the person dismisses the explainer and
 send the device's zone with it, so due-dated tasks are classified in the person's zone
-from activation on rather than in `UTC` until onboarding (weeks later). A supplied
-zone that differs from the stored one is applied exactly as a `PUT /review/settings`
-zone change (including the FR-046 floor; 400 `invalid_time_zone` for a non-IANA
-name), whether or not this acknowledgement is the first. Clients also send a settings
-zone change whenever the device zone differs from the pulled one. iOS queues the
-acknowledgement offline like any other command. It is the only way an owner becomes
+from activation on rather than in `UTC` until onboarding (weeks later). The supplied
+zone is stored by the activating acknowledgement only (400 `invalid_time_zone` for a
+non-IANA name); a later or duplicate acknowledgement changes nothing, its zone
+included (FR-051). **Zone changes afterwards** (owner decision 2026-10-06, offline-sync
+checklist CHK016): a client sends a `PUT /review/settings` zone change only when **its
+own** zone changes, i.e. the device's current zone differs from the zone that device
+last observed (iOS `local.lastObservedTimeZone`, web
+`bb.reviewLastZone.v1.<origin>.<account>`; data-model E10, E11). A device whose zone
+merely differs from the stored one (another device elsewhere set it) sends nothing, so
+two signed-in devices in different zones never alternate the setting and never raise
+the FR-046 floor repeatedly. Onboarding sends the onboarding device's zone (FR-035).
+iOS queues the acknowledgement offline like any other command. It is the only way an owner becomes
 activated. Not gated by the flag (see "Gate").
 
 ### `PUT /review/settings` → 200 settings
@@ -368,7 +391,7 @@ without "Continue" sends nothing (the parks stay unseen).
 
 | method | path | body | response |
 |---|---|---|---|
-| POST | `/review/sessions` | `{id?, mode, entry, origin, skip_steps?: [step], replace_open: bool}` | 201 session; with `replace_open` an open session is finished first (partial or abandoned by the E3 rule; the device that had it shows "review ended elsewhere"); without it and an open session exists → 409 `{"reason": "open_session_exists", "session_id": …}`. Replay is by Idempotency-Key only ("Mutations"); an `id` already used under another key → 409 `id_conflict`. iOS always pushes an offline-started session with `replace_open: true` (ios-commands §4) and keeps its key until the request succeeds, so a queued review is never set aside |
+| POST | `/review/sessions` | `{id?, mode, entry, origin, skip_steps?: [step], replace_open: bool}` | 201 session; with `replace_open` an open session is finished first (partial or abandoned by the E3 rule; the device that had it shows "review ended elsewhere"); without it and an open session exists → 409 `{"reason": "open_session_exists", "session_id": …}`. Replay is by Idempotency-Key only ("Mutations"); an `id` already used under another key → 409 `id_conflict`, unless the stored session matches (same `mode` and `origin`), which answers as already applied ("Retry after the idempotency retention"). iOS always pushes an offline-started session with `replace_open: true` (ios-commands §4) and keeps its key until the request succeeds, so a queued review is never set aside |
 | GET | `/review/sessions/{id}` | — | session |
 | PATCH | `/review/sessions/{id}` | `{current_step?, step?: {code, status}, active_seconds?: {code, seconds}, set_aside_task_id?, inbox_processed_delta?, snapshot_decision_queue?: true}` | merged session (rules below); never 409 |
 | POST | `/review/sessions/{id}/finish` | `{clear_start?: yes \| not_really}` | the person tapped Done on the summary: status `completed` or `completed_empty` per data-model E3. There is no "left" outcome: leaving only pauses a review (FR-029); it ends without Done only by replacement or the 7-day idle close. Idempotent: finishing an already finished session returns it unchanged (200) |

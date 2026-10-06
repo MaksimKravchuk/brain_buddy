@@ -29,7 +29,7 @@ request, the items were evaluated by the agent against the artifacts as of
 - [x] CHK008 Are deletion rules defined for device-local records (iOS review state, form drafts, navigator preference, downloaded model; web drafts and the last-shown key) on sign-out, account switch and app removal? [Completeness, Data model §E10, §E11] — iOS sign-out destroys the whole store today (`Workspace.signOut` → `store.destroy`); drafts and the web keys list their own removal.
 - [x] CHK009 Is the network exposure of downloading the separate on-device model stated for the privacy disclosure (a request to Apple's asset hosting, no task content)? [Gap, Spec §FR-049; Data model §E10] — Fixed: data-model E10 now states it and assigns the privacy-policy wording to PR-09.
 - [x] CHK010 Is the review time zone (coarse location) named as stored personal data in the privacy-policy requirement? [Completeness, Data model "Export and purge"; Plan PR-02]
-- [ ] CHK011 Is a stance documented for third-party personal data (other people's names or details in notes or sibling titles) that the cloud navigator sends to the provider under the person's own consent? [Assumption, Gap, Spec §FR-019, §FR-024] — Open: no artifact addresses it; a product/legal stance, not a plain gap.
+- [x] CHK011 Is a stance documented for third-party personal data (other people's names or details in notes or sibling titles) that the cloud navigator sends to the provider under the person's own consent? [Assumption, Gap, Spec §FR-019, §FR-024] — Resolved by owner decision 2026-10-06 (spec Clarifications "Session 2026-10-06 (after /speckit-tasks)"): nothing is redacted; the consent screen adds "Notes are sent as written, including any names in them" and the privacy policy says the same (spec FR-024; contracts/navigator.md §6; data-model "Export and purge"; design M-07, D-02 and their mockups; tasks T107, T113, T124).
 
 ## Requirement Clarity
 
@@ -79,4 +79,5 @@ request, the items were evaluated by the agent against the artifacts as of
 - Check items off as completed: `[x]`
 - Evaluation 2026-10-06: 31 of 32 items pass (2 after fixes), 1 open (CHK011); CHK033 not yet applicable.
 - Fixes made in this pass, outside the review dispositions: data-model E10 (CHK009), plan Test strategy Vitest row (CHK022).
+- Update 2026-10-06 (after `/speckit-tasks`): CHK011 closed by the owner's decision (consent line plus privacy-policy sentence); now 32 of 32 items pass; CHK033 still not applicable.
 - Items are numbered sequentially for easy reference
