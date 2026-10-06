@@ -97,8 +97,8 @@ or deploy.
 **Cross-feature fields in the manifest**: `depends_on` may name only slices of this
 manifest (`scripts/check_spec_kit_specs.py`), so each slice also carries
 `external_depends_on` (020 slices that must have landed first, plan "Delivery slices") and
-`serialize_with` (020 slices that write a path this slice writes, plan "Parallelism with
-020's waves"; either order, the second rebases). The validator ignores both fields; they are
+`serialize_with` (020 slices that write a path this slice writes, or share its kit or web
+surface, plan "Parallelism with 020's waves"; either order, the second rebases). The validator ignores both fields; they are
 for the implementer and the landing reviewer. State on 2026-10-06: 020 PR-01 (`54a7169`) and
 020 PR-02 (`afaa820`) have landed on `main`, so 021 PR-02's and PR-10's external
 dependencies hold; 020 PR-06 has not, so PR-08 waits for it.
@@ -111,6 +111,10 @@ contract):
   `Support/RandomCommands.swift`), so `CompactionPropertyTests` exercise the new
   `setProjectOutcome` fold. It is not an exhaustive switch, so the enum-case rule does not
   require it; plan.md's PR-04 row lists it (56 paths, still SHIP).
+- PR-08's `serialize_with` also names 020 PR-03, which the plan's "Parallelism with 020's
+  waves" row for PR-08 omits: both write `ios/BrainBuddyKit/Package.swift` (T104 declares the
+  `BrainBuddyWorkspaceTests` resources). Found by comparing the two manifests at the targeted
+  review; either order, the second rebases.
 - Line references into `backend/app/modules/tasks/service.py` predate 020 PR-02, which moved
   them by about 11 lines on `main`; tasks name the symbol (`archive_project`,
   `update_task`, …), not the line.
@@ -123,8 +127,9 @@ contract):
 **`/speckit-checklist` and `/speckit-analyze` remediation** (2026-10-06): the fixes those two
 stages made in the planning artifacts are already reflected in the tasks above. They are
 listed for the targeted review (founder-acceptance measure 6) in the three checklists'
-"Notes" and in the run report. Here they are T096 and T102 (the dry run skips the cookie
-cleanup), T117 (the guard's allow-list), T069, T082 and T106 (the rename error), T052 and
+"Notes" and in the run report. Here they are T096, T102, T103 and T119 (the dry run skips
+the cookie and the Keychain cleanup and makes no Keychain call; the Keychain part corrected
+at the targeted review), T117 (the guard's allow-list), T069, T082 and T106 (the rename error), T052 and
 T126 (the undated backup sentence), T029 (`CoreFixtures.swift`) and the per-story index below.
 
 ## Tasks by user story
@@ -302,7 +307,7 @@ Setup and polish (T001 – T005, T134 – T139) carry no story.
 - [ ] T066 [P] [US5] Write and observe RED in `frontend/src/api/__tests__/client.test.ts`: `listProjects(state)` sends `?state=`; `unarchiveProject` posts `/projects/{id}/unarchive` with `Idempotency-Key` and `expected_revision`; project responses carry `desired_outcome`, `archived_at`, `archived_before_lossless`. *(021-FR-026, 021-FR-027)*
 - [ ] T067 [P] [US5] Write and observe RED in `frontend/src/api/__tests__/clientParity.test.ts`: the manifest `contracts/api-client-parity.json` lists `unarchiveProject` and `listProjects(state)`, the operation count follows the manifest, and adapter keys equal it (review c2, G09). *(021-FR-026)*
 - [ ] T068 [P] [US1] Write and observe RED in `frontend/src/api/__tests__/taskHooks.test.ts`: `useTaskList`, `useProjects` (with `state: "all"`), `useTags` and the open task's `useTaskDetail` set `refetchInterval: 45_000` and `refetchIntervalInBackground: false`. *(021-FR-032, 021-SC-001)*
-- [ ] T069 [P] [US5] Write and observe RED in `frontend/src/components/shell/__tests__/AppShell.test.tsx`: the "Archived projects 2" disclosure (accessible name "Archived projects, 2"), hidden when none; active projects only under Projects on every page that renders the shell; the archive hint line "Archiving keeps its tasks. You can unarchive it from Archived projects."; archived options offer only "Unarchive"; "Rename…" opens the options popover's name field for an archived project, a clash shows the existing rename error with focus kept in the field; Escape returns focus to the options button. *(021-FR-024, 021-FR-025, 021-FR-026)*
+- [ ] T069 [P] [US5] Write and observe RED in `frontend/src/components/shell/__tests__/AppShell.test.tsx`: the "Archived projects 2" disclosure (accessible name "Archived projects, 2"), hidden when none; active projects only under Projects on every page that renders the shell; the archive hint line "Archiving keeps its tasks. You can unarchive it from Archived projects."; archived options offer only "Unarchive"; "Rename…" opens the options popover's name field for an archived project, a clash (409 from the server) shows its message "Project 'Old flat 2' already exists." with Ref in the popover, focus kept in the field; Escape returns focus to the options button. *(021-FR-024, 021-FR-025, 021-FR-026)*
 - [ ] T070 [P] [US5] Write and observe RED in `frontend/src/features/tasks/__tests__/TaskListPage.test.tsx`, every D-01 state: the archived project page (chip, secondary "Unarchive", no composer, "Archived projects don't take new tasks. Unarchive it to add tasks."); "Unarchiving…" with `aria-disabled` and a polite status, focus kept; unarchived → focus to the heading and toast "Unarchived “Old flat”"; archived just now → archived page, focus to the heading, toast "Archived “Old flat”"; error → notice with Ref and Retry (`role=alert`), focus on Retry; 409 refusal → "Another active project is already called “Old flat”. Rename one first." with Ref and "Rename…", no Retry, focus on Unarchive; offline → Unarchive disabled with "You're offline. Unarchive is available when you're back online."; "Old flat · archived" in groupings; filtered empty copy. *(021-FR-015, 021-FR-024, 021-FR-025, 021-FR-026)*
 - [ ] T071 [P] [US5] Write and observe RED `frontend/src/features/tasks/__tests__/ArchivedProjectNotice.test.tsx` (new): the FR-027 line ("Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists.") shows only when `archived_before_lossless` is true and the project has no task in any state, with the same cases as the kit's `ProjectDisplayTests`. *(021-FR-027)*
 - [ ] T072 [P] [US5] Write and observe RED in `frontend/src/features/tasks/__tests__/TaskDetailPanel.test.tsx`: the project picker lists active projects only, plus a task's own archived project labelled "Old flat · archived" and selected; an archived project is never offered as a new choice; archived names resolve. *(021-FR-025)*
@@ -357,14 +362,14 @@ Setup and polish (T001 – T005, T134 – T139) carry no story.
 - [ ] T093 [US4] Write and observe RED, in the same `macos/Tests/BrainBuddyMacTests/LegacyStoreImporterTests.swift`, the state-machine cases: the import state explicit (`none` recorded before the workspace opens; `inProgress` on disk before the staging file; `completed` with the keyed digest, the backup name and `legacyRenamedAt`; `workspaceFirstWrittenAt` on the first write); each FR-033 case of §6 (a file after a fresh install; `mac-local.json` removed; a new file after the rename; sign-out then an older copy writes a file; signed out without an import then a file appears; the backup deleted by retention then the original restored; an `inProgress` record with a foreign `store.json`; an older copy that keeps writing shows no second notice), each asserting unchanged bytes and one "later file" notice; an unwritten fresh workspace still imports (row 2); crashes injected after each step recover with no duplicate; a crash between the record and the rename finishes only the rename; staging cleanup with a sidecar deleted mid-attempt and at sign-out; the backup retention table (29 / 31 days, with and without a sign-out, during the first upload, with a record not carried, with the sidecar lost); a second process holding the legacy `lockf` blocks the import, and after the rename its write fails with its existing 409; review marks survive the import and a due mark stays due. *(021-FR-021, 021-FR-023, 021-FR-033)*
 - [ ] T094 [P] [US4] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacLocalStateTests.swift` (new): `mac-local.json` written atomically under its own `flock`, mode 0600, holding "no titles, names, notes, outcomes or email" (scanned with sentinels); `RecordKey` "`s:<serverID>` when the record has a server id, else `c:<client EntityID>`", re-keyed `c:` → `s:` on the next write; stamps are CryptoKit `HMAC<SHA256>` keyed by `installSalt` over `RecordContentForm`; a mark is valid while the stamp matches and `reviewedAt + 7 days > now`; marks older than 30 days pruned at launch and unmatched keys after a full pull; marks kept across sign-out; the Archived-projects disclosure state remembered. *(021-FR-023)*
 - [ ] T095 [P] [US1] Write and observe RED `macos/Tests/BrainBuddyMacTests/SingleInstanceGuardTests.swift` (new): `.instance.lock` taken with an exclusive non-blocking `flock` for the process lifetime; a second process fails to take it; a stale lock after a crash is free; the second copy asks the first to come forward and only when that fails presents X-08 ("Brain Buddy is already open." / "Switch to the open window to keep working.", "OK"). *(021-FR-017)*
-- [ ] T096 [P] [US4] Write and observe RED `macos/Tests/BrainBuddyMacTests/LegacyCookieCleanupTests.swift` (new): seeded `brainbuddy_session` cookies for three hosts in an injected cookie storage are all gone after launch, each in the pending-logout list bound to its own host, an `http://` non-localhost cookie deleted without a logout; a response seeded in an injected `URLCache` is gone; a second launch does nothing; with `BRAINBUDDY_MAC_DATA_DIR` set the cookies and cache entry stay, nothing is queued and nothing is sent (mac-app-host §1). *(021-FR-005, 021-FR-029)*
+- [ ] T096 [P] [US4] Write and observe RED `macos/Tests/BrainBuddyMacTests/LegacyCookieCleanupTests.swift` (new): seeded `brainbuddy_session` cookies for three hosts in an injected cookie storage are all gone after launch, each in the pending-logout list bound to its own host, an `http://` non-localhost cookie deleted without a logout; a response seeded in an injected `URLCache` is gone; a second launch does nothing; with `BRAINBUDDY_MAC_DATA_DIR` set the cookies and cache entry stay, nothing is queued and nothing is sent, and a spy token store seeded with a token and a pending logout records no call during launch steps 3 and 4 (`LegacyCookieCleanup`, then `WorkspaceHost.make()` with its launch-time token cleanup), so both items stay (mac-app-host §1). *(021-FR-005, 021-FR-029)*
 - [ ] T097 [P] [US4] Write and observe RED `macos/Tests/BrainBuddyMacTests/UnreadableWorkspaceTests.swift` (new): a `store.json` that does not decode shows X-09, starts no sync and sends nothing; "Try again" reloads; "Start fresh" after its confirmation sets the file aside as `store.unreadable-<UTC>.json` and opens an empty workspace; the import decision then treats the workspace as in use and imports no `local-gtd.json`. *(021-FR-022, 021-FR-017)*
 - [ ] T098 [US4] Make T092 GREEN in `macos/Sources/BrainBuddyMac/LegacySnapshot.swift` (new; the data-model E10 decoder, never written) and `macos/Sources/BrainBuddyMac/LegacyStoreImporter.swift` (new): every value through `ImportCanonicalizer`; the command plan of §2 in its order without compaction and with fresh `EntityID`s from an injectable generator; the staging file `store.import-<attemptID>.json`; verification against the canonical expectation (§3); the import report `local-gtd.import-report-<UTC>.txt` only when something was adjusted or not carried; the exclusive staging → `store.json` and legacy → backup renames (`renamex_np` with `RENAME_EXCL`); review marks to the sidecar (§4); counts-only `os.Logger` (subsystem `com.brainbuddy.mac`, category `import`). *(021-FR-020, 021-FR-021, 021-FR-030)*
 - [ ] T099 [US4] Make T093 GREEN in `macos/Sources/BrainBuddyMac/LegacyImportDecision.swift` (new; data-model E7.1 rows 1 – 16 and invariants 1 – 7, held under the single-instance lock and the legacy `lockf`; `LegacyImportRecord.state` "`none | inProgress | completed | unreadable | laterFileKept`"; orphaned staging files deleted after each terminal decision) and `macos/Sources/BrainBuddyMac/UpgradeNotice.swift` (new; the X-05 alert in every state with the copy of mac-legacy-import §5, "Continue" default, "Show in Finder", Esc not mapped, `noticeSeenAt` recorded, shown again after a quit). *(021-FR-021, 021-FR-022, 021-FR-033)*
 - [ ] T100 [US4] Make T094 GREEN in `macos/Sources/BrainBuddyMac/MacLocalState.swift` (new; data-model E7 `MacLocalState` and `LegacyImportRecord` as specified, `installSalt` of 32 random bytes, every digest a keyed HMAC, the E8 backup deletion rule with its four conditions and `backupDeletedAt`, the backup date read from its file name when the sidecar is lost). *(021-FR-021, 021-FR-023)*
 - [ ] T101 [P] [US1] Make T095 GREEN in `macos/Sources/BrainBuddyMac/SingleInstanceGuard.swift` (new; research R6). *(021-FR-017)*
-- [ ] T102 [P] [US4] Make T096 GREEN in `macos/Sources/BrainBuddyMac/LegacyCookieCleanup.swift` (new; once, recorded as `legacyCleanupDoneAt`; every `brainbuddy_session` cookie of `HTTPCookieStorage.shared` handed to the kit's pending logouts bound to its own https host, or `http://localhost`, then deleted; `URLCache.shared.removeAllCachedResponses()` and `~/Library/Caches/com.brainbuddy.mac.prototype/Cache.db*` and `fsCachedData` removed; skipped while `BRAINBUDDY_MAC_DATA_DIR` is set). *(021-FR-005, 021-FR-029)*
-- [ ] T103 [US4] Make T097 GREEN in `macos/Sources/BrainBuddyMac/UnreadableWorkspaceView.swift` (new; X-09: "We couldn't open your tasks" / "Your tasks are still on this Mac and nothing was changed." + the kit's message, "Try again" default, "Start fresh…" behind "Set the file aside and start fresh?" with "Keep trying" default and on Escape) and `macos/Sources/BrainBuddyMac/WorkspaceHost.swift` (new; `FileDocumentStore(fileURL: …/store.json)` in `~/Library/Application Support/BrainBuddyMac/` (0700) or `BRAINBUDDY_MAC_DATA_DIR`, `SyncEngine` with `KeychainSessionTokenStore(service: "app.brainbuddy.mac.session")`, `pullInterval: SyncTiming.pullAge`, `identity: .macOS(version:)`, `device: .mac`, the `didPersist` hook recording `workspaceFirstWrittenAt`, launch-time token cleanup off the main actor; mac-app-host §1 step 4). *(021-FR-005, 021-FR-022, 021-FR-031)*
+- [ ] T102 [P] [US4] Make the cookie and cache part of T096 GREEN (its Keychain part is T103) in `macos/Sources/BrainBuddyMac/LegacyCookieCleanup.swift` (new; once, recorded as `legacyCleanupDoneAt`; every `brainbuddy_session` cookie of `HTTPCookieStorage.shared` handed to the kit's pending logouts bound to its own https host, or `http://localhost`, then deleted; `URLCache.shared.removeAllCachedResponses()` and `~/Library/Caches/com.brainbuddy.mac.prototype/Cache.db*` and `fsCachedData` removed; skipped while `BRAINBUDDY_MAC_DATA_DIR` is set). *(021-FR-005, 021-FR-029)*
+- [ ] T103 [US4] Make T097 GREEN in `macos/Sources/BrainBuddyMac/UnreadableWorkspaceView.swift` (new; X-09: "We couldn't open your tasks" / "Your tasks are still on this Mac and nothing was changed." + the kit's message, "Try again" default, "Start fresh…" behind "Set the file aside and start fresh?" with "Keep trying" default and on Escape) and `macos/Sources/BrainBuddyMac/WorkspaceHost.swift` (new; `FileDocumentStore(fileURL: …/store.json)` in `~/Library/Application Support/BrainBuddyMac/` (0700) or `BRAINBUDDY_MAC_DATA_DIR`, `SyncEngine` with `KeychainSessionTokenStore(service: "app.brainbuddy.mac.session")`, `pullInterval: SyncTiming.pullAge`, `identity: .macOS(version:)`, `device: .mac`, the `didPersist` hook recording `workspaceFirstWrittenAt`, launch-time token cleanup off the main actor; while `BRAINBUDDY_MAC_DATA_DIR` is set the cleanup does not run and the engine's token store answers no token and no pending logouts without calling the Keychain until a person-started sign-in, which makes the Keychain part of T096 GREEN; mac-app-host §1 step 4). *(021-FR-005, 021-FR-022, 021-FR-031)*
 - [ ] T104 [US4] Write the golden artifact `ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Resources/legacy-import-golden.json` from the importer over `legacy-populated.json` (T092's generator and clock), declare `resources: [.copy("Resources")]` on `BrainBuddyWorkspaceTests` in `ios/BrainBuddyKit/Package.swift`, and add to `ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/FirstSignInMergeTests.swift` the case that loads it and signs in against an account with an active "Old flat", "garden" and the tag "Calls": 0 duplicate active projects or tags and 0 missing records (review c2, G21). *(runtime: Linux for the kit case)* *(021-FR-003, 021-SC-003)*
 
 ### Lane (b): rebinding
@@ -396,7 +401,7 @@ Every task here is *(runtime: macOS lane)* except the docs tasks T130 – T131 a
 - [ ] T116 [P] [US3] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacPresentationRouterTests.swift` (new), the positive control: each `UserIntent` presents exactly its own surface (X-02, X-03, X-04, the launch notices X-05, X-08, X-09); a sweep of every `SyncLineState` and transition through the status-line model leaves the router untouched. *(021-SC-004, 021-FR-017)*
 - [ ] T117 [P] [US3] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacPresentationGuardTests.swift` (new): reads the Mac target's sources via `#filePath` and fails when `.sheet(`, `.alert(`, `.confirmationDialog(`, `.popover(isPresented`, `NSAlert`, `NSSound`, `UNUserNotificationCenter`, `NSApp.activate`, `makeFirstResponder` or a `@FocusState` assignment appears outside `MacPresentationRouter.swift` and the allow-list of mac-app-host §8, which the test spells out file by file and region by region (`SignInSheet.swift`, `SignOutConfirmation.swift`, `UpgradeNotice.swift`, the X-08 and X-09 views, `ProjectReviewView.swift`, `QuickCaptureView.swift`, `QuickOpenView.swift`, the marked regions of `ContentView.swift`), and when any allow-listed call's condition reads `SyncSnapshot` or `syncStatus`; a seeded violation in a scratch copy makes it fail. *(021-SC-004, 021-FR-017)*
 - [ ] T118 [P] [US1] Write and observe RED `macos/Tests/BrainBuddyMacTests/SyncTriggerSourceTests.swift` (new), with a fake clock and a fake path monitor, the mac-app-host §5 table: launch → `start()`; activation → `reloadIfChangedExternally()` then `setForegroundActive(true)`; occlusion to visible → `.foreground`; network back → `networkAvailabilityChanged(true)`; network gone → offline; the kit ticker active for the life of the process; File › "Sync now", popover "Sync now" and "Retry" → `syncNow()`; resign and terminate → `flush()`; the App Nap activity held exactly while an account is linked. *(021-FR-006)*
-- [ ] T119 [US1] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacSyncFlowTests.swift` (new), against a counting stub `HTTPTransport`: account-less, launch, foreground, 15 s ticks, network-restored and local-change triggers send **zero** requests; after a sign-out the only request is the queued logout; an upgraded account-less host with a seeded pre-021 cookie for `https://api.example.com` sends exactly one bodiless `POST /auth/logout` there and nothing else; sync-category `os.Logger` lines with sentinel titles hold no sentinel, email or host; sign-in; the account-switch refusal when "Sign in again" resolves to a different account id while changes wait, and when the same owner id is on another server, nothing sent (US4-5); sign-out with 3 unsent changes where a quick capture arrives before confirm signs nothing out and re-presents X-04 with 4, and a plain "Sign out" refused by the kit re-presents it; with an unsaved task edit, "Sign out…" first shows the existing discard confirmation; `WorkspaceHost` uses the service `app.brainbuddy.mac.session` and a spy store sees every token-store call off the main thread; requests carry `X-Client: brainbuddy-macos/<version>`. *(021-FR-001, 021-FR-004, 021-FR-005, 021-FR-018, 021-FR-029, 021-FR-030, 021-FR-031)*
+- [ ] T119 [US1] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacSyncFlowTests.swift` (new), against a counting stub `HTTPTransport`: account-less, launch, foreground, 15 s ticks, network-restored and local-change triggers send **zero** requests; after a sign-out the only request is the queued logout; an upgraded account-less host with a seeded pre-021 cookie for `https://api.example.com` sends exactly one bodiless `POST /auth/logout` there and nothing else; sync-category `os.Logger` lines with sentinel titles hold no sentinel, email or host; sign-in; the account-switch refusal when "Sign in again" resolves to a different account id while changes wait, and when the same owner id is on another server, nothing sent (US4-5); sign-out with 3 unsent changes where a quick capture arrives before confirm signs nothing out and re-presents X-04 with 4, and a plain "Sign out" refused by the kit re-presents it; with an unsaved task edit, "Sign out…" first shows the existing discard confirmation; `WorkspaceHost` uses the service `app.brainbuddy.mac.session` and a spy store sees every token-store call off the main thread; with `BRAINBUDDY_MAC_DATA_DIR` set and the spy store seeded with a token and a pending logout, launch, foreground, 15 s ticks and network-restored triggers make no token-store call and send nothing, and a sign-in started in the dry run is the first call (mac-app-host §1); requests carry `X-Client: brainbuddy-macos/<version>`. *(021-FR-001, 021-FR-004, 021-FR-005, 021-FR-018, 021-FR-029, 021-FR-030, 021-FR-031)*
 - [ ] T120 [P] [US1] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacKeychainTests.swift` (new): each test creates and unlocks a temporary keychain (`SecKeychainCreate` in the test's temporary folder, random password) and fails, never skips, if it cannot; via the macOS-only initializer: set, read, update, remove, add and remove a pending logout; the item is not synchronizable; a non-interactive read of an item whose access is refused is treated as no token with no prompt; delete-and-re-add after a refused interactive write; the login keychain is never touched. *(021-FR-005)*
 - [ ] T121 [P] [US2] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacPrivacyGuardTests.swift` (new): the voice sources (`VoiceCapture.swift` and the `VoiceTranscriber` actor) contain no `URLSession`, `import Network` or `BrainBuddyAPI`. *(021-FR-029, 021-FR-010)*
 - [ ] T122 [US3] Make T115 GREEN in `macos/Sources/BrainBuddyMac/SyncStatusLine.swift` (new; `SyncStatusLineModel` over `SyncStatusDescriber` and `SyncActivityIndicator`; X-01 in every state: one line of 11 pt secondary text, the reserved indicator slot with a static glyph under Reduce Motion, at most one trailing action, wrapping after " · ", accessible name "Sync status: … Show details", the tooltip, one polite announcement on entering an attention state, the sidebar-hidden toolbar item in attention states only). *(021-FR-012, 021-FR-013, 021-FR-014, 021-FR-015)*
@@ -760,10 +765,484 @@ themselves.
 |---|---|
 | privacy CHK004 (Keychain item outlives the app) | T131 |
 | privacy CHK016 (backup retention row) | T112 |
-| privacy CHK026 (dry run touches nothing outside its copy) | T096, T102 |
+| privacy CHK026 (dry run touches nothing outside its copy) | T096, T102, T103, T119 |
 | offline-sync CHK032 (020 serialization) | manifest `serialize_with` |
 | ux-a11y CHK004 (X-09 Escape) | T103 |
 | ux-a11y CHK005 (toolbar item name) | T115, T122 |
 | ux-a11y CHK016 (guard allow-list) | T117 |
 | ux-a11y CHK017 ("· archived" label) | T106, T072 |
 | ux-a11y CHK018 (rename error copy) | T069, T082, T106 |
+
+## PR-срезы
+
+**Draft, awaiting the owner's approval of the file-level map** ("PR slice map status"
+above). A delivery boundary only: each slice still needs its own worktree, failing tests
+first, independent review, CI and ADR-0008 landing; approval is not authorization to merge
+or deploy. Each slice's landing class is the last `acceptance` entry, with the classifier's
+result over the slice's full `paths` list in parentheses (`printf '%s\0' <paths> | python3
+scripts/classify_path_risk.py --null`, run on 2026-10-06 over this manifest); the final class
+is the stricter of the mechanical and the semantic class (plan "Delivery slices").
+`depends_on` follows plan "Delivery slices" and the lane graph above. `external_depends_on`
+names the 020 slices that must have landed first (`020-weekly-review/PR-NN`; 020 PR-01 and
+PR-02 have, 020 PR-06 has not), and `serialize_with` names the 020 slices the plan orders
+against this one: those that write a path this slice writes, plus the further 020 kit and web
+slices the plan's table lists for PR-04, PR-05 and PR-06 (plan "Parallelism with 020's
+waves"; either order, the second rebases). `scripts/check_spec_kit_specs.py` ignores those two fields.
+
+```json
+{
+  "schema_version": "brainbuddy-pr-slices/v1",
+  "slices": [
+    {
+      "id": "PR-01",
+      "outcome": "macOS CI lane and report tooling: the macos-app job (needs only changes, every step gated on the macos change output, never a job-level if) in full-ci and allure-report, registered in the CI-artifact validator with tests; SCREEN_ID_RE widened to X- screens with a test (design gap G-7).",
+      "tasks": ["T001", "T002", "T003", "T004", "T005"],
+      "requirements": ["021-FR-005", "021-SC-004"],
+      "paths": [
+        "scripts/test_validate_ci_artifacts.py",
+        "scripts/validate_ci_artifacts.py",
+        ".github/workflows/ci.yml",
+        "scripts/test_render_feature_report.py",
+        "scripts/render_feature_report.py"
+      ],
+      "depends_on": [],
+      "external_depends_on": [],
+      "serialize_with": [],
+      "tests": [
+        "python3 -m unittest scripts/test_validate_ci_artifacts.py scripts/test_render_feature_report.py",
+        "make validate-ci",
+        "python3 scripts/check_spec_kit_specs.py"
+      ],
+      "acceptance": [
+        "each malformed macos-app workflow fixture of T001 is rejected and the complete one passes",
+        "the macos-app lane runs today's 71 XCTest cases green on the exact SHA; full-ci and allure-report need it",
+        "render_feature_report counts X-01, X-09, M-01 and D-01 as four screen ids",
+        "owner's recorded ASK approval on the PR (.github/ and scripts/); per-slice requirement scan not applicable (no product test in this slice: it carries the macOS-lane evidence for 021-FR-005 and 021-SC-004)",
+        "landing class ASK (scripts/classify_path_risk.py: ASK)"
+      ]
+    },
+    {
+      "id": "PR-02",
+      "outcome": "Backend tolerant contract: PATCH accepts a carried archived membership; GET /projects?state= (owner-scoped, open counts in one pass, 422 on a bad state); POST /projects/{id}/unarchive (already active checked before the revision); desired_outcome; archived_at and archived_before_lossless with the startup step; archive still clears memberships and sets the marker, a repeat archive keeps it; X-Client log fields and the validated incoming correlation id; API contract map; golden traces (PR-02 behaviour); Allure rules; the api-compatibility client note with the forward-only rollback rule; the data-retention outcome wording.",
+      "tasks": ["T006", "T007", "T008", "T009", "T010", "T011", "T012", "T013", "T014", "T015", "T016", "T017", "T018", "T019"],
+      "requirements": ["021-FR-015", "021-FR-025", "021-FR-026", "021-FR-027", "021-FR-028", "021-FR-030", "021-FR-031"],
+      "paths": [
+        "backend/tests/allure_taxonomy.py",
+        "backend/tests/test_project_archive_lossless_api.py",
+        "backend/tests/test_project_desired_outcome_api.py",
+        "backend/tests/test_client_attribution_logging.py",
+        "backend/tests/fixtures/project_archive_traces.json",
+        "backend/tests/test_project_archive_traces.py",
+        "backend/tests/test_api_contract.py",
+        "backend/tests/test_task_branch_coverage.py",
+        "backend/tests/test_account_export.py",
+        "backend/tests/test_account_deletion.py",
+        "backend/app/modules/tasks/domain.py",
+        "backend/app/schemas/tasks.py",
+        "backend/app/modules/tasks/service.py",
+        "backend/app/modules/tasks/repository.py",
+        "backend/app/api/tasks.py",
+        "backend/app/api/middleware.py",
+        "docs/api-compatibility.md",
+        "docs/data-retention.md"
+      ],
+      "depends_on": [],
+      "external_depends_on": ["020-weekly-review/PR-02"],
+      "serialize_with": ["020-weekly-review/PR-07", "020-weekly-review/PR-09", "020-weekly-review/PR-15"],
+      "tests": [
+        "cd backend && pytest --no-cov tests/test_project_archive_lossless_api.py tests/test_project_desired_outcome_api.py tests/test_client_attribution_logging.py tests/test_project_archive_traces.py tests/test_api_contract.py tests/test_task_branch_coverage.py tests/test_account_export.py tests/test_account_deletion.py -q",
+        "make test-backend",
+        "python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements 021-FR-015,021-FR-025,021-FR-026,021-FR-027,021-FR-028,021-FR-030,021-FR-031"
+      ],
+      "acceptance": [
+        "quickstart Scenarios 1 (steps 2 - 8 and 10 - 12 with PR-02 behaviour), 2 and 3 pass against api_client and second_api_client",
+        "archive still clears every member's project_id and sets archived_before_lossless: true; GET /projects without state returns the same projects in the same order as before",
+        "log capture: no raw X-Client value, no forged correlation field, no sentinel project name or outcome in any record",
+        "make test-backend green (coverage floor, Allure taxonomy validator)",
+        "owner's recorded ASK approval (backend/app/api/tasks.py, backend/app/api/middleware.py)",
+        "landing class ASK (scripts/classify_path_risk.py: ASK)"
+      ]
+    },
+    {
+      "id": "PR-03",
+      "outcome": "Lossless archive (ADR-0020): archiving keeps every task's project membership, sets archived_at and clears the marker; repeat archive unchanged; the clearing assertions flipped; the golden traces updated to lossless (backend only).",
+      "tasks": ["T020", "T021", "T022"],
+      "requirements": ["021-FR-024", "021-FR-027", "021-SC-006"],
+      "paths": [
+        "backend/tests/test_task_api.py",
+        "backend/tests/test_task_lifecycle_detail_api.py",
+        "backend/tests/test_task_tag_project_mvp_api.py",
+        "backend/tests/test_project_archive_lossless_api.py",
+        "backend/tests/fixtures/project_archive_traces.json",
+        "backend/app/modules/tasks/service.py"
+      ],
+      "depends_on": ["PR-02"],
+      "external_depends_on": [],
+      "serialize_with": ["020-weekly-review/PR-15"],
+      "tests": [
+        "cd backend && pytest --no-cov tests/test_project_archive_lossless_api.py tests/test_project_archive_traces.py tests/test_task_api.py tests/test_task_lifecycle_detail_api.py tests/test_task_tag_project_mvp_api.py -q",
+        "make test-backend",
+        "python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements 021-FR-024,021-FR-027,021-SC-006"
+      ],
+      "acceptance": [
+        "quickstart Scenario 1 steps 1 and 9: every member task (open, completed, cancelled) keeps project_id with no revision or updated_at change; the project gets archived_at and archived_before_lossless: false",
+        "test_021_SC_006_archive_and_unarchive_keep_every_membership green; the golden traces are lossless and pass against the real API",
+        "PR-06 deployed right after this slice (http.md §7)",
+        "landing class SHOW (scripts/classify_path_risk.py: SHIP; semantic SHOW: cross-client behaviour change)"
+      ]
+    },
+    {
+      "id": "PR-04",
+      "outcome": "Kit contract: project records and commands (desired outcome, unarchive), the ADR-0020 reducer rules incl. repeat archive, the merge table and the outcome rule, Smart Add copy, SyncIssueDescriber with the iPhone SyncIssuesScreen delegating to it, ClientIdentity, the listProjects(state:) pull with its fallback, the unarchive push with the immediate revert on 409, the clearing-server guard, Workspace.unarchiveProject / setProjectOutcome / apply([...]), the pure helpers TaskEditDraft, SelectionAnchor, RecordContentForm, ListPresentationHold, ImportCanonicalizer and projectDisplay, the fake server and the byte-identical trace copy with its replay, the Mac Smart Add parser cases ported, and every exhaustive switch over the new cases (enum-case rule).",
+      "tasks": ["T023", "T024", "T025", "T026", "T027", "T028", "T029", "T030", "T031", "T032", "T033", "T034", "T035", "T036", "T037", "T038", "T039", "T040", "T041", "T042", "T043", "T044", "T045", "T046", "T047", "T048", "T049", "T050", "T051"],
+      "requirements": ["021-FR-003", "021-FR-008", "021-FR-009", "021-FR-010", "021-FR-011", "021-FR-015", "021-FR-020", "021-FR-023", "021-FR-024", "021-FR-025", "021-FR-026", "021-FR-027", "021-FR-028", "021-FR-031", "021-SC-003", "021-SC-004"],
+      "paths": [
+        "ios/BrainBuddyKit/Package.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Records.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Commands.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Organize.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Validation.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Replay.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Replay.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Compaction.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/SmartAdd+Resolution.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/SyncIssueDescriber.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/TaskEditDraft.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/RecordContentForm.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/ListPresentationHold.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/ImportCanonicalizer.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Queries+ProjectDisplay.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPI.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPIClient.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/APIError.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/WireModels.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/RequestBodies.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/GTDCommand+Sync.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/PushPlanner.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Pull.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Push.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/StoreDocument+Merge.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServer+Organize.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServer+Tasks.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServerRecords.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/ServerState.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerOrganizeTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerArchiveTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReplayTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/CompactionTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/SmartAddParserTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/SyncIssueDescriberTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/TaskEditDraftTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/RecordContentFormTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ListPresentationHoldTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ImportCanonicalizerTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ProjectDisplayTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/TestSupport/CoreFixtures.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyPersistenceTests/StoreDocumentCodingTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/EndpointRequestTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/WireDecodingTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/ClientIdentityTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ProjectArchiveSyncTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEnginePullTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ProjectArchiveTraceReplayTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/project_archive_traces.json",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Support/RandomCommands.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceCommandTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/FirstSignInMergeTests.swift",
+        "backend/tests/test_project_archive_traces.py",
+        "ios/BrainBuddy/Screens/Settings/SyncIssuesScreen.swift"
+      ],
+      "depends_on": ["PR-03"],
+      "external_depends_on": [],
+      "serialize_with": ["020-weekly-review/PR-03", "020-weekly-review/PR-04", "020-weekly-review/PR-08", "020-weekly-review/PR-12"],
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test",
+        "cd backend && pytest --no-cov tests/test_project_archive_traces.py -q",
+        "cd ios && xcodegen generate --spec project.yml && xcodebuild -project BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO build  # ios-app lane",
+        "grep -rn 'case .archiveProject' --include=*.swift ios/BrainBuddyKit ios/BrainBuddy ios/BrainBuddyWidgets ios/Shared macos",
+        "python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements 021-FR-003,021-FR-008,021-FR-009,021-FR-010,021-FR-011,021-FR-015,021-FR-020,021-FR-023,021-FR-024,021-FR-025,021-FR-026,021-FR-027,021-FR-028,021-FR-031,021-SC-003,021-SC-004"
+      ],
+      "acceptance": [
+        "the kit trace copy is byte-identical to backend/tests/fixtures/project_archive_traces.json (pytest) and every trace replays against BrainBuddyFakeServer with the same statuses and bodies",
+        "quickstart Scenario 4 steps 1, 5, 7, 8, 9 and 11 pass against the fake server",
+        "the enum-case search finds only files in this slice's paths; the iPhone app builds on the ios-app lane on the exact SHA",
+        "the landing produces one TestFlight build",
+        "landing class SHOW (scripts/classify_path_risk.py: SHIP; semantic SHOW: ships to TestFlight and changes iPhone archive behaviour)"
+      ]
+    },
+    {
+      "id": "PR-05",
+      "outcome": "Kit status, cadence and session: SyncPresentation (snapshot, describer, timing, copy catalogue incl. the sign-out issue and backup sentences) and SyncActivityIndicator; failingSince, lastFailedAttemptAt and the reference id in SyncMetadata with the 60 s confirmation attempt; .periodic (a no-op when idle) and PeriodicSyncTicker; Workspace.setForegroundActive and syncSnapshot; single-flight syncNow tested; the device-neutral account-switch refusal; the sign-out order through signOut(removingLocalDataWith:) with the pending logout recorded first; the Keychain write failure at sign-in; macOS token-store attributes with non-interactive background reads; the convergence and offline matrix (SC-001, SC-002).",
+      "tasks": ["T052", "T053", "T054", "T055", "T056", "T057", "T058", "T059", "T060", "T061", "T062", "T063", "T064", "T065"],
+      "requirements": ["021-FR-004", "021-FR-005", "021-FR-006", "021-FR-007", "021-FR-008", "021-FR-011", "021-FR-012", "021-FR-013", "021-FR-014", "021-FR-015", "021-FR-016", "021-FR-018", "021-FR-019", "021-FR-021", "021-FR-032", "021-SC-001", "021-SC-002", "021-SC-004", "021-SC-005", "021-SC-006"],
+      "paths": [
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/SyncPresentation.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/SyncActivityIndicator.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Outbox.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/BrainBuddySync.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncConfiguration.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Cycle.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Session.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/PeriodicSyncTicker.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/SessionTokenStore.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPIClient.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/APIError.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/SyncPresentationTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/SyncActivityIndicatorTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineFailingClockTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineSchedulingTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineSessionTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/PeriodicSyncTickerTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/MacIPhoneConvergenceTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceSyncTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Support/FakeSyncService.swift"
+      ],
+      "depends_on": ["PR-04"],
+      "external_depends_on": [],
+      "serialize_with": ["020-weekly-review/PR-03", "020-weekly-review/PR-04", "020-weekly-review/PR-08", "020-weekly-review/PR-12"],
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test",
+        "sh ios/scripts/swift-linux.sh test --filter BrainBuddyWorkspaceTests",
+        "cd ios && xcodegen generate --spec project.yml && xcodebuild -project BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO build  # ios-app lane",
+        "python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements 021-FR-004,021-FR-005,021-FR-006,021-FR-007,021-FR-008,021-FR-011,021-FR-012,021-FR-013,021-FR-014,021-FR-015,021-FR-016,021-FR-018,021-FR-019,021-FR-021,021-FR-032,021-SC-001,021-SC-002,021-SC-004,021-SC-005,021-SC-006"
+      ],
+      "acceptance": [
+        "quickstart Scenario 4 steps 2 - 4, 6 and 12 - 14 and Scenario 5 steps 1 - 3 pass as kit tests",
+        "MacIPhoneConvergenceTests: every FR-007 record type held by the receiver within 60 s at the worst tick phase; the offline matrix puts every change on the server exactly once (021-SC-001, 021-SC-002)",
+        "the SyncTrigger enum-case search finds only SyncEngine.swift; the iPhone app builds on the ios-app lane on the exact SHA; the landing produces one TestFlight build",
+        "owner's recorded ASK approval (session token store, sign-out order, account-switch refusal)",
+        "landing class ASK (scripts/classify_path_risk.py: ASK)"
+      ]
+    },
+    {
+      "id": "PR-06",
+      "outcome": "Web D-01: the Archived projects disclosure, the archived project page, Unarchive in every state incl. the name-clash refusal with Rename... and the focus rules, the archive hint, archived just now, '· archived' names, the task project picker (active plus the task's own archived project), the FR-027 line, the 45 s visible-tab refetch of the list, projects, tags and the open task, the parity manifest with its adapters and count, Playwright (archive and cross-client refresh) and axe. Deployed right after PR-03.",
+      "tasks": ["T066", "T067", "T068", "T069", "T070", "T071", "T072", "T073", "T074", "T075", "T076", "T077", "T078", "T079"],
+      "requirements": ["021-FR-009", "021-FR-015", "021-FR-024", "021-FR-025", "021-FR-026", "021-FR-027", "021-FR-032", "021-SC-001", "021-SC-006"],
+      "paths": [
+        "frontend/src/api/__tests__/client.test.ts",
+        "frontend/src/api/__tests__/clientParity.test.ts",
+        "frontend/src/api/__tests__/taskHooks.test.ts",
+        "frontend/src/components/shell/__tests__/AppShell.test.tsx",
+        "frontend/src/features/tasks/__tests__/TaskListPage.test.tsx",
+        "frontend/src/features/tasks/__tests__/ArchivedProjectNotice.test.tsx",
+        "frontend/src/features/tasks/__tests__/TaskDetailPanel.test.tsx",
+        "frontend/src/features/tasks/__tests__/TaskDetailAutosaveUI.contract.test.tsx",
+        "frontend/src/api/client.ts",
+        "frontend/src/api/taskTypes.ts",
+        "frontend/src/api/taskHooks.ts",
+        "contracts/api-client-parity.json",
+        "frontend/src/features/tasks/ArchivedProjectNotice.tsx",
+        "frontend/src/components/shell/AppShell.tsx",
+        "frontend/src/features/tasks/TaskListPage.tsx",
+        "frontend/src/features/tasks/TaskDetailPanel.tsx",
+        "frontend/tests/e2e/archived-projects.spec.ts",
+        "frontend/tests/e2e/cross-client-refresh.spec.ts",
+        "frontend/tests/allure.fixtures.ts"
+      ],
+      "depends_on": ["PR-03"],
+      "external_depends_on": [],
+      "serialize_with": ["020-weekly-review/PR-05", "020-weekly-review/PR-10", "020-weekly-review/PR-13"],
+      "tests": [
+        "cd frontend && npx vitest run src/api src/components/shell src/features/tasks",
+        "make test-frontend",
+        "cd frontend && npm run lint && npm run typecheck",
+        "make test-e2e",
+        "python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements 021-FR-009,021-FR-015,021-FR-024,021-FR-025,021-FR-026,021-FR-027,021-FR-032,021-SC-001,021-SC-006"
+      ],
+      "acceptance": [
+        "quickstart Scenario 7 (web): every D-01 state, focus rule and string of design.md proven in Vitest",
+        "Playwright archived-projects and cross-client-refresh green: a subtask, a comment and a tag rename made through the API appear within 45 s; axe with no violations; no horizontal overflow at 390 x 851",
+        "frontend coverage floor unchanged or higher; no coverage suppression in frontend/src",
+        "deployed right after PR-03 (http.md §7)",
+        "landing class SHOW (scripts/classify_path_risk.py: SHIP; semantic SHOW)"
+      ]
+    },
+    {
+      "id": "PR-07",
+      "outcome": "iPhone M-01 and M-02: the status row from the shared describer (lists, Lists hub, Settings > Sync), attention rows as 44 pt buttons, Copy reference ID by long-press and VoiceOver, Settings Sync now enabled during a sync, setForegroundActive from the scene phase, the sign-out confirmation naming open issues, the non-destructive archive copy, the archived project screen via projectDisplay with Unarchive and the name-clash refusal; ios/AGENTS.md copy and docs/native-ios-app.md; host evidence.",
+      "tasks": ["T080", "T081", "T082", "T083", "T084", "T085", "T086", "T087", "T088", "T089"],
+      "requirements": ["021-FR-004", "021-FR-006", "021-FR-012", "021-FR-013", "021-FR-014", "021-FR-015", "021-FR-018", "021-FR-019", "021-FR-024", "021-FR-025", "021-FR-026", "021-FR-027", "021-FR-032"],
+      "paths": [
+        "specs/021-mac-sync/evidence/manual-ios-status.md",
+        "specs/021-mac-sync/evidence/manual-ios-archive.md",
+        "ios/BrainBuddy/Components/SyncStatusLabel.swift",
+        "ios/BrainBuddy/Screens/Lists/TaskListScreen.swift",
+        "ios/BrainBuddy/Screens/Browse/ListsHubScreen.swift",
+        "ios/BrainBuddy/Screens/Browse/ProjectsScreen.swift",
+        "ios/BrainBuddy/Screens/Settings/SettingsScreen.swift",
+        "ios/BrainBuddy/Screens/Settings/SignInSheet.swift",
+        "ios/BrainBuddy/App/BrainBuddyApp.swift",
+        "ios/AGENTS.md",
+        "docs/native-ios-app.md"
+      ],
+      "depends_on": ["PR-05"],
+      "external_depends_on": [],
+      "serialize_with": ["020-weekly-review/PR-04", "020-weekly-review/PR-08", "020-weekly-review/PR-09", "020-weekly-review/PR-12"],
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test",
+        "cd ios && xcodegen generate --spec project.yml && xcodebuild -project BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO build  # ios-app lane",
+        "python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements 021-FR-004,021-FR-006,021-FR-012,021-FR-013,021-FR-014,021-FR-015,021-FR-018,021-FR-019,021-FR-024,021-FR-025,021-FR-026,021-FR-027,021-FR-032"
+      ],
+      "acceptance": [
+        "ios-app lane green on the exact SHA; the iPhone app has no test target, so its ids are proven by the kit tests of PR-04 and PR-05 plus the host evidence",
+        "specs/021-mac-sync/evidence/manual-ios-status.md and manual-ios-archive.md filled by the owner on the landed build (or a candidate with identical trees) and committed in a docs-only commit: every M-01 and M-02 state at Dynamic Type AX5, VoiceOver, a web change within 60 s",
+        "the landing produces one TestFlight build",
+        "landing class SHOW (scripts/classify_path_risk.py: SHIP; semantic SHOW)"
+      ]
+    },
+    {
+      "id": "PR-08",
+      "outcome": "Mac adoption, account-less: Swift 6.2 and the kit dependency; WorkspaceHost; SingleInstanceGuard with X-08; X-09 for an unreadable workspace; the one-time legacy import through ImportCanonicalizer with its durable state machine, staging, verification, report, exclusive backup rename and every X-05 state; the golden import artifact and the kit case that signs in with it; MacLocalState review marks; the legacy cookie and HTTP-cache cleanup; a dry run (BRAINBUDDY_MAC_DATA_DIR) that touches no cookie, cache or Keychain item; the views rebound to Workspace with X-06 and the File-menu archive; the old store, REST client and parser removed with the XCTest ledger; data-retention rows, the privacy-policy paragraph; upgrade and archive host evidence.",
+      "tasks": ["T090", "T091", "T092", "T093", "T094", "T095", "T096", "T097", "T098", "T099", "T100", "T101", "T102", "T103", "T104", "T105", "T106", "T107", "T108", "T109", "T110", "T111", "T112", "T113", "T114"],
+      "requirements": ["021-FR-002", "021-FR-003", "021-FR-005", "021-FR-009", "021-FR-010", "021-FR-017", "021-FR-020", "021-FR-021", "021-FR-022", "021-FR-023", "021-FR-024", "021-FR-025", "021-FR-026", "021-FR-027", "021-FR-028", "021-FR-029", "021-FR-030", "021-FR-031", "021-FR-033", "021-SC-003"],
+      "paths": [
+        "macos/Package.swift",
+        "macos/Package.resolved",
+        "macos/Sources/BrainBuddyMac/BrainBuddyMacApp.swift",
+        "macos/Sources/BrainBuddyMac/ContentView.swift",
+        "macos/Sources/BrainBuddyMac/ProjectReviewView.swift",
+        "macos/Sources/BrainBuddyMac/QuickCaptureView.swift",
+        "macos/Sources/BrainBuddyMac/QuickOpenView.swift",
+        "macos/Sources/BrainBuddyMac/VoiceCapture.swift",
+        "macos/Sources/BrainBuddyMac/WorkspaceHost.swift",
+        "macos/Sources/BrainBuddyMac/SingleInstanceGuard.swift",
+        "macos/Sources/BrainBuddyMac/MacLocalState.swift",
+        "macos/Sources/BrainBuddyMac/LegacySnapshot.swift",
+        "macos/Sources/BrainBuddyMac/LegacyStoreImporter.swift",
+        "macos/Sources/BrainBuddyMac/UpgradeNotice.swift",
+        "macos/Sources/BrainBuddyMac/LegacyImportDecision.swift",
+        "macos/Sources/BrainBuddyMac/LegacyCookieCleanup.swift",
+        "macos/Sources/BrainBuddyMac/ProjectMenuCommands.swift",
+        "macos/Sources/BrainBuddyMac/UnreadableWorkspaceView.swift",
+        "macos/Sources/BrainBuddyMac/LocalGTDStore.swift",
+        "macos/Sources/BrainBuddyMac/APIClient.swift",
+        "macos/Sources/BrainBuddyMac/SmartAddParser.swift",
+        "macos/Tests/BrainBuddyMacTests/OfflineWorkspaceTests.swift",
+        "macos/Tests/BrainBuddyMacTests/LegacyStoreImporterTests.swift",
+        "macos/Tests/BrainBuddyMacTests/MacLocalStateTests.swift",
+        "macos/Tests/BrainBuddyMacTests/SingleInstanceGuardTests.swift",
+        "macos/Tests/BrainBuddyMacTests/LegacyCookieCleanupTests.swift",
+        "macos/Tests/BrainBuddyMacTests/UnreadableWorkspaceTests.swift",
+        "macos/Tests/BrainBuddyMacTests/APIClientTests.swift",
+        "macos/Tests/BrainBuddyMacTests/LocalGTDStoreTests.swift",
+        "macos/Tests/BrainBuddyMacTests/SmartAddParserTests.swift",
+        "macos/Tests/BrainBuddyMacTests/Resources/legacy-populated.json",
+        "macos/Tests/BrainBuddyMacTests/Resources/legacy-awkward.json",
+        "macos/Tests/BrainBuddyMacTests/Resources/legacy-corrupt.json",
+        "macos/Tests/BrainBuddyMacTests/Resources/legacy-newer.json",
+        "ios/BrainBuddyKit/Package.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/FirstSignInMergeTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Resources/legacy-import-golden.json",
+        "frontend/src/pages/PrivacyPolicyPage.tsx",
+        "frontend/src/pages/__tests__/PrivacyPolicyPage.test.tsx",
+        "macos/README.md",
+        "docs/data-retention.md",
+        "specs/021-mac-sync/evidence/manual-macos-upgrade.md",
+        "specs/021-mac-sync/evidence/manual-macos-archive.md"
+      ],
+      "depends_on": ["PR-01", "PR-05"],
+      "external_depends_on": ["020-weekly-review/PR-06"],
+      "serialize_with": ["020-weekly-review/PR-03", "020-weekly-review/PR-07", "020-weekly-review/PR-09", "020-weekly-review/PR-15"],
+      "tests": [
+        "cd macos && swift build && swift test  # macos-app lane",
+        "sh ios/scripts/swift-linux.sh test",
+        "cd ios && xcodegen generate --spec project.yml && xcodebuild -project BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO build  # ios-app lane",
+        "cd frontend && npx vitest run src/pages",
+        "python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements 021-FR-002,021-FR-003,021-FR-005,021-FR-009,021-FR-010,021-FR-017,021-FR-020,021-FR-021,021-FR-022,021-FR-023,021-FR-024,021-FR-025,021-FR-026,021-FR-027,021-FR-028,021-FR-029,021-FR-030,021-FR-031,021-FR-033,021-SC-003"
+      ],
+      "acceptance": [
+        "LegacyStoreImporterTests: every mac-legacy-import §6 case, the golden artifact byte for byte and the 500-seed property test; the rewritten OfflineWorkspaceTests pass on the macos-app lane on the exact SHA",
+        "every row of the XCTest ledger has its successor in place before T109 deletes the old files",
+        "LegacyCookieCleanupTests: with BRAINBUDDY_MAC_DATA_DIR set, the cookies and the cache entry stay, nothing is queued or sent, and a spy token store records no call during launch steps 3 and 4",
+        "host lane before the owner's own upgrade: quickstart Scenario 6 step 0 (the dry run, never signing in), then steps 2.1, 2.2, 2.4 - 2.6 and 2.8 from a real pre-021 build and Scenario 8, recorded in manual-macos-upgrade.md and manual-macos-archive.md in a docs-only commit",
+        "owner's recorded ASK approval (one-time migration of real user data, legacy session removal); its ios/ paths produce one TestFlight build",
+        "landing class ASK (scripts/classify_path_risk.py: SHIP; semantic ASK)"
+      ]
+    },
+    {
+      "id": "PR-09",
+      "outcome": "Mac sync UI: X-03 sign-in, X-04 sign-out with the issue and backup sentences and the unsaved-edit guard, X-01 status line in every state, X-02 popover with its focus order and Discard outcome with Undo, X-07 menus and Cmd-R, MacPresentationRouter and the source-level presentation guard, SyncStatusLineModel, SyncTriggerSource with the kit ticker and the App Nap activity, the Keychain service (prompt only at sign-in, calls off the main actor), the macOS client identity; docs/native-macos-app.md, the AGENTS.md line, the Keychain data-retention row; status host evidence.",
+      "tasks": ["T115", "T116", "T117", "T118", "T119", "T120", "T121", "T122", "T123", "T124", "T125", "T126", "T127", "T128", "T129", "T130", "T131", "T132", "T133"],
+      "requirements": ["021-FR-001", "021-FR-003", "021-FR-004", "021-FR-005", "021-FR-006", "021-FR-009", "021-FR-010", "021-FR-012", "021-FR-013", "021-FR-014", "021-FR-015", "021-FR-016", "021-FR-017", "021-FR-018", "021-FR-021", "021-FR-029", "021-FR-030", "021-FR-031", "021-FR-033", "021-SC-004"],
+      "paths": [
+        "macos/Tests/BrainBuddyMacTests/SyncStatusLineModelTests.swift",
+        "macos/Tests/BrainBuddyMacTests/MacPresentationRouterTests.swift",
+        "macos/Tests/BrainBuddyMacTests/MacPresentationGuardTests.swift",
+        "macos/Tests/BrainBuddyMacTests/SyncTriggerSourceTests.swift",
+        "macos/Tests/BrainBuddyMacTests/MacSyncFlowTests.swift",
+        "macos/Tests/BrainBuddyMacTests/MacKeychainTests.swift",
+        "macos/Tests/BrainBuddyMacTests/MacPrivacyGuardTests.swift",
+        "macos/Sources/BrainBuddyMac/SyncStatusLine.swift",
+        "macos/Sources/BrainBuddyMac/SyncStatusPopover.swift",
+        "macos/Sources/BrainBuddyMac/MacPresentationRouter.swift",
+        "macos/Sources/BrainBuddyMac/SignInSheet.swift",
+        "macos/Sources/BrainBuddyMac/SignOutConfirmation.swift",
+        "macos/Sources/BrainBuddyMac/SyncMenuCommands.swift",
+        "macos/Sources/BrainBuddyMac/SyncTriggerSource.swift",
+        "macos/Sources/BrainBuddyMac/WorkspaceHost.swift",
+        "macos/Sources/BrainBuddyMac/ContentView.swift",
+        "macos/Sources/BrainBuddyMac/BrainBuddyMacApp.swift",
+        "docs/native-macos-app.md",
+        "AGENTS.md",
+        "macos/README.md",
+        "docs/data-retention.md",
+        "specs/021-mac-sync/evidence/manual-macos-status.md"
+      ],
+      "depends_on": ["PR-08"],
+      "external_depends_on": [],
+      "serialize_with": ["020-weekly-review/PR-07", "020-weekly-review/PR-09", "020-weekly-review/PR-15"],
+      "tests": [
+        "cd macos && swift test  # macos-app lane; MacKeychainTests must run, not skip",
+        "sh ios/scripts/swift-linux.sh test",
+        "python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements 021-FR-001,021-FR-003,021-FR-004,021-FR-005,021-FR-006,021-FR-009,021-FR-010,021-FR-012,021-FR-013,021-FR-014,021-FR-015,021-FR-016,021-FR-017,021-FR-018,021-FR-021,021-FR-029,021-FR-030,021-FR-031,021-FR-033,021-SC-004"
+      ],
+      "acceptance": [
+        "MacSyncFlowTests: account-less triggers send zero requests; an upgraded host sends exactly one bodiless POST /auth/logout to the cookie's own host; a dry run makes no token-store call until a sign-in; every token-store call is off the main thread",
+        "MacPresentationGuardTests fails on a seeded violation in a scratch copy and passes on the slice; MacKeychainTests run, not skip",
+        "host lane: quickstart Scenario 5 step 4 and Scenario 6 step 2.3 on the landed build, recorded in manual-macos-status.md in a docs-only commit",
+        "owner's recorded ASK approval (session credential, first egress of Mac data)",
+        "landing class ASK (scripts/classify_path_risk.py: SHIP; semantic ASK)"
+      ]
+    },
+    {
+      "id": "PR-10",
+      "outcome": "Release gates: the manual-evidence checker (headers, per-state checklists, tree-hash identity, the content-free guard, the Keychain round-trip line when the CI test was disabled, SC-007 pending) and the 021 requirement scan (every id except SC-007) in make check-specs with gate integrity re-recorded; coverage floors raised; the evidence README and the owner-week template; the full verification on the frozen candidate.",
+      "tasks": ["T134", "T135", "T136", "T137", "T138", "T139"],
+      "requirements": ["021-SC-001", "021-SC-002", "021-SC-003", "021-SC-004", "021-SC-005", "021-SC-006", "021-SC-007"],
+      "paths": [
+        "scripts/test_check_manual_evidence.py",
+        "scripts/check_manual_evidence.py",
+        "Makefile",
+        ".specify/gate-integrity.json",
+        "specs/021-mac-sync/evidence/README.md",
+        "specs/021-mac-sync/evidence/owner-week.md",
+        "backend/coverage-floor.json",
+        "frontend/coverage-floor.json"
+      ],
+      "depends_on": ["PR-06", "PR-07", "PR-09"],
+      "external_depends_on": ["020-weekly-review/PR-01"],
+      "serialize_with": ["020-weekly-review/PR-14"],
+      "tests": [
+        "python3 -m unittest scripts/test_check_manual_evidence.py",
+        "python3 scripts/check_gate_integrity.py",
+        "make check-specs",
+        "make validate-ci && make test-backend && make test-frontend && make test-e2e",
+        "sh ios/scripts/swift-linux.sh test",
+        "make verify-all"
+      ],
+      "acceptance": [
+        "the requirement scan in make check-specs passes for every 021 FR and SC except SC-007; SC-007 is reported pending until owner-week.md holds seven dated entries",
+        "gate-integrity manifest re-recorded in the same commit as the Makefile change; invariants intact",
+        "coverage floors ratcheted to the measured values; the Allure quality gate (maxFailures: 0) unchanged",
+        "owner's recorded ASK approval (Makefile, scripts/)",
+        "landing class ASK (scripts/classify_path_risk.py: ASK)"
+      ]
+    }
+  ]
+}
+```
