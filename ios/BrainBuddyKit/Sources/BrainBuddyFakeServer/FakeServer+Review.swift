@@ -697,9 +697,12 @@ extension ServerState {
         }
         return try idempotentReview(request, body: body, owner: owner, command: "explainer_ack", now: now) { data throws(FakeHTTPError) in
             // First acknowledgement wins; the activation clamp runs in the
-            // same step without bumping any task revision.
+            // same step without bumping any task revision. The settings
+            // revision does go up, as `_activated_settings` bumps it, so a
+            // settings change queued before activation is answered 409.
             if data.review.settings.activatedAt == nil {
                 data.review.settings.activatedAt = now
+                data.review.settings.revision = (data.review.settings.revision ?? 1) + 1
                 if let zone { data.review.settings.timeZone = zone }
                 for (taskID, task) in data.tasks where task.state == .next {
                     let id = task.formulation?.id ?? FormulationID(ClientID.derived("form", from: "activation|\(taskID)"))
@@ -733,7 +736,13 @@ extension ServerState {
         if let zone, TimeZone(identifier: zone) == nil { throw .reason(400, "invalid_time_zone", "Unknown time zone.") }
         return try idempotentReview(request, body: body, owner: owner, command: "review_settings", now: now) { data throws(FakeHTTPError) in
             var settings = data.review.settings
-            guard settings.revision == expected else { throw .stale("ReviewSettings", "settings") }
+            // `ConflictError("Review settings", owner_id, …)` in the backend:
+            // detail `{resource: "Review settings", id: <owner>}` (golden
+            // trace TR-005). NOTE: the backend's message reads "Review
+            // settings have newer changes; …", which `APIError.conflictKind`
+            // does not recognise as stale (it matches "has newer changes");
+            // the fake keeps the suffix the client and http.md expect.
+            guard settings.revision == expected else { throw .stale("Review settings", owner) }
             var changed = false
             if let threshold, threshold != settings.thresholdDays {
                 settings.thresholdDays = threshold
