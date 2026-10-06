@@ -49,11 +49,14 @@ evidence, including failures. It does not certify launch or GDPR compliance.
 | Aggregate Linux native package | 614 tests / 65 suites passed, 59.213 s | Actual Swift 6.2 run on the integrated foundation/auth tree. Device/Xcode acceptance is separate. |
 | Native Apple corrupt/retired-key regression | 79 cases passed / 2 reproduced failures; after repair 81 passed | Decryption moved into the claimed attempt's terminal exception boundary. No upstream call or authority on either failure; unchanged tests passed after repair. |
 | Final aggregate start after main merge | meta gates and backend static checks passed; runner blocked before pytest | Workspace filled during local Docker rebuild; removed only enumerated disposable task build caches, preserving images/data. Fresh full chain follows. |
+| PR CI at e4e4eab | actual native kit passed; frontend, iOS host and secret scan failed | Node22 Blob realm assertion, inaccessible native error initializer, and two public-value scanner false positives repaired at 4439c00; rerun pending. Claude review runtime returned is_error:true without an assessment. |
+| Final independent code review at e4e4eab | changes requested | Reproduced removed-provider public sign-in/restoration and retention defect; native cancellation/compile findings also recorded. Scoped native fixes are at 4439; unlink repair and separate exact-SHA re-review follow. Obsolete local aggregate was stopped before product mutation; it is not a pass. |
 | Signed Apple browser continuation | 10/10 full browser journeys passed | Includes actual cross-site form POST/binder, valid ES256 client secret and RS256 Apple assertions, relay signup, stable-subject return without email, and collision rejection. Synthetic boundary evidence only. |
 
 Independent reviews:
 [initial](reviews/implementation-security-5fc4a6a.json),
 [repair review](reviews/implementation-security-8f3adb83.json),
+[final candidate changes requested](reviews/implementation-security-e4e4eab3.json),
 [merge and renumbering disposition](renumbering-review.json).
 The bounded disposition checks immutable `ce49b38`; historical six-lens
 review bytes and original planning digest are preserved, without restamping.
@@ -86,7 +89,7 @@ CI artifacts must bind to the frozen implementation SHA.
 
 ## Remaining evidence
 
-1. Finish coverage repairs, execute the complete required suite on the final
+1. Finish unlink authority/retention repair, execute the complete required suite on the final
    SHA, and verify native CI really executes against that same candidate.
 2. Retain final-candidate synthetic Apple browser and headed web reference artifacts.
    The implemented ten-journey suite already passed; final aggregate rerun follows.

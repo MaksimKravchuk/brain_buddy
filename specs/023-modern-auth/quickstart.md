@@ -24,7 +24,7 @@ python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py
 
 `make verify-all` includes full backend/frontend/Playwright suites, freshness, Allure taxonomy, product-E2E and ratcheted coverage validators; raw pytest's 95% floor and frontend runner thresholds do not substitute for repository floors. Required macOS ios-kit/ios-app and exact-SHA CI remain separate gates.
 
-Run Allure taxonomy validation on actual backend results; maintain feature-qualified 022 requirement markers in meaningful Python/TS/Swift tests. Native host build uses existing ios-app macOS CI lane; project.yml/XcodeGen is source, generated files stay ignored. Baseline prior to implementation: 73 existing auth/account tests; static design after review correction: 154 combinations/18 axe checks and no JS errors. Neither is new auth completion evidence.
+Run Allure taxonomy validation on actual backend results; maintain feature-qualified 023 requirement markers in meaningful Python/TS/Swift tests. Native host build uses existing ios-app macOS CI lane; project.yml/XcodeGen is source, generated files stay ignored. Baseline prior to implementation: 73 existing auth/account tests; static design after review correction: 154 combinations/18 axe checks and no JS errors. Neither is new auth completion evidence.
 
 ## Browser journeys
 
