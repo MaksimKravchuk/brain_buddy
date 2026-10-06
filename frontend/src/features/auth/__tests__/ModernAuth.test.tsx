@@ -27,7 +27,8 @@ describe("023-FR-001/003/008/009/010/022 configured choice and neutral code flow
     fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "unknown@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue with email" }));
     expect(screen.getByRole("button", { name: "Please wait…" })).toBeDisabled();
-    expect(await screen.findByLabelText("Email code")).toHaveFocus();
+    const codeInput = await screen.findByLabelText("Email code");
+    await waitFor(() => expect(codeInput).toHaveFocus());
     expect(modernAuthApi.requestEmail).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/if this address can be used/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /send another code in/i })).toBeDisabled();

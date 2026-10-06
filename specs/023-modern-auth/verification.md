@@ -191,3 +191,38 @@ error-envelope assertions. The actual application contract suite then passed
 **5 tests** in 7.98 seconds (`/tmp/modern-auth-contract-final.log`). Application
 code, native source and frontend source did not change in this correction.
 A fresh complete run remains required.
+
+## Complete 850f782 backend and asynchronous frontend fixture repair
+
+At `850f782f476e8574e98406b39f994bc9d67acd0e`, the complete backend
+passed **4,324 tests** in 1,388.83 seconds (1,179 warnings), with unchanged
+floors passing at **98.61% lines / 95.86% branches** and Allure taxonomy passing
+all 4,324 results. Raw full-chain log:
+`/tmp/modern-auth-023-verify-all-final-frozen-v5.log`; preserved coverage:
+`/tmp/modern-auth-v5-actual/backend-coverage.xml`.
+
+A separate frontend coverage preflight first failed its existing Allure CLI
+canary with sandbox `spawnSync allure EPERM` (**1,725 passed, 1 failed**).
+The same unchanged suite with permitted subprocess execution passed **1,726
+tests / 74 files** in 444.07 seconds, all unchanged floors and taxonomy:
+98.99% statements / 97.83% branches / 98.76% functions / 99.51% lines.
+Original failure and green evidence are retained under
+`/tmp/modern-auth-frontend-sandbox-failed-850f782/` and
+`/tmp/modern-auth-frontend-green-850f782/`; raw retry log:
+`/tmp/modern-auth-frontend-coverage-850f782-retry.log`.
+
+The full-chain frontend then exposed **two asynchronous fixture races**
+(**1,724 passed, 2 failed**): checking code-field focus before its mount effect,
+and assuming conflict recovery's persistence/refetch/save completed after one
+fake-timer advancement. Its aggregate remains **failed**; browser lanes did not
+run. Actual failed Allure records are preserved under
+`/tmp/modern-auth-v5-actual/frontend-failed/`.
+
+Only those test waits were repaired: wait for focus, and for actual refetch/UI
+and second save while recovery timers are real. The local graph and required
+revision assertions remain intact; application code, timing contracts and floors
+are unchanged. An intermediate two-file run passed 127 tests in 33.18 seconds
+(`/tmp/modern-auth-async-fixtures-green.log`); after the final explicit UI-ready
+wait, the two affected cases passed in 6.78 seconds
+(`/tmp/modern-auth-async-fixtures-final.log`; other 125 cases were filtered).
+Typecheck and lint passed. A fresh complete frozen-candidate chain is required.
