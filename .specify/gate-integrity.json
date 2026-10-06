@@ -9,7 +9,7 @@
     ".specify/workflows/speckit/workflow.yml": "007e515aabc33bb3f6fc57fe0e4383d5bfba0eb237f997cd8fbb595079df54bc",
     "Makefile": "862879ad4324cdcb989f2c56b4960d70037dfd995e10ecfbd091dd57c1f12ac9",
     "backend/mutation-enforced-scope.txt": "6d301c35b52b2366d4b3df01116c7fc44a7e0e10fef700ebdec4169cc10e5a5d",
-    "scripts/check_gate_integrity.py": "830165661852b8c3546929dde49646a7f8d261e29a9d1fb9dd76422a0b86f3c1",
+    "scripts/check_gate_integrity.py": "ddcbb5746b6fff9b541f628287324e7ad5ee9da977d540629f661c1f4b90211b",
     "scripts/check_requirement_coverage.py": "31571e9df32e4e98a53fefb7dc9757f96a21f54b2ffafb422b5cac28df07db7f",
     "scripts/check_spec_kit_specs.py": "1b9c607e4df2b129226d1f92e07338cf4a39a81af8e1ef1625edf349a0e8dacb",
     "scripts/check_speckit_manifests.py": "16db34acb64062ddd075a14ee096d4ad96e780feeacee47d8ed454cd65a2f18b",

@@ -225,14 +225,18 @@ INVARIANTS: tuple[Invariant, ...] = (
     MustNotMatch(
         "Makefile",
         "no slice-filtered requirement coverage in the gates",
-        r"check_requirement_coverage\.py[^\n]*--requirements",
+        # The bare flag, not "on the coverage line": a `\` continuation or a
+        # folded YAML scalar puts it on the next physical line.
+        r"--requirements\b",
         "--requirements checks a slice's ids only. In a gate recipe it would "
         "report a pass for a feature whose other requirements are untraced.",
     ),
     MustNotMatch(
         ".github/workflows/ci.yml",
         "no slice-filtered requirement coverage in CI",
-        r"check_requirement_coverage\.py[^\n]*--requirements",
+        # The bare flag, not "on the coverage line": a `\` continuation or a
+        # folded YAML scalar puts it on the next physical line.
+        r"--requirements\b",
         "--requirements checks a slice's ids only. In CI it would report a pass "
         "for a feature whose other requirements are untraced.",
     ),
