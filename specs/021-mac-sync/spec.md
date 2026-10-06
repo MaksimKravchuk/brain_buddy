@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-06
 
-**Status**: Draft
+**Status**: Approved (founder-accepted planning review, 2026-10-06)
 
 **Input**: User description: "The Mac app stops being local-only: it signs in to the same account as iPhone and web and syncs in the background, like other GTD apps. The person only hears about sync when something fails (can't send, can't load): a compact error. Sync activity is a small indicator that never interrupts; nearby a quiet 'synced N minutes ago'. Everything compact, nothing to think about. Mac-only project features (lossless archive with unarchive, project desired outcome) get server support so nothing is lost." See `intake.md`.
 
