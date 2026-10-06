@@ -293,7 +293,8 @@ account-less install to an account sends `acknowledgeExplainer` if the device ha
 seen it and the account has no activation yet.
 
 `local.formDrafts: [DraftKey: String]` holds unsaved form text (FR-052), keyed by
-form kind + task id + formulation id (or session id + step item). It is never sent,
+form kind + task id + formulation id (or session id + step item, or project id for a
+project's first next action, M-08 / M-19). It is never sent,
 never part of an outbox operation and never logged; it is removed on save, discard,
 formulation change, sign-out, or after 7 days. A v1 build that meets a v2 file reports
 `.unsupportedVersion` (existing behaviour); the app and its widget extension ship in

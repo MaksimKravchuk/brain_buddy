@@ -856,6 +856,7 @@ Voice-led review and review of agent-delegated work are out of scope.
   - "Process 10, release the rest" states "Nothing is deleted".
 - **Dynamic Type**: at accessibility sizes the card's decision list scrolls with the content instead of being pinned, as Process inbox does today.
 - **Reduce Motion**: card-to-card transitions in M-16 are instant. No ambient animation anywhere in this feature.
+- **Contrast** (added 2026-10-06 by `/speckit-checklist`, no visual change): every text and icon in this feature meets WCAG 2.2 AA (4.5:1 text, 3:1 non-text). The new chips already do: indigo-700 on indigo-50 is 7.1:1, amber-800 on amber-50 is 6.8:1, slate-600 on slate-100 ("Ageing") is 6.9:1. The web is checked by the axe scans; iOS by the manual evidence entry for markers.
 
 ## Keyboard and focus
 

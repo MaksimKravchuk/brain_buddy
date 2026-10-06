@@ -285,7 +285,13 @@ expire after 7 days — signed in or account-less.
 
 The downloaded model file lives in the app's Application Support (not the App Group,
 so the widget never maps it). Both are removed with the app and are **not** in the
-account export. `docs/data-retention.md` gets device-local rows: the iOS store
+account export. The download itself is an ordinary request to Apple's asset hosting
+(Background Assets), which sees the device's request as it would an App Store
+download and receives no task content; the PR-09 privacy-policy row says so.
+
+`formDrafts` keys: form kind + task id + formulation id; or session id + step item for
+review-step forms; or project id for the first next action typed for a project
+without one (M-08, M-19; FR-052). `docs/data-retention.md` gets device-local rows: the iOS store
 document row is extended to list review state (decisions with 7-day undo snapshots,
 extension reasons, sessions, consent state, form drafts) in PR-02; the model file and
 navigator preference rows come with PR-09.
@@ -295,7 +301,8 @@ navigator preference rows come with PR-09.
 Unsaved decision-form text on the web (FR-052) is kept in `localStorage` under
 `bb.reviewFormDraft.v1.<origin>.<account>.<task>.<formulation>` (the namespacing of
 the existing task-detail and CRT drafts, `frontend/src/features/tasks/taskDetailAutosave.ts`,
-`docs/data-retention.md` CRT rows). It is removed on save, discard, formulation change,
+`docs/data-retention.md` CRT rows); the next-action field of the review's projects step
+uses `project.<project id>` in place of `<task>.<formulation>`. It is removed on save, discard, formulation change,
 sign-out or account switch, and by a startup/focus sweep after 7 days. Never sent or
 logged. `docs/data-retention.md` gets a row in PR-02.
 
