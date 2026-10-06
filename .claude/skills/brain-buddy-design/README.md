@@ -39,7 +39,7 @@ Accepted product contracts fix the following vocabulary. Use it verbatim; explor
 
 **GTD primary lists** (sidebar order): `Inbox` → `Next actions` → `Waiting for` → `Someday / maybe`. These are exactly four open GTD primary lists. `Projects` and `Tags` are secondary organization.
 - Inbox count is a sky-500 pill badge; other counts are plain slate-400 numerals.
-- Weekly Review remains visibly deferred as non-interactive `coming later` status; do not invent cadence, due state, or a fifth primary list.
+- Weekly Review is flag-gated: a non-interactive `coming later` entry while the `weekly_review` flag is off, replaced by the working entry when the flag is on (ADR-0027, `specs/020-weekly-review/design.md`). Review markers are derived, never a fifth primary list or a new lifecycle state; cadence and due state come from the person's review settings, never from mock values.
 
 **Tags** use plain names such as `calls`, `errands`, `deep-work`, and `laptop`. Render them as neutral pills (white bg, slate-200 border, slate-600 text in the sidebar; slate-100 bg in task rows). Do not restore retired `@` prefixes.
 

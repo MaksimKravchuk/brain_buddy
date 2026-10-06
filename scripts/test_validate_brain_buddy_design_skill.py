@@ -8,12 +8,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / ".claude" / "skills" / "brain-buddy-design"
 
+# ADR-0027 accepted native-task Weekly Review behind the runtime-managed
+# `weekly_review` flag (020-FR-042). While the flag is off every client keeps
+# the non-interactive `coming later` entry, so the skill describes both states.
+WEEKLY_REVIEW_RULE = (
+    "Weekly Review is flag-gated: a non-interactive `coming later` entry while "
+    "the `weekly_review` flag is off"
+)
+RETIRED_WEEKLY_REVIEW_RULE = "Weekly Review remains visibly deferred"
+
 
 class BrainBuddyDesignSkillContractTests(unittest.TestCase):
     def read(self, relative_path: str) -> str:
         return (SKILL / relative_path).read_text(encoding="utf-8")
 
-    def test_gtd_navigation_uses_four_primary_lists_tags_and_deferred_review(self) -> None:
+    def test_gtd_navigation_uses_four_primary_lists_tags_and_flag_gated_review(self) -> None:
         readme = self.read("README.md")
         skill = self.read("SKILL.md")
         nav = self.read("preview/components-gtd-nav.html")
@@ -26,11 +35,14 @@ class BrainBuddyDesignSkillContractTests(unittest.TestCase):
             readme,
         )
         self.assertIn("exactly four open GTD primary lists", readme)
-        self.assertIn("Weekly Review remains visibly deferred", readme)
+        self.assertIn(WEEKLY_REVIEW_RULE, readme)
         self.assertIn("Projects and Tags", readme)
         self.assertIn("exactly four open GTD primary lists", skill)
-        self.assertIn("Weekly Review remains visibly deferred", skill)
+        self.assertIn(WEEKLY_REVIEW_RULE, skill)
+        for content in (readme, skill):
+            self.assertNotIn(RETIRED_WEEKLY_REVIEW_RULE, content)
         self.assertIn("coming later", nav)
+        self.assertIn("while the weekly_review flag is off", nav)
         self.assertIn(">Tags<", nav)
         self.assertNotRegex(
             "\n".join((readme, skill, nav, task_rows, tokens)),

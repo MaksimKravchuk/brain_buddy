@@ -252,7 +252,13 @@ def test_weekly_review_modules_reuse_the_shared_voice_workflow_if_present() -> N
     under ``app/``, it must import the shared
     ``app.workflows.voice_brain_dump`` package rather than defining its own
     operation/provider machinery. Vacuously satisfied today because no such
-    module exists yet; it activates the moment one is added."""
+    module exists yet; it activates the moment one is added.
+
+    The ``weekly_review`` path token is reserved for voice-led review, the
+    ADR-0002 ``weekly_review_voice`` operation. Native-task Weekly Review
+    (ADR-0027, feature 020) has no voice operation and lives in the Tasks
+    module, so its code avoids the token (``review_service.py``,
+    ``api/review.py``) rather than tripping this guard; see 020 research R1."""
 
     weekly_review_files = [
         path

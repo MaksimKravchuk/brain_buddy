@@ -2,6 +2,10 @@
 
 Date: 2026-07-11
 Amended: 2026-07-13
+Amended: 2026-10-06 — amended by [ADR-0027](0027-native-task-weekly-review-and-auto-park.md)
+for native tasks: the Review module row, the `WeeklyReview`/`WeeklyReviewOutcome`
+model, the `/weekly-reviews` endpoints and the `reviews/…` storage line. Each is marked
+where it stands; the capture-based review stays reserved for the Organize/Capture tranche.
 Status: Accepted
 Decision owner: BrainBuddy
 Related: `backend/app/container.py`, `backend/app/schemas/domain.py`, `docs/auth.md`,
@@ -58,7 +62,7 @@ schemas, and this ADR take precedence.
 | **Capture** | raw-input metadata, media reference, transcription attempts/results, immutable atomic-capture source and provenance | submit input; transcribe/retry; split; get session/source captures | approval, mutable user text, destination choice, task creation, CRT mutation |
 | **Organize** | mutable capture item, clarification/approval decisions, text revisions, destination intent, route/link record | edit; clarify; approve; defer; delete; request destination | source transcript/provenance, canonical task state, execution runs/results, review sessions, CRT graph |
 | **Tasks** | native `Task`, `Project`, and `Context` records and their transitions | create/query/edit/move/complete/reopen tasks; create/query projects and contexts | capture source content, operation proposals, execution runs/results, review sessions, CRT graph |
-| **Review** | weekly review session, immutable per-item outcomes, completion summary | start/resume review; decide item; complete review | canonical capture or task state, execution state, CRT graph |
+| **Review** | weekly review session, immutable per-item outcomes, completion summary (Amended by ADR-0027 for native tasks: native-task review records live in the Tasks module; this module stays the home of a future capture-based review) | start/resume review; decide item; complete review | canonical capture or task state, execution state, CRT graph |
 | **Thinking/CRT** | problem candidates, promotion records, existing trees/nodes/relations, source links | assess candidate; promote/dismiss; query source/results | transcription, external dispatch, general task management |
 | **Execution** | deferred execution runs, adapter attempts, and evidence/results linked to tasks or thinking contexts | request/track/cancel a run when enabled; record/query results | canonical Task/Project/Context fields or completion, capture decisions, CRT graph |
 
@@ -265,6 +269,11 @@ the first tranche.
 
 ### WeeklyReview and WeeklyReviewOutcome
 
+> Amended by ADR-0027 for native tasks: a review over native tasks does not use this
+> capture-based model. Its records live in the Tasks module's `tasks.sqlite3` under the
+> owner command lock (`specs/020-weekly-review/data-model.md`). This model stays
+> reserved for the Organize/Capture tranche.
+
 ```text
 WeeklyReview:
   id, owner_id, period_start, period_end
@@ -465,9 +474,9 @@ on stale state.
 | `POST /tasks/{id}/transitions` | move/complete/cancel/reopen | `200 Task` |
 | `GET /projects` / `POST /projects` | list or create projects | `200 Project[]` / `201 Project` |
 | `GET /contexts` / `POST /contexts` | list or create contexts | `200 Context[]` / `201 Context` |
-| `POST /weekly-reviews` | start or resume review for period | `200 WeeklyReviewDetail` |
-| `POST /weekly-reviews/{id}/items/{capture_id}/outcomes` | record item outcome and invoke relevant command | `200 WeeklyReviewOutcome` |
-| `POST /weekly-reviews/{id}/complete` | validate coverage and complete | `200 WeeklyReviewSummary` |
+| `POST /weekly-reviews` | start or resume review for period (Amended by ADR-0027 for native tasks: see `specs/020-weekly-review/contracts/http.md`) | `200 WeeklyReviewDetail` |
+| `POST /weekly-reviews/{id}/items/{capture_id}/outcomes` | record item outcome and invoke relevant command (Amended by ADR-0027 for native tasks) | `200 WeeklyReviewOutcome` |
+| `POST /weekly-reviews/{id}/complete` | validate coverage and complete (Amended by ADR-0027 for native tasks) | `200 WeeklyReviewSummary` |
 | `POST /problem-candidates/{id}/promotions` | user-confirmed CRT promotion | `202 CrtPromotion` |
 | `POST /results` | manually record linked evidence/result | `201 EvidenceResult` |
 
@@ -623,6 +632,9 @@ dispatches/{owner_id}/{route_id}.json
 results/{owner_id}/{result_id}.json
 audit/{owner_id}/{yyyy-mm}.jsonl
 ```
+
+> `reviews/{owner_id}/…json`: Amended by ADR-0027 for native tasks. Native-task review
+> records are rows in the Tasks module's `tasks.sqlite3`, not files under `reviews/`.
 
 Indexes are derived acceleration data and can be rebuilt from canonical records. A
 cross-module workflow is not a filesystem transaction: persist the initiating state,
