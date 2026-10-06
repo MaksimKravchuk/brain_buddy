@@ -12,14 +12,21 @@ try {
     if ($errors.Count) { throw 'Installer has PowerShell parse errors' }
     $download = $ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Download-ReleaseFile'},$true)
     if (!$download) { throw 'Expected dedicated download function' }
-    # Offline fixture copy replaces only transport. Published script has no bypass.
+    # Offline fixture copy replaces transport and enables diagnostics for synthetic
+    # inputs only. Every installer integrity and destination check still executes.
     $replacement = 'function Download-ReleaseFile([string]$Name,[long]$Limit) { Copy-Item -LiteralPath (Join-Path $env:BB_INSTALL_FIXTURE $Name) -Destination (Join-Path $stage $Name) }'
     $fixtureSource = $source.Substring(0,$download.Extent.StartOffset) + $replacement + $source.Substring($download.Extent.EndOffset)
+    $fixtureSource = $fixtureSource.Replace("[Console]::Error.WriteLine('bb install failed; the previous executable is preserved. Check the version, network, integrity and destination permissions.')", "[Console]::Error.WriteLine('Synthetic installer diagnostic: ' + `$_.Exception.Message)")
     $fixtureScript = Join-Path $root 'fixture-install.ps1'; [IO.File]::WriteAllText($fixtureScript,$fixtureSource)
     foreach ($scenario in @('success','corrupt','unsafe','duplicate','unsupported')) {
         $folder = Join-Path $root $scenario; New-Item -ItemType Directory -Path $folder | Out-Null
         $downloadDir = Join-Path $folder 'download'; New-Item -ItemType Directory -Path $downloadDir | Out-Null
         $destination = Join-Path $folder 'bin'; New-Item -ItemType Directory -Path $destination | Out-Null
+        # An elevated runner defaults new folders to Administrators ownership.
+        # Provision the user-owned destination the installer contract requires.
+        $fixtureAcl = Get-Acl -LiteralPath $destination
+        $fixtureAcl.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
+        Set-Acl -LiteralPath $destination -AclObject $fixtureAcl
         $previous = Join-Path $destination 'bb.exe'; [IO.File]::WriteAllText($previous,'previous-binary-sentinel')
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $archiveName = 'bb-0.1.0-x86_64-pc-windows-msvc.zip'; $archivePath = Join-Path $downloadDir $archiveName
