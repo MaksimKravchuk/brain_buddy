@@ -4,7 +4,7 @@ import { modernAuthApi } from "../modernAuth";
 
 const owner = { recent_proof: "one-use-proof", expected_account_id: "owner-A" };
 const response = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
-describe("022-FR-006/008/013/015/018/021 remaining auth transport boundaries", () => {
+describe("023-FR-006/008/013/015/018/021 remaining auth transport boundaries", () => {
   const fetchMock = vi.fn<typeof fetch>();
   beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset(); });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });

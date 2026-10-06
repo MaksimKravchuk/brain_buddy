@@ -55,7 +55,7 @@ pytestmark = [
     pytest.mark.allure_label("Authentication & Access", label_type="epic"),
     pytest.mark.allure_label("Modern authentication", label_type="feature"),
     pytest.mark.allure_label(
-        "022-FR-004–019 022-SC-003 022-SC-004 Protected authority",
+        "023-FR-004–019 023-SC-003 023-SC-004 Protected authority",
         label_type="story",
     ),
 ]
@@ -277,7 +277,7 @@ def recovery(modern: Modern, user: User) -> ResetRequest:
 @pytest.mark.parametrize(
     "kind", ["unknown", "legacy", "passwordless", "operator", "due"]
 )
-def test_022_FR_010_FR_011_FR_014_ineligible_recovery_is_neutral_and_inert(
+def test_023_FR_010_FR_011_FR_014_ineligible_recovery_is_neutral_and_inert(
     modern: Modern, container: Container, kind: str
 ) -> None:
     """Unknown, unverified, passwordless, reserved and past-due recovery creates no authority."""
@@ -328,7 +328,7 @@ def test_022_FR_010_FR_011_FR_014_ineligible_recovery_is_neutral_and_inert(
         "operator",
     ],
 )
-def test_022_FR_011_FR_019_reset_fresh_checks_every_authority_boundary(
+def test_023_FR_011_FR_019_reset_fresh_checks_every_authority_boundary(
     modern: Modern, container: Container, invalidated: str
 ) -> None:
     """A stale or foreign reset cannot rotate a password, mint sessions or cancel deletion."""
@@ -366,7 +366,7 @@ def test_022_FR_011_FR_019_reset_fresh_checks_every_authority_boundary(
     assert authority_counts(service) == before
 
 
-def test_022_FR_011_SC_003_two_reset_consumers_allow_one_change_and_zero_sessions(
+def test_023_FR_011_SC_003_two_reset_consumers_allow_one_change_and_zero_sessions(
     modern: Modern, container: Container
 ) -> None:
     """Two real transactions race on one reset grant and create no automatic login."""
@@ -395,7 +395,7 @@ def test_022_FR_011_SC_003_two_reset_consumers_allow_one_change_and_zero_session
     assert not rows(service, "SELECT * FROM auth_proofs WHERE user_id=?", (user.id,))
 
 
-def test_022_FR_011_FR_013_reset_and_recent_grants_cannot_exchange_purposes(
+def test_023_FR_011_FR_013_reset_and_recent_grants_cannot_exchange_purposes(
     modern: Modern, container: Container
 ) -> None:
     """Mailbox recovery grants and session-bound recent grants have disjoint authority."""
@@ -417,7 +417,7 @@ def test_022_FR_011_FR_013_reset_and_recent_grants_cannot_exchange_purposes(
     assert service.auth.verify_password(current_user(service, user.id), PASSWORD)
 
 
-def test_022_FR_012_expired_confirmation_can_be_renewed_without_losing_pending_code(
+def test_023_FR_012_expired_confirmation_can_be_renewed_without_losing_pending_code(
     modern: Modern, container: Container
 ) -> None:
     """An expired five-minute confirmation preserves the pending code for fresh same-action proof."""
@@ -453,7 +453,7 @@ def test_022_FR_012_expired_confirmation_can_be_renewed_without_losing_pending_c
 
 
 @pytest.mark.parametrize("mismatch", ["action", "session", "owner"])
-def test_022_FR_006_FR_012_pending_email_confirmation_rejects_foreign_renewal(
+def test_023_FR_006_FR_012_pending_email_confirmation_rejects_foreign_renewal(
     modern: Modern, container: Container, mismatch: str
 ) -> None:
     """A pending destination cannot use another action, session or owner's renewed confirmation."""
@@ -490,7 +490,7 @@ def test_022_FR_006_FR_012_pending_email_confirmation_rejects_foreign_renewal(
 
 
 @pytest.mark.parametrize("kind", ["claimed", "reserved"])
-def test_022_FR_012_destination_conflict_rolls_back_confirmation_and_address_change(
+def test_023_FR_012_destination_conflict_rolls_back_confirmation_and_address_change(
     modern: Modern, container: Container, kind: str
 ) -> None:
     """A newly claimed or reserved destination leaves the old verified account intact."""
@@ -519,7 +519,7 @@ def test_022_FR_012_destination_conflict_rolls_back_confirmation_and_address_cha
     assert session_user(service, token).id == user.id
 
 
-def test_022_FR_014_authenticated_legacy_verification_rejects_another_session(
+def test_023_FR_014_authenticated_legacy_verification_rejects_another_session(
     modern: Modern, container: Container
 ) -> None:
     """Historical unverified email gains authority only after password and same-session mailbox proof."""
@@ -547,7 +547,7 @@ def test_022_FR_014_authenticated_legacy_verification_rejects_another_session(
 
 
 @pytest.mark.parametrize("purpose", ["verify_email", "change_email", "reauth"])
-def test_022_FR_006_FR_012_protected_email_requires_explicit_expected_owner(
+def test_023_FR_006_FR_012_protected_email_requires_explicit_expected_owner(
     modern: Modern, container: Container, purpose: EmailPurpose
 ) -> None:
     """Protected email operations cannot infer the intended account from another tab's cookie."""
@@ -574,7 +574,7 @@ def test_022_FR_006_FR_012_protected_email_requires_explicit_expected_owner(
 
 
 @pytest.mark.parametrize("mismatch", ["binder_missing", "binder", "state", "provider"])
-def test_022_FR_004_callback_rejects_foreign_attempt_before_provider_exchange(
+def test_023_FR_004_callback_rejects_foreign_attempt_before_provider_exchange(
     modern: Modern, monkeypatch: pytest.MonkeyPatch, mismatch: str
 ) -> None:
     """Wrong provider, state or browser binder grants no upstream exchange or durable authority."""
@@ -608,7 +608,7 @@ def test_022_FR_004_callback_rejects_foreign_attempt_before_provider_exchange(
 @pytest.mark.parametrize(
     "mismatch", ["state", "client_verifier", "handoff_code", "attempt_id"]
 )
-def test_022_FR_004_FR_015_handoff_requires_all_original_client_fields_and_consumes_once(
+def test_023_FR_004_FR_015_handoff_requires_all_original_client_fields_and_consumes_once(
     modern: Modern, mismatch: str
 ) -> None:
     """A stolen or substituted callback field cannot issue a session or consume the owner's grant."""
@@ -626,7 +626,7 @@ def test_022_FR_004_FR_015_handoff_requires_all_original_client_fields_and_consu
     assert authority_counts(service) == (1, 1, 1)
 
 
-def test_022_FR_015_handoff_expires_at_exact_sixty_second_boundary(
+def test_023_FR_015_handoff_expires_at_exact_sixty_second_boundary(
     modern: Modern,
 ) -> None:
     """The callback grant cannot authorize at or beyond its sixty-second deadline."""
@@ -639,7 +639,7 @@ def test_022_FR_015_handoff_expires_at_exact_sixty_second_boundary(
 
 
 @pytest.mark.parametrize("elapsed", [30, 31])
-def test_022_FR_004_callback_exchange_cannot_commit_after_its_lease_expires(
+def test_023_FR_004_callback_exchange_cannot_commit_after_its_lease_expires(
     modern: Modern, monkeypatch: pytest.MonkeyPatch, elapsed: int
 ) -> None:
     """An expired exchange lease cannot stage a late provider result or issue a returning grant."""
@@ -657,7 +657,7 @@ def test_022_FR_004_callback_exchange_cannot_commit_after_its_lease_expires(
     assert not rows(service, "SELECT * FROM auth_handoffs")
 
 
-def test_022_FR_004_concurrent_callbacks_exchange_once_and_return_one_grant(
+def test_023_FR_004_concurrent_callbacks_exchange_once_and_return_one_grant(
     modern: Modern, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A real callback transaction lease prevents concurrent redemption of the same upstream code."""
@@ -700,7 +700,7 @@ def test_022_FR_004_concurrent_callbacks_exchange_once_and_return_one_grant(
 @pytest.mark.parametrize(
     "invalidated", ["session", "owner", "password", "purge", "operator", "expiry"]
 )
-def test_022_FR_006_FR_019_link_completion_rechecks_current_session_owner_and_authority(
+def test_023_FR_006_FR_019_link_completion_rechecks_current_session_owner_and_authority(
     modern: Modern, container: Container, invalidated: str
 ) -> None:
     """A staged link cannot attach a binding after its session, account or confirmation changes."""
@@ -748,7 +748,7 @@ def test_022_FR_006_FR_019_link_completion_rechecks_current_session_owner_and_au
     assert not rows(service, "SELECT * FROM auth_identity_bindings")
 
 
-def test_022_FR_005_bound_identity_cannot_be_linked_to_a_different_existing_owner(
+def test_023_FR_005_bound_identity_cannot_be_linked_to_a_different_existing_owner(
     modern: Modern, container: Container
 ) -> None:
     """Proving an identity owned by another account cannot reassign either account or its sessions."""
@@ -779,7 +779,7 @@ def test_022_FR_005_bound_identity_cannot_be_linked_to_a_different_existing_owne
 
 
 @pytest.mark.parametrize("field", ["subject", "namespace", "issuer"])
-def test_022_FR_004_FR_013_same_email_does_not_make_a_foreign_identity_recent_authority(
+def test_023_FR_004_FR_013_same_email_does_not_make_a_foreign_identity_recent_authority(
     modern: Modern, field: str
 ) -> None:
     """An unbound subject, issuer or namespace cannot reauthenticate a same-email account."""
@@ -805,7 +805,7 @@ def test_022_FR_004_FR_013_same_email_does_not_make_a_foreign_identity_recent_au
     assert not rows(service, "SELECT * FROM auth_proofs")
 
 
-def test_022_FR_014_provider_recent_proof_cannot_verify_a_legacy_unverified_address(
+def test_023_FR_014_provider_recent_proof_cannot_verify_a_legacy_unverified_address(
     modern: Modern, container: Container
 ) -> None:
     """A linked provider's email match cannot establish historical mailbox authority without password proof."""
@@ -846,7 +846,7 @@ def test_022_FR_014_provider_recent_proof_cannot_verify_a_legacy_unverified_addr
     assert current_user(service, user.id).email_verified_at is None
 
 
-def test_022_FR_007_last_usable_method_failure_preserves_binding_and_one_use_proof(
+def test_023_FR_007_last_usable_method_failure_preserves_binding_and_one_use_proof(
     modern: Modern,
 ) -> None:
     """Disabling the alternative delivery method cannot permit removal of the only usable provider."""
@@ -874,7 +874,7 @@ def test_022_FR_007_last_usable_method_failure_preserves_binding_and_one_use_pro
 
 
 @pytest.mark.parametrize("caller", ["provider", "email"])
-def test_022_FR_007_unlink_revokes_only_originating_provider_sessions_and_reports_signout(
+def test_023_FR_007_unlink_revokes_only_originating_provider_sessions_and_reports_signout(
     modern: Modern, caller: str
 ) -> None:
     """Unlink removes every originating provider session while preserving independent email authority."""
@@ -905,7 +905,7 @@ def test_022_FR_007_unlink_revokes_only_originating_provider_sessions_and_report
     assert authority_counts(service) == before
 
 
-def test_022_FR_004_old_provider_handoff_cannot_cross_unlink_and_new_authorization_generation(
+def test_023_FR_004_old_provider_handoff_cannot_cross_unlink_and_new_authorization_generation(
     modern: Modern,
 ) -> None:
     """A staged old provider assertion stays invalid after unlink and a fresh explicit provider login."""
@@ -928,7 +928,7 @@ def test_022_FR_004_old_provider_handoff_cannot_cross_unlink_and_new_authorizati
 
 
 @pytest.mark.parametrize("action", ["password", "export", "delete"])
-def test_022_FR_013_SC_004_passwordless_account_retains_sensitive_actions(
+def test_023_FR_013_SC_004_passwordless_account_retains_sensitive_actions(
     modern: Modern, container: Container, action: Action
 ) -> None:
     """A passwordless owner can confirm its linked email and add a password, export or request deletion."""
@@ -983,7 +983,7 @@ def test_022_FR_013_SC_004_passwordless_account_retains_sensitive_actions(
 
 
 @pytest.mark.parametrize("stage", ["email_code", "reset", "provider_handoff"])
-def test_022_FR_018_FR_019_purged_known_owner_never_falls_back_to_signup(
+def test_023_FR_018_FR_019_purged_known_owner_never_falls_back_to_signup(
     modern: Modern, container: Container, stage: str
 ) -> None:
     """Previously known owner proofs cannot recreate an erased account or create a new account at its address."""
@@ -1010,7 +1010,7 @@ def test_022_FR_018_FR_019_purged_known_owner_never_falls_back_to_signup(
     assert container.user_repo.get_by_email(user.email) is None
 
 
-def test_022_FR_017_operator_configuration_rejects_preexisting_external_sessions_and_proofs(
+def test_023_FR_017_operator_configuration_rejects_preexisting_external_sessions_and_proofs(
     modern: Modern,
 ) -> None:
     """Configuring an operator address cannot elevate an existing public provider session or staged proof."""
@@ -1033,7 +1033,7 @@ def test_022_FR_017_operator_configuration_rejects_preexisting_external_sessions
 
 
 @pytest.mark.parametrize("mutation", ["password", "legacy_email", "deletion", "purge"])
-def test_022_FR_012_FR_019_pending_destination_cannot_outlive_current_account_authority(
+def test_023_FR_012_FR_019_pending_destination_cannot_outlive_current_account_authority(
     modern: Modern, container: Container, mutation: str
 ) -> None:
     """A queued new-address code cannot override a later credential change, deletion or purge."""
@@ -1077,7 +1077,7 @@ def test_022_FR_012_FR_019_pending_destination_cannot_outlive_current_account_au
 
 
 @pytest.mark.parametrize("method", ["email", "google"])
-def test_022_FR_004_FR_015_login_cannot_replace_another_acting_cookie_owner(
+def test_023_FR_004_FR_015_login_cannot_replace_another_acting_cookie_owner(
     modern: Modern, container: Container, method: str
 ) -> None:
     """Another tab's authenticated cookie cannot attach the completed login to a different account."""
@@ -1109,7 +1109,7 @@ def test_022_FR_004_FR_015_login_cannot_replace_another_acting_cookie_owner(
     assert session_user(service, result.raw_token).id == user.id
 
 
-def test_022_FR_007_missing_provider_configuration_hides_method_without_rewriting_binding(
+def test_023_FR_007_missing_provider_configuration_hides_method_without_rewriting_binding(
     modern: Modern,
 ) -> None:
     """A missing provider credential hides new login while preserving the stored connected identity."""
@@ -1136,7 +1136,7 @@ def test_022_FR_007_missing_provider_configuration_hides_method_without_rewritin
 
 
 @pytest.mark.parametrize("purpose", ["link", "reauth"])
-def test_022_FR_006_protected_provider_start_requires_explicit_expected_owner(
+def test_023_FR_006_protected_provider_start_requires_explicit_expected_owner(
     modern: Modern,
     container: Container,
     purpose: Literal["link", "reauth"],
@@ -1163,7 +1163,7 @@ def test_022_FR_006_protected_provider_start_requires_explicit_expected_owner(
     assert not rows(service, "SELECT * FROM auth_attempts")
 
 
-def test_022_FR_011_FR_019_recovery_cannot_cancel_deletion_but_fresh_explicit_login_can(
+def test_023_FR_011_FR_019_recovery_cannot_cancel_deletion_but_fresh_explicit_login_can(
     modern: Modern, container: Container
 ) -> None:
     """Recovery preserves the deletion marker; only fresh explicit login cancels the fourteen-day grace."""

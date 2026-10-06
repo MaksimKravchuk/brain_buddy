@@ -29,7 +29,7 @@ from app.services.auth_secret_box import AuthSecretBox
 pytestmark = [
     allure.epic("Authentication & access"),
     allure.feature("Apple authority lifecycle"),
-    allure.story("022-FR-019/021/025; 022-SC-003/005"),
+    allure.story("023-FR-019/021/025; 023-SC-003/005"),
 ]
 
 NOW = datetime(2026, 10, 6, 15, tzinfo=UTC)

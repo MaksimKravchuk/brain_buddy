@@ -198,7 +198,7 @@ test.beforeEach(async ({ page }, testInfo) => {
   await page.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort("blockedbyclient"));
 });
 
-test("022-FR-001 022-FR-008 022-SC-001 email signup commits one session and survives reload", async ({ page }) => {
+test("023-FR-001 023-FR-008 023-SC-001 email signup commits one session and survives reload", async ({ page }) => {
   const email = "signup-modern-e2e@example.com";
   await test.step("request a neutral code and finish through the real browser form", async () => {
     const verifying = page.waitForRequest(request => new URL(request.url()).pathname === "/api/auth/email/verify");
@@ -219,7 +219,7 @@ test("022-FR-001 022-FR-008 022-SC-001 email signup commits one session and surv
   });
 });
 
-test("022-FR-004 022-FR-005 022-SC-001 Google signup verifies a signed assertion and clears callback material", async ({ page }) => {
+test("023-FR-004 023-FR-005 023-SC-001 Google signup verifies a signed assertion and clears callback material", async ({ page }) => {
   const email = "google-modern-e2e@gmail.com";
   await fakeGoogle(page, email, "google-signup-subject");
   await test.step("complete the fixed Google authorization and real callback exchange", async () => {
@@ -235,7 +235,7 @@ test("022-FR-004 022-FR-005 022-SC-001 Google signup verifies a signed assertion
   });
 });
 
-test("022-FR-001 022-FR-004 022-FR-006 022-FR-013 022-SC-001 Apple form-post signup returns to the same subject and never merges a matching email", async ({ page }) => {
+test("023-FR-001 023-FR-004 023-FR-006 023-FR-013 023-SC-001 Apple form-post signup returns to the same subject and never merges a matching email", async ({ page }) => {
   const email = "apple-modern-e2e@privaterelay.appleid.com";
   const subject = "apple-signup-subject";
   let owner: Me;
@@ -285,7 +285,7 @@ test("022-FR-001 022-FR-004 022-FR-006 022-FR-013 022-SC-001 Apple form-post sig
   });
 });
 
-test("022-FR-006 022-FR-010 external Google email requires mailbox completion before any session", async ({ page }) => {
+test("023-FR-006 023-FR-010 external Google email requires mailbox completion before any session", async ({ page }) => {
   const email = "external-modern-e2e@example.com";
   await fakeGoogle(page, email, "external-mailbox-subject");
   await test.step("a verified third-party claim stages a mailbox challenge without account authority", async () => {
@@ -304,7 +304,7 @@ test("022-FR-006 022-FR-010 external Google email requires mailbox completion be
   });
 });
 
-test("022-FR-013 022-FR-014 022-SC-003 legacy collision requires password ownership and interrupted linking refreshes that owner", async ({ page }) => {
+test("023-FR-013 023-FR-014 023-SC-003 legacy collision requires password ownership and interrupted linking refreshes that owner", async ({ page }) => {
   await fakeGoogle(page, legacyEmail, "legacy-link-subject");
   await test.step("matching an unverified legacy address never signs into or merges its account", async () => {
     await page.goto("/login");
@@ -337,7 +337,7 @@ test("022-FR-013 022-FR-014 022-SC-003 legacy collision requires password owners
   });
 });
 
-test("022-FR-011 022-SC-004 verified password recovery revokes existing sessions and requires a fresh login", async ({ page, context }) => {
+test("023-FR-011 023-SC-004 verified password recovery revokes existing sessions and requires a fresh login", async ({ page, context }) => {
   await test.step("establish an existing password session before requesting recovery", async () => {
     await passwordLogin(page, recoveryEmail);
     const oldCookies = await context.cookies();
@@ -363,7 +363,7 @@ test("022-FR-011 022-SC-004 verified password recovery revokes existing sessions
   });
 });
 
-test("022-FR-004 022-FR-008 022-SC-003 a stolen callback handoff without its initiating verifier grants no session", async ({ page, browser }) => {
+test("023-FR-004 023-FR-008 023-SC-003 a stolen callback handoff without its initiating verifier grants no session", async ({ page, browser }) => {
   await fakeGoogle(page, "stolen-modern-e2e@gmail.com", "stolen-handoff-subject");
   await test.step("obtain only the callback handoff from a real signed provider exchange", async () => {
     await page.goto("/login");
@@ -390,7 +390,7 @@ test("022-FR-004 022-FR-008 022-SC-003 a stolen callback handoff without its ini
   });
 });
 
-test("022-FR-018 022-FR-020 022-SC-005 a passwordless account confirms export and deletion with its connected Google identity", async ({ page }) => {
+test("023-FR-018 023-FR-020 023-SC-005 a passwordless account confirms export and deletion with its connected Google identity", async ({ page }) => {
   const email = "rights-modern-e2e@gmail.com";
   await fakeGoogle(page, email, "passwordless-rights-subject");
   await test.step("create the account and confirm export using the connected provider", async () => {
@@ -448,7 +448,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
   });
 });
 
-test("022-FR-018 022-SC-003 a browser account switch cannot spend the previous owner's export proof", async ({ page }) => {
+test("023-FR-018 023-SC-003 a browser account switch cannot spend the previous owner's export proof", async ({ page }) => {
   await test.step("obtain a legitimate action-specific proof for the first owner", async () => {
     await passwordLogin(page, staleEmail);
     const owner = (await api<Me>(page, "/auth/me")).body;
@@ -470,7 +470,7 @@ test("022-FR-018 022-SC-003 a browser account switch cannot spend the previous o
   });
 });
 
-test("022-SC-007 022-FR-016 022-FR-022 keyboard submission paints disabled busy feedback within 200ms and dispatches once", async ({ page, browser }, testInfo) => {
+test("023-SC-007 023-FR-016 023-FR-022 keyboard submission paints disabled busy feedback within 200ms and dispatches once", async ({ page, browser }, testInfo) => {
   const email = "feedback-modern-e2e@example.com";
   let dispatches = 0;
   let release: () => void = () => undefined;

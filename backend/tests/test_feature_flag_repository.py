@@ -154,7 +154,9 @@ def test_019_FR_001_existing_four_row_store_adds_crt_canvas_off(
     repo = _repo(tmp_path)
     _set_mode(repo, "voice_brain_dump", FlagMode.ON)
     with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
-        conn.execute("DELETE FROM feature_flags WHERE flag = ?", ("crt_canvas",))
+        conn.execute(
+            "DELETE FROM feature_flags WHERE flag IN (?, ?)", ("crt_canvas", "task_mcp")
+        )
         conn.commit()
 
     upgraded = FeatureFlagOverrideRepository(tmp_path / "data").read()
@@ -180,7 +182,9 @@ def test_019_FR_001_019_SC_006_reconstruction_accepts_retained_cohort(
     _add_user(repo, "voice_brain_dump", "user_retained")
     _set_mode(repo, "voice_brain_dump", mode)
     with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
-        conn.execute("DELETE FROM feature_flags WHERE flag = ?", ("crt_canvas",))
+        conn.execute(
+            "DELETE FROM feature_flags WHERE flag IN (?, ?)", ("crt_canvas", "task_mcp")
+        )
         conn.commit()
 
     reconstructed = FeatureFlagOverrideRepository(tmp_path / "data").read()
@@ -190,6 +194,40 @@ def test_019_FR_001_019_SC_006_reconstruction_accepts_retained_cohort(
     assert reconstructed.flags["voice_brain_dump"] == FlagOverride(
         mode=mode, selected_users=("user_retained",)
     )
+
+
+@pytest.mark.parametrize(
+    "existing_store", [False, True], ids=["fresh", "five-row-upgrade"]
+)
+def test_022_FR_007_task_mcp_initializes_off_without_changing_existing_cohorts(
+    tmp_path: Path, existing_store: bool
+) -> None:
+    """The MCP rollout adds one OFF row and never replays a deployment seed."""
+    if existing_store:
+        repo = _repo(tmp_path)
+        _set_mode(repo, "voice_brain_dump", FlagMode.SELECTED_USERS)
+        _add_user(repo, "voice_brain_dump", "user_retained")
+        before = {
+            name: entry
+            for name, entry in repo.read().flags.items()
+            if name != "task_mcp"
+        }
+        with sqlite3.connect(_sqlite_db_path(tmp_path)) as connection:
+            connection.execute(
+                "DELETE FROM feature_flags WHERE flag = ?", ("task_mcp",)
+            )
+    else:
+        before = None
+    repo = FeatureFlagOverrideRepository(
+        tmp_path / "data", legacy_states={"task_mcp": FeatureFlagState.ON}
+    )
+    overlay = repo.read()
+    assert overlay.degraded is False
+    assert overlay.flags["task_mcp"] == FlagOverride(mode=FlagMode.OFF)
+    if before is not None:
+        assert {
+            name: entry for name, entry in overlay.flags.items() if name != "task_mcp"
+        } == before
 
 
 def test_012_FR_009_fresh_store_forces_autocomplete_off_despite_environment(
@@ -210,6 +248,7 @@ def test_012_FR_009_fresh_store_forces_autocomplete_off_despite_environment(
         "external_agent_relay",
         "task_title_autocomplete",
         "crt_canvas",
+        "task_mcp",
     }
     assert overlay.flags["task_title_autocomplete"].mode is FlagMode.OFF
 
@@ -694,6 +733,7 @@ def test_010_DD_15_migration_seeds_exactly_the_managed_flags_plus_a_ledger_row(
         "external_agent_relay",
         "task_title_autocomplete",
         "crt_canvas",
+        "task_mcp",
     }
 
     _sqlite_repo(tmp_path)

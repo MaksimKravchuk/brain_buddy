@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { modernAuthApi } from "../modernAuth";
 
-describe("022-FR-001/006/008/013 Modern authentication wire authority", () => {
+describe("023-FR-001/006/008/013 Modern authentication wire authority", () => {
   const fetchMock = vi.fn();
   beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal("fetch", fetchMock); });
   afterEach(() => vi.unstubAllGlobals());

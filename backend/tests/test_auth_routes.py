@@ -284,6 +284,7 @@ def test_010_SC_003_feature_flags_key_set_is_exactly_known_feature_flags(
         "external_agent_relay",
         "task_title_autocomplete",
         "crt_canvas",
+        "task_mcp",
     }
 
 

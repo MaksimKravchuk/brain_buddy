@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 pytestmark = [
     allure.epic("Authentication & access"),
     allure.feature("Transactional Identity storage"),
-    allure.story("022-FR-002/004/014/018/019; 022-SC-002/003/005"),
+    allure.story("023-FR-002/004/014/018/019; 023-SC-002/003/005"),
 ]
 
 

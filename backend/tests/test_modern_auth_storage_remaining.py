@@ -37,7 +37,7 @@ rsa_key = provider.rsa_key
 pytestmark = [
     allure.epic("Authentication & access"),
     allure.feature("Durable credential failure boundaries"),
-    allure.story("022-FR-002/008/010/018/021/025; 022-SC-003/005"),
+    allure.story("023-FR-002/008/010/018/021/025; 023-SC-003/005"),
 ]
 
 

@@ -35,7 +35,7 @@ def legacy(root: Path) -> None:
     )
 
 
-def test_022_FR_002_startup_refuses_unmigrated_nonempty_legacy_root(
+def test_023_FR_002_startup_refuses_unmigrated_nonempty_legacy_root(
     tmp_path: Path,
 ) -> None:
     legacy(tmp_path)
@@ -49,7 +49,7 @@ def test_022_FR_002_startup_refuses_unmigrated_nonempty_legacy_root(
     assert tmp_path.joinpath("users/user_original.json").exists()
 
 
-def test_022_FR_014_startup_resumes_committed_cleanup_without_keys(
+def test_023_FR_014_startup_resumes_committed_cleanup_without_keys(
     tmp_path: Path, monkeypatch
 ) -> None:
     legacy(tmp_path)
@@ -69,7 +69,7 @@ def test_022_FR_014_startup_resumes_committed_cleanup_without_keys(
     assert container.user_repo.store is container.session_repo.store
 
 
-def test_022_FR_018_cli_import_and_account_purge_erase_entire_backup(
+def test_023_FR_018_cli_import_and_account_purge_erase_entire_backup(
     tmp_path: Path, monkeypatch
 ) -> None:
     legacy(tmp_path)

@@ -21,7 +21,7 @@ from app.services.auth_secret_box import AuthSecretBox
 pytestmark = [
     allure.epic("Authentication & access"),
     allure.feature("Explicit Identity migration"),
-    allure.story("022-FR-002/014/018/019; 022-SC-002/003/005"),
+    allure.story("023-FR-002/014/018/019; 023-SC-002/003/005"),
 ]
 
 NOW = datetime(2026, 10, 6, 12, tzinfo=UTC)

@@ -10,7 +10,7 @@ import Testing
 @MainActor
 @Suite("022 Workspace native authentication")
 struct WorkspaceModernAuthTests {
-    @Test("022-FR-024: Modern sign-in flushes capture before linking and retains the existing merge")
+    @Test("023-FR-024: Modern sign-in flushes capture before linking and retains the existing merge")
     func flushAndFinalize() async throws {
         let server = FakeBrainBuddyServer()
         let id = server.addAccount(email: "ada@example.com", password: "a long secure password")

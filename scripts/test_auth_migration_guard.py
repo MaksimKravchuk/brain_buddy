@@ -24,23 +24,23 @@ class AuthMigrationGuardTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
-    def test_022_SC_002_legacy_volume_can_restore_its_captured_image(self):
+    def test_023_SC_002_legacy_volume_can_restore_its_captured_image(self):
         guard = self._module()
         self.assertTrue(guard.restore_allowed(0, 0))
 
-    def test_022_SC_002_sqlite_epoch_blocks_json_even_without_import(self):
+    def test_023_SC_002_sqlite_epoch_blocks_json_even_without_import(self):
         guard = self._module()
         self.assertFalse(guard.restore_allowed(1, 0))
         self.assertTrue(guard.restore_allowed(1, 1))
         self.assertFalse(guard.restore_allowed(2, 1))
 
-    def test_022_SC_008_unknown_state_never_authorizes_restore(self):
+    def test_023_SC_008_unknown_state_never_authorizes_restore(self):
         guard = self._module()
         for current, captured in [(None, 1), (1, None), (-1, 1), (True, 1)]:
             with self.subTest(current=current, captured=captured):
                 self.assertFalse(guard.restore_allowed(current, captured))
 
-    def test_022_SC_002_probe_reads_only_coarse_ledger_and_source_capability(self):
+    def test_023_SC_002_probe_reads_only_coarse_ledger_and_source_capability(self):
         guard = self._module()
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
@@ -77,7 +77,7 @@ class AuthMigrationGuardTests(unittest.TestCase):
                     connection.execute("SELECT COUNT(*) FROM users").fetchone()[0], 1
                 )
 
-    def test_022_SC_008_probe_unknown_database_or_forged_marker_fails_closed(self):
+    def test_023_SC_008_probe_unknown_database_or_forged_marker_fails_closed(self):
         guard = self._module()
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
@@ -89,7 +89,7 @@ class AuthMigrationGuardTests(unittest.TestCase):
             self.assertNotIn("private", str(failure.exception))
             self.assertNotIn(str(root), str(failure.exception))
 
-    def test_022_SC_008_remote_probe_is_stdlib_and_emits_only_json(self):
+    def test_023_SC_008_remote_probe_is_stdlib_and_emits_only_json(self):
         guard = self._module()
         with tempfile.TemporaryDirectory() as root:
             result = subprocess.run(
@@ -103,7 +103,7 @@ class AuthMigrationGuardTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["schema_epoch"], 0)
 
-    def test_022_SC_008_release_handler_guards_before_restaging_or_image_restore(self):
+    def test_023_SC_008_release_handler_guards_before_restaging_or_image_restore(self):
         source = SCRIPT.parent.parent.joinpath(
             ".github/workflows/deploy-fly-production.yml"
         ).read_text()
@@ -118,7 +118,7 @@ class AuthMigrationGuardTests(unittest.TestCase):
         self.assertIn("auth_migration_guard.py capture", source)
         self.assertIn("auth_migration_guard.py forward", source)
 
-    def test_022_SC_002_commit_after_capture_blocks_real_restore_driver(self):
+    def test_023_SC_002_commit_after_capture_blocks_real_restore_driver(self):
         guard = self._module()
         image = "registry.fly.io/brainbuddy-backend@sha256:" + "a" * 64
         machine = {"id": "0123456789abcd", "config": {"image": image}}
@@ -140,7 +140,7 @@ class AuthMigrationGuardTests(unittest.TestCase):
             ):
                 guard.check("brainbuddy-backend", evidence)
 
-    def test_022_SC_008_capture_rejects_image_mismatch_and_unknown_machine(self):
+    def test_023_SC_008_capture_rejects_image_mismatch_and_unknown_machine(self):
         guard = self._module()
         image = "registry.fly.io/brainbuddy-backend@sha256:" + "a" * 64
         for config in [None, {"image": image + "unexpected"}]:
@@ -154,7 +154,7 @@ class AuthMigrationGuardTests(unittest.TestCase):
                     guard.capture("brainbuddy-backend", image, evidence)
                 self.assertFalse(evidence.exists())
 
-    def test_022_SC_008_unknown_fresh_probe_blocks_compatible_capture(self):
+    def test_023_SC_008_unknown_fresh_probe_blocks_compatible_capture(self):
         guard = self._module()
         image = "registry.fly.io/brainbuddy-backend@sha256:" + "a" * 64
         with tempfile.TemporaryDirectory() as root:

@@ -70,7 +70,7 @@ pytestmark = [
     pytest.mark.allure_label("Authentication & Access", label_type="epic"),
     pytest.mark.allure_label("Modern authentication", label_type="feature"),
     pytest.mark.allure_label(
-        "022-FR-004 022-FR-006 022-FR-008–019 022-FR-025 022-SC-003 Failure authority",
+        "023-FR-004 023-FR-006 023-FR-008–019 023-FR-025 023-SC-003 Failure authority",
         label_type="story",
     ),
 ]
@@ -135,7 +135,7 @@ def native_proof(
 
 
 @pytest.mark.parametrize("absent", ["mail_service", "smtp_configuration"])
-def test_022_FR_003_email_unavailability_is_global_and_creates_no_pending_authority(
+def test_023_FR_003_email_unavailability_is_global_and_creates_no_pending_authority(
     modern: Modern, absent: str
 ) -> None:
     """Absent email setup gives the same safe outcome for every address without queueing proof material."""
@@ -168,7 +168,7 @@ def test_022_FR_003_email_unavailability_is_global_and_creates_no_pending_author
 
 @pytest.mark.parametrize("operation", ["request", "resend", "verify"])
 @pytest.mark.parametrize("limited", [False, True])
-def test_022_FR_008_FR_010_mail_dependency_failure_neither_consumes_nor_grants_authority(
+def test_023_FR_008_FR_010_mail_dependency_failure_neither_consumes_nor_grants_authority(
     modern: Modern, monkeypatch: pytest.MonkeyPatch, operation: str, limited: bool
 ) -> None:
     """Mail adapter failures expose a coarse retry outcome and preserve an already delivered valid code."""
@@ -224,7 +224,7 @@ def test_022_FR_008_FR_010_mail_dependency_failure_neither_consumes_nor_grants_a
 
 
 @pytest.mark.parametrize("eligible", [False, True])
-def test_022_FR_008_FR_009_resend_preserves_outer_expiry_and_neutral_ineligible_shape(
+def test_023_FR_008_FR_009_resend_preserves_outer_expiry_and_neutral_ineligible_shape(
     modern: Modern, container: Container, eligible: bool
 ) -> None:
     """Resend enforces the minimum interval, replaces the delivered generation and preserves the outer deadline."""
@@ -268,7 +268,7 @@ def test_022_FR_008_FR_009_resend_preserves_outer_expiry_and_neutral_ineligible_
         assert authority_counts(service) == (1, 0, 1)
 
 
-def test_022_FR_008_FR_009_exhausted_challenge_cannot_reset_guesses_by_resending(
+def test_023_FR_008_FR_009_exhausted_challenge_cannot_reset_guesses_by_resending(
     modern: Modern,
 ) -> None:
     """Five rejected guesses remain committed and resend cannot revive the challenge."""
@@ -310,7 +310,7 @@ def test_022_FR_008_FR_009_exhausted_challenge_cannot_reset_guesses_by_resending
         "missing_proof",
     ],
 )
-def test_022_FR_006_FR_014_protected_email_cannot_borrow_missing_or_foreign_authority(
+def test_023_FR_006_FR_014_protected_email_cannot_borrow_missing_or_foreign_authority(
     modern: Modern, container: Container, invalid: str
 ) -> None:
     """Protected email operations reject wrong destination, intent or source before enqueueing any proof."""
@@ -351,7 +351,7 @@ def test_022_FR_006_FR_014_protected_email_cannot_borrow_missing_or_foreign_auth
     assert not rows(service, "SELECT * FROM auth_challenges")
 
 
-def test_022_FR_008_code_rechecked_after_concurrent_resend_cannot_issue_a_session(
+def test_023_FR_008_code_rechecked_after_concurrent_resend_cannot_issue_a_session(
     modern: Modern, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A code replaced after its first check cannot issue authority from an earlier generation."""
@@ -377,7 +377,7 @@ def test_022_FR_008_code_rechecked_after_concurrent_resend_cannot_issue_a_sessio
     assert finish_email(service, pending, sent[-1][1]).payload.status == "signed_in"
 
 
-def test_022_FR_014_login_rechecks_mailbox_authority_after_the_code_check(
+def test_023_FR_014_login_rechecks_mailbox_authority_after_the_code_check(
     modern: Modern, container: Container, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A concurrently unverified mailbox cannot retain login authority through an already checked code."""
@@ -402,7 +402,7 @@ def test_022_FR_014_login_rechecks_mailbox_authority_after_the_code_check(
     assert current_user(service, user.id).email_verified_at is None
 
 
-def test_022_FR_005_new_address_claimed_after_delivery_requires_existing_account_login(
+def test_023_FR_005_new_address_claimed_after_delivery_requires_existing_account_login(
     modern: Modern, container: Container
 ) -> None:
     """A signup code cannot seize an account created at that address while the code was in flight."""
@@ -423,7 +423,7 @@ def test_022_FR_005_new_address_claimed_after_delivery_requires_existing_account
 
 
 @pytest.mark.parametrize("purpose", ["login", "recover", "reauth"])
-def test_022_FR_017_operator_configuration_changed_after_delivery_blocks_old_email_proof(
+def test_023_FR_017_operator_configuration_changed_after_delivery_blocks_old_email_proof(
     modern: Modern, container: Container, purpose: Literal["login", "recover", "reauth"]
 ) -> None:
     """A delivered public or protected email code cannot become an operator shortcut after configuration changes."""
@@ -452,7 +452,7 @@ def test_022_FR_017_operator_configuration_changed_after_delivery_blocks_old_ema
 
 
 @pytest.mark.parametrize("purpose", ["recover", "reauth"])
-def test_022_FR_011_FR_013_mailbox_disabled_after_delivery_cannot_issue_account_proofs(
+def test_023_FR_011_FR_013_mailbox_disabled_after_delivery_cannot_issue_account_proofs(
     modern: Modern, container: Container, purpose: Literal["recover", "reauth"]
 ) -> None:
     """Delivered recovery or confirmation code cannot survive revocation of its verified mailbox authority."""
@@ -476,7 +476,7 @@ def test_022_FR_011_FR_013_mailbox_disabled_after_delivery_cannot_issue_account_
     assert not rows(service, "SELECT * FROM auth_proofs")
 
 
-def test_022_FR_014_pending_legacy_verification_rejects_a_renewed_provider_source(
+def test_023_FR_014_pending_legacy_verification_rejects_a_renewed_provider_source(
     modern: Modern, container: Container
 ) -> None:
     """Pending legacy verification cannot substitute a social recent grant for the original password authority."""
@@ -518,7 +518,7 @@ def test_022_FR_014_pending_legacy_verification_rejects_a_renewed_provider_sourc
 
 
 @pytest.mark.parametrize("incorrect", ["password", "changed_during_check"])
-def test_022_FR_006_password_confirmation_rechecks_the_exact_verified_credential(
+def test_023_FR_006_password_confirmation_rechecks_the_exact_verified_credential(
     modern: Modern,
     container: Container,
     monkeypatch: pytest.MonkeyPatch,
@@ -559,7 +559,7 @@ def test_022_FR_006_password_confirmation_rechecks_the_exact_verified_credential
 
 
 @pytest.mark.parametrize("operation", ["email", "provider", "recent"])
-def test_022_FR_008_SC_003_lost_atomic_consumption_write_cannot_grant_authority(
+def test_023_FR_008_SC_003_lost_atomic_consumption_write_cannot_grant_authority(
     modern: Modern, container: Container, operation: str
 ) -> None:
     """A real SQLite trigger that refuses consumption prevents the protected effect and preserves retry state."""
@@ -603,7 +603,7 @@ def test_022_FR_008_SC_003_lost_atomic_consumption_write_cannot_grant_authority(
 
 
 @pytest.mark.parametrize("failure_kind", ["unavailable", "assertion", "secret"])
-def test_022_FR_004_failed_provider_exchange_erases_the_lease_and_never_retries_the_code(
+def test_023_FR_004_failed_provider_exchange_erases_the_lease_and_never_retries_the_code(
     modern: Modern, monkeypatch: pytest.MonkeyPatch, failure_kind: str
 ) -> None:
     """A failed bounded provider exchange retires the attempt without exposing upstream inputs or retrying its code."""
@@ -634,7 +634,7 @@ def test_022_FR_004_failed_provider_exchange_erases_the_lease_and_never_retries_
 
 
 @pytest.mark.parametrize("fault", ["box_missing", "retired_key", "tampered_payload"])
-def test_022_FR_004_provider_attempt_key_protection_fails_closed_at_the_service_boundary(
+def test_023_FR_004_provider_attempt_key_protection_fails_closed_at_the_service_boundary(
     modern: Modern, fault: str
 ) -> None:
     """Absent protection, retired keys and corrupted sealed attempts cannot issue a returning grant."""
@@ -662,7 +662,7 @@ def test_022_FR_004_provider_attempt_key_protection_fails_closed_at_the_service_
 
 
 @pytest.mark.parametrize("mismatch", ["provider", "audience"])
-def test_022_FR_004_provider_adapter_cannot_stage_identity_for_another_attempt_profile(
+def test_023_FR_004_provider_adapter_cannot_stage_identity_for_another_attempt_profile(
     modern: Modern, mismatch: str
 ) -> None:
     """Even a faulty provider adapter cannot stage a different provider or audience under an existing attempt."""
@@ -684,7 +684,7 @@ def test_022_FR_004_provider_adapter_cannot_stage_identity_for_another_attempt_p
 
 @pytest.mark.parametrize("authoritative", [False, True])
 @pytest.mark.parametrize("address", [None, "reserved@example.com"])
-def test_022_FR_014_FR_017_new_provider_identity_requires_an_eligible_destination(
+def test_023_FR_014_FR_017_new_provider_identity_requires_an_eligible_destination(
     modern: Modern, authoritative: bool, address: str | None
 ) -> None:
     """Missing or newly reserved provider destinations cannot grant signup or mailbox-verification authority."""
@@ -700,7 +700,7 @@ def test_022_FR_014_FR_017_new_provider_identity_requires_an_eligible_destinatio
     assert not rows(service, "SELECT * FROM auth_challenges")
 
 
-def test_022_FR_004_corrupt_staged_provider_ciphertext_cannot_consume_the_handoff(
+def test_023_FR_004_corrupt_staged_provider_ciphertext_cannot_consume_the_handoff(
     modern: Modern,
 ) -> None:
     """Corrupt stored assertion ciphertext fails before handoff consumption or account mutation."""
@@ -718,7 +718,7 @@ def test_022_FR_004_corrupt_staged_provider_ciphertext_cannot_consume_the_handof
 
 
 @pytest.mark.parametrize("corruption", ["destination", "attempt_state"])
-def test_022_FR_014_mailbox_completion_rejects_inconsistent_staged_identity_state(
+def test_023_FR_014_mailbox_completion_rejects_inconsistent_staged_identity_state(
     modern: Modern, corruption: str
 ) -> None:
     """A mailbox challenge cannot finalize a different destination or a superseded provider state."""
@@ -745,7 +745,7 @@ def test_022_FR_014_mailbox_completion_rejects_inconsistent_staged_identity_stat
     assert authority_counts(service) == (0, 0, 0)
 
 
-def test_022_FR_004_FR_009_provider_attempt_budget_survives_instances_and_key_rotation(
+def test_023_FR_004_FR_009_provider_attempt_budget_survives_instances_and_key_rotation(
     modern: Modern,
 ) -> None:
     """Provider starts cannot reset durable client abuse counters by recreating service or rotating a key."""
@@ -777,7 +777,7 @@ def test_022_FR_004_FR_009_provider_attempt_budget_survives_instances_and_key_ro
     assert start_provider(restarted).payload.attempt_id
 
 
-def test_022_FR_009_network_start_budget_cannot_be_evaded_with_new_client_challenges(
+def test_023_FR_009_network_start_budget_cannot_be_evaded_with_new_client_challenges(
     modern: Modern,
 ) -> None:
     """Changing client proof challenges cannot evade the independent provider network start budget."""
@@ -817,7 +817,7 @@ def test_022_FR_009_network_start_budget_cannot_be_evaded_with_new_client_challe
         "missing_proof",
     ],
 )
-def test_022_FR_006_FR_017_provider_start_rejects_unusable_protected_intent(
+def test_023_FR_006_FR_017_provider_start_rejects_unusable_protected_intent(
     modern: Modern, container: Container, invalid: str
 ) -> None:
     """Unsupported provider or protected intent cannot capture the cookie or create an attempt."""
@@ -851,7 +851,7 @@ def test_022_FR_006_FR_017_provider_start_rejects_unusable_protected_intent(
     assert not rows(service, "SELECT * FROM auth_attempts")
 
 
-def test_022_FR_006_explicit_relink_reactivates_only_the_same_disabled_binding(
+def test_023_FR_006_explicit_relink_reactivates_only_the_same_disabled_binding(
     modern: Modern,
 ) -> None:
     """A fresh confirmed link reactivates the original disabled identity without creating a session or changing account email."""
@@ -884,7 +884,7 @@ def test_022_FR_006_explicit_relink_reactivates_only_the_same_disabled_binding(
     assert session_user(service, token).email == user.email
 
 
-def test_022_FR_006_link_cannot_replace_an_existing_provider_subject(
+def test_023_FR_006_link_cannot_replace_an_existing_provider_subject(
     modern: Modern,
 ) -> None:
     """A newly proved second subject cannot overwrite an account's already connected provider identity."""
@@ -910,7 +910,7 @@ def test_022_FR_006_link_cannot_replace_an_existing_provider_subject(
     assert authority_counts(service) == (1, 1, 1)
 
 
-def test_022_FR_006_stale_explicit_link_cannot_restore_a_later_disabled_generation(
+def test_023_FR_006_stale_explicit_link_cannot_restore_a_later_disabled_generation(
     modern: Modern,
 ) -> None:
     """An older staged explicit link cannot undo a later authorization and unlink generation."""
@@ -955,7 +955,7 @@ def test_022_FR_006_stale_explicit_link_cannot_restore_a_later_disabled_generati
 
 
 @pytest.mark.parametrize("changed", ["state", "generation"])
-def test_022_FR_006_partially_retired_provider_source_cannot_authorize_existing_recent_grant(
+def test_023_FR_006_partially_retired_provider_source_cannot_authorize_existing_recent_grant(
     modern: Modern, changed: str
 ) -> None:
     """A partially applied provider-source retirement cannot leave an old recent grant usable."""
@@ -978,7 +978,7 @@ def test_022_FR_006_partially_retired_provider_source_cannot_authorize_existing_
     assert authority_counts(service) == before
 
 
-def test_022_FR_006_source_retired_during_consume_cannot_mint_provider_recent_authority(
+def test_023_FR_006_source_retired_during_consume_cannot_mint_provider_recent_authority(
     modern: Modern,
 ) -> None:
     """A source revoked at the durable attempt transition cannot mint a recent provider proof."""
@@ -1001,7 +1001,7 @@ def test_022_FR_006_source_retired_during_consume_cannot_mint_provider_recent_au
     assert rows(service, "SELECT state FROM auth_identity_bindings")[0][0] == "active"
 
 
-def test_022_FR_025_apple_web_callback_seals_grant_and_uses_web_audience(
+def test_023_FR_025_apple_web_callback_seals_grant_and_uses_web_audience(
     apple_runtime: AppleRuntime, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Apple's web callback selects the Services ID and seals its cleanup grant before issuing a session."""
@@ -1052,7 +1052,7 @@ def test_022_FR_025_apple_web_callback_seals_grant_and_uses_web_audience(
 
 
 @pytest.mark.parametrize("wrong", ["provider", "channel", "state"])
-def test_022_FR_004_native_apple_completion_rejects_a_foreign_attempt_profile(
+def test_023_FR_004_native_apple_completion_rejects_a_foreign_attempt_profile(
     apple_runtime: AppleRuntime, wrong: str
 ) -> None:
     """Native Apple completion refuses a broker or state belonging to another provider or channel."""
@@ -1095,7 +1095,7 @@ def test_022_FR_004_native_apple_completion_rejects_a_foreign_attempt_profile(
 
 
 @pytest.mark.parametrize("protection_failure", ["tampered_payload", "retired_key"])
-def test_022_FR_004_native_apple_damaged_start_state_is_a_coarse_invalid_proof(
+def test_023_FR_004_native_apple_damaged_start_state_is_a_coarse_invalid_proof(
     apple_runtime: AppleRuntime, protection_failure: str
 ) -> None:
     """Damaged or no-longer-decryptable native start state fails before provider exchange or authority creation."""
@@ -1128,7 +1128,7 @@ def test_022_FR_004_native_apple_damaged_start_state_is_a_coarse_invalid_proof(
         "lease_expired",
     ],
 )
-def test_022_FR_004_FR_025_native_apple_failure_retires_attempt_and_rolls_back_authority(
+def test_023_FR_004_FR_025_native_apple_failure_retires_attempt_and_rolls_back_authority(
     apple_runtime: AppleRuntime, monkeypatch: pytest.MonkeyPatch, failure_kind: str
 ) -> None:
     """Native provider, protection and lifecycle failures retire the lease and roll back account, binding and grant creation."""
@@ -1168,7 +1168,7 @@ def test_022_FR_004_FR_025_native_apple_failure_retires_attempt_and_rolls_back_a
     assert attempt["lease_id"] is None
 
 
-def test_022_FR_004_overlapping_native_callbacks_cannot_erase_the_first_exchange_lease(
+def test_023_FR_004_overlapping_native_callbacks_cannot_erase_the_first_exchange_lease(
     apple_runtime: AppleRuntime, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A duplicate native request is refused while the original leased exchange alone completes."""
@@ -1202,7 +1202,7 @@ def test_022_FR_004_overlapping_native_callbacks_cannot_erase_the_first_exchange
     assert len(calls) == 1 and authority_counts(service) == (1, 1, 1)
 
 
-def test_022_FR_014_native_apple_mailbox_proof_finalizes_the_original_grant_without_handoff(
+def test_023_FR_014_native_apple_mailbox_proof_finalizes_the_original_grant_without_handoff(
     apple_runtime: AppleRuntime,
 ) -> None:
     """Non-authoritative native Apple email stages no account and finalizes once through the original mailbox verifier."""
@@ -1222,7 +1222,7 @@ def test_022_FR_014_native_apple_mailbox_proof_finalizes_the_original_grant_with
     assert not rows(service, "SELECT * FROM auth_handoffs")
 
 
-def test_022_FR_006_FR_025_native_apple_reauth_and_unlink_preserve_independent_email_session(
+def test_023_FR_006_FR_025_native_apple_reauth_and_unlink_preserve_independent_email_session(
     apple_runtime: AppleRuntime,
 ) -> None:
     """Apple confirmation is purpose-bound, and unlink revokes provider authority while independent mailbox access survives."""
@@ -1244,7 +1244,7 @@ def test_022_FR_006_FR_025_native_apple_reauth_and_unlink_preserve_independent_e
     assert not rows(service, "SELECT * FROM auth_apple_grants")
 
 
-def test_022_FR_013_FR_025_passwordless_apple_deletion_schedules_cleanup_and_preserves_deadline(
+def test_023_FR_013_FR_025_passwordless_apple_deletion_schedules_cleanup_and_preserves_deadline(
     apple_runtime: AppleRuntime,
 ) -> None:
     """Passwordless Apple confirmation can request deletion and revocation without changing its fourteen-day purge deadline."""
@@ -1267,7 +1267,7 @@ def test_022_FR_013_FR_025_passwordless_apple_deletion_schedules_cleanup_and_pre
     )
 
 
-def test_022_FR_025_active_cleanup_lease_blocks_native_grant_replacement_until_acknowledged(
+def test_023_FR_025_active_cleanup_lease_blocks_native_grant_replacement_until_acknowledged(
     apple_runtime: AppleRuntime, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A leased remote cleanup prevents a new native grant from racing the old generation's revocation."""
@@ -1308,7 +1308,7 @@ def test_022_FR_025_active_cleanup_lease_blocks_native_grant_replacement_until_a
     assert service.complete_native_apple(retried).payload.status == "signed_in"
 
 
-def test_022_FR_025_apple_notification_requires_an_available_lifecycle_service(
+def test_023_FR_025_apple_notification_requires_an_available_lifecycle_service(
     modern: Modern,
 ) -> None:
     """A signed-notice endpoint with no lifecycle processor fails safely without changing account authority."""
@@ -1322,7 +1322,7 @@ def test_022_FR_025_apple_notification_requires_an_available_lifecycle_service(
     assert authority_counts(service) == (0, 0, 0)
 
 
-def test_022_FR_008_dispatcher_acknowledges_mail_and_erases_expired_proof_material(
+def test_023_FR_008_dispatcher_acknowledges_mail_and_erases_expired_proof_material(
     modern: Modern,
 ) -> None:
     """The lifecycle dispatcher activates acknowledged delivery and removes expired sealed attempts even with no transports."""
@@ -1348,7 +1348,7 @@ def test_022_FR_008_dispatcher_acknowledges_mail_and_erases_expired_proof_materi
     assert not rows(service, "SELECT * FROM auth_mail_jobs")
 
 
-def test_022_FR_004_dispatcher_retires_an_abandoned_exchange_before_late_provider_completion(
+def test_023_FR_004_dispatcher_retires_an_abandoned_exchange_before_late_provider_completion(
     modern: Modern, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Cleanup retires an expired in-flight exchange and its late response cannot restore the sealed attempt."""
@@ -1369,7 +1369,7 @@ def test_022_FR_004_dispatcher_retires_an_abandoned_exchange_before_late_provide
     assert authority_counts(service) == (0, 0, 0)
 
 
-def test_022_FR_019_completion_lookup_and_caller_do_not_expose_missing_or_foreign_owners(
+def test_023_FR_019_completion_lookup_and_caller_do_not_expose_missing_or_foreign_owners(
     modern: Modern, container: Container
 ) -> None:
     """Completion and caller helpers require the live immutable owner, never a purged or foreign account."""

@@ -14,7 +14,7 @@ function pending(owner = "A") {
   history.replaceState(null, "", `/auth/complete#attempt=${token}&state=${token}&grant=${token}`);
 }
 const show = () => render(<MemoryRouter initialEntries={["/auth/complete"]}><Routes><Route path="/auth/complete" element={<ProviderCompletionPage />} /><Route path="/settings/account" element={<div>Methods metadata</div>} /></Routes></MemoryRouter>);
-describe("022-FR-006/015/021 callback owner and one-use handoff", () => {
+describe("023-FR-006/015/021 callback owner and one-use handoff", () => {
   beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); useAuthStore.setState({ user: null, status: "loading" }); });
   afterEach(() => { useAuthStore.setState({ hydrate: originalHydrate }); history.replaceState(null, "", "/"); vi.restoreAllMocks(); });
   it("clears the URL before waiting for cold session hydration and completes once for the same owner", async () => {
@@ -28,7 +28,7 @@ describe("022-FR-006/015/021 callback owner and one-use handoff", () => {
     expect(await screen.findByText("Methods metadata")).toBeInTheDocument();
     expect(modernAuthApi.completeProvider).toHaveBeenCalledTimes(1);
   });
-  it("022-FR-015 waits for the session that superseded the callback hydration", async () => {
+  it("023-FR-015 waits for the session that superseded the callback hydration", async () => {
     const hydrate = vi.fn(async () => {});
     useAuthStore.setState({ hydrate });
     vi.mocked(modernAuthApi.completeProvider).mockResolvedValue({ status: "linked", user: { id: "A", email: "a@test.example" } });

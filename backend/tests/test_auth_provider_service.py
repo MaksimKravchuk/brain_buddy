@@ -120,7 +120,7 @@ def exchange_google(service: AuthProviderService) -> Any:
     )
 
 
-def test_022_FR_004_google_exchange_proves_signature_claims_and_fixed_transport(
+def test_023_FR_004_google_exchange_proves_signature_claims_and_fixed_transport(
     rsa_key: RSAKey, apple_key: ECKey
 ) -> None:
     """A valid signed Google identity uses the pinned exchange and JWKS endpoints."""
@@ -151,7 +151,7 @@ def test_022_FR_004_google_exchange_proves_signature_claims_and_fixed_transport(
     assert "stable-synthetic-subject" not in repr(result)
 
 
-def test_022_FR_004_authorization_urls_use_google_s256_and_apple_form_post(
+def test_023_FR_004_authorization_urls_use_google_s256_and_apple_form_post(
     rsa_key: RSAKey, apple_key: ECKey
 ) -> None:
     """Provider URLs request minimal identity scopes with exact configured callbacks."""
@@ -196,7 +196,7 @@ def test_022_FR_004_authorization_urls_use_google_s256_and_apple_form_post(
         "https://api.example.com/api/auth/providers/google/callback?next=bad",
     ],
 )
-def test_022_FR_004_unconfigured_callback_destinations_are_rejected(
+def test_023_FR_004_unconfigured_callback_destinations_are_rejected(
     rsa_key: RSAKey, apple_key: ECKey, redirect: str
 ) -> None:
     """Neither authorization nor exchange accepts a request-selected callback."""
@@ -236,7 +236,7 @@ def test_022_FR_004_unconfigured_callback_destinations_are_rejected(
         {"nbf": NOW + 61},
     ],
 )
-def test_022_FR_004_invalid_signed_claims_never_authorize(
+def test_023_FR_004_invalid_signed_claims_never_authorize(
     rsa_key: RSAKey, apple_key: ECKey, change: dict[str, Any]
 ) -> None:
     """Signed but wrong issuer, audience, nonce, time, subject or boolean claims fail."""
@@ -246,7 +246,7 @@ def test_022_FR_004_invalid_signed_claims_never_authorize(
 
 
 @pytest.mark.parametrize("missing", ["iss", "aud", "sub", "iat", "exp", "nonce"])
-def test_022_FR_004_required_login_claims_cannot_be_omitted(
+def test_023_FR_004_required_login_claims_cannot_be_omitted(
     rsa_key: RSAKey, apple_key: ECKey, missing: str
 ) -> None:
     """Every login identity must include its exact authority and time bindings."""
@@ -265,7 +265,7 @@ def test_022_FR_004_required_login_claims_cannot_be_omitted(
         {"jwk": {"kty": "RSA"}},
     ],
 )
-def test_022_FR_004_header_selected_keys_are_rejected_without_fetch(
+def test_023_FR_004_header_selected_keys_are_rejected_without_fetch(
     rsa_key: RSAKey, apple_key: ECKey, header: dict[str, Any]
 ) -> None:
     """Token headers cannot choose a key source or cause attacker-directed HTTP."""
@@ -278,7 +278,7 @@ def test_022_FR_004_header_selected_keys_are_rejected_without_fetch(
 
 
 @pytest.mark.parametrize("algorithm", ["HS256", "none"])
-def test_022_FR_004_unsupported_signature_algorithms_fail_before_jwks(
+def test_023_FR_004_unsupported_signature_algorithms_fail_before_jwks(
     rsa_key: RSAKey, apple_key: ECKey, algorithm: str
 ) -> None:
     """Unsigned and symmetric assertions are never accepted as provider identity."""
@@ -307,7 +307,7 @@ def test_022_FR_004_unsupported_signature_algorithms_fail_before_jwks(
         ("person@workspace.example", "bad..example", True, False),
     ],
 )
-def test_022_FR_004_google_mailbox_authority_requires_google_or_signed_valid_workspace(
+def test_023_FR_004_google_mailbox_authority_requires_google_or_signed_valid_workspace(
     rsa_key: RSAKey,
     apple_key: ECKey,
     email: str,
@@ -323,7 +323,7 @@ def test_022_FR_004_google_mailbox_authority_requires_google_or_signed_valid_wor
     assert exchange_google(service).identity.email_authoritative is authoritative
 
 
-def test_022_FR_004_google_issuer_alias_and_explicit_multi_audience_party(
+def test_023_FR_004_google_issuer_alias_and_explicit_multi_audience_party(
     rsa_key: RSAKey, apple_key: ECKey
 ) -> None:
     """Recognized Google issuer aliases normalize and multiple audiences require azp."""
@@ -336,7 +336,7 @@ def test_022_FR_004_google_issuer_alias_and_explicit_multi_audience_party(
     assert exchange_google(service).identity.issuer == "https://accounts.google.com"
 
 
-def test_022_FR_004_jwks_cache_expiry_and_unknown_key_refresh_are_bounded(
+def test_023_FR_004_jwks_cache_expiry_and_unknown_key_refresh_are_bounded(
     rsa_key: RSAKey, apple_key: ECKey
 ) -> None:
     """Known keys cache for one hour and unknown IDs cannot amplify key fetching."""
@@ -374,7 +374,7 @@ def test_022_FR_004_jwks_cache_expiry_and_unknown_key_refresh_are_bounded(
     assert sum(request.url.path.endswith("/certs") for request in requests) == 3
 
 
-def test_022_FR_025_apple_exchange_signs_short_lived_secret_and_returns_only_revocation_grant(
+def test_023_FR_025_apple_exchange_signs_short_lived_secret_and_returns_only_revocation_grant(
     rsa_key: RSAKey, apple_key: ECKey
 ) -> None:
     """Apple confidential exchange uses ES256 and protects its transient cleanup grant."""
@@ -412,7 +412,7 @@ def test_022_FR_025_apple_exchange_signs_short_lived_secret_and_returns_only_rev
     assert "code_verifier" not in form
 
 
-def test_022_FR_025_apple_identity_without_revocation_grant_fails_closed(
+def test_023_FR_025_apple_identity_without_revocation_grant_fails_closed(
     rsa_key: RSAKey, apple_key: ECKey
 ) -> None:
     """Apple exchange cannot establish authority without its required cleanup credential."""
@@ -423,7 +423,7 @@ def test_022_FR_025_apple_identity_without_revocation_grant_fails_closed(
         )
 
 
-def test_022_FR_004_wrong_rsa_signature_cannot_authorize_valid_claims(
+def test_023_FR_004_wrong_rsa_signature_cannot_authorize_valid_claims(
     rsa_key: RSAKey, apple_key: ECKey
 ) -> None:
     """A valid-looking assertion signed by another RSA key fails cryptographic proof."""
@@ -436,7 +436,7 @@ def test_022_FR_004_wrong_rsa_signature_cannot_authorize_valid_claims(
 @pytest.mark.parametrize(
     "failure", ["timeout", "oversized", "redirect", "duplicate-key", "wrong-algorithm"]
 )
-def test_022_FR_004_unusable_jwks_fails_closed_and_refresh_failure_is_throttled(
+def test_023_FR_004_unusable_jwks_fails_closed_and_refresh_failure_is_throttled(
     rsa_key: RSAKey, apple_key: ECKey, failure: str
 ) -> None:
     """Failed or malformed key responses cannot authorize or amplify repeated key fetches."""
@@ -478,7 +478,7 @@ def test_022_FR_004_unusable_jwks_fails_closed_and_refresh_failure_is_throttled(
 
 
 @pytest.mark.parametrize("mismatch", ["sub", "aud", "nonce"])
-def test_022_FR_004_apple_native_original_and_exchange_assertions_must_agree(
+def test_023_FR_004_apple_native_original_and_exchange_assertions_must_agree(
     rsa_key: RSAKey, apple_key: ECKey, mismatch: str
 ) -> None:
     """Native Apple exchanges every code and rejects inconsistent signed assertions."""
@@ -492,7 +492,7 @@ def test_022_FR_004_apple_native_original_and_exchange_assertions_must_agree(
         )
 
 
-def test_022_FR_004_native_apple_accepts_raw_nonce_and_optional_returning_email(
+def test_023_FR_004_native_apple_accepts_raw_nonce_and_optional_returning_email(
     rsa_key: RSAKey, apple_key: ECKey
 ) -> None:
     """Native returning identities do not require a repeated profile or hashed nonce."""
@@ -521,7 +521,7 @@ def test_022_FR_004_native_apple_accepts_raw_nonce_and_optional_returning_email(
 
 
 @pytest.mark.parametrize("status", [302, 400, 503])
-def test_022_FR_021_provider_errors_are_generic_and_code_exchange_is_never_retried(
+def test_023_FR_021_provider_errors_are_generic_and_code_exchange_is_never_retried(
     rsa_key: RSAKey, apple_key: ECKey, status: int
 ) -> None:
     """Upstream errors and redirects expose no code or provider body and are not retried."""
@@ -552,7 +552,7 @@ def notification_claims(**changes: Any) -> dict[str, Any]:
     }
 
 
-def test_022_FR_025_signed_apple_notification_has_separate_optional_exp_profile(
+def test_023_FR_025_signed_apple_notification_has_separate_optional_exp_profile(
     rsa_key: RSAKey, apple_key: ECKey
 ) -> None:
     """Authentic bounded Apple notices do not require login nonce or undocumented exp."""
@@ -601,7 +601,7 @@ def test_022_FR_025_signed_apple_notification_has_separate_optional_exp_profile(
         },
     ],
 )
-def test_022_FR_025_invalid_stale_or_malformed_notification_is_rejected(
+def test_023_FR_025_invalid_stale_or_malformed_notification_is_rejected(
     rsa_key: RSAKey, apple_key: ECKey, change: dict[str, Any]
 ) -> None:
     """The signed notification profile enforces audience, age, event spelling and optional expiry."""
@@ -610,7 +610,7 @@ def test_022_FR_025_invalid_stale_or_malformed_notification_is_rejected(
         service.verify_notification(assertion(rsa_key, notification_claims(**change)))
 
 
-def test_022_FR_025_stateless_apple_revoke_uses_original_issuing_client(
+def test_023_FR_025_stateless_apple_revoke_uses_original_issuing_client(
     rsa_key: RSAKey, apple_key: ECKey
 ) -> None:
     """Revocation transport signs for the configured issuing client without storing the grant."""
@@ -627,7 +627,7 @@ def test_022_FR_025_stateless_apple_revoke_uses_original_issuing_client(
     assert len(requests) == 1
 
 
-def test_022_FR_003_unconfigured_providers_fail_without_external_requests() -> None:
+def test_023_FR_003_unconfigured_providers_fail_without_external_requests() -> None:
     """Unavailable settings cannot authorize provider HTTP even when called directly."""
     requests: list[httpx.Request] = []
 

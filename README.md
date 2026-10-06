@@ -158,6 +158,8 @@ the optional Hermes managed-delivery mode additionally follow ADR-0010 and
 - Error toasts now surface retry actions and show correlation references when failures occur.
 
 ## Documentation
+
+- `docs/mcp.md` — GPT task tools and MCP connection setup.
 - `docs/architecture_overview.md`
 - `docs/api_usage.md`
 - `docs/troubleshooting.md`

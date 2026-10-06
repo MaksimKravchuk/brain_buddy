@@ -62,7 +62,7 @@ def configured_values() -> dict[str, Any]:
     }
 
 
-def test_022_FR_003_missing_settings_leave_password_configuration_available() -> None:
+def test_023_FR_003_missing_settings_leave_password_configuration_available() -> None:
     """Missing modern setup disables new methods and preserves password startup."""
     settings = get_config().modern_auth
     assert not settings.crypto_ready
@@ -73,8 +73,8 @@ def test_022_FR_003_missing_settings_leave_password_configuration_available() ->
     assert AppConfig().modern_auth == ModernAuthSettings()
 
 
-def test_022_FR_003_fully_configured_methods_and_distinct_apple_channels() -> None:
-    """022-SC-008: direct provider configuration needs no auth SaaS credential.
+def test_023_FR_003_fully_configured_methods_and_distinct_apple_channels() -> None:
+    """023-SC-008: direct provider configuration needs no auth SaaS credential.
 
     This checks the configuration/cost dependency only; live smoke and the
     complete required suite remain separate acceptance evidence.
@@ -121,7 +121,7 @@ def test_022_FR_003_fully_configured_methods_and_distinct_apple_channels() -> No
         ),
     ],
 )
-def test_022_FR_003_invalid_origins_or_keyring_disable_every_new_method(
+def test_023_FR_003_invalid_origins_or_keyring_disable_every_new_method(
     field: str, value: Any
 ) -> None:
     """Invalid fixed origins or any configured key fail closed without startup failure."""
@@ -146,7 +146,7 @@ def test_022_FR_003_invalid_origins_or_keyring_disable_every_new_method(
         ("smtp_password", "", "email_available"),
     ],
 )
-def test_022_FR_003_invalid_provider_setup_only_hides_affected_method(
+def test_023_FR_003_invalid_provider_setup_only_hides_affected_method(
     field: str, value: Any, unavailable: str
 ) -> None:
     """Malformed optional credentials cannot disable unrelated configured methods."""
@@ -159,7 +159,7 @@ def test_022_FR_003_invalid_provider_setup_only_hides_affected_method(
     assert all(getattr(settings, name) for name in other)
 
 
-def test_022_FR_021_settings_are_frozen_and_secret_free_in_repr_and_dumps() -> None:
+def test_023_FR_021_settings_are_frozen_and_secret_free_in_repr_and_dumps() -> None:
     """Settings expose safe metadata and omit secret fields from nested dumps."""
     settings = ModernAuthSettings(**configured_values())
     serialized = (
@@ -181,7 +181,7 @@ def test_022_FR_021_settings_are_frozen_and_secret_free_in_repr_and_dumps() -> N
         settings.keyring["new"] = SecretStr("new-sensitive-secret")  # type: ignore[index]
 
 
-def test_022_FR_023_environment_builder_reads_explicit_modern_auth_names(
+def test_023_FR_023_environment_builder_reads_explicit_modern_auth_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Explicit deployment environment names configure fixed origins and versioned keys."""
@@ -212,7 +212,7 @@ def test_022_FR_023_environment_builder_reads_explicit_modern_auth_names(
         '{"key-2": "synthetic-secret", "key-2": "other"}',
     ],
 )
-def test_022_FR_021_malformed_secret_environment_has_no_secret_validation_error(
+def test_023_FR_021_malformed_secret_environment_has_no_secret_validation_error(
     monkeypatch: pytest.MonkeyPatch, raw: str
 ) -> None:
     """Malformed secret inputs disable modern auth while get_config stays usable."""

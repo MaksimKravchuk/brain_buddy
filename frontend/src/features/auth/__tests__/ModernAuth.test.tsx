@@ -7,7 +7,7 @@ import { AuthEntry } from "../AuthEntry";
 
 vi.mock("../../../api/modernAuth", () => ({ modernAuthApi: { methods: vi.fn(), requestEmail: vi.fn(), verifyEmail: vi.fn(), resendEmail: vi.fn(), resetPassword: vi.fn(), startProvider: vi.fn() } }));
 
-describe("022-FR-001/003/008/009/010/022 configured choice and neutral code flow", () => {
+describe("023-FR-001/003/008/009/010/022 configured choice and neutral code flow", () => {
   beforeEach(() => {
     useAuthStore.setState({ user: null, status: "anon" });
     vi.mocked(modernAuthApi.methods).mockResolvedValue({ google: true, apple: false, email: true, password: true, web_account_origin: null });
@@ -46,7 +46,7 @@ describe("022-FR-001/003/008/009/010/022 configured choice and neutral code flow
     fireEvent.click(screen.getByRole("button", { name: "Use your password" }));
     expect(screen.getByLabelText("Password")).toHaveAttribute("autocomplete", "current-password");
   });
-  it("022-FR-011 returns to sign-in after reset without creating a session", async () => {
+  it("023-FR-011 returns to sign-in after reset without creating a session", async () => {
     show();
     fireEvent.click(screen.getByRole("button", { name: "Use your password" }));
     fireEvent.click(screen.getByRole("button", { name: "Forgot password?" }));
@@ -63,7 +63,7 @@ describe("022-FR-001/003/008/009/010/022 configured choice and neutral code flow
     await waitFor(() => expect(screen.getByText(/Password reset. Sign in/i)).toBeInTheDocument());
     expect(useAuthStore.getState().status).toBe("anon");
   });
-  it("022-FR-008/011 rejects a session outcome in a recovery-only flow", async () => {
+  it("023-FR-008/011 rejects a session outcome in a recovery-only flow", async () => {
     const hydrate = vi.spyOn(useAuthStore.getState(), "hydrate");
     show(); fireEvent.click(screen.getByRole("button", { name: "Use your password" })); fireEvent.click(screen.getByRole("button", { name: "Forgot password?" }));
     fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "person@example.com" } }); fireEvent.click(screen.getByRole("button", { name: "Send a recovery code" }));

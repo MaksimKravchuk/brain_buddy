@@ -8,7 +8,7 @@ from .test_modern_auth_service import VERIFIER, challenge, make_modern
 
 
 @pytest.mark.parametrize("client", ["web", "ios"])
-def test_022_FR_001_discovery_preserves_password_without_optional_keys(
+def test_023_FR_001_discovery_preserves_password_without_optional_keys(
     client, anonymous_api_client
 ):
     response = anonymous_api_client.get(f"/api/auth/methods?client={client}")
@@ -33,7 +33,7 @@ def test_022_FR_001_discovery_preserves_password_without_optional_keys(
         "/account/auth-delete",
     ],
 )
-def test_022_FR_019_cross_origin_mutation_is_rejected_before_authority(
+def test_023_FR_019_cross_origin_mutation_is_rejected_before_authority(
     path, anonymous_api_client
 ):
     response = anonymous_api_client.post(
@@ -44,7 +44,7 @@ def test_022_FR_019_cross_origin_mutation_is_rejected_before_authority(
     assert response.headers["Cache-Control"] == "no-store"
 
 
-def test_022_FR_017_schema_errors_never_reflect_secret_input(anonymous_api_client):
+def test_023_FR_017_schema_errors_never_reflect_secret_input(anonymous_api_client):
     secret = "do-not-reflect-secret"
     response = anonymous_api_client.post(
         "/api/auth/email/verify",
@@ -68,7 +68,7 @@ def live_modern(anonymous_api_client, container):
     return anonymous_api_client, service, mail, sent, provider, clock
 
 
-def test_022_FR_001_SC_001_email_http_signup_me_and_discovery_use_same_opaque_session(
+def test_023_FR_001_SC_001_email_http_signup_me_and_discovery_use_same_opaque_session(
     live_modern,
 ):
     client, _, mail, sent, _, _ = live_modern
@@ -106,7 +106,7 @@ def test_022_FR_001_SC_001_email_http_signup_me_and_discovery_use_same_opaque_se
 
 
 @pytest.mark.parametrize("site", ["cross-site", "same-site"])
-def test_022_FR_019_foreign_fetch_metadata_and_non_json_fail_before_proof(
+def test_023_FR_019_foreign_fetch_metadata_and_non_json_fail_before_proof(
     live_modern, site
 ):
     client, *_ = live_modern

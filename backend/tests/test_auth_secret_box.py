@@ -29,7 +29,7 @@ def box() -> AuthSecretBox:
     return AuthSecretBox({"key-1": b"1" * 32}, "key-1")
 
 
-def test_022_FR_021_sealed_payload_has_random_nonce_and_no_plaintext() -> None:
+def test_023_FR_021_sealed_payload_has_random_nonce_and_no_plaintext() -> None:
     """Repeated sealing protects plaintext with fresh authenticated encryption."""
     secret_box = box()
     payload = b"synthetic-refresh-grant"
@@ -53,7 +53,7 @@ def test_022_FR_021_sealed_payload_has_random_nonce_and_no_plaintext() -> None:
         ("generation", 3),
     ],
 )
-def test_022_FR_021_every_context_dimension_is_authenticated(
+def test_023_FR_021_every_context_dimension_is_authenticated(
     field: str, value: str | int
 ) -> None:
     """Changing payload purpose, attempt, binding, owner, client or generation fails."""
@@ -65,7 +65,7 @@ def test_022_FR_021_every_context_dimension_is_authenticated(
 
 
 @pytest.mark.parametrize("mutation", ["ciphertext", "key", "version", "malformed"])
-def test_022_FR_021_tamper_unknown_keys_and_malformed_envelopes_fail_safely(
+def test_023_FR_021_tamper_unknown_keys_and_malformed_envelopes_fail_safely(
     mutation: str,
 ) -> None:
     """Tampering and malformed envelopes raise a generic secret-free error."""
@@ -89,7 +89,7 @@ def test_022_FR_021_tamper_unknown_keys_and_malformed_envelopes_fail_safely(
     assert "synthetic" not in str(error.value)
 
 
-def test_022_FR_021_envelope_key_id_cannot_be_swapped_even_for_identical_master() -> (
+def test_023_FR_021_envelope_key_id_cannot_be_swapped_even_for_identical_master() -> (
     None
 ):
     """The envelope key ID is authenticated independently of master material."""
@@ -99,7 +99,7 @@ def test_022_FR_021_envelope_key_id_cannot_be_swapped_even_for_identical_master(
         secret_box.open(sealed, context())
 
 
-def test_022_FR_023_rotation_preserves_old_decrypt_and_budget_authority() -> None:
+def test_023_FR_023_rotation_preserves_old_decrypt_and_budget_authority() -> None:
     """Retained keys protect old payloads and prevent reset of active abuse windows."""
     original = box()
     sealed = original.seal(b"synthetic", context())
@@ -118,7 +118,7 @@ def test_022_FR_023_rotation_preserves_old_decrypt_and_budget_authority() -> Non
         AuthSecretBox({"key-2": b"2" * 32}, "key-2").open(sealed, context())
 
 
-def test_022_FR_008_codes_use_keyed_context_bound_digest_and_retained_key_verification() -> (
+def test_023_FR_008_codes_use_keyed_context_bound_digest_and_retained_key_verification() -> (
     None
 ):
     """Six-digit codes use purpose-separated HMAC and survive controlled key rotation."""
@@ -151,7 +151,7 @@ def test_022_FR_008_codes_use_keyed_context_bound_digest_and_retained_key_verifi
         ({"bad.id": b"x" * 32}, "bad.id"),
     ],
 )
-def test_022_FR_021_invalid_keyring_raises_only_safe_error(
+def test_023_FR_021_invalid_keyring_raises_only_safe_error(
     keys: dict[str, bytes], current: str
 ) -> None:
     """Missing keys and wrong key lengths never generate restart keys or leak values."""
@@ -161,7 +161,7 @@ def test_022_FR_021_invalid_keyring_raises_only_safe_error(
     assert str(error.value) == "Invalid authentication secret configuration or payload."
 
 
-def test_022_FR_003_build_from_unavailable_settings_fails_closed() -> None:
+def test_023_FR_003_build_from_unavailable_settings_fails_closed() -> None:
     """Secret-box construction fails safely without usable deployment keys."""
     with pytest.raises(AuthSecretError):
         AuthSecretBox.from_settings(ModernAuthSettings())

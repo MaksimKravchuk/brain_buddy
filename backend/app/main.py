@@ -12,6 +12,7 @@ from app.api.account import router as account_router
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
 from app.api.errors import register_exception_handlers
+from app.api.mcp import install_task_mcp
 from app.api.middleware import CorrelationIdMiddleware
 from app.api.modern_auth import router as modern_auth_router
 from app.container import Container, build_container
@@ -343,6 +344,8 @@ def create_app() -> FastAPI:
     app.include_router(account_router, prefix=f"{config.api_prefix}/account")
     app.include_router(admin_router, prefix=f"{config.api_prefix}/admin")
     app.include_router(api_router, prefix=config.api_prefix)
+    if config.mcp_enabled:
+        install_task_mcp(app, app.state.container, config)
 
     @app.get("/health", tags=["health"])
     @app.get(f"{config.api_prefix}/health", tags=["health"])

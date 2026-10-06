@@ -164,11 +164,11 @@ def test_013_configured_operator_cannot_move_away_from_allow_list(
     assert unchanged.email == OPERATOR_EMAIL
 
 
-@allure.story("013-FR-007 022-FR-002 022-FR-012: atomic admin profile updates")
+@allure.story("013-FR-007 023-FR-002 023-FR-012: atomic admin profile updates")
 def test_013_admin_profile_update_rolls_back_canonical_row_when_authority_cleanup_fails(
     container, admin_service
 ) -> None:
-    """022-FR-002 022-FR-012: failure after the row update restores canonical email and payload."""
+    """023-FR-002 023-FR-012: failure after the row update restores canonical email and payload."""
     _create_invite(container, "invite_atomic_update")
     user, _token = _signup(container, email=MEMBER_EMAIL, code="invite_atomic_update")
     with container.user_repo.store.connection() as connection:
@@ -717,11 +717,11 @@ def test_013_user_email_transaction_returns_an_unchanged_account(
     assert unchanged == seeded_member
 
 
-@allure.story("013-FR-011 022-FR-002 022-FR-012: transactional legacy email updates")
+@allure.story("013-FR-011 023-FR-002 023-FR-012: transactional legacy email updates")
 def test_013_user_email_transaction_rolls_back_when_authority_cleanup_fails(
     container, seeded_member
 ) -> None:
-    """022-FR-002 022-FR-012: SQLite failure restores the row after an attempted email update."""
+    """023-FR-002 023-FR-012: SQLite failure restores the row after an attempted email update."""
     with container.user_repo.store.connection() as connection:
         before = tuple(
             connection.execute(

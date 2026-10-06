@@ -54,7 +54,7 @@ function newPassword(repeat = "new-password-123") {
   fireEvent.change(screen.getByLabelText("Repeat password"), { target: { value: repeat } });
 }
 
-describe("022-FR-006/008/009/011/013/015/016/021 remaining auth failure and recovery journeys", () => {
+describe("023-FR-006/008/009/011/013/015/016/021 remaining auth failure and recovery journeys", () => {
   beforeEach(() => {
     vi.resetAllMocks(); sessionStorage.clear();
     useAuthStore.setState({ user: account, status: "authed", deletionCancelledNotice: false, deletionScheduledFor: null, hydrate: original.hydrate, login: original.login, clearSessionAfterCleanup: original.cleanup });

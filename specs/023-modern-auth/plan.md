@@ -17,7 +17,7 @@ UX authority: [design.md](design.md), explicitly approved by the owner with "Ð”Ð
 **Language/Version**: Python >=3.11; strict TypeScript/React 19; Swift 6 complete strict concurrency, iOS 26.
 **Primary Dependencies**: existing FastAPI/Pydantic/httpx/cryptography/argon2-cffi; add free maintained `joserfc==1.7.5` for JWT/JWK and pin via uv (PyPI version/Python compatibility inspected 2026-10-06). Existing React Router/Zustand/React Query/design components. AuthenticationServices/Security/CryptoKit in the iOS host only; no third-party Swift dependencies.
 **Storage**: Identity-owned `data/auth.sqlite3`, reusing SQLiteRepositorySupport. Existing task/flag/relay DBs and tree/voice files retain ownership. Explicit verified one-time JSON user/session migration.
-**Testing**: pytest/TestClient, Vitest/Testing Library, Playwright/axe, Linux Swift Testing, macOS/Xcode CI, configured-provider smoke. Feature-qualified `022-FR-###` and `022-SC-###` markers; full requirement coverage without `--requirements` filtering.
+**Testing**: pytest/TestClient, Vitest/Testing Library, Playwright/axe, Linux Swift Testing, macOS/Xcode CI, configured-provider smoke. Feature-qualified `023-FR-###` and `023-SC-###` markers; full requirement coverage without `--requirements` filtering.
 **Target Platform**: existing Linux/Fly API/nginx web deployment and iOS; compatible existing Mac password consumer.
 **Project Type**: modular monolith with web/native clients; no new deployed service.
 **Performance Goals**: local input/busy feedback <=200 ms; no network under DB writes; request enqueue does not wait for SMTP; provider HTTP timeout 10 s; existing canvas/task loop unaffected.
@@ -40,7 +40,7 @@ Pre-research/post-contract checks pass for this proposed implementation, subject
 
 ### Documentation
 
-`specs/022-modern-auth/`: intake, spec, requirements checklist, approved design/HTML/captures, plan, research, data-model, contracts and quickstart. Later stages add tasks, traceability, acceptance and report. The persistence contract records the proposed identity ADR; promote to `docs/decisions/0028-modern-auth-and-transactional-identity.md` only after its reviewed decision, without rewriting accepted history.
+`specs/023-modern-auth/`: intake, spec, requirements checklist, approved design/HTML/captures, plan, research, data-model, contracts and quickstart. Later stages add tasks, traceability, acceptance and report. The persistence contract records the proposed identity ADR; promote to `docs/decisions/0028-modern-auth-and-transactional-identity.md` only after its reviewed decision, without rewriting accepted history.
 
 ### Intended source ownership
 

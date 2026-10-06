@@ -17,7 +17,7 @@ Run relevant new auth/account/provider/migration tests red first, then green. Ra
 ```bash
 make verify-all
 sh ios/scripts/swift-linux.sh test
-python3 scripts/check_requirement_coverage.py specs/022-modern-auth
+python3 scripts/check_requirement_coverage.py specs/023-modern-auth
 python3 scripts/check_gate_integrity.py
 python3 -m unittest scripts/test_validate_brain_buddy_design_skill.py
 ```

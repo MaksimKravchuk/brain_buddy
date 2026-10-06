@@ -124,7 +124,7 @@ def verify(service, identifier: str, code: str, verifier: str = VERIFIER):
     )
 
 
-def test_022_FR_001_code_signup_is_neutral_until_ack_and_consumes_once(
+def test_023_FR_001_code_signup_is_neutral_until_ack_and_consumes_once(
     modern, container
 ) -> None:
     service, mail, sent, _, _ = modern
@@ -143,7 +143,7 @@ def test_022_FR_001_code_signup_is_neutral_until_ack_and_consumes_once(
     assert len(container.user_repo.list_users()) == 1
 
 
-def test_022_FR_010_unverified_legacy_email_never_grants_code_login(
+def test_023_FR_010_unverified_legacy_email_never_grants_code_login(
     modern, container
 ) -> None:
     service, mail, _, _, _ = modern
@@ -159,7 +159,7 @@ def test_022_FR_010_unverified_legacy_email_never_grants_code_login(
     assert fresh.email_verified_at is None
 
 
-def test_022_FR_008_foreign_verifier_and_missing_challenge_are_same_404(modern) -> None:
+def test_023_FR_008_foreign_verifier_and_missing_challenge_are_same_404(modern) -> None:
     service, _, _, _, _ = modern
     pending = request(service, "new@example.com")
     errors = []
@@ -173,7 +173,7 @@ def test_022_FR_008_foreign_verifier_and_missing_challenge_are_same_404(modern) 
     assert errors[0][0] == 404
 
 
-def test_022_FR_009_five_failed_guesses_remain_committed(modern) -> None:
+def test_023_FR_009_five_failed_guesses_remain_committed(modern) -> None:
     service, mail, sent, _, _ = modern
     pending = request(service, "new@example.com")
     mail.dispatch_one()
@@ -215,7 +215,7 @@ def provider_handoff(service):
     )
 
 
-def test_022_FR_004_provider_binding_keeps_identity_despite_email_change(
+def test_023_FR_004_provider_binding_keeps_identity_despite_email_change(
     modern, container
 ) -> None:
     service, _, _, provider, clock = modern
@@ -237,7 +237,7 @@ def test_022_FR_004_provider_binding_keeps_identity_despite_email_change(
     assert len(container.user_repo.list_users()) == 1
 
 
-def test_022_FR_004_provider_email_collision_never_merges_legacy_account(
+def test_023_FR_004_provider_email_collision_never_merges_legacy_account(
     modern, container
 ) -> None:
     service, _, _, provider, _ = modern
@@ -260,7 +260,7 @@ def test_022_FR_004_provider_email_collision_never_merges_legacy_account(
         )
 
 
-def test_022_FR_014_external_provider_mailbox_finalizes_after_handoff_expires(
+def test_023_FR_014_external_provider_mailbox_finalizes_after_handoff_expires(
     modern, container
 ) -> None:
     service, mail, sent, provider, clock = modern
@@ -315,7 +315,7 @@ def recent(service, owner, token, action):
     ).recent_proof
 
 
-def test_022_FR_012_recent_proof_is_session_owner_action_bound_and_one_use(
+def test_023_FR_012_recent_proof_is_session_owner_action_bound_and_one_use(
     modern, container
 ):
     from app.schemas.modern_auth import AccountActionRequest, PasswordConfirmRequest
@@ -344,7 +344,7 @@ def test_022_FR_012_recent_proof_is_session_owner_action_bound_and_one_use(
         service.export_account(action, raw_token=token)
 
 
-def test_022_FR_011_verified_recovery_revokes_sessions_without_auto_login(
+def test_023_FR_011_verified_recovery_revokes_sessions_without_auto_login(
     modern, container
 ):
     from app.schemas.modern_auth import ResetRequest
@@ -378,7 +378,7 @@ def test_022_FR_011_verified_recovery_revokes_sessions_without_auto_login(
         service.reset_password(payload)
 
 
-def test_022_FR_010_destination_is_unclaimed_until_both_confirmation_and_code(
+def test_023_FR_010_destination_is_unclaimed_until_both_confirmation_and_code(
     modern, container
 ):
     service, mail, sent, _, _ = modern
@@ -418,7 +418,7 @@ def test_022_FR_010_destination_is_unclaimed_until_both_confirmation_and_code(
     assert container.user_repo.get_by_id(owner.id).email_verified_at is not None
 
 
-def test_022_FR_005_existing_account_can_link_only_after_same_account_confirmation(
+def test_023_FR_005_existing_account_can_link_only_after_same_account_confirmation(
     modern, container
 ):
     service, _, _, provider, _ = modern
@@ -456,7 +456,7 @@ def test_022_FR_005_existing_account_can_link_only_after_same_account_confirmati
     assert returned.payload.user.id == owner.id
 
 
-def test_022_FR_014_legacy_deletion_invalidates_all_modern_owner_proofs(
+def test_023_FR_014_legacy_deletion_invalidates_all_modern_owner_proofs(
     modern, container
 ):
     service, _, _, _, _ = modern
@@ -488,7 +488,7 @@ def test_022_FR_014_legacy_deletion_invalidates_all_modern_owner_proofs(
     assert container.user_repo.get_by_id(owner.id).auth_version > owner.auth_version
 
 
-def test_022_FR_014_admin_cannot_strand_verified_email_only_account(modern, container):
+def test_023_FR_014_admin_cannot_strand_verified_email_only_account(modern, container):
     service, mail, sent, _, _ = modern
     pending = request(service, "emailonly@example.com")
     mail.dispatch_one()

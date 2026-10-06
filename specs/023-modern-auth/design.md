@@ -1,6 +1,6 @@
 # Design: Google, Apple and email authentication
 
-**Feature**: `specs/022-modern-auth/`
+**Feature**: `specs/023-modern-auth/`
 **Spec**: `spec.md` (Clarifications settled: 2026-10-06)
 **Screens**: [design/auth.html](design/auth.html)
 **Captured previews**: [six-screen overview](design/overview.png), [iPhone sign-in](design/iphone-sign-in.png)

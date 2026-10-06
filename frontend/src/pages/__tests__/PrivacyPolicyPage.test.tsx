@@ -57,14 +57,14 @@ describe("PrivacyPolicyPage", () => {
     renderPolicy();
 
     // docs/data-retention.md names this page as the user-facing summary that
-    // must stay in sync with it. The runtime store now covers five managed flags.
+    // must stay in sync with it. The runtime store now covers six managed flags.
     // The decided facts pinned here are what it holds, that purge scrubs it,
     // and that it is outside the export.
     expect(screen.getByText(/one SQLite store/i)).toBeInTheDocument();
-    expect(screen.getByText(/covering five managed flags/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering six managed flags/i)).toBeInTheDocument();
     expect(screen.getByText(/holds only your account id per flag/i)).toBeInTheDocument();
     expect(screen.getByText(/scrubbed when your account is purged/i)).toBeInTheDocument();
-    expect(screen.getByText(/covering five managed flags:.*excluded from your data export/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering six managed flags:.*excluded from your data export/i)).toBeInTheDocument();
   });
 
   it("012-FR-007: names OpenAI's title-suggestion processing purpose", () => {
@@ -150,7 +150,7 @@ describe("PrivacyPolicyPage", () => {
     expect(retention).toHaveTextContent(/excluded from.*data export/i);
   });
 
-  it("022-FR-020 names optional identity providers, minimum scopes, and direct code delivery", () => {
+  it("023-FR-020 names optional identity providers, minimum scopes, and direct code delivery", () => {
     renderPolicy();
     const collection = screen.getByRole("heading", { name: /what we collect/i }).closest("section");
     const purposes = screen.getByRole("heading", { name: /why we process it/i }).closest("section");
@@ -168,7 +168,7 @@ describe("PrivacyPolicyPage", () => {
     expect(processors).not.toHaveTextContent(/agreement is in place|transfers are covered/i);
   });
 
-  it("022-FR-018 022-FR-020 022-FR-025 distinguishes temporary proofs, retained identities, and secret-free exports", () => {
+  it("023-FR-018 023-FR-020 023-FR-025 distinguishes temporary proofs, retained identities, and secret-free exports", () => {
     renderPolicy();
     const retention = screen.getByRole("heading", { name: /how long we keep it/i }).closest("section");
     const rights = screen.getByRole("heading", { name: /your rights/i }).closest("section");

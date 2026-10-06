@@ -115,7 +115,7 @@ from app.core.logging import (
         ),
     ],
 )
-def test_022_FR_021_sensitive_request_targets_remove_query_and_fragment(
+def test_023_FR_021_sensitive_request_targets_remove_query_and_fragment(
     target: str, expected: str, prefix: str
 ) -> None:
     """Auth targets hide proofs and personal query input while unrelated URLs keep their meaning."""
@@ -132,7 +132,7 @@ def test_022_FR_021_sensitive_request_targets_remove_query_and_fragment(
         "https://[bad/api/auth?code=synthetic-code",
     ],
 )
-def test_022_FR_021_malformed_targets_are_total_and_fail_closed(target: Any) -> None:
+def test_023_FR_021_malformed_targets_are_total_and_fail_closed(target: Any) -> None:
     """Malformed targets never raise or print attacker-controlled credentials."""
     assert sanitize_log_path(target, api_prefix="/api") == "[redacted]"
 
@@ -145,7 +145,7 @@ def record(
     return event
 
 
-def test_022_FR_021_uvicorn_access_preserves_status_and_correlation_without_auth_proofs() -> (
+def test_023_FR_021_uvicorn_access_preserves_status_and_correlation_without_auth_proofs() -> (
     None
 ):
     """The actual uvicorn record shape retains method, path, status and correlation metadata."""
@@ -183,7 +183,7 @@ def test_022_FR_021_uvicorn_access_preserves_status_and_correlation_without_auth
         ("127.0.0.1:1", "GET", "/api/tasks", "1.1", 200, "synthetic-code"),
     ],
 )
-def test_022_FR_021_unknown_uvicorn_shapes_redact_instead_of_allowing_raw_payload(
+def test_023_FR_021_unknown_uvicorn_shapes_redact_instead_of_allowing_raw_payload(
     args: Any,
 ) -> None:
     """An unknown access format cannot bypass redaction or break message formatting."""
@@ -196,7 +196,7 @@ def test_022_FR_021_unknown_uvicorn_shapes_redact_instead_of_allowing_raw_payloa
     assert "color_message" not in event.__dict__
 
 
-def test_022_FR_021_auth_exception_text_cannot_leak_at_application_or_uvicorn_edge() -> (
+def test_023_FR_021_auth_exception_text_cannot_leak_at_application_or_uvicorn_edge() -> (
     None
 ):
     """Auth failure records retain coarse outcomes and discard secret-bearing traceback text."""
@@ -219,7 +219,7 @@ def test_022_FR_021_auth_exception_text_cannot_leak_at_application_or_uvicorn_ed
     assert "api_request_failed" in application.getMessage()
 
 
-def test_022_FR_021_unknown_uvicorn_error_message_without_args_is_redacted() -> None:
+def test_023_FR_021_unknown_uvicorn_error_message_without_args_is_redacted() -> None:
     """An unfamiliar server diagnostic cannot print a literal callback credential."""
     event = record(
         "Unknown error /api/auth?code=synthetic-code", (), name="uvicorn.error"
@@ -247,7 +247,7 @@ def test_022_FR_021_unknown_uvicorn_error_message_without_args_is_redacted() -> 
         ("Unknown middleware diagnostic synthetic-code", ()),
     ],
 )
-def test_022_FR_021_unknown_application_request_shapes_are_safe_to_format(
+def test_023_FR_021_unknown_application_request_shapes_are_safe_to_format(
     message: str, args: Any
 ) -> None:
     """Malformed application request records cannot leak through another format field."""
@@ -256,7 +256,7 @@ def test_022_FR_021_unknown_application_request_shapes_are_safe_to_format(
     assert "synthetic-code" not in logging.Formatter("%(message)s").format(event)
 
 
-def test_022_FR_021_previously_redacted_application_target_still_clears_exception() -> (
+def test_023_FR_021_previously_redacted_application_target_still_clears_exception() -> (
     None
 ):
     """A middleware-redacted malformed target cannot regain its secret through a traceback."""
@@ -273,7 +273,7 @@ def test_022_FR_021_previously_redacted_application_target_still_clears_exceptio
 @pytest.mark.parametrize(
     "untrusted_id", ["person@example.com", "synthetic-code", "123456", "grant=proof"]
 )
-def test_022_FR_021_auth_logs_do_not_echo_credentials_from_untrusted_correlation_header(
+def test_023_FR_021_auth_logs_do_not_echo_credentials_from_untrusted_correlation_header(
     untrusted_id: str,
 ) -> None:
     """The log correlation field cannot echo rejected credential-shaped request header input."""
@@ -289,7 +289,7 @@ def test_022_FR_021_auth_logs_do_not_echo_credentials_from_untrusted_correlation
     assert "api_request_failed" in rendered
 
 
-def test_022_FR_021_logging_filter_never_loads_configuration_and_receives_explicit_prefix(
+def test_023_FR_021_logging_filter_never_loads_configuration_and_receives_explicit_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Logging receives the settled route prefix without config or network work while filtering."""
@@ -310,7 +310,7 @@ def test_022_FR_021_logging_filter_never_loads_configuration_and_receives_explic
     assert "push_callback" in configured["handlers"]["console"]["filters"]
 
 
-def test_022_FR_021_real_middleware_failure_and_success_logs_are_auth_safe(
+def test_023_FR_021_real_middleware_failure_and_success_logs_are_auth_safe(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Real middleware request logs remain safe on callback success and handler failure."""
@@ -354,7 +354,7 @@ def test_022_FR_021_real_middleware_failure_and_success_logs_are_auth_safe(
     assert "synthetic" not in rendered and "person@example.com" not in rendered
 
 
-def test_022_FR_021_actual_nginx_template_uses_sanitized_targets_and_safe_error_policy() -> (
+def test_023_FR_021_actual_nginx_template_uses_sanitized_targets_and_safe_error_policy() -> (
     None
 ):
     """The shipped nginx template logs sanitized targets and never raw auth URLs or referrers."""

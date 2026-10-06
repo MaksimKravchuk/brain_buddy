@@ -21,7 +21,7 @@ pytestmark = [
         "Modern authentication HTTP journeys", label_type="feature"
     ),
     pytest.mark.allure_label(
-        "022-FR-001 022-FR-018 022-SC-004 HTTP authority", label_type="story"
+        "023-FR-001 023-FR-018 023-SC-004 HTTP authority", label_type="story"
     ),
 ]
 
@@ -101,7 +101,7 @@ def google_step(runtime, purpose="login", **extra):
     return result.json()
 
 
-def test_022_FR_018_022_SC_004_email_owner_adds_password_exports_and_deletes(
+def test_023_FR_018_023_SC_004_email_owner_adds_password_exports_and_deletes(
     live_modern,
 ):
     client, *_ = live_modern
@@ -149,7 +149,7 @@ def test_022_FR_018_022_SC_004_email_owner_adds_password_exports_and_deletes(
             assert client.get("/api/auth/me").status_code == 401
 
 
-def test_022_FR_011_022_SC_004_recovery_http_reset_revokes_cookie_without_autologin(
+def test_023_FR_011_023_SC_004_recovery_http_reset_revokes_cookie_without_autologin(
     live_modern,
 ):
     client, service, _, _, _, clock = live_modern
@@ -182,7 +182,7 @@ def test_022_FR_011_022_SC_004_recovery_http_reset_revokes_cookie_without_autolo
 
 
 @pytest.mark.parametrize("provider_session", [False, True])
-def test_022_FR_007_unlink_clears_only_the_origin_provider_session(
+def test_023_FR_007_unlink_clears_only_the_origin_provider_session(
     live_modern, provider_session
 ):
     client, _, _, _, provider, _ = live_modern
@@ -230,7 +230,7 @@ def test_022_FR_007_unlink_clears_only_the_origin_provider_session(
         ("%zz", "application/x-www-form-urlencoded"),
     ],
 )
-def test_022_FR_017_apple_form_exception_rejects_malformed_authority(
+def test_023_FR_017_apple_form_exception_rejects_malformed_authority(
     live_modern, body, content_type
 ):
     client, service, *_ = live_modern
@@ -244,7 +244,7 @@ def test_022_FR_017_apple_form_exception_rejects_malformed_authority(
     assert service.auth.user_repo.list_users() == []
 
 
-def test_022_FR_001_native_apple_http_finish_sets_one_session(
+def test_023_FR_001_native_apple_http_finish_sets_one_session(
     apple_runtime, anonymous_api_client, container
 ):
     service, _, _, provider, _ = apple_runtime
@@ -286,7 +286,7 @@ def test_022_FR_001_native_apple_http_finish_sets_one_session(
     assert client.get("/api/auth/me").status_code == 401
 
 
-def test_022_FR_009_http_resend_replaces_only_the_initiating_challenge(live_modern):
+def test_023_FR_009_http_resend_replaces_only_the_initiating_challenge(live_modern):
     client, _, mail, sent, _, clock = live_modern
     requested = client.post(
         "/api/auth/email/request",

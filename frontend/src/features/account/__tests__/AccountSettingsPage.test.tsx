@@ -177,7 +177,7 @@ describe("AccountSettingsPage", () => {
     );
   });
 
-  it("022-FR-013 exposes direct deletion with the safe keep-account default", async () => {
+  it("023-FR-013 exposes direct deletion with the safe keep-account default", async () => {
     const client = createQueryClient();
     render(<QueryClientProvider client={client}><MemoryRouter><AccountSettingsPage directDelete /></MemoryRouter></QueryClientProvider>);
     expect(await screen.findByRole("dialog")).toBeInTheDocument();

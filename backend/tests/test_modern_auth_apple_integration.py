@@ -113,7 +113,7 @@ def native_login(service):
     return service.complete_native_apple(payload), start, payload
 
 
-def test_022_FR_003_FR_019_native_exchange_persists_only_sealed_revocation_grant(
+def test_023_FR_003_FR_019_native_exchange_persists_only_sealed_revocation_grant(
     apple_runtime,
 ):
     service, _, _, provider, _ = apple_runtime
@@ -134,7 +134,7 @@ def test_022_FR_003_FR_019_native_exchange_persists_only_sealed_revocation_grant
         service.complete_native_apple(payload)
 
 
-def test_022_FR_019_relay_disabled_notice_removes_mail_login_and_reauth(apple_runtime):
+def test_023_FR_019_relay_disabled_notice_removes_mail_login_and_reauth(apple_runtime):
     service, mail, _, provider, _ = apple_runtime
     result, _, _ = native_login(service)
     provider.notification = replace(
@@ -174,7 +174,7 @@ def test_022_FR_019_relay_disabled_notice_removes_mail_login_and_reauth(apple_ru
         )
 
 
-def test_022_FR_019_revoked_binding_has_safe_wire_state_and_fresh_consent_reactivates(
+def test_023_FR_019_revoked_binding_has_safe_wire_state_and_fresh_consent_reactivates(
     apple_runtime,
 ):
     service, _, _, provider, clock = apple_runtime
@@ -203,7 +203,7 @@ def test_022_FR_019_revoked_binding_has_safe_wire_state_and_fresh_consent_reacti
         assert binding["generation"] == 2
 
 
-def test_022_SC_005_purge_erases_personal_notice_receipts_under_retry(apple_runtime):
+def test_023_SC_005_purge_erases_personal_notice_receipts_under_retry(apple_runtime):
     service, _, _, provider, _ = apple_runtime
     result, _, _ = native_login(service)
     provider.notification = replace(

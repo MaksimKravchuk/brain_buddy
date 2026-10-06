@@ -28,7 +28,7 @@ pytestmark = [
     pytest.mark.allure_label("Authentication & Access", label_type="epic"),
     pytest.mark.allure_label("Modern authentication", label_type="feature"),
     pytest.mark.allure_label(
-        "022-FR-008 022-FR-009 022-FR-010 Email proofs", label_type="story"
+        "023-FR-008 023-FR-009 023-FR-010 Email proofs", label_type="story"
     ),
 ]
 
@@ -102,7 +102,7 @@ def row(mail: AuthMailService, table: str, identifier: str) -> dict[str, object]
         return dict(result)
 
 
-def test_022_FR_008_delivery_ack_activates_code_and_erases_sealed_payload(
+def test_023_FR_008_delivery_ack_activates_code_and_erases_sealed_payload(
     tmp_path: Path,
 ) -> None:
     """Only acknowledged delivery activates a code; SMTP runs outside the write transaction."""
@@ -137,7 +137,7 @@ def test_022_FR_008_delivery_ack_activates_code_and_erases_sealed_payload(
 
 
 @pytest.mark.parametrize("eligible", [False])
-def test_022_FR_010_inert_challenges_never_enqueue(
+def test_023_FR_010_inert_challenges_never_enqueue(
     tmp_path: Path, eligible: bool
 ) -> None:
     """An ineligible public challenge cannot acquire delivery or code authority."""
@@ -151,7 +151,7 @@ def test_022_FR_010_inert_challenges_never_enqueue(
     assert not mail.verify_code("c", "123456", network="network")
 
 
-def test_022_FR_009_transport_failure_never_retries_or_refunds(tmp_path: Path) -> None:
+def test_023_FR_009_transport_failure_never_retries_or_refunds(tmp_path: Path) -> None:
     """Failed delivery erases its payload and cannot authorize or refund its reserved send."""
     clock = Clock()
     sends: list[str] = []
@@ -174,7 +174,7 @@ def test_022_FR_009_transport_failure_never_retries_or_refunds(tmp_path: Path) -
         mail.reserve_send("c@example.com", "client", "network")
 
 
-def test_022_FR_009_crashed_lease_is_invalidated_across_restart(tmp_path: Path) -> None:
+def test_023_FR_009_crashed_lease_is_invalidated_across_restart(tmp_path: Path) -> None:
     """A worker crash with uncertain delivery leaves a lease that expires without retry."""
     clock = Clock()
 
@@ -196,7 +196,7 @@ def test_022_FR_009_crashed_lease_is_invalidated_across_restart(tmp_path: Path) 
     assert not replacement.verify_code("c", "123456", network="network")
 
 
-def test_022_FR_008_resend_preserves_expiry_and_guesses_invalidates_old_code(
+def test_023_FR_008_resend_preserves_expiry_and_guesses_invalidates_old_code(
     tmp_path: Path,
 ) -> None:
     """Explicit resend changes generation/code without resetting guesses or outer expiry."""
@@ -223,7 +223,7 @@ def test_022_FR_008_resend_preserves_expiry_and_guesses_invalidates_old_code(
     assert mail.verify_code("c", sent[-1], network="network")
 
 
-def test_022_FR_008_late_old_generation_ack_cannot_activate_replacement(
+def test_023_FR_008_late_old_generation_ack_cannot_activate_replacement(
     tmp_path: Path,
 ) -> None:
     """A resend racing an in-flight send cannot activate its replacement with the old ACK."""
@@ -248,7 +248,7 @@ def test_022_FR_008_late_old_generation_ack_cannot_activate_replacement(
     assert not mail.verify_code("c", sent[0], network="network")
 
 
-def test_022_FR_008_failed_guesses_commit_and_five_challenge_limit_survives_restart(
+def test_023_FR_008_failed_guesses_commit_and_five_challenge_limit_survives_restart(
     tmp_path: Path,
 ) -> None:
     """Five failed guesses persist before rejection; correct code cannot bypass exhaustion."""
@@ -279,7 +279,7 @@ def test_022_FR_008_failed_guesses_commit_and_five_challenge_limit_survives_rest
         ("guess", "network", 100),
     ],
 )
-def test_022_FR_009_rolling_limits_are_independent_and_persistent(
+def test_023_FR_009_rolling_limits_are_independent_and_persistent(
     tmp_path: Path, kind: str, scope: str, limit: int
 ) -> None:
     """All address/client/network rolling limits survive service/process reconstruction."""
@@ -315,7 +315,7 @@ def test_022_FR_009_rolling_limits_are_independent_and_persistent(
         assert "same-network" not in serialized
 
 
-def test_022_FR_009_missing_retained_budget_key_fails_closed(tmp_path: Path) -> None:
+def test_023_FR_009_missing_retained_budget_key_fails_closed(tmp_path: Path) -> None:
     """Removing an active key cannot reset its still-live abuse authority."""
     clock = Clock()
     mail = service(tmp_path, clock)
@@ -325,7 +325,7 @@ def test_022_FR_009_missing_retained_budget_key_fails_closed(tmp_path: Path) -> 
         replacement.reserve_guess("c@example.com", "client", "network")
 
 
-def test_022_FR_009_concurrent_two_store_reservations_do_not_exceed_client_limit(
+def test_023_FR_009_concurrent_two_store_reservations_do_not_exceed_client_limit(
     tmp_path: Path,
 ) -> None:
     """Independent SQLite connections serialize contested shared-client reservations."""
@@ -347,7 +347,7 @@ def test_022_FR_009_concurrent_two_store_reservations_do_not_exceed_client_limit
     assert sum(admitted) == 30
 
 
-def test_022_FR_008_outer_transaction_rollback_and_finalization_recheck(
+def test_023_FR_008_outer_transaction_rollback_and_finalization_recheck(
     tmp_path: Path,
 ) -> None:
     """Enqueue/budgets join root transactions; a consumed code fails the final recheck."""
@@ -371,7 +371,7 @@ def test_022_FR_008_outer_transaction_rollback_and_finalization_recheck(
         assert not mail.code_matches(conn, "c", "123456")
 
 
-def test_022_FR_008_expiry_invalidates_payload_and_never_dispatches(
+def test_023_FR_008_expiry_invalidates_payload_and_never_dispatches(
     tmp_path: Path,
 ) -> None:
     """The outer lifetime expires pending delivery and cannot be extended by resend."""
@@ -400,7 +400,7 @@ def _process_budget_reservations(arguments: tuple[str, int]) -> int:
     return admitted
 
 
-def test_022_FR_009_distinct_processes_preserve_shared_budget_limit(
+def test_023_FR_009_distinct_processes_preserve_shared_budget_limit(
     tmp_path: Path,
 ) -> None:
     """Separate processes sharing one volume cannot each spend a full client budget."""
@@ -416,7 +416,7 @@ def test_022_FR_009_distinct_processes_preserve_shared_budget_limit(
     assert sum(admitted) == 30
 
 
-def test_022_FR_009_shared_exhaustion_rejects_valid_code_without_mutating_counter(
+def test_023_FR_009_shared_exhaustion_rejects_valid_code_without_mutating_counter(
     tmp_path: Path,
 ) -> None:
     """A correct code cannot bypass an exhausted shared budget or refund failures."""
@@ -436,7 +436,7 @@ def test_022_FR_009_shared_exhaustion_rejects_valid_code_without_mutating_counte
 
 
 @pytest.mark.parametrize("mutation", ["client", "destination", "ciphertext", "key"])
-def test_022_FR_010_tampered_context_and_missing_key_never_send(
+def test_023_FR_010_tampered_context_and_missing_key_never_send(
     tmp_path: Path, mutation: str
 ) -> None:
     """AEAD context changes, corrupted payloads and missing old keys fail without dispatch."""
@@ -470,7 +470,7 @@ def test_022_FR_010_tampered_context_and_missing_key_never_send(
 
 
 @pytest.mark.parametrize("tls", ["starttls", "tls"])
-def test_022_FR_010_default_smtp_requires_verified_tls_and_bounded_timeout(
+def test_023_FR_010_default_smtp_requires_verified_tls_and_bounded_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tls: str
 ) -> None:
     """The default sender authenticates only after verified TLS, with a 10-second timeout."""
@@ -531,7 +531,7 @@ def test_022_FR_010_default_smtp_requires_verified_tls_and_bounded_timeout(
     assert calls.index("secure") < calls.index("login") < calls.index("send")
 
 
-def test_022_FR_010_unconfigured_smtp_is_never_contacted(
+def test_023_FR_010_unconfigured_smtp_is_never_contacted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Missing configuration fails closed without SMTP contact or sensitive logs."""
@@ -554,7 +554,7 @@ def test_022_FR_010_unconfigured_smtp_is_never_contacted(
     assert row(mail, "auth_challenges", "c")["code_hmac"] is None
 
 
-def test_022_FR_008_code_hmac_binds_immutable_intent(tmp_path: Path) -> None:
+def test_023_FR_008_code_hmac_binds_immutable_intent(tmp_path: Path) -> None:
     """Changing the challenge intent cannot repurpose its already delivered code."""
     clock = Clock()
     mail = service(tmp_path, clock)

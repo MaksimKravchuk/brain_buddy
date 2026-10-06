@@ -14,7 +14,7 @@ from app.utils.time import utcnow
 
 
 @pytest.mark.parametrize("stored_hash", ["", "malformed-hash"])
-def test_022_FR_010_unset_or_invalid_hash_pays_dummy_cost_and_cannot_login(
+def test_023_FR_010_unset_or_invalid_hash_pays_dummy_cost_and_cannot_login(
     container, stored_hash: str
 ) -> None:
     service = container.auth_service
@@ -38,7 +38,7 @@ def test_022_FR_010_unset_or_invalid_hash_pays_dummy_cost_and_cannot_login(
     )
 
 
-def test_022_FR_002_passwordless_sensitive_action_never_accepts_dummy_password(
+def test_023_FR_002_passwordless_sensitive_action_never_accepts_dummy_password(
     container,
 ) -> None:
     service = container.auth_service
@@ -56,7 +56,7 @@ def test_022_FR_002_passwordless_sensitive_action_never_accepts_dummy_password(
     )
 
 
-def test_022_FR_014_password_changed_during_verify_cannot_issue_session(
+def test_023_FR_014_password_changed_during_verify_cannot_issue_session(
     container, monkeypatch
 ) -> None:
     service = container.auth_service
@@ -78,7 +78,7 @@ def test_022_FR_014_password_changed_during_verify_cannot_issue_session(
         service.login(email=user.email, password="old-long-password")
 
 
-def test_022_FR_021_operator_seed_logs_never_include_address_or_password(
+def test_023_FR_021_operator_seed_logs_never_include_address_or_password(
     container, caplog
 ) -> None:
     service = container.auth_service
@@ -93,7 +93,7 @@ def test_022_FR_021_operator_seed_logs_never_include_address_or_password(
 
 
 @pytest.mark.parametrize("action", ["email", "password", "delete"])
-def test_022_FR_014_stale_password_confirmation_cannot_mutate_account(
+def test_023_FR_014_stale_password_confirmation_cannot_mutate_account(
     container, monkeypatch, action: str
 ) -> None:
     service = container.auth_service

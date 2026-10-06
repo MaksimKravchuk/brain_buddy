@@ -9,7 +9,7 @@ import Testing
 
 @Suite("022 isolated native session finalization")
 struct ModernAuthSessionTests {
-    @Test("022-FR-016: An owner changed after begin is rechecked under the document lock")
+    @Test("023-FR-016: An owner changed after begin is rechecked under the document lock")
     func ownerChangedBeforeCommit() async throws {
         let url = URL(string: "https://api.example.test/api")!
         let ownerA = LinkedAccount(id: "owner_a", email: "a@example.com", serverURL: url, linkedAt: .distantPast)
@@ -31,7 +31,7 @@ struct ModernAuthSessionTests {
         #expect(try tokens.pendingLogouts().map(\.token) == ["candidate-a"])
     }
 
-    @Test("022-FR-016: Cancel during persistence preserves the prior owner and live cookie", arguments: [false, true])
+    @Test("023-FR-016: Cancel during persistence preserves the prior owner and live cookie", arguments: [false, true])
     func cancelDuringPersistence(afterWrite: Bool) async throws {
         let harness = SyncHarness()
         let store = HeldNativeStore(afterWrite: afterWrite)
@@ -49,7 +49,7 @@ struct ModernAuthSessionTests {
         #expect(try await store.load()?.account == nil)
         #expect(try tokens.token(for: FakeBrainBuddyServer.baseURL) == nil)
     }
-    @Test("022-FR-016: Malformed/error cookies are candidate-only; a continuation never installs one", arguments: [400, 200, 201])
+    @Test("023-FR-016: Malformed/error cookies are candidate-only; a continuation never installs one", arguments: [400, 200, 201])
     func invalidResponse(status: Int) async throws {
         let url = URL(string: "https://api.example.test/api")!
         let owner = LinkedAccount(id: "owner_a", email: "ada@example.com", serverURL: url, linkedAt: .distantPast)
@@ -96,7 +96,7 @@ struct ModernAuthSessionTests {
         #expect(transport.requests.last?.body.map { String(decoding: $0, as: UTF8.self).contains("handoff_code") } == false)
     }
 
-    @Test("022-FR-024: Local-only work goes through the existing first-pull merge and push")
+    @Test("023-FR-024: Local-only work goes through the existing first-pull merge and push")
     func localMerge() async throws {
         let harness = SyncHarness()
         let device = await harness.device()
@@ -109,7 +109,7 @@ struct ModernAuthSessionTests {
         #expect(try await device.document().outbox.isEmpty)
     }
 
-    @Test("022-FR-016: A late failed request cannot invalidate a newer successful attempt")
+    @Test("023-FR-016: A late failed request cannot invalidate a newer successful attempt")
     func lateFailure() async throws {
         let harness = SyncHarness()
         let device = HeldDevice(harness: harness, matches: { $0.url.path.hasSuffix("/auth/login") })
@@ -127,7 +127,7 @@ struct ModernAuthSessionTests {
         #expect(harness.server.liveSessionCount(email: SyncHarness.email) == 1)
     }
 
-    @Test("022-FR-016 / 022-SC-006: Failed Keychain installation restores durable owner, token and pending work; offline cleanup owns only the candidate")
+    @Test("023-FR-016 / 023-SC-006: Failed Keychain installation restores durable owner, token and pending work; offline cleanup owns only the candidate")
     func keychainFailure() async throws {
         let harness = SyncHarness()
         let device = await harness.device()
@@ -171,7 +171,7 @@ struct ModernAuthSessionTests {
         }
     }
 
-    @Test("022-FR-016 / 022-SC-006: Wrong owner with pending work preserves every operation")
+    @Test("023-FR-016 / 023-SC-006: Wrong owner with pending work preserves every operation")
     func pendingWrongOwner() async throws {
         let harness = SyncHarness()
         harness.server.addAccount(email: "bob@example.com", password: "bob long password")
@@ -187,7 +187,7 @@ struct ModernAuthSessionTests {
         #expect(harness.server.snapshot(email: "bob@example.com").tasks.isEmpty)
     }
 
-    @Test("022-FR-016: A newer attempt supersedes late success without revoking its accepted session")
+    @Test("023-FR-016: A newer attempt supersedes late success without revoking its accepted session")
     func overlap() async throws {
         let harness = SyncHarness()
         let device = HeldDevice(harness: harness, matches: { $0.url.path.hasSuffix("/auth/login") })
@@ -220,7 +220,7 @@ struct ModernAuthSessionTests {
         #expect(await device.engine.status == .localOnly)
     }
 
-    @Test("022-FR-016: Wrong owner is refused even with an empty outbox; legacy switch still works")
+    @Test("023-FR-016: Wrong owner is refused even with an empty outbox; legacy switch still works")
     func wrongOwner() async throws {
         let harness = SyncHarness()
         harness.server.addAccount(email: "bob@example.com", password: "bob long password")
@@ -236,7 +236,7 @@ struct ModernAuthSessionTests {
         #expect(harness.server.liveSessionCount(email: "bob@example.com") == 0)
     }
 
-    @Test("022-FR-016: Cancelled late success cannot replace the linked cookie or local outbox")
+    @Test("023-FR-016: Cancelled late success cannot replace the linked cookie or local outbox")
     func cancelledLateSuccess() async throws {
         let harness = SyncHarness()
         let device = HeldDevice(harness: harness, matches: { $0.url.path.hasSuffix("/auth/login") })

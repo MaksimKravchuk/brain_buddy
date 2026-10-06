@@ -90,7 +90,7 @@ def test_invite_repository_rejects_duplicate_and_consumed_or_unknown_codes(
 
 @allure.epic("Authentication & Access")
 @allure.feature("Identity storage")
-@allure.story("022-FR-002: canonical session expiry preserves other sessions")
+@allure.story("023-FR-002: canonical session expiry preserves other sessions")
 def test_session_repository_removes_expired_sessions_and_ignores_missing_delete(
     data_dir,
 ) -> None:
@@ -126,7 +126,7 @@ def test_session_repository_removes_expired_sessions_and_ignores_missing_delete(
 
 @allure.epic("Authentication & Access")
 @allure.feature("Identity storage")
-@allure.story("022-FR-002: legacy email normalization survives reopening")
+@allure.story("023-FR-002: legacy email normalization survives reopening")
 def test_user_repository_normalizes_canonical_sqlite_record_and_payload(
     data_dir,
 ) -> None:

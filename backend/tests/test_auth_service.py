@@ -281,7 +281,7 @@ def test_login_unmarked_snapshot_purge_interposes_before_fresh_mutate(
     assert container.session_repo.delete_all_for_user(user.id) == 0
 
 
-def test_022_FR_014_session_failure_rolls_back_deletion_cancellation(
+def test_023_FR_014_session_failure_rolls_back_deletion_cancellation(
     container,
 ) -> None:
     """Account refresh and session issuance either commit together or neither."""

@@ -1,6 +1,6 @@
 # Business Intake: Google, Apple and email authentication
 
-**Feature**: `specs/022-modern-auth/`
+**Feature**: `specs/023-modern-auth/`
 **Interviewed**: 2026-10-06
 **Interviewee**: product owner, through the current conversation
 **Status**: scope and non-goals confirmed by the owner; specification/design stage

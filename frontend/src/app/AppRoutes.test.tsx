@@ -167,14 +167,14 @@ afterEach(() => {
 });
 
 describe("AppRoutes", () => {
-  it("022-FR-015 exposes only the fixed public provider completion route and rejects missing handoff", async () => {
+  it("023-FR-015 exposes only the fixed public provider completion route and rejects missing handoff", async () => {
     act(() => useAuthStore.setState({ user: null, status: "anon" }));
     renderRoutes("/auth/complete");
     expect(await screen.findByRole("heading", { name: "Complete sign-in" })).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't confirm whether this finished/i);
     expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/auth/providers/complete"), expect.anything());
   });
-  it("022-FR-013/021 protects passwordless deletion with the original owner through sign-in", async () => {
+  it("023-FR-013/021 protects passwordless deletion with the original owner through sign-in", async () => {
     act(() => useAuthStore.setState({ user: null, status: "anon" }));
     renderRoutes("/settings/account/delete?expected_owner=A");
     expect(await screen.findByRole("heading", { name: "Sign in or create an account" })).toBeInTheDocument();

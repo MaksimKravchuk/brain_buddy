@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClientProof, takeProviderCallback, saveProviderAttempt, safeAuthDestination } from "../authFlow";
 
-describe("022-FR-015/021 provider client proof and restricted destinations", () => {
+describe("023-FR-015/021 provider client proof and restricted destinations", () => {
   afterEach(() => { sessionStorage.clear(); history.replaceState(null, "", "/"); vi.restoreAllMocks(); });
   it("creates a 32-byte cryptographic verifier and S256 challenge", async () => {
     const result = await createClientProof();

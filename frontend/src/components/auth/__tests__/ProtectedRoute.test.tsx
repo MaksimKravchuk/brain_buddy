@@ -47,7 +47,7 @@ describe("ProtectedRoute", () => {
     renderWithRoute();
     expect(screen.getByText(/secret content/i)).toBeInTheDocument();
   });
-  it("022-FR-006/021 blocks a different owner on direct account deletion and retains the fixed destination", () => {
+  it("023-FR-006/021 blocks a different owner on direct account deletion and retains the fixed destination", () => {
     useAuthStore.setState({ user: { id: "B", email: "b@test.example" }, status: "authed" });
     function LoginProbe() {
       const state = useLocation().state as { from: { pathname: string; search: string } };

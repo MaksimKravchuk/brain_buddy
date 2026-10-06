@@ -8,7 +8,7 @@ import { AccountSecurity } from "../../auth/AccountSecurity";
 
 vi.mock("../../../api/modernAuth", () => ({ modernAuthApi: { methods: vi.fn(), accountMethods: vi.fn(), confirmPassword: vi.fn(), unlink: vi.fn(), setPassword: vi.fn(), exportAccount: vi.fn(), deleteAccount: vi.fn(), requestEmail: vi.fn(), verifyEmail: vi.fn(), resendEmail: vi.fn() } }));
 const methods: AccountMethods = { account_id: "A", email: "a@example.com", email_verified: false, email_delivery: "available", has_password: true, methods: [{ method: "password", state: "active", usable: true, connected_at: null }, { method: "google", state: "active", usable: true, connected_at: null }] };
-describe("022-FR-006/007/013/018 same-owner connected methods and privacy actions", () => {
+describe("023-FR-006/007/013/018 same-owner connected methods and privacy actions", () => {
   beforeEach(() => {
     useAuthStore.setState({ user: { id: "A", email: "a@example.com" }, status: "authed" });
     vi.mocked(modernAuthApi.methods).mockResolvedValue({ password: true, google: true, apple: true, email: true, web_account_origin: null });
@@ -21,7 +21,7 @@ describe("022-FR-006/007/013/018 same-owner connected methods and privacy action
     const input = await screen.findByLabelText("Current password");
     await act(async () => { fireEvent.change(input, { target: { value: "password-123456" } }); fireEvent.click(screen.getByRole("button", { name: "Confirm" })); });
   }
-  it("022-FR-007 offers reconnection after a provider is disabled", async () => {
+  it("023-FR-007 offers reconnection after a provider is disabled", async () => {
     vi.mocked(modernAuthApi.accountMethods).mockResolvedValue({ ...methods, methods: [...methods.methods, { method: "apple", state: "disabled", usable: false, connected_at: null }] });
     show();
     expect(await screen.findByRole("button", { name: "Reconnect Apple" })).toBeEnabled();
@@ -60,7 +60,7 @@ describe("022-FR-006/007/013/018 same-owner connected methods and privacy action
     await waitFor(() => expect(modernAuthApi.accountMethods).toHaveBeenCalledTimes(2));
     expect(modernAuthApi.setPassword).toHaveBeenCalledTimes(1);
   });
-  it("022-FR-013 lets a passwordless owner request direct deletion using action-bound email proof", async () => {
+  it("023-FR-013 lets a passwordless owner request direct deletion using action-bound email proof", async () => {
     vi.mocked(modernAuthApi.accountMethods).mockResolvedValue({ ...methods, has_password: false, email_verified: true, methods: [{ method: "email", usable: true, state: "active", connected_at: null }] });
     vi.mocked(modernAuthApi.requestEmail).mockResolvedValue({ challenge_id: "c", expires_at: new Date(Date.now() + 600000).toISOString(), resend_at: new Date(Date.now() + 60000).toISOString(), message: "neutral" });
     vi.mocked(modernAuthApi.verifyEmail).mockResolvedValue({ status: "reauthenticated", recent_proof: "email-proof", expires_at: new Date(Date.now() + 300000).toISOString() });

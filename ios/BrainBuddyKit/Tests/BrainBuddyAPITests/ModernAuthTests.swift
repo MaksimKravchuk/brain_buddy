@@ -47,7 +47,7 @@ struct ModernAuthTests {
         #expect(transport.requests.allSatisfy { $0.url.query == nil && $0.headers["Cookie"] == nil })
     }
 
-    @Test("022-FR-016: Continuations and malformed/error responses never authorize a cookie")
+    @Test("023-FR-016: Continuations and malformed/error responses never authorize a cookie")
     func cookieBoundary() async throws {
         let transport = ScriptedTransport([
             Fixture.json(200, #"{"status":"existing_account_required","message":"neutral"}"#, headers: ["Set-Cookie": Fixture.loginSetCookie]),
