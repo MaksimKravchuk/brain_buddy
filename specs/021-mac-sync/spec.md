@@ -38,6 +38,13 @@ The owner delegated these. Each one resolves a contradiction or gap the plan fou
 - The pre-upgrade backup outliving sign-out is intended, since it was never account data (Assumptions).
 - A second copy of the app gets design X-08 and is listed in FR-017.
 
+### Session 2026-10-06 (after planning-review campaign c1)
+
+The owner delegated these. Both follow the recommendation in `review-c1-disposition.md`:
+
+- OQ-1: the pre-upgrade backup gets no "remove now" option and no lifetime cap without sign-out in this feature. The sign-out dialog and the status popover state the date it is kept until.
+- OQ-2: there is no person-started import of an earlier-version file that appears after the workspace is in use. The file is kept untouched and surfaced with "Show in Finder" (FR-033).
+
 ### Session 2026-10-06 (design sign-off, continued)
 
 - Design gaps G-1 – G-3 were resolved as recommended: "Not synced yet" and day/date wording (FR-012), and the deletion-cancelled note inside the sign-in sheet (FR-017).
