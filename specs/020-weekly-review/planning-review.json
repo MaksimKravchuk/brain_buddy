@@ -1,0 +1,68 @@
+{
+  "planning_review": {
+    "run_id": "020-weekly-review-c2",
+    "risk": "high",
+    "status": "founder-accepted",
+    "reviewers": [
+      "requirements-consistency",
+      "architecture-consistency",
+      "testability-evidence",
+      "privacy-consent-security",
+      "ux-accessibility-mobile",
+      "adversarial-high-risk"
+    ],
+    "founder_acceptance": {
+      "accepted_by": "Max (product owner)",
+      "accepted_on": "2026-10-06",
+      "expires_on": "2026-11-05",
+      "rationale": "Two review campaigns, the cap, ran on a high-risk package. Campaign 1 raised 2 blocking findings and 3 product decisions; the owner answered the decisions and all 75 findings were fixed (review-c1-disposition.md). Campaign 2 raised no blocking finding and no product decision; all 65 important/advisory findings were then fixed with none rejected (review-c2-disposition.md). The verdict stayed technical-changes-required only because no third campaign is allowed to confirm those fixes. The owner accepts the residual risk that a fix is incomplete, bounded by the compensating measures below. Panel caveat: all six lenses ran through a Claude-backed adapter (ADR-0025 exception chosen by the owner instead of the ADR-0024 Codex route), on one provider with three models (Sonnet 5.5, Fable 5.1, Opus 5.5). Opus 5.5 also authored the spec, so the panel is correlated and partly self-review; every lens is recorded as degraded and model-unverified.",
+      "compensating_measures": [
+        "Every PR slice from tasks.md gets its own independent review and full CI before landing, per ADR-0008 and ADR-0023; ASK-class slices need the owner's recorded approval.",
+        "Each slice's PR description lists the review-c1/c2 dispositions it implements, so a reviewer can check that the planned fix actually landed in code.",
+        "/speckit-accept runs before release and maps every FR and SC to a named executable test with fresh Allure evidence; a reject verdict blocks the feature flag rollout.",
+        "The weekly_review flag stays OFF in production until the owner has completed the definition-of-done checks in intake.md on TestFlight and web.",
+        "If any slice changes spec.md, plan.md or a contract beyond the dispositions, the planning review is re-run for that change instead of relying on this acceptance."
+      ],
+      "campaign_history": [
+        {
+          "run_id": "020-weekly-review-c1",
+          "status": "product-decision-required"
+        },
+        {
+          "run_id": "020-weekly-review-c2",
+          "status": "technical-changes-required"
+        }
+      ],
+      "artifacts_digest_after_fixes": "e4ecddd09600e384401004f891f07260206373245c59f0aff1ab826f888be48d",
+      "review_runtime": "Claude Code headless adapter, SHA-256 pinned per model: opus-5-5 15eca6f0192ac098f04ecdf5a73306480b8fb56da61c9eceaa66451ea6528a55, sonnet-5-5 89a1902c324243ea4b0dc6e84a96f9a4e579d545f6c62d71135c88449642ea33, fable-5-1 ad7f92066760499486445c647e6b68c0aec8b905823a6ba0e2ec3f6cde43376b"
+    },
+    "post_acceptance_review": {
+      "reason": "Compensating measure 5: spec/plan/contract changes made after founder acceptance (checklist fixes and owner decisions after /speckit-tasks) were reviewed instead of relying on the acceptance.",
+      "reviewed_range": "eeaaae5..e4f7f29+ec65326 (spec.md, plan.md, contracts/*, data-model.md, design.md)",
+      "reviewer": "claude-fable-5-1 via headless Claude Code, read-only tools (Read, Grep, Glob)",
+      "date": "2026-10-06",
+      "verdict": "changes-required",
+      "findings": {
+        "blocking": 0,
+        "important": 2,
+        "advisory": 5
+      },
+      "resolution": "All 7 findings fixed in 5cc205e; the owner confirmed the three resulting refinements (linking drops unsent extensions; repeated bulk-release undo returns the stored result; web shows the next review in the browser zone, T172).",
+      "artifacts_digest_after_fixes": "4f981d87cad581f019462a413e6597d9bd17b81eed9f2954c14a9d9d8667cc3e"
+    },
+    "post_acceptance_review_2": {
+      "reason": "Compensating measure 5: spec/plan/contract/design changes made while addressing the /speckit-analyze findings (cc8114c) were reviewed instead of relying on the acceptance.",
+      "reviewed_range": "bdb2c30..cc8114c (spec.md, plan.md, contracts/*, design.md)",
+      "reviewer": "claude-fable-5-1 via headless Claude Code, read-only tools (Read, Grep, Glob)",
+      "date": "2026-10-06",
+      "verdict": "pass",
+      "findings": {
+        "blocking": 0,
+        "important": 0,
+        "advisory": 4
+      },
+      "resolution": "All 4 advisory wording-drift findings fixed in the commit that records this entry: the notification skip rule and restart trigger say 'counted review (FR-029)' everywhere (design.md, M-10, M-24, adr-draft.md); D-02 'interrupted (suggesting)' puts the FR-052 confirmation first and, after a reload, reopens the draft with the ordinary Suggest control; the design sign-off states the FR-048 Undo durations; the plan's PR-04 paths list its two BrainBuddyKit files.",
+      "artifacts_digest_after_fixes": "676dc4ac8afa3b937760f6ecb88e4c14bfe6e2884d6c8932d6868801fce970f3"
+    }
+  }
+}

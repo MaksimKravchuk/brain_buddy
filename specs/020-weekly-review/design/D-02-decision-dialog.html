@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>D-02 · Decision dialog with the AI navigator (web)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--ind50:#eef2ff;--ind200:#c7d2fe;--ind700:#4338ca;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-feature-settings:"cv11","ss01","ss03";-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1280px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600);max-width:1000px}
+.grid{display:grid;grid-template-columns:repeat(2,640px);gap:28px}
+figure{margin:0}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;min-height:52px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.stage{position:relative;width:640px;height:760px;background:var(--s50);border:1px solid var(--s300);border-radius:12px;overflow:hidden;box-shadow:var(--raised)}
+.stage .bgl{padding:24px 30px;font-size:20px;font-weight:600;color:var(--s400)}
+.scrim{position:absolute;inset:0;background:rgba(248,250,252,.8);backdrop-filter:blur(4px)}
+.dlg{position:absolute;left:40px;right:40px;top:28px;background:#fff;border:1px solid var(--s200);border-radius:20px;box-shadow:var(--float);padding:20px;display:flex;flex-direction:column;gap:12px}
+.dh{display:flex;align-items:center;justify-content:space-between}
+.dh h2{margin:0;font-size:20px;font-weight:600;letter-spacing:-.015em}
+.x{width:36px;height:36px;border:0;background:none;border-radius:8px;color:var(--s500);display:grid;place-items:center}
+.lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin:2px 0 -4px}
+.tt{font-size:17px;font-weight:600;margin:0}
+.meta{font-size:12px;color:var(--s500);margin:-6px 0 0}
+.fr{font-size:13px;color:var(--s600);margin:0;line-height:1.45}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{min-height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--s200);background:#fff;font-size:13px;color:var(--s700)}
+.chip.on{background:var(--sky50);border-color:var(--sky500);color:var(--sky700);font-weight:600}
+.opts{border:1px solid var(--s200);border-radius:12px;overflow:hidden}
+.opt{display:flex;align-items:center;gap:10px;width:100%;min-height:42px;padding:6px 12px;background:#fff;border:0;border-top:1px solid var(--s200);text-align:left;font-size:14px;font-weight:500}
+.opt:first-child{border-top:0}
+.opt:hover{background:var(--s50)}
+.opt .os{font-size:12px;font-weight:400;color:var(--s500);margin-left:6px}
+.opt .k{margin-left:auto;font-size:11px;color:var(--s400);font-family:ui-monospace,Menlo,monospace}
+.opt.rec{background:var(--sky50);box-shadow:inset 0 0 0 1.5px var(--sky500)}
+.rc{font-size:11px;font-weight:600;color:var(--sky700);background:#fff;border:1px solid var(--sky200);border-radius:999px;padding:1px 8px;margin-left:8px}
+.opt[disabled]{opacity:.5;cursor:not-allowed}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;border-radius:8px;border:1px solid transparent;font-size:13px;font-weight:600;padding:0 14px}
+.btn.pri{background:var(--sky700);color:#fff}.btn.sec{background:#fff;border-color:var(--s200);color:var(--s900)}.btn.gh{background:none;color:var(--sky700)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.acts{display:flex;justify-content:flex-end;gap:8px}
+.field{width:100%;min-height:40px;border:1.5px solid var(--sky500);border-radius:6px;background:#fff;padding:9px 10px;font-size:14px}
+.field.off{border:1px solid var(--s200)}
+.ph{color:var(--s400)}
+.caret{display:inline-block;width:2px;height:16px;background:var(--sky500);vertical-align:-3px}
+.nav{border:1px solid var(--s200);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px;background:#fff}
+.navh{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--s700)}.navh .i{color:var(--sky700)}
+.prop{display:flex;gap:8px;align-items:center;width:100%;min-height:36px;padding:7px 10px;border:1px solid var(--s200);border-radius:8px;background:var(--s50);text-align:left;font-size:13px}
+.prop .rb{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--s300);background:#fff;flex:none}
+.prop.on{border:1.5px solid var(--sky500);background:var(--sky50)}.prop.on .rb{border:5px solid var(--sky700)}
+.prov{font-size:11px;color:var(--s500);display:flex;gap:5px;align-items:center}
+.was{font-size:12px;color:var(--s600);border:1px dashed var(--s300);border-radius:8px;padding:8px 10px}
+.banner{display:flex;gap:8px;align-items:flex-start;border-radius:10px;padding:9px 11px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700)}
+.banner.warn{background:var(--amb50);border-color:var(--amb200);color:var(--amb800)}
+.ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--s600)}
+.sent{border:1px solid var(--s200);border-radius:12px;padding:10px 14px}
+.sent ul{margin:4px 0 0;padding-left:18px;font-size:13px;line-height:1.6}
+.sent p{margin:6px 0 0;font-size:12px;color:var(--s600)}
+.diff{border:1px solid var(--s200);border-radius:10px;padding:8px 12px;font-size:13px;line-height:1.6}.diff .k{display:inline-block;width:46px;color:var(--s500);font-size:12px}.diff s{color:var(--s400)}
+.spin{width:12px;height:12px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;display:inline-block}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.17 6.81a2.83 2.83 0 0 0-4-4L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/></symbol>
+<symbol id="i-step" viewBox="0 0 24 24"><path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4M4 13h4"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+<symbol id="i-xc" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+<symbol id="i-cal-plus" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4"/></symbol>
+<symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z"/></symbol>
+<symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+<symbol id="i-retry" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+<symbol id="i-network" viewBox="0 0 24 24"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3M12 12V8"/></symbol>
+<symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01M8.5 16.43a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M5 13a10 10 0 0 1 5.24-2.76M2 2l20 20"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>D-02 · Decision dialog with the AI navigator — web</h1>
+  <p>A 560 px modal dialog (20 px radius, floating shadow, light blurred scrim) opened from a marker chip in D-01, from the task's inline detail, or embedded in the review (D-03). Content, order, reason → recommendation mapping and copy match M-03/M-04. Keyboard: focus lands on the dialog title; Tab moves through reasons then decisions; number keys 1–7 pick a decision; Esc closes without changes and returns focus to the marker chip that opened it.</p>
+  <p>On web every suggestion uses the cloud provider, so the first "Suggest" always goes through consent (FR-024). Every failure shows a correlation ID (FR-025, FR-045). Server round-trips show a pending state on the chosen control only. Every applied decision shows an Undo toast for about 5 seconds (FR-048).</p>
+</header>
+
+<div class="grid">
+
+<figure>
+<figcaption><b>D-02 · default, reason chosen</b>"Too big" recommends "Find a first step". Every decision remains available. Keyboard hints on the right.</figcaption>
+<div class="stage"><div class="bgl">Next actions</div><div class="scrim"></div>
+  <section class="dlg" role="dialog" aria-modal="true" aria-labelledby="w1">
+    <div class="dh"><h2 id="w1" tabindex="-1">Decide</h2><button class="x" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <p class="lbl">Asks for a decision</p>
+    <p class="tt">Renovate the bathroom</p>
+    <p class="meta">15 days in Next · Home</p>
+    <p class="fr">This wording hasn't moved. That usually means the wording needs work, not you.</p>
+    <p class="lbl">What got in the way? · optional</p>
+    <div class="chips" role="group" aria-label="What got in the way, optional"><button class="chip">Unclear</button><button class="chip on" aria-pressed="true">Too big</button><button class="chip">Missing information</button><button class="chip">Waiting on someone</button><button class="chip">Unpleasant / no energy</button><button class="chip">No longer matters</button></div>
+    <p class="lbl">What now?</p>
+    <div class="opts" role="group" aria-label="Decisions">
+      <button class="opt"><svg class="i"><use href="#i-check"/></svg>Done<span class="k">1</span></button>
+      <button class="opt"><svg class="i"><use href="#i-pencil"/></svg>Reformulate<span class="os">Say what you'll actually do</span><span class="k">2</span></button>
+      <button class="opt rec"><svg class="i"><use href="#i-step"/></svg>Find a first step<span class="rc">Recommended</span><span class="k">3</span></button>
+      <button class="opt"><svg class="i"><use href="#i-clock"/></svg>Move to Waiting for…<span class="k">4</span></button>
+      <button class="opt"><svg class="i"><use href="#i-archive"/></svg>Release to Someday<span class="os">Not now. Bring it back any time</span><span class="k">5</span></button>
+      <button class="opt"><svg class="i"><use href="#i-xc"/></svg>Cancel task<span class="os">Stays findable under Cancelled</span><span class="k">6</span></button>
+      <button class="opt"><svg class="i"><use href="#i-cal-plus"/></svg>Keep 7 more days<span class="os">Once, with a reason</span><span class="k">7</span></button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-02 · third stalled wording, and saving</b>FR-005 offer above the reasons. "Think it through" appears only when the thinking canvas (<code>crt_canvas</code>) is available to the person; otherwise only "Release to Someday" is offered. "Release to Someday" was clicked: only that row shows progress, the others are disabled until the server answers.</figcaption>
+<div class="stage"><div class="bgl">Next actions</div><div class="scrim"></div>
+  <section class="dlg" role="dialog" aria-modal="true" aria-labelledby="w2" aria-busy="true">
+    <div class="dh"><h2 id="w2">Decide</h2><button class="x" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <p class="tt">Write the first page of the novel</p>
+    <p class="meta">14 days in Next · Writing</p>
+    <div class="banner" style="background:var(--sky50);border-color:var(--sky200);color:var(--sky700);flex-direction:column"><div style="display:flex;gap:8px"><svg class="i"><use href="#i-info"/></svg><span>This is the third wording in a row that has stalled. Sometimes the task isn't the problem. It may help to set it aside, or to look at what's underneath.</span></div><div style="display:flex;gap:8px"><button class="btn sec"><svg class="i"><use href="#i-network"/></svg>Think it through</button><button class="btn sec"><svg class="i"><use href="#i-archive"/></svg>Release to Someday</button></div></div>
+    <div class="opts" role="group" aria-label="Decisions">
+      <button class="opt" disabled><svg class="i"><use href="#i-check"/></svg>Done</button>
+      <button class="opt" disabled><svg class="i"><use href="#i-pencil"/></svg>Reformulate</button>
+      <button class="opt" disabled><svg class="i"><use href="#i-step"/></svg>Find a first step</button>
+      <button class="opt" disabled><svg class="i"><use href="#i-clock"/></svg>Move to Waiting for…</button>
+      <button class="opt" style="background:var(--sky50)"><svg class="i"><use href="#i-archive"/></svg>Release to Someday<span class="os">Saving…</span></button>
+      <button class="opt" disabled><svg class="i"><use href="#i-xc"/></svg>Cancel task</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-02 · cloud consent (first "Suggest" on web)</b>Names the provider and lists exactly what is sent, including the line that notes go as written (owner decision 2026-10-06). Nothing has been sent. Focus starts on "Not now" so consent is never given by a stray Enter.</figcaption>
+<div class="stage"><div class="bgl">Next actions</div><div class="scrim"></div>
+  <section class="dlg" role="dialog" aria-modal="true" aria-labelledby="w3">
+    <div class="dh"><h2 id="w3">Send task details to OpenAI for suggestions?</h2><button class="x" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <p class="fr">OpenAI processes them to suggest a first step. Nothing has been sent yet.</p>
+    <div class="sent"><p class="lbl" style="margin:0">Sent with each suggestion request</p>
+      <ul><li>The task's title</li><li>The task's notes</li><li>The reason you picked, if any</li><li>The project's name</li><li>Titles of up to 20 other open tasks in that project</li></ul>
+      <p>Nothing else is sent.</p>
+      <p>Notes are sent as written, including any names in them.</p></div>
+    <p class="fr" style="font-size:12px;color:var(--s500)">We ask once. You can turn this off in Settings, and requests stop immediately.</p>
+    <div class="acts"><button class="btn sec">Not now</button><button class="btn pri">Allow and suggest</button></div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-02 · first step with cloud proposals</b>The pick fills the field for editing; only "Save first step" writes. The old wording goes to notes as "Was: …".</figcaption>
+<div class="stage"><div class="bgl">Next actions</div><div class="scrim"></div>
+  <section class="dlg" role="dialog" aria-modal="true" aria-labelledby="w4">
+    <div class="dh"><h2 id="w4">Find a first step</h2><button class="x" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <p class="meta" style="margin:0">Renovate the bathroom · reason: too big</p>
+    <div class="field" role="textbox" aria-label="First step">Measure the bathroom floor<span class="caret"></span></div>
+    <div class="nav" role="radiogroup" aria-label="Suggested first steps">
+      <div class="navh"><svg class="i"><use href="#i-compass"/></svg>Pick one to edit</div>
+      <button class="prop on" role="radio" aria-checked="true"><span class="rb"></span>Measure the bathroom walls and floor</button>
+      <button class="prop" role="radio" aria-checked="false"><span class="rb"></span>List what you want changed in the bathroom</button>
+      <button class="prop" role="radio" aria-checked="false"><span class="rb"></span>Take photos of the bathroom to send for quotes</button>
+      <div class="prov"><svg class="i" style="width:12px;height:12px"><use href="#i-cloud"/></svg>Suggested by OpenAI from this task's details.</div>
+    </div>
+    <div class="was">Kept in notes as <b>Was: Renovate the bathroom</b></div>
+    <div class="acts"><button class="btn gh">Back</button><button class="btn sec">None of these</button><button class="btn pri">Save first step</button></div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-02 · error: provider timeout, and cost cap</b>Two variants of the same slot. Both keep the form usable; the cap has no retry because retrying can't succeed.</figcaption>
+<div class="stage"><div class="bgl">Next actions</div><div class="scrim"></div>
+  <section class="dlg" role="dialog" aria-modal="true" aria-labelledby="w5">
+    <div class="dh"><h2 id="w5">Find a first step</h2><button class="x" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <p class="meta" style="margin:0">Renovate the bathroom · reason: too big</p>
+    <div class="field off" role="textbox" aria-label="First step"><span class="ph">Something you could start in 10 minutes</span></div>
+    <div class="banner warn" role="alert" style="flex-direction:column;gap:4px"><div style="display:flex;gap:8px"><svg class="i"><use href="#i-cloud"/></svg><span>OpenAI didn't answer in time. Try again, or write your own step.</span></div><span class="ref">Ref 2b9e41d7-a1c3</span><button class="btn gh" style="align-self:flex-start;padding:0"><svg class="i"><use href="#i-retry"/></svg>Try again</button></div>
+    <div class="banner warn" role="alert" style="flex-direction:column;gap:4px"><div style="display:flex;gap:8px"><svg class="i"><use href="#i-info"/></svg><span>Cloud suggestions have reached their usage limit for now. Everything else works as usual.</span></div><span class="ref">Ref 9c04e2aa-55f0</span></div>
+    <div class="acts"><button class="btn gh">Back</button><button class="btn pri" disabled>Save first step</button></div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-02 · stale, and offline</b>Stale reuses the web's existing "Task changed elsewhere" heading (FR-011). Offline: the dialog explains and disables decisions; nothing is queued on web.</figcaption>
+<div class="stage"><div class="bgl">Next actions</div><div class="scrim"></div>
+  <section class="dlg" role="dialog" aria-modal="true" aria-labelledby="w6">
+    <div class="dh"><h2 id="w6">Task changed elsewhere</h2><button class="x" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <p class="fr">Nothing was applied. Here's the current version. Decide again if it still needs it.</p>
+    <div class="diff"><span class="k">Was</span><s>Renovate the bathroom</s><br><span class="k">Now</span>Get 3 quotes for the bathroom</div>
+    <p class="meta" style="margin:0">Changed on iPhone at 15:58 · new wording, so the clock restarted</p>
+    <div class="acts"><button class="btn pri">Close</button></div>
+    <hr style="border:0;border-top:1px dashed var(--s300);width:100%;margin:6px 0">
+    <p class="lbl">Offline variant</p>
+    <div class="banner" role="status"><svg class="i"><use href="#i-wifi-off"/></svg><span><b>You're offline.</b> Decisions need a connection on the web. Retry when you're back online.</span></div>
+    <div class="opts"><button class="opt" disabled><svg class="i"><use href="#i-check"/></svg>Done</button><button class="opt" disabled><svg class="i"><use href="#i-pencil"/></svg>Reformulate</button></div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-02 · decision applied, with Undo</b>The dialog closes and the row updates. A toast (bottom-left, floating shadow) names the decision and offers Undo for about 5 seconds, like Process inbox (FR-048). Focus moves to the next row; the toast is announced politely and reachable with Tab.</figcaption>
+<div class="stage" style="height:360px">
+  <div class="bgl" style="color:var(--s900)">Next actions</div>
+  <div style="margin:0 30px;border-top:1px solid var(--s200);background:#fff">
+    <div style="height:44px;display:flex;align-items:center;padding-left:44px;border-bottom:1px solid var(--s200);font-size:14px;font-weight:500">Call the plumber about the leak</div>
+    <div style="height:44px;display:flex;align-items:center;padding-left:44px;border-bottom:1px solid var(--s200);font-size:14px;font-weight:500">Sort the paperwork drawer</div>
+    <div style="height:44px;display:flex;align-items:center;padding-left:44px;border-bottom:1px solid var(--s200);font-size:14px;font-weight:500">Draft the launch FAQ</div>
+  </div>
+  <div role="status" style="position:absolute;left:30px;bottom:24px;width:420px;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);border:1px solid var(--s200);border-radius:20px;box-shadow:var(--float);padding:8px 8px 8px 14px;display:flex;align-items:center;gap:10px;font-size:13px"><svg class="i" style="color:var(--sky700)"><use href="#i-archive"/></svg><span style="flex:1">"Renovate the bathroom" released to Someday</span><button class="btn gh" aria-label="Undo: return Renovate the bathroom to Next">Undo</button></div>
+</div>
+</figure>
+
+</div>
+</body>
+</html>

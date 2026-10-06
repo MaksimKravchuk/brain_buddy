@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M-23 · Weekly review and suggestions settings (iOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--rose600:#e11d48;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1100px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600)}
+.frames{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;min-height:52px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.phone{width:390px;height:851px;background:var(--s50);border-radius:44px;overflow:hidden;position:relative;display:flex;flex-direction:column;box-shadow:var(--raised);border:1px solid var(--s300)}
+.sb{height:47px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font-size:15px;font-weight:600}
+.nb{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 8px}
+.nb .ttl{font-size:17px;font-weight:600}
+.nb button{min-width:44px;min-height:44px;border:0;background:none;color:var(--sky700);font-size:17px;padding:0 8px;display:inline-flex;align-items:center}
+.body{flex:1;overflow:hidden;padding:4px 16px 12px;display:flex;flex-direction:column;gap:10px}
+.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin:6px 4px -4px}
+.list{background:#fff;border:1px solid var(--s200);border-radius:14px;overflow:hidden}
+.kv{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:48px;padding:8px 14px;border-top:1px solid var(--s200);font-size:16px;width:100%;background:#fff;border-left:0;border-right:0;border-bottom:0;text-align:left}
+.kv:first-child{border-top:0}
+.kv .v{color:var(--s500);font-size:15px;text-align:right}
+.kv .sm{display:block;font-size:12px;color:var(--s500);margin-top:2px}
+.kv.ro{color:var(--s600)}
+.kv.danger{color:var(--rose600)}
+.kv.act{color:var(--sky700)}
+.tog{width:51px;height:31px;border-radius:999px;background:var(--s300);position:relative;flex:none}
+.tog::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:var(--soft)}
+.tog.on{background:var(--sky700)}.tog.on::after{left:22px}
+.foot{font-size:12px;color:var(--s500);margin:-2px 6px 0;line-height:1.45}
+.ok{color:var(--sky700);font-weight:700}
+.scrim{position:absolute;inset:0;background:rgba(15,23,42,.35)}
+.alert{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:290px;background:rgba(255,255,255,.97);border-radius:20px;box-shadow:var(--float);text-align:center;overflow:hidden}
+.alert h3{margin:18px 16px 6px;font-size:17px;font-weight:600}
+.alert p{margin:0 16px 16px;font-size:13px;color:var(--s600);line-height:1.45}
+.alert button{display:block;width:100%;min-height:46px;border:0;border-top:1px solid var(--s200);background:none;font-size:17px;color:var(--sky700)}
+.alert button.d{color:var(--rose600);font-weight:600}
+.note{border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700);display:flex;gap:8px;align-items:flex-start}
+.note.info{background:var(--sky50);border-color:var(--sky200);color:var(--sky700)}
+.note.warn{background:var(--amb50);border-color:var(--amb200);color:var(--amb800)}
+.ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--s600)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+<symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+<symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01M8.5 16.43a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M5 13a10 10 0 0 1 5.24-2.76M2 2l20 20"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>M-23 · Settings — Weekly review and Suggestions sections (iOS)</h1>
+  <p>Two new sections in the existing Settings screen. <b>Weekly review</b>: day, time, threshold (FR-035, FR-039), and the neutral "Last review" line (FR-038), which is information, not a control. <b>Suggestions</b>: whether Apple's on-device model is available here, what to use when it isn't (FR-023, remembered choice), the downloaded model with its size and a delete action (FR-049), and cloud consent with revoke (FR-024). No streaks, no history chart.</p>
+  <p>Delete model is the only destructive action here and asks for confirmation; it states what is lost. Rose is used only for that destructive control, never for age.</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>M-23 · default</b>Model downloaded, cloud allowed. The time zone note answers US5-5 before anyone asks.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Lists</button><span class="ttl">Settings</span><span style="width:60px"></span></div>
+  <div class="body">
+    <p class="lbl">Weekly review</p>
+    <div class="list">
+      <button class="kv"><span>Day</span><span class="v">Friday</span></button>
+      <button class="kv"><span>Time</span><span class="v">16:00</span></button>
+      <button class="kv"><span>Ask for a decision after</span><span class="v">14 days</span></button>
+      <div class="kv ro"><span>Last review</span><span class="v">9 days ago</span></div>
+    </div>
+    <p class="foot">Times follow your local time zone. Tasks move to Someday 7 days after they start asking.</p>
+    <p class="lbl">Suggestions</p>
+    <div class="list">
+      <div class="kv ro"><span>On this iPhone<span class="sm">Apple's on-device model</span></span><span class="v">Available for English</span></div>
+      <button class="kv"><span>When it isn't available</span><span class="v">Downloaded model</span></button>
+      <div class="kv"><span>Downloaded model<span class="sm">Russian and other languages · 1.1 GB</span></span></div>
+      <button class="kv danger">Delete downloaded model</button>
+      <div class="kv"><span>Cloud suggestions<span class="sm">OpenAI · allowed since Sat 3 Oct</span></span><span class="tog on" role="switch" aria-checked="true" aria-label="Allow cloud suggestions from OpenAI"></span></div>
+    </div>
+    <p class="foot">Cloud suggestions send a task's title, notes, chosen reason, project name and up to 20 other open task titles in that project. Turning this off stops requests immediately.</p>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-23 · threshold changed (28 → 7)</b>Picker with the four values; after a change, a note says markers update now and nothing will be parked sooner than 7 days from now (FR-039).</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Settings</button><span class="ttl">Ask for a decision after</span><span style="width:60px"></span></div>
+  <div class="body">
+    <div class="list" role="radiogroup" aria-label="Ask for a decision after">
+      <div class="kv" role="radio" aria-checked="true"><span>7 days</span><span class="ok">✓</span></div>
+      <div class="kv" role="radio" aria-checked="false"><span>14 days</span></div>
+      <div class="kv" role="radio" aria-checked="false"><span>21 days</span></div>
+      <div class="kv" role="radio" aria-checked="false"><span>28 days</span></div>
+    </div>
+    <div class="note info" role="status"><svg class="i"><use href="#i-info"/></svg><span>Markers in Next update now. Because of this change, nothing moves to Someday before Fri 16 Oct.</span></div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-23 · delete model, confirmation</b>FR-049. Says what is freed and what changes. Non-AI features are unaffected.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Lists</button><span class="ttl">Settings</span><span style="width:60px"></span></div>
+  <div class="body"><p class="lbl">Suggestions</p><div class="list"><div class="kv">Downloaded model</div><div class="kv danger">Delete downloaded model</div></div></div>
+  <div class="scrim"></div>
+  <div class="alert" role="alertdialog" aria-labelledby="dl" aria-describedby="dld">
+    <h3 id="dl">Delete the downloaded model?</h3>
+    <p id="dld">Frees 1.1 GB. Suggestions for languages Apple's model doesn't support will need the download again, or the cloud. Your tasks aren't affected.</p>
+    <button class="d">Delete</button><button>Cancel</button>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-23 · empty (nothing set up yet)</b>Never reviewed, no model, no consent. Rows say so plainly; the last-review line reads "Not yet".</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Lists</button><span class="ttl">Settings</span><span style="width:60px"></span></div>
+  <div class="body">
+    <p class="lbl">Weekly review</p>
+    <div class="list">
+      <button class="kv"><span>Day</span><span class="v">Friday</span></button>
+      <button class="kv"><span>Time</span><span class="v">16:00</span></button>
+      <button class="kv"><span>Ask for a decision after</span><span class="v">14 days</span></button>
+      <div class="kv ro"><span>Last review</span><span class="v">Not yet</span></div>
+    </div>
+    <p class="lbl">Suggestions</p>
+    <div class="list">
+      <div class="kv ro"><span>On this iPhone<span class="sm">Apple's on-device model</span></span><span class="v">Apple Intelligence is off</span></div>
+      <button class="kv"><span>When it isn't available</span><span class="v">Ask me</span></button>
+      <div class="kv ro"><span>Downloaded model</span><span class="v">Not downloaded</span></div>
+      <div class="kv"><span>Cloud suggestions<span class="sm">OpenAI · not allowed</span></span><span class="tog" role="switch" aria-checked="false" aria-label="Allow cloud suggestions from OpenAI"></span></div>
+    </div>
+    <p class="foot">Turning cloud suggestions on shows exactly what is sent before anything is.</p>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-23 · cloud consent revoked</b>Takes effect immediately on this device, before any sync: no further requests (FR-024). The next "Suggest" shows the consent screen again (M-07).</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Lists</button><span class="ttl">Settings</span><span style="width:60px"></span></div>
+  <div class="body">
+    <p class="lbl">Suggestions</p>
+    <div class="list">
+      <div class="kv"><span>Cloud suggestions<span class="sm">OpenAI · turned off just now</span></span><span class="tog" role="switch" aria-checked="false" aria-label="Allow cloud suggestions from OpenAI"></span></div>
+    </div>
+    <div class="note" role="status"><svg class="i"><use href="#i-info"/></svg><span>Cloud suggestions are off. Nothing will be sent to OpenAI.</span></div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-23 · offline</b>Everything is editable offline and syncs later. Revoking consent works offline too, because it only stops requests from this device.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>✈︎ 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Lists</button><span class="ttl">Settings</span><span style="width:60px"></span></div>
+  <div class="body">
+    <p class="lbl">Weekly review</p>
+    <div class="list">
+      <button class="kv"><span>Day</span><span class="v">Sunday</span></button>
+      <button class="kv"><span>Time</span><span class="v">10:00</span></button>
+      <button class="kv"><span>Ask for a decision after</span><span class="v">14 days</span></button>
+    </div>
+    <div class="note"><svg class="i"><use href="#i-wifi-off"/></svg><span>Offline — 2 changes waiting. They sync when you're back online.</span></div>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-23 · error</b>The account rejected a settings change. The device keeps the new value and retries; the correlation ID is shown.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Lists</button><span class="ttl">Settings</span><span style="width:60px"></span></div>
+  <div class="body">
+    <p class="lbl">Weekly review</p>
+    <div class="list">
+      <button class="kv"><span>Day</span><span class="v">Sunday</span></button>
+      <button class="kv"><span>Time</span><span class="v">10:00</span></button>
+    </div>
+    <div class="note warn" role="alert" style="flex-direction:column;gap:6px"><div style="display:flex;gap:8px"><svg class="i"><use href="#i-info"/></svg><span>Your new review day couldn't be saved to your account yet. It's set on this iPhone and we'll try again.</span></div><span class="ref">Ref 4e5d9a20-c18b</span></div>
+  </div>
+</div>
+</figure>
+
+</div>
+</body>
+</html>

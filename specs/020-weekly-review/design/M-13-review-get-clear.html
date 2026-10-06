@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M-13 to M-15 · Review steps: wins, mind sweep, Inbox to zero (iOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1100px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600)}
+.frames{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;min-height:52px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.phone{width:390px;height:851px;background:var(--s50);border-radius:44px;overflow:hidden;position:relative;display:flex;flex-direction:column;box-shadow:var(--raised);border:1px solid var(--s300)}
+.sb{height:47px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font-size:15px;font-weight:600}
+.nb{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 8px}
+.nb .ttl{font-size:15px;font-weight:600;color:var(--s600)}
+.nb button{min-width:44px;min-height:44px;border:0;background:none;color:var(--sky700);font-size:17px;padding:0 8px}
+.steps{display:flex;gap:4px;padding:0 20px 10px;flex:none}.steps i{flex:1;height:4px;border-radius:2px;background:var(--s200)}.steps i.d{background:var(--sky500)}.steps i.c{background:var(--sky700)}.steps i.s{background:var(--s300)}
+.body{flex:1;overflow:hidden;padding:4px 16px 12px;display:flex;flex-direction:column;gap:12px}
+.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.h1{font-size:26px;font-weight:600;letter-spacing:-.02em;margin:0;line-height:1.2}
+.p{font-size:15px;color:var(--s600);line-height:1.45;margin:0}
+.lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin:2px 4px -4px}
+.list{background:#fff;border:1px solid var(--s200);border-radius:14px;overflow:hidden}
+.row{display:flex;gap:10px;align-items:center;padding:10px 14px;min-height:46px;border-top:1px solid var(--s200);font-size:15px}.row:first-child{border-top:0}
+.row .ok{color:var(--sky500)}
+.row .d{margin-left:auto;font-size:12px;color:var(--s500)}
+.big{font-size:44px;font-weight:600;letter-spacing:-.02em;line-height:1}
+.foot{flex:none;padding:10px 16px 30px;border-top:1px solid var(--s200);background:rgba(248,250,252,.95);display:flex;flex-direction:column;gap:8px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:50px;border-radius:12px;border:1px solid transparent;font-size:16px;font-weight:600;padding:0 16px}
+.btn.pri{background:var(--sky700);color:#fff}.btn.sec{background:#fff;border-color:var(--s200);color:var(--s900)}.btn.gh{background:none;color:var(--sky700);min-height:44px}
+.field{flex:1;min-height:50px;border:1.5px solid var(--sky500);border-radius:12px;background:#fff;padding:13px 12px;font-size:16px}
+.ph{color:var(--s400)}
+.caret{display:inline-block;width:2px;height:18px;background:var(--sky500);vertical-align:-3px}
+.add{width:50px;min-height:50px;border-radius:12px;border:0;background:var(--sky700);color:#fff;display:grid;place-items:center}
+.prompts{display:flex;flex-wrap:wrap;gap:6px}
+.prompts span{font-size:13px;color:var(--s600);background:var(--s100);border-radius:999px;padding:5px 10px}
+.choice{display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;background:#fff;border:1px solid var(--s200);border-radius:14px;padding:14px;min-height:64px}
+.choice b{font-size:16px}.choice span{font-size:13px;color:var(--s600)}
+.item{background:#fff;border:1px solid var(--s200);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:6px}
+.item .t{font-size:22px;font-weight:600;letter-spacing:-.015em;line-height:1.25}
+.item .m{font-size:13px;color:var(--s500)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dec{min-height:52px;border-radius:12px;border:1px solid var(--s200);background:#fff;font-size:15px;font-weight:500;padding:0 10px}
+.dec.wide{grid-column:1/-1}
+.org{display:flex;gap:8px}.org span{font-size:13px;border:1px dashed var(--s300);border-radius:8px;padding:6px 10px;color:var(--s600)}
+.toast{position:absolute;left:16px;right:16px;bottom:126px;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);border:1px solid var(--s200);border-radius:20px;box-shadow:var(--float);padding:10px 14px;font-size:14px;display:flex;align-items:center;gap:10px}
+.toast button{margin-left:auto;border:0;background:none;color:var(--sky700);font-weight:600;min-height:44px;padding:0 6px}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:8px;padding:0 28px}
+.empty .i{width:40px;height:40px;color:var(--s400);stroke-width:1.5}
+.empty h2{font-size:20px;font-weight:600;margin:4px 0 0}.empty p{margin:0;font-size:15px;color:var(--s500);line-height:1.45}
+.scrim{position:absolute;inset:0;background:rgba(15,23,42,.35)}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--s50);border-radius:20px 20px 0 0;display:flex;flex-direction:column;box-shadow:var(--float);padding:0 16px 30px;gap:10px}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--s300);margin:6px auto 4px;flex:none}
+.note{border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700);display:flex;gap:8px;align-items:flex-start}
+.help{font-size:12px;color:var(--s500);margin:0;text-align:center}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+<symbol id="i-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>M-13 · Wins of the week, M-14 · Mind sweep, M-15 · Inbox to zero — iOS review steps</h1>
+  <p><b>Review step chrome (shared by M-13 to M-22):</b> "Leave" on the left, mode and step position in the middle, "Skip" on the right (FR-029: every step skippable). A segmented progress bar under it: filled = done, grey = skipped, dark = current. The step's own primary action sits in the bottom bar. Leaving keeps everything done so far; the review resumes at the same step on any device (US4-7).</p>
+  <p>Quick review: Wins → Inbox → Decisions → Summary. Full review: Wins → Mind sweep → Inbox → Decisions → Rest of Next → Waiting → Projects → Someday → Dates → Summary (FR-028). Wins always come first, before any backlog is shown (US4-1).</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>M-13 · Wins of the week (default)</b>Completed tasks of the last 7 days with their count. Read-only; nothing to decide here. The count is a fact, not a score: no comparison with other weeks.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Full · 1 of 10</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="c"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="body">
+    <h1 class="h1">This week you finished</h1>
+    <p><span class="big">12</span> <span class="p">things</span></p>
+    <div class="list">
+      <div class="row"><svg class="i ok"><use href="#i-check"/></svg>Call the plumber about the leak<span class="d">Fri</span></div>
+      <div class="row"><svg class="i ok"><use href="#i-check"/></svg>Send the launch FAQ draft<span class="d">Thu</span></div>
+      <div class="row"><svg class="i ok"><use href="#i-check"/></svg>Pay the electricity bill<span class="d">Thu</span></div>
+      <div class="row"><svg class="i ok"><use href="#i-check"/></svg>Measure the bathroom floor<span class="d">Wed</span></div>
+      <div class="row"><svg class="i ok"><use href="#i-check"/></svg>Book the car service<span class="d">Tue</span></div>
+      <div class="row" style="color:var(--s500)">and 7 more</div>
+    </div>
+  </div>
+  <div class="foot"><button class="btn pri">Next: mind sweep</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-13 · Wins, empty</b>Nothing completed this week. Kind and short; no "0". Finishing this step still counts as a finished step (FR-029).</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Quick · 1 of 4</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="c"></i><i></i><i></i><i></i></div>
+  <div class="empty">
+    <svg class="i"><use href="#i-check"/></svg>
+    <h2>A quiet week</h2>
+    <p>Nothing was marked done in the last 7 days. That happens. Taking a few minutes now is how next week gets easier.</p>
+  </div>
+  <div class="foot"><button class="btn pri">Next: Inbox</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>Review chrome · leave (interrupted)</b>Shared by every step. Leaving is never a loss. A review with at least one decision or finished step is kept as partial; otherwise it's dropped quietly (FR-029). App kill, phone call or switching device behave the same, without the sheet.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Full · 4 of 10</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="s"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="body"><h1 class="h1">Tasks that ask for a decision</h1></div>
+  <div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="lv">
+    <div class="grab"></div>
+    <h2 id="lv" style="margin:0;font-size:20px;font-weight:600">Take a break?</h2>
+    <p class="p">Everything you've done is kept. Continue from step 4 any time, on any device.</p>
+    <button class="btn pri">Leave for now</button>
+    <button class="btn sec">Keep going</button>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-14 · Mind sweep (full only)</b>Quick capture straight into Inbox, one line at a time, with a few gentle prompts. Captured items are processed in the next step.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:04</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Full · 2 of 10</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="body">
+    <h1 class="h1">What's on your mind?</h1>
+    <p class="p">Get it out of your head. Don't sort it yet.</p>
+    <div class="prompts"><span>Promises to someone</span><span>Home</span><span>Work loose ends</span><span>Errands</span><span>Health</span><span>Money</span></div>
+    <div style="display:flex;gap:8px"><div class="field" role="textbox" aria-label="Add to Inbox"><span class="caret"></span><span class="ph">Type one thing</span></div><button class="add" aria-label="Add to Inbox"><svg class="i"><use href="#i-plus"/></svg></button></div>
+    <p class="lbl">Added to Inbox · 3</p>
+    <div class="list">
+      <div class="row"><svg class="i" style="color:var(--s400)"><use href="#i-inbox"/></svg>Reply to Mia about Saturday</div>
+      <div class="row"><svg class="i" style="color:var(--s400)"><use href="#i-inbox"/></svg>Renew the passport</div>
+      <div class="row"><svg class="i" style="color:var(--s400)"><use href="#i-inbox"/></svg>Squeaky door in the hall</div>
+    </div>
+  </div>
+  <div class="foot"><button class="btn pri">Next: Inbox</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-15 · Inbox, more than 15 items</b>FR-030: a choice before processing. "Process 10 now" leaves the rest in Inbox; the third option processes 10 now and then releases the remaining 13 to Someday (FR-030, confirmed by the owner on 2026-10-05).</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:06</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Full · 3 of 10</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="body">
+    <h1 class="h1">Your Inbox has 23 items</h1>
+    <p class="p">That's a lot for one sitting. Choose what fits today.</p>
+    <button class="choice"><b>Process 10 now</b><span>The other 13 wait in Inbox for next time.</span></button>
+    <button class="choice"><b>Process all 23</b><span>About 10–15 minutes.</span></button>
+    <button class="choice"><b>Process 10, release the rest to Someday</b><span>The other 13 move to Someday / maybe. Nothing is deleted.</span></button>
+  </div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-15 · Inbox, one item at a time</b>Reuses Process inbox (FR-034): progress, the item, optional organize chips, decision buttons, and its existing Undo toast.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:07</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Full · 3 of 10</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="body">
+    <p class="p" style="font-size:13px">Item 3 of 10</p>
+    <div class="item"><span class="t">Renew the passport</span><span class="m">Captured 2 minutes ago</span></div>
+    <div class="org"><span>Project</span><span>Tags</span><span>Due date</span></div>
+    <p class="p" style="font-size:14px">Is it actionable? Choose where it belongs.</p>
+    <div class="grid">
+      <button class="dec">Next action</button><button class="dec">Waiting for…</button>
+      <button class="dec">Someday / maybe</button><button class="dec">Done — under 2 min</button>
+      <button class="dec">Not needed</button><button class="dec">Skip</button>
+    </div>
+  </div>
+  <div class="toast" role="status" style="bottom:40px">"Reply to Mia about Saturday" → Next actions<button>Undo</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-15 · Inbox empty</b>Nothing to process: the step finishes by itself with one line, and counts as a finished step with nothing to decide.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:06</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Quick · 2 of 4</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="c"></i><i></i><i></i></div>
+  <div class="empty">
+    <svg class="i"><use href="#i-inbox"/></svg>
+    <h2>Inbox is empty</h2>
+    <p>Nothing to process.</p>
+  </div>
+  <div class="foot"><button class="btn pri">Next: decisions</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-15 · Inbox done, with release (and partial failure)</b>After processing 10 and releasing the rest. If any item changed elsewhere meanwhile, it is named and left in Inbox.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:15</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Leave</button><span class="ttl">Full · 3 of 10</span><button>Skip</button></div>
+  <div class="steps" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="body">
+    <h1 class="h1">Inbox done</h1>
+    <div class="list">
+      <div class="row"><svg class="i ok"><use href="#i-check"/></svg>10 items processed</div>
+      <div class="row"><svg class="i" style="color:var(--s500)"><use href="#i-archive"/></svg>12 released to Someday / maybe</div>
+    </div>
+    <div class="note"><svg class="i"><use href="#i-info"/></svg><span>"Buy printer paper" was changed on another device, so it stayed in Inbox.</span></div>
+  </div>
+  <div class="foot"><button class="btn pri">Next: decisions</button></div>
+</div>
+</figure>
+
+</div>
+</body>
+</html>

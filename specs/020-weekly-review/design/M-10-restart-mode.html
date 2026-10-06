@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M-10 · Restart mode after 21+ days (iOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1100px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600)}
+.frames{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;min-height:52px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.phone{width:390px;height:851px;background:var(--s50);border-radius:44px;overflow:hidden;position:relative;display:flex;flex-direction:column;box-shadow:var(--raised);border:1px solid var(--s300)}
+.sb{height:47px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font-size:15px;font-weight:600}
+.nb{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 8px}
+.nb .ttl{font-size:17px;font-weight:600}
+.nb button{min-width:44px;min-height:44px;border:0;background:none;color:var(--sky700);font-size:17px;padding:0 8px}
+.body{flex:1;overflow:hidden;padding:8px 16px 12px;display:flex;flex-direction:column;gap:14px}
+.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.h1{font-size:26px;font-weight:600;letter-spacing:-.02em;margin:0}
+.p{font-size:15px;color:var(--s600);line-height:1.45;margin:0}
+.card{background:#fff;border:1px solid var(--s200);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.card h2{margin:0;font-size:18px;font-weight:600;letter-spacing:-.01em}
+.card p{margin:0;font-size:14px;color:var(--s600);line-height:1.45}
+.list{background:#fff;border:1px solid var(--s200);border-radius:12px;overflow:hidden}
+.row{display:flex;justify-content:space-between;gap:10px;padding:10px 12px;min-height:44px;border-top:1px solid var(--s200);font-size:15px}.row:first-child{border-top:0}
+.row .m{font-size:12px;color:var(--s500);white-space:nowrap}
+.foot{flex:none;padding:10px 16px 30px;border-top:1px solid var(--s200);background:rgba(248,250,252,.95);display:flex;flex-direction:column;gap:8px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:50px;border-radius:12px;border:1px solid transparent;font-size:16px;font-weight:600;padding:0 16px}
+.btn.pri{background:var(--sky700);color:#fff}.btn.sec{background:#fff;border-color:var(--s200);color:var(--s900)}.btn.gh{background:none;color:var(--sky700);min-height:44px}
+.done{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--s200);border-radius:14px;padding:14px;font-size:15px;line-height:1.45}
+.done .i{color:var(--sky700);margin-top:2px}
+.note{border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700);display:flex;gap:8px;align-items:flex-start}
+.help{font-size:12px;color:var(--s500);text-align:center;margin:0}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+<symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+<symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>M-10 · Restart mode — iOS (full-screen review cover)</h1>
+  <p>When no counted review (FR-029) happened for 21 days or more (counted from onboarding if there has never been one), the review opens here (FR-017), after "While you were away" if that has anything to show. One offer: release every Next task older than 4 weeks to Someday in a single reversible action. Neutral wording: a gap is a fact, not a failure. No counts of missed weeks, no streak language.</p>
+  <p>"Older than 4 weeks" means formulation age, with the due-date pause applied (FR-046). Undo is available until the person leaves this restart screen (owner default). After that, each task can still be moved back individually from Someday.</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>M-10 · default</b>The offer with the count. Both paths are equal-weight; keeping everything is a normal choice.</figcaption>
+<div class="phone">
+  <div class="sb"><span>18:20</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Close</button><span class="ttl">Weekly review</span><span style="width:60px"></span></div>
+  <div class="body">
+    <h1 class="h1">Welcome back</h1>
+    <p class="p">Your last review was 26 days ago. Gaps happen. Let's make Next fit the week ahead.</p>
+    <div class="card">
+      <h2>17 next actions are older than 4 weeks</h2>
+      <p>Release them to Someday / maybe in one go? They keep their project, Tags and notes, and you can undo this right away.</p>
+      <button class="btn gh" aria-expanded="false">See which ones <svg class="i"><use href="#i-chev-d"/></svg></button>
+    </div>
+  </div>
+  <div class="foot"><button class="btn pri"><svg class="i"><use href="#i-archive"/></svg>Release 17 to Someday</button><button class="btn sec">Keep them and start the review</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-10 · list expanded</b>The person can check what would move before deciding. Read-only; to keep one, they keep all here and decide it later in the review.</figcaption>
+<div class="phone">
+  <div class="sb"><span>18:20</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Close</button><span class="ttl">Weekly review</span><span style="width:60px"></span></div>
+  <div class="body">
+    <div class="card">
+      <h2>17 next actions are older than 4 weeks</h2>
+      <button class="btn gh" aria-expanded="true">Hide the list</button>
+      <div class="list">
+        <div class="row"><span>Update the CV</span><span class="m">9 weeks</span></div>
+        <div class="row"><span>Clean out the garage</span><span class="m">7 weeks</span></div>
+        <div class="row"><span>Learn basic Portuguese</span><span class="m">7 weeks</span></div>
+        <div class="row"><span>Fix the bike's back brake</span><span class="m">6 weeks</span></div>
+        <div class="row"><span>Scan old photos</span><span class="m">6 weeks</span></div>
+        <div class="row"><span>Research a standing desk</span><span class="m">5 weeks</span></div>
+        <div class="row"><span>Plan the spring trip</span><span class="m">5 weeks</span></div>
+        <div class="row" style="color:var(--s500)"><span>and 10 more</span><span></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><button class="btn pri"><svg class="i"><use href="#i-archive"/></svg>Release 17 to Someday</button><button class="btn sec">Keep them and start the review</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-10 · released</b>Confirms what happened and offers Undo in one tap (US2-7). Then the review continues to the mode picker (M-11).</figcaption>
+<div class="phone">
+  <div class="sb"><span>18:21</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Close</button><span class="ttl">Weekly review</span><span style="width:60px"></span></div>
+  <div class="body">
+    <h1 class="h1">Welcome back</h1>
+    <div class="done" role="status"><svg class="i"><use href="#i-check"/></svg><span>17 tasks released to Someday / maybe. Next now holds 12 tasks.</span></div>
+    <button class="btn sec"><svg class="i"><use href="#i-undo"/></svg>Undo</button>
+  </div>
+  <div class="foot"><button class="btn pri">Start the review</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-10 · undone</b>Everything is back exactly as it was, including each task's clock.</figcaption>
+<div class="phone">
+  <div class="sb"><span>18:21</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Close</button><span class="ttl">Weekly review</span><span style="width:60px"></span></div>
+  <div class="body">
+    <h1 class="h1">Welcome back</h1>
+    <div class="done" role="status"><svg class="i"><use href="#i-undo"/></svg><span>Undone. All 17 are back in Next as they were.</span></div>
+  </div>
+  <div class="foot"><button class="btn pri">Start the review</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-10 · partial failure</b>Some tasks changed on another device between showing the offer and applying it; those are left alone. Undo covers exactly the ones released.</figcaption>
+<div class="phone">
+  <div class="sb"><span>18:21</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Close</button><span class="ttl">Weekly review</span><span style="width:60px"></span></div>
+  <div class="body">
+    <h1 class="h1">Welcome back</h1>
+    <div class="done" role="status"><svg class="i"><use href="#i-check"/></svg><span>15 tasks released to Someday / maybe.</span></div>
+    <div class="note"><svg class="i"><use href="#i-info"/></svg><span>2 tasks changed on another device in the meantime, so they stayed in Next: "Plan the spring trip" and "Scan old photos".</span></div>
+    <button class="btn sec"><svg class="i"><use href="#i-undo"/></svg>Undo the 15</button>
+  </div>
+  <div class="foot"><button class="btn pri">Start the review</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-10 · set up but never reviewed</b>Onboarding was done 21+ days ago but no review has happened. Same neutral offer, without "Welcome back" or any wording that implies the person has been away (owner default).</figcaption>
+<div class="phone">
+  <div class="sb"><span>18:20</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Close</button><span class="ttl">Weekly review</span><span style="width:60px"></span></div>
+  <div class="body">
+    <h1 class="h1">Your first review</h1>
+    <p class="p">Let's make Next fit the week ahead.</p>
+    <div class="card">
+      <h2>17 next actions are older than 4 weeks</h2>
+      <p>Release them to Someday / maybe in one go? They keep their project, Tags and notes, and you can undo this right away.</p>
+      <button class="btn gh" aria-expanded="false">See which ones</button>
+    </div>
+  </div>
+  <div class="foot"><button class="btn pri"><svg class="i"><use href="#i-archive"/></svg>Release 17 to Someday</button><button class="btn sec">Keep them and start the review</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-10 · empty (nothing older than 4 weeks)</b>Restart mode still welcomes the person back, but with no offer: there is nothing to release.</figcaption>
+<div class="phone">
+  <div class="sb"><span>18:20</span><span>●●● 100%</span></div>
+  <div class="nb"><button>Close</button><span class="ttl">Weekly review</span><span style="width:60px"></span></div>
+  <div class="body">
+    <h1 class="h1">Welcome back</h1>
+    <p class="p">Your last review was 23 days ago. Gaps happen. Nothing in Next is older than 4 weeks, so let's go straight in.</p>
+  </div>
+  <div class="foot"><button class="btn pri">Start the review</button></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-10 · offline / interrupted</b>Release and Undo apply on the device and sync later. If the app is closed after releasing, the review resumes past this screen; the released tasks stay in Someday and can be moved back one by one.</figcaption>
+<div class="phone">
+  <div class="sb"><span>18:21</span><span>✈︎ 100%</span></div>
+  <div class="nb"><button>Close</button><span class="ttl">Weekly review</span><span style="width:60px"></span></div>
+  <div class="body">
+    <h1 class="h1">Welcome back</h1>
+    <div class="done" role="status"><svg class="i"><use href="#i-check"/></svg><span>17 tasks released to Someday / maybe. Next now holds 12 tasks.</span></div>
+    <button class="btn sec"><svg class="i"><use href="#i-undo"/></svg>Undo</button>
+    <p class="help">Offline. Changes are saved on this iPhone and sync later.</p>
+  </div>
+  <div class="foot"><button class="btn pri">Start the review</button></div>
+</div>
+</figure>
+
+</div>
+</body>
+</html>

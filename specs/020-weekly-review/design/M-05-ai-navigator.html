@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M-05 · AI navigator in the decision card, on-device (iOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1100px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600)}
+.frames{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+figure{margin:0;width:390px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;min-height:52px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.phone{width:390px;height:851px;background:var(--s50);border-radius:44px;overflow:hidden;position:relative;display:flex;flex-direction:column;box-shadow:var(--raised);border:1px solid var(--s300)}
+.sb{height:47px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 30px 6px;font-size:15px;font-weight:600}
+.scrim{position:absolute;inset:0;background:rgba(15,23,42,.35)}
+.sheet{position:absolute;left:0;right:0;bottom:0;top:58px;background:var(--s50);border-radius:20px 20px 0 0;display:flex;flex-direction:column;box-shadow:var(--float)}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--s300);margin:6px auto 0;flex:none}
+.nb{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 8px}
+.nb .ttl{font-size:17px;font-weight:600}
+.nb button{min-width:44px;min-height:44px;border:0;background:none;color:var(--sky700);font-size:17px;padding:0 8px;display:inline-flex;align-items:center}
+.sbody{flex:1;overflow:hidden;padding:2px 16px 16px;display:flex;flex-direction:column;gap:12px}
+.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin:2px 4px -4px}
+.ctx{font-size:13px;color:var(--s500);margin:0}
+.h2{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0;line-height:1.3}
+.field{width:100%;min-height:52px;border:1px solid var(--s200);border-radius:12px;background:#fff;padding:13px 12px;font-size:16px;line-height:1.35}
+.field.on{border:1.5px solid var(--sky500)}
+.ph{color:var(--s400)}
+.caret{display:inline-block;width:2px;height:18px;background:var(--sky500);vertical-align:-3px;margin-left:1px}
+.help{font-size:12px;color:var(--s500);margin:-4px 4px 0;line-height:1.45}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:50px;border-radius:12px;border:1px solid transparent;font-size:16px;font-weight:600;padding:0 16px}
+.btn.pri{background:var(--sky700);color:#fff}.btn.sec{background:#fff;border-color:var(--s200);color:var(--s900)}.btn.gh{background:none;color:var(--sky700);min-height:44px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.spacer{flex:1}
+.nav{background:#fff;border:1px solid var(--s200);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.navh{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--s700)}
+.navh .i{color:var(--sky700)}
+.prop{display:flex;gap:10px;align-items:flex-start;width:100%;min-height:48px;padding:11px 12px;border:1px solid var(--s200);border-radius:10px;background:var(--s50);text-align:left;font-size:15px;line-height:1.35}
+.prop .rb{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--s300);flex:none;margin-top:1px;background:#fff}
+.prop.on{border:1.5px solid var(--sky500);background:var(--sky50)}
+.prop.on .rb{border:6px solid var(--sky700)}
+.prov{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--s500)}
+.skel{background:var(--s200);border-radius:6px;height:14px}
+.note{border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700);display:flex;gap:8px;align-items:flex-start}
+.note.info{background:var(--sky50);border-color:var(--sky200);color:var(--sky700)}
+.was{display:flex;gap:8px;align-items:flex-start;background:#fff;border:1px dashed var(--s300);border-radius:12px;padding:10px 12px;font-size:13px;color:var(--s600);line-height:1.45}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-chev-l" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+<symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z"/></symbol>
+<symbol id="i-device" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></symbol>
+<symbol id="i-ask" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+<symbol id="i-notes" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M10 13H8M16 17H8"/></symbol>
+<symbol id="i-retry" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+<symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01M8.5 16.43a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M5 13a10 10 0 0 1 5.24-2.76M2 2l20 20"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>M-05 · AI navigator inside the decision card — on-device (iOS)</h1>
+  <p>Shown inside the "Find a first step" and "Reformulate" forms (M-04) after "Suggest". It uses Apple's on-device model when available (FR-022): no server request, no consent prompt, works offline, and a short line says so. The navigator panel uses neutral white with a sky Compass, not the emerald/Sparkles tokens, which stay reserved for the speculative Execution exploration.</p>
+  <p>Input is exactly title, notes, chosen reason, project name and up to 20 other open task titles in the project (FR-019). Proposals are 1–3, never duplicate an open task in the project, and never add people, places, amounts or dates not already in the task (FR-021). Picking fills the field; only "Save" writes (FR-020).</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>M-05 · loading</b>Static placeholder lines, no animated shimmer. "Stop" cancels and returns to the empty field. Typically under 2 s on device.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="b1">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="b1">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · reason: too big</p>
+      <p class="h2">What's the very first thing you'd do?</p>
+      <div class="field" role="textbox" aria-label="First step"><span class="ph">Something you could start in 10 minutes</span></div>
+      <div class="nav" aria-busy="true">
+        <div class="navh"><svg class="i"><use href="#i-compass"/></svg>Suggesting on this iPhone…</div>
+        <div class="skel" style="width:85%"></div><div class="skel" style="width:70%"></div><div class="skel" style="width:78%"></div>
+        <button class="btn gh">Stop</button>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save first step</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-05 · proposals</b>Three grounded proposals in the task's language, with the on-device note. "None of these" closes the panel and leaves the task unchanged (US3-3).</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="b2">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="b2">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · reason: too big</p>
+      <div class="field" role="textbox" aria-label="First step"><span class="ph">Something you could start in 10 minutes</span></div>
+      <div class="nav" role="radiogroup" aria-label="Suggested first steps">
+        <div class="navh"><svg class="i"><use href="#i-compass"/></svg>Pick one to edit</div>
+        <button class="prop" role="radio" aria-checked="false"><span class="rb"></span>Measure the bathroom walls and floor</button>
+        <button class="prop" role="radio" aria-checked="false"><span class="rb"></span>List what you want changed in the bathroom</button>
+        <button class="prop" role="radio" aria-checked="false"><span class="rb"></span>Take photos of the bathroom to send for quotes</button>
+        <div class="prov"><svg class="i" style="width:14px;height:14px"><use href="#i-device"/></svg>Suggested on this iPhone. Nothing left the device.</div>
+        <button class="btn gh">None of these</button>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save first step</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-05 · proposal picked, editing</b>The pick fills the field for editing; the person changed "walls and floor" to "floor". Nothing is written until "Save first step". The old wording still goes to notes.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="b3">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="b3">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · reason: too big</p>
+      <div class="field on" role="textbox" aria-label="First step">Measure the bathroom floor<span class="caret"></span></div>
+      <div class="nav" role="radiogroup" aria-label="Suggested first steps">
+        <button class="prop on" role="radio" aria-checked="true"><span class="rb"></span>Measure the bathroom walls and floor</button>
+        <button class="prop" role="radio" aria-checked="false"><span class="rb"></span>List what you want changed in the bathroom</button>
+        <button class="prop" role="radio" aria-checked="false"><span class="rb"></span>Take photos of the bathroom to send for quotes</button>
+        <div class="prov"><svg class="i" style="width:14px;height:14px"><use href="#i-device"/></svg>Suggested on this iPhone. Nothing left the device.</div>
+      </div>
+      <div class="was"><svg class="i"><use href="#i-notes"/></svg><span>Kept in notes as <b>Was: Renovate the bathroom</b></span></div>
+      <div class="spacer"></div>
+      <button class="btn pri">Save first step</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-05 · clarifying question</b>FR-021: too little to go on, so one question instead of invented facts. The answer is added to the task's notes (a normal notes edit, which does not touch the clock) and the navigator runs again on the updated notes. Confirmed by the owner on 2026-10-05.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="b4">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="b4">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Sort things out · no project · reason: unclear</p>
+      <div class="field" role="textbox" aria-label="First step"><span class="ph">Something you could start in 10 minutes</span></div>
+      <div class="nav">
+        <div class="navh"><svg class="i"><use href="#i-ask"/></svg>One question first</div>
+        <p style="margin:0;font-size:15px;line-height:1.4">What does "things" mean here? Which part of your life or home is this about?</p>
+        <div class="field on" role="textbox" aria-label="Your answer">The spare room<span class="caret"></span></div>
+        <button class="btn sec">Add to notes and suggest again</button>
+        <div class="prov"><svg class="i" style="width:14px;height:14px"><use href="#i-device"/></svg>On this iPhone. Your answer is saved in the task's notes.</div>
+        <button class="btn gh">I'll write my own step</button>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save first step</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-05 · offline, on-device</b>The on-device model works in airplane mode (FR-022). Same proposals and note.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>✈︎ 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="b5">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="b5">Reformulate</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Book a dentist appointment · reason: unpleasant / no energy</p>
+      <div class="field" role="textbox" aria-label="New wording">Book a dentist appointment</div>
+      <div class="nav" role="radiogroup" aria-label="Suggested wordings">
+        <div class="navh"><svg class="i"><use href="#i-compass"/></svg>Pick one to edit</div>
+        <button class="prop" role="radio" aria-checked="false"><span class="rb"></span>Look up the dentist's booking page</button>
+        <button class="prop" role="radio" aria-checked="false"><span class="rb"></span>Find the dentist's phone number and save it</button>
+        <div class="prov"><svg class="i" style="width:14px;height:14px"><use href="#i-device"/></svg>Suggested on this iPhone. Works offline.</div>
+        <button class="btn gh">None of these</button>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save new wording</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>M-05 · error (on-device)</b>The model produced nothing usable (malformed, or every proposal duplicated an open task). Plain reason, retry, and the card stays usable. No correlation ID: nothing went to a server.</figcaption>
+<div class="phone">
+  <div class="sb"><span>16:02</span><span>●●● 100%</span></div><div class="scrim"></div>
+  <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="b6">
+    <div class="grab"></div>
+    <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Back</button><span class="ttl" id="b6">First step</span><span style="width:60px"></span></div>
+    <div class="sbody">
+      <p class="ctx">Renovate the bathroom · reason: too big</p>
+      <div class="field" role="textbox" aria-label="First step"><span class="ph">Something you could start in 10 minutes</span></div>
+      <div class="note" role="status"><svg class="i"><use href="#i-compass"/></svg><span>No useful suggestion this time. You can try again, or write your own step.</span></div>
+      <button class="btn sec"><svg class="i"><use href="#i-retry"/></svg>Try again</button>
+      <div class="spacer"></div>
+      <button class="btn pri" disabled>Save first step</button>
+    </div>
+  </section>
+</div>
+</figure>
+
+</div>
+</body>
+</html>
