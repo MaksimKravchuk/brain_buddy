@@ -634,26 +634,32 @@ PR-05 was declared "SHOW (mech. SHIP)" in the first plan although its existing t
 | PR-05 | Kit status, cadence and session: `SyncPresentation` (snapshot, describer, timing, copy catalogue incl. sign-out issue and backup sentences), `SyncActivityIndicator`, `failingSince`, `lastFailedAttemptAt`, `accountLinkedAt` and reference id in `SyncMetadata`, the 60 s confirmation attempt, `.periodic` (no-op when idle) and `PeriodicSyncTicker`, forced pull on foreground, single-flight `syncNow`, device-neutral refusal, sign-out order, macOS token-store attributes, `Workspace.syncSnapshot`; convergence and offline matrix (SC-001, SC-002) | PR-04 | `…/BrainBuddyCore/{SyncPresentation,SyncActivityIndicator,Outbox}.swift`, `…/BrainBuddySync/{BrainBuddySync,SyncConfiguration,SyncEngine,SyncEngine+Cycle,SyncEngine+Session,PeriodicSyncTicker}.swift`, `…/BrainBuddyAPI/SessionTokenStore.swift`, `…/BrainBuddyWorkspace/Workspace.swift`, `…/Tests/BrainBuddyCoreTests/{SyncPresentationTests,SyncActivityIndicatorTests}.swift`, `…/Tests/BrainBuddySyncTests/{SyncEngineFailingClockTests,SyncEngineSchedulingTests,SyncEngineSessionTests,PeriodicSyncTickerTests}.swift`, `…/Tests/BrainBuddyWorkspaceTests/{MacIPhoneConvergenceTests,WorkspaceSyncTests}.swift` | **ASK** (mech.: `SyncEngineSessionTests.swift`, `SessionTokenStore.swift`; semantic: session end, account switch, sign-out order, token store) |
 | PR-06 | Web D-01: archived disclosure, archived project page, Unarchive with every state incl. the name-clash refusal, archive hint, archived-just-now, "· archived" names, FR-027 line, 45 s visible refetch on the list, projects, tags and open task detail, type drift fix, Playwright (archive and cross-client refresh) and axe | PR-03 | `frontend/src/api/{client.ts,taskTypes.ts,taskHooks.ts}`, `frontend/src/api/__tests__/{client.test.ts,clientParity.test.ts,taskHooks.test.ts}`, `frontend/src/components/shell/AppShell.tsx`, `frontend/src/components/shell/__tests__/AppShell.test.tsx`, `frontend/src/features/tasks/{TaskListPage.tsx,TaskDetailPanel.tsx,ArchivedProjectNotice.tsx}`, `frontend/src/features/tasks/__tests__/{TaskListPage.test.tsx,ArchivedProjectNotice.test.tsx,TaskDetailAutosaveUI.contract.test.tsx}`, `frontend/tests/e2e/{archived-projects.spec.ts,cross-client-refresh.spec.ts}`, `frontend/tests/allure.fixtures.ts` | **SHOW** (mech. SHIP) |
 | PR-07 | iPhone M-01 and M-02: status row via the describer (lists, Lists hub, Settings › Sync), attention rows as buttons, long-press "Copy reference ID", Settings "Sync now" enabled during a sync, `PeriodicSyncTicker` toggled by the scene phase, Sync issues via `SyncIssueDescriber`, sign-out confirmation naming open issues, archive copy, archived project screen via `projectDisplay`, the name-clash refusal, Unarchive swipe / toolbar / VoiceOver action; `ios/AGENTS.md` copy; `docs/native-ios-app.md` (archive, backend asks 5 and 7 done, `X-Client` macOS); manual evidence | PR-05 | `ios/BrainBuddy/App/BrainBuddyApp.swift`, `ios/BrainBuddy/Components/SyncStatusLabel.swift`, `ios/BrainBuddy/Screens/Lists/TaskListScreen.swift`, `ios/BrainBuddy/Screens/Browse/{ListsHubScreen,ProjectsScreen}.swift`, `ios/BrainBuddy/Screens/Settings/{SettingsScreen,SyncIssuesScreen,SignInSheet}.swift`, `ios/AGENTS.md`, `docs/native-ios-app.md`, `specs/021-mac-sync/evidence/{manual-ios-status.md,manual-ios-archive.md}` | **SHOW** (mech. SHIP) |
-| PR-08 | Mac adoption, account-less: tools 6.2 / Swift 6, kit dependency, `WorkspaceHost`, `SingleInstanceGuard`, legacy import with verification, backup and X-05, `MacLocalState` review marks, model replaced by `Workspace`, X-06, removals, account-less X-01 line, Mac tests in Swift Testing, data-retention rows (Mac store, backup, sidecar), upgrade evidence | PR-01, PR-05; 020 PR-06 landed (external) | `macos/Package.swift`, `macos/Package.resolved`, `macos/Sources/BrainBuddyMac/{BrainBuddyMacApp,ContentView,ProjectReviewView,QuickCaptureView,QuickOpenView,VoiceCapture,WorkspaceHost,SingleInstanceGuard,MacLocalState,LegacySnapshot,LegacyStoreImporter,UpgradeNotice,LocalGTDStore,APIClient,SmartAddParser}.swift`, `macos/Tests/BrainBuddyMacTests/{OfflineWorkspaceTests,LegacyStoreImporterTests,MacLocalStateTests,SingleInstanceGuardTests,APIClientTests,LocalGTDStoreTests,SmartAddParserTests}.swift`, `macos/Tests/BrainBuddyMacTests/Resources/{legacy-populated,legacy-corrupt,legacy-newer}.json`, `macos/README.md`, `docs/data-retention.md`, `specs/021-mac-sync/evidence/manual-macos-upgrade.md` | **ASK** (semantic: one-time migration of real user data; mech. SHIP) |
-| PR-09 | Mac sync: X-03 sign-in sheet, X-04 sign-out, X-01 every state, X-02 popover, X-07 menus and ⌘R, `SyncTriggerSource` (activation, path monitor, 15 s tick, flush), Keychain service, macOS client identity; `docs/native-macos-app.md`; AGENTS.md line; data-retention Keychain row; status evidence | PR-08 | `macos/Sources/BrainBuddyMac/{BrainBuddyMacApp,ContentView,WorkspaceHost,SyncTriggerSource,SyncStatusLine,SyncStatusPopover,SignInSheet,SignOutConfirmation,SyncMenuCommands}.swift`, `macos/Tests/BrainBuddyMacTests/{SyncTriggerSourceTests,MacSyncFlowTests}.swift`, `docs/native-macos-app.md`, `AGENTS.md`, `macos/README.md`, `docs/data-retention.md`, `specs/021-mac-sync/evidence/manual-macos-status.md` | **ASK** (semantic: session credential, first egress of Mac data; mech. SHIP) |
-| PR-10 | Release gates: 021 requirement coverage and the evidence-file checks in `make check-specs` (gate integrity re-recorded); coverage floors raised; evidence README and owner-week template | PR-06, PR-07, PR-09; 020 PR-01 landed (external) | `Makefile`, `.specify/gate-integrity.json`, `backend/coverage-floor.json`, `frontend/coverage-floor.json`, `specs/021-mac-sync/evidence/{README.md,owner-week.md}` | **ASK** (mech.: `Makefile`) |
+| PR-08 | Mac adoption, account-less: tools 6.2 / Swift 6, kit dependency, `WorkspaceHost`, `SingleInstanceGuard` with X-08, legacy import with its durable state machine, staging file, verification, backup and every X-05 state incl. "later file" (FR-033), `MacLocalState` review marks with content stamps, legacy cookie cleanup, model replaced by `Workspace`, X-06 incl. the File-menu keyboard path and the refused state, removals, account-less X-01 line, Mac tests in Swift Testing, data-retention rows as written in data-model E5, E7, E8 (Mac store, sidecar, backup, kept files, legacy cookie) and the export sentence, upgrade and archive evidence | PR-01, PR-05; 020 PR-06 landed (external) | `macos/Package.swift`, `macos/Package.resolved`, `macos/Sources/BrainBuddyMac/{BrainBuddyMacApp,ContentView,ProjectReviewView,QuickCaptureView,QuickOpenView,VoiceCapture,WorkspaceHost,SingleInstanceGuard,MacLocalState,LegacySnapshot,LegacyStoreImporter,UpgradeNotice,LegacyCookieCleanup,ProjectMenuCommands,LocalGTDStore,APIClient,SmartAddParser}.swift`, `macos/Tests/BrainBuddyMacTests/{OfflineWorkspaceTests,LegacyStoreImporterTests,MacLocalStateTests,SingleInstanceGuardTests,LegacyCookieCleanupTests,APIClientTests,LocalGTDStoreTests,SmartAddParserTests}.swift`, `macos/Tests/BrainBuddyMacTests/Resources/{legacy-populated,legacy-corrupt,legacy-newer}.json`, `macos/README.md`, `docs/data-retention.md`, `specs/021-mac-sync/evidence/{manual-macos-upgrade.md,manual-macos-archive.md}` | **ASK** (semantic: one-time migration of real user data, legacy session removal; mech. SHIP) |
+| PR-09 | Mac sync: X-03 sign-in sheet incl. Cancel while loading, "no answer" and "couldn't save sign-in", X-04 sign-out with the issue and backup sentences, X-01 every state, X-02 popover incl. dismissal focus, kept outcome, backup and later-file lines, X-07 menus and ⌘R, `MacPresentationRouter`, `SyncTriggerSource` (activation, path monitor, the kit ticker, flush), Keychain service, macOS client identity; `docs/native-macos-app.md` (incl. the login-keychain disposition); AGENTS.md line; data-retention Keychain row as written in data-model E9; status evidence | PR-08 | `macos/Sources/BrainBuddyMac/{BrainBuddyMacApp,ContentView,WorkspaceHost,SyncTriggerSource,SyncStatusLine,SyncStatusPopover,SignInSheet,SignOutConfirmation,SyncMenuCommands,MacPresentationRouter}.swift`, `macos/Tests/BrainBuddyMacTests/{SyncTriggerSourceTests,MacSyncFlowTests,MacPresentationRouterTests,MacKeychainTests,MacPrivacyGuardTests}.swift`, `docs/native-macos-app.md`, `AGENTS.md`, `macos/README.md`, `docs/data-retention.md`, `specs/021-mac-sync/evidence/manual-macos-status.md` | **ASK** (semantic: session credential, first egress of Mac data; mech. SHIP) |
+| PR-10 | Release gates: 021 requirement coverage (every id except SC-007) and `scripts/check_manual_evidence.py` (headers, per-state checklists, SHA ancestry, SC-007 pending) in `make check-specs` (gate integrity re-recorded); coverage floors raised; evidence README (content-free rule) and owner-week template | PR-06, PR-07, PR-09; 020 PR-01 landed (external) | `Makefile`, `.specify/gate-integrity.json`, `backend/coverage-floor.json`, `frontend/coverage-floor.json`, `scripts/check_manual_evidence.py`, `scripts/test_check_manual_evidence.py`, `specs/021-mac-sync/evidence/{README.md,owner-week.md}` | **ASK** (mech.: `Makefile`, `scripts/`) |
+
+**PR-08 task lanes** (review c1, F47): PR-08 stays one slice, but `/speckit-tasks` splits it into two task lanes: (a) importer and host: `LegacySnapshot`, `LegacyStoreImporter`, `UpgradeNotice`, `MacLocalState`, `SingleInstanceGuard`, `LegacyCookieCleanup`, `WorkspaceHost`, their tests and fixtures, mostly new files; (b) rebinding: `ContentView` and the other views onto `Workspace`, `ProjectMenuCommands`, the removals. The importer is wired into the launch order only by the last task, after the rebinding: until then the old `BrainBuddyModel` still reads `local-gtd.json`, and an importer that renamed it would break the running build.
 
 **Lanes inside 021**:
 
 ```text
-PR-01 ─────────────────────────────────────────────┐
-PR-02 → PR-03 → PR-06 (web)                         │
-              → PR-04 → PR-05 → PR-07 (iPhone)      │
-                              → PR-08 (Mac) ←───────┘ → PR-09 (Mac sync UI)
-PR-06 + PR-07 + PR-09 → PR-10
+PR-01 ───────────────────────────────────────────────────────┐
+PR-02 → PR-03 → PR-06 (web)                                   │
+              → PR-04 → PR-05 (ASK) → PR-07 (iPhone)          │
+                                    → PR-08 (Mac, ASK) ←──────┘ → PR-09 (Mac sync UI, ASK)
+PR-06 + PR-07 + PR-09 → PR-10 (ASK)
 ```
+
+PR-05's development may start beside PR-04 (its pure status files share nothing with PR-04), but it lands after PR-04 and through the ASK procedure.
 
 Independent slices with no edge between them share no write path:
 
 - PR-06 is frontend only.
 - PR-07 owns `docs/native-ios-app.md` and `ios/AGENTS.md`.
 - `docs/data-retention.md` is written by PR-02, PR-08 and PR-09, which form a dependency chain.
-- The trace copy under `ios/BrainBuddyKit/Tests/…/Resources/` is written by PR-02 and PR-03 (a chain), and is read but not written by PR-04.
+- `AGENTS.md` is written by PR-09 only (research R22).
+- `backend/tests/test_project_archive_traces.py` is written by PR-02 and PR-04, and the backend fixture by PR-02 and PR-03 (chains through PR-03).
+- The trace copy under `ios/BrainBuddyKit/Tests/…/Resources/` is written by PR-04 only; PR-02 and PR-03 write nothing under `ios/`.
 
 **Parallelism with 020's waves** (research R20; 020 lanes from `specs/020-weekly-review/tasks.md:511-524`):
 
@@ -671,28 +677,26 @@ The 020 lane that 021 leans on most is iOS core (020 PR-03 → PR-04). Recommend
 
 ## ASK-class surfaces (summary)
 
-- **ASK paths**: `backend/app/api/tasks.py` and `backend/app/api/middleware.py` (explicit ASK paths).
-- **`.github/workflows/ci.yml`** (`.github/`). It is protected by invariants only, and no invariant is touched.
-- **`scripts/validate_ci_artifacts.py`, `scripts/render_feature_report.py` and their tests** (`scripts/`).
-- **`Makefile`** (guarded). Re-record `.specify/gate-integrity.json` with `python3 scripts/check_gate_integrity.py --update` in the same commit. The `check-specs` invariant keeps the 019 line, and 021 is added beside it and beside 020's.
-- **Semantic ASK**: PR-08 (one-time migration of real local data) and PR-09 (session credential; first egress of Mac data).
+- **ASK paths**: `backend/app/api/tasks.py` and `backend/app/api/middleware.py` (explicit ASK paths), PR-02.
+- **Session token paths** (token `session`): `ios/BrainBuddyKit/Sources/BrainBuddyAPI/SessionTokenStore.swift` and `ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineSessionTests.swift`, PR-05 (review c1, F01).
+- **`.github/workflows/ci.yml`** (`.github/`), PR-01. It is protected by invariants only, and no invariant is touched.
+- **`scripts/validate_ci_artifacts.py`, `scripts/render_feature_report.py` and their tests** (`scripts/`), PR-01; **`scripts/check_manual_evidence.py` and its test**, PR-10.
+- **`Makefile`** (guarded), PR-10. Re-record `.specify/gate-integrity.json` with `python3 scripts/check_gate_integrity.py --update` in the same commit. The `check-specs` invariant keeps the 019 line, and 021 is added beside it and beside 020's.
+- **Semantic ASK**: PR-05 (session end, account switch, sign-out order, token store), PR-08 (one-time migration of real local data; legacy session removal) and PR-09 (session credential; first egress of Mac data).
 - **Review risk**: `plan.md` names ASK `.py` and `.yml` paths, so `scripts/spec_kit_planning_review.py` derives risk **high** for this feature, and the review run needs the recorded human sign-off (ADR-0012).
 
 ## Inconsistencies found while planning
 
-These were found in spec.md, design.md and repository docs. Neither spec.md nor design.md was edited; the plan's handling is stated for each.
+These were found in spec.md, design.md and repository docs while planning. Items 1 – 5 are now **resolved**: the spec amendment `0b9fffe` settled 1 – 4, the FR-019 amendment `b83d367` settled 5, and review c1 brought the plan, research, contracts and design.md in line (review c1, F11, F40).
 
-1. **Task deletion and manual reorder do not exist anywhere.**
-   - FR-007 lists a task's "manual order" and "deletion"; FR-009 protects "dragging"; the edge case "Same task deleted on one device and edited on another" assumes task deletion.
-   - In fact no client and no server route deletes a task or reorders one: there is no `DELETE /tasks`, the kit has no delete or reorder command, and the Mac has no drag (`ContentView.swift` has no `onMove`).
-   - **Plan**: "manual order" is the create-time `order_key`, carried as is and preserved by the import. Task deletion is not applicable (cancel is the terminal action). The "deleted elsewhere" sync-issue copy is kept for the 404 path that a foreign or purged record can still produce. The spec should drop "deletion" and "dragging" for tasks, or a later feature adds them.
-2. **SC-001 needs the iPhone and the web to poll; no FR says so.**
-   - SC-001 measures Mac ↔ iPhone and Mac ↔ web in both directions within 60 s with both clients open, but FR-006 gives periodic fetching to the Mac only.
-   - Today the iPhone pulls only on foreground and a 30-minute background refresh, and the web never polls.
-   - **Plan**: a 15 s `.periodic` tick on the iPhone while active, and a 45 s visible-tab refetch on the web task list and projects (research R8). A one-line FR addition would make this explicit.
-3. **The backup outlives sign-out.** FR-021 keeps the pre-upgrade backup "at least 30 days, or until the person signs out, whichever is later". US1-6 and FR-018 say signing out removes the account's data from the Mac. The backup holds pre-upgrade Mac data that was uploaded into the account at sign-in, so after sign-out a copy stays on disk for up to 30 days. **Plan**: implemented as written (E8) and listed in `docs/data-retention.md`.
-4. **Design gap G-8, "already open".** The edge case "a second copy … refuses to start … and the person is told in plain words" has no design screen. **Plan**: bring the running copy forward; otherwise a system alert "Brain Buddy is already open." / "Close the other copy of Brain Buddy, then open it again." with "Quit" (research R6). The design owner should confirm the copy.
-5. **iPhone "Sync now" parity.** design.md "Notes for the plan" says that FR-013 governs the Mac only and that the iPhone Settings "Sync now" may stay disabled during a sync. The FR-019 amendment (`b83d367`) makes the single-flight rule apply "on both platforms". **Plan**: follows FR-019 (PR-07). The design note is superseded and needs no screen change.
+1. **Task deletion and manual reorder do not exist anywhere** — resolved by `0b9fffe` (FR-007, FR-009 and the edge case no longer mention them).
+   - No client and no server route deletes a task or reorders one: there is no `DELETE /tasks`, the kit has no delete or reorder command, and the Mac has no drag (`ContentView.swift` has no `onMove`).
+   - **Project deletion does not exist either** (review c1, F63): the server's only DELETE is `/tags/{tag_id}` (`backend/app/api/tasks.py:691`), and no client deletes a project. ADR-0020's "List deletion remains a separate, confirmed, irreversible operation" names a future operation. US2-5's example now uses a project archived elsewhere.
+   - **Plan**: "manual order" is the create-time `order_key`, carried as is and preserved by the import. The "deleted elsewhere" sync-issue copy is kept, labelled as a defensive path, for the 404 that a foreign or purged record can still produce (kit-commands §5); no test or example assumes a delete route.
+2. **SC-001 needs the iPhone and the web to poll** — resolved by `0b9fffe` (FR-032). **Plan**: the kit's `PeriodicSyncTicker` (15 s, pull age 30 s) on the iPhone while active, and a 45 s visible-tab refetch on the web task list, projects, tags and open task detail (research R8).
+3. **The backup outlives sign-out** — resolved by `0b9fffe` (Assumptions) and review c1 (FR-021 states that without a sign-out the backup is kept). **Plan**: implemented as written (E8), listed in `docs/data-retention.md` with the row text of data-model E8, and stated in the X-04 confirmation with its date (review c1, F27, F42).
+4. **Design gap G-8, "already open"** — resolved by design X-08 and FR-017 (`0b9fffe`). **Plan**: bring the running copy forward; otherwise X-08: "Brain Buddy is already open." / "Switch to the open window to keep working." with "OK" (research R6). The copy first proposed here ("Close the other copy …" with "Quit") is withdrawn.
+5. **iPhone "Sync now" parity** — resolved by the FR-019 amendment (`b83d367`). **Plan**: follows FR-019 (PR-07). design.md's superseded note is corrected and M-01 has the "Settings › Sync, sync running" row.
 6. **`docs/api-compatibility.md` is stale.** It says "There is no mobile/iOS client contract yet" and asks for an API semantic version before a second client. The iPhone already exists, and the Mac is a third. **Plan**: PR-02 updates the doc. A versioned API stays out of scope, because every change is additive.
 7. **ADR-0020 mentions "trashed Tasks".** No trash state exists in the backend or the kit. There is no impact.
 8. **Brief versus code.**
@@ -712,14 +716,18 @@ G-1 – G-3 were resolved by the spec amendment of 2026-10-06, and G-4 – G-6 a
 - **G-5** (flicker): resolved by decision 1. The thresholds live in `SyncTiming` (sync-status §1).
 - **G-6** (plain sign-out confirmation): resolved by decision 3. The copy is `signOutNothingUnsent`.
 - **G-7** (`SCREEN_ID_RE`): widened to `[DMX]-\d{2}` in PR-01.
+- **G-8** ("already open"): resolved by design X-08 (`0b9fffe`); realised in `SingleInstanceGuard` (research R6).
 
 ## Open questions for the product owner
 
-1. **Completion and creation dates after the first sign-in** (research R5, "Known limit").
-   - The server sets `created_at`, `completed_at` and `waiting_since` itself, and accepts no client time. After the Mac's first sign-in, the History of tasks completed before the upgrade shows the sign-in day as their completion day. Order, due dates and everything else are kept.
-   - The iPhone's account-less upload behaves the same today.
-   - Keeping the original dates would need the server to accept client timestamps on create and transitions, which intake §4 lists as out of scope.
-   - **Default if no answer**: accept the limit, and record it in `docs/native-macos-app.md`.
+The planning question about completion and creation dates after the first sign-in is **answered**: spec Assumptions (`0b9fffe`) accept the limit, as the iPhone's account-less upload does, and `docs/native-macos-app.md` records it.
+
+Review c1 raised two product choices. Neither blocks planning or delivery; each has a default that the plan already follows:
+
+1. **OQ-1 — Removing the pre-upgrade backup on request** (review c1, F27, F42, F62). The owner accepted that the backup outlives a sign-out; without a sign-out it is kept indefinitely. Should the Mac offer to delete it (an "Also remove that backup now" option in X-04, or a button in X-02), or cap its life when nobody signs out?
+   - **Default (recommended)**: no deletion control and no cap in 021. The X-04 confirmation states until when the backup stays, X-02 shows it with "Show in Finder", and `docs/data-retention.md` lists it, so the person is told and can remove the file. A control would be an irreversible action that needs its own design.
+2. **OQ-2 — Adding a kept previous-version file into a workspace in use** (review c1, F02, F38). FR-033 keeps a `local-gtd.json` that appears after the update, and a file whose import failed verification, untouched and never imports it. Should a later feature offer a person-started "Add these tasks" that appends its records to the workspace, merging projects and tags by name?
+   - **Default (recommended)**: not in 021. The file is kept and surfaced; nothing is lost. Revisit only if the owner meets the case.
 
 All other technical choices were made in research.md, as the owner asked.
 
@@ -727,12 +735,14 @@ All other technical choices were made in research.md, as the owner asked.
 
 | risk | likelihood / impact | mitigation |
 |---|---|---|
-| PR-08 is large: it rebinds about 4,000 lines of SwiftUI from `BrainBuddyModel` to `Workspace` | high / medium | the views stay and only bindings change; `/speckit-tasks` may split PR-08 into "import and host" and "rebinding"; the macOS lane (PR-01) lands first so every step is compiled and tested in CI |
+| PR-08 is large: it rebinds about 4,000 lines of SwiftUI from `BrainBuddyModel` to `Workspace` | high / medium | the views stay and only bindings change; `/speckit-tasks` splits PR-08 into the "importer and host" and "rebinding" task lanes, the importer wired at launch only by the last task; view logic that needs tests (draft diff, anchors, project display, stamps) lives in kit pure helpers; the macOS lane (PR-01) lands first so every step is compiled and tested in CI |
+| The legacy file reappears after the update (older copy, restore, deleted sidecar) | medium / high | the import state machine and the exclusive rename never touch a workspace in use (FR-033, data-model E7.1); five named tests |
+| `KeychainSessionTokenStore` has never run on macOS | medium / high | PR-05 drops the iOS-only accessibility attribute on macOS; a macOS-lane round trip against the login keychain; a write failure is a visible sign-in error |
 | Swift 6 diagnostics in `VoiceCapture.swift` / WhisperKit | medium / low | confine WhisperKit to one actor; a documented `@preconcurrency import` only if WhisperKit's declarations force it (R2) |
 | Keychain access prompt after each ad-hoc rebuild | high / low | a separate Mac service; documented in `docs/native-macos-app.md`; "Always allow" persists until the next signature change (R17) |
 | Collisions with 020 in shared kit and backend files | high / medium | the serialization table above; optional fields only, so no `StoreDocument` version race |
-| Fake server drifting from the backend on archive semantics | medium / high | golden traces run against both (R19) |
-| Full pull every 45 s per open client on a large account | low / low at today's scale | paged by 200; the `client` log field lets the cost be watched per client; a change feed stays a backend ask |
+| Fake server drifting from the backend on archive semantics | medium / high | golden traces run against both, and a pytest asserts the kit copy is byte-identical; the landing path runs every stack (R19) |
+| Full pull every 30 s per open Mac or iPhone, and a 45 s web refetch, on a large account | low / low at today's scale | an idle tick sends nothing; paged by 200; the `client` log field lets the cost be watched per client; a change feed stays a backend ask |
 | Image rollback below PR-02 after PR-03 | low / high | two-step deploy; one-step automatic rollback is always safe; the runbook says to roll forward |
 | Older code drops `desired_outcome` on re-save during a rollback | low / medium | stated limit (http.md §8); the outcome editor exists only on the Mac, so the window is short |
 | macOS runner availability or minutes, or a slow WhisperKit fetch in CI | medium / low | the lane runs only when `macos/` or the kit changes; `Package.resolved` pins versions |
@@ -740,18 +750,19 @@ All other technical choices were made in research.md, as the owner asked.
 
 ## Planning review
 
-The `after_plan` hook (`/speckit-review`) is run by the owner and was not run by this stage.
+The `after_plan` hook (`/speckit-review`) is run by the owner. Campaign `021-mac-sync-c1` (`.specify/workflows/runs/021-mac-sync-c1/`) returned 63 technical findings (2 blocking, 37 important, 24 advisory) and no product decision; every finding is dispositioned in [review-c1-disposition.md](review-c1-disposition.md).
 
 ## Constitution Check (post-design)
 
-- **Spec workflow** — PASS. Inconsistencies 1 – 8 and gap G-8 are recorded above for a spec or design touch-up; one owner question has a stated default.
+- **Spec workflow** — PASS. Inconsistencies 1 – 5 are resolved (`0b9fffe`, `b83d367`, review c1); 6 – 8 are handled in the plan. Gap G-8 is resolved by X-08. Two owner questions from review c1 have recommended defaults that the plan follows.
 - **Consent & Safety** — PASS:
-  - no egress before sign-in;
-  - the credential only in the Keychain;
-  - content-free logs with tests on both server and Mac;
-  - the import is non-destructive and fails closed;
+  - no egress before sign-in, tested with a counting transport;
+  - the credential only in the login keychain, never synchronizable, with its real at-rest disposition documented;
+  - the pre-021 cookie session ended and its cookie removed;
+  - content-free logs with tests on server and Mac, and an incoming correlation id that cannot inject log text;
+  - the import is non-destructive, fails closed, and never touches a workspace in use;
   - the server field is exported and purged;
-  - the device files are listed in `docs/data-retention.md`.
+  - the device files are listed in `docs/data-retention.md` with the row text written in data-model.
 - **Tests** — PASS: failing-first tests per slice, covering idempotency, retries, partial failure, crash recovery, offline replay, rollback-safe validation and every design state id.
 - **Contracts** — PASS:
   - the five contract files, `data-model.md` and this plan agree: E1 ↔ http §2, E3 / E4 ↔ kit §1 – §3, E5 / E6 ↔ sync-status, E7 / E8 / E10 ↔ mac-legacy-import and mac-app-host;
@@ -759,16 +770,17 @@ The `after_plan` hook (`/speckit-review`) is run by the owner and was not run by
   - the compatibility story for older iPhone and web builds is in http §7.
 - **Observability** — PASS: Ref on every surfaced failure, including timeouts; client attribution in the request log; Mac logs content-free.
 - **Mobile/resilience** — PASS: offline-first Mac and iPhone, the durable outbox, single instance, a crash-safe import, and no blocking first load.
-- **Delivery boundary** — PASS: slices with classes; ASK slices named; cross-feature serialization stated.
-- **Design citation** — PASS: every user-story section cites its X-, M- and D- ids and states.
+- **Delivery boundary** — PASS: slices with classes re-derived from the classifier; ASK slices named; cross-feature serialization stated.
+- **Design citation** — PASS: every user-story section cites its X-, M- and D- ids and states, X-08 included.
 
-Delivery risk: **HIGH / ASK** remains for the feature (PR-01, PR-02, PR-08, PR-09, PR-10).
+Delivery risk: **HIGH / ASK** remains for the feature (PR-01, PR-02, PR-05, PR-08, PR-09, PR-10).
 
 ## Complexity Tracking
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |---|---|---|
 | A second local file on the Mac (`mac-local.json`) beside the kit's `StoreDocument` | FR-023 keeps the review marks device-local and surviving sign-out; `StoreDocument` mirrors the account and is shared with the iPhone and widgets | putting Mac-only marks in `StoreDocument` forces a document version bump that collides with 020's v2 and leaks a Mac concept into the iPhone's core (R4) |
-| Polling on three clients (15 s tick, 45 s pull age; web 45 s refetch) instead of a change feed | SC-001's 60 s bound in both directions with both clients open | a change feed or push is out of scope (intake §4); a 60 s age with a 60 s tick misses SC-001 (R8) |
+| Polling on three clients (15 s tick, 30 s pull age; web 45 s refetch) instead of a change feed | SC-001's 60 s bound in both directions with both clients open | a change feed or push is out of scope (intake §4); a 60 s age with a 60 s tick misses SC-001, and a 45 s age leaves a worst case just over 60 s (R8) |
+| A staging file and an exclusive rename for the one-time import | the import must never write over a workspace in use, even when its own record is lost (FR-033) | writing `store.json` in place and trusting the sidecar record replaces a used workspace when `mac-local.json` is deleted or an older copy brings the legacy file back (review c1, F02) |
 | One ADR change (lossless archive) split over two backend slices | a safe one-step image rollback at every point | a single slice makes rollback leave every task in a newly archived project uneditable (R9) |
 | A startup step runs at every backend boot instead of a one-time ledger row | marks archives made by older code during any rollback window | a ledger row runs once and misses them (R12) |

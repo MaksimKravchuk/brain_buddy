@@ -104,7 +104,7 @@ Numbers use the locale's grouping ("1,284 changes waiting", design X-01 long tex
 | `signOutUnsent(n, offline, sessionEnded)` | design X-04 rows, verbatim |
 | `signOutNothingUnsent` | "Sign out?" + "Your tasks are removed from this <device>. They stay in your account." |
 | `signOutIssues(n)` | appended to either sign-out text when sync issues are open (FR-018; review c1 F06, F54): "1 change that couldn't sync will also be removed from this <device>." / "N changes that couldn't sync will also be removed from this <device>." |
-| `signOutBackup(until)` | Mac only, appended while the pre-upgrade backup exists (FR-021; review c1 F27): "A copy of your tasks from before the update stays on this Mac until 5 Nov." |
+| `signOutBackup(until)` | Mac only, appended while the pre-upgrade backup exists and `until` (`importedAt + 30 days`) is still in the future (FR-021; review c1 F27): "A copy of your tasks from before the update stays on this Mac until 5 Nov." Once that date has passed, this sign-out deletes the backup (data-model E8), so no sentence is added and the base text is true |
 | `outcomeKeptIssue` | see kit-commands §5: the account's outcome is kept and the full local outcome is shown, with "Copy outcome" |
 
 The age format of `oldest` is "N s" under a minute, "N min" under an hour, "N h" under a day, and "1 day" / "N days" otherwise ("oldest 3 days", X-02 "unreachable for days"). The age is measured from the sendable time (data-model E6), so the first sign-in with months-old local data does not read as days of failure.

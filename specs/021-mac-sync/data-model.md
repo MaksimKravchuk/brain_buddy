@@ -144,10 +144,10 @@ SyncSnapshot {
   lastFailedAttemptAt: Date?     // E5
   lastFailureReferenceID: String?
   lastFailureReason: FailureReason?   // unreachable | serverError | rateLimited | redirected | unreadable
-  backupKeptUntil: Date?         // Mac only: importedAt + 30 days while the pre-upgrade backup exists (E8)
-  laterLegacyFilePresent: Bool   // Mac only: a kept previous-version file (E7 `laterFile`, FR-033)
 }
 ```
+
+The Mac-only facts that X-02 and X-04 also show (the pre-upgrade backup's "kept until" date, E8, and a kept previous-version file, E7.1) are not in the shared snapshot: the Mac host reads them from `MacLocalState` and the folder and passes them to the copy catalogue's `popoverBackup`, `popoverLaterFile` and `signOutBackup` (contracts/sync-status.md §3).
 
 Validation:
 
@@ -256,7 +256,7 @@ Rules:
 
 `local-gtd.json` is renamed, with its content unchanged, to `local-gtd.backup-<UTC yyyyMMdd'T'HHmmss'Z'>.json` after the import is verified. It is deleted at a launch or sign-out when `importedAt + 30 days ≤ now` **and** `signedOutSinceImport == true`. Without a sign-out it is kept (FR-021).
 
-While it exists, `SyncSnapshot.backupKeptUntil` is `importedAt + 30 days` (E6). The X-04 sign-out confirmation then adds one sentence with that date, and X-02 shows a quiet line with "Show in Finder" (design X-04 "backup kept", X-02 "pre-upgrade backup"; review c1 F27, F62).
+While it exists, the Mac host passes `importedAt + 30 days` as the "kept until" date (E6 note). The X-04 sign-out confirmation then adds one sentence with that date, and X-02 shows a quiet line with "Show in Finder" (design X-04 "backup kept", X-02 "pre-upgrade backup"; review c1 F27, F62).
 
 An unreadable legacy file, and a previous-version file kept under FR-033, are never renamed or deleted (FR-022, FR-033).
 

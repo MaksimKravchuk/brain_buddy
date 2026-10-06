@@ -39,3 +39,9 @@
   - keep the pre-upgrade store as a backup for ≥ 30 days (FR-021);
   - Mac review marks stay device-local (FR-023, owner-confirmed scope).
 - Validation: iteration 1 (2026-10-06), all items pass.
+- Validation: iteration 2 (2026-10-06, after planning review campaign `021-mac-sync-c1`; dispositions in `../review-c1-disposition.md`), all items still pass. The spec changed minimally, with FR and SC numbering kept and no owner decision (intake, Clarifications, design Sign-off) altered:
+  - new **FR-033**: the upgrade runs at most once into an unwritten workspace; a previous-version store that appears later is kept untouched and the person is told once (review blocking finding F02). Testable by `LegacyStoreImporterTests`; observable as the X-05 "later file" notice;
+  - one sentence each in FR-003 (both outcomes: the account's kept, the Mac's shown in full), FR-017 (the "Couldn't sign out" error and the FR-033 notice are allowed dialogs), FR-018 (sign-out names open sync issues) and FR-021 (without a sign-out the backup is kept);
+  - two edge cases ("Same-named archived projects", "The previous Mac store appears again after the update"); US1's independent test no longer says "delete"; US2-5's example no longer assumes a project delete route; a cross-reference corrected (FR-001, FR-018);
+  - Assumptions: the backup wording corrected, and what the upgrade does not carry (deleted tags, retry receipts, a comment's edited time) stated;
+  - no [NEEDS CLARIFICATION] marker was added. Two product choices raised by the review (OQ-1, OQ-2) have recommended defaults recorded in plan.md and do not block.
