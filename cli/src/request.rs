@@ -169,7 +169,12 @@ fn decode(mut response: Response, r: &Request, credential: Option<&Credential>) 
         None
     };
     if status.is_success() {
-        return value.map(|value| Reply { value, headers }).ok_or(failure);
+        return value
+            .filter(|value| {
+                credential.is_none_or(|credential| !value.to_string().contains(&*credential.token))
+            })
+            .map(|value| Reply { value, headers })
+            .ok_or(failure);
     }
     if let Some(value) = value {
         let mut detail = serde_json::Map::new();

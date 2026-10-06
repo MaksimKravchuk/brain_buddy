@@ -2,6 +2,29 @@ mod common;
 use serde_json::{Value, json};
 
 #[test]
+fn success_body_cannot_echo_active_credential_024_fr_007_024_fr_006() {
+    let (output, _) = common::exchange(
+        &[
+            "task",
+            "add",
+            "--title",
+            "Fixture",
+            "--key",
+            "credential-reflection-fixture",
+        ],
+        201,
+        "",
+        br#"{"id":"fixture","revision":1,"title":"synthetic-cli-token","state":"inbox"}"#,
+    );
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("synthetic-cli-token"));
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"]["mutation_confirmed"], true);
+    assert_eq!(error["error"]["delivery_unknown"], false);
+}
+
+#[test]
 fn task_create_preserves_key_and_cookie_024_fr_001_024_fr_005_024_sc_001() {
     let (output,request)=common::exchange(&["task","add","--title","Fixture","--key","fixture-create"],201,"",br#"{"id":"task-fixture","title":"Fixture","state":"inbox","revision":1,"details":"long fixture details","priority":"none","due_date":null,"project_id":null,"tag_ids":[]}"#);
     assert!(output.status.success(), "{:?}", output);

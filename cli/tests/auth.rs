@@ -25,6 +25,71 @@ fn cookie() -> String {
 
 #[cfg(unix)]
 #[test]
+fn cancellation_during_poll_reports_130_024_fr_013() {
+    let dir = config_dir();
+    let (results, captured) = common::sessions_with_hook_and_pid(
+        &[&["auth", "login", "--no-browser", "--store", "file"]],
+        dir.path(),
+        vec![
+            (200, String::new(), start()),
+            (
+                403,
+                String::new(),
+                json!({"message":"Denied","detail":{"code":"authorization_denied"}}),
+            ),
+        ],
+        |index, pid| {
+            if index == 1 {
+                assert!(pid > 0);
+                // Signal only the child fixture process, while its HTTP poll is in flight.
+                assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGINT) }, 0);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        },
+    );
+    assert_eq!(results[0].status.code(), Some(130));
+    assert_eq!(captured.len(), 2);
+    assert!(String::from_utf8_lossy(&results[0].stderr).contains("cancelled"));
+    assert!(!dir.path().join("config.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn expiry_stops_before_another_poll_024_fr_013() {
+    let dir = config_dir();
+    let mut grant = start();
+    grant["expires_in"] = json!(1);
+    let (result, captured) = common::sequence(
+        &["auth", "login", "--no-browser", "--store", "file"],
+        dir.path(),
+        vec![(200, String::new(), grant)],
+    );
+    assert_eq!(result.status.code(), Some(11));
+    assert_eq!(captured.len(), 1);
+    assert!(!dir.path().join("config.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn malformed_issued_cookie_reports_cleanup_uncertainty_024_fr_007_024_fr_013() {
+    let dir = config_dir();
+    let invalid = cookie().replace("HttpOnly; ", "");
+    let (result, captured) = common::sequence(
+        &["auth", "login", "--no-browser", "--store", "file"],
+        dir.path(),
+        vec![(200, String::new(), start()), (200, invalid, issued())],
+    );
+    assert!(!result.status.success());
+    assert_eq!(captured.len(), 2);
+    let output = String::from_utf8_lossy(&result.stderr);
+    assert!(!output.contains("new-session-secret-sentinel"));
+    let error: Value = serde_json::from_str(output.lines().last().unwrap()).unwrap();
+    assert_eq!(error["error"]["detail"]["cleanup_uncertain"], true);
+    assert!(!dir.path().join("config.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn headless_login_persists_without_disclosing_proofs_024_fr_007_024_fr_013_024_sc_006() {
     use std::os::unix::fs::PermissionsExt;
     let dir = config_dir();

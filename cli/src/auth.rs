@@ -290,21 +290,39 @@ fn login(
             None,
         ) {
             Ok(reply) => break reply,
-            Err(error) => match error.code {
-                "authorization_pending" => {}
-                "slow_down" => {
-                    interval = (interval + 5).min(600);
-                    interval = interval.max(error.retry_after_seconds.unwrap_or(0).min(600));
+            Err(mut error) => {
+                if error.mutation_confirmed == Some(true) {
+                    error.detail = Some(Box::new(
+                        json!({"cleanup_uncertain":true,"new_session_may_exist":true}),
+                    ));
                 }
-                "rate_limited" => {
-                    interval = interval.max(error.retry_after_seconds.unwrap_or(interval).min(600))
+                if cancel.load(Ordering::SeqCst) {
+                    let mut cancelled = canceled();
+                    cancelled.detail = error.detail;
+                    return Err(cancelled);
                 }
-                "transport_error" => interval = (interval * 2).min(60),
-                _ => return Err(error),
-            },
+                match error.code {
+                    "authorization_pending" => {}
+                    "slow_down" => {
+                        interval = (interval + 5).min(600);
+                        interval = interval.max(error.retry_after_seconds.unwrap_or(0).min(600));
+                    }
+                    "rate_limited" => {
+                        interval =
+                            interval.max(error.retry_after_seconds.unwrap_or(interval).min(600))
+                    }
+                    "transport_error" => interval = (interval * 2).min(60),
+                    _ => return Err(error),
+                }
+            }
         }
     };
-    let credential = issued_credential(&reply, config)?;
+    let credential = issued_credential(&reply, config).map_err(|mut error| {
+        error.detail = Some(Box::new(
+            json!({"cleanup_uncertain":true,"new_session_may_exist":true}),
+        ));
+        error
+    })?;
     let previous = config.connection.clone();
     let save = (|| {
         let identity = account(
@@ -350,6 +368,19 @@ fn login(
     let identity = match save {
         Ok(value) => value,
         Err(error) => {
+            // Rename has committed the locator even if its directory fsync failed.
+            // Preserve both credentials; deleting the new one would break saved state.
+            if config
+                .connection
+                .as_ref()
+                .is_some_and(|connection| connection.locator == locator)
+            {
+                let mut error = error;
+                error.detail = Some(Box::new(
+                    json!({"connection_saved":true,"durability_uncertain":true,"previous_credential_retained":previous.is_some(),"cleanup_uncertain":previous.is_some()}),
+                ));
+                return Err(error);
+            }
             return Err(cleanup(
                 client,
                 config,
@@ -399,8 +430,20 @@ fn logout(config: &mut Config, client: &reqwest::blocking::Client) -> Result<Val
     let mut local_cleared = false;
     if !credential.external {
         let connection = config.connection.clone().ok_or_else(Error::auth)?;
-        config.save(None)?;
-        credential::remove(config, &connection.store, &connection.locator)?;
+        if let Err(mut error) = config.save(None) {
+            let local_cleared = config.connection.is_none()
+                && credential::remove(config, &connection.store, &connection.locator).is_ok();
+            error.detail = Some(Box::new(
+                json!({"local_cleared":local_cleared,"connection_metadata_cleared":config.connection.is_none(),"server_revoked":remote.is_ok(),"cleanup_uncertain":!local_cleared || remote.is_err(),"durability_uncertain":config.connection.is_none()}),
+            ));
+            return Err(error);
+        }
+        if let Err(mut error) = credential::remove(config, &connection.store, &connection.locator) {
+            error.detail = Some(Box::new(
+                json!({"local_cleared":false,"connection_metadata_cleared":true,"server_revoked":remote.is_ok(),"cleanup_uncertain":true}),
+            ));
+            return Err(error);
+        }
         local_cleared = true;
     }
     let data = json!({"local_cleared":local_cleared,"server_revoked":remote.is_ok(),"source":if credential.external {"environment"}else{"saved"}});

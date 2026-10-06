@@ -156,9 +156,17 @@ impl Config {
         if bytes.len() > 65536 {
             return Err(Error::store("Too many saved connections."));
         }
-        crate::storage::write(&path, &bytes)?;
-        self.saved = saved;
-        self.connection = connection;
-        Ok(())
+        let result = crate::storage::write(&path, &bytes);
+        if result.is_ok()
+            || result
+                .as_ref()
+                .err()
+                .and_then(|error| error.detail.as_ref())
+                .is_some_and(|detail| detail["write_committed"] == true)
+        {
+            self.saved = saved;
+            self.connection = connection;
+        }
+        result
     }
 }

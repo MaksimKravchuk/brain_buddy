@@ -90,6 +90,22 @@ pub fn valid_locator(locator: &str) -> Result<()> {
 }
 
 pub fn write(path: &Path, bytes: &[u8]) -> Result<()> {
+    write_with_sync(path, bytes, |parent| {
+        #[cfg(unix)]
+        return fs::File::open(parent).and_then(|dir| dir.sync_all());
+        #[cfg(not(unix))]
+        {
+            let _ = parent;
+            Ok(())
+        }
+    })
+}
+
+fn write_with_sync(
+    path: &Path,
+    bytes: &[u8],
+    sync: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> Result<()> {
     let parent = path.parent().ok_or_else(unavailable)?;
     directory(parent, true)?;
     if path.symlink_metadata().is_ok() {
@@ -105,10 +121,13 @@ pub fn write(path: &Path, bytes: &[u8]) -> Result<()> {
         file.write_all(bytes).map_err(|_| unavailable())?;
         file.sync_all().map_err(|_| unavailable())?;
         fs::rename(&temp, path).map_err(|_| unavailable())?;
-        #[cfg(unix)]
-        fs::File::open(parent)
-            .and_then(|dir| dir.sync_all())
-            .map_err(|_| unavailable())?;
+        sync(parent).map_err(|_| {
+            let mut error = unavailable();
+            error.detail = Some(Box::new(
+                serde_json::json!({"write_committed":true,"durability_uncertain":true}),
+            ));
+            error
+        })?;
         Ok(())
     })();
     if result.is_err() {
@@ -118,6 +137,7 @@ pub fn write(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 pub struct Lock(std::path::PathBuf);
+
 impl Lock {
     pub fn acquire(dir: &Path) -> Result<Self> {
         directory(dir, true)?;
@@ -135,5 +155,28 @@ impl Lock {
 impl Drop for Lock {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn post_rename_sync_failure_keeps_committed_bytes_024_fr_013() {
+        let dir = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let path = dir.path().join("config.json");
+        let error = match super::write_with_sync(&path, b"new-config", |_| {
+            Err(std::io::Error::other("Synthetic directory sync failure"))
+        }) {
+            Ok(_) => panic!("Expected uncertain durability"),
+            Err(error) => error,
+        };
+        assert_eq!(std::fs::read(&path).unwrap(), b"new-config");
+        assert_eq!(error.detail.as_ref().unwrap()["write_committed"], true);
+        assert_eq!(error.detail.as_ref().unwrap()["durability_uncertain"], true);
     }
 }

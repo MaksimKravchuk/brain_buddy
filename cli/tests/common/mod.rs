@@ -2,7 +2,7 @@
 use serde_json::Value;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -40,6 +40,21 @@ pub fn sessions_with_hook(
     replies: Vec<(u16, String, Value)>,
     mut hook: impl FnMut(usize) + Send + 'static,
 ) -> (Vec<Output>, Vec<Captured>) {
+    sessions_with_hook_and_pid(actions, config, replies, move |index, _pid| hook(index))
+}
+
+pub fn sessions_with_hook_and_pid(
+    actions: &[&[&str]],
+    config: &std::path::Path,
+    replies: Vec<(u16, String, Value)>,
+    mut hook: impl FnMut(usize, u32) + Send + 'static,
+) -> (Vec<Output>, Vec<Captured>) {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    };
+    let pid = Arc::new(AtomicU32::new(0));
+    let process_id = pid.clone();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let server = format!("http://{}", listener.local_addr().unwrap());
     listener.set_nonblocking(true).unwrap();
@@ -96,7 +111,7 @@ pub fn sessions_with_hook(
                 headers,
                 body: serde_json::from_slice(&bytes[end..]).unwrap_or(Value::Null),
             });
-            hook(captured.len() - 1);
+            hook(captured.len() - 1, process_id.load(Ordering::SeqCst));
             let body = value.to_string().replace("FIXTURE_ORIGIN", &fixture_origin);
             let response = format!(
                 "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra_headers}\r\n{body}",
@@ -109,14 +124,18 @@ pub fn sessions_with_hook(
     let result = actions
         .iter()
         .map(|args| {
-            Command::new(binary())
+            let child = Command::new(binary())
                 .args(*args)
                 .args(["--server", &server])
                 .env("BB_CONFIG_DIR", config)
                 .env_remove("BB_SESSION_TOKEN")
                 .env_remove("BB_SERVER")
-                .output()
-                .unwrap()
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            pid.store(child.id(), Ordering::SeqCst);
+            child.wait_with_output().unwrap()
         })
         .collect();
     (result, worker.join().unwrap())
