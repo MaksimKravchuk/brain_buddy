@@ -6,6 +6,12 @@ use std::process::{Command, Output};
 use std::thread;
 use std::time::{Duration, Instant};
 
+pub fn binary() -> std::path::PathBuf {
+    std::env::var_os("BB_TEST_CLI_BINARY")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_BIN_EXE_bb")))
+}
+
 pub struct Captured {
     pub headers: String,
     pub body: Value,
@@ -24,6 +30,15 @@ pub fn sessions(
     actions: &[&[&str]],
     config: &std::path::Path,
     replies: Vec<(u16, String, Value)>,
+) -> (Vec<Output>, Vec<Captured>) {
+    sessions_with_hook(actions, config, replies, |_| {})
+}
+
+pub fn sessions_with_hook(
+    actions: &[&[&str]],
+    config: &std::path::Path,
+    replies: Vec<(u16, String, Value)>,
+    mut hook: impl FnMut(usize) + Send + 'static,
 ) -> (Vec<Output>, Vec<Captured>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let server = format!("http://{}", listener.local_addr().unwrap());
@@ -80,6 +95,7 @@ pub fn sessions(
                 headers,
                 body: serde_json::from_slice(&bytes[end..]).unwrap_or(Value::Null),
             });
+            hook(captured.len() - 1);
             let body = value.to_string().replace("FIXTURE_ORIGIN", &fixture_origin);
             let response = format!(
                 "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra_headers}\r\n{body}",
@@ -92,7 +108,7 @@ pub fn sessions(
     let result = actions
         .iter()
         .map(|args| {
-            Command::new(env!("CARGO_BIN_EXE_bb"))
+            Command::new(binary())
                 .args(*args)
                 .args(["--server", &server])
                 .env("BB_CONFIG_DIR", config)
@@ -177,7 +193,7 @@ pub fn exchange(
         }
     });
     let config = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_bb"))
+    let output = Command::new(binary())
         .args(args)
         .args(["--server", &server])
         .env("BB_SESSION_TOKEN", "synthetic-cli-token")

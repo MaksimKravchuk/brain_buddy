@@ -1,3 +1,4 @@
+mod common;
 use serde_json::Value;
 use std::{
     io::{BufRead, BufReader},
@@ -14,7 +15,7 @@ impl Drop for Backend {
 
 #[test]
 #[ignore = "Requires installed real backend; required Linux integration job runs explicitly"]
-fn real_capture_replay_search_edit_conflict_complete_024_fr_001_024_fr_005_024_fr_006_024_sc_001_024_sc_003()
+fn real_capture_replay_search_edit_conflict_complete_024_fr_001_024_fr_005_024_fr_006_024_fr_012_024_sc_001_024_sc_003()
  {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -41,7 +42,7 @@ fn real_capture_replay_search_edit_conflict_complete_024_fr_001_024_fr_005_024_f
     let context: Value =
         serde_json::from_str(&line).expect("Backend fixture must start successfully");
     let invoke = |args: &[&str], exit: i32| {
-        let output = Command::new(env!("CARGO_BIN_EXE_bb"))
+        let output = Command::new(common::binary())
             .args(args)
             .env("BB_SERVER", context["server"].as_str().unwrap())
             .env("BB_SESSION_TOKEN", context["token"].as_str().unwrap())

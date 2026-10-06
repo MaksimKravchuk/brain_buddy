@@ -258,6 +258,12 @@ class InvariantEnforcementTests(unittest.TestCase):
                 )
                 self.assertIn("check-specs runs CLI requirement coverage", report)
 
+    def test_full_ci_requires_native_cli_and_release_aggregation(self) -> None:
+        for job in ("cli-native", "cli-artifacts"):
+            with self.subTest(job=job), tempfile.TemporaryDirectory() as tmp:
+                report=self._assert_invariant_fires(tmp,".github/workflows/ci.yml",lambda text:text.replace(f"      - {job}\n",""))
+                self.assertIn(f"Full CI requires {job}",report)
+
     def test_slice_filter_on_a_continuation_line_is_caught(self) -> None:
         """A shell `\\` continuation or a folded YAML scalar moves the flag to the next line."""
         cases = (

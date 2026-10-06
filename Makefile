@@ -169,4 +169,12 @@ verify-frontend: ci-frontend
 # The chain an implementation or verification agent runs before reporting done.
 # Prerequisites the individual targets do not install:
 #   cd frontend && npx playwright install --with-deps chromium (test-e2e)
-verify-all: check-specs validate-ci verify-backend verify-frontend test-e2e
+verify-cli:
+	python3 -m unittest scripts/test_build_cli_release.py -v
+	cd cli && cargo fmt --check
+	cd cli && cargo clippy --locked --all-targets -- -D warnings
+	cd cli && cargo test --locked --tests
+	python3 -m unittest discover -s cli/tests/installers -p 'test_*.py' -v
+	BB_TEST_BACKEND_PYTHON="$(CURDIR)/backend/.venv/bin/python" cargo test --locked --manifest-path cli/Cargo.toml --test task_journey -- --ignored
+
+verify-all: check-specs validate-ci verify-backend verify-frontend test-e2e verify-cli

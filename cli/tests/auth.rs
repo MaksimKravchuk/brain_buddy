@@ -111,7 +111,7 @@ fn file_credentials_refuse_symlinks_024_fr_007() {
     let dir = config_dir();
     let other = tempfile::tempdir().unwrap();
     std::os::unix::fs::symlink(other.path(), dir.path().join("unsafe")).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_bb"))
+    let result = Command::new(common::binary())
         .args([
             "auth",
             "login",
@@ -176,6 +176,143 @@ fn stored_session_survives_processes_and_logout_revokes_only_it_024_fr_007_024_f
     }));
 }
 
+#[cfg(unix)]
+#[test]
+fn denied_reconnect_preserves_usable_saved_session_024_fr_013_024_fr_014() {
+    let dir = config_dir();
+    let actions: &[&[&str]] = &[
+        &["auth", "login", "--no-browser", "--store", "file"],
+        &["auth", "login", "--no-browser", "--store", "file"],
+        &["auth", "status"],
+    ];
+    let (results, captured) = common::sessions(
+        actions,
+        dir.path(),
+        vec![
+            (200, String::new(), start()),
+            (200, cookie(), issued()),
+            (200, String::new(), start()),
+            (
+                403,
+                String::new(),
+                json!({"detail":{"code":"authorization_denied"}}),
+            ),
+            (200, String::new(), json!({"id":"account-1"})),
+        ],
+    );
+    assert!(results[0].status.success());
+    assert_eq!(results[1].status.code(), Some(11));
+    assert!(results[2].status.success());
+    assert!(
+        captured[4]
+            .headers
+            .contains("brainbuddy_session=new-session-secret-sentinel")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn foreign_account_without_replace_revokes_only_candidate_024_fr_013_024_fr_014() {
+    let dir = config_dir();
+    let mut foreign = issued();
+    foreign["account"]["id"] = json!("account-2");
+    let actions: &[&[&str]] = &[
+        &["auth", "login", "--no-browser", "--store", "file"],
+        &["auth", "login", "--no-browser", "--store", "file"],
+        &["auth", "status"],
+    ];
+    let (results, captured) = common::sessions(
+        actions,
+        dir.path(),
+        vec![
+            (200, String::new(), start()),
+            (200, cookie(), issued()),
+            (200, String::new(), start()),
+            (
+                200,
+                cookie().replace(
+                    "new-session-secret-sentinel",
+                    "foreign-session-secret-sentinel",
+                ),
+                foreign,
+            ),
+            (204, String::new(), Value::Null),
+            (200, String::new(), json!({"id":"account-1"})),
+        ],
+    );
+    assert!(results[0].status.success());
+    assert_eq!(results[1].status.code(), Some(6));
+    assert!(results[2].status.success());
+    assert!(
+        captured[4]
+            .headers
+            .contains("brainbuddy_session=foreign-session-secret-sentinel")
+    );
+    assert!(captured[4].headers.starts_with("POST /api/auth/logout "));
+    assert!(
+        captured[5]
+            .headers
+            .contains("brainbuddy_session=new-session-secret-sentinel")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn post_issuance_store_failure_revokes_candidate_and_preserves_connection_024_fr_007_024_fr_013_024_fr_014()
+ {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = config_dir();
+    let path = dir.path().to_owned();
+    let actions: &[&[&str]] = &[
+        &["auth", "login", "--no-browser", "--store", "file"],
+        &["auth", "login", "--no-browser", "--store", "file"],
+        &["auth", "status"],
+    ];
+    let (results, captured) = common::sessions_with_hook(
+        actions,
+        dir.path(),
+        vec![
+            (200, String::new(), start()),
+            (200, cookie(), issued()),
+            (200, String::new(), start()),
+            (
+                200,
+                cookie().replace(
+                    "new-session-secret-sentinel",
+                    "candidate-session-secret-sentinel",
+                ),
+                issued(),
+            ),
+            (204, String::new(), Value::Null),
+            (200, String::new(), json!({"id":"account-1"})),
+        ],
+        move |index| {
+            if index == 3 {
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o500)).unwrap();
+            }
+            if index == 4 {
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
+        },
+    );
+    assert!(results[0].status.success());
+    assert_eq!(results[1].status.code(), Some(10));
+    assert!(results[2].status.success());
+    assert!(
+        captured[4]
+            .headers
+            .contains("brainbuddy_session=candidate-session-secret-sentinel")
+    );
+    assert!(
+        captured[5]
+            .headers
+            .contains("brainbuddy_session=new-session-secret-sentinel")
+    );
+    assert!(
+        String::from_utf8_lossy(&results[1].stderr).contains("\"new_session_server_revoked\":true")
+    );
+}
+
 #[test]
 #[ignore = "Requires an isolated unlocked native store; required native CI runs this explicitly"]
 fn native_session_survives_processes_024_fr_007_024_sc_006() {
@@ -236,7 +373,7 @@ fn locked_native_store_is_refused_without_unlock_or_network_024_fr_007_024_fr_00
     .unwrap();
     let collection = service.get_default_collection().unwrap();
     collection.lock().unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_bb"))
+    let result = Command::new(common::binary())
         .args(["task", "list"])
         .env("BB_CONFIG_DIR", dir.path())
         .env_remove("BB_SESSION_TOKEN")
