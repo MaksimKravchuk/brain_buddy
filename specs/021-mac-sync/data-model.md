@@ -365,3 +365,10 @@ StoredTag     { id, name, state: active|deleted, revision }
 | Keychain item | n/a | sign-out, 401; pending logout when delivered |
 
 **Export sentence** (PR-08 adds it to `docs/data-retention.md` "Export contents", beside the iOS one): "Also excluded: **macOS changes that have not reached the server yet**, and everything a Mac holds while it has never been signed in ("On this Mac"). The controller does not hold them. The Mac says so in words ("Offline · 3 changes waiting", "On this Mac · Sign in to sync"). Also excluded: the Mac's device-only records — review marks in `mac-local.json`, the backup from before the update, its import report, and previous-version files kept as found — which are never sent, so the controller does not hold them." (review c2, G51)
+
+**Privacy policy** (review c2, G23): `docs/data-retention.md` requires the user-facing policy to stay in sync with it, so PR-08 also edits `frontend/src/pages/PrivacyPolicyPage.tsx` and its test, as feature 020 did.
+
+- Under "How long we keep it", one new paragraph after the account-deletion paragraph: "The Brain Buddy apps for Mac and iPhone keep a working copy of your tasks on the device until you sign out there, including after a session ends or your account is deleted. On a Mac, deleting the app does not remove that copy. The copy of your tasks from before the Mac update is kept for at least 30 days and until you sign out on that Mac. We cannot erase copies on your devices or in their backups, such as Time Machine; signing out removes the app's copy from that device."
+- Under "Your rights", the Erasure line gains: "Erasure covers everything our servers hold. Copies on your devices are removed by signing out on each device."
+- `LAST_UPDATED` moves to the PR-08 landing date.
+- `PrivacyPolicyPage.test.tsx` asserts both new sentences verbatim and the new date.

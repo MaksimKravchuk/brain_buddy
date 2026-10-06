@@ -21,6 +21,7 @@
 | Single instance | `.instance.lock`, an exclusive non-blocking `flock` held for the process lifetime (`SingleInstanceGuard.swift`, research R6) |
 | Keychain | service `app.brainbuddy.mac.session`, login keychain (data-model E9) |
 | Server address | `UserDefaults` key `BrainBuddyAPIURL` (existing), https only, `http://localhost` allowed (kit rule) |
+| Folder override (dry run) | environment variable `BRAINBUDDY_MAC_DATA_DIR`: an absolute path to an existing folder; when set, every file in this table except the Keychain item lives there instead (`WorkspaceHost`, PR-08). The Keychain service and the cookie storage are not redirected, so a dry run never signs in. Used by quickstart Scenario 6 step 0, the dry run on a copy of the owner's real folder (review c2, G02), and by host tests |
 
 **Launch order**:
 
