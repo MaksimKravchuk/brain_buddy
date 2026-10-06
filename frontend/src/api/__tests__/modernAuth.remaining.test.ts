@@ -68,10 +68,14 @@ describe("023-FR-006/008/013/015/018/021 remaining auth transport boundaries", (
     const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     let download = "";
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { download = this.download; });
-    fetchMock.mockResolvedValue(new Response("zip", { headers: { "Content-Disposition": 'attachment; filename="safe-export.zip"' } }));
+    fetchMock.mockResolvedValue(new Response("zip", { headers: { "Content-Type": "application/zip", "Content-Disposition": 'attachment; filename="safe-export.zip"' } }));
     expect(await modernAuthApi.exportAccount(owner)).toBe("safe-export.zip");
     expect(download).toBe("safe-export.zip"); expect(document.querySelector('a[download]')).toBeNull();
-    expect(createUrl).toHaveBeenCalledWith(expect.any(Blob)); expect(revoke).toHaveBeenCalledWith("blob:account-export");
+    expect(createUrl).toHaveBeenCalledTimes(1);
+    const exported = createUrl.mock.calls[0][0] as Blob;
+    expect(exported.size).toBe(3); expect(exported.type).toBe("application/zip");
+    expect(await exported.text()).toBe("zip");
+    expect(revoke).toHaveBeenCalledWith("blob:account-export");
     expect(fetchMock.mock.calls[0][0]).not.toContain(owner.recent_proof);
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST", body: JSON.stringify(owner) });
   });

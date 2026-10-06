@@ -48,6 +48,7 @@ final class ModernAuthCoordinator: NSObject, ASWebAuthenticationPresentationCont
     }
 
     func authenticate(provider: NativeAuthProvider, start: ProviderStartDTO, verifier: String) async throws -> NativeSignInCredential {
+        try Task.checkCancellation()
         cancel()
         guard NativeAuthCallback.isRandomToken(start.state), NativeAuthCallback.isRandomToken(start.nonce),
             NativeAuthCallback.isRandomToken(start.attemptID)
@@ -74,7 +75,7 @@ final class ModernAuthCoordinator: NSObject, ASWebAuthenticationPresentationCont
                                 return
                             }
                             do {
-                                guard let url else { throw NativeAuthCallback.InvalidCallback() }
+                                guard let url else { throw Failure(message: "No sign-in return was received.") }
                                 let callback = try NativeAuthCallback.parse(url, attemptID: start.attemptID, state: start.state)
                                 self.finish(id: id, result: .success(.browserGrant(attemptID: start.attemptID, state: start.state, handoffCode: callback.handoffCode, verifier: verifier)))
                             } catch {
@@ -99,7 +100,10 @@ final class ModernAuthCoordinator: NSObject, ASWebAuthenticationPresentationCont
                 }
             }
         } onCancel: {
-            Task { @MainActor [weak self] in self?.cancel() }
+            Task { @MainActor [weak self] in
+                guard let self, self.active?.id == id else { return }
+                self.cancel()
+            }
         }
     }
 
