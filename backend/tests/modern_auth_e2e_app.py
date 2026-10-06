@@ -296,7 +296,7 @@ def create_app() -> FastAPI:
     if apple_lifecycle is None:
         raise RuntimeError("The real app must wire the Apple credential lifecycle.")
     apple_lifecycle.gateway = modern.provider
-    application.add_event_handler("shutdown", upstream.close)
+    application.router.add_event_handler("shutdown", upstream.close)
 
     def capture_mail(recipient: str, code: str, purpose: str) -> None:
         message = (
