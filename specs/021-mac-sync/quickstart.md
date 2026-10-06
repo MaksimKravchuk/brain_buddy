@@ -20,7 +20,7 @@ This file holds validation scenarios only. Shapes and rules are in [contracts/](
 ## Fast checks (per slice)
 
 ```bash
-cd backend && pytest tests/test_project_archive_lossless_api.py tests/test_project_desired_outcome_api.py tests/test_client_attribution_logging.py tests/test_project_archive_traces.py -q
+cd backend && pytest --no-cov tests/test_project_archive_lossless_api.py tests/test_project_desired_outcome_api.py tests/test_client_attribution_logging.py tests/test_project_archive_traces.py -q   # --no-cov: the repo-wide floor in addopts fails a subset
 make test-backend            # coverage floor + Allure taxonomy validator, before reporting green
 sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests
 sh ios/scripts/swift-linux.sh test --filter BrainBuddySyncTests
@@ -53,9 +53,9 @@ The `--requirements` filter and the Swift test trees come from 020 PR-01. Until 
 7. With PR-02 deployed and PR-03 not yet: archive. **Expect**: memberships cleared as before, marker true.
 8. Second owner: unarchive the first owner's project. **Expect**: 404.
 9. **Repeat archive** (review c1, F14): seed a pre-feature archive (marker true, `archived_at` null) and archive it again. **Expect**: 200, revision bumped, marker still true, `archived_at` still null. Archive an already lossless-archived project again. **Expect**: `archived_at` unchanged.
+10. `GET /projects?state=bogus` is listed with 422 in the API contract map (`test_api_contract.py`), and the default `GET /projects` returns the same projects in the same order as before, each with the three new fields.
 11. **Owner scope and counts** (review c2, G42, G53): the second owner's archived and active projects never appear in the first owner's `?state=archived` or `?state=all`; an owner with no projects gets 200 `[]`; `open_task_count` is the same from the list and from `GET /projects/{id}`, and a list request loads the owner's tasks once.
 12. **Unarchive retried late** (G44): unarchive with the right revision, then again with the same (now stale) `expected_revision` and a new key. **Expect**: 200 unchanged both times, never 409.
-10. `GET /projects?state=bogus` is listed with 422 in the API contract map (`test_api_contract.py`), and the default `GET /projects` returns the same projects in the same order as before, each with the three new fields.
 
 ## Scenario 2 — desired outcome survives other clients (US5-5; FR-028)
 
@@ -125,7 +125,7 @@ These run as kit tests (contracts/sync-status.md §5) and as host checks.
    - failing (point the server address at a closed port on `localhost` for more than 60 s);
    - rejected (unarchive a name that clashes).
 
-   **Expect**: no sheet, alert or notification appears and focus never moves (SC-004), and every failure shows a reference id. The automated guard is `MacPresentationRouterTests` (mac-app-host §8); this host run confirms it on screen. Recorded in `specs/021-mac-sync/evidence/manual-macos-status.md` (labelled manual): VoiceOver reading of X-01 and X-02, keyboard order, Reduce Motion glyph, Large sidebar text wrapping after " · ", and also (review c1):
+   **Expect**: no sheet, alert or notification appears and focus never moves (SC-004), and every failure shows a reference id. The automated guard is `MacPresentationGuardTests`, with `MacPresentationRouterTests` as its positive control (mac-app-host §8; review c2, G16); this host run confirms it on screen. Recorded in `specs/021-mac-sync/evidence/manual-macos-status.md` (labelled manual): VoiceOver reading of X-01 and X-02, keyboard order, Reduce Motion glyph, Large sidebar text wrapping after " · ", and also (review c1):
    - scroll position, selection and keyboard focus unchanged while an incoming change arrives from the web (FR-009, F19);
    - after X-03 closes, focus is on the status words when the opener is gone (a closed popover, a menu item, the vanished "Sign in to sync"), and on the trailing action after Cancel (F29);
    - Cancel and Esc work during "Signing in…" and leave the typed values (F28);

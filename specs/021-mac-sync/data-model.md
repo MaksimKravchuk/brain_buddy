@@ -282,7 +282,7 @@ Without a sign-out it is kept (FR-021). The deletion records `backupDeletedAt`, 
 
 **What the person is told**:
 
-- While the backup exists and the date `importedAt + 30 days` is in the future, X-04 appends `signOutBackup(until)` and X-02 shows "Backup from before the update · kept until 5 Nov" with "Show in Finder".
+- While the backup exists and the date `importedAt + 30 days` is in the future, X-04 appends `signOutBackup(until)` and X-02 shows "Backup from before the update · kept until 5 Nov" with "Show in Finder". After that date, a sign-out that keeps the backup (condition 3 or 4) appends the undated form, "A copy of your tasks from before the update stays on this Mac." (added after `/speckit-analyze`).
 - When this sign-out will delete it (all four conditions hold at confirm time), X-04 appends `signOutBackupRemoved` ("The copy of your tasks from before the update will also be removed from this Mac."), so the irreversible deletion is never silent.
 - Once the date has passed but the backup is kept (no sign-out yet, or condition 3 or 4), X-02 reads "Backup from before the update · removed when you sign out" (or, under condition 3, "kept because some records could not be carried over").
 - The Mac host computes these from `MacLocalState` and the folder (E6 note).
@@ -293,13 +293,11 @@ An unreadable legacy file, and a previous-version file kept under FR-033, are ne
 
 **Import report** (mac-legacy-import §2a): `local-gtd.import-report-<UTC>.txt`, same timestamp as the backup, written only when the import adjusted a value or could not carry a record. It lists each one with its original and resulting value. X-02 shows "Some details changed during the update" with "Show in Finder" while it exists.
 
-An unreadable legacy file, and a previous-version file kept under FR-033, are never renamed or deleted (FR-022, FR-033).
-
 **Data-retention rows** (PR-08 writes them into `docs/data-retention.md` as given here):
 
 | what | where and protection | kept until | removed by |
 |---|---|---|---|
-| **macOS pre-upgrade backup** (`local-gtd.backup-<UTC>.json`: the untouched pre-021 store, with every task, note, comment, project desired outcome and tag the person had before the update) | same folder, 0600, FileVault only, in Time Machine | At least 30 days after the update. Deleted at the first launch or sign-out once 30 days have passed **and** the person has signed out since the update; **kept without a sign-out**. Deleting the app does not remove it | macOS client (E8 rule) |
+| **macOS pre-upgrade backup** (`local-gtd.backup-<UTC>.json`: the untouched pre-021 store, with every task, note, comment, project desired outcome and tag the person had before the update) | same folder, 0600, FileVault only, in Time Machine | At least 30 days after the update. Deleted at the first launch or sign-out once 30 days have passed **and** the person has signed out since the update; **kept without a sign-out**, kept while the import report lists a record that could not be carried over, and kept at a sign-out that discards part of the first upload. Deleting the app does not remove it | macOS client (E8 rule) |
 | **macOS previous-version files kept as found** (an unreadable `local-gtd.json`, or one an older copy wrote after the update) | same folder, as the older copy left it | Until the person removes it; the app never renames or deletes it (FR-022, FR-033) | the person |
 | **macOS import report** (`local-gtd.import-report-<UTC>.txt`: for each value the upgrade adjusted or record it could not carry, the original text and what it became, so it quotes task, project and tag text) | same folder, 0600, FileVault only, in Time Machine | Deleted together with the pre-upgrade backup, under the same rule. Never logged or sent | macOS client (E8 rule) |
 | **macOS legacy session cookie** (every `brainbuddy_session` cookie of the pre-021 app, for any host, in `~/Library/HTTPStorages/<bundle id>/`) | macOS shared cookie storage, a plain file | Removed at the first 021 launch, whatever its host; each host's server session is ended then, or by the queued logout when offline (review c1 F36; review c2, G52) | macOS client (`LegacyCookieCleanup`) |
@@ -321,6 +319,7 @@ An unreadable legacy file, and a previous-version file kept under FR-033, are ne
 
 - Protected by the login password and FileVault. Unlike the iPhone item, it **is** carried by Time Machine and Migration Assistant to a restored or migrated Mac.
 - Removed on sign-out and on the first 401 (kit behaviour). A pending-logout item keeps the token until the logout reaches the server, then it is removed.
+- Deleting the app does not remove it: the login keychain belongs to the person, as Keychain items outlive the iPhone app too. The server session it names still ends at its 30-day expiry or a revocation (data-retention "Sessions" row), and if the app is installed again, its first launch with no linked account removes the item.
 - On launch with no linked account, any token left over from earlier is removed (kit `Workspace.live` behaviour, reproduced by `WorkspaceHost`). A sign-out records the token as a pending logout **before** it removes local data, so a crash between the two still ends the server session (contracts/kit-commands.md §4 "Sign-out order"; review c2, G11, G61).
 - A Keychain **write** failure at sign-in is a sign-in error with a reference id (design X-03 "error: couldn't save sign-in"); the session the server just opened is ended at once. It is never a silent "Sign in again".
 - A Keychain **read** failure other than "not found" (for example access refused after an ad-hoc rebuild) shows "Sign in again to sync" and is logged as the error class `keychain_read_failed`, never with the token or the host.
@@ -331,7 +330,7 @@ An unreadable legacy file, and a previous-version file kept under FR-033, are ne
 
 | what | where and protection | kept until | removed by |
 |---|---|---|---|
-| **macOS session token** (the opaque `brainbuddy_session` value, one per server host, and any pending-logout copies) | login keychain generic password, service `app.brainbuddy.mac.session`; not synchronizable; protected by the login password and FileVault; **carried by Time Machine and Migration Assistant** to another Mac | Until sign-out or the first 401; a pending-logout copy until its logout is delivered. A launch with no linked account removes any left over | macOS client (`KeychainSessionTokenStore`); the server-side session follows the Sessions row |
+| **macOS session token** (the opaque `brainbuddy_session` value, one per server host, and any pending-logout copies) | login keychain generic password, service `app.brainbuddy.mac.session`; not synchronizable; protected by the login password and FileVault; **carried by Time Machine and Migration Assistant** to another Mac | Until sign-out or the first 401; a pending-logout copy until its logout is delivered. Deleting the app does not remove it, so a launch with no linked account removes any left over | macOS client (`KeychainSessionTokenStore`); the server-side session follows the Sessions row |
 
 ## E10. Legacy snapshot v1 (input only)
 
