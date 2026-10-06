@@ -12,8 +12,8 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
 - **NC-1 — late extension**: measured from the extension day. `ask_at = extended_at + 7 d`,
   `park_due_at = extended_at + 14 d` (FR-009, FR-012, US1-7). Example: extended on
   day 18 of a 14-day threshold → asks again on day 25, parked on day 32. The design
-  frame M-04 "Keep until Thu 15 Oct" (with today Fri 9 Oct) is a copy slip to correct
-  during implementation: it must read Fri 16 Oct.
+  frame M-04 "Keep until Thu 15 Oct" (with today Fri 9 Oct) was a copy slip: it must
+  read Fri 16 Oct (corrected in design.md and the M-04 mockup on 2026-10-06).
 - **NC-2 — downloadable on-device model**: approved as a **late slice** (PR-09). The
   owner approves the iOS third-party dependency exception (to be recorded in its own ADR
   with PR-09) and a download of roughly 1–2.6 GB; the final model (Qwen3-1.7B 4-bit vs
@@ -27,9 +27,30 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
   and show "part of the notes was not considered" (FR-019). Budget with
   `tokenCount(for:)` (iOS 26.4+; a 3-characters-per-token estimate before that). The
   cloud path receives exactly the same reduced input.
+  *Planning refinement (campaign 1, 2026-10-06; the owner decision itself is unchanged)*:
+  to make "exactly the same reduced input" literally true, the reduction uses one shared
+  character budget for every model (contracts/navigator.md §1 `reduce_notes`); token
+  counting is kept only as a guard.
 - **NC-4 — Apple Private Cloud Compute**: counts as a cloud provider under FR-024
   (consent naming "Apple Private Cloud Compute"); not built in this feature
   (FR-023 note). The `NavigatorModel` protocol admits it later without changes elsewhere.
+
+### Owner decisions of 2026-10-06 (planning-review campaign 1 product decisions)
+
+Recorded in spec.md Clarifications "Session 2026-10-06".
+
+- **PD-1 — summary counts**: two new counters, "Kept as is" (keep waiting, keep in
+  Someday) and "Moved to Next" (follow-up, return to Next from Waiting or Someday); ten
+  counts in all (FR-033, US4-9, data-model E4 `review_counts_as`, design M-22).
+- **PD-2 — skip-everything review**: shown as "Review done", recorded as
+  `completed_empty`; it does not count toward regularity, restart postponement or
+  notification suppression (FR-029, data-model E3). Derived by planning, for
+  consistency: "Last review" (FR-038) uses the same counted-review instant.
+- **PD-3 — first exposure**: a one-time auto-park explainer at the first app or web
+  open after the flag is switched on (FR-051, design M-26 / D-05), independent of the
+  onboarding; the 14-day grace starts then; first acknowledgement on any device wins and
+  is stored on the server (account-less iOS: on the device); auto-park never runs for an
+  owner who has not seen it. Ships in increment 1 with auto-park (plan PR-02/PR-04/PR-05).
 
 ## R1. Where Weekly Review lives in the backend
 
@@ -39,7 +60,10 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
   mixin composed into `TaskRepository` so it shares `command_lock`, connection and
   `migration_ledger`), `review_service.py` (`ReviewService`: decisions, undo,
   auto-park, sessions, queues, bulk release, settings), `navigator.py` (provider
-  adapter + validation). One new router `backend/app/api/review.py`.
+  adapter + validation). Three new routers, `backend/app/api/review.py`,
+  `review_navigator.py` and `review_flow.py`, all mounted (with the container wiring
+  and the flag) by slice PR-02 so later slices only add their own files
+  (contracts/http.md header).
 - **Rationale**: a decision changes a task and records itself atomically under one
   owner lock and one idempotency record (`_serialized_write`,
   `backend/app/modules/tasks/service.py:64`). Undo needs the pre-decision snapshot in
@@ -93,26 +117,42 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
 
 ## R4. Backend activation, grace and backfill (FR-016)
 
-- **Decision**: lazy per-owner activation. `review_settings.activated_at` is set the
-  first time the `weekly_review` flag is effective for the owner and either a gated
-  endpoint or the sweep sees it. Under that owner's lock, every Next task without a
-  clock gets one started at `activated_at`, and every Next task gets
-  `formulation_park_floor_at ≥ activated_at + 14 d`.
-- **Rationale**: the flag is per user (ADR-0019 SELECTED_USERS), so "first becomes
-  active" is per owner. Starting unknown clocks at activation means nothing "asks" on
-  day one (spec edge case "Huge backlog on first use"); the floor guarantees FR-016 even
-  for clocks maintained before activation. Restart mode (FR-017) still handles a truly
-  stale Next after 21 days without a review.
-- **Alternatives**: backfill from `created_at` (dozens ask on day one, contradicting
-  the edge case; overstates age since titles may have changed); a global deploy-time
-  migration (wrong for a per-user flag; makes flag-off users' data change).
+- **Decision** (revised after owner decision PD-3, 2026-10-06): per-owner activation
+  happens when the owner first acknowledges the auto-park explainer (FR-051) on any
+  device: `POST /review/explainer/acknowledge` sets `review_settings.activated_at` to
+  the server's `now` if it is null (first wins). In the same transaction, under that
+  owner's lock, every Next task gets the **activation clamp**: a null clock starts at
+  `activated_at`; an existing clock keeps its formulation id but
+  `formulation_started_at = max(started_at, activated_at)`; and every Next task gets
+  `formulation_park_floor_at ≥ activated_at + 14 d` (formulation-clock §3). These are
+  clock-bookkeeping writes that do not bump `revision`. Neither the sweep nor any other
+  endpoint activates an owner, and nothing parks and no marker shows before activation.
+  Account-less iOS applies the same transition as a post-replay step keyed on
+  `local.activatedAt`.
+- **Rationale**: the flag is per user (ADR-0019 SELECTED_USERS), so activation is per
+  owner. Clocks are maintained while the flag is off (R5), so without the clamp a user
+  enabled weeks after the backend deploy would see every old task ask on day one — the
+  contradiction campaign 1 found between this record and R5. With the clamp nothing asks
+  before `activated_at + T` and nothing parks before `activated_at + 14 d` (FR-016, spec
+  edge case "Huge backlog on first use"). Keeping the formulation id (rather than
+  minting new ones) means device and server agree without exchanging ids. Restart mode
+  (FR-017) still handles a stale Next later.
+- **Alternatives**: activation at the first gated call or sweep (the original plan:
+  auto-park could run for an owner who never saw the rule, rejected by the owner);
+  activation at onboarding completion (owner chose the earlier, independent explainer);
+  backfill from `created_at` (dozens ask on day one); restarting every formulation with
+  a new id (forces id exchange with offline devices for no benefit); a global
+  deploy-time migration (wrong for a per-user flag).
 
 ## R5. Server clock maintenance even while the flag is off
 
 - **Decision**: the clock fields are maintained by every task command regardless of
   the flag; only exposure (routes, markers, sweep effects) is gated.
-- **Rationale**: keeps one code path; turning the flag on later finds mostly correct
-  clocks; the FR-016 floor still prevents early parks.
+- **Rationale**: keeps one code path; turning the flag on later finds a clock on every
+  task, which the activation clamp (R4) then re-anchors so nothing asks on day one; the
+  FR-016 floor prevents early parks. A flag turned off and on again later is covered by
+  the sweep-gap floor (formulation-clock §3), so parks that became due while the flag
+  was off are preceded by a visible marker.
 - **Alternatives**: gate maintenance too (two code paths, mass backfill at enable).
 
 ## R6. Extension arithmetic
@@ -130,9 +170,16 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
   the existing `_serialized_write`) validates, applies the task change, writes the
   decision (and receipt / follow-up task), and stores one idempotency record whose
   response is the whole `DecisionResponse`. `_apply_idempotent_record`
-  (`service.py:1142`) learns the new command prefixes (`decide_task:`,
-  `undo_decision:`, `auto_park:`, `bulk_release:`, `undo_bulk_release:`) so the
-  repair-on-replay guarantee covers them.
+  (`service.py:1142`) learns the new command prefixes, spelled exactly as in
+  contracts/http.md §9 (`decide_task:`, `undo_decision:`, `auto-park:`,
+  `bulk_release:`, `undo_bulk_release:`, `review_session:`, `review_settings:`,
+  `explainer_ack:`), each with its own result reconstructor (the default branch
+  validates the stored body as a `TaskDocument` and would raise on a composite
+  response), so the repair-on-replay guarantee covers them; one test reconciles a
+  record of each prefix. Client-supplied ids (`decision_id`, session `id`, bulk `id`,
+  `follow_up_task_id`, `new_formulation_id`) follow the existing optional `id` on
+  `TaskCreateRequest` (`backend/app/schemas/tasks.py:122`), so offline iOS records and
+  their server copies share ids and replay can match them.
 - **Rationale**: FR-011 requires the existing idempotent, owner-serialized
   operations; one request per iOS command (the `GTDCommand` invariant); atomic Undo.
 - **Alternatives**: client issues the plain task command then a separate "record
@@ -146,7 +193,12 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
   nulled after 7 days.
 - **Rationale**: "restores the task's previous state, title and formulation clock"
   cannot be expressed with existing inverse commands (moving back to Next would start a
-  *new* formulation). The iOS Process inbox inverse-command Undo stays as is.
+  *new* formulation). The iOS Process inbox inverse-command Undo stays as is; Inbox
+  items are not decision rows, so their Undo is that inverse command plus an
+  `inbox_processed_delta: -1` on the session. The web Inbox step (new UI, D-03 "Inbox
+  step") offers the same inverse-command Undo. A follow-up created by a decision is
+  deleted by Undo only while its own revision is unchanged (its revision is stored on
+  the decision), so an edit made to it elsewhere is never lost.
 - **Alternatives**: inverse commands (loses the clock); time-limited server undo
   (an offline iOS undo may be pushed late; revision equality is the real guard).
 
@@ -156,9 +208,13 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
   `auto-park:<task_id>:<formulation_id>` and re-checks under the owner lock. Devices
   may send `POST /tasks/{id}/auto-park`; the server parks only if **its own** evaluation
   is `park_due`, otherwise returns `applied: false` (200). Devices record issued parks
-  per formulation and never re-issue. A decision whose `client_decided_at` precedes
-  `parked.at`, made on the exact pre-park revision of the same formulation, reverses the
-  park (yield rule).
+  per formulation and never re-issue. A **card decision** whose `client_decided_at`
+  precedes `parked.at`, made on the exact pre-park revision of the same formulation,
+  reverses the park (yield rule) by restoring the clock snapshot the park stored
+  (`parked.clock_before`), so the formulation is not closed twice and an offline
+  `extend` is still accepted. Plain edits and moves never yield: there is no
+  `client_occurred_at` on `PATCH`/transitions; they 409 and are replayed onto the
+  parked task by the existing iOS refetch path (contracts/http.md §1).
 - **Rationale**: US2-6 (exactly once, no conflict), edge case "Clock skew" (server
   authoritative), edge case "Offline for a long time" (explicit earlier decision wins).
   `client_decided_at` is only compared against a park the server itself made, so a
@@ -173,11 +229,18 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
   invoked from the existing privacy-maintenance thread loop
   (`_start_privacy_maintenance_thread`, `main.py:156`, 60 s default via
   `BRAIN_BUDDY_AGENT_RETENTION_SWEEP_INTERVAL_SECONDS`) and at startup from
-  `_run_maintenance_sweep` (`main.py:85`). Candidates come from one indexed query
-  (`tasks.state = 'next'`, index `idx_tasks_owner_state`) grouped by owner; each owner is
-  processed under its own `command_lock`, re-reading first (the voice sweep pattern,
-  `workflows/voice_brain_dump/service.py:560-590`). Flag effectiveness is checked per
-  owner via `FeatureFlagService.is_effective`.
+  `_run_maintenance_sweep` (`main.py:85`). It is wired as its own `try/except` block
+  inside `_run_privacy_maintenance_sweep` without changing that function's 3-tuple
+  return (asserted by `tests/test_crt_receipt_retention.py:364`). Candidates come from
+  one indexed query (`tasks.state = 'next'`, index `idx_tasks_owner_state`) run
+  **outside** the lock and grouped by owner; each owner is then processed under
+  `command_lock(owner_id)` in short transactions of at most 50 tasks, re-reading first
+  (the voice sweep pattern, `workflows/voice_brain_dump/service.py:560-590`). The lock is
+  one process-wide `RLock` (`repository.py:66-87`), so it blocks every owner's task
+  writes while held: no provider or network I/O ever runs under it. The sweep has a
+  retention part that runs for every owner with review rows regardless of the flag, and
+  an exposure part (auto-park, repair, gap floor) for activated owners whose flag is
+  effective (`FeatureFlagService.is_effective`), contracts/http.md §9.
 - **Rationale**: no new thread, no new env var; threads are already disabled in tests
   unless `BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST=1`, and tests call the sweep function
   directly, as `tests/test_crt_receipt_retention.py:364` does. A 60 s cadence parks
@@ -194,8 +257,10 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
   web uses `Intl.DateTimeFormat().resolvedOptions().timeZone`.
 - **Rationale**: no user time zone exists anywhere today (`backend/app/schemas/auth.py`
   `User` has none; all backend times are UTC). Differences between device zone and stored
-  zone last only until the next settings sync and never cause an early park (floors are
-  instants).
+  zone last only until the next settings sync. A zone change moves `due_start` and so
+  can bring a due-anchored park forward by up to a day; every `time_zone` change
+  therefore applies the FR-046 7-day floor to due-dated Next tasks
+  (formulation-clock §3), keeping the 24-hour marker of SC-006 intact.
 
 ## R12. Feature flag and exposure
 
@@ -204,9 +269,14 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
   `_POST_ADR_0019_DEFAULT_OFF_FLAGS` (`backend/app/repositories/feature_flag.py:83,100`)
   and the `_upgrade_adr_0019_store` whitelist (line 426). Web reads it with
   `hasFeatureFlag(user, "weekly_review")` (`frontend/src/api/auth.ts:21`); iOS with
-  `MeDTO.featureFlags`. Account-less iOS uses the build switch `BBWeeklyReviewLocal`.
-- **Rationale**: ADR-0022 requires a flag for a significant capability; ADR-0019/0021
-  require an ADR for a new managed flag (ADR-0027 draft §6).
+  `MeDTO.featureFlags`. Account-less iOS uses the build switch `BBWeeklyReviewLocal`,
+  `NO` in Release until the synced path has run clean for one threshold cycle
+  (contracts/ios-commands.md §8), because account-less parks have no remote kill
+  switch.
+- **Rationale**: ADR-0022 requires a flag for a significant capability; ADR-0019 and
+  `docs/decisions/0021-runtime-managed-task-title-autocomplete.md` require an ADR for a
+  new managed flag (ADR-0027 draft §6). (Two files carry the number 0021, so it is
+  cited by file name.)
 
 ## R13. AI navigator: models and providers
 
@@ -222,8 +292,25 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
   `_MAX_INPUT_TOKENS=6000`, `_MAX_OUTPUT_TOKENS=300`, `_MAX_COST_USD=0.01` (per-call admission from token
   estimate, the reconciler's admission pattern), `_MAX_DAILY_COST_USD=0.20` (per owner,
   table `navigator_usage`). Rate limit: 20 calls / 10 min per owner via
-  `backend/app/core/rate_limit.py`. Startup fails loudly when the provider is
-  `openai` and the named key variable is unset (as title completion does).
+  `backend/app/core/rate_limit.py`.
+- **Missing credentials — corrected in campaign 1**: title completion does **not**
+  fail at startup without a key. `build_title_completion_provider`
+  (`backend/app/ai/title_completion.py:241-259`) falls through to
+  `DisabledTitleCompletionProvider.from_settings` (reason "provider credentials
+  missing"), which raises only when `complete()` is called; the container
+  (`backend/app/container.py:384-392`) wires it without a check, and
+  `TaskTitleAutocompleteSettings` (`backend/app/core/config.py:475`) has no validator.
+  The STT and reconciler builders degrade the same way. The navigator deliberately
+  differs: `_build_review_navigator_provider(config)` in the container **raises**
+  (naming the variable, never its value) when the provider is `openai` and the key
+  variable is unset or empty, when it is `deterministic` outside TEST, or when it is
+  unknown. Only `disabled` produces the disabled provider, which the API reports as
+  `available: false` / `503 navigator_disabled` and the clients show visibly. Reason:
+  constitution I requires that remote processing without required configuration
+  "fail visibly instead of silently ... degrading"; a deploy that fails its health
+  check never reaches users, while a silently disabled navigator would look like a
+  product bug. The first failing test of PR-07 is "container build raises without the
+  key".
 - **Rationale**: spec Assumptions: reuse the existing provider and cost-cap conventions;
   `gpt-4o-mini` is already configured for title autocomplete; the design's
   illustrative provider name is OpenAI. Per-owner daily cap bounds spend for the
@@ -238,7 +325,11 @@ Resolved by the owner (Max) on 2026-10-05; spec.md updated accordingly.
   re-checked at request time **and** echoed in the request body (the title-completion
   pattern, `TitleCompletionConsent` in `backend/app/schemas/tasks.py:19`). Revocation
   is a `DELETE` that takes effect for the next request; iOS also blocks locally at once
-  (offline revoke).
+  (offline revoke), and other devices stop once the revoke syncs (stated in the M-23 /
+  D-04 offline copy). On the web the switch blocks the tab at once but shows "Turning
+  off…" until the `DELETE` succeeds. A grant stored with a `consent_text_version` lower
+  than the server's current one counts as absent, and the version is bumped whenever the
+  FR-019 data list or the provider changes, so a changed data list always re-asks.
 - **Rationale**: FR-024 needs "one-time" consent (so persisted, unlike title
   completion's per-request checkbox) and immediate revocation (so re-checked per
   request). No per-owner AI consent store exists today.
@@ -253,9 +344,11 @@ document; not repeated here).
   `SystemLanguageModel` only when it is `.available` **and** the detected language is in
   `supportedLanguages`; keep the thrown `unsupportedLanguageOrLocale` as a backstop;
   otherwise show the FR-023 choice with the reason from `UnavailableReason` or
-  "language not supported". **Apple's model does not support Russian on iOS 26.x or
-  iOS 27** (16 languages; secondary sources, primary pages blocked), so for the owner's
-  Russian tasks the FR-023 choice is the normal path, not an edge case.
+  "language not supported". **Russian is not listed as supported by Apple's model on
+  iOS 26.x or iOS 27; this is unverified** (16 languages; secondary sources, primary
+  pages blocked), so it is treated as unsupported and for the owner's Russian tasks the
+  FR-023 choice is the designed path, not an edge case. The per-task routing works
+  either way.
 - **Decision (option (a), slice PR-09)**: as recommended in that file §3: Core AI +
   `CoreAILanguageModel` behind the iOS 27 `LanguageModel` protocol, Qwen3-1.7B 4-bit
   (Apache-2.0) in an Apple-hosted Background Assets pack downloaded on explicit request,
@@ -290,19 +383,31 @@ document; not repeated here).
 ## R14. Logging and metrics (FR-044)
 
 - **Decision**: logger `app.modules.tasks.review` (the tasks module has no logger today)
-  emitting only ids, codes, counts and timings; supporting metrics (decision mix, stall
-  reasons, re-stall rate, returns from auto-park, due-date moves on Next tasks) are
-  derived from stored codes, never from text. A unit test asserts that a decision with
-  sentinel strings in title, notes, waiting-for, extension reason and navigator I/O never
-  appears in captured log records.
+  emitting only ids, codes, counts and timings, and **not** the stall reason (one reason
+  is behaviourally sensitive and platform logs outlive account purge). Supporting
+  metrics and their sources: decision mix and stall reasons from `review_decisions`
+  (purged with the account); re-stall rate from `consecutive_stalled_formulations`;
+  returns from auto-park from `review_park_acks.returned_at` (data-model E6); due-date
+  moves on Next tasks from a content-free log event `review_due_date_moved owner_id=…
+  task_id=…` (no persisted counter, so nothing new to export or purge); median active
+  review time from `review_sessions.active_seconds_by_step` (SC-004). A unit test
+  asserts that a decision with sentinel strings in title, notes, waiting-for, extension
+  reason and navigator I/O, and with a stall reason set, never shows any of them in
+  captured log records.
 - **Alternatives**: event bus (none exists for tasks; ADR-0001 events are unbuilt).
 
 ## R15. Retention of content-bearing review data
 
-- **Decision**: decision `undo` snapshots (they contain the old title/notes) are nulled
-  7 days after the decision; everything else lives for the account's life (intake §6
-  "same as tasks") and is exported and purged with the tasks store. Device-local model
-  and navigator preference are deleted with the app.
+- **Decision**: decision `undo` snapshots (they contain the old title/notes) and
+  bulk-release clock snapshots are nulled 7 days after they were written, by the
+  retention part of the sweep, which runs for every owner with review rows whether or
+  not the flag is on for them (a rollback or cohort removal must not suspend the bound;
+  test: decide, flag OFF, advance 8 days, sweep, snapshot null). `navigator_usage` rows
+  go after 35 days on the same basis. Everything else lives for the account's life
+  (intake §6 "same as tasks") and is exported and purged with the tasks store. The
+  device copy follows the same 7-day bounds (`runLocalReviewMaintenance`,
+  contracts/ios-commands.md §5), including account-less use. Device-local model and
+  navigator preference are deleted with the app.
 - **Rationale**: Undo is a seconds-long affordance; keeping old content indefinitely in a
   second place has no purpose.
 
@@ -312,8 +417,14 @@ document; not repeated here).
   (`StoreDocumentCoding.swift:117`), review state pulled with
   `GET /api/review/state` after the existing full task pull
   (`SyncEngine+Pull.swift`), new commands per contracts/ios-commands.md.
-- **Rationale**: the outbox already gives offline, ordered, idempotent replay;
-  sessions created offline (SC-007) need no new mechanism.
+- **Rationale**: the outbox already gives offline, ordered, idempotent replay. Campaign 1
+  found that sessions created offline (SC-007) do need two additions, now in the
+  contracts: client-supplied ids on sessions, decisions, bulk releases, follow-ups and
+  formulations, so device and server name the same records; and a stated rule per
+  review command (a `.review` conflict target, merged session progress, field-level
+  settings retry, `replace_open: true` for offline-started sessions, session-less
+  recording of a decision whose session is unknown) so nothing falls into the generic
+  set-aside path (contracts/ios-commands.md §4).
 
 ## R17. iOS notification and widget
 
@@ -344,7 +455,14 @@ document; not repeated here).
   is added to `frontend/src/test/allureTaxonomy.ts` (today tasks fall to the generic
   fallback).
 - **Note**: the web has no Process-inbox flow or Undo toast today; the Inbox step on
-  the web is new UI built from existing task commands.
+  the web is new UI built from existing task commands (design D-03 "Inbox step").
+- **Undo by keyboard**: while an Undo toast is visible, Ctrl+Z / Cmd+Z triggers it
+  (outside text inputs), and the toast's accessible description names the shortcut, so
+  keyboard users need not tab across the list (design "Keyboard and focus").
+- **Form drafts** (FR-052): unsaved decision-form text is kept in `localStorage` under
+  `bb.reviewFormDraft.v1.…` with the origin/account/task namespacing and lifecycle of
+  the existing task-detail and CRT drafts, plus a `beforeunload` warning as
+  `crtDraftCoordinator.ts` does (data-model E11).
 
 ## R19. Requirement-coverage gate for Swift-only requirements
 
@@ -361,11 +479,15 @@ document; not repeated here).
   `check-specs` recipe in `Makefile` (ASK, guarded) when increment 1 lands.
 - **Alternatives**: contrived backend/web tests naming iOS-only requirements (evidence
   that does not test the behaviour).
-- **Lettered ids**: FR-046, FR-047, FR-048, FR-049 and FR-050 do not match the
-  definition regex `((?:FR|SC)-\d+)\*\*` in either `check_requirement_coverage.py:44`
-  or `check_spec_kit_specs.py:165-166`, so the gate cannot enforce them and they cannot
-  be listed in `## PR-срезы` `requirements`. Tests still name them (`020_FR_003a_…`);
-  slices cite their parent id. Reported to the main session as a spec-format issue.
+- **Ids are all gate-enforced**: the former lettered ids were renumbered FR-046 –
+  FR-050, and campaign 1 added FR-051 and FR-052. Every FR-001 … FR-052 and
+  SC-001 … SC-007 matches `DEFINITION_RE` (`check_requirement_coverage.py:44`) and the
+  PR-срезы validator, so each must be named by a test (`020-FR-046`,
+  `test_020_FR_046_…`) and listed in the `requirements` of the slices that realize it.
+  Where the only honest evidence is a manual device check (app-target glue for FR-036,
+  FR-037, FR-047), the test names the id and the evidence file says "manual" (plan
+  Test strategy). PR-01 also updates `scripts/test_check_requirement_coverage.py` with a
+  case proving that a Swift test naming an id satisfies the gate.
 
 ## R20. Mutation testing
 
@@ -376,3 +498,35 @@ document; not repeated here).
   the deploy-and-ci rules. Add `frontend/src/features/review/formulation.ts` to the
   Stryker observed `mutate` list (`frontend/stryker.config.json`). No Swift mutation
   tooling exists (ADR-0015 superseded); Swift parity relies on the shared vectors.
+
+## R21. Time control in tests and the end-to-end route
+
+- **Decision**: one clock seam. `TaskService`, `ReviewService` and the review sweep take
+  an injected `clock: Callable[[], datetime]` from the container (default
+  `app.utils.time.utcnow`), and every time-based pytest case uses one `frozen_clock`
+  fixture that sets it, so no module reads its own `utcnow` binding. For Playwright,
+  the compose stack runs on a real clock, and no test-only HTTP route is added (it would
+  be a production-exposed surface). Instead PR-02 adds two `app.cli` commands that refuse
+  to run unless `BRAIN_BUDDY_ENV=test`: `review-seed-aged-task` (creates a Next task
+  for a user with a formulation started N days ago, and activates the owner) and
+  `review-run-sweep` (runs `_run_review_maintenance_sweep` once). Playwright calls them
+  through the existing `docker compose exec backend python -m app.cli …` seam
+  (`frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts`). The sweep logic
+  itself is proven in pytest.
+- **Alternatives**: a TEST-only clock offset header (touches every request path); a
+  test HTTP endpoint (ASK surface in production builds); mocking the API in Playwright
+  (does not exercise the sweep or the real markers).
+
+## R22. Unsaved text and interruptions (constitution Principle V)
+
+- **Decision**: FR-052. Forms keep a dirty flag per field; Close, swipe-down, Escape,
+  Back, Leave and card or step changes confirm before discarding ("Keep editing" is the
+  default). iOS blocks interactive sheet dismissal while dirty
+  (`interactiveDismissDisabled`) and stores the text in `local.formDrafts`; the web warns
+  on `beforeunload` and stores it in `localStorage` (R18). Drafts are keyed by task and
+  formulation, so a draft never reappears on a newer wording, and expire after 7 days.
+- **Rationale**: constitution Principle V ("Local drafts … MUST avoid data loss and warn
+  before destructive navigation", and tolerate UI closure); the signed-off design
+  discarded killed forms, which campaign 1 flagged as blocking.
+- **Alternatives**: warning only, no persistence (loses text on an app kill); syncing
+  drafts (sends unconfirmed text to the server for no user benefit).

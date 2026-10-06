@@ -96,8 +96,11 @@ each; ~40 new endpoints-or-fields across 3 clients; 29 designed screens.
 
 - **Spec workflow** — PASS. `intake.md`, `spec.md` (Clarifications session 2026-10-05,
   no NEEDS CLARIFICATION markers), `checklists/requirements.md` and the signed-off
-  `design.md` exist. Two owner questions found during planning are recorded in
-  research.md (NC-1 – NC-4), resolved by the owner on 2026-10-05; none changes increment 1's contracts.
+  `design.md` exist. Four owner questions found during planning are recorded in
+  research.md (NC-1 – NC-4), resolved by the owner on 2026-10-05; NC-1 changed the
+  clock contract's extension arithmetic. The owner's answers to planning-review
+  campaign 1's three product decisions (PD-1 – PD-3, 2026-10-06) are in spec.md
+  Clarifications "Session 2026-10-06" and research.md "Owner decisions of 2026-10-06".
 - **Consent & Safety** — PASS with design. On-device navigator needs no consent and sends
   nothing (FR-022). Cloud requires a persisted per-owner per-provider consent that the
   server re-checks on every request; revocation stops the next request; no silent
@@ -105,8 +108,12 @@ each; ~40 new endpoints-or-fields across 3 clients; 29 designed screens.
   strict schema of exactly the FR-019 fields. No titles, notes, reason text or AI I/O in
   logs/metrics/fixtures; navigator evaluation set is synthetic. New durable records are
   exported and purged (data-model "Export and purge"). New provider key is read from an
-  env var named by `BRAIN_BUDDY_REVIEW_NAVIGATOR_API_KEY_ENV`; startup fails loudly when
-  the provider is enabled without it.
+  env var named by `BRAIN_BUDDY_REVIEW_NAVIGATOR_API_KEY_ENV`. Unlike title completion
+  (which degrades to a disabled provider without its key, research R13), the
+  navigator's container build **raises** at startup when the provider is `openai` and
+  that variable is unset, so the deploy fails visibly (constitution I); the first
+  failing test of PR-07 asserts it. Auto-park never runs before the owner has seen the
+  explainer (FR-051).
 - **Tests** — PASS with the strategy in [Test strategy](#test-strategy). Failing tests
   first per slice: formulation vectors, transition tables, decision/undo/stale/idempotency,
   sweep and yield rule, export/purge, flag-off 404, consent denial/revocation,
@@ -124,8 +131,10 @@ each; ~40 new endpoints-or-fields across 3 clients; 29 designed screens.
 - **Mobile/resilience/performance** — PASS. iOS: all of US1, US2, US4, US5 work offline
   through the outbox; decisions made offline before a server park win (yield rule);
   duplicate parks are no-ops; review progress persists per decision; interrupted forms
-  apply nothing (design M-03/M-04 offline rows). Web is online-only with the existing
-  "You're offline" pattern. No canvas impact.
+  apply nothing to the task but keep typed text as a local draft and warn before
+  discarding it (FR-052, constitution Principle V; design M-03/M-04 rows). Web is
+  online-only with the existing "You're offline" pattern, plus browser-local drafts
+  and a leave warning. No canvas impact.
 - **Delivery boundary** — PASS. Spec Kit artifacts are planning input only; each slice
   runs in its own worktree with TDD, independent verification, exact-SHA CI and the
   ADR-0008 class stated per slice; ASK slices need recorded approval.
@@ -144,7 +153,7 @@ Facts this plan builds on (verified 2026-10-05).
 | `backend/app/modules/tasks/domain.py` | `TaskDocument` (state inbox/next/waiting/someday/completed/cancelled, title, details, project_id, tag_ids, due_date, priority, waiting_for/since, order_key, timestamps, revision); no clock or title history | add E1 fields |
 | `backend/app/modules/tasks/service.py` | `TaskService` commands under `_serialized_write` (l.64): owner `command_lock`, idempotency purge + reconcile; `update_task` (l.615), `transition_task` (l.680), `archive_project` (l.959, clears `project_id` on member tasks), `_apply_idempotent_record` (l.1142), `_assert_current` (l.1317, 409 `ConflictError`) | maintain the clock in create/update/transition/smart-add; new prefixes in `_apply_idempotent_record` |
 | `backend/app/modules/tasks/repository.py` | `tasks.sqlite3`, JSON payload + indexed columns, `migration_ledger`, process-wide `command_lock`, `delete_all_for_owner` (l.644), `normalize_task_name` (l.43) | review tables via a mixin; purge review tables first |
-| `backend/app/api/tasks.py` (**ASK**) | task routes; `_to_response` (l.1189) builds `TaskResponse`; title-completion routes and log line | map `formulation`/`parked` |
+| `backend/app/api/tasks.py` (**ASK**) | task routes; `_to_response` (l.1183) builds `TaskResponse`; title-completion routes and log line | map `formulation`/`parked`; accept `new_formulation_id` |
 | `backend/app/api/dependencies.py` (**ASK**) | `get_task_service` (l.111), `require_voice_brain_dump_enabled` (l.361) | `get_review_service`, `require_weekly_review_enabled` |
 | `backend/app/api/__init__.py` | mounts `task_router` into `api_router` | mount review routers |
 | `backend/app/main.py` | `_run_privacy_maintenance_sweep` (l.26), `_run_maintenance_sweep` (l.85), `_start_privacy_maintenance_thread` (l.156); threads off in TEST unless `BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST=1` | `_run_review_maintenance_sweep` on the same thread |

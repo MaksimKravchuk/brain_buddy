@@ -109,15 +109,25 @@ Auto-park:
   device or the server, has no effect and produces no sync conflict;
 - is skipped when the formulation, state or extension changed after the park
   became due (re-checked under the owner lock);
-- never fires earlier than: 14 days after the feature first becomes active for the
-  owner (FR-016), 7 days after a threshold change (FR-039), 7 days after a due-date
-  change on that task (FR-046); and never without the "moves to Someday tomorrow"
-  marker having been derivable for the preceding 24 hours (SC-006);
+- never runs for an owner who has not seen the one-time auto-park explainer shown at
+  the first app or web open after the flag is switched on (FR-051; the first
+  acknowledgement on any device is recorded on the server, account-less iOS records it
+  on the device);
+- never fires earlier than: 14 days after that acknowledgement (FR-016), 7 days after
+  a threshold change (FR-039), 7 days after a due-date change on that task or a
+  time-zone change (FR-046), 7 days after the sweep resumes from a gap of 24 hours or
+  more (flag off and on again, outage); and never without the "moves to Someday
+  tomorrow" marker having been derivable for the preceding 24 hours (SC-006);
 - keeps project, tags, notes, due date and priority, and records the park instant
   and its origin on the task;
-- yields to an explicit decision the person made, on another device, against the
+- yields to an explicit card decision the person made, on another device, against the
   pre-park version of the same formulation before the park instant (spec edge case
-  "Offline for a long time").
+  "Offline for a long time"), restoring the clock the park recorded; plain edits never
+  reverse a park.
+
+Clock bookkeeping that is not a GTD state change — re-anchoring clocks at activation,
+repairing a missing clock, the floors above — does not bump a task's revision, so it
+never conflicts with a person's pending edits.
 
 The server's park time is authoritative once synced. A device whose clock runs ahead
 never causes an early server park.
@@ -141,9 +151,16 @@ admission, rate limiting) under its own `BRAIN_BUDDY_REVIEW_NAVIGATOR_*` setting
 The exact navigator input set is fixed by spec FR-019 and enforced by a strict request
 schema. Proposal text never enters logs, metrics or events.
 
-Apple's on-device model does not support Russian (16 languages on iOS 26.x and 27;
-see the feature's `research-on-device-model.md`), so the choice in FR-023 is the normal
-path for Russian tasks. Routing is per task language, never silently to the cloud.
+Russian is not listed as supported by Apple's on-device model (16 languages on iOS
+26.x and 27, per secondary sources; unverified, see the feature's
+`research-on-device-model.md`); it is treated as unsupported, so the choice in FR-023
+is the designed path for Russian tasks. Routing is per task language, never silently
+to the cloud.
+
+A cloud provider configured without its credentials fails the backend's startup
+rather than degrading silently (constitution I); unlike title completion, the
+navigator never runs as a quietly disabled provider unless the operator chose
+`disabled`.
 
 A downloadable on-device model (recommended: Core AI + Qwen3-1.7B 4-bit in an
 Apple-hosted Background Assets pack, iOS/macOS 27+ only) would be the first third-party
@@ -180,9 +197,12 @@ A due date that keeps moving forward defers the rule (accepted; measured, not
 blocked).
 
 **Risks.** Clock skew between devices and server (bounded by server authority);
-the first automatic state change could surprise people (mitigated by the 24-hour
-marker, the "while you were away" screen, one-tap return, the 14-day grace and
-onboarding copy); on-device model language coverage (Russian unverified).
+the first automatic state change could surprise people (mitigated by the one-time
+explainer before any park, the 24-hour marker, the "while you were away" screen,
+one-tap return, the 14-day grace and onboarding copy); on-device model language
+coverage (Russian unverified); account-less parks have no remote kill switch
+(mitigated by shipping the account-less switch off in Release until the synced path
+has run clean, and a per-launch cap on device parks).
 
 ## Alternatives considered
 

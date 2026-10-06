@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>D-05 · Auto-park explainer (web)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-feature-settings:"cv11","ss01","ss03";-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1200px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--s600);max-width:1000px}
+figure{margin:0 0 30px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;max-width:1000px}figcaption b{color:var(--s900);font-size:13px;margin-right:6px}
+.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.page{width:900px;height:560px;background:var(--s50);border:1px solid var(--s300);border-radius:12px;box-shadow:var(--raised);position:relative;overflow:hidden}
+.page .ghost{padding:28px 40px;color:var(--s400);font-size:20px;font-weight:600}
+.scrim{position:absolute;inset:0;background:rgba(15,23,42,.35)}
+.dlg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:520px;background:#fff;border-radius:14px;box-shadow:var(--float);padding:22px;display:flex;flex-direction:column;gap:14px}
+.dlg h2{margin:0;font-size:18px;font-weight:600;letter-spacing:-.01em}
+.x{position:absolute;right:12px;top:12px;width:36px;height:36px;border:0;background:none;border-radius:8px;color:var(--s600)}
+.pt{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.5;color:var(--s700)}
+.pt .ic{width:28px;height:28px;border-radius:8px;background:var(--sky50);color:var(--sky700);display:grid;place-items:center;flex:none}
+.pt b{color:var(--s900)}
+.seg{display:inline-flex;background:var(--s100);border-radius:8px;padding:3px;gap:3px}
+.seg button{min-height:32px;padding:0 14px;border:0;background:none;border-radius:6px;font-size:13px;font-weight:500;color:var(--s600)}
+.seg button.on{background:#fff;box-shadow:var(--soft);color:var(--s900);font-weight:600}
+.row{display:flex;gap:8px;justify-content:flex-end}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;border-radius:8px;border:1px solid transparent;font-size:13px;font-weight:600;padding:0 14px}
+.btn.pri{background:var(--sky700);color:#fff}.btn.sec{background:#fff;border-color:var(--s200);color:var(--s900)}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.banner{display:flex;gap:8px;align-items:flex-start;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700)}
+.banner.warn{background:var(--amb50);border-color:var(--amb200);color:var(--amb800)}
+.ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--s600)}
+.help{font-size:12px;color:var(--s500);margin:0;line-height:1.5}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-ask" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+<symbol id="i-calendar" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>D-05 · Auto-park explainer — one-time dialog at first web open</h1>
+  <p>New on 2026-10-06 (owner decision PD-3, FR-051). M-26 content as a modal dialog, shown once per owner at the first web open after the feature is switched on, unless <code>GET /review/state</code> says the explainer was already seen on any device. Focus starts on the heading and is trapped. "Got it", Close and Esc all record it as seen (<code>POST /review/explainer/acknowledge</code>) and return focus to the main heading. At 390 px it becomes a full-height sheet.</p>
+</header>
+
+<figure>
+<figcaption><b>D-05 · default</b>The three points and the grace date; "Got it" primary, "Change the number of days" secondary (shows the threshold control inline, as D-04).</figcaption>
+<div class="page">
+  <div class="ghost">Next actions</div>
+  <div class="scrim"></div>
+  <section class="dlg" role="dialog" aria-modal="true" aria-labelledby="d5a">
+    <button class="x" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+    <h2 id="d5a" tabindex="-1">How Next stays fresh</h2>
+    <div class="pt"><span class="ic"><svg class="i"><use href="#i-ask"/></svg></span><span><b>When a task stalls.</b> If a next action keeps the same wording for 14 days, it asks for a decision.</span></div>
+    <div class="pt"><span class="ic"><svg class="i"><use href="#i-archive"/></svg></span><span><b>If it stays undecided.</b> 7 days later it moves to Someday / maybe. Nothing is deleted, and you can bring it back in one click. It's the only thing the app moves on its own.</span></div>
+    <div class="pt"><span class="ic"><svg class="i"><use href="#i-calendar"/></svg></span><span><b>Your tasks get time.</b> Tasks already in Next won't move before Fri 23 Oct.</span></div>
+    <div class="row"><button class="btn sec">Change the number of days</button><button class="btn pri">Got it</button></div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-05 · saving failed, and offline</b>If the acknowledgement could not be saved, the dialog stays with a banner, Ref and Retry; it shows again next time if it was never saved. Offline at web open: "Got it" is disabled with the reason, and Close shows it again next time because nothing could be recorded.</figcaption>
+<div class="page">
+  <div class="ghost">Next actions</div>
+  <div class="scrim"></div>
+  <section class="dlg" role="dialog" aria-modal="true" aria-labelledby="d5b">
+    <button class="x" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+    <h2 id="d5b" tabindex="-1">How Next stays fresh</h2>
+    <div class="pt"><span class="ic"><svg class="i"><use href="#i-ask"/></svg></span><span><b>When a task stalls.</b> If a next action keeps the same wording for 14 days, it asks for a decision.</span></div>
+    <div class="banner warn" role="alert" style="flex-direction:column;gap:4px"><span style="display:flex;gap:8px"><svg class="i"><use href="#i-info"/></svg>Couldn't save that you've seen this. Try again.</span><span class="ref">Ref 3b9d07c2-41e5</span></div>
+    <p class="help">Offline variant: "You're offline. Try again when you're back online." with "Got it" disabled.</p>
+    <div class="row"><button class="btn sec">Retry</button><button class="btn pri" disabled>Got it</button></div>
+  </section>
+</div>
+</figure>
+
+</body>
+</html>

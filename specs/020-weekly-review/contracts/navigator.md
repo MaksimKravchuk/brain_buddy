@@ -11,23 +11,37 @@ outcome).
 NavigatorInput
   kind:             first_step | reformulate | project_next_action
   task_title:       string?   (absent for project_next_action)
-  task_notes:       string?   (≤ 20 000; when the prompt budget is exceeded, the middle of the notes is dropped (beginning and most recent lines kept) and `notes_truncated = true` — owner decision NC-3, FR-019)
+  task_notes:       string?   (after `reduce_notes`, below; `notes_truncated = true` when anything was dropped — owner decision NC-3, FR-019)
   stall_reason:     unclear | too_big | missing_info | waiting_on_someone | no_energy | no_longer_matters | null
   project_name:     string?   (null for a task without a project)
   open_task_titles: [string]  (≤ 20, other open tasks in the same project, excluding this task, most recently updated first)
-  language_hint:    BCP-47 dominant language of title + notes (else project_name), detected on device
-                    (`NLLanguageRecognizer` on Apple platforms; browser-side heuristic on web, server
-                    does not re-detect)
 ```
 
-**Prompt budget** (owner decision NC-3): the builder measures the assembled prompt (Apple:
-`tokenCount(for:)` on iOS 26.4+, else 3 characters per token; cloud: 3 characters per
-token against `BRAIN_BUDDY_REVIEW_NAVIGATOR_MAX_INPUT_TOKENS`, default 6 000) and, only
-if it exceeds the budget, drops the middle of the notes. The beginning and the most
-recently added lines are kept. Title, stall reason, project name and sibling titles are
-never dropped. When `notes_truncated` is set, the UI shows "Part of the notes was not
-considered." Apple's window is 4,096 tokens on iOS 26.x and
-8,192 on iOS 27 (`research-on-device-model.md` §1).
+`kind` is request metadata (which suggestion is asked for), listed in FR-019.
+**Device-only routing input** (never part of the request body, never sent to a cloud
+provider): `language` — the BCP-47 dominant language of title + notes (else
+project name), detected on device with `NLLanguageRecognizer`; Apple's model and the
+downloaded model receive it as the locale pin of §3. The web does not detect a
+language; the cloud prompt says to answer in the language of the task text.
+
+**One shared reduction** (owner decision NC-3, FR-019 "exactly the same reduced input"):
+`reduce_notes(notes) -> (notes', truncated)` is one deterministic function implemented
+in Core (`NavigatorInputBuilder`), in `navigatorInput.ts` and in `navigator.py`
+(backstop), covered by shared vectors in `NavigatorValidatorTests`, Vitest and pytest.
+With `NOTES_BUDGET_CHARS = 6 000` (a constant, not per model): if the notes have at
+most that many characters (Unicode scalars) they are unchanged; otherwise the first
+lines up to 2 000 characters and the most recent (last) lines up to 4 000 characters
+are kept, whole lines only, joined by one line `…`, and `truncated = true`. Title,
+stall reason, project name and sibling titles are never dropped. The budget is chosen so
+the reduced input, with instructions and siblings, fits the smallest supported window
+(Apple's 4,096 tokens on iOS 26.x, `research-on-device-model.md` §1) at the
+conservative 3 characters per token; every model, on-device or cloud, receives exactly
+this reduced input. Token measurement (`tokenCount(for:)` on iOS 26.4+, 3 characters per
+token on the server against `BRAIN_BUDDY_REVIEW_NAVIGATOR_MAX_INPUT_TOKENS`) is a
+**guard only**: if the reduced input still does not fit (for example very long
+sibling titles in a dense script), the model is not called and the person sees the
+"input too large" copy (http §7). When `notes_truncated` is set, the UI shows "Part
+of the notes was not considered." (design M-05 / M-07 / D-02 "notes shortened").
 
 Nothing else: no ids, dates, tags, due dates, other projects, account data or history.
 The same value is built by `NavigatorInputBuilder` in
@@ -61,15 +75,15 @@ Core; `validate_navigator_output` in `backend/app/modules/tasks/navigator.py`):
 
 ## 3. Prompt (versioned `navigator-prompt/v1`)
 
-Instructions (system role; English for model reliability, output language forced by
-the hint):
+Instructions (system role; English for model reliability; on-device paths add the
+locale pin below, the cloud path relies on the "same language" rule):
 
 ```text
 You help a person get unstuck on a task they keep postponing.
 Propose 1 to 3 concrete next physical actions that would take under 30 minutes
 each and could be started today. Each proposal is one short imperative line.
 Rules:
-- Write in the language with code {language_hint}.
+- Write in the same language as the task text.
 - Use only facts present in the input. Never invent people, places, amounts,
   dates, brands or organisations.
 - Do not repeat the current wording or any listed open task.
@@ -86,7 +100,7 @@ User content (data role, delimited, never interpolated into instructions):
 
 ```text
 <task_title>…</task_title>
-<task_notes>…last 4 000 chars…</task_notes>
+<task_notes>…notes after reduce_notes (§1)…</task_notes>
 <stall_reason>too_big</stall_reason>
 <project_name>…</project_name>
 <open_tasks>
@@ -152,12 +166,31 @@ Implementations:
 
 `NavigatorRouter` (Core) chooses: Apple model if `available` for the language →
 else the person's remembered fallback (`downloaded` if installed, `cloud` if
-consented and signed in) → else return `unavailable(reason)` so M-06 shows the choice.
-It never falls back silently from on-device to cloud (constitution I).
+consent is current, the account is signed in and the server reports
+`available: true`) → else return `unavailable(reason)` so M-06 shows the choice. It
+never falls back silently from on-device to cloud (constitution I).
+
+- **Route shown before the tap** (privacy advisory, campaign 1): the router resolves
+  the route for the open task when the form appears, and the Suggest control carries it
+  as a caption — "Suggest · on this iPhone" or "Suggest · OpenAI" (M-04, M-08, M-19) —
+  so cloud egress for a given task is visible before anything is sent.
+- **Interruption** (constitution async rules): backgrounding the app or dismissing the
+  sheet while a suggestion runs cancels the Swift `Task` (`NavigatorError.cancelled`),
+  which is shown quietly ("Suggestion stopped. Suggest again"), never as an error.
+  Proposals that had already arrived are kept with the form's draft (FR-052) and shown
+  again on return. A lost connection mid-request on the cloud path is a
+  `providerError` with the M-07 timeout copy and Ref.
 
 ## 5. Evaluation set (SC-005)
 
-Method and gate: `research-on-device-model.md` §4. Fixtures:
+Method and gate: `research-on-device-model.md` §4. The fixture, the deterministic
+screen runner and the recorded-output format land in **PR-07** (before any cloud
+exposure), not in the late PR-09. Evaluation matrix, by source and language: cloud
+(RU, EN), Apple on-device (EN; RU only if Apple ever lists it), downloaded on-device
+(RU, EN; PR-09). Each cell is generated manually by the owner (cloud runs spend money
+and are approval-gated, never unattended or from a subagent), graded blind, and
+recorded as aggregate scores only. PR-14 opens each flag stage only for the sources
+whose cell has passed the gate. Fixtures:
 `backend/tests/fixtures/navigator/eval_v1.json`, ~48 **synthetic** cases (24 RU, 12 EN,
 12 RU/EN code-switched; every stall reason and none; ~25% where the right output is one
 question; notes that name people/places/amounts vs none; 0/5/20 sibling titles), each with
@@ -176,7 +209,10 @@ counts (ids and codes only), never from text.
 
 - On device: no network call; M-05 note "Suggested on this iPhone. Nothing left the device."
 - Cloud: server log line `navigator outcome=%s request_id=%s owner_id=%s provider=%s
-  kind=%s duration_ms=%d input_tokens=%s output_tokens=%s proposals=%d` (codes and
-  counts only, mirroring the title-completion line in `backend/app/api/tasks.py`).
+  kind=%s duration_ms=%d input_tokens=%s output_tokens=%s proposals=%d
+  notes_truncated=%s` (codes and counts only, mirroring the title-completion line in
+  `backend/app/api/tasks.py`).
+- Provider configuration: see contracts/http.md §7 "Provider configuration" (startup
+  raises when `openai` is configured without its key).
 - Neither input nor output text is persisted server-side. `review_decisions` stores
   only `ai_use` and `navigator_request_id`.

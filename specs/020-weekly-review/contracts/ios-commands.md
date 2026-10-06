@@ -20,16 +20,18 @@ public var consecutiveStalledFormulations: Int // default 0
 public var parked: ParkMarker?                 // only while .someday
 
 public struct FormulationClock: Hashable, Sendable, Codable {
-    public var id: FormulationID          // client UUID until the server's id is pulled
+    public var id: FormulationID          // minted by the reducer ("form_<UUID>") and sent as
+                                          // `new_formulation_id`; the server adopts it (http §1)
     public var startedAt: Date
     public var extendedAt: Date?
     public var extensionReason: String?
     public var parkFloorAt: Date?
 }
-public struct ParkMarker: Hashable, Sendable, Codable {
+public struct ParkMarker: Hashable, Sendable, Codable {   // auto-park only
     public var at: Date
-    public var by: ParkOrigin            // .auto | .person
     public var formulationID: FormulationID
+    public var clockBefore: FormulationClock?             // local parks; server keeps its own
+    public var stalledBefore: Int
 }
 ```
 
@@ -46,16 +48,19 @@ client id it creates.
 
 | case | payload | request | reducer effect |
 |---|---|---|---|
-| `decideTask(DecideTask)` | `decisionID, taskID, type, formulationID?, stallReason?, title?, waitingFor?, reason?, sessionID?, aiUse, navigatorRequestID?, followUpTaskID?` | `POST /tasks/{id}/decisions` | applies the decision table (http §3) and records `ReviewDecision` with an undo snapshot |
-| `undoDecision(DecisionID)` | — | `POST /review/decisions/{id}/undo` | restores the snapshot, removes the decision, deletes a created follow-up |
-| `autoParkTask(AutoParkTask)` | `taskID, formulationID` | `POST /tasks/{id}/auto-park` | parks iff the local evaluation is `park_due` |
-| `bulkRelease(BulkRelease)` | `bulkID, kind, sessionID?, taskIDs` | `POST /review/bulk-releases` | parks each eligible task with `by: .person` |
-| `undoBulkRelease(BulkID)` | — | `POST /review/bulk-releases/{id}/undo` | restores tasks whose state is unchanged |
+| `decideTask(DecideTask)` | `decisionID, taskID, type, formulationID?, newFormulationID?, stallReason?, title?, waitingFor?, reason?, sessionID?, aiUse, navigatorRequestID?, followUpTaskID?` | `POST /tasks/{id}/decisions` (sends `decision_id`, `new_formulation_id`, `follow_up_task_id`) | applies the decision table (http §3) and records `ReviewDecision` with an undo snapshot (and the follow-up's revision) |
+| `undoDecision(DecisionID)` | — | `POST /review/decisions/{id}/undo` | restores the snapshot, removes the decision, deletes a created follow-up only if it is unchanged |
+| `autoParkTask(AutoParkTask)` | `taskID, formulationID` | `POST /tasks/{id}/auto-park` | parks iff activated and the local evaluation is `park_due`; stores `clockBefore` |
+| `bulkRelease(BulkRelease)` | `bulkID, kind, sessionID?, taskIDs` | `POST /review/bulk-releases` (sends `id`) | moves each eligible task to Someday (no park marker) and keeps its previous list and clock in the local bulk-release record |
+| `undoBulkRelease(BulkID)` | — | `POST /review/bulk-releases/{id}/undo` | restores tasks whose state is unchanged, clock included |
 | `review(ReviewCommand)` | see below | one request per case | mutates `GTDState.review` only |
 
-`ReviewCommand`: `updateSettings(ReviewSettingsChange)` → `PUT /review/settings`;
+`ReviewCommand`: `acknowledgeExplainer` → `POST /review/explainer/acknowledge`
+(FR-051; reducer sets the local activation and runs the activation step of §3 when not
+yet activated); `updateSettings(ReviewSettingsChange)` → `PUT /review/settings`;
 `acknowledgeParks([ParkAck])` → `POST /review/parks/acknowledge`;
-`startSession(StartSession)` → `POST /review/sessions`;
+`startSession(StartSession)` (carries the client `sessionID`) → `POST /review/sessions`
+with `id` and `replace_open: true`;
 `progressSession(SessionProgress)` → `PATCH /review/sessions/{id}`;
 `finishSession(FinishSession)` → `POST /review/sessions/{id}/finish`;
 `grantNavigatorConsent(provider)` / `revokeNavigatorConsent(provider)` →
@@ -65,12 +70,10 @@ New `GTDValidationError` cases (user-facing `message`, as today):
 `decisionNotAllowed`, `extensionAlreadyUsed`, `extensionNotDue`,
 `formulationChanged`, `undoUnavailable`, `projectArchived`.
 
-**Exhaustive switches to update** (from the current code): `Reducer.swift:24`,
-`Reducer+Replay.swift:39`, `Compaction.swift` (151, 267, 337), `Replay.swift`
-(~185, 229), `BrainBuddySync/GTDCommand+Sync.swift` (18, 39, 68, 84, 116),
-`BrainBuddySync/PushPlanner.swift:98` and `PlannedRequest.send` (:35),
-`BrainBuddySync/SyncEngine+Push.swift` (353, 434), and the in-memory server in
-`BrainBuddyFakeServer`.
+**Exhaustive switches to update**: every exhaustive `switch` over `GTDCommand` in
+`BrainBuddyCore` (reducer, replay, compaction), `BrainBuddySync` (sync mapping, push
+planner, push engine) and the in-memory server in `BrainBuddyFakeServer`; adding the
+cases makes the compiler enumerate them, so no line list is kept here.
 
 ## 3. Clock maintenance in existing cases
 
@@ -84,9 +87,36 @@ New `GTDValidationError` cases (user-facing `message`, as today):
 | `transitionTask` out of Someday | clear `parked` |
 | `archiveProject` | unchanged (clears `projectID`, as today) |
 
-Because replay re-applies each operation at its `issuedAt`
-(`Replay.swift`), the clock is deterministic for account-less use, where the
-compacted outbox is the only data.
+Every case that starts a formulation mints `form_<UUID>` in the command (not in the
+reducer, so replay is deterministic) and sends it as `new_formulation_id`
+(http §1). Before local activation (below) the reducer still maintains clocks, but
+classification returns `none` and nothing parks (formulation-clock §2).
+
+**Activation step (FR-016, FR-051)**: activation is not an outbox operation of the
+task stream. The reducer applies the formulation-clock §3 activation transition as a
+deterministic **post-replay step keyed on the activation instant**: after replaying
+the outbox onto `base`, if an activation instant is known (`base.review.settings.
+activatedAt` pulled from the server when signed in; `local.activatedAt` for
+account-less use), every Next task's clock is clamped to it and its floor raised to
+`activatedAt + 14 d`. The same inputs therefore always give the same clocks, whatever
+order operations were folded in.
+
+**Compaction is clock-aware** (account-less correctness): replay applies each
+operation at its `issuedAt`, and today `OutboxCompactor` folds a task edit into the
+task's unsent creation and turns a later move into the creation's list. Folding would
+move a later title change or move back to the creation instant and over-state the
+formulation age, which, without an account, nothing would correct. So once the review
+feature is exposed on the device, the compactor **does not fold** an `updateTask` that
+changes the title, nor a `transitionTask`, into an unsent `createTask` of a task; other
+folds (notes, tags, project, priority, subtasks, comments) stay as they are, because
+they do not touch the clock. A Swift test asserts that, for every transition vector,
+replaying the compacted outbox and replaying the uncompacted operations give identical
+`formulation` fields.
+
+Signed-in devices also receive the server's clock on every pull (`TaskDTO.formulation`
+replaces the local value); a task the server has with a `null` clock classifies as
+`none` locally until the server's repair arrives, so the device can never park it
+early.
 
 ## 4. Replay, compaction and conflicts
 
@@ -110,6 +140,26 @@ compacted outbox is the only data.
   pulled server task wins. `LocalReviewState.issuedAutoParks[taskID] = formulationID`
   prevents re-issuing for the same formulation, so a device whose clock runs ahead
   cannot loop (research R9).
+- **Review commands never fall into the generic set-aside path** (today a
+  `.staleRevision` whose `conflictTarget` is `nil` and every other 4xx are set aside,
+  `SyncEngine+Push.swift`). `GTDCommand+Sync.swift` gains a `.review` conflict target
+  whose refetch re-pulls `GET /review/state`, and each `ReviewCommand` has a stated rule:
+
+  | command | server behaviour | device rule |
+  |---|---|---|
+  | `acknowledgeExplainer` | idempotent, first wins | always succeeds; pulled `activatedAt` replaces the local one |
+  | `updateSettings` | 409 on `expected_revision` mismatch | refetch state, re-apply only the fields this change set (field-level last writer wins), resend with the new revision |
+  | `acknowledgeParks` | idempotent, unknown ids ignored | always succeeds |
+  | `startSession` | client `id`, `replace_open: true`; replay with the same id returns the session | never 409; if another device's open session was replaced, that device shows "review ended elsewhere" |
+  | `progressSession` | merged, never 409 (http §6) | adopt the merged session; if its `current_step` differs, show "review moved on elsewhere" |
+  | `finishSession` | idempotent | adopt the returned session |
+  | `grant/revokeNavigatorConsent` | idempotent | revoke blocks locally at once |
+
+  `decideTask` naming a session the server does not know is recorded without a session
+  (http §3), so no decision is lost (SC-007). `ReviewSyncTests` cover: two devices start
+  a review offline, both sync, 0 decisions lost; a settings edit queued while another
+  device changed settings; a queued edit survives activation (activation does not bump
+  `revision`, formulation-clock §2).
 
 ## 5. Auto-park on device
 
@@ -119,10 +169,23 @@ compacted outbox is the only data.
 task (`BrainBuddyApp.swift:43`). It queries `GTDQueries.dueAutoParks(in:now:settings:)`
 and performs one `autoParkTask` per task via the private `perform(_:)`.
 
+- Nothing parks before activation (FR-051): `dueAutoParks` is empty while no
+  activation instant is known.
 - Account-less: the park is final locally (FR-014).
 - Signed in: the park is optimistic; the server decides (`applied`), and pull
   reconciles. Two devices parking the same formulation both get 200 and one server
   park (US2-6).
+- **Device-side safety valve** (no remote kill switch exists for account-less parks):
+  one call applies at most 10 parks; when more are due, the rest wait until M-09 for
+  the applied ones has been continued or closed, then the next call applies the next
+  batch. Parks can only be later than due, never earlier, so FR-012 still holds in
+  substance and a clock defect degrades to a visible prompt instead of mass parking.
+
+`Workspace.runLocalReviewMaintenance()` runs at the same moments (load, foreground,
+after pull, background refresh) and keeps the device copy within the server's
+retention bounds, signed in or not: it closes local sessions idle ≥ 7 days (partial
+or abandoned, data-model E3), nulls local decision undo snapshots and bulk-release
+clock snapshots older than 7 days, and deletes form drafts (FR-052) older than 7 days.
 - Widgets and intents never park (they open the workspace with `enableSync: false`
   and only read); the widget counts `park_due` tasks as "moves to Someday tomorrow"
   until the app applies the park.
@@ -130,22 +193,52 @@ and performs one `autoParkTask` per task via the private `perform(_:)`.
 ## 6. Queries (`BrainBuddyCore/Queries+Review.swift`, new)
 
 `GTDQueries.formulationClass(of:now:settings:timeZone:)`,
-`decisionQueue(in:now:settings:)` (oldest `ask_at` first),
-`dueAutoParks(in:now:settings:)`, `unseenParks(in:)`,
+`decisionQueue(in:now:settings:)` (the `asks_for_decision` aggregate in the order of
+formulation-clock §5), `dueAutoParks(in:now:settings:)`, `unseenParks(in:)`,
 `restartCandidates(in:now:settings:)`, `wins(in:now:)` (completed in the last
-7 days), `capacityMirror(in:now:)` (Next count, 4-week weekly average, implied
-weeks), `waitingDue(in:now:)`, `somedayDue(in:now:limit: 7)`,
-`projectsNeedingNextAction(in:)` (reuses `ProjectSummary.needsNextAction`,
+7 days), `capacityMirror(in:now:)` (Next count; 4-week weekly average and implied
+weeks only with ≥ 4 full weeks of history and ≥ 1 completion, else `nil`, FR-031),
+`waitingDue(in:now:)`, `somedayDue(in:now:limit: 7)` (eligibility and order of
+http §6), `projectsNeedingNextAction(in:)` (reuses `ProjectSummary.needsNextAction`,
 `Queries.swift:183`), `datesAhead(in:today:days: 14)`,
-`lastCountedReview(in:)`, `askCount(in:now:settings:)` (widget).
+`lastCountedReview(in:)` (completed and partial only), `askCount(in:now:settings:)`
+(widget; the same aggregate as `decisionQueue`), `explainerNeeded(in:)` (FR-051).
+
+Pure Core functions for behaviour that otherwise lives only in app or widget targets
+(so it is Linux-testable, testability finding campaign 1):
+
+- `ReviewReminderPlanner.nextFireDate(settings:lastCountedReview:now:timeZone:) -> Date?`
+  — the FR-036 rule (one per week, skipped after a counted review in the preceding
+  6 days, follows time-zone changes); the app's `ReviewReminderScheduler` only
+  registers what it returns.
+- `ReviewRoute.parse(_ url: URL) -> ReviewRoute?` and
+  `ReviewEntryPlanner.start(for: .widgetDecisions, state:) -> [ReviewScreen]` — the
+  deep link and the entry order of design.md (explainer, onboarding, While you were
+  away, restart, then resume or a quick review at the decision step with Wins and Inbox
+  skipped).
+- `ModelDownloadMachine` (PR-09) — the download state machine (request-only start,
+  progress, interruption and resume, insufficient storage, delete, never required for
+  non-AI parts) behind injected `ModelDownloader` and `StorageProbe` protocols.
+- `MarkerStyle.for(_ class:)` — the marker's text, icon and colour role, with a test
+  that no age class maps to an error role (FR-004, FR-038).
 
 ## 7. Persistence (`StoreDocument` v2)
 
 `StoreDocument.currentVersion` becomes 2. `StoreDocumentCoding.migrationStep(from: 1)`
 (`BrainBuddyPersistence/StoreDocumentCoding.swift:117`) adds an empty
-`base.review`/`local` and, for account-less documents, sets
-`local.activatedAt = nil` (activation happens when the flag/build switch first shows
-the feature, not at migration). A v1 build that meets a v2 file reports
+`base.review`/`local` and sets `local.activatedAt = nil` and `local.formDrafts = [:]`.
+Activation happens when the person first dismisses the auto-park explainer (M-26,
+FR-051), never at migration: account-less, that instant is `local.activatedAt`;
+signed in, the device queues `acknowledgeExplainer` and uses the server's
+`activated_at` once pulled (an offline device that shows the explainer before learning
+it was already seen elsewhere sends a harmless duplicate acknowledgement). Linking an
+account-less install to an account sends `acknowledgeExplainer` if the device had
+seen it and the account has no activation yet.
+
+`local.formDrafts: [DraftKey: String]` holds unsaved form text (FR-052), keyed by
+form kind + task id + formulation id (or session id + step item). It is never sent,
+never part of an outbox operation and never logged; it is removed on save, discard,
+formulation change, sign-out, or after 7 days. A v1 build that meets a v2 file reports
 `.unsupportedVersion` (existing behaviour); the app and its widget extension ship in
 one bundle, so they never disagree.
 
@@ -155,3 +248,9 @@ Shown when signed in and `MeDTO.featureFlags["weekly_review"] == true`, or when
 account-less and the build's Info.plist key `BBWeeklyReviewLocal` (new, in
 `ios/project.yml`) is `YES`. Otherwise Lists keeps the existing `DeferredRow`
 ("coming later", `Screens/Browse/ListsHubScreen.swift:47-53`).
+
+Because account-less parks have no server and no remote kill switch,
+`BBWeeklyReviewLocal` is `NO` in the Release configuration (TestFlight and App Store)
+until the synced path has run clean for at least one full threshold cycle (T + 7 days)
+for the owner; it is `YES` only in Debug until then. Turning it on for Release is a
+recorded owner decision at PR-14.
