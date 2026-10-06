@@ -735,6 +735,10 @@ class AppConfig(BaseModel):
 
     environment: AppEnvironment = Field(default=AppEnvironment.DEVELOPMENT)
     api_prefix: str = Field(default="/api")
+    mcp_enabled: bool = False
+    mcp_allowed_hosts: list[str] = Field(
+        default_factory=lambda: ["localhost:*", "127.0.0.1:*", "[::1]:*"]
+    )
     data: DataSettings = Field(default_factory=DataSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
@@ -1115,6 +1119,14 @@ def _build_config() -> AppConfig:
     return AppConfig(
         environment=environment,
         api_prefix=api_prefix,
+        mcp_enabled=os.getenv("BRAIN_BUDDY_MCP_ENABLED", "").strip() == "1",
+        mcp_allowed_hosts=[
+            host.strip()
+            for host in os.getenv(
+                "BRAIN_BUDDY_MCP_ALLOWED_HOSTS", "localhost:*,127.0.0.1:*,[::1]:*"
+            ).split(",")
+            if host.strip()
+        ],
         data=data_config,
         logging=logging_config,
         session=session_config,
