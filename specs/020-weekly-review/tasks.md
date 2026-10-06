@@ -96,6 +96,15 @@ before revisions, replay-safe session progress (`progress_id`), undo retries, th
 equal-zone no-op, the notification zone and the account-linking `extend` rule (172
 tasks).
 
+**`/speckit-analyze` remediation** (2026-10-06; T-ids kept stable): T173 (the Swift
+replay of the decision and park traces, split out of T136) is appended in Phase 4 and
+slice PR-04, which now also depends on PR-15; T136 keeps the run traces in PR-12. T021,
+T022, T020 (required `progress_id`), T042, T126 (`id_conflict` vs matching record),
+T113, T124 (`ai_use` on the wire; web Stop), T147, T149 (first-review and
+completed-without-activity copy), T079, T116 (performance evidence), T166 (FR-041 run
+file), T169 ("clean cycle" counts) were extended; T049 lost its `[P]`; the manifest's
+`tests` now hold literal commands (173 tasks).
+
 **Slice naming**: the plan's PR-01 – PR-14 keep their ids. The plan's rule "split
 PR-02" is applied as **PR-02** (behaviour-neutral: clock seam, pure rules, vectors,
 wire schemas and fixtures, their copies, the backend Allure rules) and **PR-15** (the
@@ -269,7 +278,7 @@ a contract):
 
 - [ ] T077 [US2] Write and observe RED `backend/tests/test_review_auto_park.py` (activation): the first `POST /review/explainer/acknowledge` sets `activated_at` to server now, runs the activation clamp and the `activated_at + 14 d` floor in one owner-locked transaction without bumping any task `revision`/`updated_at`, stores a supplied IANA `time_zone` (400 `invalid_time_zone` otherwise) and returns the state body; later or duplicate acknowledgements change nothing, a different `time_zone` on them included (only the activating acknowledgement stores a zone, contracts/http.md §5); an acknowledgement with the flag off still activates; no derived instants and no park before activation. *(020-FR-014, 020-FR-016, 020-FR-018, 020-FR-051)*
 - [ ] T078 [US2] Make T077 GREEN in `backend/app/modules/tasks/review_service.py` and `backend/app/api/review.py`; log `review_activated`. *(020-FR-016, 020-FR-051)*
-- [ ] T079 [US2] Write and observe RED in `backend/tests/test_review_auto_park.py` (sweep, driven by `_run_review_maintenance_sweep(container)` with `frozen_clock`): due vs not due; every park in the matrix preceded by a ≥ 24 h `moves_tomorrow` window and listed in `unseen_parks`; the FR-039, FR-046, time-zone and sweep-gap floors; skipped after reformulate, move or extend; a second park of the same formulation is a no-op; the park keeps project, tags, notes, due date and priority and writes `parked` with `clock_before` and the `review_park_acks` row (`parked_at`, `from_revision`, `source: sweep`) in the same transaction; key `auto-park:<task_id>:<formulation_id>:<from_revision>`, so park → yield + cosmetic save → parked again by the next run with no idempotency conflict; clock repair with a 14-day floor; retention with the flag OFF (a decision undo snapshot null after 8 days, a bulk-release `clock_before` null after 7 days, `navigator_usage` rows older than 35 days deleted); one owner's failure isolated and logged with `type(exc).__name__`; a `User` resolved per owner for `is_effective`; the return shape of `_run_privacy_maintenance_sweep` unchanged (`backend/tests/test_crt_receipt_retention.py:364`). *(020-FR-012, 020-FR-013, 020-FR-014, 020-FR-016, 020-FR-018, 020-FR-039, 020-FR-043, 020-FR-046, 020-SC-006)*
+- [ ] T079 [US2] Write and observe RED in `backend/tests/test_review_auto_park.py` (sweep, driven by `_run_review_maintenance_sweep(container)` with `frozen_clock`): due vs not due; every park in the matrix preceded by a ≥ 24 h `moves_tomorrow` window and listed in `unseen_parks`; the FR-039, FR-046, time-zone and sweep-gap floors; skipped after reformulate, move or extend; a second park of the same formulation is a no-op; the park keeps project, tags, notes, due date and priority and writes `parked` with `clock_before` and the `review_park_acks` row (`parked_at`, `from_revision`, `source: sweep`) in the same transaction; key `auto-park:<task_id>:<formulation_id>:<from_revision>`, so park → yield + cosmetic save → parked again by the next run with no idempotency conflict; clock repair with a 14-day floor; retention with the flag OFF (a decision undo snapshot null after 8 days, a bulk-release `clock_before` null after 7 days, `navigator_usage` rows older than 35 days deleted); one owner's failure isolated and logged with `type(exc).__name__`; a `User` resolved per owner for `is_effective`; the return shape of `_run_privacy_maintenance_sweep` unchanged (`backend/tests/test_crt_receipt_retention.py:364`); optionally, a sweep-duration bound: one case seeds 20 activated owners × 200 Next tasks and asserts the run's measured `duration_ms` stays below the 60 s sweep interval (plan "Performance Goals"; a generous ceiling against an accidental per-task query, not a benchmark). *(020-FR-012, 020-FR-013, 020-FR-014, 020-FR-016, 020-FR-018, 020-FR-039, 020-FR-043, 020-FR-046, 020-SC-006)*
 - [ ] T080 [US2] Make T079 GREEN: `ReviewService.run_auto_park_sweep(now)` and `run_review_retention(now)` in `backend/app/modules/tasks/review_service.py` (candidates selected outside the lock, owner-locked transactions of at most 50 tasks that re-read before writing, no I/O under the lock; the idle-run close delegated to `ReviewFlowService`, a no-op until PR-11); `_run_review_maintenance_sweep(container)` as its own `try/except` inside `_run_privacy_maintenance_sweep` and called from `_run_maintenance_sweep` in `backend/app/main.py`; the log line `review_sweep owners=%d parked=%d repaired=%d closed=%d gap_floors=%d snapshots_nulled=%d duration_ms=%d`. *(020-FR-012, 020-FR-014, 020-FR-043)*
 - [ ] T081 [US2] Write and observe RED in `backend/tests/test_review_auto_park.py` (device parks and the yield rule): `POST /tasks/{task_id}/auto-park` parks iff the flag is effective, the owner is activated, the task is in Next with class `park_due` and not already parked for its formulation, otherwise `200 {"applied": false}`; two devices → one park, both 200; the yield applies when `parked.formulation_id == formulation_id`, `parked.from_revision <= expected_revision <= task.revision` and `client_decided_at < parked.at` (restore `clock_before` exactly, apply the decision, `"yielded_auto_park": true`), including an `extend` made offline before the park; an offline notes edit then an offline card decision with the park between → notes kept, decision applied; a notes-only PATCH queued before the park → 409 and the park stands. *(020-FR-011, 020-FR-013, 020-SC-007)*
 - [ ] T082 [US2] Make T081 GREEN: the auto-park route in `backend/app/api/review.py` and the yield rule in `ReviewService.decide` (`backend/app/modules/tasks/review_service.py`); log `review_auto_park applied=… source=sweep|device yielded=…`. *(020-FR-013)*
@@ -335,7 +344,7 @@ a contract):
 - [ ] T113 [US3] Write and observe RED first, named for `020-FR-026`: in `ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NavigatorValidatorTests.swift`, `NavigatorAIUse.resolve(shownProposals:pickedProposal:savedText:requestID:)` gives `as_is` when a picked proposal is confirmed unedited, `edited` when it was picked and then edited, `not_used` when proposals were shown and the person saved their own text, `none` when no proposal was shown, and carries the server `request_id` only for a cloud route (on-device → `navigatorRequestID == nil`); in `ios/BrainBuddyKit/Tests/BrainBuddyAPITests/NavigatorAPITests.swift`, the `decideTask` built from each case is encoded through the PR-03 request body and the wire JSON is asserted (`"ai_use": "as_is" | "edited" | "not_used"`, `"navigator_request_id"` equal to the UUID the stubbed cloud response returned, `null` on device; no proposal text anywhere in the body). Then GREEN with `NavigatorAIUse` in `ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift` and its use in `ios/BrainBuddy/Screens/Review/DecisionForms.swift`, and build the navigator UI: the new `ios/BrainBuddy/Navigator/NavigatorPanel.swift` (M-05 states incl. notes shortened, interrupted "Suggestion stopped." · "Suggest again", the clarifying question appending the answer to notes through a normal `updateTask` and re-running), `ios/BrainBuddy/Navigator/ModelChoiceSheet.swift` (M-06 choice per reason, cloud unavailable; the download row shown unavailable until PR-09) and `ios/BrainBuddy/Navigator/CloudConsentSheet.swift` (M-07: the provider and the five items, "Nothing else is sent." and "Notes are sent as written, including any names in them." (owner decision 2026-10-06), consent after revoke, consent text changed, declined, errors with Ref, offline, no account, the clarifying question (cloud)); "Suggest · on this iPhone" / "Suggest · OpenAI" in `ios/BrainBuddy/Screens/Review/DecisionForms.swift`; focus returns to Suggest or the first proposal when M-06 or M-07 closes. *(020-FR-019, 020-FR-020, 020-FR-021, 020-FR-022, 020-FR-023, 020-FR-024, 020-FR-025, 020-FR-026, 020-FR-045, 020-FR-052)*
 - [ ] T114 [US3] M-08 in the new `ios/BrainBuddy/Navigator/ProjectNextActionBlock.swift`, shown where `ios/BrainBuddy/Screens/Lists/TaskListScreen.swift` says "This project needs a next action": proposals, "Add to Next actions" creating the task in Next in that project with `createTask`, the "model question" and empty-project states whose answer field is the next action itself, the typed next action kept as a draft. *(020-FR-019, 020-FR-020, 020-FR-021, 020-FR-052)*
 - [ ] T115 [US3] M-23 "Suggestions" in the new `ios/BrainBuddy/Screens/Settings/SuggestionsSettingsSection.swift`, placed in `ios/BrainBuddy/Screens/Settings/SettingsScreen.swift`: on-device status, the fallback choice (Ask me / Downloaded / Cloud), the cloud consent switch naming the provider with an immediate local revoke and the offline note, and the "feature switched off, consent stored" state. *(020-FR-023, 020-FR-024)*
-- [ ] T116 [US3] Record `specs/020-weekly-review/evidence/manual-ios-navigator.md` (labelled manual, synthetic data): `AppleNavigatorModel` on an Apple-Intelligence device (EN), the unsupported-language path to M-06, VoiceOver focus after M-06 / M-07 close, the M-07 consent line about notes (`020-FR-024`), M-05 – M-08 at Dynamic Type AX5 with every sheet body scrolling and no clipped control (design "Mobile viability"), and the Xcode-lane build.
+- [ ] T116 [US3] Record `specs/020-weekly-review/evidence/manual-ios-navigator.md` (labelled manual, synthetic data): `AppleNavigatorModel` on an Apple-Intelligence device (EN), with the time from tapping Suggest to the first visible proposal text measured over 5 runs on that device (each run and the median recorded; plan "Performance Goals": on-device first token visible ≤ 2 s, placeholder lines after 300 ms; a miss is recorded as a finding for the owner, not hidden), the unsupported-language path to M-06, VoiceOver focus after M-06 / M-07 close, the M-07 consent line about notes (`020-FR-024`), M-05 – M-08 at Dynamic Type AX5 with every sheet body scrolling and no clipped control (design "Mobile viability"), and the Xcode-lane build.
 
 ### Downloadable on-device model (slice PR-09, late; may slip)
 
@@ -483,7 +492,7 @@ accepted on the pre-sync row and its recorded macOS-host run.
 ### Phase Dependencies
 
 - **Setup (Phase 1, PR-01)**: no dependencies; first.
-- **Foundational (Phase 2)**: PR-02 depends on PR-01; PR-15 depends on PR-02. The iOS core (PR-03) and web (PR-05) lanes need only PR-02; the backend story work needs PR-15.
+- **Foundational (Phase 2)**: PR-02 depends on PR-01; PR-15 depends on PR-02. The iOS core (PR-03) and web (PR-05) lanes need only PR-02; the backend story work needs PR-15, and so does the iOS app slice PR-04 (it replays PR-15's decision and park traces, T173).
 - **US1 and US2 (Phases 3–4, P1)**: one increment. Activation (US2's explainer) is what makes US1's markers appear (FR-004 "Before activation"), so they ship together.
 - **US3 (Phase 5, P2)**: backend PR-07 after PR-15; iOS PR-08 after PR-04 and PR-07; PR-09 after PR-08 (late); web PR-10 after PR-05 and PR-07.
 - **US4 and US5 (Phases 6–7)**: backend PR-11 after PR-15 (a sibling of PR-07); iOS PR-12 after PR-08 and PR-11; web PR-13 after PR-10 and PR-11.
@@ -505,7 +514,7 @@ accepted on the pre-sync row and its recorded macOS-host run.
 PR-01                  → PR-02, PR-06
 PR-02                  → PR-15 (backend), PR-03 (iOS core), PR-05 (web)
 PR-15                  → PR-07 (navigator backend), PR-11 (review-flow backend)   # siblings
-PR-03                  → PR-04
+PR-03 + PR-15          → PR-04   # PR-15's decision/park traces replayed in Swift (T173)
 PR-04 + PR-07          → PR-08
 PR-08                  → PR-09 (late; may slip)
 PR-08 + PR-11          → PR-12
@@ -574,7 +583,7 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
 
 ### Parallel Team Strategy
 
-1. One worker per lane after PR-02: backend (PR-15 → PR-07 ‖ PR-11), iOS (PR-03 → PR-04 → PR-08 → PR-12, PR-09 off PR-08), web (PR-05 → PR-10 → PR-13), Mac (PR-06).
+1. One worker per lane after PR-02: backend (PR-15 → PR-07 ‖ PR-11), iOS (PR-03 → PR-04, which also waits for PR-15, → PR-08 → PR-12, PR-09 off PR-08), web (PR-05 → PR-10 → PR-13), Mac (PR-06).
 2. A dependent slice starts from an accepted base, never from a speculative parallel branch.
 
 ---
@@ -596,6 +605,11 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
   dispositions re-runs the planning review for that change.
 - Live provider calls (`/verify-live`, the SC-005 cloud cell) are approval-gated and
   never run unattended, from a subagent or from a scheduled session.
+- The founder acceptance of the planning review **expires on 2026-11-05**
+  (`planning-review.json` `founder_acceptance.expires_on`). If slices remain after that
+  date, work on them does not continue on the expired acceptance: first either the
+  owner re-accepts (a new dated `founder_acceptance` record with its own expiry) or a
+  targeted planning review is re-run over the artifacts the remaining slices rely on.
 
 ## Disposition traceability
 
@@ -700,7 +714,7 @@ planning artifacts themselves (spec, design, plan, contracts wording) are listed
 | TE-02 (SC-005 denominator) | T102, T132 |
 | TE-03 (stall recommendation) | T053, T069 |
 | TE-04 (`ReviewCopy`) | T053, T151, T143 |
-| TE-05 (golden traces) | T086, T131, T136 |
+| TE-05 (golden traces) | T086, T131, T136, T173 |
 | TE-06 (flow vectors run in PR-02) | T018, T019 |
 | TE-07 (post-release read-out) | T132, T168 |
 | TE-08 (`--requirements` filter) | T006, T007, T166 |
@@ -749,7 +763,7 @@ it implements.
 | Consent line and privacy-policy sentence (privacy CHK011) | spec FR-024; contracts/navigator.md §6; data-model "Export and purge"; design M-07, D-02 | T107, T113, T116, T124 |
 | Account linking turns unsent device parks into seen moves to Someday (offline-sync CHK006); unsent `extend` decisions dropped and listed on M-09 (targeted re-review) | spec FR-014, edge case "Account-less iOS use"; contracts/ios-commands.md §6, §7; data-model E10; design M-09 "account linked: extension restarted" | T057, T091, T093 |
 | A device sends a zone change only when its own zone changes (offline-sync CHK016); a zone equal to the stored one is a no-op; the notification and shown next review use the device's current zone (targeted re-review) | spec FR-035, FR-036, US5-5, edge case "Two devices in different time zones"; contracts/http.md §5, formulation-clock.md §3, ios-commands.md §2, §6, §7; data-model E2, E10, E11; research R11; design "Amendments … (after /speckit-tasks)" | T039, T046, T057, T077, T151, T152, T154, T159, T163, T172 |
-| A matching retry after the 24 h idempotency retention is success (offline-sync CHK023), checked before revisions; progress replay-safe by `progress_id`; undo retries succeed; constitution IV exception justified | spec FR-011, edge case "Retry long after a lost response"; contracts/http.md "Mutations", "Client-supplied ids", "Retry after the idempotency retention", §3, §6; ios-commands.md §2, §4; data-model E3, E7; plan "Complexity Tracking"; ADR-0027 §7 | T042, T043, T044, T055, T056, T086, T126, T129, T131, T133, T135, T136, T146 |
+| A matching retry after the 24 h idempotency retention is success (offline-sync CHK023), checked before revisions; progress replay-safe by `progress_id`; undo retries succeed; constitution IV exception justified | spec FR-011, edge case "Retry long after a lost response"; contracts/http.md "Mutations", "Client-supplied ids", "Retry after the idempotency retention", §3, §6; ios-commands.md §2, §4; data-model E3, E7; plan "Complexity Tracking"; ADR-0027 §7 | T042, T043, T044, T055, T056, T086, T126, T129, T131, T133, T135, T136, T146, T173 |
 | Dynamic Type up to AX5 everywhere (ux-a11y CHK008) | design "Mobile viability", M-22 "accessibility text size" | T092, T093, T094, T116, T133, T134, T137, T143, T155, T159 |
 | Campaign-2 owner notes 1–6 accepted as recommended | spec Clarifications; plan "Migration, deploy order and rollback", "Post-release acceptance" | note 1: T059, T169; note 2: T042, T129; note 3: T014, T016, T017; note 4: T132, T168, T169; note 5: T126, T137, T146; note 6: T098, T105 |
 
@@ -834,7 +848,7 @@ last `acceptance` entry.
         "cd backend && pytest tests/test_review_clock_seam.py tests/test_review_formulation.py tests/test_review_formulation_vectors.py tests/test_review_flow_vectors.py tests/test_review_wire_fixtures.py -q",
         "cd backend && pytest -q",
         "make test-backend",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements <this slice's requirements>"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-001,020-FR-002,020-FR-003,020-FR-004,020-FR-005,020-FR-007,020-FR-009,020-FR-012,020-FR-015,020-FR-016,020-FR-017,020-FR-019,020-FR-028,020-FR-029,020-FR-031,020-FR-032,020-FR-036,020-FR-039,020-FR-045,020-FR-046,020-FR-051,020-SC-004"
       ],
       "acceptance": [
         "every vector section passes in pytest; the drift guard fails on a deliberately edited copy and passes on byte-identical copies",
@@ -895,7 +909,7 @@ last `acceptance` entry.
         "cd backend && pytest tests/test_feature_flags.py tests/test_feature_flag_repository.py tests/test_review_repository.py tests/test_review_gate_api.py tests/test_review_clock_api.py tests/test_review_decisions_api.py tests/test_review_settings_api.py tests/test_review_auto_park.py tests/test_review_export_purge.py tests/test_review_log_privacy.py tests/test_review_cli.py tests/test_review_traces.py tests/test_crt_receipt_retention.py -q",
         "cd frontend && npx vitest run src/pages/__tests__/PrivacyPolicyPage.test.tsx",
         "make test-backend",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements <this slice's requirements>"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-001,020-FR-002,020-FR-003,020-FR-004,020-FR-005,020-FR-006,020-FR-007,020-FR-008,020-FR-009,020-FR-010,020-FR-011,020-FR-012,020-FR-013,020-FR-014,020-FR-015,020-FR-016,020-FR-017,020-FR-018,020-FR-026,020-FR-032,020-FR-033,020-FR-035,020-FR-038,020-FR-039,020-FR-042,020-FR-043,020-FR-044,020-FR-045,020-FR-046,020-FR-048,020-FR-051,020-SC-006,020-SC-007"
       ],
       "acceptance": [
         "quickstart Scenarios 1 (backend steps), 2 (steps 1-3, 5-10), 7 (backend), Privacy read-back and Rollout read-back pass on synthetic data",
@@ -956,7 +970,7 @@ last `acceptance` entry.
         "sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests",
         "sh ios/scripts/swift-linux.sh test --filter BrainBuddySyncTests",
         "sh ios/scripts/swift-linux.sh test --filter BrainBuddyWorkspaceTests",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements <this slice's requirements>"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-001,020-FR-002,020-FR-003,020-FR-004,020-FR-005,020-FR-006,020-FR-007,020-FR-008,020-FR-009,020-FR-010,020-FR-011,020-FR-012,020-FR-013,020-FR-014,020-FR-015,020-FR-016,020-FR-017,020-FR-018,020-FR-024,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-035,020-FR-036,020-FR-037,020-FR-038,020-FR-039,020-FR-040,020-FR-043,020-FR-045,020-FR-046,020-FR-047,020-FR-048,020-FR-051,020-FR-052,020-SC-004,020-SC-006,020-SC-007"
       ],
       "acceptance": [
         "all shared vector sections pass in Swift; compacted and uncompacted replays give identical clocks",
@@ -997,7 +1011,7 @@ last `acceptance` entry.
         "sh ios/scripts/swift-linux.sh test",
         "sh ios/scripts/swift-linux.sh test --filter ReviewTaskTraceReplayTests",
         "(cd ios && xcodegen generate) && xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements @PR-04"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-001,020-FR-002,020-FR-003,020-FR-004,020-FR-005,020-FR-006,020-FR-007,020-FR-008,020-FR-009,020-FR-010,020-FR-011,020-FR-012,020-FR-013,020-FR-014,020-FR-015,020-FR-016,020-FR-018,020-FR-039,020-FR-042,020-FR-045,020-FR-046,020-FR-047,020-FR-048,020-FR-051,020-FR-052,020-SC-006,020-SC-007"
       ],
       "acceptance": [
         "ios-app lane green on the exact SHA; previews for every M-01, M-02, M-03, M-04, M-09, M-26 state",
@@ -1056,7 +1070,7 @@ last `acceptance` entry.
         "cd frontend && npx vitest run src/features/review src/features/tasks src/features/account src/components/shell src/api",
         "make test-frontend",
         "cd frontend && npx tsc --noEmit && npx eslint src",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements <this slice's requirements>"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-001,020-FR-002,020-FR-003,020-FR-004,020-FR-005,020-FR-006,020-FR-007,020-FR-009,020-FR-010,020-FR-011,020-FR-012,020-FR-015,020-FR-016,020-FR-018,020-FR-038,020-FR-039,020-FR-040,020-FR-042,020-FR-044,020-FR-045,020-FR-046,020-FR-048,020-FR-051,020-FR-052"
       ],
       "acceptance": [
         "Vitest proves every D-01, D-02 (no navigator), D-04 threshold, D-05, D-06 and WYWA-dialog state, focus and Esc rule named in design.md",
@@ -1078,7 +1092,7 @@ last `acceptance` entry.
       ],
       "depends_on": ["PR-01"],
       "tests": [
-        "cd macos && swift test --disable-sandbox (macOS host; no CI lane runs macos/)",
+        "cd macos && swift test --disable-sandbox  # macOS host only; no CI lane runs macos/",
         "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-041"
       ],
       "acceptance": [
@@ -1113,7 +1127,7 @@ last `acceptance` entry.
         "cd backend && pytest tests/test_review_navigator.py tests/test_review_navigator_eval.py -q",
         "cd frontend && npx vitest run src/pages/__tests__/PrivacyPolicyPage.test.tsx",
         "make test-backend",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements <this slice's requirements>"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-019,020-FR-020,020-FR-021,020-FR-024,020-FR-025,020-FR-026,020-FR-043,020-FR-044,020-FR-045,020-SC-005"
       ],
       "acceptance": [
         "first failing test of the slice: container build raises without the key (observed RED in the PR)",
@@ -1151,13 +1165,13 @@ last `acceptance` entry.
         "sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests",
         "sh ios/scripts/swift-linux.sh test --filter BrainBuddyAPITests",
         "(cd ios && xcodegen generate) && xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements @PR-08"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-019,020-FR-020,020-FR-021,020-FR-022,020-FR-023,020-FR-024,020-FR-025,020-FR-026,020-FR-045,020-FR-049,020-FR-052"
       ],
       "acceptance": [
         "NavigatorValidatorTests: shared reduce_notes vectors, rules 1-4, 21st-sibling duplicate dropped, router never routes to cloud without consent/account",
         "quickstart Scenario 4 step 6 passes as a package test",
         "NavigatorAPITests (020-FR-026): the encoded decision body carries ai_use as_is / edited / not_used for an unedited, edited and own-text confirmation, the cloud request_id as navigator_request_id (null on device), and no proposal text",
-        "specs/020-weekly-review/evidence/manual-ios-navigator.md (labelled manual) incl. VoiceOver focus after M-06/M-07, the M-07 consent line and M-05 - M-08 at Dynamic Type AX5",
+        "specs/020-weekly-review/evidence/manual-ios-navigator.md (labelled manual) incl. the on-device first-token timing against the 2 s goal, VoiceOver focus after M-06/M-07, the M-07 consent line and M-05 - M-08 at Dynamic Type AX5",
         "landing class SHOW (scripts/classify_path_risk.py: SHIP)"
       ]
     },
@@ -1188,7 +1202,7 @@ last `acceptance` entry.
         "sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests",
         "cd frontend && npx vitest run src/pages/__tests__/PrivacyPolicyPage.test.tsx",
         "(cd ios && xcodegen generate) && xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements @PR-09"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-023,020-FR-043,020-FR-049,020-SC-005"
       ],
       "acceptance": [
         "ModelDownloadMachineTests cover request-only start, interruption/resume after kill, cancel, storage, retry, delete, no silent cloud fallback",
@@ -1219,7 +1233,7 @@ last `acceptance` entry.
       "tests": [
         "cd frontend && npx vitest run src/features/review src/features/account",
         "make test-frontend",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements <this slice's requirements>"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-019,020-FR-020,020-FR-021,020-FR-024,020-FR-025,020-FR-026,020-FR-045,020-FR-052"
       ],
       "acceptance": [
         "Vitest proves every D-02 navigator state and D-04 consent state in design.md, incl. the two-stage clarifying-question failures and the consent line about notes",
@@ -1250,7 +1264,7 @@ last `acceptance` entry.
       "tests": [
         "cd backend && pytest tests/test_review_flow_api.py tests/test_review_traces.py tests/test_review_metrics_readout.py tests/test_review_formulation_vectors.py -q",
         "make test-backend",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements <this slice's requirements>"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-011,020-FR-017,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-045,020-FR-050,020-SC-001,020-SC-002,020-SC-003,020-SC-004,020-SC-005,020-SC-007"
       ],
       "acceptance": [
         "quickstart Scenario 5 steps 2-6, 9 pass at the API level on synthetic data; SC-002 flow test green",
@@ -1300,7 +1314,7 @@ last `acceptance` entry.
         "sh ios/scripts/swift-linux.sh test",
         "sh ios/scripts/swift-linux.sh test --filter ReviewTraceReplayTests",
         "(cd ios && xcodegen generate) && xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements @PR-12"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-006,020-FR-016,020-FR-017,020-FR-018,020-FR-019,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-035,020-FR-036,020-FR-037,020-FR-038,020-FR-042,020-FR-045,020-FR-048,020-FR-050,020-FR-051,020-FR-052,020-SC-002,020-SC-003,020-SC-007"
       ],
       "acceptance": [
         "ReviewTraceReplayTests: review_traces_runs.json (PR-11) replays against BrainBuddyFakeServer with the recorded responses, incl. a progress change retried after the retention merged once",
@@ -1360,7 +1374,7 @@ last `acceptance` entry.
         "cd frontend && npx playwright test tests/e2e/weekly-review.spec.ts",
         "make test-frontend",
         "make test-e2e",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements <this slice's requirements>"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-004,020-FR-015,020-FR-016,020-FR-017,020-FR-019,020-FR-024,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-035,020-FR-036,020-FR-038,020-FR-040,020-FR-042,020-FR-045,020-FR-046,020-FR-048,020-FR-050,020-FR-052,020-SC-002,020-SC-004,020-SC-006,020-SC-007"
       ],
       "acceptance": [
         "Playwright: quick review end-to-end, SC-007 summary on /review, keyboard-only story E2E-A11Y-01, axe scans with no violations at desktop and 390 px, no horizontal overflow at 390 x 851",
