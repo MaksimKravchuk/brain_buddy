@@ -61,7 +61,7 @@ request, the items were evaluated by the agent against the artifacts as of
 
 ## Dependencies & Assumptions
 
-- [x] CHK028 Is the documented "Weekly review stays deferred" rule reconciled with the working entry? [Dependency, Design "Design authority"; Plan PR-01] — The plan schedules the design skill, its test and `docs/native-ios-app.md`; `ios/AGENTS.md` and `ios/README.md` carry the same rule and were added by tasks.md (T008, T121).
+- [x] CHK028 Is the documented "Weekly review stays deferred" rule reconciled with the working entry? [Dependency, Design "Design authority"; Plan PR-01] — The plan schedules the design skill, its test and `docs/native-ios-app.md`; `ios/AGENTS.md` and `ios/README.md` carry the same rule and were added by tasks.md (T005, T156).
 - [x] CHK029 Is the persona assumption (ADHD as the design centre, not positioned as "an ADHD app") reflected in the copy requirements? [Assumption, Spec Assumptions; Design copy columns]
 
 ## Pre-freeze evidence
