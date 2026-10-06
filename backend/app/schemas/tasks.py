@@ -216,6 +216,33 @@ class TaskCommentResponse(StrictBaseModel):
     revision: int
 
 
+class TaskFormulationResponse(StrictBaseModel):
+    """The formulation clock of a Next task (spec 020, contracts/http.md §2).
+
+    ``ageing_at``, ``ask_at``, ``park_due_at`` and ``paused_until`` are derived
+    with the owner's settings at response time, are advisory for display, and
+    are null while the owner is not activated.
+    """
+
+    id: str
+    started_at: datetime
+    extended_at: datetime | None
+    extension_reason: str | None
+    park_floor_at: datetime | None
+    consecutive_stalled: int = Field(ge=0)
+    ageing_at: datetime | None
+    ask_at: datetime | None
+    park_due_at: datetime | None
+    paused_until: datetime | None
+
+
+class TaskParkResponse(StrictBaseModel):
+    """Set only by auto-park; ``clock_before`` stays server-side (http §2)."""
+
+    at: datetime
+    formulation_id: str
+
+
 class TaskResponse(StrictBaseModel):
     """Public task projection returned by task endpoints."""
 
@@ -238,6 +265,10 @@ class TaskResponse(StrictBaseModel):
     revision: int
     subtasks: list[TaskSubtaskResponse] = Field(default_factory=list)
     comments: list[TaskCommentResponse] = Field(default_factory=list)
+    # Spec 020 (http §2): additive and nullable, so older clients ignore them.
+    # Always null until the behaviour slice maintains the clock.
+    formulation: TaskFormulationResponse | None = None
+    parked: TaskParkResponse | None = None
 
 
 class SmartAddTaskResponse(StrictBaseModel):

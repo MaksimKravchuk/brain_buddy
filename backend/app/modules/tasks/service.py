@@ -6,7 +6,7 @@ import base64
 import json
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date
+from datetime import date, datetime
 from typing import Concatenate, ParamSpec, TypeVar, cast
 
 from pydantic import BaseModel
@@ -72,7 +72,9 @@ def _serialized_write(
         owner_id = cast(str, kwargs["owner_id"])
         idempotency_key = cast(str, kwargs["idempotency_key"])
         with service.task_repo.command_lock(owner_id):
-            service.task_repo.purge_expired_idempotency(owner_id=owner_id, now=utcnow())
+            service.task_repo.purge_expired_idempotency(
+                owner_id=owner_id, now=service.clock()
+            )
             service._reconcile_idempotent_result(owner_id=owner_id, key=idempotency_key)
             return command(service, *args, **kwargs)
 
@@ -82,8 +84,17 @@ def _serialized_write(
 class TaskService:
     """Owns canonical GTD records and their owner-scoped projections."""
 
-    def __init__(self, task_repo: TaskRepository) -> None:
+    def __init__(
+        self,
+        task_repo: TaskRepository,
+        *,
+        clock: Callable[[], datetime] = utcnow,
+    ) -> None:
         self.task_repo = task_repo
+        # The one time seam of the task module (spec 020, research R21): every
+        # timestamp and the idempotency purge read this injected clock, so tests
+        # drive time through ``frozen_clock`` instead of patching ``utcnow``.
+        self.clock = clock
 
     @_serialized_write
     def create_project(
@@ -104,7 +115,7 @@ class TaskService:
         if record is not None:
             return self._project_result(record, owner_id=owner_id)
 
-        now = utcnow()
+        now = self.clock()
         name = display_project_name(payload.name)
         project = ProjectDocument(
             id=generate_id("project"),
@@ -146,7 +157,7 @@ class TaskService:
         if record is not None:
             return self._tag_result(record, owner_id=owner_id)
 
-        now = utcnow()
+        now = self.clock()
         name = display_tag_name(payload.name)
         tag = TagDocument(
             id=generate_id("tag"),
@@ -197,7 +208,7 @@ class TaskService:
             if payload.state == "waiting"
             else None
         )
-        now = utcnow()
+        now = self.clock()
         task = TaskDocument(
             id=generate_id("task"),
             owner_id=owner_id,
@@ -258,7 +269,7 @@ class TaskService:
         )
         if record is not None:
             return self._task_result(record, owner_id=owner_id)
-        now = utcnow()
+        now = self.clock()
         task = TaskDocument(
             id=generate_id("task"),
             owner_id=owner_id,
@@ -316,7 +327,7 @@ class TaskService:
         tags, created_tag_ids = self._resolve_smart_add_tags(
             payload.tags, owner_id=owner_id
         )
-        now = utcnow()
+        now = self.clock()
         task = TaskDocument(
             id=generate_id("task"),
             owner_id=owner_id,
@@ -382,7 +393,7 @@ class TaskService:
         if record is not None:
             return self._subtask_result(record, owner_id=owner_id, task_id=task_id)
 
-        now = utcnow()
+        now = self.clock()
         subtasks = self.task_repo.list_subtasks(owner_id=owner_id, task_id=task_id)
         subtask = TaskSubtaskDocument(
             id=generate_id("subtask"),
@@ -426,7 +437,7 @@ class TaskService:
         if record is not None:
             return self._comment_result(record, owner_id=owner_id, task_id=task_id)
 
-        now = utcnow()
+        now = self.clock()
         comment = TaskCommentDocument(
             id=generate_id("comment"),
             owner_id=owner_id,
@@ -475,7 +486,7 @@ class TaskService:
             "Subtask", subtask.id, subtask.revision, payload.expected_revision
         )
         fields = payload.model_fields_set
-        now = utcnow()
+        now = self.clock()
         updated = subtask.model_copy(
             update={
                 "title": payload.title if "title" in fields else subtask.title,
@@ -529,7 +540,7 @@ class TaskService:
         }[payload.action]
         if subtask.state == next_state:
             raise ValidationFailure("Subtask transition requires a different state.")
-        now = utcnow()
+        now = self.clock()
         updated = subtask.model_copy(
             update={
                 "state": next_state,
@@ -576,7 +587,7 @@ class TaskService:
         self._assert_revision(
             "Comment", comment.id, comment.revision, payload.expected_revision
         )
-        now = utcnow()
+        now = self.clock()
         updated = comment.model_copy(
             update={
                 "body": payload.body,
@@ -662,7 +673,7 @@ class TaskService:
             due_date=payload.due_date if "due_date" in fields else task.due_date,
             priority=payload.priority if "priority" in fields else task.priority,
             waiting_for=waiting_for,
-            updated_at=utcnow(),
+            updated_at=self.clock(),
             revision=task.revision + 1,
         )
         self._store_idempotency(
@@ -698,7 +709,7 @@ class TaskService:
 
         task = self.get_task(task_id, owner_id=owner_id)
         self._assert_current(task, payload.expected_revision)
-        now = utcnow()
+        now = self.clock()
         if payload.action == "complete":
             if task.state not in _OPEN_STATES:
                 raise ValidationFailure("Only open tasks can be completed.")
@@ -939,7 +950,7 @@ class TaskService:
                 "name": name,
                 "normalized_name": normalize_task_name(name),
                 "color": payload.color if "color" in fields else project.color,
-                "updated_at": utcnow(),
+                "updated_at": self.clock(),
                 "revision": project.revision + 1,
             }
         )
@@ -978,7 +989,7 @@ class TaskService:
         self._assert_revision(
             "Project", project.id, project.revision, payload.expected_revision
         )
-        now = utcnow()
+        now = self.clock()
         updated_project = project.model_copy(
             update={
                 "state": "archived",
@@ -1043,7 +1054,7 @@ class TaskService:
             update={
                 "name": name,
                 "normalized_name": normalize_task_name(name, strip_tag_prefix=True),
-                "updated_at": utcnow(),
+                "updated_at": self.clock(),
                 "revision": tag.revision + 1,
             }
         )
@@ -1080,7 +1091,7 @@ class TaskService:
             return self._tag_result(record, owner_id=owner_id)
         tag = self.get_tag(tag_id, owner_id=owner_id)
         self._assert_revision("Tag", tag.id, tag.revision, payload.expected_revision)
-        now = utcnow()
+        now = self.clock()
         updated_tag = tag.model_copy(
             update={"state": "deleted", "updated_at": now, "revision": tag.revision + 1}
         )
@@ -1183,7 +1194,7 @@ class TaskService:
                 request_hash=request_hash,
                 resource_id=resource_id,
                 response_body=response.model_dump(mode="json"),
-                created_at=utcnow(),
+                created_at=self.clock(),
             ),
         )
 
@@ -1381,7 +1392,7 @@ class TaskService:
             if existing.state != "active":
                 raise ValidationFailure("Task project must be active.")
             return existing, None
-        now = utcnow()
+        now = self.clock()
         project = ProjectDocument(
             id=generate_id("project"),
             owner_id=owner_id,
@@ -1430,7 +1441,7 @@ class TaskService:
                     "Task contexts must be active; task tags must be active."
                 )
             return existing, None
-        now = utcnow()
+        now = self.clock()
         tag = TagDocument(
             id=generate_id("tag"),
             owner_id=owner_id,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -171,6 +172,78 @@ def container(
     get_config.cache_clear()
     monkeypatch.delenv("BRAIN_BUDDY_DATA_DIR", raising=False)
     monkeypatch.delenv("BRAIN_BUDDY_ENV", raising=False)
+
+
+FROZEN_CLOCK_START = datetime(2026, 10, 9, 14, 2, tzinfo=UTC)
+"""Default instant of ``frozen_clock`` (the design's example Friday)."""
+
+_CONTAINER_FIXTURES = (
+    "container",
+    "api_client",
+    "second_api_client",
+    "anonymous_api_client",
+)
+
+
+class FrozenClock:
+    """A settable UTC clock injected in place of ``app.utils.time.utcnow``.
+
+    Spec 020 (research R21): ``TaskService`` takes an injected ``clock``; review
+    tests move time by setting this object, never by patching a module's
+    ``utcnow`` binding. ``install`` points every clock seam of a container at
+    it: ``TaskService`` now, ``ReviewService`` and the review sweep once they
+    exist.
+    """
+
+    def __init__(self, instant: datetime = FROZEN_CLOCK_START) -> None:
+        self.now = self._aware(instant)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    @staticmethod
+    def _aware(instant: datetime) -> datetime:
+        if instant.tzinfo is None:
+            raise ValueError("frozen_clock needs an aware UTC instant")
+        return instant.astimezone(UTC)
+
+    def set(self, instant: datetime) -> None:
+        self.now = self._aware(instant)
+
+    def advance(self, delta: timedelta | None = None, **parts: float) -> None:
+        self.now = self.now + (delta or timedelta()) + timedelta(**parts)
+
+    def install(self, container: Container) -> None:
+        container.task_service.clock = self
+
+
+def _container_of(value: object) -> Container | None:
+    if isinstance(value, Container):
+        return value
+    if isinstance(value, tuple):
+        value = value[0]
+    app = getattr(value, "app", None)
+    container = getattr(getattr(app, "state", None), "container", None)
+    return container if isinstance(container, Container) else None
+
+
+@pytest.fixture
+def frozen_clock(request: pytest.FixtureRequest) -> FrozenClock:
+    """One injected clock for every time-based test (spec 020, R21).
+
+    Installs itself into whichever container-bearing fixture the test also
+    requested (``container``, ``api_client``, ``second_api_client``,
+    ``anonymous_api_client``); a test that builds its own app calls
+    ``frozen_clock.install(container)``.
+    """
+
+    clock = FrozenClock()
+    for name in _CONTAINER_FIXTURES:
+        if name in request.fixturenames:
+            container = _container_of(request.getfixturevalue(name))
+            if container is not None:
+                clock.install(container)
+    return clock
 
 
 @pytest.fixture

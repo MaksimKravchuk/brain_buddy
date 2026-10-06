@@ -1,0 +1,4583 @@
+{
+  "schema": "brainbuddy-formulation-vectors/v1",
+  "format": "Canonical file (contracts/formulation-clock.md §6). Instants are UTC; 'days' are 86 400-second spans. classification: expect holds the class and the derived instants. transitions: expect lists the fields that must hold after the event (unlisted fields equal before); an 'error' expect means the event is refused and nothing changes; an 'applied: false' expect means auto-park does not apply and nothing changes; 'bulk_clock_before' is the clock the bulk-release record stores; 'expect_settings' lists owner inputs after the event; 'expect_derived' lists the class and instants evaluated at 'now' after the event; 'follows' names the vector whose result is 'before'. queue_order: the asks_for_decision aggregate in §5 queue order. Edit the canonical file and both copies in one commit (§6).",
+  "normalisation": [
+    {
+      "id": "N-001",
+      "note": "trailing punctuation and case (§1 example)",
+      "old": "Call Bob",
+      "new": "call bob.",
+      "old_key": "call bob",
+      "new_key": "call bob",
+      "substantive": false
+    },
+    {
+      "id": "N-002",
+      "note": "hyphen Pd becomes a space (§1 example)",
+      "old": "Follow-up with Ann",
+      "new": "follow up with ann",
+      "old_key": "follow up with ann",
+      "new_key": "follow up with ann",
+      "substantive": false
+    },
+    {
+      "id": "N-003",
+      "note": "hyphen splits a word (§1 example)",
+      "old": "e-mail Ann",
+      "new": "email Ann",
+      "old_key": "e mail ann",
+      "new_key": "email ann",
+      "substantive": true
+    },
+    {
+      "id": "N-004",
+      "note": "full case folding ß → ss (§1 example)",
+      "old": "Straße",
+      "new": "STRASSE",
+      "old_key": "strasse",
+      "new_key": "strasse",
+      "substantive": false
+    },
+    {
+      "id": "N-005",
+      "note": "ё and е stay distinct (§1 example)",
+      "old": "Ёлка",
+      "new": "Елка",
+      "old_key": "ёлка",
+      "new_key": "елка",
+      "substantive": true
+    },
+    {
+      "id": "N-006",
+      "note": "Cyrillic case, repeated space, Po (§1 example)",
+      "old": "Купить хлеб",
+      "new": "купить  хлеб!",
+      "old_key": "купить хлеб",
+      "new_key": "купить хлеб",
+      "substantive": false
+    },
+    {
+      "id": "N-007",
+      "note": "symbols (Sm) are kept",
+      "old": "C++ course",
+      "new": "C course",
+      "old_key": "c++ course",
+      "new_key": "c course",
+      "substantive": true
+    },
+    {
+      "id": "N-008",
+      "note": "surrounding and repeated whitespace",
+      "old": "Call   Bob",
+      "new": " call bob ",
+      "old_key": "call bob",
+      "new_key": "call bob",
+      "substantive": false
+    },
+    {
+      "id": "N-009",
+      "note": "NFKC expands the ﬁ ligature",
+      "old": "ﬁle report",
+      "new": "file report",
+      "old_key": "file report",
+      "new_key": "file report",
+      "substantive": false
+    },
+    {
+      "id": "N-010",
+      "note": "NFKC folds full-width letters",
+      "old": "Ｃａｌｌ Bob",
+      "new": "call bob",
+      "old_key": "call bob",
+      "new_key": "call bob",
+      "substantive": false
+    },
+    {
+      "id": "N-011",
+      "note": "emoji are kept",
+      "old": "Call Bob 📞",
+      "new": "Call Bob",
+      "old_key": "call bob 📞",
+      "new_key": "call bob",
+      "substantive": true
+    },
+    {
+      "id": "N-012",
+      "note": "digits are kept",
+      "old": "Pay 100",
+      "new": "Pay 1000",
+      "old_key": "pay 100",
+      "new_key": "pay 1000",
+      "substantive": true
+    },
+    {
+      "id": "N-013",
+      "note": "Pi/Pf quotes become spaces",
+      "old": "«Call» Bob",
+      "new": "call bob",
+      "old_key": "call bob",
+      "new_key": "call bob",
+      "substantive": false
+    },
+    {
+      "id": "N-014",
+      "note": "connector Pc becomes a space",
+      "old": "call_bob",
+      "new": "call bob",
+      "old_key": "call bob",
+      "new_key": "call bob",
+      "substantive": false
+    },
+    {
+      "id": "N-015",
+      "note": "Ps/Pe brackets become spaces",
+      "old": "(call) bob",
+      "new": "call bob",
+      "old_key": "call bob",
+      "new_key": "call bob",
+      "substantive": false
+    },
+    {
+      "id": "N-016",
+      "note": "final sigma folds to σ",
+      "old": "ΟΔΟΣ",
+      "new": "οδος",
+      "old_key": "οδοσ",
+      "new_key": "οδοσ",
+      "substantive": false
+    },
+    {
+      "id": "N-017",
+      "note": "en dash Pd becomes a space",
+      "old": "call–bob",
+      "new": "call bob",
+      "old_key": "call bob",
+      "new_key": "call bob",
+      "substantive": false
+    },
+    {
+      "id": "N-018",
+      "note": "İ folds to i + U+0307, unlike i",
+      "old": "İstanbul",
+      "new": "istanbul",
+      "old_key": "i̇stanbul",
+      "new_key": "istanbul",
+      "substantive": true
+    },
+    {
+      "id": "N-019",
+      "note": "an apostrophe splits a word",
+      "old": "don't forget",
+      "new": "dont forget",
+      "old_key": "don t forget",
+      "new_key": "dont forget",
+      "substantive": true
+    },
+    {
+      "id": "N-020",
+      "note": "currency symbol Sc is kept",
+      "old": "$5 lunch",
+      "new": "5 lunch",
+      "old_key": "$5 lunch",
+      "new_key": "5 lunch",
+      "substantive": true
+    },
+    {
+      "id": "N-021",
+      "note": "NFKC maps no-break space to a space",
+      "old": "call bob",
+      "new": "call bob",
+      "old_key": "call bob",
+      "new_key": "call bob",
+      "substantive": false
+    },
+    {
+      "id": "N-022",
+      "note": "NFKC expands … to dots, which become spaces",
+      "old": "Call Bob…",
+      "new": "call bob",
+      "old_key": "call bob",
+      "new_key": "call bob",
+      "substantive": false
+    }
+  ],
+  "classification": [
+    {
+      "id": "C-001",
+      "note": "asks between ask_at and tomorrow_at (§6 example)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-002",
+      "note": "fresh one second before ageing_at",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-01T09:13:59Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-003",
+      "note": "ageing at ageing_at",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-01T09:14:00Z",
+      "expect": {
+        "class": "ageing",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-004",
+      "note": "ageing one second before ask_at",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-08T09:13:59Z",
+      "expect": {
+        "class": "ageing",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-005",
+      "note": "asks at ask_at (threshold T)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-08T09:14:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-006",
+      "note": "asks one second before tomorrow_at",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-14T09:13:59Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-007",
+      "note": "moves tomorrow at tomorrow_at",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-14T09:14:00Z",
+      "expect": {
+        "class": "moves_tomorrow",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-008",
+      "note": "moves tomorrow one second before park_due_at",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-15T09:13:59Z",
+      "expect": {
+        "class": "moves_tomorrow",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-009",
+      "note": "park due at park_due_at (T + 7)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-15T09:14:00Z",
+      "expect": {
+        "class": "park_due",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-010",
+      "note": "third stall: asks with two stalled formulations",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 2
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": true
+      }
+    },
+    {
+      "id": "C-011",
+      "note": "no third stall while only ageing",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 2
+      },
+      "now": "2026-10-05T10:00:00Z",
+      "expect": {
+        "class": "ageing",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-012",
+      "note": "no third stall with one stalled formulation",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 1
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-013",
+      "note": "third stall in moves tomorrow too",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 3
+      },
+      "now": "2026-10-14T10:00:00Z",
+      "expect": {
+        "class": "moves_tomorrow",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": true
+      }
+    },
+    {
+      "id": "C-014",
+      "note": "not activated: none and no instants (FR-051)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": null
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "none",
+        "ageing_at": null,
+        "ask_at": null,
+        "park_due_at": null,
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-015",
+      "note": "not in Next: none",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "waiting",
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "none",
+        "ageing_at": null,
+        "ask_at": null,
+        "park_due_at": null,
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-016",
+      "note": "Next without a clock: none until repaired",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "none",
+        "ageing_at": null,
+        "ask_at": null,
+        "park_due_at": null,
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-017",
+      "note": "threshold 7: asks at day 7",
+      "settings": {
+        "threshold_days": 7,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-01T09:14:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-09-27T21:14:00Z",
+        "ask_at": "2026-10-01T09:14:00Z",
+        "park_due_at": "2026-10-08T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-018",
+      "note": "threshold 21: ageing at day 10.5",
+      "settings": {
+        "threshold_days": 21,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-04T21:14:00Z",
+      "expect": {
+        "class": "ageing",
+        "ageing_at": "2026-10-04T21:14:00Z",
+        "ask_at": "2026-10-15T09:14:00Z",
+        "park_due_at": "2026-10-22T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-019",
+      "note": "threshold 28: fresh one second before day 14",
+      "settings": {
+        "threshold_days": 28,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-08T09:13:59Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-10-08T09:14:00Z",
+        "ask_at": "2026-10-22T09:14:00Z",
+        "park_due_at": "2026-10-29T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-020",
+      "note": "paused one second before the due day starts",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-10-20",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-19T21:59:59Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-10-26T22:00:00Z",
+        "ask_at": "2026-11-02T22:00:00Z",
+        "park_due_at": "2026-11-09T22:00:00Z",
+        "paused_until": "2026-10-19T22:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-021",
+      "note": "fresh at the start of the due day (age counts from it)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-10-20",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-19T22:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-10-26T22:00:00Z",
+        "ask_at": "2026-11-02T22:00:00Z",
+        "park_due_at": "2026-11-09T22:00:00Z",
+        "paused_until": "2026-10-19T22:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-022",
+      "note": "due today: not paused, age from the due day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-10-09",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-10-15T22:00:00Z",
+        "ask_at": "2026-10-22T22:00:00Z",
+        "park_due_at": "2026-10-29T22:00:00Z",
+        "paused_until": "2026-10-08T22:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-023",
+      "note": "due tomorrow: paused",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-10-10",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-10-16T22:00:00Z",
+        "ask_at": "2026-10-23T22:00:00Z",
+        "park_due_at": "2026-10-30T22:00:00Z",
+        "paused_until": "2026-10-09T22:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-024",
+      "note": "due yesterday: age from the due day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-10-08",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-10-14T22:00:00Z",
+        "ask_at": "2026-10-21T22:00:00Z",
+        "park_due_at": "2026-10-28T22:00:00Z",
+        "paused_until": "2026-10-07T22:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-025",
+      "note": "due date before the formulation start: start wins, never paused",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-09-20",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-026",
+      "note": "DST Europe/Berlin due 2026-03-29: paused one second before",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-03-29",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-03-28T22:59:59Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-04-04T23:00:00Z",
+        "ask_at": "2026-04-11T23:00:00Z",
+        "park_due_at": "2026-04-18T23:00:00Z",
+        "paused_until": "2026-03-28T23:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-027",
+      "note": "DST Europe/Berlin due 2026-03-29: fresh at the start of the day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-03-29",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-03-28T23:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-04-04T23:00:00Z",
+        "ask_at": "2026-04-11T23:00:00Z",
+        "park_due_at": "2026-04-18T23:00:00Z",
+        "paused_until": "2026-03-28T23:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-028",
+      "note": "DST Europe/Berlin due 2026-03-30: paused one second before",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-03-30",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-03-29T21:59:59Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-04-05T22:00:00Z",
+        "ask_at": "2026-04-12T22:00:00Z",
+        "park_due_at": "2026-04-19T22:00:00Z",
+        "paused_until": "2026-03-29T22:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-029",
+      "note": "DST Europe/Berlin due 2026-03-30: fresh at the start of the day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-03-30",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-03-29T22:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-04-05T22:00:00Z",
+        "ask_at": "2026-04-12T22:00:00Z",
+        "park_due_at": "2026-04-19T22:00:00Z",
+        "paused_until": "2026-03-29T22:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-030",
+      "note": "DST Europe/Berlin due 2026-10-25: paused one second before",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-10-25",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-24T21:59:59Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-10-31T22:00:00Z",
+        "ask_at": "2026-11-07T22:00:00Z",
+        "park_due_at": "2026-11-14T22:00:00Z",
+        "paused_until": "2026-10-24T22:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-031",
+      "note": "DST Europe/Berlin due 2026-10-25: fresh at the start of the day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-10-25",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-24T22:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-10-31T22:00:00Z",
+        "ask_at": "2026-11-07T22:00:00Z",
+        "park_due_at": "2026-11-14T22:00:00Z",
+        "paused_until": "2026-10-24T22:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-032",
+      "note": "DST Europe/Berlin due 2026-10-26: paused one second before",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-10-26",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-25T22:59:59Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-11-01T23:00:00Z",
+        "ask_at": "2026-11-08T23:00:00Z",
+        "park_due_at": "2026-11-15T23:00:00Z",
+        "paused_until": "2026-10-25T23:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-033",
+      "note": "DST Europe/Berlin due 2026-10-26: fresh at the start of the day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-10-26",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-25T23:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-11-01T23:00:00Z",
+        "ask_at": "2026-11-08T23:00:00Z",
+        "park_due_at": "2026-11-15T23:00:00Z",
+        "paused_until": "2026-10-25T23:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-034",
+      "note": "DST America/New_York due 2026-03-08: paused one second before",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "America/New_York",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-03-08",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-03-08T04:59:59Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-03-15T05:00:00Z",
+        "ask_at": "2026-03-22T05:00:00Z",
+        "park_due_at": "2026-03-29T05:00:00Z",
+        "paused_until": "2026-03-08T05:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-035",
+      "note": "DST America/New_York due 2026-03-08: fresh at the start of the day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "America/New_York",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-03-08",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-03-08T05:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-03-15T05:00:00Z",
+        "ask_at": "2026-03-22T05:00:00Z",
+        "park_due_at": "2026-03-29T05:00:00Z",
+        "paused_until": "2026-03-08T05:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-036",
+      "note": "DST America/New_York due 2026-03-09: paused one second before",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "America/New_York",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-03-09",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-03-09T03:59:59Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-03-16T04:00:00Z",
+        "ask_at": "2026-03-23T04:00:00Z",
+        "park_due_at": "2026-03-30T04:00:00Z",
+        "paused_until": "2026-03-09T04:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-037",
+      "note": "DST America/New_York due 2026-03-09: fresh at the start of the day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "America/New_York",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-03-09",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-03-09T04:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-03-16T04:00:00Z",
+        "ask_at": "2026-03-23T04:00:00Z",
+        "park_due_at": "2026-03-30T04:00:00Z",
+        "paused_until": "2026-03-09T04:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-038",
+      "note": "DST America/New_York due 2026-11-01: paused one second before",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "America/New_York",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-11-01",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-11-01T03:59:59Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-11-08T04:00:00Z",
+        "ask_at": "2026-11-15T04:00:00Z",
+        "park_due_at": "2026-11-22T04:00:00Z",
+        "paused_until": "2026-11-01T04:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-039",
+      "note": "DST America/New_York due 2026-11-01: fresh at the start of the day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "America/New_York",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-11-01",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-11-01T04:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-11-08T04:00:00Z",
+        "ask_at": "2026-11-15T04:00:00Z",
+        "park_due_at": "2026-11-22T04:00:00Z",
+        "paused_until": "2026-11-01T04:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-040",
+      "note": "DST America/New_York due 2026-11-02: paused one second before",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "America/New_York",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-11-02",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-11-02T04:59:59Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-11-09T05:00:00Z",
+        "ask_at": "2026-11-16T05:00:00Z",
+        "park_due_at": "2026-11-23T05:00:00Z",
+        "paused_until": "2026-11-02T05:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-041",
+      "note": "DST America/New_York due 2026-11-02: fresh at the start of the day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "America/New_York",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-11-02",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-11-02T05:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-11-09T05:00:00Z",
+        "ask_at": "2026-11-16T05:00:00Z",
+        "park_due_at": "2026-11-23T05:00:00Z",
+        "paused_until": "2026-11-02T05:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-042",
+      "note": "midnight DST gap America/Santiago due 2026-09-06: paused one second before",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "America/Santiago",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-09-06",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-09-06T03:59:59Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-09-13T04:00:00Z",
+        "ask_at": "2026-09-20T04:00:00Z",
+        "park_due_at": "2026-09-27T04:00:00Z",
+        "paused_until": "2026-09-06T04:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-043",
+      "note": "midnight DST gap America/Santiago due 2026-09-06: fresh at the start of the day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "America/Santiago",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-03-01T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": "2026-09-06",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-09-06T04:00:00Z",
+      "expect": {
+        "class": "fresh",
+        "ageing_at": "2026-09-13T04:00:00Z",
+        "ask_at": "2026-09-20T04:00:00Z",
+        "park_due_at": "2026-09-27T04:00:00Z",
+        "paused_until": "2026-09-06T04:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-044",
+      "note": "extended at T: ageing until the new ask",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": "2026-10-08T09:14:00Z",
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "ageing",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-15T09:14:00Z",
+        "park_due_at": "2026-10-22T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-045",
+      "note": "extended at T + 3: ageing one second before the new ask",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": "2026-10-11T09:14:00Z",
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-18T09:13:59Z",
+      "expect": {
+        "class": "ageing",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-18T09:14:00Z",
+        "park_due_at": "2026-10-25T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-046",
+      "note": "extended at T + 3: asks again at extension + 7 d",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": "2026-10-11T09:14:00Z",
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-18T09:14:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-18T09:14:00Z",
+        "park_due_at": "2026-10-25T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-047",
+      "note": "extended at T + 6: moves tomorrow at extension + 13 d (33 days old: restart-eligible)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": "2026-10-14T09:14:00Z",
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-27T09:14:00Z",
+      "expect": {
+        "class": "moves_tomorrow",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-21T09:14:00Z",
+        "park_due_at": "2026-10-28T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": true,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-048",
+      "note": "extended at park_due: ageing right after",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": "2026-10-15T09:14:00Z",
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-15T09:14:00Z",
+      "expect": {
+        "class": "ageing",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-22T09:14:00Z",
+        "park_due_at": "2026-10-29T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-049",
+      "note": "extended at park_due: park due at extension + 14 d (35 days old: restart-eligible)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": "2026-10-15T09:14:00Z",
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-29T09:14:00Z",
+      "expect": {
+        "class": "park_due",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-22T09:14:00Z",
+        "park_due_at": "2026-10-29T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": true,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-050",
+      "note": "task floor dominates: asks one second before floor - 24 h",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": "2026-10-20T10:00:00Z",
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-19T09:59:59Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-20T10:00:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-051",
+      "note": "task floor dominates: moves tomorrow at floor - 24 h",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": "2026-10-20T10:00:00Z",
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-19T10:00:00Z",
+      "expect": {
+        "class": "moves_tomorrow",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-20T10:00:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-052",
+      "note": "owner floor (threshold change to 7) dominates",
+      "settings": {
+        "threshold_days": 7,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": "2026-10-16T14:02:00Z",
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-09-27T21:14:00Z",
+        "ask_at": "2026-10-01T09:14:00Z",
+        "park_due_at": "2026-10-16T14:02:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-053",
+      "note": "owner floor (sweep gap) keeps a due park one day away",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": "2026-10-22T10:00:00Z",
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-15T10:00:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-22T10:00:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-054",
+      "note": "activation floor binds at T = 7 (nothing parks before activation + 14 d)",
+      "settings": {
+        "threshold_days": 7,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-10-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-10-01T08:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": "2026-10-15T08:00:00Z",
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-15T07:59:59Z",
+      "expect": {
+        "class": "moves_tomorrow",
+        "ageing_at": "2026-10-04T20:00:00Z",
+        "ask_at": "2026-10-08T08:00:00Z",
+        "park_due_at": "2026-10-15T08:00:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-055",
+      "note": "an earlier floor does not move the park",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": "2026-10-01T00:00:00Z",
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": "2026-10-02T00:00:00Z",
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-056",
+      "note": "restart: not eligible one second before 28 days",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": "2026-11-30T00:00:00Z",
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-22T09:13:59Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-11-30T00:00:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-057",
+      "note": "restart: eligible at 28 days",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": "2026-11-30T00:00:00Z",
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-22T09:14:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-11-30T00:00:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": true,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-058",
+      "note": "restart: measured from the due-day start",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": "2026-11-30T00:00:00Z",
+        "due_date": "2026-10-16",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-11-12T23:00:00Z",
+      "expect": {
+        "class": "asks",
+        "ageing_at": "2026-10-22T22:00:00Z",
+        "ask_at": "2026-10-29T22:00:00Z",
+        "park_due_at": "2026-11-30T00:00:00Z",
+        "paused_until": "2026-10-15T22:00:00Z",
+        "asks_for_decision": true,
+        "restart_eligible": true,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-059",
+      "note": "restart: a paused task is never eligible",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": "2026-11-30T00:00:00Z",
+        "due_date": "2026-11-20",
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-22T09:14:00Z",
+      "expect": {
+        "class": "paused",
+        "ageing_at": "2026-11-26T23:00:00Z",
+        "ask_at": "2026-12-03T23:00:00Z",
+        "park_due_at": "2026-12-10T23:00:00Z",
+        "paused_until": "2026-11-19T23:00:00Z",
+        "asks_for_decision": false,
+        "restart_eligible": false,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "C-060",
+      "note": "restart: park-due task past 28 days is eligible",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "task": {
+        "state": "next",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_park_floor_at": null,
+        "due_date": null,
+        "consecutive_stalled_formulations": 0
+      },
+      "now": "2026-10-22T09:14:00Z",
+      "expect": {
+        "class": "park_due",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-15T09:14:00Z",
+        "paused_until": null,
+        "asks_for_decision": true,
+        "restart_eligible": true,
+        "third_stall": false
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "id": "T-001",
+      "note": "substantive title change while asking closes as stalled (§6 example)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_title",
+        "title": "Email Bob the quote",
+        "new_formulation_id": "form_b"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "title": "Email Bob the quote",
+        "revision": 4,
+        "formulation_id": "form_b",
+        "formulation_started_at": "2026-10-09T14:02:00Z",
+        "consecutive_stalled_formulations": 1,
+        "parked": null
+      }
+    },
+    {
+      "id": "T-002",
+      "note": "cosmetic title change keeps the clock (FR-002)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_title",
+        "title": "call bob.",
+        "new_formulation_id": "form_b"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "title": "call bob.",
+        "revision": 4
+      }
+    },
+    {
+      "id": "T-003",
+      "note": "substantive change while ageing resets the stalled count",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_title",
+        "title": "Email Bob",
+        "new_formulation_id": "form_b"
+      },
+      "now": "2026-10-05T10:00:00Z",
+      "expect": {
+        "title": "Email Bob",
+        "revision": 4,
+        "formulation_id": "form_b",
+        "formulation_started_at": "2026-10-05T10:00:00Z",
+        "consecutive_stalled_formulations": 0
+      }
+    },
+    {
+      "id": "T-004",
+      "note": "closing one second before ask_at has not reached asking",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_title",
+        "title": "Email Bob",
+        "new_formulation_id": "form_b"
+      },
+      "now": "2026-10-08T09:13:59Z",
+      "expect": {
+        "title": "Email Bob",
+        "revision": 4,
+        "formulation_id": "form_b",
+        "formulation_started_at": "2026-10-08T09:13:59Z",
+        "consecutive_stalled_formulations": 0
+      }
+    },
+    {
+      "id": "T-005",
+      "note": "closing at ask_at has reached asking",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_title",
+        "title": "Email Bob",
+        "new_formulation_id": "form_b"
+      },
+      "now": "2026-10-08T09:14:00Z",
+      "expect": {
+        "title": "Email Bob",
+        "revision": 4,
+        "formulation_id": "form_b",
+        "formulation_started_at": "2026-10-08T09:14:00Z",
+        "consecutive_stalled_formulations": 2
+      }
+    },
+    {
+      "id": "T-006",
+      "note": "title change outside Next touches no clock",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "waiting",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_title",
+        "title": "Email Bob",
+        "new_formulation_id": "form_b"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "title": "Email Bob",
+        "revision": 4
+      }
+    },
+    {
+      "id": "T-007",
+      "note": "notes, tags, project, priority, subtasks, comments and waiting-for edits keep the clock (FR-003)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_other",
+        "fields": [
+          "details",
+          "tag_ids",
+          "project_id",
+          "priority",
+          "subtasks",
+          "comments",
+          "waiting_for"
+        ]
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "revision": 4
+      }
+    },
+    {
+      "id": "T-008",
+      "note": "due date set while in Next raises the task floor to now + 7 d (FR-046)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_due_date",
+        "due_date": "2026-10-20"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "due_date": "2026-10-20",
+        "revision": 4,
+        "formulation_park_floor_at": "2026-10-16T14:02:00Z"
+      },
+      "expect_derived": {
+        "class": "paused",
+        "ageing_at": "2026-10-26T22:00:00Z",
+        "ask_at": "2026-11-02T22:00:00Z",
+        "park_due_at": "2026-11-09T22:00:00Z",
+        "paused_until": "2026-10-19T22:00:00Z"
+      }
+    },
+    {
+      "id": "T-009",
+      "note": "due date moved into the past: the floor dominates the park",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_due_date",
+        "due_date": "2026-09-01"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "due_date": "2026-09-01",
+        "revision": 4,
+        "formulation_park_floor_at": "2026-10-16T14:02:00Z"
+      },
+      "expect_derived": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-16T14:02:00Z",
+        "paused_until": null
+      }
+    },
+    {
+      "id": "T-010",
+      "note": "due date removed: floor raised, start unchanged",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": "2026-09-20",
+        "parked": null
+      },
+      "event": {
+        "type": "update_due_date",
+        "due_date": null
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "due_date": null,
+        "revision": 4,
+        "formulation_park_floor_at": "2026-10-16T14:02:00Z"
+      },
+      "expect_derived": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-16T14:02:00Z",
+        "paused_until": null
+      }
+    },
+    {
+      "id": "T-011",
+      "note": "due date change keeps a later existing floor",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": "2026-10-30T00:00:00Z",
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_due_date",
+        "due_date": "2026-10-20"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "due_date": "2026-10-20",
+        "revision": 4
+      }
+    },
+    {
+      "id": "T-012",
+      "note": "due date change outside Next sets no floor",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "waiting",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_due_date",
+        "due_date": "2026-10-20"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "due_date": "2026-10-20",
+        "revision": 4
+      }
+    },
+    {
+      "id": "T-013",
+      "note": "task created in Next starts a formulation (FR-001)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": null,
+        "title": null,
+        "revision": 0,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "create_in_next",
+        "title": "Call Bob",
+        "new_formulation_id": "form_new"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 1,
+        "formulation_id": "form_new",
+        "formulation_started_at": "2026-10-09T14:02:00Z"
+      }
+    },
+    {
+      "id": "T-014",
+      "note": "moved from Inbox into Next starts a formulation",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "inbox",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "transition",
+        "to": "next",
+        "new_formulation_id": "form_b"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "state": "next",
+        "revision": 4,
+        "formulation_id": "form_b",
+        "formulation_started_at": "2026-10-09T14:02:00Z"
+      }
+    },
+    {
+      "id": "T-015",
+      "note": "leaving Next while asking closes as stalled",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "transition",
+        "to": "waiting"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "state": "waiting",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1
+      }
+    },
+    {
+      "id": "T-016",
+      "note": "completing while fresh resets the stalled count",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "transition",
+        "to": "completed"
+      },
+      "now": "2026-09-30T10:00:00Z",
+      "expect": {
+        "state": "completed",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0
+      }
+    },
+    {
+      "id": "T-017",
+      "note": "returning to Next starts a new formulation; the stalled count survives",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "waiting",
+        "title": "Call Bob",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "transition",
+        "to": "next",
+        "new_formulation_id": "form_c"
+      },
+      "now": "2026-10-10T08:00:00Z",
+      "expect": {
+        "state": "next",
+        "revision": 5,
+        "formulation_id": "form_c",
+        "formulation_started_at": "2026-10-10T08:00:00Z",
+        "consecutive_stalled_formulations": 1
+      },
+      "follows": "T-015"
+    },
+    {
+      "id": "T-018",
+      "note": "the returned formulation stalls again: the count reaches the third-stall offer (FR-005)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 5,
+        "formulation_id": "form_c",
+        "formulation_started_at": "2026-10-10T08:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "update_title",
+        "title": "Email Bob the quote",
+        "new_formulation_id": "form_d"
+      },
+      "now": "2026-10-24T08:00:00Z",
+      "expect": {
+        "title": "Email Bob the quote",
+        "revision": 6,
+        "formulation_id": "form_d",
+        "formulation_started_at": "2026-10-24T08:00:00Z",
+        "consecutive_stalled_formulations": 2
+      },
+      "follows": "T-017",
+      "expect_derived": {
+        "class": "fresh",
+        "ageing_at": "2026-10-31T08:00:00Z",
+        "ask_at": "2026-11-07T08:00:00Z",
+        "park_due_at": "2026-11-14T08:00:00Z",
+        "paused_until": null,
+        "third_stall": false
+      }
+    },
+    {
+      "id": "T-019",
+      "note": "extend while asking (FR-009)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "extend",
+        "reason": "Waiting for the quote"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "revision": 4,
+        "formulation_extended_at": "2026-10-09T14:02:00Z",
+        "formulation_extension_reason": "Waiting for the quote"
+      },
+      "expect_derived": {
+        "ask_at": "2026-10-16T14:02:00Z",
+        "park_due_at": "2026-10-23T14:02:00Z"
+      }
+    },
+    {
+      "id": "T-020",
+      "note": "extend at T: asks at T + 7, parks at T + 14 (FR-012)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "extend",
+        "reason": "Waiting for the quote"
+      },
+      "now": "2026-10-08T09:14:00Z",
+      "expect": {
+        "revision": 4,
+        "formulation_extended_at": "2026-10-08T09:14:00Z",
+        "formulation_extension_reason": "Waiting for the quote"
+      },
+      "expect_derived": {
+        "ask_at": "2026-10-15T09:14:00Z",
+        "park_due_at": "2026-10-22T09:14:00Z"
+      }
+    },
+    {
+      "id": "T-021",
+      "note": "extend at T + 3: measured from the extension day",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "extend",
+        "reason": "Waiting for the quote"
+      },
+      "now": "2026-10-11T09:14:00Z",
+      "expect": {
+        "revision": 4,
+        "formulation_extended_at": "2026-10-11T09:14:00Z",
+        "formulation_extension_reason": "Waiting for the quote"
+      },
+      "expect_derived": {
+        "ask_at": "2026-10-18T09:14:00Z",
+        "park_due_at": "2026-10-25T09:14:00Z"
+      }
+    },
+    {
+      "id": "T-022",
+      "note": "extend at T + 6 (moves tomorrow)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "extend",
+        "reason": "Waiting for the quote"
+      },
+      "now": "2026-10-14T09:14:00Z",
+      "expect": {
+        "revision": 4,
+        "formulation_extended_at": "2026-10-14T09:14:00Z",
+        "formulation_extension_reason": "Waiting for the quote"
+      },
+      "expect_derived": {
+        "ask_at": "2026-10-21T09:14:00Z",
+        "park_due_at": "2026-10-28T09:14:00Z"
+      }
+    },
+    {
+      "id": "T-023",
+      "note": "extend at park_due before the park is applied",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "extend",
+        "reason": "Waiting for the quote"
+      },
+      "now": "2026-10-15T09:14:00Z",
+      "expect": {
+        "revision": 4,
+        "formulation_extended_at": "2026-10-15T09:14:00Z",
+        "formulation_extension_reason": "Waiting for the quote"
+      },
+      "expect_derived": {
+        "ask_at": "2026-10-22T09:14:00Z",
+        "park_due_at": "2026-10-29T09:14:00Z"
+      }
+    },
+    {
+      "id": "T-024",
+      "note": "extend while only ageing is refused",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "extend",
+        "reason": "Waiting for the quote"
+      },
+      "now": "2026-10-05T10:00:00Z",
+      "expect": {
+        "error": "extension_not_due"
+      }
+    },
+    {
+      "id": "T-025",
+      "note": "a second extension of one formulation is refused",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": "2026-10-09T14:02:00Z",
+        "formulation_extension_reason": "Waiting for the quote",
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "extend",
+        "reason": "Still waiting"
+      },
+      "now": "2026-10-17T10:00:00Z",
+      "expect": {
+        "error": "extension_already_used"
+      }
+    },
+    {
+      "id": "T-026",
+      "note": "extend outside Next is refused",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "waiting",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "extend",
+        "reason": "Waiting for the quote"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "error": "decision_not_allowed"
+      }
+    },
+    {
+      "id": "T-027",
+      "note": "extend, then a substantive reformulate before the extended ask counts as stalled (FR-005)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": "2026-10-09T14:02:00Z",
+        "formulation_extension_reason": "Waiting for the quote",
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "reformulate",
+        "title": "Email Bob the quote",
+        "new_formulation_id": "form_b"
+      },
+      "now": "2026-10-12T10:00:00Z",
+      "expect": {
+        "title": "Email Bob the quote",
+        "revision": 4,
+        "formulation_id": "form_b",
+        "formulation_started_at": "2026-10-12T10:00:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "consecutive_stalled_formulations": 1
+      }
+    },
+    {
+      "id": "T-028",
+      "note": "cosmetic reformulate ('Save anyway') keeps the clock (FR-002)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "reformulate",
+        "title": "call Bob!",
+        "new_formulation_id": "form_b"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "title": "call Bob!",
+        "revision": 4
+      }
+    },
+    {
+      "id": "T-029",
+      "note": "first step always starts a new formulation (FR-008)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "first_step",
+        "title": "Find Bob's number",
+        "new_formulation_id": "form_b"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "title": "Find Bob's number",
+        "revision": 4,
+        "formulation_id": "form_b",
+        "formulation_started_at": "2026-10-09T14:02:00Z",
+        "consecutive_stalled_formulations": 1
+      }
+    },
+    {
+      "id": "T-030",
+      "note": "first step on a cosmetically equal title still starts a new formulation",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "first_step",
+        "title": "call bob",
+        "new_formulation_id": "form_b"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "title": "call bob",
+        "revision": 4,
+        "formulation_id": "form_b",
+        "formulation_started_at": "2026-10-09T14:02:00Z",
+        "consecutive_stalled_formulations": 1
+      }
+    },
+    {
+      "id": "T-031",
+      "note": "person release to Someday closes the formulation and is not a park",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "someday"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "state": "someday",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "parked": null
+      }
+    },
+    {
+      "id": "T-032",
+      "note": "waiting decision while moving tomorrow closes as stalled",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "waiting",
+        "waiting_for": "Ann"
+      },
+      "now": "2026-10-14T10:00:00Z",
+      "expect": {
+        "state": "waiting",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1
+      }
+    },
+    {
+      "id": "T-033",
+      "note": "complete decision at park_due closes as stalled",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "complete"
+      },
+      "now": "2026-10-15T10:00:00Z",
+      "expect": {
+        "state": "completed",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1
+      }
+    },
+    {
+      "id": "T-034",
+      "note": "cancel decision while fresh resets the count",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 2,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "decide",
+        "decision_type": "cancel"
+      },
+      "now": "2026-09-25T10:00:00Z",
+      "expect": {
+        "state": "cancelled",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0
+      }
+    },
+    {
+      "id": "T-035",
+      "note": "auto-park at park_due records the clock it closed (FR-012)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "auto_park"
+      },
+      "now": "2026-10-15T09:14:00Z",
+      "expect": {
+        "state": "someday",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "parked": {
+          "at": "2026-10-15T09:14:00Z",
+          "formulation_id": "form_a",
+          "from_revision": 3,
+          "clock_before": {
+            "started_at": "2026-09-24T09:14:00Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "stalled_before": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "T-036",
+      "note": "auto-park one second before park_due does not apply",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "auto_park"
+      },
+      "now": "2026-10-15T09:13:59Z",
+      "expect": {
+        "applied": false
+      }
+    },
+    {
+      "id": "T-037",
+      "note": "auto-park before activation does not apply (FR-051)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": null
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "auto_park"
+      },
+      "now": "2026-10-20T10:00:00Z",
+      "expect": {
+        "applied": false
+      }
+    },
+    {
+      "id": "T-038",
+      "note": "auto-park of an already parked task does not apply again (FR-013)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "someday",
+        "title": "Call Bob",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": {
+          "at": "2026-10-15T09:14:00Z",
+          "formulation_id": "form_a",
+          "from_revision": 3,
+          "clock_before": {
+            "started_at": "2026-09-24T09:14:00Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "stalled_before": 0
+          }
+        }
+      },
+      "event": {
+        "type": "auto_park"
+      },
+      "now": "2026-10-15T10:00:00Z",
+      "expect": {
+        "applied": false
+      },
+      "follows": "T-035"
+    },
+    {
+      "id": "T-039",
+      "note": "auto-park outside Next does not apply",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "waiting",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "auto_park"
+      },
+      "now": "2026-10-20T10:00:00Z",
+      "expect": {
+        "applied": false
+      }
+    },
+    {
+      "id": "T-040",
+      "note": "yield reversal + extend: clock restored, extension accepted at park_due, counted once",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "someday",
+        "title": "Call Bob",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": {
+          "at": "2026-10-15T09:14:00Z",
+          "formulation_id": "form_a",
+          "from_revision": 3,
+          "clock_before": {
+            "started_at": "2026-09-24T09:14:00Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "stalled_before": 0
+          }
+        }
+      },
+      "event": {
+        "type": "yield_reversal",
+        "decision": {
+          "decision_type": "extend",
+          "reason": "Waiting for the quote"
+        }
+      },
+      "now": "2026-10-15T12:00:00Z",
+      "expect": {
+        "state": "next",
+        "revision": 5,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": "2026-10-15T12:00:00Z",
+        "formulation_extension_reason": "Waiting for the quote",
+        "consecutive_stalled_formulations": 0,
+        "parked": null
+      },
+      "follows": "T-035"
+    },
+    {
+      "id": "T-041",
+      "note": "yield reversal + substantive reformulate: stalled count incremented once, not twice",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "someday",
+        "title": "Call Bob",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": {
+          "at": "2026-10-15T09:14:00Z",
+          "formulation_id": "form_a",
+          "from_revision": 3,
+          "clock_before": {
+            "started_at": "2026-09-24T09:14:00Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "stalled_before": 0
+          }
+        }
+      },
+      "event": {
+        "type": "yield_reversal",
+        "decision": {
+          "decision_type": "reformulate",
+          "title": "Email Bob the quote",
+          "new_formulation_id": "form_c"
+        }
+      },
+      "now": "2026-10-15T12:00:00Z",
+      "expect": {
+        "state": "next",
+        "title": "Email Bob the quote",
+        "revision": 5,
+        "formulation_id": "form_c",
+        "formulation_started_at": "2026-10-15T12:00:00Z",
+        "consecutive_stalled_formulations": 1,
+        "parked": null
+      },
+      "follows": "T-035"
+    },
+    {
+      "id": "T-042",
+      "note": "park → yield + cosmetic reformulate: back in Next on the same formulation",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "someday",
+        "title": "Call Bob",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": {
+          "at": "2026-10-15T09:14:00Z",
+          "formulation_id": "form_a",
+          "from_revision": 3,
+          "clock_before": {
+            "started_at": "2026-09-24T09:14:00Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "stalled_before": 0
+          }
+        }
+      },
+      "event": {
+        "type": "yield_reversal",
+        "decision": {
+          "decision_type": "reformulate",
+          "title": "call bob.",
+          "new_formulation_id": "form_c"
+        }
+      },
+      "now": "2026-10-15T12:00:00Z",
+      "expect": {
+        "state": "next",
+        "title": "call bob.",
+        "revision": 5,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "consecutive_stalled_formulations": 0,
+        "parked": null
+      },
+      "follows": "T-035"
+    },
+    {
+      "id": "T-043",
+      "note": "… and the next sweep parks it again from the new revision",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "call bob.",
+        "revision": 5,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "auto_park"
+      },
+      "now": "2026-10-15T12:01:00Z",
+      "expect": {
+        "state": "someday",
+        "revision": 6,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "parked": {
+          "at": "2026-10-15T12:01:00Z",
+          "formulation_id": "form_a",
+          "from_revision": 5,
+          "clock_before": {
+            "started_at": "2026-09-24T09:14:00Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "stalled_before": 0
+          }
+        }
+      },
+      "follows": "T-042"
+    },
+    {
+      "id": "T-044",
+      "note": "park → yield + waiting decision",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "someday",
+        "title": "Call Bob",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": {
+          "at": "2026-10-15T09:14:00Z",
+          "formulation_id": "form_a",
+          "from_revision": 3,
+          "clock_before": {
+            "started_at": "2026-09-24T09:14:00Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "stalled_before": 0
+          }
+        }
+      },
+      "event": {
+        "type": "yield_reversal",
+        "decision": {
+          "decision_type": "waiting",
+          "waiting_for": "Ann"
+        }
+      },
+      "now": "2026-10-15T12:00:00Z",
+      "expect": {
+        "state": "waiting",
+        "revision": 5,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "parked": null
+      },
+      "follows": "T-035"
+    },
+    {
+      "id": "T-045",
+      "note": "… undo restores the task as it was after the reversal (FR-048)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "waiting",
+        "title": "Call Bob",
+        "revision": 5,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "undo_decision",
+        "task_before": {
+          "state": "next",
+          "title": "Call Bob",
+          "revision": 4,
+          "formulation_id": "form_a",
+          "formulation_started_at": "2026-09-24T09:14:00Z",
+          "formulation_extended_at": null,
+          "formulation_extension_reason": null,
+          "formulation_park_floor_at": null,
+          "consecutive_stalled_formulations": 0,
+          "due_date": null,
+          "parked": null
+        }
+      },
+      "now": "2026-10-15T12:00:04Z",
+      "expect": {
+        "state": "next",
+        "revision": 6,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "consecutive_stalled_formulations": 0,
+        "parked": null
+      },
+      "follows": "T-044"
+    },
+    {
+      "id": "T-046",
+      "note": "… and the next sweep parks it again",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 6,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "auto_park"
+      },
+      "now": "2026-10-15T12:05:00Z",
+      "expect": {
+        "state": "someday",
+        "revision": 7,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "parked": {
+          "at": "2026-10-15T12:05:00Z",
+          "formulation_id": "form_a",
+          "from_revision": 6,
+          "clock_before": {
+            "started_at": "2026-09-24T09:14:00Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "stalled_before": 0
+          }
+        }
+      },
+      "follows": "T-045"
+    },
+    {
+      "id": "T-047",
+      "note": "a parked task returned to Next starts a new formulation (FR-001)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "someday",
+        "title": "Call Bob",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": {
+          "at": "2026-10-15T09:14:00Z",
+          "formulation_id": "form_a",
+          "from_revision": 3,
+          "clock_before": {
+            "started_at": "2026-09-24T09:14:00Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "stalled_before": 0
+          }
+        }
+      },
+      "event": {
+        "type": "transition",
+        "to": "next",
+        "new_formulation_id": "form_r"
+      },
+      "now": "2026-10-16T08:00:00Z",
+      "expect": {
+        "state": "next",
+        "revision": 5,
+        "formulation_id": "form_r",
+        "formulation_started_at": "2026-10-16T08:00:00Z",
+        "consecutive_stalled_formulations": 1,
+        "parked": null
+      },
+      "follows": "T-035"
+    },
+    {
+      "id": "T-048",
+      "note": "a parked task completed from Someday drops the park marker",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "someday",
+        "title": "Call Bob",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": {
+          "at": "2026-10-15T09:14:00Z",
+          "formulation_id": "form_a",
+          "from_revision": 3,
+          "clock_before": {
+            "started_at": "2026-09-24T09:14:00Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "stalled_before": 0
+          }
+        }
+      },
+      "event": {
+        "type": "transition",
+        "to": "completed"
+      },
+      "now": "2026-10-16T08:00:00Z",
+      "expect": {
+        "state": "completed",
+        "revision": 5,
+        "parked": null
+      },
+      "follows": "T-035"
+    },
+    {
+      "id": "T-049",
+      "note": "bulk release stores the clock before closing",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": "2026-10-08T10:00:00Z",
+        "formulation_extension_reason": "Waiting for the quote",
+        "formulation_park_floor_at": "2026-10-30T00:00:00Z",
+        "consecutive_stalled_formulations": 1,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "bulk_release"
+      },
+      "now": "2026-11-01T10:00:00Z",
+      "expect": {
+        "state": "someday",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 2,
+        "parked": null,
+        "bulk_clock_before": {
+          "formulation_id": "form_a",
+          "started_at": "2026-09-24T09:14:00Z",
+          "extended_at": "2026-10-08T10:00:00Z",
+          "extension_reason": "Waiting for the quote",
+          "park_floor_at": "2026-10-30T00:00:00Z",
+          "stalled_before": 1
+        }
+      }
+    },
+    {
+      "id": "T-050",
+      "note": "bulk release undo restores the clock exactly",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "someday",
+        "title": "Call Bob",
+        "revision": 4,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 2,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "undo_bulk_release",
+        "previous_state": "next",
+        "clock_before": {
+          "formulation_id": "form_a",
+          "started_at": "2026-09-24T09:14:00Z",
+          "extended_at": "2026-10-08T10:00:00Z",
+          "extension_reason": "Waiting for the quote",
+          "park_floor_at": "2026-10-30T00:00:00Z",
+          "stalled_before": 1
+        }
+      },
+      "now": "2026-11-01T10:00:30Z",
+      "expect": {
+        "state": "next",
+        "revision": 5,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": "2026-10-08T10:00:00Z",
+        "formulation_extension_reason": "Waiting for the quote",
+        "formulation_park_floor_at": "2026-10-30T00:00:00Z",
+        "consecutive_stalled_formulations": 1
+      },
+      "follows": "T-049"
+    },
+    {
+      "id": "T-051",
+      "note": "activation starts a missing clock at the activation instant (FR-016)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": null
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "activate",
+        "at": "2026-10-09T14:02:00Z",
+        "new_formulation_id": "form_act"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "formulation_id": "form_act",
+        "formulation_started_at": "2026-10-09T14:02:00Z",
+        "formulation_park_floor_at": "2026-10-23T14:02:00Z"
+      },
+      "expect_settings": {
+        "activated_at": "2026-10-09T14:02:00Z"
+      }
+    },
+    {
+      "id": "T-052",
+      "note": "activation clamp: an older start moves to the activation instant, same id, no revision bump",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": null
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "activate",
+        "at": "2026-10-09T14:02:00Z",
+        "new_formulation_id": "form_act"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "formulation_started_at": "2026-10-09T14:02:00Z",
+        "formulation_park_floor_at": "2026-10-23T14:02:00Z"
+      },
+      "expect_settings": {
+        "activated_at": "2026-10-09T14:02:00Z"
+      },
+      "expect_derived": {
+        "class": "fresh",
+        "ageing_at": "2026-10-16T14:02:00Z",
+        "ask_at": "2026-10-23T14:02:00Z",
+        "park_due_at": "2026-10-30T14:02:00Z",
+        "paused_until": null
+      }
+    },
+    {
+      "id": "T-053",
+      "note": "activation keeps a later existing floor",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": null
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": "2026-11-30T00:00:00Z",
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "activate",
+        "at": "2026-10-09T14:02:00Z",
+        "new_formulation_id": "form_act"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "formulation_started_at": "2026-10-09T14:02:00Z"
+      },
+      "expect_settings": {
+        "activated_at": "2026-10-09T14:02:00Z"
+      }
+    },
+    {
+      "id": "T-054",
+      "note": "activation leaves tasks outside Next alone",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": null
+      },
+      "before": {
+        "state": "waiting",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "activate",
+        "at": "2026-10-09T14:02:00Z",
+        "new_formulation_id": "form_act"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {},
+      "expect_settings": {
+        "activated_at": "2026-10-09T14:02:00Z"
+      }
+    },
+    {
+      "id": "T-055",
+      "note": "activation with Pacific/Honolulu: due_start in that zone, not UTC",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "UTC",
+        "owner_park_floor_at": null,
+        "activated_at": null
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": "2026-10-09",
+        "parked": null
+      },
+      "event": {
+        "type": "activate",
+        "at": "2026-10-09T09:00:00Z",
+        "time_zone": "Pacific/Honolulu",
+        "new_formulation_id": "form_act"
+      },
+      "now": "2026-10-09T09:00:00Z",
+      "expect": {
+        "formulation_started_at": "2026-10-09T09:00:00Z",
+        "formulation_park_floor_at": "2026-10-23T09:00:00Z"
+      },
+      "expect_settings": {
+        "activated_at": "2026-10-09T09:00:00Z",
+        "time_zone": "Pacific/Honolulu"
+      },
+      "expect_derived": {
+        "class": "paused",
+        "ageing_at": "2026-10-16T10:00:00Z",
+        "ask_at": "2026-10-23T10:00:00Z",
+        "park_due_at": "2026-10-30T10:00:00Z",
+        "paused_until": "2026-10-09T10:00:00Z"
+      }
+    },
+    {
+      "id": "T-056",
+      "note": "activation of an already activated owner changes nothing (first wins)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "activate",
+        "at": "2026-10-09T14:02:00Z",
+        "time_zone": "Pacific/Honolulu",
+        "new_formulation_id": "form_act"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {},
+      "expect_settings": {
+        "activated_at": "2026-09-01T08:00:00Z",
+        "time_zone": "Europe/Berlin"
+      }
+    },
+    {
+      "id": "T-057",
+      "note": "repair: a Next task without a clock starts one at now with a 14-day floor",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": null,
+        "formulation_started_at": null,
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "repair",
+        "new_formulation_id": "form_fix"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "formulation_id": "form_fix",
+        "formulation_started_at": "2026-10-09T14:02:00Z",
+        "formulation_park_floor_at": "2026-10-23T14:02:00Z"
+      }
+    },
+    {
+      "id": "T-058",
+      "note": "repair leaves a started clock alone",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "repair",
+        "new_formulation_id": "form_fix"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {}
+    },
+    {
+      "id": "T-059",
+      "note": "sweep gap: owner floor now + 7 d puts a marker before the park (SC-006)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "sweep_gap"
+      },
+      "now": "2026-10-15T10:00:00Z",
+      "expect": {},
+      "expect_settings": {
+        "owner_park_floor_at": "2026-10-22T10:00:00Z"
+      },
+      "expect_derived": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-22T10:00:00Z",
+        "paused_until": null
+      }
+    },
+    {
+      "id": "T-060",
+      "note": "sweep gap keeps a later owner floor",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": "2026-10-30T00:00:00Z",
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "sweep_gap"
+      },
+      "now": "2026-10-15T10:00:00Z",
+      "expect": {},
+      "expect_settings": {
+        "owner_park_floor_at": "2026-10-30T00:00:00Z"
+      }
+    },
+    {
+      "id": "T-061",
+      "note": "threshold change 14 → 7: markers update at once, no park before change + 7 d (FR-039)",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "threshold_change",
+        "to": 7
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {},
+      "expect_settings": {
+        "threshold_days": 7,
+        "owner_park_floor_at": "2026-10-16T14:02:00Z"
+      },
+      "expect_derived": {
+        "class": "asks",
+        "ageing_at": "2026-09-27T21:14:00Z",
+        "ask_at": "2026-10-01T09:14:00Z",
+        "park_due_at": "2026-10-16T14:02:00Z",
+        "paused_until": null
+      }
+    },
+    {
+      "id": "T-062",
+      "note": "threshold change to the stored value is no change",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "threshold_change",
+        "to": 14
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {},
+      "expect_settings": {
+        "threshold_days": 14,
+        "owner_park_floor_at": null
+      }
+    },
+    {
+      "id": "T-063",
+      "note": "time-zone change floors a due-dated Next task, no revision bump",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": "2026-09-20",
+        "parked": null
+      },
+      "event": {
+        "type": "time_zone_change",
+        "to": "America/New_York"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {
+        "formulation_park_floor_at": "2026-10-16T14:02:00Z"
+      },
+      "expect_settings": {
+        "time_zone": "America/New_York"
+      },
+      "expect_derived": {
+        "class": "asks",
+        "ageing_at": "2026-10-01T09:14:00Z",
+        "ask_at": "2026-10-08T09:14:00Z",
+        "park_due_at": "2026-10-16T14:02:00Z",
+        "paused_until": null
+      }
+    },
+    {
+      "id": "T-064",
+      "note": "time-zone change leaves a Next task without a due date alone",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": null,
+        "parked": null
+      },
+      "event": {
+        "type": "time_zone_change",
+        "to": "America/New_York"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {},
+      "expect_settings": {
+        "time_zone": "America/New_York"
+      }
+    },
+    {
+      "id": "T-065",
+      "note": "time-zone change to the stored zone is no change",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "before": {
+        "state": "next",
+        "title": "Call Bob",
+        "revision": 3,
+        "formulation_id": "form_a",
+        "formulation_started_at": "2026-09-24T09:14:00Z",
+        "formulation_extended_at": null,
+        "formulation_extension_reason": null,
+        "formulation_park_floor_at": null,
+        "consecutive_stalled_formulations": 0,
+        "due_date": "2026-09-20",
+        "parked": null
+      },
+      "event": {
+        "type": "time_zone_change",
+        "to": "Europe/Berlin"
+      },
+      "now": "2026-10-09T14:02:00Z",
+      "expect": {},
+      "expect_settings": {
+        "time_zone": "Europe/Berlin"
+      }
+    }
+  ],
+  "queue_order": [
+    {
+      "id": "Q-001",
+      "note": "earliest-asking first: by ask_at, then start, then id; an extended and a due-paused task sort by when they actually asked",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "now": "2026-10-20T12:00:00Z",
+      "tasks": [
+        {
+          "id": "task_a",
+          "state": "next",
+          "formulation_started_at": "2026-10-01T08:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_b",
+          "state": "next",
+          "formulation_started_at": "2026-09-20T08:00:00Z",
+          "formulation_extended_at": "2026-10-10T08:00:00Z",
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_c",
+          "state": "next",
+          "formulation_started_at": "2026-09-15T08:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": "2026-10-03",
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_d",
+          "state": "next",
+          "formulation_started_at": "2026-10-10T08:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_e",
+          "state": "next",
+          "formulation_started_at": "2026-09-29T13:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_f",
+          "state": "next",
+          "formulation_started_at": "2026-09-28T08:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_g",
+          "state": "waiting",
+          "formulation_started_at": null,
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_i",
+          "state": "next",
+          "formulation_started_at": "2026-10-01T08:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        }
+      ],
+      "expect": [
+        "task_f",
+        "task_e",
+        "task_a",
+        "task_i",
+        "task_c",
+        "task_b"
+      ]
+    },
+    {
+      "id": "Q-002",
+      "note": "not activated: nothing asks",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": null
+      },
+      "now": "2026-10-20T12:00:00Z",
+      "tasks": [
+        {
+          "id": "task_a",
+          "state": "next",
+          "formulation_started_at": "2026-09-01T08:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        }
+      ],
+      "expect": []
+    }
+  ]
+}

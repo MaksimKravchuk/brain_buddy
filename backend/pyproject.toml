@@ -202,6 +202,13 @@ only_mutate = [
   # enforced scope is a later calibration with its own measured score.
   "app/modules/agents/a2a/mapping.py",
   "app/modules/agents/a2a/card.py",
+  # Spec 020 (research R20): the pure formulation-clock rule and the pure
+  # review-flow rules, both driven by shared vector files that the iOS core and
+  # the web run too. OBSERVED tier — report-only; promotion of formulation.py
+  # to the enforced scope is a later, guarded (ASK) change after two clean
+  # nightly runs.
+  "app/modules/tasks/formulation.py",
+  "app/modules/tasks/review_rules.py",
 ]
 pytest_add_cli_args_test_selection = [
   # Task module and auth: non-ASGI only. The HTTP-level suites cover the same
@@ -220,6 +227,15 @@ pytest_add_cli_args_test_selection = [
   "tests/test_repository_and_cli_edges.py",
   "tests/test_node_service.py",
   "tests/test_mutation_survivor_exact.py",
+  # Spec 020: the vector runners by node id. The copy drift guard in the same
+  # module compares files outside backend/, which mutmut's copied tree does
+  # not hold, so it is left out of the mutation run (it runs in pytest).
+  "tests/test_review_formulation.py",
+  "tests/test_review_formulation_vectors.py::test_020_FR_002_normalisation_vector",
+  "tests/test_review_formulation_vectors.py::test_020_FR_004_classification_vector",
+  "tests/test_review_formulation_vectors.py::test_020_FR_001_transition_vector",
+  "tests/test_review_formulation_vectors.py::test_020_FR_004_queue_order_vector",
+  "tests/test_review_flow_vectors.py",
 ]
 pytest_add_cli_args = ["-c", "mutmut_pytest.ini"]
 also_copy = ["mutmut_pytest.ini"]

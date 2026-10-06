@@ -28,6 +28,15 @@ EPIC_QUALITY = "Platform Quality"
 # enough surface that it earns its own epic.
 EPIC_AGENT_RELAY = "External agent relay"
 
+# Spec 020 (weekly review) features, all under the Tasks epic: the review is
+# task-tracker behaviour that lives in ``app/modules/tasks`` (ADR-0027).
+FEATURE_FORMULATION_CLOCK = "Formulation clock"
+FEATURE_REVIEW_DECISIONS = "Review decisions"
+FEATURE_AUTO_PARK = "Auto-park"
+FEATURE_REVIEW_FLOW = "Review flow"
+FEATURE_NAVIGATOR = "Navigator"
+_REVIEW_MODULE_PREFIX = "review_"
+
 # Module stem -> (epic, feature, story). Keyed by the test file name without the
 # leading ``test_`` and ``.py``. Keep these meaningful: feature is the subsystem
 # under test, story is the behaviour grouping shown in the Allure tree.
@@ -86,6 +95,105 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         EPIC_TASKS,
         "Voice brain dump reconciliation",
         "Schema v2 dual-STT contracts",
+    ),
+    # Spec 020 (weekly review). Every review test module of every slice is
+    # mapped here at once (slice PR-02 is this file's single owner for the
+    # feature), so no later backend slice edits it. Unlisted ``test_review_*``
+    # modules fall back to ``_REVIEW_FALLBACK`` in ``resolve``.
+    "review_clock_seam": (
+        EPIC_TASKS,
+        FEATURE_FORMULATION_CLOCK,
+        "Injected clock seam",
+    ),
+    "review_formulation": (
+        EPIC_TASKS,
+        FEATURE_FORMULATION_CLOCK,
+        "Formulation key, instants and classification",
+    ),
+    "review_formulation_vectors": (
+        EPIC_TASKS,
+        FEATURE_FORMULATION_CLOCK,
+        "Shared formulation vectors and copy drift",
+    ),
+    "review_clock_api": (
+        EPIC_TASKS,
+        FEATURE_FORMULATION_CLOCK,
+        "Clock maintenance in task commands",
+    ),
+    "review_decisions_api": (
+        EPIC_TASKS,
+        FEATURE_REVIEW_DECISIONS,
+        "Decision card commands and Undo",
+    ),
+    "review_log_privacy": (
+        EPIC_TASKS,
+        FEATURE_REVIEW_DECISIONS,
+        "Content-free review logs",
+    ),
+    "review_traces": (
+        EPIC_TASKS,
+        FEATURE_REVIEW_DECISIONS,
+        "Golden operation traces",
+    ),
+    "review_auto_park": (
+        EPIC_TASKS,
+        FEATURE_AUTO_PARK,
+        "Activation, sweep and device parks",
+    ),
+    "review_cli": (
+        EPIC_TASKS,
+        FEATURE_AUTO_PARK,
+        "TEST-only seed and sweep commands",
+    ),
+    "review_flow_vectors": (
+        EPIC_TASKS,
+        FEATURE_REVIEW_FLOW,
+        "Shared review-flow vectors",
+    ),
+    "review_wire_fixtures": (
+        EPIC_TASKS,
+        FEATURE_REVIEW_FLOW,
+        "Golden wire fixtures",
+    ),
+    "review_repository": (
+        EPIC_TASKS,
+        FEATURE_REVIEW_FLOW,
+        "Review records persistence",
+    ),
+    "review_gate_api": (
+        EPIC_TASKS,
+        FEATURE_REVIEW_FLOW,
+        "Exposure gate",
+    ),
+    "review_settings_api": (
+        EPIC_TASKS,
+        FEATURE_REVIEW_FLOW,
+        "Review settings and state",
+    ),
+    "review_export_purge": (
+        EPIC_TASKS,
+        FEATURE_REVIEW_FLOW,
+        "Review data export and purge",
+    ),
+    "review_flow_api": (
+        EPIC_TASKS,
+        FEATURE_REVIEW_FLOW,
+        "Guided review runs and queues",
+    ),
+    "review_metrics_readout": (
+        EPIC_TASKS,
+        FEATURE_REVIEW_FLOW,
+        "Content-free metrics read-out",
+    ),
+    "review_navigator": (
+        EPIC_TASKS,
+        FEATURE_NAVIGATOR,
+        "Navigator consent, caps and suggestions",
+    ),
+    "review_navigator_eval": (
+        EPIC_TASKS,
+        FEATURE_NAVIGATOR,
+        "Navigator evaluation screen",
     ),
     # Authentication & access
     "auth_service": (EPIC_AUTH, "Auth service", "Credential and session logic"),
@@ -258,9 +366,10 @@ def resolve(
     """
 
     stem = _module_stem(module_name)
-    epic, feature, story = _MODULE_TAXONOMY.get(
-        stem, (EPIC_QUALITY, _humanize(stem), f"{_humanize(stem)} behaviour")
-    )
+    fallback = (EPIC_QUALITY, _humanize(stem), f"{_humanize(stem)} behaviour")
+    if stem.startswith(_REVIEW_MODULE_PREFIX):
+        fallback = (EPIC_TASKS, FEATURE_REVIEW_FLOW, f"{_humanize(stem)} behaviour")
+    epic, feature, story = _MODULE_TAXONOMY.get(stem, fallback)
 
     summary = ""
     if docstring:
