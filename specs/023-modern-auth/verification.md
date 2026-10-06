@@ -226,3 +226,50 @@ are unchanged. An intermediate two-file run passed 127 tests in 33.18 seconds
 wait, the two affected cases passed in 6.78 seconds
 (`/tmp/modern-auth-async-fixtures-final.log`; other 125 cases were filtered).
 Typecheck and lint passed. A fresh complete frozen-candidate chain is required.
+
+## Complete local verification at 630e812 and current native integration
+
+The frozen `630e812cfb5713b9e1db026ddcf605ed724c351a` completed the
+canonical `make verify-all` with exit **0**. Browser checks ran first, followed
+by the two unit suites; all original targets and recipes remained required.
+Backend: **4,324 passed**, coverage floors **98.61% lines / 95.86% branches**,
+Allure taxonomy 4,324. Frontend: **1,726 passed / 74 files**, unchanged floors
+**98.99% statements / 97.83% branches / 98.76% functions / 99.51% lines**,
+Allure taxonomy 1,726. Legacy browser: **65 passed**, one optional external
+model case skipped. Modern auth: **14 passed**. All executed browser cases
+passed on the first attempt, with no flaky cases; combined freshness, taxonomy
+and six required native-product stories passed. Raw log:
+`/tmp/modern-auth-023-verify-all-final-frozen-v7.log`; actual archive and
+aggregate: `/tmp/modern-auth-v7-actual/aggregate-summary.json`.
+
+The modern suite exercised real application, SQLite, session and signature
+validation with isolated synthetic Google/Apple upstreams and SMTP capture.
+At 1440×1000 and 390×851, ten held-response interactions gave visible pending
+feedback within **29.6 ms maximum**, one submission, disabled duplicate
+controls, visible keyboard focus and 44 CSS-pixel targets. Fourteen Axe results
+had zero violations, with fourteen masked screenshots. Evidence retains the
+actual `630e812` input SHA; it is not live provider or physical-iOS evidence.
+Legacy CRT kept its original 200 ms thresholds and 120 measurements. Its
+generated candidate field is null; outer inventory/hash evidence provides the
+local source context, not a release-bound artifact.
+
+Earlier V6 failures remain preserved in
+`/tmp/modern-auth-v6-actual/legacy-failed/`: CRT zoom exceeded its unchanged
+budget, and completed-task verification failed. Independent reproduction found
+an existing autosave race (`BASELINE-TASK-ACK-SYNC-001`, P2): an intervening sync
+updates the mutable revision baseline before a valid acknowledgement is
+validated. It remains outside this auth change and is unresolved; a passing
+repeat does not repair it or prove the original failure's exact wire ordering.
+
+Public `main` advanced to `143f1e813a466a7a000cd1f7e39bf4aae06c268d`.
+The full seven-commit advance includes native Weekly Review implementation as
+well as the latest commit's 30 Mac-spec documents. It was fetched read-only and
+merged locally without conflicts. Mac PR265 remains the other chat's work;
+its observed head was `1e63e42acb3206980cc66b297eee315f1893dcb7`.
+The modern workspace completion now reuses Weekly Review's existing local
+account-linking preparation, and checks cancellation again after that async
+step. Three bounded regressions cover server-side preservation of local parks,
+storage failure before any credential submission with the outbox preserved,
+and cancellation while preparation waits. These new integrated native inputs
+require fresh Swift tests and candidate verification; the completed 630 run
+is historical evidence for its own SHA only.
