@@ -166,20 +166,30 @@ Recorded in spec.md Clarifications "Session 2026-10-06".
 
 ## R7. Decisions as one composite task command
 
-- **Decision**: `POST /tasks/{id}/decisions` (`ReviewService.decide`, decorated with
-  the existing `_serialized_write`) validates, applies the task change, writes the
+- **Decision**: `POST /tasks/{id}/decisions` (`ReviewService.decide`, under the
+  existing serialized-write discipline) validates, applies the task change, writes the
   decision (and receipt / follow-up task), and stores one idempotency record whose
-  response is the whole `DecisionResponse`. `_apply_idempotent_record`
-  (`service.py:1142`) learns the new command prefixes, spelled exactly as in
+  response is the whole `DecisionResponse`. `_serialized_write`
+  (`service.py:64-79`) is typed for `TaskService` (it reads `service.task_repo` and
+  calls `service._reconcile_idempotent_result`), so PR-02 generalises it to a small
+  `SerializedWriter` protocol that `TaskService` and `ReviewService` both implement;
+  `ReviewService` composes `TaskService` (calling its undecorated task-change
+  helpers inside its own write, so a decision stays one transaction) and has its own
+  `_apply_idempotent_record` for the new prefixes, spelled exactly as in
   contracts/http.md §9 (`decide_task:`, `undo_decision:`, `auto-park:`,
   `bulk_release:`, `undo_bulk_release:`, `review_session:`, `review_settings:`,
-  `explainer_ack:`), each with its own result reconstructor (the default branch
-  validates the stored body as a `TaskDocument` and would raise on a composite
+  `explainer_ack:`), each with its own result reconstructor (the task service's default
+  branch validates the stored body as a `TaskDocument` and would raise on a composite
   response), so the repair-on-replay guarantee covers them; one test reconciles a
-  record of each prefix. Client-supplied ids (`decision_id`, session `id`, bulk `id`,
-  `follow_up_task_id`, `new_formulation_id`) follow the existing optional `id` on
-  `TaskCreateRequest` (`backend/app/schemas/tasks.py:122`), so offline iOS records and
-  their server copies share ids and replay can match them.
+  record of each prefix. Dependency direction `review_service → service → repository`,
+  extended so in the import-linter layers contract. Client-supplied ids
+  (`decision_id`, session `id`, bulk `id`, `follow_up_task_id`, `new_formulation_id`)
+  are **new with this feature** (no existing task route takes a client id:
+  `TaskCreateRequest`, `schemas/tasks.py:99-118`, has none; campaign 1 cited
+  `schemas/tasks.py:122` wrongly, which is `SmartAddClassificationRef.id`). They are
+  fixed-shape opaque labels (`<prefix>_<uuid>`, ≤ 64 chars, contracts/http.md
+  "Client-supplied ids") so offline iOS records and their server copies share ids; the
+  Idempotency-Key stays the only replay input (constitution IV).
 - **Rationale**: FR-011 requires the existing idempotent, owner-serialized
   operations; one request per iOS command (the `GTDCommand` invariant); atomic Undo.
 - **Alternatives**: client issues the plain task command then a separate "record
@@ -205,16 +215,27 @@ Recorded in spec.md Clarifications "Session 2026-10-06".
 ## R9. Auto-park authority, idempotency and clock skew
 
 - **Decision**: the server sweep parks with deterministic key
-  `auto-park:<task_id>:<formulation_id>` and re-checks under the owner lock. Devices
+  `auto-park:<task_id>:<formulation_id>:<from_revision>` and re-checks under the owner
+  lock; FR-013's "no additional effect" is the state re-check, and the revision in the
+  key keeps a second, legitimate park of the same formulation (after a yield reversal
+  followed by a cosmetic reformulation, or by a decision and its Undo) from being
+  swallowed as a replay within the 24 h idempotency retention
+  (`repository.py:39`; campaign 2). Devices
   may send `POST /tasks/{id}/auto-park`; the server parks only if **its own** evaluation
   is `park_due`, otherwise returns `applied: false` (200). Devices record issued parks
-  per formulation and never re-issue. A **card decision** whose `client_decided_at`
-  precedes `parked.at`, made on the exact pre-park revision of the same formulation,
-  reverses the park (yield rule) by restoring the clock snapshot the park stored
-  (`parked.clock_before`), so the formulation is not closed twice and an offline
-  `extend` is still accepted. Plain edits and moves never yield: there is no
-  `client_occurred_at` on `PATCH`/transitions; they 409 and are replayed onto the
-  parked task by the existing iOS refetch path (contracts/http.md §1).
+  per formulation and never re-issue; signed in and online, a device applies a park
+  locally only after `applied: true`, and evaluates due parks with the last observed
+  server clock offset (`server_now`), so a skewed device clock causes no visible early
+  park (ios-commands §5). A **card decision** whose `client_decided_at`
+  precedes `parked.at`, made on the same formulation with an `expected_revision`
+  between `parked.from_revision` and the current revision, reverses the park (yield
+  rule) by restoring the clock snapshot the park stored (`parked.clock_before`), so the
+  formulation is not closed twice and an offline `extend` is still accepted. The
+  revision range (not equality) is needed because iOS takes `expected_revision` from the
+  base at push time and replays earlier queued plain edits onto the parked task first
+  (`PushPlanner.swift:131-140`, `SyncEngine+Push.swift:270-291`). Plain edits and moves
+  never yield: there is no `client_occurred_at` on `PATCH`/transitions; they 409 and are
+  replayed onto the parked task by the existing iOS refetch path (contracts/http.md §1).
 - **Rationale**: US2-6 (exactly once, no conflict), edge case "Clock skew" (server
   authoritative), edge case "Offline for a long time" (explicit earlier decision wins).
   `client_decided_at` is only compared against a park the server itself made, so a
@@ -232,15 +253,21 @@ Recorded in spec.md Clarifications "Session 2026-10-06".
   `_run_maintenance_sweep` (`main.py:85`). It is wired as its own `try/except` block
   inside `_run_privacy_maintenance_sweep` without changing that function's 3-tuple
   return (asserted by `tests/test_crt_receipt_retention.py:364`). Candidates come from
-  one indexed query (`tasks.state = 'next'`, index `idx_tasks_owner_state`) run
-  **outside** the lock and grouped by owner; each owner is then processed under
+  one query over Next tasks (`tasks.state = 'next'`) run **outside** the lock and
+  grouped by owner; because the clock fields are payload-only, that query cannot select
+  park-due tasks, so every Next task of every exposed owner is parsed and classified in
+  Python each run — O(Next tasks) per minute, fine at beta scale, with an optional
+  per-owner watermark left to the implementer (contracts/http.md §9 "Scan cost"); each owner is then processed under
   `command_lock(owner_id)` in short transactions of at most 50 tasks, re-reading first
   (the voice sweep pattern, `workflows/voice_brain_dump/service.py:560-590`). The lock is
   one process-wide `RLock` (`repository.py:66-87`), so it blocks every owner's task
   writes while held: no provider or network I/O ever runs under it. The sweep has a
   retention part that runs for every owner with review rows regardless of the flag, and
   an exposure part (auto-park, repair, gap floor) for activated owners whose flag is
-  effective (`FeatureFlagService.is_effective`), contracts/http.md §9.
+  effective. `FeatureFlagService.is_effective(name, user)`
+  (`backend/app/services/feature_flag_service.py:145`) takes a `User`, so the sweep
+  resolves each owner id to its `User` before asking (contracts/http.md §9). Owner
+  failures are logged with `type(exc).__name__` and a reason code only.
 - **Rationale**: no new thread, no new env var; threads are already disabled in tests
   unless `BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST=1`, and tests call the sweep function
   directly, as `tests/test_crt_receipt_retention.py:364` does. A 60 s cadence parks
@@ -252,7 +279,11 @@ Recorded in spec.md Clarifications "Session 2026-10-06".
 ## R11. Time zone
 
 - **Decision**: store the owner's IANA zone in `review_settings.time_zone`; clients
-  send the device zone at onboarding and on change (US5-5). Backend uses `zoneinfo` for
+  send the device zone with the explainer acknowledgement (activation), at onboarding,
+  and whenever the device zone differs from the pulled one (US5-5). Sending it at
+  activation matters: activation can precede onboarding by weeks, and until a zone
+  arrives the server would compute `due_start` at UTC midnight while the device uses
+  its own zone (campaign 2). Backend uses `zoneinfo` for
   `due_start` and the review slot. iOS uses `TimeZone.current` for display and markers;
   web uses `Intl.DateTimeFormat().resolvedOptions().timeZone`.
 - **Rationale**: no user time zone exists anywhere today (`backend/app/schemas/auth.py`
@@ -282,10 +313,25 @@ Recorded in spec.md Clarifications "Session 2026-10-06".
 
 ### Cloud provider
 
-- **Decision**: OpenAI chat completions, model `gpt-4o-mini`, through a new adapter in
-  `backend/app/modules/tasks/navigator.py` modelled on
+- **Decision**: OpenAI chat completions, model `gpt-4o-mini`, through a new adapter
+  `backend/app/ai/review_navigator.py` beside and modelled on
   `backend/app/ai/title_completion.py` (official API origin, key read from the env var
-  named by `*_API_KEY_ENV`, `disabled` default, `deterministic` only in TEST). New env
+  named by `*_API_KEY_ENV`, `disabled` default, `deterministic` only in TEST), built by
+  `container.py` and injected into `ReviewService` through a `NavigatorProvider`
+  protocol declared in `backend/app/modules/tasks/navigator.py`, which keeps only the
+  schema, `reduce_notes`, validation and consent rules. Reason (campaign 2): ADR-0001
+  rule 9 (`docs/decisions/0001-…md:85-86`) allows network clients only as concrete
+  adapters in Execution or Capture, and the repository's precedent keeps the OpenAI
+  adapter outside the modules tree; keeping egress out of the module that owns
+  canonical task records also keeps its blast radius small.
+- **Cost admission and the process-wide lock**: the per-call and daily caps are
+  admitted in three steps — reserve under `command_lock` (read `navigator_usage`,
+  reject or write `calls + 1` and the estimated cost), call the provider with **no**
+  lock held, settle the actual cost (or release the reservation on failure) under the
+  lock again — because `command_lock` is one process-wide `RLock`
+  (`repository.py:67-87`) and an 8 s call under it would stall every owner's task
+  writes (contracts/http.md §7). The voice reconciler reserves before its provider call
+  in the same way (`workflows/voice_brain_dump/service.py:1378`). New env
   vars (documented in `.env.example`):
   `BRAIN_BUDDY_REVIEW_NAVIGATOR_PROVIDER=disabled`,
   `_MODEL=gpt-4o-mini`, `_API_KEY_ENV=OPENAI_API_KEY`, `_TIMEOUT_SECONDS=8`,
@@ -310,7 +356,10 @@ Recorded in spec.md Clarifications "Session 2026-10-06".
   "fail visibly instead of silently ... degrading"; a deploy that fails its health
   check never reaches users, while a silently disabled navigator would look like a
   product bug. The first failing test of PR-07 is "container build raises without the
-  key".
+  key". Blast radius (campaign 2, kept): the same raise also stops an already-serving
+  machine that restarts during a secrets change, taking every route down; the runbook
+  therefore sets the provider to `disabled` before any key rotation or removal and back
+  afterwards (plan rollback section, `.env.example`, ADR-0027 draft §5).
 - **Rationale**: spec Assumptions: reuse the existing provider and cost-cap conventions;
   `gpt-4o-mini` is already configured for title autocomplete; the design's
   illustrative provider name is OpenAI. Per-owner daily cap bounds spend for the
@@ -390,10 +439,13 @@ document; not repeated here).
   returns from auto-park from `review_park_acks.returned_at` (data-model E6); due-date
   moves on Next tasks from a content-free log event `review_due_date_moved owner_id=…
   task_id=…` (no persisted counter, so nothing new to export or purge); median active
-  review time from `review_sessions.active_seconds_by_step` (SC-004). A unit test
-  asserts that a decision with sentinel strings in title, notes, waiting-for, extension
-  reason and navigator I/O, and with a stall reason set, never shows any of them in
-  captured log records.
+  review time from `review_sessions.active_seconds_by_step` (SC-004). Route and sweep
+  errors log `type(exc).__name__` plus a reason code, never `str(exc)` or a validation
+  error's `errors()`, which would render input values. A unit test asserts that a
+  decision with sentinel strings in title, notes, waiting-for, extension reason and
+  navigator I/O, and with a stall reason set, never shows any of them in captured log
+  records, and the same test runs the sweep over a deliberately invalid task payload
+  holding a sentinel string.
 - **Alternatives**: event bus (none exists for tasks; ADR-0001 events are unbuilt).
 
 ## R15. Retention of content-bearing review data
@@ -410,6 +462,11 @@ document; not repeated here).
   navigator preference are deleted with the app.
 - **Rationale**: Undo is a seconds-long affordance; keeping old content indefinitely in a
   second place has no purpose.
+- **Limit (campaign 2)**: a *code* rollback to a build without the review sweep pauses
+  this retention for the rollback window; the first sweep after roll-forward nulls
+  every snapshot older than 7 days. `docs/data-retention.md` states the bound as
+  "7 days; longer only while the backend is rolled back to a build without the review
+  sweep" (contracts/http.md §8).
 
 ## R16. iOS persistence and sync
 
@@ -476,7 +533,15 @@ document; not repeated here).
   `GUARDED_FILES` member; re-record `.specify/gate-integrity.json` with
   `python3 scripts/check_gate_integrity.py --update`). Add
   `python3 scripts/check_requirement_coverage.py specs/020-weekly-review` to the
-  `check-specs` recipe in `Makefile` (ASK, guarded) when increment 1 lands.
+  `check-specs` recipe in `Makefile` (ASK, guarded) in **PR-14**, the one landing
+  point of the full-feature gate (it exits non-zero while any requirement is untested,
+  so it cannot be on before the last slice; campaign 2 aligned this with the plan and
+  quickstart). Per-slice tracing before that: PR-01 also adds a
+  `--requirements 020-FR-001,020-SC-002,…` filter to the script, and each slice's
+  verification runs it with that slice's `requirements` list from the PR-срезы
+  manifest. For FR-041 (and any other requirement whose only lane is a recorded manual
+  or macOS-host run) the slice's evidence file is required in addition to the name
+  match, because no CI lane executes `macos/`.
 - **Alternatives**: contrived backend/web tests naming iOS-only requirements (evidence
   that does not test the behaviour).
 - **Ids are all gate-enforced**: the former lettered ids were renumbered FR-046 –

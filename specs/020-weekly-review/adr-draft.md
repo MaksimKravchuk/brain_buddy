@@ -120,10 +120,13 @@ Auto-park:
   tomorrow" marker having been derivable for the preceding 24 hours (SC-006);
 - keeps project, tags, notes, due date and priority, and records the park instant
   and its origin on the task;
-- yields to an explicit card decision the person made, on another device, against the
-  pre-park version of the same formulation before the park instant (spec edge case
-  "Offline for a long time"), restoring the clock the park recorded; plain edits never
-  reverse a park.
+- yields to an explicit card decision the person made, on another device, on the same
+  formulation before the park instant (spec edge case "Offline for a long time"),
+  restoring the clock the park recorded; plain edits never reverse a park, and plain
+  edits queued before such a decision do not defeat the yield;
+- is keyed per park attempt (`auto-park:<task>:<formulation>:<from_revision>`), so a
+  formulation that becomes due again after a yield is parked again instead of being
+  swallowed as an idempotent replay.
 
 Clock bookkeeping that is not a GTD state change — re-anchoring clocks at activation,
 repairing a missing clock, the floors above — does not bump a task's revision, so it
@@ -145,9 +148,15 @@ On Apple platforms the navigator uses Apple's on-device model when available. Wh
 it is unavailable the person chooses between a separately downloaded on-device
 model and the cloud provider. Every cloud request requires a current, per-owner,
 per-provider consent that the server re-checks at request time; revocation stops
-requests immediately. The cloud path reuses the existing provider-adapter and
-cost-cap conventions (`BRAIN_BUDDY_*_PROVIDER/_MODEL/_API_KEY_ENV`, per-call cost
-admission, rate limiting) under its own `BRAIN_BUDDY_REVIEW_NAVIGATOR_*` settings.
+requests immediately; the person can see and revoke a stored consent even while the
+flag is off. The cloud path follows the existing provider-adapter and cost-admission
+conventions (`BRAIN_BUDDY_*_PROVIDER/_MODEL/_API_KEY_ENV`, per-call cost admission,
+rate limiting) under its own `BRAIN_BUDDY_REVIEW_NAVIGATOR_*` settings and limits. The
+HTTP adapter lives with the existing one in `backend/app/ai/`, outside the Tasks module,
+and reaches `ReviewService` through a port, so ADR-0001 rule 9 ("network clients are
+only concrete adapters in Execution or Capture") holds without an amendment; the
+Tasks module keeps only the request schema, validation and consent rules. The provider
+call never runs under the process-wide task command lock (reserve, call, settle).
 The exact navigator input set is fixed by spec FR-019 and enforced by a strict request
 schema. Proposal text never enters logs, metrics or events.
 
@@ -160,7 +169,9 @@ to the cloud.
 A cloud provider configured without its credentials fails the backend's startup
 rather than degrading silently (constitution I); unlike title completion, the
 navigator never runs as a quietly disabled provider unless the operator chose
-`disabled`.
+`disabled`. Because that also stops a serving machine restarted during a secrets
+change, the operating rule is: set the navigator provider to `disabled` before rotating
+or removing its key, and back afterwards (`.env.example`, deploy runbook).
 
 A downloadable on-device model (recommended: Core AI + Qwen3-1.7B 4-bit in an
 Apple-hosted Background Assets pack, iOS/macOS 27+ only) would be the first third-party
@@ -177,7 +188,11 @@ owner decision NC-4).
 ### 6. Rollout
 
 All of the above is behind the runtime-managed flag `weekly_review` (default OFF,
-ADR-0019 store). While the flag is off, web and iOS keep today's non-interactive
+ADR-0019 store). As for voice, exposure control is not authorization: the flag gates
+reads, the navigator and the exposure part of the sweep, while writes that finish work
+a client already started (queued decisions, sessions, acknowledgements) and consent
+revocation keep working when it is off, so a rollback never strands a device's queued
+work. While the flag is off, web and iOS keep today's non-interactive
 "coming later" entry and the design skill keeps describing that state; the skill text
 and its validator test change to "flag-gated; visibly deferred while off" in the same
 slice that accepts this record. The Mac shows a non-interactive "Weekly review ·
