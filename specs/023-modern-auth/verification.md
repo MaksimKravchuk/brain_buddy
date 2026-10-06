@@ -173,3 +173,21 @@ in 3.16 seconds (`/tmp/modern-auth-retention-final.log`), covering missing keys,
 provider unavailability without network calls, and isolation of a transient
 store failure from account deletion. These are focused results, not a full
 candidate acceptance verdict.
+
+## OpenAPI inventory correction after the interrupted 056252d run
+
+Full `make verify-all` at `056252da83c790b6c4bcf2a92d29bb5d08285826`
+found one precise contract-fixture mismatch: the six compatible account routes
+now intentionally document the optional expected-owner mismatch **404**, while
+the old exact error-status inventory omitted it. The run was interrupted after
+the confirmed failure rather than represented as green. Preserved partial
+Allure results: **1,994 passed, 1 failed, 1 skipped** under
+`/tmp/modern-auth-v4-partial/backend-allure`; raw log:
+`/tmp/modern-auth-023-verify-all-final-frozen-v4.log`. Interrupted pytest teardown
+also produced a stash error; no final aggregate or coverage result is claimed.
+
+Only the six expected status sets were corrected, retaining exact inventory and
+error-envelope assertions. The actual application contract suite then passed
+**5 tests** in 7.98 seconds (`/tmp/modern-auth-contract-final.log`). Application
+code, native source and frontend source did not change in this correction.
+A fresh complete run remains required.
