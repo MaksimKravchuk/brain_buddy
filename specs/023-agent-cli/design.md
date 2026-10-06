@@ -1,8 +1,8 @@
 # Design: Agent-friendly BrainBuddy CLI
 
-Feature: specs/022-agent-cli/. Spec: spec.md; scope clarified 2026-10-06.
-Screens: design/terminal.html.
-Human sign-off: pending. Planning and implementation have not started.
+Feature: specs/023-agent-cli/. Spec: spec.md; scope clarified 2026-10-06.
+Screens: design/terminal.html and design/authorize.html.
+Human sign-off: Maksim Kravchuk, 2026-10-06, current conversation: “Да. Отлично” in response to the auth-inclusive interface approval request. This approves the UX; implementation still requires the separate planning-review gate.
 
 ## Applicability
 
@@ -66,7 +66,29 @@ Installer empty/partial business-result states are N/A: one binary is installed.
 | S11 offline logout | Server revoke cannot be confirmed | Local credential removed; remote-revocation failure remains visible | local_cleared:true, server_revoked:false | FR-014 |
 | S12 unsupported server | CLI authorization capability absent | Explicit unsupported result and server-upgrade hint | cli_auth_unavailable | FR-013 |
 
-One-time verification codes are intentionally shown to the owner during explicit login, not ordinary business output or telemetry. Polling follows server interval/expiry; pending approval is not a failure or a task-write retry. The exact shared browser page remains an integration dependency; provider availability must come from the deployed shared-auth system.
+One-time verification codes are intentionally shown to the owner during explicit login, not ordinary business output or telemetry. Polling follows server interval/expiry; pending approval is not a failure or a task-write retry. The narrow approval page is specified below; provider availability comes from the deployed shared-auth system.
+
+### D-03 — Browser approval detail
+
+The new approval page delegates sign-in to the existing shared login route. Provider availability comes from deployed shared auth. This narrow approval surface belongs to this feature; contracts/device-auth.md supplies its exchange and safety rules.
+
+| state | visible content and controls | recovery/accessibility |
+|---|---|---|
+| B01 signed out | Shared login with safe local approval return destination | Existing login methods; no duplicate provider picker |
+| B02 code input | Labelled one-time code input and Continue | Manual entry when fragment missing; no approval on navigation |
+| B03 loading | Request loading; Approve disabled | aria-live polite; bounded wait/retry |
+| B04 awaiting decision | Signed-in account, BrainBuddy CLI label, matching code/expiry; Approve/Deny | Approve only a code from your own CLI; keyboard buttons/visible focus |
+| B05 approved | Connection approved; return to terminal | Success announced; decision cannot be issued again |
+| B06 denied | Connection declined; return to terminal | Explicit denial; changing decision requires new login |
+| B07 expired/invalid | Code expired/unavailable; start new login/manual code input | No identity/existence leak or extended expiry |
+| B08 unavailable | CLI unavailable for this account | Server enforces flag/auth boundary |
+| B09 request/decision error | Safe error/reference and Retry | Retain code locally; uncertain decision retries same explicit choice |
+
+Focus policy: B02 focuses the labelled code input on entry. B03 preserves the initiating control focus while disabled and announces immediate Checking this code…; decision sends announce Sending your decision…. B04 focuses the approval heading (tabindex=-1), then normal tab order reaches Approve/Deny. B05/B06/B07/B08 focus their named outcome heading. B09 focuses an error-summary heading, with Retry next in tab order; retry restores the same request/choice and returns focus to the resulting heading. Every browser fetch has AbortController30s timeout.
+
+Concrete recovery copy: B06 Connection declined. Run bb auth login to start again. B08 CLI connections are unavailable for this account. B09 lookup: Could not check this code. Retry. B09 decision: Your decision could not be confirmed. Retry the same choice or check your terminal. Include a safe reference when available; never show success before confirmed approval. No background auto-approval/polling.
+
+Clear code fragment from history after reading; never send it in query URLs/analytics. JSON POST lookup keeps codes out of access-log URLs. Identity from /auth/me, deliberate approval only. Stack at390px, no horizontal scroll, accessible labels/visible focus/≥44px controls; screenshots/keyboard/axe checks required. Static preview illustrates B04/B05/B07; tests cover all states.
 
 ## Affordance → requirement map
 
@@ -98,11 +120,11 @@ Adds capture, clarification, explicit action and inspection from a terminal. Rev
 
 ## Mobile viability
 
-CLI viewport/touch/one-handed navigation are N/A: no native mobile app changes. Headless approval uses the responsive shared-auth page, whose mobile and keyboard behavior must be verified in that work; it is not waived. Terminal output requires no colors, mouse or animation.
+CLI viewport/touch/one-handed navigation are N/A: no native mobile app changes. Headless approval uses the responsive CLI approval page and existing shared login; changed approval states require mobile and keyboard verification in this feature. Terminal output requires no colors, mouse or animation.
 
 ## Keyboard and focus
 
-Commands/arguments are keyboard accessible. No terminal GUI tab order, focus restoration or Escape control. Ctrl-C cancels waiting login and interrupts ordinary processes; write recovery remains explicit. The verification link/code supports manual navigation if browser launch fails. Browser sign-in/approval accessibility belongs to the shared-auth integration. Plain help and named arguments provide labels.
+Commands/arguments are keyboard accessible. No terminal GUI tab order, focus restoration or Escape control. Ctrl-C cancels waiting login and interrupts ordinary processes; write recovery remains explicit. The verification link/code supports manual navigation if browser launch fails. Existing shared sign-in accessibility remains owned by shared auth; this feature verifies approval accessibility. Plain help and named arguments provide labels.
 
 ## Design authority
 
@@ -112,4 +134,4 @@ Quiet light palette and system fonts from the repository design reference; no ex
 
 ## Open decisions for the human
 
-Approve the revised terminal interface including browser/headless login before planning, as explicitly required by speckit-design. The previous approval request has not been answered and is superseded by this auth-inclusive design. Protocol/library/parser/build choices remain technical decisions; see auth-integration.md for the observed shared-auth dependency.
+The owner approved the revised terminal interface and browser/headless login on 2026-10-06. No open UX decision remains. Protocol/library/parser/build choices remain technical decisions; see auth-integration.md for the observed shared-auth dependency.

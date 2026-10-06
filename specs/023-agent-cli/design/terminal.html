@@ -35,17 +35,17 @@ Offline logout: local access removed; remote revocation reported as unconfirmed.
 <pre>$ bb commands task
 {"name":"task","commands":["add","list","get","update","transition"]}
 
-$ bb task add --title "Call the garage" --idempotency-key garage-1
+$ bb task add --title "Call the garage" --key garage-1
 {"data":{"id":"task-demo","title":"Call the garage","state":"inbox","revision":1}}
 
-$ bb task list --query garage --limit 20 --fields id,title,state,revision
+$ bb task list --query q=garage --limit 20 --fields id,title,state,revision
 {"data":[{"id":"task-demo","title":"Call the garage","state":"inbox","revision":1}],"page":{"has_more":false,"next_cursor":null}}
 
-$ bb task update task-demo --revision 1 --json @- --idempotency-key garage-2
+$ bb task update task-demo --revision 1 --json @- --key garage-2
 stdin: {"title":"Call the garage and book the repair"}
 {"data":{"id":"task-demo","title":"Call the garage and book the repair","state":"inbox","revision":2}}
 
-$ bb task transition task-demo complete --revision 2 --idempotency-key garage-3
+$ bb task transition task-demo complete --revision 2 --key garage-3
 {"data":{"id":"task-demo","title":"Call the garage and book the repair","state":"completed","revision":3}}</pre>
 <h2>D-01 · Discover and preview</h2>
 <pre>$ bb schema POST /tasks
@@ -54,14 +54,14 @@ Scoped request/response schema, including required fields and enums.
 $ bb api GET /auth/me --fields id,email
 {"data":{"id":"member-demo","email":"member@example.test"}}
 
-$ bb task add --title "Call the garage" --idempotency-key garage-1 --dry-run
-{"method":"POST","path":"/tasks","body":{"title":"Call the garage"},"idempotency_key":"garage-1"}
+$ bb task add --title "Call the garage" --key garage-1 --dry-run
+{"data":{"method":"POST","path":"/tasks","body_fields":{"title":"string"},"redacted":true,"idempotency_key":"garage-1"}}
 
-$ bb task list --query no-match
+$ bb task list --query q=no-match
 {"data":[],"page":{"has_more":false,"next_cursor":null}}</pre>
 <h2>D-01 · Recover deliberately</h2>
 <pre>Stale revision · stderr · nonzero exit
-{"error":{"code":"conflict","status":409,"message":"Revision conflict","reference_id":"demo-reference","detail":{"current_revision":3}}}
+{"error":{"code":"conflict","http_status":409,"message":"Revision conflict","reference_id":"demo-reference","detail":{"current_revision":3}}}
 
 Interrupted write · stderr · nonzero exit
 {"error":{"code":"transport","message":"Request failed; delivery is unknown","delivery_unknown":true,"idempotency_key":"garage-3"}}</pre>

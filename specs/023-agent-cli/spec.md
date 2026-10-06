@@ -2,7 +2,7 @@
 
 **Feature Branch**: feat/agent-cli
 **Created**: 2026-10-06
-**Status**: Distribution and convenient authentication in scope; revised terminal design approval pending
+**Status**: Scope and auth-inclusive UX approved; technical planning/review in progress
 **Input**: Universal BrainBuddy CLI optimized for AI agents and tokens, including prebuilt binaries, one-command installation and convenient login integrated with the shared Google/Apple authentication work.
 
 ## Clarifications
@@ -10,7 +10,8 @@
 ### Session 2026-10-06
 
 - Q: Confirm the initial client scope and non-goals? → A: The owner selected “Нужны также готовые сборки и установка одной командой”. Client scope is retained; distribution is added.
-- Owner steering: convenient CLI authentication must integrate with the Google/Apple and other shared-login work in a parallel session. Manual session provisioning and excluding authentication are superseded. The owner did not choose a protocol; browser-based device authorization below is an agent recommendation awaiting design approval.
+- Owner steering: convenient CLI authentication must integrate with the Google/Apple and other shared-login work in a parallel session. Manual session provisioning and excluding authentication are superseded. The owner approved the browser-based device authorization journey below; the implementing agent owns its protocol details.
+- Owner approval: “Да. Отлично” to the revised browser/headless login and terminal interface on 2026-10-06.
 - No further business questions are needed. Technical choices belong to the implementing agent. Platform architecture limits below are explicit first-release assumptions.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -106,7 +107,7 @@ Authentication additionally covers code expiry/denial, bounded server-directed p
 
 ### Key Entities
 
-Existing owner-scoped Task, Project, Tag and CRT tree; explicit command request with revision/key; projected result with continuation/error metadata; versioned CLI release tied to an exact reviewed commit. New authentication entities are an expiring device approval and a separate server/account-bound CLI credential; their server ownership and transport depend on the shared-auth contract. No parallel business-data storage.
+Existing owner-scoped Task, Project, Tag and CRT tree; explicit command request with revision/key; projected result with continuation/error metadata; versioned CLI release tied to an exact reviewed commit. New authentication entities are an expiring Identity-owned device approval and a separate server/account-bound opaque session credential using the existing cookie transport. No parallel business-data storage.
 
 ## Success Criteria *(mandatory)*
 
@@ -121,4 +122,4 @@ Existing owner-scoped Task, Project, Tag and CRT tree; explicit command request 
 
 ## Assumptions
 
-Rust is preferred. Convenient login is required; externally supplied credentials are an unattended option rather than the primary owner journey. Shared provider login, account linking, signup/invites and password management belong to the parallel authentication work. The CLI-specific server authorization/credential contract must be integrated with that work before authentication implementation; it is not present in the inspected main branch. The recommended device flow is against BrainBuddy, not an assumption that Google or Apple supports device grants directly. No offline sync, MCP/TUI, unrelated server business changes or web/iOS redesign. A narrow shared-auth approval surface and CLI authorization support are now in scope as integration dependencies. JSON API only initially; binary export/raw audio are not claimed. Windows arm64, code signing/notarization, package-manager registries and automatic updates are first-release exclusions. Server flags and deployed contracts govern availability. Byte reduction is a size proxy, not an identical token-reduction claim.
+Rust is preferred. Convenient login is required; externally supplied credentials are an unattended option rather than the primary owner journey. Shared provider login, account linking, signup/invites and password management belong to the parallel authentication work. The additive CLI device contract in contracts/device-auth.md reuses existing opaque sessions and the shared login page. It is proposed new capability, absent from the inspected main branch. The device flow is against BrainBuddy, not an assumption that Google or Apple supports device grants directly. CLI acceptance uses the deployed shared login methods; Google/Apple availability is not claimed until that work is published and deployed. No offline sync, MCP/TUI, unrelated server business changes or web/iOS redesign. A narrow shared-auth approval surface, safe return navigation and CLI authorization support are in scope. JSON API only initially; binary export/raw audio are not claimed. Windows arm64, code signing/notarization, package-manager registries and automatic updates are first-release exclusions. Server flags and deployed contracts govern availability. Byte reduction is a size proxy, not an identical token-reduction claim.

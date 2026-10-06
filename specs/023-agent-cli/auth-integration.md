@@ -1,6 +1,6 @@
 # CLI authentication integration notes
 
-Status: proposed UX and integration requirements, not an accepted or implemented server API contract.
+Status: owner-approved browser/headless UX; proposed technical contract under planning review, not implemented. The authoritative proposed interface is contracts/device-auth.md.
 Inspected on 2026-10-06 at main commit afaa820ae8f5edcac99764c386ed748d6dca037c.
 
 ## What is observed
@@ -21,17 +21,17 @@ For SSH/remote/container use, bb auth login --no-browser leaves approval to a br
 
 Prefer a BrainBuddy device-authorization flow following the [OAuth device authorization model, RFC 8628](https://www.rfc-editor.org/rfc/rfc8628). This is a flow supported by BrainBuddy itself; it does not require Google or Apple to expose device authorization to this CLI. Provider verification, immutable account mapping, invite policy and account linking stay server-owned in the parallel auth feature. The CLI does not implement Google/Apple SDK login, accept provider passwords or ship an embedded client secret.
 
-The shared-auth work must supply or explicitly agree the following capabilities before CLI authentication implementation:
+This feature supplies the following additive capabilities through the existing Identity services; published shared-auth changes must be reconciled before freezing the implementation candidate:
 
 - Start a bounded authorization grant: private device proof, short user code, trusted verification URI, expiry and polling interval.
 - Browser approval tied to the displayed device request and authenticated existing account, with CSRF/session protections from shared auth; no identity inferred just from an email address.
 - A polling/exchange contract distinguishing pending approval, slow-down, denial, expiry and successful credential issuance; consumption/replay behavior must be explicit.
-- A BrainBuddy API credential transport accepted by member endpoints. Whether this reuses an opaque server session or another reviewed credential shape is deliberately not asserted as an existing contract.
+- A distinct opaque BrainBuddy session using the existing cookie transport accepted by member endpoints. No bearer-token or provider-token migration is introduced.
 - Status, expiry and separate CLI revocation, including account-deletion/session-revocation obligations. No promise of refresh tokens until the shared-auth contract actually includes renewal.
 - An authenticated authorization boundary for CLI access. Existing owner scoping, operator rules, flags and external-processing consent remain enforced; this document does not invent restricted scopes the server cannot enforce.
 - Capability-unavailable behavior for older servers. The CLI must not silently fall back to asking for a provider password or exporting browser cookies.
 
-No messages were sent to another session. This file is the reviewable coordination input; shared-auth source artifacts still need to be read when published.
+No messages were sent to another session. The CLI does not depend on unpublished provider code: its approval page delegates sign-in to the existing shared login route, which can gain configured providers independently. Published shared-auth source artifacts still need to be read before candidate freeze.
 
 ## Credential storage and recovery requirements
 
@@ -41,4 +41,4 @@ Only report successful login after the credential is saved. A failed save must p
 
 ## Acceptance dependency
 
-FR-013/FR-014 and SC-006 in spec.md are required outcomes. Shared provider sign-in and CLI authorization must be deployed and verified together before calling this feature complete. Auth/privacy work is ASK-class under ADR-0008; planning-review and release approvals remain applicable. No product implementation or authentication approval is claimed by this design amendment.
+FR-013/FR-014 and SC-006 in spec.md are required outcomes. CLI authorization and its approval page must be deployed and verified against the shared login methods available at release before calling this feature complete. Google/Apple implementation remains owned by the parallel feature. Auth/privacy work is ASK-class under ADR-0008; planning-review and release approvals remain applicable. No product implementation or release approval is claimed by the UX sign-off.

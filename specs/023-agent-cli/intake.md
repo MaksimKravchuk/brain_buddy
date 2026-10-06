@@ -1,7 +1,7 @@
 # Business Intake: Agent-friendly BrainBuddy CLI
 
 Interviewed: 2026-10-06. Interviewee: Maksim Kravchuk, current Codex conversation.
-Status: Distribution and convenient shared authentication requested; revised terminal design approval pending.
+Status: Owner approved the auth-inclusive interface on 2026-10-06 (“Да. Отлично”); technical planning/review follows.
 
 ## The ask, as given
 
@@ -53,7 +53,7 @@ Observable acceptance: browser/headless login and protected credential reuse, st
 
 ## Deferred to /speckit-clarify
 
-No protocol question is escalated to the owner: the owner explicitly said they were unsure which authentication to choose. Updated terminal/login design still requires the repository-mandated owner approval before planning. The unpublished shared-auth/CLI authorization contract is a technical integration dependency, not a claim that the owner's parallel work does not exist.
+No protocol question is escalated to the owner: the owner explicitly said they were unsure which authentication to choose. Updated terminal/login design received explicit owner approval on 2026-10-06. The unpublished shared-auth/CLI authorization contract is a technical integration dependency, not a claim that the owner's parallel work does not exist.
 
 ## Contradictions surfaced during the interview
 
