@@ -36,7 +36,7 @@
 - No [NEEDS CLARIFICATION] markers. Every open point from the intake was either resolved with a documented default or recorded as an Assumption:
   - substantive title change → FR-002;
   - threshold-change retroactivity → FR-039;
-  - post-release grace → FR-016;
+  - post-release grace → FR-016 (anchored on the explainer since 2026-10-06);
   - receipts → FR-032;
   - Russian on-device support → Assumption plus fallback (FR-023).
 - **Items for `/speckit-clarify`**, which are worth a human answer even though defaults exist:
@@ -44,3 +44,9 @@
   - Whether to adopt iOS 27 Foundation Models features or stay on the iOS 26 baseline.
   - The 30-day Someday receipt, versus 7 days in the macOS POC.
 - Validation: iteration 1, all items pass.
+- Validation: iteration 2 (2026-10-06, after planning-review campaign 1), all items pass. Re-checked against the amended spec:
+  - The three owner answers (Clarifications "Session 2026-10-06") are reflected in FR-014, FR-016, FR-029, FR-033, FR-035, FR-036, FR-038, FR-051, US2-8, US4-8b and US4-9; FR-029 now defines completed, completed without activity, partial and abandoned, so "counts toward regularity" is testable.
+  - The new requirements are plain-numbered (FR-051 explainer, FR-052 unsaved text), unique and gate-enforceable; no lettered FR ids exist.
+  - New or amended requirements state observable behaviour (what the person sees, what is or is not recorded) and leave mechanisms to the plan; the few named mechanisms (browser leave warning, sheet dismissal) describe user-visible behaviour on each platform.
+  - SC-001 and SC-004 now say how they are counted (counted reviews; active time), so they are measurable without implementation detail.
+  - Edge cases added: review continued on two devices; the "Huge backlog on first use" and "Offline for a long time" cases now say exactly what is prevented and which actions win.

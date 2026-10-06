@@ -60,7 +60,7 @@ fields plus new tables `review_settings`, `review_sessions`, `review_decisions`,
 `review_receipts`, `review_park_acks`, `review_bulk_releases`, `navigator_consents`,
 `navigator_usage` ([data-model.md](data-model.md)). Feature flag in the existing ADR-0019
 SQLite flag store. iOS: App Group `store.json` (`StoreDocument` v1 → v2). Device-local
-model file in app Application Support. Web: no new persistent browser storage.
+model file in app Application Support. Web: only form drafts in `localStorage` (FR-052).
 
 **Testing**: pytest + FastAPI TestClient (`api_client`, `second_api_client`); Vitest +
 Testing Library; Playwright (`frontend/tests/allure.fixtures.ts`); Swift Testing in the
@@ -507,7 +507,10 @@ widget targets; the web gets one feature folder. Router and module file names av
   summary counts and "clear start" (FR-033), bulk release with client ids, partial
   results and clock-exact undo for restart (FR-017) and Inbox remainder (FR-030),
   regularity instant from counted reviews only. Foreign and unknown task ids in bodies
-  are indistinguishable.
+  are indistinguishable. Restart candidates interact with auto-park: because parks move
+  undecided formulations by T + 7 ≤ 35 days, the 4-week offer mostly finds tasks held in
+  Next by an extension, a floor or an ended due-date pause (formulation-clock §5); its
+  tests seed exactly those.
 - **iOS**: review cover with shared step chrome (Leave/Skip at top, primary action at
   bottom, "N of M"), each step's states as designed, including "review ended / moved on
   elsewhere" and "leave with unsaved text"; decision step reuses M-03 full-screen with
@@ -628,20 +631,43 @@ rise; no coverage suppressions in `frontend/src`.
 
 | layer | what | key cases |
 |---|---|---|
-| pytest — pure rule | `test_review_formulation.py`, `test_review_formulation_vectors.py` | every vector; boundaries ±1 s; DST; floors; extension at T/T+3/T+6; third stall; copies byte-identical |
-| pytest — service/API | `test_review_decisions_api.py` | each decision type; stale revision; stale formulation; idempotent replay and mismatch; first-step "Was:"; extension once; follow-up in archived project; undo exact restore incl. clock; undo after change → 409; owner isolation → 404; flag off → 404; FR-003 non-restarting edits through PATCH |
-| pytest — sweep | `test_review_auto_park.py` | due/not due; 24 h marker precedes park (SC-006); FR-016 floor at activation; FR-039 floor; FR-046 floor; skip after reformulate/move/extend; double park no-op; device park with server not due → `applied:false`; yield rule both sides of `parked.at`; archived project; sweep failure isolation; driven by calling `_run_review_maintenance_sweep(container)` directly |
-| pytest — privacy | `test_review_export_purge.py`, log-capture test | every new table exported/excluded per data-model; purge removes all; purge idempotent; no sentinel text in logs |
-| pytest — navigator | `test_review_navigator.py` | strict input schema rejects extra fields; consent missing/revoked/mismatch; rate limit; per-call and daily cap; timeout; malformed; duplicate filtering; grounding filter; deterministic provider in TEST; startup failure without key |
-| pytest — flow | `test_review_flow_api.py` | quick/full steps; partial vs abandoned; resume; replace open; queue snapshot stable after threshold change; capacity numbers (41 / 9 per week); receipts 7/30 days and revision invalidation; bulk release partial + undo; restart eligibility at 21 days incl. onboarded-never-reviewed |
-| Swift Testing (Linux) | `FormulationTests`, `ReducerReviewTests`, `QueriesReviewTests`, `NavigatorValidatorTests`, `ReviewSyncTests` | shared vectors; reducer clock on every command; replay determinism; compaction of decision+undo; 409 refetch path; `applied:false` no re-issue loop; StoreDocument v1→v2; account-less parks; offline review synced with 0 lost decisions (SC-007) via `BrainBuddyFakeServer` |
-| Xcode (`ios-app` lane) | app/widget targets compile; previews per design state | AppleNavigatorModel behind `#if canImport(FoundationModels)`; widget families |
-| Vitest | `features/review/__tests__/*` | `formulation.ts` vectors; markers only asks/tomorrow in lists; D-02 focus/Esc/keys/stale/save-failed/Ref; Undo toast; WYWA partial failures; settings floor note; AppShell flag-off keeps "Weekly review — Coming soon" (existing test unchanged), flag-on link + "Last review" |
-| Playwright | `frontend/tests/e2e/weekly-review.spec.ts` | seeded stalled task → decide → Undo; auto-park via sweep endpoint in test env → WYWA → return; quick review end-to-end; consent decline path with deterministic provider |
+| pytest — pure rule | `test_review_formulation.py`, `test_review_formulation_vectors.py` | every vector incl. the transitions schema (formulation-clock §6); boundaries ±1 s; DST; floors (activation, threshold, due date, sweep gap, time zone); extension at T/T+3/T+6 and at `park_due`; not activated → `none`; third stall; yield reversal + extend / + reformulate; bulk undo clock equality; copies present and byte-identical |
+| pytest — service/API | `test_review_decisions_api.py` | each decision type and its `review_counts_as`; stale revision; stale formulation; idempotent replay and mismatch; client ids adopted, `id_conflict`; unknown session → session-less 200; first-step "Was:"; extension once; `extend` keeps `reason_text`; follow-up in archived project; undo exact restore incl. clock; undo after change (task or follow-up) → 409; owner isolation → 404; flag off → 404; FR-003 non-restarting edits through PATCH; reconcile one idempotency record of every new prefix |
+| pytest — activation and sweep | `test_review_auto_park.py` | explainer ack first-wins, clamp, floors, no revision bump; no park and no derived instants before activation (FR-051); due/not due; 24 h marker precedes park (SC-006: every park in the matrix is checked for a preceding `moves_tomorrow` window and for appearing in `unseen_parks`); FR-039, FR-046, time-zone and sweep-gap floors; skip after reformulate/move/extend; double park no-op; device park with server not due → `applied:false`; yield rule both sides of `parked.at`; notes-only PATCH before a park → 409, park stands; archived project; retention runs with the flag OFF (snapshot nulled after 8 days); sweep failure isolation; return shape of `_run_privacy_maintenance_sweep` unchanged; driven by calling `_run_review_maintenance_sweep(container)` with `frozen_clock` |
+| pytest — privacy | `test_review_export_purge.py`, log-capture test | every new table exported/excluded per data-model; purge removes all; purge idempotent; no sentinel text and no stall-reason value in logs; foreign vs unknown task ids in batch bodies give byte-identical responses (`second_api_client`) |
+| pytest — navigator | `test_review_navigator.py` | **first failing test of PR-07: container build raises without the key** (and for `deterministic` outside TEST); strict input schema rejects extra fields incl. a language field; consent missing/revoked/provider mismatch/outdated version; rate limit; per-call and daily cap; timeout; malformed; duplicate filtering; grounding filter; `reduce_notes` vectors; deterministic provider in TEST; SC-005 screen runner over recorded outputs (`eval_v1.json`) |
+| pytest — flow | `test_review_flow_api.py` | quick/full steps; completed / completed_empty / partial / abandoned and which count (FR-029); resume; replace open; merged progress from two clients; finish idempotent; queue snapshot stable after threshold change and holding the aggregate in §5 order; **SC-002**: after a completed review with no set-aside, zero `asks_for_decision` tasks remain; capacity numbers (41 / 9 per week) and < 4 weeks; Waiting and Someday eligibility/order (FR-032); receipts 7/30 days and revision invalidation; bulk release partial + clock-exact undo; restart eligibility at 21 days incl. onboarded-never-reviewed; `review_flow_vectors.json`; golden wire fixtures validate against `schemas/review.py` |
+| pytest — read-out | `test_review_metrics_readout.py` | `python -m app.cli review-metrics` over seeded synthetic sessions computes weeks with a counted review (SC-001), share of "yes" (SC-003), median active minutes per mode (SC-004), `ai_use` acceptance share (SC-005), parks returned; output is aggregates only |
+| Swift Testing (Linux) | `FormulationTests`, `ReducerReviewTests`, `QueriesReviewTests`, `NavigatorValidatorTests`, `ReviewPlannersTests`, `ReviewSyncTests` | shared formulation and review-flow vectors; reducer clock on every command; post-replay activation step; replay determinism; **compacted vs uncompacted outbox give identical clocks** (title edit / move after a Next entry); compaction of decision+undo; drafts keyed by formulation; 409 refetch path; `.review` conflict target and every ReviewCommand rule; two devices start a review offline → 0 decisions lost; queued edit survives activation; `applied:false` no re-issue loop; park cap per call; local 7-day maintenance; StoreDocument v1→v2; account-less parks; golden wire fixtures decode into DTOs and `BrainBuddyFakeServer`; `ReviewReminderPlanner`, `ReviewRoute`/`ReviewEntryPlanner`, `MarkerStyle` (no error role); offline review synced with 0 lost decisions (SC-007) |
+| Swift Testing (Linux), PR-09 | `ModelDownloadMachineTests` | request-only start; progress; interruption and resume; insufficient storage; retry; switch to cloud; delete; never required for non-AI parts; the router never falls back silently to cloud (FR-049, US3-4a/4b), with injected `ModelDownloader` / `StorageProbe` |
+| Xcode (`ios-app` lane) + manual | app/widget targets compile; previews per design state | AppleNavigatorModel behind `#if canImport(FoundationModels)`; widget families. App-target glue that no package test can reach (notification registration FR-036, widget `Link` FR-037, `.presentationDetents([.large])` FR-047, `interactiveDismissDisabled` FR-052) is checked on a simulator or device and recorded in `specs/020-weekly-review/evidence/manual-ios-*.md`, labelled **manual**; the requirement ids are still named by the Core tests of the decisions behind them |
+| Vitest | `features/review/__tests__/*` | `formulation.ts` normalisation vectors and `classifyFromInstants` over the classification vectors; markers only for the aggregate in lists; D-02 focus/trap/Esc/keys-in-text-fields/stale/save-failed/Ref; unsaved-text confirmation, draft restore and `beforeunload`; Undo toast incl. Ctrl/Cmd+Z; WYWA dialog states; D-05; D-03 Inbox step and step-action failures; settings floor note; golden wire fixtures; **string and token guard**: review-feature strings and rendered markers contain no "overdue", streak wording or rose/red tokens; AppShell flag-off keeps "Weekly review — Coming soon" (existing test unchanged), flag-on link + "Last review" |
+| Playwright | `frontend/tests/e2e/weekly-review.spec.ts` | stalled task seeded through `python -m app.cli review-seed-aged-task` (TEST only) → D-05 → decide → Undo; auto-park via `python -m app.cli review-run-sweep` → WYWA → return; quick review end-to-end; consent decline path with deterministic provider; no horizontal overflow at 390 px for `/review` and the decision dialog; flag-on drawer link at 390 px |
+| macOS (manual host run) | `macos/Tests/BrainBuddyMacTests` | the FR-041 "coming later" row only; no CI lane runs `macos/`, so PR-06 evidence is a recorded `swift test --disable-sandbox` run on a macOS host; US6-1 is not verified until the Mac-sync spec exists |
 
-Requirement coverage: once PR-01 extends the scanner to Swift test trees, every FR/SC
-is named by at least one test; lettered ids are named but not gate-enforced (research
-R19). Live provider evaluation (SC-005) is approval-gated and never runs unattended.
+Time control: one injected clock (`frozen_clock` fixture) for every time-based pytest
+case (research R21). Shared vectors: the formulation vector file and a second
+`review_flow_vectors.json` (wins window, capacity incl. < 4 weeks, Waiting/Someday
+queue membership and order, restart eligibility, session status and counted-review
+rules, regularity instant, notification skip, decision-queue order) are canonical in
+`backend/tests/fixtures/`, copied byte-identically by PR-02 into the Swift and web test
+trees, with the drift guard of formulation-clock §6. Golden wire fixtures
+(`backend/tests/fixtures/review_wire/*.json`, validated by pytest against
+`schemas/review.py`) are copied the same way and decoded by the Swift DTO /
+`BrainBuddyFakeServer` tests and Vitest, so wire drift fails mechanically.
+
+**Evidence rule** (constitution I): every screenshot, recording or Allure attachment in
+`specs/020-weekly-review/evidence/` and in slice PRs comes from a seeded synthetic
+account using the design's example data (the Playwright seed in `weekly-review.spec.ts`).
+Results from the owner's real use (SC-001, SC-003, SC-004, SC-005, the definition of
+done) are recorded only as the numbers the `review-metrics` read-out prints — never
+titles, notes, reasons or summaries. PR-14 adds `evidence/README.md` stating this rule.
+
+Requirement coverage: once PR-01 extends the scanner to Swift test trees, every
+FR-001 … FR-052 and SC-001 … SC-007 is gate-enforced and must be named by at least one
+test (`020-FR-046`, `test_020_FR_046_…`) and listed in the `requirements` of its slices
+(research R19). Live provider evaluation (SC-005) is approval-gated and never runs
+unattended.
 
 ## Delivery slices
 
@@ -651,27 +677,35 @@ owner's approval there. Classes per ADR-0008 / `scripts/classify_path_risk.py`
 
 | id | increment | outcome | depends on | main paths | class |
 |---|---|---|---|---|---|
-| PR-01 | 1 | ADR-0027 accepted; design skill reworded to "flag-gated, deferred while off" with its test; Swift test trees in requirement coverage; architecture-guard docstring | — | `docs/decisions/0027-…md`, `.claude/skills/brain-buddy-design/{README.md,SKILL.md}`, `scripts/test_validate_brain_buddy_design_skill.py`, `scripts/check_requirement_coverage.py`, `.specify/gate-integrity.json`, `backend/tests/test_voice_workflow_architecture.py` | **ASK** (mech.: `scripts/`, guarded files) |
-| PR-02 | 1 | Backend clock, decisions, undo, auto-park sweep and device endpoint, settings/state, park acks, all review tables, export/purge, flag | PR-01 | `backend/app/modules/tasks/*`, `backend/app/api/{review.py,tasks.py,dependencies.py,__init__.py}`, `backend/app/schemas/{tasks.py,review.py}`, `backend/app/core/config.py`, `backend/app/repositories/feature_flag.py`, `backend/app/services/account_service.py`, `backend/app/container.py`, `backend/app/main.py`, `docs/data-retention.md`, `frontend/src/pages/PrivacyPolicyPage.tsx`, backend tests | **ASK** (mech.: `api/tasks.py`, `api/dependencies.py`; sem.: privacy export/purge, first automatic state change) |
-| PR-03 | 1 | iOS core: records, clock in reducer, new commands, queries, StoreDocument v2, API/sync mapping, fake server, vectors | PR-02 | `ios/BrainBuddyKit/**` | SHOW (mech. SHIP; persistence format change) |
-| PR-04 | 1 | iOS UI for US1/US2: M-01, M-02, M-03, M-04 (no Suggest), M-09, M-23 threshold | PR-03 | `ios/BrainBuddy/Screens/{Lists,Detail,Settings,Review}/*`, `ios/BrainBuddy/Components/*`, `ios/BrainBuddy/App/*`, `ios/project.yml` | SHOW |
-| PR-05 | 1 | Web US1/US2: D-01 markers, inline "This wording", D-02 without navigator, WYWA, D-04 threshold, action toast | PR-02 | `frontend/src/features/{tasks,review,account}/*`, `frontend/src/api/{review.ts,reviewHooks.ts,taskTypes.ts}`, `frontend/src/components/shell/shellToast.ts`, `frontend/src/test/allureTaxonomy.ts` | SHOW |
-| PR-06 | 1 | Mac "Weekly review · coming later" row | — | `macos/Sources/BrainBuddyMac/ContentView.swift`, `macos/Tests/BrainBuddyMacTests/*` | SHIP |
-| PR-07 | 2 | Backend navigator: adapter, consent, usage caps, routes, env | PR-02 | `backend/app/modules/tasks/navigator.py`, `backend/app/api/review_navigator.py`, `backend/app/core/{config.py,rate_limit.py}`, `backend/app/container.py`, `.env.example`, tests | **ASK** (mech.: `.env.example`; sem.: provider credentials, new egress, consent) |
-| PR-08 | 2 | iOS navigator: protocol, router, validator, Apple model, cloud client, M-05, M-06 (cloud choice), M-07, M-08, M-19 AI states, M-23 Suggestions | PR-04, PR-07 | `ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift`, `…/BrainBuddyAPI/NavigatorAPI.swift`, `ios/BrainBuddy/Navigator/*`, `ios/BrainBuddy/Screens/Review/*` | SHOW |
-| PR-09 | 2 (late; may slip) | Downloadable on-device model: dependency-exception ADR, Core AI runtime + model pack, M-06 download states, M-23 delete (FR-023 (a), FR-049); SC-005 eval gate | PR-08 | `ios/BrainBuddy/Navigator/DownloadedNavigatorModel.swift` (new), `ios/project.yml`, `ios/Shared/PrivacyInfo.xcprivacy`, `docs/decisions/` (new ADR), `backend/tests/fixtures/navigator/eval_v1.json` | **ASK** (third-party dependency exception, external model download, new entitlement) |
-| PR-10 | 2 | Web navigator in D-02; D-04 consent switch | PR-05, PR-07 | `frontend/src/features/review/*`, `frontend/src/api/review.ts` | SHOW |
-| PR-11 | 3 | Backend review flow: runs, queues, capacity, receipts, bulk release, restart, regularity, next review | PR-07 | `backend/app/modules/tasks/review_flow.py`, `backend/app/api/review_flow.py`, `backend/app/api/__init__.py`, tests | SHOW |
+| PR-01 | 1 | ADR-0027 accepted; design skill reworded to "flag-gated, deferred while off" with its test; Swift test trees in requirement coverage (with a test that a Swift test naming an id satisfies the gate); architecture-guard docstring | — | `docs/decisions/0027-…md`, `.claude/skills/brain-buddy-design/{README.md,SKILL.md}`, `scripts/test_validate_brain_buddy_design_skill.py`, `scripts/check_requirement_coverage.py`, `scripts/test_check_requirement_coverage.py`, `.specify/gate-integrity.json`, `backend/tests/test_voice_workflow_architecture.py` | **ASK** (mech.: `scripts/`, guarded files) |
+| PR-02 | 1 | Backend clock (with client formulation ids), decisions, undo, auto-park sweep (retention + exposure parts) and device endpoint, **explainer acknowledgement and activation (FR-051)**, settings/state, park acks, all review tables, export/purge, flag; mounts all three routers and wires the container (navigator and flow routers empty until their slices); injected clock; TEST-only CLI seed/sweep; import-linter contracts for the review modules; canonical formulation and review-flow vectors and golden wire fixtures **plus their iOS and web copies**; data-retention rows for the server tables, the iOS store v2 contents and web form drafts | PR-01 | `backend/app/modules/tasks/*`, `backend/app/api/{review.py,review_navigator.py,review_flow.py,tasks.py,dependencies.py,__init__.py}`, `backend/app/schemas/{tasks.py,review.py}`, `backend/app/core/config.py`, `backend/app/repositories/feature_flag.py`, `backend/app/services/account_service.py`, `backend/app/container.py`, `backend/app/main.py`, `backend/app/cli.py`, `backend/pyproject.toml`, `docs/data-retention.md`, `frontend/src/pages/PrivacyPolicyPage.tsx`, backend tests and fixtures, `ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources/{review_formulation_vectors.json,review_flow_vectors.json,review_wire/*}`, `frontend/src/features/review/__tests__/{review_formulation_vectors.json,review_flow_vectors.json,review_wire/*}` | **ASK** (mech.: `api/tasks.py`, `api/dependencies.py`; sem.: privacy export/purge, first automatic state change) |
+| PR-03 | 1 | iOS core: records, clock in reducer (client formulation ids, post-replay activation step, clock-aware compaction), new commands incl. `acknowledgeExplainer`, `.review` conflict rules, queries and Core planners, drafts in `local`, local maintenance and park cap, StoreDocument v2, API/sync mapping, fake server | PR-02 (vector and wire-fixture copies; can be developed in parallel against the frozen contracts and rebased) | `ios/BrainBuddyKit/**` except the PR-02 resource copies | SHOW (mech. SHIP; persistence format change) |
+| PR-04 | 1 | iOS UI for US1/US2: **M-26 explainer**, M-01, M-02, M-03, M-04 (no Suggest; unsaved-text states and drafts), M-09, M-23 threshold | PR-03 | `ios/BrainBuddy/Screens/{Lists,Detail,Settings,Review}/*`, `ios/BrainBuddy/Components/*`, `ios/BrainBuddy/App/*`, `ios/project.yml` (`BBWeeklyReviewLocal` NO in Release) | SHOW |
+| PR-05 | 1 | Web US1/US2: **D-05 explainer**, D-01 markers and WYWA dialog states, inline "This wording", D-02 without navigator (unsaved-text states, drafts, `beforeunload`), D-04 threshold, action toast with Ctrl/Cmd+Z, 390 px states | PR-02 | `frontend/src/features/{tasks,review,account}/*` except the PR-02 test copies, `frontend/src/api/{review.ts,reviewHooks.ts,taskTypes.ts}`, `frontend/src/components/shell/shellToast.ts`, `frontend/src/test/allureTaxonomy.ts` | SHOW |
+| PR-06 | 1 | Mac "Weekly review · coming later" row; evidence is a recorded macOS-host run | — | `macos/Sources/BrainBuddyMac/ContentView.swift`, `macos/Tests/BrainBuddyMacTests/*` | SHIP |
+| PR-07 | 2 | Backend navigator: adapter (startup raises without key), consent with text versions, usage caps, routes, env; `eval_v1.json`, deterministic screen runner and recorded-output format (SC-005, before any cloud exposure); privacy policy and data-retention rows for the navigator purpose and data set | PR-02 | `backend/app/modules/tasks/navigator.py`, `backend/app/api/review_navigator.py`, `backend/app/core/{config.py,rate_limit.py}`, `backend/app/container.py`, `.env.example`, `backend/tests/fixtures/navigator/*`, `frontend/src/pages/PrivacyPolicyPage.tsx`, `docs/data-retention.md`, tests | **ASK** (mech.: `.env.example`; sem.: provider credentials, new egress, consent, privacy disclosure) |
+| PR-08 | 2 | iOS navigator: protocol, router (route caption, quiet cancellation), validator and `reduce_notes`, Apple model, cloud client, M-05, M-06 (cloud choice, cloud unavailable), M-07, M-08, M-19 AI states, M-23 Suggestions | PR-04, PR-07 | `ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift`, `…/BrainBuddyAPI/NavigatorAPI.swift`, `ios/BrainBuddy/Navigator/*`, `ios/BrainBuddy/Screens/Review/*` | SHOW |
+| PR-09 | 2 (late; may slip) | Downloadable on-device model: dependency-exception ADR, Core AI runtime + model pack, `ModelDownloadMachine` with its tests, M-06 download states, M-23 delete (FR-023 (a), FR-049); its SC-005 evaluation cells; data-retention and privacy-policy rows for the model file and the device-local preference | PR-08 | `ios/BrainBuddy/Navigator/DownloadedNavigatorModel.swift` (new), `ios/BrainBuddyKit/Sources/BrainBuddyCore/ModelDownloadMachine.swift` (new), `ios/project.yml`, `ios/Shared/PrivacyInfo.xcprivacy`, `docs/decisions/` (new ADR), `docs/data-retention.md`, `frontend/src/pages/PrivacyPolicyPage.tsx` | **ASK** (third-party dependency exception, external model download, new entitlement) |
+| PR-10 | 2 | Web navigator in D-02 (notes-shortened, input-too-large, suggestions-unavailable states); D-04 consent switch (pending until the DELETE succeeds) | PR-05, PR-07 | `frontend/src/features/review/*`, `frontend/src/api/review.ts` | SHOW |
+| PR-11 | 3 | Backend review flow: runs (client ids, merged progress, `completed_empty`, active time), queues, capacity, receipts, bulk release with clock snapshots, restart, regularity, next review; `review-metrics` read-out | PR-02 | `backend/app/modules/tasks/review_flow.py`, `backend/app/api/review_flow.py`, `backend/app/cli.py`, tests | SHOW |
 | PR-12 | 3 | iOS review: M-10, M-11, M-12, M-13 – M-22, M-23 schedule, M-24 widget, M-25 notification, Lists entry | PR-08, PR-11 | `ios/BrainBuddy/Screens/{Review,Browse,Settings}/*`, `ios/BrainBuddy/Review/*`, `ios/BrainBuddyWidgets/*`, `ios/BrainBuddy/App/*`, `docs/native-ios-app.md` | SHOW |
-| PR-13 | 3 | Web review: D-03 shell and steps, onboarding dialog, sidebar link + "Last review", D-04 schedule; e2e | PR-10, PR-11 | `frontend/src/features/review/*`, `frontend/src/app/AppRoutes.tsx`, `frontend/src/components/shell/AppShell.tsx`, `frontend/tests/e2e/weekly-review.spec.ts`, `frontend/tests/allure.fixtures.ts` | SHOW |
-| PR-14 | 3 | Release: requirement coverage for 020 in `check-specs`; rollout evidence; flag stages | PR-12, PR-13 | `Makefile`, `.specify/gate-integrity.json`, `specs/020-weekly-review/evidence/*` | **ASK** (mech.: `Makefile`) |
+| PR-13 | 3 | Web review: D-03 shell and steps (incl. the Inbox step, step-action states, 390 px), onboarding dialog, sidebar and drawer link + "Last review", D-04 schedule; e2e | PR-10, PR-11 | `frontend/src/features/review/*`, `frontend/src/app/AppRoutes.tsx`, `frontend/src/components/shell/AppShell.tsx`, `frontend/tests/e2e/weekly-review.spec.ts`, `frontend/tests/allure.fixtures.ts` | SHOW |
+| PR-14 | 3 | Release: requirement coverage for 020 in `check-specs`, plus the vector-copy byte check in `check-specs`; `evidence/README.md` (evidence rule) and the recorded read-out; manual iOS evidence files; flag stages, each opened only for navigator sources whose SC-005 cell passed; the owner's recorded decision on `BBWeeklyReviewLocal` for Release | PR-12, PR-13 | `Makefile`, `.specify/gate-integrity.json`, `specs/020-weekly-review/evidence/*` | **ASK** (mech.: `Makefile`) |
 | (US6) | 4 | Mac review after Mac↔backend sync | Mac sync spec | planned when that spec exists | — |
 
-Write-path notes: slices with no dependency between them do not share write paths
-(PR-06 is disjoint from all; PR-05 and PR-03/PR-04 are disjoint; PR-07 → PR-11 is
-sequenced because both mount routers in `backend/app/api/__init__.py` and extend
-`container.py`). Increment boundaries match the owner's increments: (1) rule + card +
-auto-park + markers on backend, iOS, web; (2) navigator; (3) full guided review +
+Write-path notes: slices with no dependency between them do not share write paths.
+PR-06 is disjoint from all. PR-02 writes the router mounts, container wiring and flag
+for all three routers, so PR-07 and PR-11 are **siblings** after PR-02 (the guided
+review no longer waits for the navigator backend); they share no file except
+`backend/app/container.py`, which PR-07 edits (navigator provider) and PR-11 does not,
+and `backend/app/cli.py`, which only PR-02 and PR-11 edit. PR-02 also writes the
+vector and wire-fixture copies under `ios/` and `frontend/`; PR-03 and PR-05 read them
+and depend on PR-02. `docs/data-retention.md` and `PrivacyPolicyPage.tsx` are written
+by PR-02, PR-07 and PR-09, which form a dependency chain. Lanes: backend PR-02 → PR-07
+‖ PR-11; iOS PR-03 → PR-04 → PR-08 → PR-12, with PR-09 off PR-08; web PR-05 → PR-10 →
+PR-13; Mac PR-06; governance PR-01 first and PR-14 last. Increment boundaries match the
+owner's increments: (1) rule + card + auto-park + markers + the one-time explainer on
+backend, iOS, web; (2) navigator; (3) full guided review +
 schedule/notification/onboarding; (4) macOS after Mac sync.
 
 ## ASK-class surfaces (summary)
@@ -696,8 +730,9 @@ Status after the owner's decisions and the spec amendments of 2026-10-05:
   extension day), 3 (renumbered FR-046 – FR-050), 4 (D-11 attribution) and 5 (FR-005:
   canvas only where it exists).
 - **Remaining work in this plan**:
-  - item 2: the M-04 date copy, which is corrected during implementation;
-  - item 6: new web UI in PR-13;
+  - item 2: the M-04 date copy — corrected in design.md and the M-04 mockup on
+    2026-10-06 ("Keep until Fri 16 Oct");
+  - item 6: new web UI in PR-13, now designed (design D-03 "Inbox step" rows);
   - item 7: no impact.
 
 1. **Archived-project states are unreachable today.** Archiving a project clears
@@ -709,7 +744,7 @@ Status after the owner's decisions and the spec amendments of 2026-10-05:
    (`project_archived` reason) defensively and tests it with a fixture, nothing more.
 2. **Extension arithmetic** FR-009/FR-012 vs US1-7 and M-02 (NC-1). Also M-04 "Keep until
    Thu 15 Oct" with today Fri 9 Oct is 6 days, matching neither reading.
-3. **Lettered requirement ids** (formerly FR-003a, FR-010a, FR-011a, FR-023a, FR-034a)
+3. **Lettered requirement ids** (formerly the lettered variants of FR-003, FR-010, FR-011, FR-023 and FR-034)
    were not recognised by `scripts/check_requirement_coverage.py:44` or the PR-срезы
    validator in `scripts/check_spec_kit_specs.py:165-166, 212-214`. Resolved: they were
    renumbered FR-046 – FR-050 (R19).
@@ -718,27 +753,38 @@ Status after the owner's decisions and the spec amendments of 2026-10-05:
 5. **Third-stall "Think it through" on iOS**: FR-005/M-03 offer the thinking canvas, but
    the iOS app has no CRT canvas (CRT is web-only, `/crt`, flag `crt_canvas`). Plan: on
    iOS the offer shows only "Release to Someday" plus the reassurance copy; on web it links
-   to `/crt` when `crt_canvas` is effective. Owner may want different copy.
+   to `/crt` when `crt_canvas` is effective. Settled by FR-005; design M-03, D-02 and the
+   affordance map were amended accordingly on 2026-10-06.
 6. **"Process inbox Undo" on web**: design D-03/M-15 assume the existing Process inbox
    and its Undo; the web has neither (`frontend/src` has no Process-inbox flow and a
    text-only toast). The web Inbox step is new UI (PR-13), not reuse.
 7. **ADR-0002 status**: the spec calls ADR-0002 binding; its header says
    `Status: Proposed`. No impact here (voice review is out of scope).
 
+## Planning review
+
+Campaign 1 (`020-weekly-review-c1`) dispositions, finding by finding, are in [review-c1-disposition.md](review-c1-disposition.md).
+
 ## Constitution Check (post-design)
 
-- Spec workflow — PASS (NC-1 – NC-4 resolved by the owner; inconsistencies listed for
-  the owner; no spec/design edits by this stage).
+- Spec workflow — PASS (NC-1 – NC-4 resolved by the owner on 2026-10-05; PD-1 – PD-3
+  resolved on 2026-10-06 and applied to spec, design, contracts and this plan; campaign 1
+  findings dispositioned in review-c1-disposition.md).
 - Consent & Safety — PASS: strict navigator input, per-request consent re-check,
   no silent fallback, content-free logs with a test, export + purge of every new record,
   undo snapshots time-limited.
 - Tests — PASS: failing-first tests per slice; edge cases for idempotency, stale,
   timeouts, consent denial, partial failure, offline replay.
-- Contracts — PASS: four contract files agree with `data-model.md` (E-numbers referenced
-  from http and ios contracts); additive changes; backend before clients.
+- Contracts — PASS after campaign 1: the first version's claim that the four contract
+  files agreed was wrong (client-created ids were missing from the HTTP bodies, the
+  extension precondition excluded `park_due`, bulk-release undo had no clock to restore,
+  `client_occurred_at` had no defined rule). Those are now aligned with `data-model.md`
+  (E-numbers referenced from http and ios contracts); additive changes; backend before
+  clients.
 - Observability — PASS: Ref on every failure; reason codes; sweep and decision logs.
-- Mobile/resilience — PASS: offline outbox for all task/review commands; yield rule;
-  idempotent parks; resumable review.
+- Mobile/resilience — PASS: offline outbox for all task/review commands with a stated
+  conflict rule per review command; yield rule; idempotent parks; resumable review;
+  unsaved text kept as drafts with a leave warning (FR-052); narrow 390 px web states.
 - Delivery boundary — PASS: slices with classes; ASK slices named; owner approves the
   slice map at `/speckit-tasks`.
 - Design citation — PASS: every user story section cites its M-/D- ids.
@@ -751,4 +797,4 @@ Delivery risk: **HIGH / ASK** remains for the feature (PR-01, PR-02, PR-07, PR-0
 |---|---|---|
 | Review records stored in the Tasks module's SQLite file instead of ADR-0001's separate Review module | atomic decision + task write, exact Undo, one idempotency record per decision | separate store needs a saga for every decision and a second export/purge path (R1); recorded by ADR-0027 |
 | Clock rule implemented three times (Python, Swift, TS key only) | iOS must work offline/account-less; web shows the cosmetic-edit note | server-only rule cannot serve offline iOS; mitigated by one byte-identical vector file with a drift test (R3) |
-| Possible first third-party iOS dependency (PR-09) | FR-023 (a) downloadable on-device model; Apple's model has no Russian | isolated behind `NavigatorModel`, app target only, approved by the owner (NC-2), gated by a dependency-exception ADR and its own ASK slice; Core AI's raw framework without the package would need a hand-written tokenizer/decoder (`research-on-device-model.md` §2) |
+| Possible first third-party iOS dependency (PR-09) | FR-023 (a) downloadable on-device model; Russian is not listed as supported by Apple's model (unverified, treated as unsupported) | isolated behind `NavigatorModel`, app target only, approved by the owner (NC-2), gated by a dependency-exception ADR and its own ASK slice; Core AI's raw framework without the package would need a hand-written tokenizer/decoder (`research-on-device-model.md` §2) |
