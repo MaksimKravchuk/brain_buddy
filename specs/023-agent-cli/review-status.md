@@ -6,7 +6,7 @@ Date: 2026-10-06. Product implementation, release binaries and publication have 
 
 cli-023-r1: escalated; risk high; mandatory reviews0/6; no human risk sign-off. Actual [campaign-1 summary](review/campaign-1-summary.json) is copied verbatim from the harness. Five configured Codex executions failed authentication401 and refresh failure, so no valid reviewer JSON was produced; adversarial was not run through the broken runtime. No missing review is counted as a pass.
 
-Original reviewed-artifact preflight digest: bc42250a4f80b8558333c3f20b65f1a8f997ba0fd764e5da417d2e28a1a3e62e. Subsequent draft task/contract corrections require a fresh preflight/campaign; this old digest does not approve current artifacts. A second campaign has not been spent on repeating the same unavailable authentication.
+Original reviewed-artifact preflight digest: bc42250a4f80b8558333c3f20b65f1a8f997ba0fd764e5da417d2e28a1a3e62e. Subsequent draft task/contract corrections require a fresh preflight/campaign; this old digest does not approve current artifacts. Second-campaign preflight is ready at digest21037c8fb6827f05861462fb86d9bbe1f5b757ba79f45cb61d74a47654f4fedc; no second-campaign model execution has occurred. See review/campaign-2-context.json. The prior15-minute device login expired without authorization; a fresh environment login is required.
 
 The repo-permitted external adapter alternative was inspected and rejected because a proposed out-of-band transport could not enforce reviewer read-only tool access. It was not used for canonical evidence. No gate code, provenance, risk class or pass status was altered to bypass the failure.
 
@@ -22,7 +22,7 @@ Corrections in the current plan/contracts:
 - Collected desktop/mobile Playwright paths, Compose/per-run trusted origin/provisioned exposure/readback and reviewed normal production origin configuration.
 - Separate-process/restart/termination lock evidence and concrete browser focus/loading30s/error/retry behavior.
 
-The corrected artifacts have not yet been canonically re-reviewed. Supplemental adversarial review is pending. A human cannot clear missing mandatory evidence with the high-risk sign-off alone; a valid reviewed-runtime campaign is still required before the normal approval path.
+The corrected artifacts have not yet been canonically re-reviewed. Supplemental adversarial-high-risk reviewed the corrected contracts and returned pass with one durability advisory; the parent-directory fsync-before-mint requirement is now explicit. This supplemental pass is not a canonical gate result. A human cannot clear missing mandatory evidence with high-risk sign-off alone; a valid reviewed-runtime campaign is still required before normal approval.
 
 ## Required next gates
 
