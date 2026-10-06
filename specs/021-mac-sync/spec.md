@@ -216,7 +216,7 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 
   When signing in cancels a pending account deletion, the sign-in sheet says so before it closes, as the iPhone does. This is not a separate dialog.
 - **FR-018**: Signing out with unsent changes MUST warn with the count and offer two choices: keep the changes (cancel sign-out) or sign out and remove them from this Mac. This matches the iPhone.
-- **FR-019**: On iPhone, the list-screen sync status MUST use the same states, the same wording (with "iPhone" for "Mac") and the same compact form as the Mac: words, a small activity indicator during sync, and failures only after 60 s. It MUST NOT use a dialog. The iPhone Settings Sync section and Sync issues screen stay as they are, with the same wording.
+- **FR-019**: On iPhone, the list-screen sync status MUST use the same states, the same wording (with "iPhone" for "Mac") and the same compact form as the Mac: words, a small activity indicator during sync, and failures only after 60 s. It MUST NOT use a dialog. The iPhone Settings Sync section and Sync issues screen stay as they are, with the same wording. The one exception is "Sync now": on both platforms it is never disabled by a running sync, and a press while one runs joins it or queues a single follow-up (single-flight).
 
 **Upgrade of the local Mac store**
 
