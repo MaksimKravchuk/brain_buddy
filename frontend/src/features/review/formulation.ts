@@ -22,61 +22,93 @@ export interface FormulationInstants {
 
 export type ListMarker = "asks" | "moves_tomorrow";
 
-const HOUR_MS = 3_600_000;
-const DAY_MS = 24 * HOUR_MS;
-
-/** formulation-clock §5: the "asks for a decision" aggregate. */
-export const askDecisionClasses: ReadonlySet<FormulationClass> = new Set<FormulationClass>([
-  "asks",
-  "moves_tomorrow",
-  "park_due"
-]);
+// Tables live inside the functions that read them, not at module level, so
+// each table entry is checked by the tests that exercise it (research R20:
+// module-level code would make every entry a static mutant).
+const DAY_MS = 86_400_000;
 
 // ------------------------------------------------------------------ §1 key
 
-/** Python `str.isspace()`: what `str.split()` collapses. */
+/**
+ * Python `str.isspace()` for NFKC text: what `str.split()` collapses. Every
+ * other Python whitespace scalar (U+00A0, U+2000…U+200A, U+202F, U+205F,
+ * U+3000) is already U+0020 after NFKC, so it never reaches this check.
+ */
 function isPythonSpace(code: number): boolean {
   return (
     (code >= 0x09 && code <= 0x0d) ||
     (code >= 0x1c && code <= 0x20) ||
     code === 0x85 ||
-    code === 0xa0 ||
     code === 0x1680 ||
-    (code >= 0x2000 && code <= 0x200a) ||
     code === 0x2028 ||
-    code === 0x2029 ||
-    code === 0x202f ||
-    code === 0x205f ||
-    code === 0x3000
+    code === 0x2029
   );
 }
 
 /**
- * NFKC-stable scalars whose full case folding is not their full lowercase
- * mapping (Unicode 14, the server's Python 3.11), apart from the ranges
- * handled in `caseFoldScalar`. Ported from `NameNormalizer.swift` (research R3).
+ * Python `str.casefold()` of one NFKC-stable scalar outside the ranges handled
+ * in `caseFoldScalar`. The cases are the scalars whose full case folding is not
+ * their full lowercase mapping (Unicode 14, the server's Python 3.11), ported
+ * from `NameNormalizer.swift` (research R3).
  */
-const FOLDING_EXCEPTIONS: ReadonlyMap<number, readonly number[]> = new Map<number, readonly number[]>([
-  [0x00df, [0x73, 0x73]], [0x1e9e, [0x73, 0x73]], [0x01f0, [0x6a, 0x30c]], [0x0345, [0x3b9]],
-  [0x0390, [0x3b9, 0x308, 0x301]], [0x03b0, [0x3c5, 0x308, 0x301]], [0x03c2, [0x3c3]],
-  [0x1c80, [0x432]], [0x1c81, [0x434]], [0x1c82, [0x43e]], [0x1c83, [0x441]], [0x1c84, [0x442]],
-  [0x1c85, [0x442]], [0x1c86, [0x44a]], [0x1c87, [0x463]], [0x1c88, [0xa64b]],
-  [0x1e96, [0x68, 0x331]], [0x1e97, [0x74, 0x308]], [0x1e98, [0x77, 0x30a]], [0x1e99, [0x79, 0x30a]],
-  [0x1f50, [0x3c5, 0x313]], [0x1f52, [0x3c5, 0x313, 0x300]], [0x1f54, [0x3c5, 0x313, 0x301]],
-  [0x1f56, [0x3c5, 0x313, 0x342]],
-  [0x1fb2, [0x1f70, 0x3b9]], [0x1fb3, [0x3b1, 0x3b9]], [0x1fb4, [0x3ac, 0x3b9]], [0x1fb6, [0x3b1, 0x342]],
-  [0x1fb7, [0x3b1, 0x342, 0x3b9]], [0x1fbc, [0x3b1, 0x3b9]],
-  [0x1fc2, [0x1f74, 0x3b9]], [0x1fc3, [0x3b7, 0x3b9]], [0x1fc4, [0x3ae, 0x3b9]], [0x1fc6, [0x3b7, 0x342]],
-  [0x1fc7, [0x3b7, 0x342, 0x3b9]], [0x1fcc, [0x3b7, 0x3b9]],
-  [0x1fd2, [0x3b9, 0x308, 0x300]], [0x1fd6, [0x3b9, 0x342]], [0x1fd7, [0x3b9, 0x308, 0x342]],
-  [0x1fe2, [0x3c5, 0x308, 0x300]], [0x1fe4, [0x3c1, 0x313]], [0x1fe6, [0x3c5, 0x342]],
-  [0x1fe7, [0x3c5, 0x308, 0x342]],
-  [0x1ff2, [0x1f7c, 0x3b9]], [0x1ff3, [0x3c9, 0x3b9]], [0x1ff4, [0x3ce, 0x3b9]], [0x1ff6, [0x3c9, 0x342]],
-  [0x1ff7, [0x3c9, 0x342, 0x3b9]], [0x1ffc, [0x3c9, 0x3b9]]
-]);
-
-/** Base letters of the Greek ypogegrammeni blocks U+1F80…U+1FAF, per row of 16. */
-const IOTA_SUBSCRIPT_BASES = [0x1f00, 0x1f20, 0x1f60] as const;
+function foldSingleScalar(code: number): string {
+  switch (code) {
+    case 0x00df:
+    case 0x1e9e: return "ss";
+    case 0x01f0: return "ǰ";
+    case 0x0345: return "ι";
+    case 0x0390: return "ΐ";
+    case 0x03b0: return "ΰ";
+    case 0x03c2: return "σ";
+    case 0x1c80: return "в";
+    case 0x1c81: return "д";
+    case 0x1c82: return "о";
+    case 0x1c83: return "с";
+    case 0x1c84:
+    case 0x1c85: return "т";
+    case 0x1c86: return "ъ";
+    case 0x1c87: return "ѣ";
+    case 0x1c88: return "ꙋ";
+    case 0x1e96: return "ẖ";
+    case 0x1e97: return "ẗ";
+    case 0x1e98: return "ẘ";
+    case 0x1e99: return "ẙ";
+    case 0x1f50: return "ὐ";
+    case 0x1f52: return "ὒ";
+    case 0x1f54: return "ὔ";
+    case 0x1f56: return "ὖ";
+    case 0x1fb2: return "ὰι";
+    case 0x1fb3:
+    case 0x1fbc: return "αι";
+    case 0x1fb4: return "άι";
+    case 0x1fb6: return "ᾶ";
+    case 0x1fb7: return "ᾶι";
+    case 0x1fc2: return "ὴι";
+    case 0x1fc3:
+    case 0x1fcc: return "ηι";
+    case 0x1fc4: return "ήι";
+    case 0x1fc6: return "ῆ";
+    case 0x1fc7: return "ῆι";
+    case 0x1fd2: return "ῒ";
+    case 0x1fd6: return "ῖ";
+    case 0x1fd7: return "ῗ";
+    case 0x1fe2: return "ῢ";
+    case 0x1fe4: return "ῤ";
+    case 0x1fe6: return "ῦ";
+    case 0x1fe7: return "ῧ";
+    case 0x1ff2: return "ὼι";
+    case 0x1ff3:
+    case 0x1ffc: return "ωι";
+    case 0x1ff4: return "ώι";
+    case 0x1ff6: return "ῶ";
+    case 0x1ff7: return "ῶι";
+    default:
+      // A lone scalar has no casing context, so its lowercase is the full
+      // mapping (final sigma never applies), exactly the per-scalar rule
+      // Python uses.
+      return String.fromCodePoint(code).toLowerCase();
+  }
+}
 
 /** Python `str.casefold()` of one scalar of NFKC text. */
 function caseFoldScalar(code: number): string {
@@ -91,20 +123,13 @@ function caseFoldScalar(code: number): string {
     return String.fromCodePoint(code - 0xab70 + 0x13a0);
   }
   if (code >= 0x1f80 && code <= 0x1faf) {
-    // Greek with ypogegrammeni / prosgegrammeni: base letter + iota.
-    const base = IOTA_SUBSCRIPT_BASES[Math.floor((code - 0x1f80) / 16)] + (code & 0x7);
-    return String.fromCodePoint(base, 0x3b9);
+    // Greek with ypogegrammeni / prosgegrammeni: base letter + iota, where the
+    // three rows of 16 start at U+1F00, U+1F20 and U+1F60.
+    const rowBase = [0x1f00, 0x1f20, 0x1f60][Math.floor((code - 0x1f80) / 16)];
+    return String.fromCodePoint(rowBase + (code & 0x7), 0x3b9);
   }
-  const folded = FOLDING_EXCEPTIONS.get(code);
-  if (folded) {
-    return String.fromCodePoint(...folded);
-  }
-  // A lone scalar has no casing context, so this is its full lowercase mapping
-  // (final sigma never applies), exactly the per-scalar rule Python uses.
-  return String.fromCodePoint(code).toLowerCase();
+  return foldSingleScalar(code);
 }
-
-const PUNCTUATION = /\p{P}/u;
 
 /** formulation-clock §1: NFKC, punctuation to a space, Python whitespace, casefold. */
 export function formulationKey(title: string): string {
@@ -112,7 +137,7 @@ export function formulationKey(title: string): string {
   let pendingSpace = false;
   for (const char of title.normalize("NFKC")) {
     const code = char.codePointAt(0) as number;
-    if (PUNCTUATION.test(char) || isPythonSpace(code)) {
+    if (/\p{P}/u.test(char) || isPythonSpace(code)) {
       pendingSpace = result.length > 0;
       continue;
     }
@@ -173,8 +198,9 @@ export function classifyFromInstants(now: Date, instants: FormulationInstants | 
   return "fresh";
 }
 
+/** formulation-clock §5: the "asks for a decision" aggregate. */
 export function asksForDecision(formulationClass: FormulationClass): boolean {
-  return askDecisionClasses.has(formulationClass);
+  return formulationClass === "asks" || formulationClass === "moves_tomorrow" || formulationClass === "park_due";
 }
 
 /** FR-005: the third consecutive formulation that reached the threshold. */
@@ -200,22 +226,20 @@ export function daysInNext(startedAt: string, now: Date): number {
   return Math.max(0, Math.floor((now.getTime() - Date.parse(startedAt)) / DAY_MS));
 }
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
-
 /**
  * "Fri 16 Oct", the date form every review screen uses. Built from numeric
  * parts so no locale data can change it ("Sept" in newer en-GB data).
  */
 export function formatReviewDate(iso: string, timeZone?: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "numeric", day: "numeric", timeZone })
-    .formatToParts(new Date(iso));
-  const part = (type: "year" | "month" | "day") => Number(parts.find((entry) => entry.type === type)?.value);
-  const year = part("year");
-  const month = part("month");
-  const day = part("day");
+  const { year, month, day } = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { year: "numeric", month: "numeric", day: "numeric", timeZone })
+      .formatToParts(new Date(iso))
+      .map((entry) => [entry.type, Number(entry.value)])
+  ) as Record<"year" | "month" | "day", number>;
   const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-  return `${WEEKDAYS[weekday]} ${day} ${MONTHS[month - 1]}`;
+  const weekdays = "Sun Mon Tue Wed Thu Fri Sat".split(" ");
+  const months = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
+  return `${weekdays[weekday]} ${day} ${months[month - 1]}`;
 }
 
 /** "09:14", the 24-hour time the review screens use. */

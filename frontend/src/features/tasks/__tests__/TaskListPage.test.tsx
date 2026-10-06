@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiClient, getApiBaseUrl } from "../../../api/client";
 import { reviewApi, type DecisionResponse, type ReviewState } from "../../../api/review";
+import { announceThresholdChange, useThresholdNotice } from "../../../api/reviewHooks";
+import { formatReviewDate } from "../../review/formulation";
 import type { AgentRunResponse, AgentRunSummaryResponse } from "../../../api/agentTypes";
 import { taskKeys } from "../../../api/taskHooks";
 import type {
@@ -2677,6 +2679,7 @@ describe("020-FR-004 D-01 Next actions age markers", () => {
     vi.useRealTimers();
     // The file's own teardown only clears mocks; the offline spy must not leak.
     vi.restoreAllMocks();
+    useThresholdNotice.setState({ notice: null });
   });
 
   it("020-FR-004 020-FR-051 marks only asks, moves tomorrow and an unapplied park, never Ageing, and nothing before activation", async () => {
@@ -2695,6 +2698,35 @@ describe("020-FR-004 D-01 Next actions age markers", () => {
     expect(chip).toHaveTextContent("Asks for a decision");
     expect(chip).toHaveClass("border-indigo-200", "bg-indigo-50", "text-indigo-700");
     expect(screen.getByRole("button", { name: /Open decision for Sort the paperwork drawer/ })).toHaveClass("border-amber-200", "bg-amber-50", "text-amber-800");
+    // 390 px: the marker wraps under the title on its own line; the 44 px hit area stays.
+    expect(chip.parentElement).toHaveClass("max-sm:order-last", "max-sm:basis-full");
+    expect(chip.closest("[data-testid=task-row-header]")).toHaveClass("max-sm:flex-wrap", "max-sm:h-auto");
+    expect(screen.queryByText("You're offline. Decisions need a connection. Retry when you're back online.")).not.toBeInTheDocument();
+  });
+
+  it("020-FR-039 after a threshold change Next shows a one-time note with the new count and floor", async () => {
+    const user = userEvent.setup();
+    withFlag();
+    act(() => announceThresholdChange("user-1", { threshold_days: 7, floor: iso(7 * DAY) }));
+    renderPage("/tasks/next?group=off");
+
+    const note = await screen.findByText(`Your threshold is now 7 days. 3 tasks ask for a decision. Nothing moves to Someday before ${formatReviewDate(iso(7 * DAY))}.`);
+    await user.click(within(note.parentElement as HTMLElement).getByRole("button", { name: "OK" }));
+    expect(screen.queryByText(/Your threshold is now/)).not.toBeInTheDocument();
+  });
+
+  it("020-FR-039 the note reads in the singular, and belongs to the account that made the change", async () => {
+    withFlag();
+    mocked.listTasks.mockImplementation(async () => listResponse([asking, fresh]));
+    act(() => announceThresholdChange("user-1", { threshold_days: 21, floor: iso(7 * DAY) }));
+    const { unmount } = renderPage("/tasks/next?group=off");
+    expect(await screen.findByText(/^Your threshold is now 21 days\. 1 task asks for a decision\./)).toBeInTheDocument();
+    unmount();
+
+    act(() => announceThresholdChange("someone-else", { threshold_days: 28, floor: iso(7 * DAY) }));
+    renderPage("/tasks/next?group=off");
+    expect(await screen.findByRole("link", { name: "Renovate the bathroom" })).toBeInTheDocument();
+    expect(screen.queryByText(/Your threshold is now/)).not.toBeInTheDocument();
   });
 
   it("020-FR-042 shows no marker while the weekly_review flag is off", async () => {
@@ -2713,6 +2745,7 @@ describe("020-FR-004 D-01 Next actions age markers", () => {
     const chip = await screen.findByRole("button", { name: "Asks for a decision. Open decision for Renovate the bathroom" });
     expect(chip).toHaveAttribute("aria-disabled", "true");
     expect(chip).toHaveAccessibleDescription("You're offline. Decisions need a connection. Retry when you're back online.");
+    expect(screen.getByText("You're offline. Decisions need a connection. Retry when you're back online.")).toBeVisible();
     chip.focus();
     expect(chip).toHaveFocus();
     await user.click(chip);

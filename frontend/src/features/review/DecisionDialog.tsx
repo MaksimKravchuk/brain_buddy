@@ -230,8 +230,7 @@ export function DecisionDialog({
   useLayoutEffect(() => {
     removeOtherFormulationDrafts(draftScope, task.id, formulationId);
     titleRef.current?.focus();
-    // Once per open dialog; later changes are the person's own.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opened dialog: a stale answer later swaps in a newer wording, and focus must not jump back to the title then.
   }, []);
 
   useEffect(() => {

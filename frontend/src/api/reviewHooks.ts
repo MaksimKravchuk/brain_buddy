@@ -10,11 +10,12 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
+import { create } from "zustand";
 
 import { hasFeatureFlag } from "./auth";
 import { getApiBaseUrl } from "./client";
 import { reviewApi } from "./review";
-import type { DecisionRequest, ParkAcknowledgement, ReviewSettingsUpdate, ReviewState } from "./review";
+import type { DecisionRequest, ParkAcknowledgement, ReviewSettingsUpdate, ReviewState, ThresholdDays } from "./review";
 import { getTaskCacheScope, taskKeys } from "./taskHooks";
 import type { TaskResponse } from "./taskTypes";
 import { useAuthStore } from "../stores/authStore";
@@ -91,13 +92,37 @@ export function useAcknowledgeExplainer() {
   });
 }
 
+export interface ThresholdNotice {
+  accountId: string;
+  threshold_days: ThresholdDays;
+  /** The owner park floor the change set (FR-039): nothing parks before it. */
+  floor: string;
+}
+
+/**
+ * The one-time "threshold just changed" note on Next actions (design D-01 /
+ * M-01): set by a saved threshold change, cleared by its OK.
+ */
+export const useThresholdNotice = create<{ notice: ThresholdNotice | null; dismiss: () => void }>((set) => ({
+  notice: null,
+  dismiss: () => set({ notice: null })
+}));
+
+export function announceThresholdChange(accountId: string, change: Omit<ThresholdNotice, "accountId">): void {
+  useThresholdNotice.setState({ notice: { accountId, ...change } });
+}
+
 export function useUpdateReviewSettings() {
   const queryClient = useQueryClient();
+  const accountId = useAuthStore((store) => store.user?.id);
   return useMutation({
     mutationFn: ({ body, idempotencyKey }: { body: ReviewSettingsUpdate; idempotencyKey: string }) =>
       reviewApi.updateSettings(body, idempotencyKey),
-    onSuccess: (settings) => {
+    onSuccess: (settings, { body }) => {
       queryClient.setQueryData<ReviewState>(reviewKeys.state(), (state) => state && { ...state, settings });
+      if (body.threshold_days !== undefined) {
+        announceThresholdChange(accountId as string, { threshold_days: settings.threshold_days, floor: settings.owner_park_floor_at as string });
+      }
       refreshAfterReviewWrite(queryClient);
     }
   });

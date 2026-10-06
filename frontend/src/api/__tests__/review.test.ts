@@ -1,6 +1,11 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook } from "@testing-library/react";
+import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useAuthStore } from "../../stores/authStore";
 import { ApiError, setUnauthorizedHandler } from "../client";
+import { useThresholdNotice, useUpdateReviewSettings } from "../reviewHooks";
 import {
   describeReviewError,
   newIdempotencyKey,
@@ -304,6 +309,40 @@ describe("020-FR-045 failures expose the correlation id", () => {
     expect(describeReviewError(new Error("boom"))).toEqual({ kind: "other", referenceId: undefined });
     expect(describeReviewError(new ApiError("x", 400, { detail: { reason: 7 } }))).toEqual({ kind: "other", referenceId: undefined });
     expect(describeReviewError(new ApiError("x", 400, { detail: { reason: "something_new" } }))).toEqual({ kind: "other", referenceId: undefined });
+  });
+});
+
+describe("020-FR-039 review settings hook", () => {
+  afterEach(() => {
+    act(() => useAuthStore.setState({ user: null, status: "loading" }));
+    useThresholdNotice.setState({ notice: null });
+  });
+
+  function renderSettingsHook() {
+    act(() => useAuthStore.setState({ user: { id: "user_1", email: "a@example.test" }, status: "authed" }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: React.ReactNode }) => createElement(QueryClientProvider, { client }, children);
+    return renderHook(() => useUpdateReviewSettings(), { wrapper });
+  }
+
+  it("020-FR-039 a saved threshold announces the note for the signed-in account", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, body("W-035")));
+    const { result } = renderSettingsHook();
+
+    await act(() => result.current.mutateAsync({ body: { threshold_days: 21, expected_revision: 3 }, idempotencyKey: "key" }));
+
+    expect(useThresholdNotice.getState().notice).toEqual({ accountId: "user_1", threshold_days: 21, floor: "2026-10-16T12:00:00Z" });
+    act(() => useThresholdNotice.getState().dismiss());
+    expect(useThresholdNotice.getState().notice).toBeNull();
+  });
+
+  it("020-FR-039 a settings save that does not touch the threshold announces nothing", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, body("W-035")));
+    const { result } = renderSettingsHook();
+
+    await act(() => result.current.mutateAsync({ body: { expected_revision: 3 }, idempotencyKey: "key" }));
+
+    expect(useThresholdNotice.getState().notice).toBeNull();
   });
 });
 

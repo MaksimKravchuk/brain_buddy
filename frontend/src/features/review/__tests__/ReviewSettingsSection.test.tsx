@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../../api/client";
 import { reviewApi, type ReviewSettings, type ReviewState } from "../../../api/review";
+import { useThresholdNotice } from "../../../api/reviewHooks";
 import { useAuthStore } from "../../../stores/authStore";
 import { formatReviewDate } from "../formulation";
 import { ReviewSettingsSection, ThresholdControl } from "../ReviewSettingsSection";
@@ -103,6 +104,8 @@ describe("020-FR-039 D-04 review threshold setting", () => {
     expect(updateSettings).toHaveBeenCalledWith({ threshold_days: 7, expected_revision: 3 }, expect.any(String));
     expect(await screen.findByText(`Saved. Markers in Next update now. Because of this change, nothing moves to Someday before ${formatReviewDate(iso(7 * DAY))}.`)).toBeInTheDocument();
     expect(option(7)).toBeChecked();
+    // Next actions shows the one-time "threshold just changed" note for this account (D-01).
+    expect(useThresholdNotice.getState().notice).toEqual({ accountId: "user-1", threshold_days: 7, floor: saved.owner_park_floor_at });
   });
 
   it("020-FR-045 a failed save keeps the old value, shows the Ref and retries with the same key", async () => {

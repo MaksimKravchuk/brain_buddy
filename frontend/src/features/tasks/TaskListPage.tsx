@@ -28,9 +28,9 @@ import { getTaskDetailAutosaveController } from "./taskDetailAutosave";
 import type { AutosaveResult } from "./taskDetailAutosave";
 import { useTaskTitleAutocomplete } from "./useTaskTitleAutocomplete";
 import { useTaskCompletionAnimation } from "./useTaskCompletionAnimation";
-import { useOnlineStatus, useReviewClock, useWeeklyReviewEnabled } from "../../api/reviewHooks";
+import { useOnlineStatus, useReviewClock, useThresholdNotice, useWeeklyReviewEnabled, type ThresholdNotice } from "../../api/reviewHooks";
 import { DecisionDialog, type DecisionOutcome } from "../review/DecisionDialog";
-import { classifyFromInstants, formulationInstants, listMarkerFor, type ListMarker } from "../review/formulation";
+import { classifyFromInstants, formatReviewDate, formulationInstants, listMarkerFor, type ListMarker } from "../review/formulation";
 
 const stateLabels: Record<OpenTaskState, string> = {
   inbox: "Inbox",
@@ -244,6 +244,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const [reviewFocusRequest, setReviewFocusRequest] = useState(0);
   const markerFor = (task: TaskResponse): ListMarker | null =>
     reviewEnabled ? listMarkerFor(classifyFromInstants(reviewNow, formulationInstants(task.formulation))) : null;
+  const thresholdNotice = useThresholdNotice((store) => store.notice);
+  const dismissThresholdNotice = useThresholdNotice((store) => store.dismiss);
   const cacheScope = getTaskCacheScope(accountId ?? null);
   const scopeKey = JSON.stringify(cacheScope);
   const completionAnimation = useTaskCompletionAnimation(scopeKey, JSON.stringify({ state, projectId, tagId, dateView, searchQuery, sort, groupByProject, showCancelled }));
@@ -961,6 +963,18 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         </div>
 
         {!taskId ? mutationNotice : null}
+        {reviewEnabled && !online ? (
+          <p id={REVIEW_OFFLINE_REASON_ID} role="status" className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            {REVIEW_OFFLINE_REASON}
+          </p>
+        ) : null}
+        {reviewEnabled && state === "next" && thresholdNotice?.accountId === accountId ? (
+          <ThresholdChangedNote
+            notice={thresholdNotice as ThresholdNotice}
+            asking={openTasks.filter((task) => markerFor(task) !== null).length}
+            onDismiss={dismissThresholdNotice}
+          />
+        ) : null}
         {selectionRecoveryNotice}
         {agentSummaryNotice}
 
@@ -1046,7 +1060,6 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         ) : null}
 
         {dateView ? <DateViewCaptureHint /> : null}
-        {reviewEnabled ? <span id={REVIEW_OFFLINE_REASON_ID} hidden>{REVIEW_OFFLINE_REASON}</span> : null}
       </section>
       {decisionTask ? (
         <DecisionDialog
@@ -1195,7 +1208,7 @@ function ReviewMarkerChip({ marker, title, offline, onOpen }: {
       aria-label={`${label}. Open decision for ${title}`}
       aria-disabled={offline ? "true" : undefined}
       aria-describedby={offline ? REVIEW_OFFLINE_REASON_ID : undefined}
-      className={`relative inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium after:absolute after:-inset-y-[11px] after:inset-x-0 after:content-[''] max-sm:order-last ${
+      className={`relative inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium after:absolute after:-inset-y-[11px] after:inset-x-0 after:content-[''] ${
         asks ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-amber-200 bg-amber-50 text-amber-800"
       }`}
       onClick={(event) => onOpen(event.currentTarget)}
@@ -1203,6 +1216,22 @@ function ReviewMarkerChip({ marker, title, offline, onOpen }: {
       {asks ? <CircleHelp className="h-[11px] w-[11px]" aria-hidden /> : <Archive className="h-[11px] w-[11px]" aria-hidden />}
       {label}
     </button>
+  );
+}
+
+/** D-01 / M-01 "threshold just changed": one dismissible note after a D-04 change (FR-039). */
+function ThresholdChangedNote({ notice, asking, onDismiss }: {
+  notice: ThresholdNotice;
+  asking: number;
+  onDismiss: () => void;
+}): React.JSX.Element {
+  return (
+    <div role="status" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+      <span className="min-w-0 flex-1">
+        {`Your threshold is now ${notice.threshold_days} days. ${asking} ${asking === 1 ? "task asks" : "tasks ask"} for a decision. Nothing moves to Someday before ${formatReviewDate(notice.floor)}.`}
+      </span>
+      <Button size="sm" variant="ghost" onClick={onDismiss}>OK</Button>
+    </div>
   );
 }
 
@@ -1341,7 +1370,7 @@ function TaskRow({
     >
       <div
         data-testid="task-row-header"
-        className={`flex h-11 min-w-0 cursor-pointer items-center gap-2 pl-1.5 pr-3 transition-colors duration-150 ease-smooth ${isSelected ? "bg-slate-50" : "hover:bg-slate-50/70"}`}
+        className={`flex h-11 min-w-0 cursor-pointer items-center gap-2 pl-1.5 pr-3 transition-colors duration-150 ease-smooth ${isSelected ? "bg-slate-50" : "hover:bg-slate-50/70"} ${marker ? "max-sm:h-auto max-sm:min-h-11 max-sm:flex-wrap max-sm:gap-y-0 max-sm:pb-1.5" : ""}`}
         onClick={(event) => {
           const target = event.target as HTMLElement;
           if (target.closest("a, button, input, textarea, select, label")) return;
@@ -1395,12 +1424,15 @@ function TaskRow({
           {task.title}
         </Link>
         {marker ? (
-          <ReviewMarkerChip
-            marker={marker}
-            title={task.title}
-            offline={reviewOffline}
-            onOpen={(origin) => onOpenDecision(task, origin)}
-          />
+          // At 390 px the chip takes its own line under the title (D-01 narrow).
+          <span className="inline-flex shrink-0 max-sm:order-last max-sm:basis-full max-sm:pl-[42px]">
+            <ReviewMarkerChip
+              marker={marker}
+              title={task.title}
+              offline={reviewOffline}
+              onOpen={(origin) => onOpenDecision(task, origin)}
+            />
+          </span>
         ) : null}
         {task.due_date ? (
           <span className="hidden md:inline-flex">

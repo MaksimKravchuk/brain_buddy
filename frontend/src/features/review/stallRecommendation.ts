@@ -33,9 +33,9 @@ const RECOMMENDATIONS: Readonly<Record<StallReason, RecommendedDecision>> = {
   no_longer_matters: "cancel"
 };
 
+/** No reason, or a value outside the fixed list, recommends nothing. */
 export function recommendedDecision(reason: StallReason | null): RecommendedDecision | null {
-  if (reason === null || !Object.prototype.hasOwnProperty.call(RECOMMENDATIONS, reason)) {
-    return null;
-  }
-  return RECOMMENDATIONS[reason];
+  return Object.prototype.hasOwnProperty.call(RECOMMENDATIONS, String(reason))
+    ? RECOMMENDATIONS[reason as StallReason]
+    : null;
 }
