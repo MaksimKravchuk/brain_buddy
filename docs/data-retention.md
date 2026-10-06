@@ -18,6 +18,7 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 | **Weekly review records** (spec 020): review settings (threshold, review day, review time and the IANA **time zone**, the activation instant), review sessions (counts, active seconds per step, ids only), decisions (type, stall-reason code, AI-use code, and the **reason text** of a "keep 7 more days"), receipts, park acknowledgements, bulk releases (ids and codes), navigator consents; plus the formulation-clock fields on each task (inside the task row, incl. an open extension's reason) | `tasks.sqlite3` tables `review_settings`, `review_sessions`, `review_decisions`, `review_receipts`, `review_park_acks`, `review_bulk_releases`, `navigator_consents` (SQLite only, no JSON mirror) | Life of account | Account purge (`TaskRepository.delete_all_for_owner` deletes the review tables first, in its lock) |
 | **Weekly review undo and bulk-release snapshots** (a decision's `undo` copy of the task as it was — title, notes, clock — and a bulk release's per-task `clock_before`, which can hold an extension reason) | Inside the `review_decisions` / `review_bulk_releases` rows | 7 days; longer only while the backend is rolled back to a build without the review sweep (the first sweep after roll-forward nulls every snapshot older than 7 days). The retention runs for every owner with review rows whatever the `weekly_review` flag state | Review maintenance sweep (`ReviewService.run_review_retention`) / purge |
 | Weekly review navigator usage counters (per owner and UTC day: calls, estimated and reserved cost, requests that showed a proposal; no content) | `tasks.sqlite3` table `navigator_usage` | 35 days, whatever the flag state | Review maintenance sweep / purge |
+| **Weekly review navigator input as received by the cloud provider** (spec 020, one copy per suggestion request: the task title, its notes reduced to at most 6 000 characters, the stall-reason code, the project name and up to 20 other open task titles of that project — sent **as written**, so names or other details of other people in notes and titles are included; nothing is redacted) | The provider (OpenAI API), not Brain Buddy. Brain Buddy keeps neither the input nor the proposals: no idempotency record, no `task-commands/` entry, no log text — only the usage counters above, the owner's consent row, and on a later decision the `ai_use` code and `navigator_request_id` | The provider's own policy: up to 30 days for OpenAI API data (abuse monitoring) | **Not reachable by account purge**: see "The navigator's provider copy" below |
 | CRT mutation idempotency receipts (owner/key, route/request fingerprint/status plus the canonical response needed for replay; no raw key) | `data/crt_commands.sqlite3` | Canonical response body exactly 30 days after commit; after expiry, the body and pending snapshot are redacted but an owner-scoped, content-free key/route/request-fingerprint tombstone remains until account purge. Normal tree deletion redacts prior content-bearing receipts and retains the content-free delete tombstone; account purge physically removes every receipt; pending commands reconcile before the 30-day response clock starts | CRT command maintenance sweep / confirmed-delete cleanup / account purge (ADR-0026) |
 | Voice operations (transcripts, consent records) | `data/voice_operations.sqlite3` + `brain-dump-operations/` mirrors | Life of account; uncommitted working artifacts 7 days | Sweep (`purge_expired_working_artifacts`) / purge |
 | Raw voice audio | `data/brain-dump-media/<owner>/…` | 24 hours after processing (`BRAIN_BUDDY_VOICE_RAW_AUDIO_RETENTION_SECONDS`), or immediate user deletion | Sweep (`purge_expired_raw_audio`) / in-app "Delete raw audio" |
@@ -43,9 +44,9 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 | iOS list display options (sort, grouping, completed/cancelled visibility, priority and tag filters; keyed by list or by a local project/tag id; no names or task text) | app `UserDefaults.standard`, keys `listOptions.*` | Until the app is deleted; not tied to an account | None needed: preferences without content |
 | **iOS session token** (the opaque `brainbuddy_session` cookie value, one per server host) | Keychain generic password, service `app.brainbuddy.session`, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: never restored to another device from a backup or synced through iCloud Keychain; the app's own, no keychain sharing with the widgets | Until sign-out or the first 401 (session expired or revoked server-side), whichever comes first. Keychain items can outlive deleting the app, so a launch with no linked account removes any left over | iOS client (`KeychainSessionTokenStore`); the server-side session follows the Sessions row |
 
-The device and browser rows (mobile, web, CRT and iOS) are the only entries in this table
-an account purge cannot reach: the server can revoke every session, but it cannot delete
-bytes on a phone or in a browser. The Expo mobile client's native sweep provides its
+Apart from the navigator's provider copy (below), the device and browser rows (mobile,
+web, CRT and iOS) are the only entries in this table an account purge cannot reach: the
+server can revoke every session, but it cannot delete bytes on a phone or in a browser. The Expo mobile client's native sweep provides its
 device stores' 30-day physical bound as specified by feature 006; that client's source
 was removed from the repository in 2026-10, so its rows describe only builds that were
 already installed. The web preference becomes unusable at 30 days and its
@@ -77,6 +78,21 @@ token stops verifying immediately in either case (after purge it verifies
 against nothing, and the route answers one opaque rejection without creating a
 durable row), and the hand-off review shows the external-copy notice before the
 user confirms.
+
+**The navigator's provider copy** (spec 020, contracts/navigator.md §6). The weekly
+review's cloud suggestions exist to propose 1–3 next steps for a stalled task or a project
+without a next action; nothing is written to a task until the person confirms. Each
+request sends exactly the five FR-019 items above (title, notes, stall reason, project
+name, up to 20 sibling titles) and nothing else, and only while the owner holds a current
+consent: one row per owner and provider in `navigator_consents`, for the configured
+provider and the current `CONSENT_TEXT_VERSION`, revocable at any time with
+`DELETE /api/review/navigator/consent` (never gated by the `weekly_review` flag; the next
+request is refused at once). Notes and titles go as written, including names of other
+people (owner decision 2026-10-06). The provider keeps what it received under its own
+policy — up to 30 days for OpenAI API data — and an account purge cannot reach that
+copy; it is the one copy of this feature's content that survives purge by design, and
+the privacy policy ("Weekly review suggestions") says so. On iOS, suggestions from
+Apple's on-device model never leave the device.
 
 ## Account deletion lifecycle
 
