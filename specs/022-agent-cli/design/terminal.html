@@ -9,8 +9,28 @@ p{line-height:1.6}.meta{color:#64748b;font-size:14px}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:20px;border:1px solid #e2e8f0;border-radius:12px;background:white;font:13px/1.65 ui-monospace,monospace}
 </style>
 <h1>BrainBuddy in your terminal</h1>
-<p class="meta">Proposed interface · D-01 and D-02 · synthetic data only · no published release yet</p>
-<p>One command per action. Compact JSON goes to stdout; structured errors go to stderr. No prompts during agent work.</p>
+<p class="meta">Proposed interface · D-01, D-02 and D-03 · synthetic data only · no published release yet</p>
+<p>Sign in once through the shared BrainBuddy login, then use one command per action. Compact JSON goes to stdout; structured errors go to stderr. No prompts during agent business work.</p>
+<h2>D-03 · Connect your account once</h2>
+<pre>$ bb auth login
+stderr: Opened the BrainBuddy verification page. Confirm code DEMO-1234.
+browser: Sign in with a configured method, verify your account and approve this CLI connection.
+{"data":{"authenticated":true,"server":"https://brainbuddy.example.test","account_id":"member-demo","credential_store":"os"}}
+
+$ bb auth login --no-browser
+stderr: Open the BrainBuddy verification link on another device and confirm code DEMO-5678.
+The link and one-time code are shown only during explicit login.
+
+$ bb auth status
+{"data":{"authenticated":true,"server":"https://brainbuddy.example.test","account_id":"member-demo","credential_store":"os"}}
+
+$ bb auth logout
+{"data":{"authenticated":false,"local_cleared":true,"server_revoked":true}}
+
+Expired/denied approval: no session replaced; explicit error.
+Keychain unavailable: choose explicit protected-file storage or external secret input.
+Offline logout: local access removed; remote revocation reported as unconfirmed.</pre>
+<p>This is proposed shared-auth integration. Provider availability comes from BrainBuddy; the current inspected server has no device authorization endpoint yet. Passwords and provider tokens stay out of the CLI.</p>
 <h2>D-01 · Capture, inspect, act</h2>
 <pre>$ bb commands task
 {"name":"task","commands":["add","list","get","update","transition"]}

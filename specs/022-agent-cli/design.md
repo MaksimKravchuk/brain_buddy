@@ -6,7 +6,7 @@ Human sign-off: pending. Planning and implementation have not started.
 
 ## Applicability
 
-Terminal input/output and installation are user-visible. The static preview illustrates commands, not a new graphical app.
+Terminal input/output, installation and explicit browser/headless login are user-visible. The static preview illustrates commands; shared provider-login UI is owned by the parallel auth work.
 
 ## Screen inventory
 
@@ -14,6 +14,7 @@ Terminal input/output and installation are user-visible. The static preview illu
 |---|---|---|---|---|
 | D-01 | terminal | Agent workflow | Discovery, task commands, projection, recovery | FR-001–FR-008, FR-012 |
 | D-02 | terminal | Installation | Versioned native install and integrity failure | FR-009–FR-012 |
+| D-03 | terminal + shared browser auth | Connect an account | Device approval, protected credential reuse, status/logout | FR-007–FR-008, FR-012–FR-014 |
 
 ## State inventory
 
@@ -48,6 +49,25 @@ Terminal input/output and installation are user-visible. The static preview illu
 
 Installer empty/partial business-result states are N/A: one binary is installed. Client business commands execute one request at a time; no new batch protocol.
 
+### D-03 — Connect an account
+
+| state | trigger | what the user sees | copy | FR/SC refs |
+|---|---|---|---|---|
+| S01 signed out | auth status | Server and signed-out status; no browser opens | Run bb auth login | FR-014 |
+| S02 login waiting | Explicit auth login | Browser opened; trusted BrainBuddy verification link and short code on stderr | Confirm this connection in your browser | FR-013, SC-006 |
+| S03 headless waiting | login --no-browser or failed browser launch | Same verification link/code usable from another device | Open the link on a device with a browser | FR-013, SC-006 |
+| S04 browser approval | User signs in with a configured shared provider | Shared-auth account identity and specific CLI connection to approve | Connect this CLI to the displayed account | FR-013 |
+| S05 connected | Approval and credential save succeed | Compact identity/status JSON; secret stays in OS credential store | authenticated:true | FR-007, FR-013–FR-014, SC-006 |
+| S06 denied/expired/cancelled | Approval refused, grant times out or Ctrl-C | Explicit outcome; no working session replaced | authorization_denied / authorization_expired | FR-013, SC-006 |
+| S07 storage unavailable | Keychain unavailable/locked or save fails | Failure and explicit protected-file/external-secret options; no silent plaintext storage | credential_store_unavailable | FR-007, FR-014 |
+| S08 expired connection | Business command gets 401 | Structured auth-required error; no login UI started | Run bb auth login | FR-008, FR-014 |
+| S09 server/account mismatch | Credential belongs to another server or identity replacement requested | Refuse credential reuse or implicit account replacement | Confirm the intended server/account | FR-014 |
+| S10 logout success | Server revoke and local removal succeed | Compact logged-out result; browser session unaffected | server_revoked:true | FR-014, SC-006 |
+| S11 offline logout | Server revoke cannot be confirmed | Local credential removed; remote-revocation failure remains visible | local_cleared:true, server_revoked:false | FR-014 |
+| S12 unsupported server | CLI authorization capability absent | Explicit unsupported result and server-upgrade hint | cli_auth_unavailable | FR-013 |
+
+One-time verification codes are intentionally shown to the owner during explicit login, not ordinary business output or telemetry. Polling follows server interval/expiry; pending approval is not a failure or a task-write retry. The exact shared browser page remains an integration dependency; provider availability must come from the deployed shared-auth system.
+
 ## Affordance → requirement map
 
 | screen | affordance | what it does | FR ref |
@@ -59,8 +79,10 @@ Installer empty/partial business-result states are N/A: one binary is installed.
 | D-01 | commands/schema | Offline discovery/scoped live schema | FR-004 |
 | D-01 | dry-run | Redacted nonexecuting preview | FR-004, FR-007 |
 | D-01 | revision/idempotency key | Existing concurrency/replay controls | FR-005 |
-| D-01 | Protected session input/environment | Existing account authority | FR-007 |
+| D-01 | Saved CLI credential or explicit external credential | Shared account authority, isolated by server/account | FR-007, FR-014 |
 | D-02 | Unix/PowerShell installer, version/destination | Verified native binary install | FR-009–FR-010 |
+| D-03 | bb auth login / --no-browser | Explicit owner authorization through shared browser login | FR-013 |
+| D-03 | bb auth status / logout | Inspect identity and remove/revoke CLI access | FR-014 |
 
 ### Requirements with no affordance
 
@@ -76,16 +98,18 @@ Adds capture, clarification, explicit action and inspection from a terminal. Rev
 
 ## Mobile viability
 
-Viewport/touch/one-handed navigation are N/A: no mobile surface changes. Terminal output requires no colors, mouse or animation.
+CLI viewport/touch/one-handed navigation are N/A: no native mobile app changes. Headless approval uses the responsive shared-auth page, whose mobile and keyboard behavior must be verified in that work; it is not waived. Terminal output requires no colors, mouse or animation.
 
 ## Keyboard and focus
 
-Commands/arguments are keyboard accessible. No GUI tab order, focus restoration or Escape control. Ctrl-C is normal process interruption; write recovery remains explicit. Plain help and named arguments provide labels.
+Commands/arguments are keyboard accessible. No terminal GUI tab order, focus restoration or Escape control. Ctrl-C cancels waiting login and interrupts ordinary processes; write recovery remains explicit. The verification link/code supports manual navigation if browser launch fails. Browser sign-in/approval accessibility belongs to the shared-auth integration. Plain help and named arguments provide labels.
 
 ## Design authority
 
-Quiet light palette and system fonts from the repository design reference; no external assets. Production terminal output remains plain JSON/text. GTD and Tag vocabulary preserved. Automated design/vocabulary validation is pending because the managed environment became offline before verification completed.
+Quiet light palette and system fonts from the repository design reference; no external assets. Production terminal output remains plain JSON/text. GTD and Tag vocabulary preserved. Automated design-reference and vocabulary checks are recorded below after the revised design is verified.
+
+2026-10-06 revised-design checks: design-reference validator tests passed (6 tests); forbidden-vocabulary search found zero matches; git diff --check passed. These are documentation checks, not implementation, shared-auth or production acceptance.
 
 ## Open decisions for the human
 
-Approve the displayed terminal interface before planning, as explicitly required by speckit-design. Library/parser/build choices remain technical decisions.
+Approve the revised terminal interface including browser/headless login before planning, as explicitly required by speckit-design. The previous approval request has not been answered and is superseded by this auth-inclusive design. Protocol/library/parser/build choices remain technical decisions; see auth-integration.md for the observed shared-auth dependency.
