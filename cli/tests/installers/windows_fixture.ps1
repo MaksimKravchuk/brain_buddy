@@ -18,7 +18,7 @@ try {
     $fixtureSource = $source.Substring(0,$download.Extent.StartOffset) + $replacement + $source.Substring($download.Extent.EndOffset)
     $fixtureSource = $fixtureSource.Replace("[Console]::Error.WriteLine('bb install failed; the previous executable is preserved. Check the version, network, integrity and destination permissions.')", "[Console]::Error.WriteLine('Synthetic installer diagnostic: ' + `$_.Exception.Message)")
     $fixtureScript = Join-Path $root 'fixture-install.ps1'; [IO.File]::WriteAllText($fixtureScript,$fixtureSource)
-    foreach ($scenario in @('success','corrupt','unsafe','duplicate','unsupported')) {
+    foreach ($scenario in @('success','new','locked','corrupt','unsafe','duplicate','unsupported')) {
         $folder = Join-Path $root $scenario; New-Item -ItemType Directory -Path $folder | Out-Null
         $downloadDir = Join-Path $folder 'download'; New-Item -ItemType Directory -Path $downloadDir | Out-Null
         $destination = Join-Path $folder 'bin'; New-Item -ItemType Directory -Path $destination | Out-Null
@@ -28,6 +28,7 @@ try {
         $fixtureAcl.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
         Set-Acl -LiteralPath $destination -AclObject $fixtureAcl
         $previous = Join-Path $destination 'bb.exe'; [IO.File]::WriteAllText($previous,'previous-binary-sentinel')
+        if ($scenario -eq 'new') { [IO.File]::Delete($previous) }
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $archiveName = 'bb-0.1.0-x86_64-pc-windows-msvc.zip'; $archivePath = Join-Path $downloadDir $archiveName
         $archive = [IO.Compression.ZipFile]::Open($archivePath,[IO.Compression.ZipArchiveMode]::Create)
@@ -46,9 +47,13 @@ try {
         $info.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $fixtureScript + '" -Version 0.1.0 -InstallDir "' + $destination + '"'
         $info.EnvironmentVariables['BB_INSTALL_FIXTURE'] = $downloadDir
         if ($scenario -eq 'unsupported') { $info.EnvironmentVariables['PROCESSOR_ARCHITECTURE']='ARM64'; $info.EnvironmentVariables['PROCESSOR_ARCHITEW6432']='ARM64' }
-        $process = [Diagnostics.Process]::Start($info)
-        $output = $process.StandardOutput.ReadToEnd(); $diagnostic = $process.StandardError.ReadToEnd(); $process.WaitForExit()
-        if ($scenario -eq 'success') {
+        $locked = $null
+        try {
+            if ($scenario -eq 'locked') { $locked = [IO.File]::Open($previous,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read) }
+            $process = [Diagnostics.Process]::Start($info)
+            $output = $process.StandardOutput.ReadToEnd(); $diagnostic = $process.StandardError.ReadToEnd(); $process.WaitForExit()
+        } finally { if ($locked) { $locked.Dispose() } }
+        if ($scenario -in @('success','new')) {
             if ($process.ExitCode -ne 0) { throw "Success fixture failed: $diagnostic" }
             if ((& $previous --version) -cne 'bb 0.1.0') { throw 'Installed version mismatch' }
         } else {
@@ -56,5 +61,5 @@ try {
         }
         if (@(Get-ChildItem -LiteralPath $destination -Force).Count -ne 1) { throw 'Staging files were not cleaned' }
     }
-    Write-Output '5 installer fixtures passed'
+    Write-Output '7 installer fixtures passed'
 } finally { Remove-Item -LiteralPath $root -Recurse -Force }

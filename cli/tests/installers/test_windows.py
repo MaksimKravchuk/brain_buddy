@@ -14,6 +14,6 @@ class WindowsInstallerTests(unittest.TestCase):
         fixture_env={key:value for key,value in os.environ.items() if key.casefold()!="psmodulepath"}
         result=subprocess.run(["powershell.exe","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",str(fixture),"-Binary",binary],capture_output=True,text=True,timeout=120,env=fixture_env)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn("5 installer fixtures passed",result.stdout)
+        self.assertIn("7 installer fixtures passed",result.stdout)
 
 if __name__=="__main__":unittest.main()

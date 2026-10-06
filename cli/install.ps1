@@ -113,7 +113,10 @@ try {
     if ($LASTEXITCODE -ne 0 -or $reported -cne "bb $Version") { throw 'Executable version or runtime mismatch' }
     if (Test-Path -LiteralPath $destination) {
         if ((Get-Item -LiteralPath $destination -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Destination changed during installation' }
-        [IO.File]::Replace($staged,$destination,$null)
+        # Windows PowerShell 5 coerces a null backup argument to an empty path.
+        # Keep the old file in our same-volume stage until atomic replacement
+        # succeeds; the finally block removes this private backup afterwards.
+        [IO.File]::Replace($staged,$destination,(Join-Path $stage 'previous-bb.exe'))
     } else { [IO.File]::Move($staged,$destination) }
     Write-Output "Installed bb $Version at $destination"
     if ($env:PATH.Split(';') -notcontains $InstallDir) { Write-Output "Add $InstallDir to your user PATH." }
