@@ -437,7 +437,10 @@ Body `{"time_zone"?: IANA name}`. Idempotent and first-wins: when `activated_at`
 null it is set to the server's `now` and the activation transition of
 formulation-clock §3 runs under the owner lock in the same transaction; when it is
 already set nothing changes. Either way the response is the current
-`GET /review/state` body. The activating acknowledgement increments `revision`; a later
+`GET /review/state` body; this holds for a same-key replay too, which is the one
+exception to "Mutations" returning the original response: the acknowledgement is
+idempotent by state (first wins), and its body is a read of the current state, so a
+replay answers with the state as it now is. The activating acknowledgement increments `revision`; a later
 one does not; sweep bookkeeping (`last_effective_sweep_at`, gap `owner_park_floor_at`)
 never does. Clients call it when the person dismisses the explainer and
 send the device's zone with it, so due-dated tasks are classified in the person's zone
