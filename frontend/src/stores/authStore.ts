@@ -158,8 +158,25 @@ export const useAuthStore = create<AuthStoreState>((set, get) => ({
     const requestGeneration = ++sessionGeneration;
     const departingOwner = get().user?.id;
     const stillCurrent = () => requestGeneration === sessionGeneration && get().user?.id === departingOwner;
+    let observedServerOwner: AuthUser | null = null;
+    if (options?.requireServerConfirmation) {
+      // A different tab may have changed the shared cookie while this store
+      // stayed anonymous. Clean the observed server owner's local work too.
+      const serverOwner = await authApi.me();
+      if (!stillCurrent()) return false;
+      observedServerOwner = serverOwner;
+      if (serverOwner && serverOwner.id !== departingOwner) {
+        if (!(await cleanupDepartingOwner(serverOwner))) return false;
+        if (!stillCurrent()) return false;
+      }
+    }
     if (!(await cleanupDepartingOwner(get().user))) return false;
     if (!stillCurrent()) return false;
+    if (options?.requireServerConfirmation) {
+      const currentServerOwner = await authApi.me();
+      if (!stillCurrent()) return false;
+      if (currentServerOwner?.id !== observedServerOwner?.id) throw new Error("Server session changed during sign-out");
+    }
     // Ordinary logout remains available offline. Account-switch admission
     // additionally confirms that the browser no longer carries a session.
     try {

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Sprout } from "lucide-react";
 import { useAuthStore } from "../stores/authStore";
 import { AuthEntry } from "../features/auth/AuthEntry";
-import { safeAuthDestination } from "../features/auth/authFlow";
+import { ensureAnonymousSignIn, safeAuthDestination } from "../features/auth/authFlow";
 import { useAuthOperation } from "../features/auth/authOperation";
 import { Button } from "../components/ui/Button";
 
@@ -17,21 +17,34 @@ export default function LoginPage(): React.JSX.Element {
   const destination = safeAuthDestination(state?.from ? `${state.from.pathname ?? "/"}${state.from.search ?? ""}` : "/");
   const expected = new URL(destination, "https://brainbuddy.invalid").searchParams.get("expected_owner");
   const deletionScheduled = state?.deletionScheduled ?? deletionScheduledFor;
+  const beforeSignIn = async () => {
+    try {
+      if (useAuthStore.getState() !== confirmedSession) throw new Error("Session changed");
+      await ensureAnonymousSignIn();
+      if (useAuthStore.getState() !== confirmedSession) throw new Error("Session changed");
+    } catch (caught) {
+      setConfirmedSession(null);
+      switchAccount.setError("Your browser session changed or couldn't be checked. Sign out again before using the linked account.");
+      throw caught;
+    }
+  };
   if (status === "authed" && (!expected || user?.id === expected)) return <Navigate to={destination} replace />;
   return <AuthLayout title="Sign in or create an account">
     {expected ? <p role="status" className="mb-4 text-sm text-slate-700">Use the account linked to this device before continuing.</p> : null}
     {state?.authNotice ? <p role="status" className="mb-4 text-sm text-slate-700">{state.authNotice}</p> : null}
     {deletionScheduled ? <p role="status" className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Your account is deactivated and will be permanently deleted on {new Date(deletionScheduled).toLocaleDateString()}. Sign back in before then to cancel the deletion. Apple cleanup may still be pending or unconfirmed; your deletion date is unchanged.</p> : null}
-    {expected && status === "loading" ? <p role="status">Checking your current account…</p> : expected && (confirmedSession !== session || switchAccount.busy || switchAccount.error) ? <div className="flex flex-col gap-4">
+    {expected && status === "loading" ? <p role="status">Checking your current account…</p> : expected && (status !== "anon" || confirmedSession !== session || switchAccount.busy || switchAccount.error) ? <div className="flex flex-col gap-4">
       <p className="text-sm text-slate-700">First sign out of this browser before using the account linked to your device.</p>
       {switchAccount.error ? <p role="alert" className="text-sm text-rose-700">{switchAccount.error}</p> : null}
       <Button className="min-h-11" disabled={switchAccount.busy} onClick={() => void switchAccount.run(async () => {
         if (useAuthStore.getState() !== session) throw new Error("Session changed");
         if (!(await session.logout({ requireServerConfirmation: true }))) throw new Error("Sign-out was not completed");
-        setConfirmedSession(useAuthStore.getState());
+        const confirmed = useAuthStore.getState();
+        if (confirmed.status !== "anon") throw new Error("Session changed");
+        setConfirmedSession(confirmed);
       }, "Couldn't confirm sign-out. Try again before signing in to the linked account.")}>Sign out and use linked account</Button>
     </div> : <>
-      <AuthEntry destination={destination} />
+      <AuthEntry destination={destination} beforeSignIn={expected ? beforeSignIn : undefined} />
       <p className="mt-4 text-center text-xs text-slate-500">Have a password and invite code? <Link to="/signup?invite=1" className="inline-flex min-h-11 items-center text-sky-700 underline">Create an account with an invite</Link></p>
     </>}
   </AuthLayout>;

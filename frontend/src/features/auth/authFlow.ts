@@ -1,6 +1,7 @@
 import { modernAuthApi, type Provider, type ProviderStart, type ProviderComplete, type ClientProof, type AuthAction, type RecentProof } from "../../api/modernAuth";
 import { useAuthStore } from "../../stores/authStore";
 import type { Completion } from "../../api/modernAuth";
+import { authApi } from "../../api/auth";
 
 const PENDING_KEY = "brainbuddy.auth.provider-attempt";
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
@@ -36,8 +37,14 @@ export function takeProviderCallback(): { request: ProviderComplete; pending: Pe
   if (cancelled) return { pending, cancelled: true };
   return { pending, request: { attempt_id: pending.attemptId, state: pending.state, handoff_code: params.get("grant") ?? "", client_verifier: pending.verifier } };
 }
-export async function startBrowserProvider(provider: Provider, options: Omit<ProviderStart, "client" | "client_challenge">, destination = "/"): Promise<void> {
+export async function ensureAnonymousSignIn(): Promise<void> {
+  const session = useAuthStore.getState();
+  const current = await authApi.me();
+  if (current !== null || session.status !== "anon" || useAuthStore.getState() !== session) throw new Error("Session changed before sign-in");
+}
+export async function startBrowserProvider(provider: Provider, options: Omit<ProviderStart, "client" | "client_challenge">, destination = "/", beforeSignIn?: () => Promise<void>): Promise<void> {
   const proof = await createClientProof();
+  await beforeSignIn?.();
   const started = await modernAuthApi.startProvider(provider, { ...options, client: "web", client_challenge: proof.challenge });
   if (!started.authorization_url || !TOKEN.test(started.attempt_id) || !TOKEN.test(started.state)) throw new Error("Provider is unavailable");
   const url = new URL(started.authorization_url);

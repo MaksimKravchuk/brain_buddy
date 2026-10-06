@@ -2,11 +2,12 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { modernAuthApi } from "../../../api/modernAuth";
+import { authApi } from "../../../api/auth";
 import { useAuthStore } from "../../../stores/authStore";
 import { saveProviderAttempt } from "../authFlow";
 import { ProviderCompletionPage } from "../ProviderCompletionPage";
 
-vi.mock("../../../api/modernAuth", () => ({ modernAuthApi: { completeProvider: vi.fn(), methods: vi.fn() } }));
+vi.mock("../../../api/modernAuth", () => ({ modernAuthApi: { completeProvider: vi.fn(), methods: vi.fn(), verifyEmail: vi.fn() } }));
 const token = "a".repeat(43);
 const originalHydrate = useAuthStore.getState().hydrate;
 function pending(owner = "A") {
@@ -72,5 +73,46 @@ describe("023-FR-006/015/021 callback owner and one-use handoff", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/sign-in cancelled/i);
     expect(screen.getByRole("link", { name: "Check your sign-in methods" })).toHaveAttribute("href", "/settings/account?expected_owner=A");
     expect(modernAuthApi.completeProvider).not.toHaveBeenCalled();
+  });
+
+  it.each(["/cli/authorize", "/settings/account/delete?expected_owner=A", "//foreign.example/steal"])("retains a safe retry destination after failed login to %s", async destination => {
+    function Retry() { const here = useLocation(); return <p>Retry {JSON.stringify(here.state)}</p>; }
+    useAuthStore.setState({ status: "anon" });
+    vi.spyOn(authApi, "me").mockResolvedValue(null);
+    vi.mocked(modernAuthApi.completeProvider).mockRejectedValue(new Error("offline"));
+    saveProviderAttempt({ attemptId: token, state: token, verifier: "v".repeat(43), purpose: "login", destination, expiresAt: Date.now() + 60000 });
+    history.replaceState(null, "", `/auth/complete#attempt=${token}&state=${token}&grant=${token}`);
+    render(<MemoryRouter initialEntries={["/auth/complete"]}><Routes><Route path="/auth/complete" element={<ProviderCompletionPage />} /><Route path="/login" element={<Retry />} /></Routes></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("link", { name: "Back to sign in" }));
+    const retry = await screen.findByText(/Retry/);
+    expect(retry).toHaveTextContent(destination.startsWith("//") ? '"pathname":"/"' : destination.startsWith("/cli") ? '"pathname":"/cli/authorize"' : '"pathname":"/settings/account/delete","search":"?expected_owner=A"');
+    expect(retry).not.toHaveTextContent("foreign.example");
+  });
+
+  it("refuses a linked-owner login handoff when the shared cookie changed during the provider round trip", async () => {
+    useAuthStore.setState({ status: "anon" });
+    vi.spyOn(authApi, "me").mockResolvedValue({ id: "C", email: "c@example.com" });
+    saveProviderAttempt({ attemptId: token, state: token, verifier: "v".repeat(43), purpose: "login", destination: "/settings/account?expected_owner=A", expiresAt: Date.now() + 60000 });
+    history.replaceState(null, "", `/auth/complete#attempt=${token}&state=${token}&grant=${token}`);
+    show();
+    expect(await screen.findByRole("link", { name: "Back to sign in" })).toBeInTheDocument();
+    expect(modernAuthApi.completeProvider).not.toHaveBeenCalled();
+    expect(location.hash).toBe(""); expect(sessionStorage.length).toBe(0);
+  });
+
+  it("rechecks the shared cookie before provider mailbox verification and retains the linked-owner retry", async () => {
+    function Retry() { const here = useLocation(); return <p>Retry {JSON.stringify(here.state)}</p>; }
+    useAuthStore.setState({ status: "anon" });
+    const me = vi.spyOn(authApi, "me").mockResolvedValue(null);
+    vi.mocked(modernAuthApi.methods).mockResolvedValue({ password: true, email: true, google: false, apple: false, web_account_origin: null });
+    vi.mocked(modernAuthApi.completeProvider).mockResolvedValue({ status: "verify_mailbox", challenge_id: "mailbox", expires_at: new Date(Date.now() + 600000).toISOString(), resend_at: new Date(Date.now() + 60000).toISOString(), message: "Check your email" });
+    saveProviderAttempt({ attemptId: token, state: token, verifier: "v".repeat(43), purpose: "login", destination: "/settings/account/delete?expected_owner=A", expiresAt: Date.now() + 60000 });
+    history.replaceState(null, "", `/auth/complete#attempt=${token}&state=${token}&grant=${token}`);
+    render(<MemoryRouter initialEntries={["/auth/complete"]}><Routes><Route path="/auth/complete" element={<ProviderCompletionPage />} /><Route path="/login" element={<Retry />} /></Routes></MemoryRouter>);
+    fireEvent.change(await screen.findByLabelText("Email code"), { target: { value: "123456" } });
+    me.mockResolvedValue({ id: "C", email: "c@example.com" });
+    fireEvent.click(screen.getByRole("button", { name: "Verify and continue" }));
+    expect(await screen.findByText(/Retry/)).toHaveTextContent('"pathname":"/settings/account/delete","search":"?expected_owner=A"');
+    expect(modernAuthApi.verifyEmail).not.toHaveBeenCalled();
   });
 });

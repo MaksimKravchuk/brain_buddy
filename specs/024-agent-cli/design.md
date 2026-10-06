@@ -90,6 +90,8 @@ Concrete recovery copy: B06 Connection declined. Run bb auth login to start agai
 
 Read and validate the code fragment before any authentication redirect, then clear history immediately; never send it in query URLs/analytics. Retain only normalized short user code and <=600s deadline in tab-scoped sessionStorage through password/email/Google/Apple return to allowlisted /cli/authorize. No private device proof enters browser storage. Terminal outcome/expiry/cancel clears retained state; unavailable/stale storage falls back to B02 manual entry. JSON POST lookup keeps codes out of access-log URLs. Identity from /auth/me, deliberate approval only. Stack at390px, no horizontal scroll, accessible labels/visible focus/≥44px controls; screenshots/keyboard/axe checks required. Static preview illustrates B04/B05/B07; tests cover all states.
 
+Linked-owner account management requires explicit server-confirmed sign-out before another account's sign-in methods are offered. Loading or local anonymous state is insufficient: the confirmation belongs to the current anonymous store snapshot, and sign-in, code verification/resend and provider completion re-read the shared server session. A changed or unreadable session returns to the explicit switch control without spending the proof; provider failure preserves only the allowlisted retry destination. Explicit sign-out cleans local CRT records for both the local departing owner and any different owner observed through the shared cookie; cleanup refusal keeps sign-in blocked. The server owner must still match after cleanup before logout is dispatched. Server owner checks remain authoritative for changes between the read and submission.
+
 ## Affordance → requirement map
 
 | screen | affordance | what it does | FR ref |

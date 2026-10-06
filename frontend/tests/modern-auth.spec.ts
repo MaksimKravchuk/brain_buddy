@@ -229,7 +229,7 @@ test.beforeEach(async ({ page }, testInfo) => {
   await page.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort("blockedbyclient"));
 });
 
-for (const method of ["email", "google"] as const) {
+for (const method of ["email", "google", "email-code"] as const) {
   test(`023-FR-013 023-FR-018 ${method} owner management recovers from another browser account`, async ({ page, context }) => {
     const email = `linked-switch-${method}-modern-e2e@gmail.com`;
     await page.setViewportSize({ width: 390, height: 844 });
@@ -251,7 +251,7 @@ for (const method of ["email", "google"] as const) {
       expect((await api<Me>(page, "/auth/me")).body.id).not.toBe(owner.id);
     });
     await test.step("withhold sign-in until explicit server-confirmed sign-out, including offline retry", async () => {
-      const pathname = method === "email" ? "/settings/account/delete" : "/settings/account";
+      const pathname = method === "google" ? "/settings/account" : "/settings/account/delete";
       await page.goto(`${pathname}?expected_owner=${encodeURIComponent(owner.id)}`);
       const switchButton = page.getByRole("button", { name: "Sign out and use linked account", exact: true });
       await expect(switchButton).toBeVisible();
@@ -268,11 +268,54 @@ for (const method of ["email", "google"] as const) {
       await switchButton.click();
       await expect(page.getByRole("button", { name: "Continue with email", exact: true })).toBeVisible();
       expect((await api(page, "/auth/me")).status).toBe(401);
+      const sibling = await context.newPage();
+      await sibling.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort("blockedbyclient"));
+      let signInPosts = 0;
+      page.on("request", request => {
+        if (request.method() === "POST" && ["/api/auth/email/request", "/api/auth/providers/google/start", "/api/auth/email/verify"].includes(new URL(request.url()).pathname)) signInPosts += 1;
+      });
+      try {
+        await passwordLogin(sibling, otherEmail);
+        if (method !== "google") {
+          await page.getByLabel("Email address", { exact: true }).fill(email);
+          await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+        } else await page.getByRole("button", { name: "Sign in with Google", exact: true }).click();
+        await expect(switchButton).toBeVisible();
+        expect(signInPosts).toBe(0);
+        expect((await api<Me>(page, "/auth/me")).body.email).toBe(otherEmail);
+        await accessible(page);
+        await switchButton.click();
+        await expect(page.getByRole("button", { name: "Continue with email", exact: true })).toBeVisible();
+        expect((await api(page, "/auth/me")).status).toBe(401);
+        if (method === "email-code") {
+          await page.getByLabel("Email address", { exact: true }).fill(email);
+          await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+          await expect(page.getByLabel("Email code", { exact: true })).toBeVisible();
+          await passwordLogin(sibling, otherEmail);
+          await page.getByLabel("Email code", { exact: true }).fill("123456");
+          await page.getByRole("button", { name: "Verify and continue", exact: true }).click();
+          await expect(switchButton).toBeVisible();
+          expect(signInPosts).toBe(1);
+          expect((await api<Me>(page, "/auth/me")).body.email).toBe(otherEmail);
+          await switchButton.click();
+          await expect(page.getByRole("button", { name: "Continue with email", exact: true })).toBeVisible();
+        }
+      } finally { await sibling.close(); }
       if (method === "email") {
         await page.getByLabel("Email address", { exact: true }).fill(email);
         await page.getByRole("button", { name: "Continue with email", exact: true }).click();
         await enterCode(page, email, "login");
       } else {
+        if (method === "email-code") {
+          // Abandoning a proof must not bypass the real mailbox cooldown.
+          // A fresh connected provider remains a usable recovery method.
+          await page.getByLabel("Email address", { exact: true }).fill(email);
+          const limited = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/email/request");
+          await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+          expect((await limited).status()).toBe(429);
+          await expect(page.getByRole("alert")).toContainText("Too many attempts");
+          await accessible(page);
+        }
         await page.getByRole("button", { name: "Sign in with Google", exact: true }).click();
         await finishGoogle(page);
       }

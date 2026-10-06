@@ -41,7 +41,7 @@ describe("024-FR-013 shared sign-in returns to explicit CLI approval", () => {
     const start = vi.spyOn(authFlow, "startBrowserProvider").mockResolvedValue();
     const entry = show();
     fireEvent.click(await screen.findByRole("button", { name: `Sign in with ${provider === "google" ? "Google" : "Apple"}` }));
-    await waitFor(() => expect(start).toHaveBeenCalledWith(provider, { purpose: "login" }, "/cli/authorize"));
+    await waitFor(() => expect(start).toHaveBeenCalledWith(provider, { purpose: "login" }, "/cli/authorize", undefined));
     expect(retainedCode()?.userCode).toBe("ABCD-EFGH");
     entry.unmount();
     // Synthetic provider handoff exercises the real shared completion page.
