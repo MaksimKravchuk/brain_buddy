@@ -296,3 +296,13 @@ must preserve existing `clientVersion:` callers and logout/retry behavior.
 The future Mac namespace is explicitly `app.brainbuddy.mac.session`; iOS keeps
 `app.brainbuddy.session`. Recheck aggregate Mac/iOS CI and device evidence after
 021 source integration; do not substitute the planning PR's older build checks.
+
+## Password access before optional setup
+
+Without usable modern origins and the auth keyring, discovery advertises no
+web account origin. Existing password accounts retain password changes, safe
+exports and password-confirmed deletion through the compatible account routes.
+The web UI keeps connected-method metadata and binds these requests to its
+displayed owner. A failed discovery request is a retry state, not a downgrade
+to this mode. Passwordless accounts continue to use the proof-bound actions;
+missing operational keys must be restored rather than bypassing ownership proof.

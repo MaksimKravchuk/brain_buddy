@@ -112,3 +112,46 @@ CI artifacts must bind to the frozen implementation SHA.
 
 The full acceptance gate is not ready while T033/T041–T044 remain incomplete.
 Do not turn missing device/live/production evidence into passing mock results.
+
+
+## Full local run at 1f4e7c4 and follow-up browser repairs
+
+Frozen SHA `1f4e7c4b12cf016010ccd366a348b8e7ca2bbc49`: actual
+`make -j2 verify-all` ran the complete prerequisite graph. Backend **4,313
+passed** in 1,603.90 seconds; unchanged floors passed at **98.60% lines /
+95.86% branches**, and Allure taxonomy passed for all 4,313 results. Frontend
+**1,710 passed** in 412.56 seconds; unchanged floors passed at 99.01%
+statements / 97.83% branches / 98.80% functions / 99.51% lines. Raw log:
+`/tmp/modern-auth-023-verify-all-final-frozen-v3.log`; preserved coverage reports:
+`/tmp/modern-auth-v3-actual/`. The aggregate is **failed**, because old browser
+helpers did not select the newly explicit password/invite flow; only that lane
+was terminated (143) while the complete backend lane continued to completion.
+
+An isolated real Compose browser preflight of the prepared helper patch ran
+all 66 legacy journeys: **56 passed, 9 failed, 1 skipped**. Actual failures
+exposed unconfigured password-account actions requiring new origin/proof keys,
+nginx injecting noncanonical X-Request-ID values into UUID-validated routes,
+Hermes card discovery through the managed container proxy, a 236.3 ms CRT
+selection p95 under concurrent server load, and a voice failure-journey timeout.
+The optional model-backed vNext journey was skipped; it is not a pass. Raw
+results and diagnostics are retained under
+`/tmp/modern-auth-legacy-e2e-preflight/`. They do not certify the final candidate.
+
+Follow-up repairs restore existing password-account controls only after explicit
+successful unconfigured discovery, preserve connected metadata, refuse a
+passwordless/network-failure downgrade, and bind compatible account requests to
+the displayed owner. A late account switch prevents export download. Existing
+native requests without the optional owner header remain compatible. nginx no
+longer injects its 32-hex request identifier into the UUID-validated API header.
+The final browser execution uses a task-local Docker proxy configuration with
+only the known private Compose hosts/IPs added to NO_PROXY; the external proxy
+and original Docker configuration remain unchanged. No vendored Hermes or A2A
+security policy was modified to obtain a pass.
+
+Focused real HTTP regressions: **35 passed** in 45.93 seconds, Allure taxonomy
+passed (`/tmp/modern-auth-unconfigured-backend-green.log`). Sandboxed HTTP
+attempts stalled or used the wrong working directory and are not passes.
+Focused frontend: **75 passed**, typecheck and lint passed
+(`/tmp/modern-auth-unconfigured-frontend-final2.log`); earlier test fixture/name
+errors were corrected without removing outcome assertions. A fresh final full
+chain and independently reviewed candidate are still required.

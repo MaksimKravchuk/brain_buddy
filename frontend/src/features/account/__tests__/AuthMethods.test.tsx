@@ -17,6 +17,26 @@ describe("023-FR-006/007/013/018 same-owner connected methods and privacy action
   });
   afterEach(() => vi.clearAllMocks());
   const show = () => render(<MemoryRouter><AccountSecurity /></MemoryRouter>);
+
+  it("023-FR-003 a discovery failure offers retry without downgrading account actions", async () => {
+    vi.mocked(modernAuthApi.methods).mockRejectedValue(new Error("offline"));
+    show();
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /download my data/i })).not.toBeInTheDocument();
+    vi.mocked(modernAuthApi.methods).mockResolvedValue({ password: true, google: true, apple: false, email: false, web_account_origin: "https://brainbuddy.example.com" });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: "Remove Google" })).toBeEnabled();
+    expect(modernAuthApi.methods).toHaveBeenCalledTimes(2);
+  });
+
+  it("023-FR-013 an unconfigured passwordless account never enters the password-only fallback", async () => {
+    vi.mocked(modernAuthApi.methods).mockResolvedValue({ password: true, google: false, apple: false, email: false, web_account_origin: null });
+    vi.mocked(modernAuthApi.accountMethods).mockResolvedValue({ ...methods, has_password: false });
+    show();
+    expect(await screen.findByRole("button", { name: "Add password" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /download my data/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
+  });
   async function confirm() {
     const input = await screen.findByLabelText("Current password");
     await act(async () => { fireEvent.change(input, { target: { value: "password-123456" } }); fireEvent.click(screen.getByRole("button", { name: "Confirm" })); });

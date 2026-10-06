@@ -4,7 +4,24 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.config import ModernAuthSettings
+
 from .test_modern_auth_service import VERIFIER, challenge, make_modern
+
+
+def test_023_FR_003_unusable_keyring_does_not_advertise_account_origin(
+    anonymous_api_client,
+):
+    service = anonymous_api_client.app.state.container.modern_auth_service
+    service.settings = ModernAuthSettings(
+        public_origin="https://brainbuddy.example.com",
+        api_origin="https://api.brainbuddy.example.com",
+        current_key_id="missing",
+    )
+    response = anonymous_api_client.get("/api/auth/methods?client=web")
+    assert response.status_code == 200
+    assert response.json()["web_account_origin"] is None
+    assert response.json()["password"] is True
 
 
 @pytest.mark.parametrize("client", ["web", "ios"])

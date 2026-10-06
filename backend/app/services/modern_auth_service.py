@@ -153,7 +153,13 @@ class ModernAuthService:
                 else self.settings.apple_native_available
             ),
             email=self.settings.email_available,
-            web_account_origin=self.settings.public_origin or None,
+            web_account_origin=(
+                self.settings.public_origin
+                if self.settings.crypto_ready
+                and self.settings.api_origin
+                and self.settings.public_origin
+                else None
+            ),
         )
 
     def _mail(self) -> AuthMailService:

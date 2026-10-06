@@ -36,6 +36,16 @@ from .dependencies import (
 router = APIRouter(tags=["account"])
 
 
+def get_account_user(
+    request: Request, current_user: User = Depends(get_current_user)
+) -> User:
+    """Optionally bind compatible account requests to the displayed owner."""
+    expected_owner = request.headers.get("X-BrainBuddy-Expected-Owner")
+    if expected_owner is not None and expected_owner != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return current_user
+
+
 def _check_sensitive_rate_limit(user: User) -> None:
     if not sensitive_action_rate_limiter.check(user.id):
         raise HTTPException(
@@ -61,9 +71,9 @@ def _account_response(
     )
 
 
-@router.get("", response_model=AccountResponse, responses=error_responses(401))
+@router.get("", response_model=AccountResponse, responses=error_responses(401, 404))
 def get_account(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_account_user),
     account_service: AccountService = Depends(get_account_service),
     task_service: TaskService = Depends(get_task_service),
 ) -> AccountResponse:
@@ -79,11 +89,11 @@ def get_account(
 @router.patch(
     "/profile",
     response_model=AccountResponse,
-    responses=error_responses(400, 401, 422),
+    responses=error_responses(400, 401, 404, 422),
 )
 def update_profile(
     payload: ProfileUpdateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_account_user),
     account_service: AccountService = Depends(get_account_service),
     task_service: TaskService = Depends(get_task_service),
 ) -> AccountResponse:
@@ -101,12 +111,12 @@ def update_profile(
 @router.post(
     "/email",
     response_model=AccountResponse,
-    responses=error_responses(400, 401, 403, 422, 429),
+    responses=error_responses(400, 401, 403, 404, 422, 429),
 )
 def change_email(
     payload: EmailChangeRequest,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_account_user),
     account_service: AccountService = Depends(get_account_service),
     task_service: TaskService = Depends(get_task_service),
     auth_service: AuthService = Depends(get_auth_service),
@@ -133,12 +143,12 @@ def change_email(
 @router.post(
     "/password",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=error_responses(400, 401, 403, 422, 429),
+    responses=error_responses(400, 401, 403, 404, 422, 429),
 )
 def change_password(
     payload: PasswordChangeRequest,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_account_user),
     account_service: AccountService = Depends(get_account_service),
     auth_service: AuthService = Depends(get_auth_service),
     config: AppConfig = Depends(get_config_dep),
@@ -161,11 +171,11 @@ def change_password(
             "content": {"application/zip": {}},
             "description": "ZIP archive of every record the account owns.",
         },
-        **error_responses(401),
+        **error_responses(401, 404),
     },
 )
 def export_account_data(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_account_user),
     account_service: AccountService = Depends(get_account_service),
 ) -> StreamingResponse:
     filename, stream = account_service.export_account_data(current_user)
@@ -180,12 +190,12 @@ def export_account_data(
     "/delete",
     response_model=AccountDeleteResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    responses=error_responses(401, 403, 422, 429),
+    responses=error_responses(401, 403, 404, 422, 429),
 )
 def request_deletion(
     payload: AccountDeleteRequest,
     response: Response,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_account_user),
     account_service: AccountService = Depends(get_account_service),
     config: AppConfig = Depends(get_config_dep),
 ) -> AccountDeleteResponse:
