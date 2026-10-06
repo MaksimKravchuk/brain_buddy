@@ -41,9 +41,14 @@ the `X-Correlation-ID` header on every response, success or failure (FR-045).
 **Mutations** require `Idempotency-Key` (400 without it, as today), except
 `POST /review/navigator/suggestions`, which is a read-like call (§7). A replay with the
 same key and body returns the original response; a different body → 409
-`{"reason": "idempotency_conflict"}`. The Idempotency-Key is the **only** replay input;
-a client-supplied record id never is (below). Concurrency uses `expected_revision` in
-the body.
+`{"reason": "idempotency_conflict"}`. The Idempotency-Key is the replay input and
+returns the original response while its record exists (24 h). Besides it, a
+client-supplied record id is a **de-duplication** input in exactly one form, the
+**matching-record replay** of "Retry after the idempotency retention" (below): a
+request whose id is already held by a record of the same owner with equal identifying
+fields is answered as already applied and writes nothing; it is what makes a retry
+after the 24 h safe (for session progress the id is `progress_id`, §6). A client id is
+never an authorization input. Concurrency uses `expected_revision` in the body.
 
 **Ownership**: an id in the path that does not exist **or belongs to another owner** →
 404 with `{"resource": "...", "id": "..."}` (existing `NotFoundError` mapping). Never
@@ -61,23 +66,41 @@ client id today — `TaskCreateRequest`, `backend/app/schemas/tasks.py:99-118`, 
 none and `create_task` mints `generate_id("task")`): offline iOS creates sessions,
 decisions, bulk releases, follow-up tasks and formulations before the server sees
 them, so those requests carry the client's id (`id`, `decision_id`,
-`follow_up_task_id`, `new_formulation_id`). Every such id is an opaque label of one
-fixed shape, validated by the Pydantic schema (422 on mismatch):
-`^(review|decision|bulk|form|task)_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+`follow_up_task_id`, `new_formulation_id`, and `progress_id` on session progress, §6).
+Every such id is an opaque label of one fixed shape, validated by the Pydantic schema
+(422 on mismatch):
+`^(review|decision|bulk|form|task|progress)_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
 with the prefix fixed per field (`id` of a session `review_`, `decision_id`
 `decision_`, bulk `id` `bulk_`, `new_formulation_id` `form_`, `follow_up_task_id`
-`task_`), at most 64 characters, so no free text can travel in an id into tables,
+`task_`, `progress_id` `progress_`), at most 64 characters, so no free text can travel in an id into tables,
 exports or logs (iOS lowercases `UUID().uuidString`). Fields that refer to an existing
 record (`session_id`, `formulation_id`, task ids in bodies) accept either that shape or
 a server-minted id (`<prefix>_<12 hex>`, `app/utils/identifiers.py`), and nothing else. `navigator_request_id` on a decision is either null or exactly the
 36-character UUID the server returned as `request_id` (the
 `TitleCompletionAcceptedRequest.request_id` pattern, `schemas/tasks.py:49`). The
-server adopts a supplied id when it creates the record. Ids are labels only, never
-authorization or idempotency inputs (constitution IV): a request that reuses an id
-already held by a record of the same owner, under a different Idempotency-Key, is 409
-`{"reason": "id_conflict"}` and changes nothing, unless the stored record matches the
-request (below); only the same Idempotency-Key with the same body replays. When no id is supplied (web, older clients), the server mints one
-(`generate_id`).
+server adopts a supplied id when it creates the record. When no id is supplied (web,
+older clients), the server mints one (`generate_id`).
+
+What a client id is used for, exhaustively:
+
+- **Never an authorization input.** Every lookup by a client id is scoped to the
+  authenticated owner (`(owner_id, id)` keys, data-model E3, E4, E7); a client id of
+  another owner is invisible and behaves exactly like an unknown id. Holding an id
+  grants nothing.
+- **Not the replay key.** Replay of a request is by Idempotency-Key with the same body
+  while its record exists (24 h, "Mutations").
+- **The one de-duplication use: the matching-record replay** of "Retry after the
+  idempotency retention" below. It applies only to the four id-bearing records named
+  in its table, only for the same owner and the same id, and only when the request's
+  identifying fields equal the stored record's; it writes nothing and returns the
+  stored result. It exists for the retry after the 24 h retention and answers the same
+  way at any age. Any mismatch — a stored record of the same owner and id whose
+  identifying fields differ — is 409 `{"reason": "id_conflict"}` and changes nothing.
+  This is a bounded exception to constitution IV ("accepted client-supplied IDs are
+  observability labels only and never … idempotency inputs"), justified in plan.md
+  "Complexity Tracking" and recorded in ADR-0027 §7.
+- **Otherwise a label**: the id names the record it creates, in tables, exports and
+  logs, and nothing else.
 
 **Retry after the idempotency retention** (owner decision 2026-10-06, offline-sync
 checklist CHK023): the server keeps idempotency records for 24 h
@@ -87,15 +110,37 @@ Idempotency-Key, which the server no longer knows, and an id the earlier deliver
 already stored. When the stored record **matches** the retry, the server treats the
 retry as already applied: it changes nothing and answers with the success status and
 response shape of a first delivery, built from the stored record and the task as it
-now is. A match means the same owner, the same record kind and the same identifying
-fields: a decision (`decision_id`) with the same `task_id`, `type` and decided-on
-`formulation_id`; a session (`id`) with the same `mode` and `origin`; a bulk release
-(`id`) with the same `kind` and the same set of task ids. Only a record that does not
-match is `id_conflict`. A record that no longer exists (for example a decision undone
-since) is not matched; the request is then processed as new, and its own preconditions
-(`expected_revision`, eligibility) decide the outcome. Within the 24 h the ordinary
-Idempotency-Key replay applies, as before. A pytest case sends a content-bearing id (sentinel text) and asserts
-422 and that the sentinel reaches no log record.
+now is. A match means the same owner, the same record kind, the same id and the same
+identifying fields:
+
+| record (id field) | identifying fields that must be equal |
+|---|---|
+| decision (`decision_id`, `POST /tasks/{task_id}/decisions`) | `task_id`, `type`, the decided-on `formulation_id` (null for types that take none) |
+| session (`id`, `POST /review/sessions`) | `mode`, `origin` |
+| bulk release (`id`, `POST /review/bulk-releases`) | `kind`, the set of task ids in `items` |
+| session progress (`progress_id`, `PATCH /review/sessions/{id}`) | the session id in the path and the SHA-256 of the canonical progress body (§6 "Progress is replay-safe") |
+
+Order of checks: the matching-record check runs **first**, under the owner lock and
+before `expected_revision` (including each bulk item's), the formulation check, the
+decision-type eligibility, bulk eligibility and `replace_open`, because a retry always carries the revision and
+state of its first delivery, which are stale by now. A match returns at once; only a
+request whose id is not stored for this owner goes on to those preconditions. Only a
+stored record that does not match is `id_conflict`. A record that no longer exists (for
+example a decision undone since) is not matched; the request is then processed as new,
+and its own preconditions (`expected_revision`, eligibility) decide the outcome.
+Within the 24 h the ordinary Idempotency-Key replay applies, as before. Other mutations
+of this feature need no such rule: `POST /tasks/{id}/auto-park`, the explainer and
+park acknowledgements, `finish` and consent are idempotent by state, and
+`PUT /review/settings` is protected by `expected_revision` (a stale retry gets 409 and
+the device rule of ios-commands §4; the values are absolute, so re-applying them is
+harmless). A retried `POST /review/decisions/{id}/undo` whose first delivery was
+applied gets 404 (already undone, §3); the device treats that 404 as success
+(ios-commands §4). A retried `POST /review/bulk-releases/{id}/undo` whose first
+delivery was applied gets 200 with the stored undo result (§6). Session progress is
+covered by `progress_id` (§6).
+
+A pytest case sends a content-bearing id (sentinel text) and asserts 422 and that the
+sentinel reaches no log record.
 
 **Logs** (FR-044): one structured line per request on logger `app.modules.tasks.review`
 or `app.api.review` with `owner_id`, ids, decision type, counts, `duration_ms`, outcome
@@ -245,7 +290,7 @@ Errors:
 | 400 | `extension_already_used` / `extension_not_due` | FR-009 | card hides the option; server is the backstop |
 | 400 | `project_archived` | `follow_up`/`return_to_next` into an archived project | M-18 archived, M-09 partial |
 | 404 | `{resource, id}` | task not found or not owned (path id) | |
-| 409 | `id_conflict` | a supplied client id is already used by a record that does not match this request ("Retry after the idempotency retention": a matching record answers 200 as already applied) | iOS sets aside with Ref (cannot happen with UUIDs in practice) |
+| 409 | `id_conflict` | a supplied client id is already used by a record that does not match this request ("Retry after the idempotency retention": a matching record answers 200 as already applied, checked before the revision and eligibility rows above) | iOS sets aside with Ref (cannot happen with UUIDs in practice) |
 | 422 | (validation) | missing/oversized fields | |
 
 **Auto-park yield rule** (spec edge case "Offline for a long time"): the precondition is
@@ -279,7 +324,9 @@ follow-up task created by the decision changed since it was created (its revisio
 stored on the decision, data-model E4), or when the undo snapshot was already purged
 (7 days). Clients show "Couldn't undo: "<title>" changed on another device. It's in
 <list> now." + Ref (design "Undo didn't apply" states). 404 when not owned or already
-undone.
+undone; a retried undo whose first delivery was applied therefore gets 404, which the
+device treats as success (the undo's goal, the decision being absent, holds;
+ios-commands §4).
 
 ## 4. Auto-park
 
@@ -346,6 +393,19 @@ iOS becomes visible on the web (SC-007). `restart_mode` is
 (FR-017): a person who has not onboarded gets onboarding first and no restart mode, and
 one who onboarded but never had a counted review counts from onboarding.
 
+`next_review_at` is the next review slot (`review_weekday` at `review_time`, skipping a
+slot that has a counted review in the preceding 6 days, FR-036) evaluated in the stored
+`time_zone`. The slot itself is a local wall-clock day and time, and
+**each client evaluates it in its own current zone** (targeted re-review 2026-10-06):
+the iOS notification is a local notification on that device and fires at the chosen
+day and time in the device's current zone, and iOS (M-22, M-25) and the web (D-03
+summary) show the next review at the slot evaluated in the device's or browser's own
+zone (ios-commands §6 `ReviewReminderPlanner`; web `reviewSlot.ts`). When a device sits
+in the stored zone, that instant equals `next_review_at`; when it sits elsewhere (zone
+rule below), the device's own evaluation wins for everything shown or fired on it.
+Only task classification (markers, parks) uses the stored zone on every signed-in
+client, so markers agree with server parks. The server fires nothing at the slot.
+
 `server_now` has one consumer: signed-in iOS keeps the last observed offset between
 `server_now` and its own clock and evaluates due parks with the adjusted clock
 (ios-commands §5).
@@ -368,7 +428,11 @@ last observed (iOS `local.lastObservedTimeZone`, web
 `bb.reviewLastZone.v1.<origin>.<account>`; data-model E10, E11). A device whose zone
 merely differs from the stored one (another device elsewhere set it) sends nothing, so
 two signed-in devices in different zones never alternate the setting and never raise
-the FR-046 floor repeatedly. Onboarding sends the onboarding device's zone (FR-035).
+the FR-046 floor repeatedly. Such a device keeps classifying with the stored zone but
+fires its notification and shows the next review in its own current zone (above).
+A device whose own zone changed into the zone already stored sends the change anyway;
+it is a no-op (`PUT /review/settings` below). Onboarding sends the onboarding device's
+zone (FR-035).
 iOS queues the acknowledgement offline like any other command. It is the only way an owner becomes
 activated. Not gated by the flag (see "Gate").
 
@@ -379,7 +443,13 @@ Body: any of `threshold_days`, `review_weekday`, `review_time`, `time_zone`,
 `GET /review/state`, re-apply only the fields this change set, resend; see
 ios-commands §4). 400 `{"reason": "invalid_time_zone"}` for a non-IANA zone. A
 threshold change sets `owner_park_floor_at = now + 7 d` (FR-039). A `time_zone` change
-applies the due-date floor to due-dated Next tasks (formulation-clock §3).
+applies the due-date floor to due-dated Next tasks (formulation-clock §3). A field
+whose value equals the stored one is **not a change**: a `time_zone` equal to the stored
+zone (for example from a device that travelled into the zone another device had
+already stored) raises no floor, and a body in which every field equals the stored
+values is a no-op that leaves `revision` unchanged and returns the current settings
+(200; `expected_revision` is still checked). A threshold equal to the stored one
+likewise sets no `owner_park_floor_at`.
 
 ### `POST /review/parks/acknowledge` → 204
 
@@ -391,9 +461,9 @@ without "Continue" sends nothing (the parks stay unseen).
 
 | method | path | body | response |
 |---|---|---|---|
-| POST | `/review/sessions` | `{id?, mode, entry, origin, skip_steps?: [step], replace_open: bool}` | 201 session; with `replace_open` an open session is finished first (partial or abandoned by the E3 rule; the device that had it shows "review ended elsewhere"); without it and an open session exists → 409 `{"reason": "open_session_exists", "session_id": …}`. Replay is by Idempotency-Key only ("Mutations"); an `id` already used under another key → 409 `id_conflict`, unless the stored session matches (same `mode` and `origin`), which answers as already applied ("Retry after the idempotency retention"). iOS always pushes an offline-started session with `replace_open: true` (ios-commands §4) and keeps its key until the request succeeds, so a queued review is never set aside |
+| POST | `/review/sessions` | `{id?, mode, entry, origin, skip_steps?: [step], replace_open: bool}` | 201 session; with `replace_open` an open session is finished first (partial or abandoned by the E3 rule; the device that had it shows "review ended elsewhere"); without it and an open session exists → 409 `{"reason": "open_session_exists", "session_id": …}`. Within the 24 h retention, replay is by Idempotency-Key ("Mutations"); an `id` already used under another key → 409 `id_conflict`, unless the stored session matches (same owner, `id`, `mode` and `origin`), which answers 201 with the stored session as already applied and replaces nothing, checked before `replace_open` ("Retry after the idempotency retention"). iOS always pushes an offline-started session with `replace_open: true` (ios-commands §4) and keeps its key until the request succeeds, so a queued review is never set aside |
 | GET | `/review/sessions/{id}` | — | session |
-| PATCH | `/review/sessions/{id}` | `{current_step?, step?: {code, status}, active_seconds?: {code, seconds}, set_aside_task_id?, inbox_processed_delta?, snapshot_decision_queue?: true}` | merged session (rules below); never 409 |
+| PATCH | `/review/sessions/{id}` | `{progress_id?, current_step?, step?: {code, status}, active_seconds?: {code, seconds}, set_aside_task_id?, inbox_processed_delta?, snapshot_decision_queue?: true}` | merged session (rules below); no version conflict. `progress_id` (`progress_<uuid>`, minted by the client once per progress change, iOS and web alike, and reused unchanged on every retry of that change) is required (422 without it) |
 | POST | `/review/sessions/{id}/finish` | `{clear_start?: yes \| not_really}` | the person tapped Done on the summary: status `completed` or `completed_empty` per data-model E3. There is no "left" outcome: leaving only pauses a review (FR-029); it ends without Done only by replacement or the 7-day idle close. Idempotent: finishing an already finished session returns it unchanged (200) |
 | GET | `/review/queues/{step}` | query `session_id` | `{items: TaskResponse[], meta}`; `meta` per step: `wins` `{count}`; `rest_of_next` `{next_count, weekly_average_4w, weeks_of_history, implied_weeks}` (`weekly_average_4w` and `implied_weeks` are `null` when `weeks_of_history < 4` or there were no completions in them, FR-031); `someday` `{eligible_total, shown ≤ 7}`; `dates` grouped by local day for 14 days. Unknown or foreign `session_id` → the same 404 ("Ownership") |
 
@@ -406,6 +476,29 @@ step differs from the merged `current_step` shows "review moved on elsewhere" (d
 M-13/D-03). A `set_aside_task_id` that is not an open task of this owner is ignored
 (identical response for unknown and foreign ids). Progress on a finished session is
 accepted and ignored (200, the finished session).
+
+**Progress is replay-safe** (owner decision 2026-10-06 extended to progress, targeted
+re-review): `active_seconds` and `inbox_processed_delta` are additive, so a progress
+change applied twice would over-count SC-004 active time and the M-22 / D-03 "Inbox
+processed" count, and a stale `current_step` re-applied late would move the resume
+point back. Every PATCH therefore carries a `progress_id`. The open session keeps a
+server-internal map `applied_progress` (`progress_id` → SHA-256 of the canonical JSON of
+the body without `progress_id`; ids and digests only, no content; data-model E3). Under
+the owner lock, before anything is merged:
+
+- `progress_id` already in the map with the **same** digest → the change is already
+  applied: nothing is merged, `last_activity_at` does not move, and the response is the
+  current merged session (200). This holds within and after the 24 h idempotency
+  retention, so a progress change lost in transit and retried days later is counted
+  once.
+- `progress_id` in the map with a **different** digest → 409 `{"reason":
+  "id_conflict"}`, nothing merged (a client bug; UUIDs make it impossible in practice;
+  iOS sets it aside with its Ref like any `id_conflict`).
+- otherwise the change is merged by the rules above and its id and digest are added.
+
+The map is kept while the session is open and dropped when it ends (finish,
+replacement, idle close), because progress on an ended session is ignored anyway.
+Its size is one entry per progress change of one review.
 
 **Queues**: `decisions` = the session's `decision_queue` snapshot (ids of tasks that
 `asks_for_decision`, formulation-clock §5 order), taken when the step first opens.
@@ -425,8 +518,8 @@ E3 `set_aside_task_ids`)`, qualifying_activity, clear_start, revision`. `status`
 `open | completed | completed_empty | partial | abandoned`. Server-internal and not
 on the wire: `set_aside_task_ids` (ids only; the count is enough for the client, which
 keeps its own set-aside list for the session it runs), `decision_queue` (its items are
-returned through the `decisions` queue), and the per-step `finished_empty` flags (they
-only feed `qualifying_activity`).
+returned through the `decisions` queue), the per-step `finished_empty` flags (they
+only feed `qualifying_activity`), and `applied_progress` (replay protection only).
 
 ### Bulk release (FR-017 restart, FR-030 Inbox remainder)
 
@@ -448,8 +541,12 @@ a Someday receipt (`source: release`, FR-032).
 `POST /review/bulk-releases/{id}/undo` → 200 `{restored: […], skipped: […]}`: each
 released task whose revision is still `revision_after` returns to its previous list with
 its clock restored exactly (formulation-clock §3) and its release receipt deleted;
-others are `skipped` with reason `stale` (M-10 / M-15 "undone, some skipped"). 409 `{"reason": "undo_unavailable"}` once
-already undone, or after 7 days, when the snapshot is purged. The server keeps no
+others are `skipped` with reason `stale` (M-10 / M-15 "undone, some skipped"). The
+record keeps `undone_at` and the result as task ids and reason codes (data-model E7).
+An undo of a release that is **already undone** changes nothing and answers 200 with
+that stored result, at any age, so a retried undo whose response was lost is a
+success. 409 `{"reason": "undo_unavailable"}` only when the release was never undone
+and its snapshot was purged (7 days). The server keeps no
 shorter window: when Undo stops being offered is a client rule (until the person moves
 on from the restart screen or leaves the Inbox step, FR-017, FR-030).
 

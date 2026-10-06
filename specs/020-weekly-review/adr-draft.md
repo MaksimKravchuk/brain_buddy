@@ -142,6 +142,13 @@ threshold are stored per owner. iOS schedules at most one local notification per
 week, skipped when a complete or partial review happened in the preceding 6 days;
 the web sends none. No streaks, no escalation, no follow-up reminders.
 
+The stored zone changes only when a device's own zone changes, so two signed-in
+devices may sit in different zones. The stored zone then governs classification
+(markers and parks agree with the server); the review slot is a local wall-clock day
+and time that each device evaluates in its **own current zone**, so a device's
+notification fires, and its "next review" reads, at the chosen time where that device
+is.
+
 ### 5. AI navigator: on-device first, cloud only under per-owner consent
 
 On Apple platforms the navigator uses Apple's on-device model when available. When
@@ -197,6 +204,37 @@ work. While the flag is off, web and iOS keep today's non-interactive
 and its validator test change to "flag-gated; visibly deferred while off" in the same
 slice that accepts this record. The Mac shows a non-interactive "Weekly review ·
 coming later" row until Mac↔backend sync exists (separate spec).
+
+### 7. Client-supplied record ids: one bounded exception to constitution IV
+
+Constitution IV says accepted client-supplied ids are "observability labels only and
+never authorization or idempotency inputs". Offline iOS must create review sessions,
+decisions, bulk releases, follow-up tasks and formulations before the server sees them,
+so the server adopts the client's id (fixed `<prefix>_<uuid>` shape, validated, owner-
+scoped). Replay stays keyed on the Idempotency-Key. The owner decided on 2026-10-06
+(offline-sync CHK023) that a retry arriving after the server's 24 h idempotency
+retention — a lost response followed by a long offline period — is a success when the
+stored record matches it. After the retention the Idempotency-Key is gone, so the
+client id is then the only thing that identifies the retry: it becomes a
+**de-duplication** input. This record accepts that as a bounded exception, and only
+in this form:
+
+- it applies to four records only — review decisions, review sessions, bulk releases
+  and session progress (`progress_id`) — listed in
+  `specs/020-weekly-review/contracts/http.md` "Retry after the idempotency retention";
+- the lookup is `(owner_id, id)`; a client id is never an authorization input, and an
+  id of another owner behaves as unknown;
+- it matches only when the request's identifying fields equal the stored record's
+  (for progress, the SHA-256 of the canonical body); a match writes nothing and
+  returns the stored result, and it is checked before revision and eligibility;
+- any mismatch is 409 `id_conflict` and writes nothing;
+- the id keeps its fixed UUID shape, so no content travels in it.
+
+Rejected alternative: a longer idempotency retention. It only moves the window (a
+device can stay offline for weeks), keeps response bodies with content longer, and
+grows `idempotency_records` for every owner. The constitution's wording is not
+changed by this record; if a later feature needs the same rule, the constitution
+should be amended instead of repeating this exception.
 
 ## Consequences
 

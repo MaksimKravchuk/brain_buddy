@@ -261,14 +261,14 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
 | default: consent | first cloud "Suggest" | Provider named; exact five data items; "Nothing else is sent"; one line that notes go as written (owner decision 2026-10-06); Allow / Not now | "Send task details to OpenAI for suggestions?" / "Notes are sent as written, including any names in them." | FR-024 |
-| consent after revoke | consent revoked in M-23 | Note that nothing was sent since; consent again | "You turned cloud suggestions off on Wed 7 Oct. Nothing has been sent since." | FR-024, US3-6 |
+| consent after revoke | consent revoked in M-23 | Note that nothing was sent since; consent again, with the same five items, "Nothing else is sent" and the line that notes go as written (owner decision 2026-10-06) | "You turned cloud suggestions off on Wed 7 Oct. Nothing has been sent since." / "Notes are sent as written, including any names in them." | FR-024, US3-6 |
 | declined | "Not now" | Form usable; Suggest still available | "Nothing was sent. Write your own step, or ask for suggestions later." | FR-024, US3-5 |
 | loading → proposals | allowed | Placeholder, "Stop"; proposals with provider line | "Asking OpenAI…" / "Suggested by OpenAI from this task's details." | FR-019, FR-020 |
 | error: timeout / provider / malformed | provider fails | Reason, correlation ID, "Try again" | "OpenAI didn't answer in time. You can try again or write your own step." + Ref | FR-025, FR-045 |
 | error: cost cap | existing cap reached | Reason, correlation ID, no retry | "Cloud suggestions have reached their usage limit for now. Everything else works as usual." + Ref | FR-025, FR-045 |
 | offline | no connection | No request attempted; form usable | "You're offline. Cloud suggestions need a connection…" | FR-025, FR-040 |
 | no account | account-less iOS | Cloud unavailable, on-device still offered | "Cloud suggestions need a Brain Buddy account. Suggestions on this iPhone don't." | edge case |
-| consent text changed | a stored consent was for an earlier list of data or another provider | The consent screen again, with a line saying what changed | "What we send has changed, so we're asking again." | FR-024 |
+| consent text changed | a stored consent was for an earlier list of data or another provider | The consent screen again (every "default: consent" line, the notes line included), with a line saying what changed | "What we send has changed, so we're asking again." | FR-024 |
 | proposals, notes shortened | as M-05 | Provider line plus the shortened-notes line | "Suggested by OpenAI from this task's details. Part of the notes was not considered." | FR-019 |
 | error: input too large | notes and project still too long after shortening (server 400 `navigator_input_too_large`) | Reason, Ref, no retry; the form stays usable | "These notes are too long for suggestions. Write your own step, or shorten the notes and try again." + Ref | FR-019, FR-045 |
 | interrupted | app backgrounded or sheet dismissed while "Asking OpenAI…"; or connection lost mid-request | Backgrounding or dismissal cancels quietly ("Suggestion stopped." · "Suggest again"); a lost connection shows the timeout copy with Ref | as M-07 timeout | FR-025, FR-045 |
@@ -312,6 +312,7 @@ review's projects step (D-03 hosting M-19). A web project-page entry is out of s
 | offline / interrupted | parked locally while offline; app closed before Continue | Works locally; shows again next time with the same tasks | "Offline. Changes are saved on this iPhone and sync later." | FR-014, FR-040 |
 | closed without Continue | swipe-down or Close | Means "not acknowledged": the parks stay unseen, and the sheet appears again at the next app open, but at most once per calendar day; it always appears as the first screen of the next review | — | FR-015 |
 | more parks waiting (account-less) | more than 10 parks were due at once (device safety valve) | Lists the 10 applied; after Continue the next batch is applied and shown | "These 10 tasks moved to Someday / maybe… More will follow after you continue." | FR-012, FR-014 |
+| account linked: extension restarted (added 2026-10-06, targeted re-review) | an account-less install was linked to an account while a "Keep 7 more days" was not yet sent (contracts/ios-commands.md §7) | One information row per such task, after any park rows, without a Return button; shown once; Continue or Close removes it. Auto-parks converted at linking are **not** listed (they count as seen) | ""Call the landlord" stays in Next. Its clock restarted when you signed in, so it has at least the 7 days you asked for." | FR-009, FR-014 |
 
 ### M-10 — Restart mode
 
@@ -519,7 +520,7 @@ review's projects step (D-03 hosting M-19). A web project-page entry is out of s
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default | chosen local day/time | One banner; tap → M-11 | "Weekly review / Your review time. The quick one takes about 5 minutes." | FR-036, US5-2 |
+| default | chosen day/time in the iPhone's current time zone (it travels with the device; the account's stored zone, which may be another device's, only governs markers) | One banner; tap → M-11 | "Weekly review / Your review time. The quick one takes about 5 minutes." | FR-036, US5-2 |
 | skipped this week | a complete or partial review happened in the preceding 6 days (any device) | No notification. On iOS the pending one is cancelled when the review is recorded. | — | FR-036 |
 | web | — | Never: the web sends no notifications; its only cue is the sidebar "Last review" line (D-01) | — | FR-036, FR-038 |
 | permission declined | iOS permission off | Nothing sent, nothing nags (M-12 note) | — | FR-036 |
@@ -975,9 +976,19 @@ Owner decisions taken when the task list was approved (spec Clarifications "Sess
 2026-10-06 (after /speckit-tasks)"); sign-off decisions 1–6 are unchanged:
 
 - **Consent line** (privacy checklist CHK011): M-07 "default: consent" and "consent
-  again after revoke", and the D-02 consent dialog, add "Notes are sent as written,
-  including any names in them." below "Nothing else is sent." (mockups
-  `M-07-cloud-consent.html`, `D-02-decision-dialog.html`).
+  again after revoke" (state rows and mockup frames), and the D-02 consent dialog, add
+  "Notes are sent as written, including any names in them." below "Nothing else is
+  sent." (mockups `M-07-cloud-consent.html`, `D-02-decision-dialog.html`); "consent
+  text changed" shows the same consent screen.
+- **Notification zone** (targeted re-review 2026-10-06): M-25 fires at the chosen day
+  and time in the iPhone's **current** zone (it is a local notification on that
+  device), while task classification on a signed-in device keeps the account's stored
+  zone (contracts/ios-commands.md §6). M-22 shows the next review at that same
+  device-local instant, and the web summary (D-03) at the slot in the browser's own
+  zone (contracts/http.md §5).
+- **Account linking** (targeted re-review 2026-10-06): M-09 gains the "account linked:
+  extension restarted" information row for a "Keep 7 more days" that was not yet sent
+  when an account-less install was linked (contracts/ios-commands.md §7).
 - **Dynamic Type up to AX5** (ux-a11y checklist CHK008): "Mobile viability" now covers
   every iOS screen; M-22 has a new "accessibility text size" state with a one-column
   grid and a scrolling step bar (mockup `M-22-review-summary.html`, new frame).

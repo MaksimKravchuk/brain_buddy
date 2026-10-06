@@ -57,8 +57,8 @@ client id it creates.
 | `review(ReviewCommand)` | see below | one request per case | mutates `GTDState.review` only |
 
 Every client id a command carries is `<prefix>_<lowercased UUID>` (`review_`,
-`decision_`, `bulk_`, `form_`, `task_`), the shape the server validates (http
-"Client-supplied ids").
+`decision_`, `bulk_`, `form_`, `task_`, `progress_`), the shape the server validates
+(http "Client-supplied ids").
 
 `ReviewCommand`: `acknowledgeExplainer(timeZone)` → `POST /review/explainer/acknowledge`
 with the device zone (FR-051; the command writes only the activation instant in
@@ -70,13 +70,16 @@ which runs because an activation instant is now known, so `review(…)` still mu
 compares `TimeZone.current` with `local.lastObservedTimeZone` on load, on foreground
 and on the system time-zone-change notification, queues `updateSettings(timeZone:)`
 when they differ and then records the new zone; a pulled zone that differs from the
-device's is never a reason to send, http §5; `lastObservedTimeZone` is first set to the
+device's is never a reason to send, http §5; a sent zone that equals the stored one is
+a server no-op with no FR-046 floor and no `revision` bump; `lastObservedTimeZone` is first set to the
 zone the device sends with the explainer acknowledgement or at onboarding, or, on a
 device that sends neither, to its zone when it first loads the review state);
 `acknowledgeParks([ParkAck])` → `POST /review/parks/acknowledge`;
 `startSession(StartSession)` (carries the client `sessionID`) → `POST /review/sessions`
 with `id` and `replace_open: true`;
-`progressSession(SessionProgress)` → `PATCH /review/sessions/{id}`;
+`progressSession(SessionProgress)` (carries a `progressID`, `progress_<lowercased
+UUID>`, minted in the command so a retry resends the same one) →
+`PATCH /review/sessions/{id}` with `progress_id`;
 `finishSession(FinishSession)` → `POST /review/sessions/{id}/finish` (only Done on the
 summary; leaving sends nothing but progress, FR-029);
 `grantNavigatorConsent(provider)` / `revokeNavigatorConsent(provider)` →
@@ -143,8 +146,12 @@ early.
   `acknowledgeParks` when every ack exists.
 - **Compaction** (`OutboxCompactor`): an unsent `decideTask` followed by its
   `undoDecision` cancels both (and the created follow-up task); an unsent
-  `bulkRelease` followed by its `undoBulkRelease` cancels both. Sent operations are
-  never modified (existing rule).
+  `bulkRelease` followed by its `undoBulkRelease` cancels both. `progressSession`
+  operations are never folded into each other, so each keeps the `progressID` it may
+  already have been sent with. Sent operations are never modified (existing rule).
+- **`undoDecision` answered 404** (http §3: the decision is already undone, e.g. a retry
+  of an undo whose response was lost): acknowledged as success, because the replay goal
+  (the decision is absent) holds; it is never set aside.
 - **409 stale on `decideTask`**: the existing refetch path (`SyncEngine+Push.swift`
   `handleFailure`/`refetch`) runs; after the refetched task is upserted, replay
   re-evaluates the decision. When the refetched task is parked for the decision's
@@ -175,8 +182,8 @@ early.
   | `acknowledgeExplainer` | idempotent, first wins | always succeeds; pulled `activatedAt` replaces the local one |
   | `updateSettings` | 409 on `expected_revision` mismatch | refetch state, re-apply only the fields this change set (field-level last writer wins), resend with the new revision |
   | `acknowledgeParks` | idempotent, unknown ids ignored | always succeeds |
-  | `startSession` | client `id`, `replace_open: true`; replay only by the same Idempotency-Key (the id is a label, http "Client-supplied ids"); the device keeps the key until success | never 409; if another device's open session was replaced, that device shows "review ended elsewhere" |
-  | `progressSession` | merged, never 409 (http §6) | adopt the merged session; if its `current_step` differs, show "review moved on elsewhere" |
+  | `startSession` | client `id`, `replace_open: true`; within the 24 h retention, replay by the same Idempotency-Key; after it, a stored session with the same owner, `id`, `mode` and `origin` answers as already applied and replaces nothing (the one de-duplication use of a client id, http "Client-supplied ids"); the device keeps the key until success | never set aside (an `id_conflict` cannot happen with UUIDs); if another device's open session was replaced, that device shows "review ended elsewhere" |
+  | `progressSession` | merged, no version conflict; replay-safe by the command's `progressID` at any age (http §6 "Progress is replay-safe") | adopt the merged session; if its `current_step` differs, show "review moved on elsewhere"; a retry answered as already applied is a success |
   | `finishSession` | idempotent | adopt the returned session |
   | `grant/revokeNavigatorConsent` | idempotent | revoke blocks locally at once |
 
@@ -184,13 +191,17 @@ early.
   (http §3), so no decision is lost (SC-007).
 
 - **Retry after the server's 24 h idempotency retention** (a lost response followed by
-  a long offline window): the device keeps the operation and its Idempotency-Key as
-  today and resends it. The server recognises a stored record that matches the retry
-  and answers as for a first delivery (http "Retry after the idempotency retention"),
-  so the device treats it as success; it is never set aside. Only a non-matching
-  record answers `id_conflict`, which is set aside with its Ref as before.
-  `ReviewSyncTests` and the golden trace "decision retried after the retention" cover
-  it (0 sync issues, the decision applied once).
+  a long offline window): the device keeps the operation, its Idempotency-Key and its
+  client ids as today and resends it unchanged, including the now-stale
+  `expected_revision`. For `decideTask`, `startSession` and `bulkRelease` the server
+  checks for a matching stored record (same owner, id and identifying fields) **before**
+  the revision and eligibility checks and answers as for a first delivery (http "Retry
+  after the idempotency retention"), so the device treats it as success; it is never
+  set aside. `progressSession` is de-duplicated by its `progressID` at any age (http §6),
+  `undoDecision` by the 404 rule above, and the other review commands are idempotent by
+  state (table above). Only a non-matching record answers `id_conflict`, which is set
+  aside with its Ref as before. `ReviewSyncTests` and the golden trace "decision
+  retried after the retention" cover it (0 sync issues, the decision applied once).
 
 - **Feature turned off on the server** (rollback, cohort removal): every write a
   review command or `decideTask` / `undoDecision` / `autoParkTask` / `bulkRelease` /
@@ -254,18 +265,29 @@ http §6), `projectsNeedingNextAction(in:)` (reuses `ProjectSummary.needsNextAct
 `Queries.swift:183`), `datesAhead(in:today:days: 14)`,
 `lastCountedReview(in:)` (completed and partial only), `askCount(in:now:settings:)`
 (widget; the same aggregate as `decisionQueue`), `explainerNeeded(in:)` (FR-051).
-The `timeZone` that classification uses is the owner's stored `time_zone` (the
-formulation-clock owner input) when signed in, so a device sitting in another zone
-classifies due-dated tasks exactly as the server parks them; account-less, it is the
-device zone. Times shown to the person use the device zone.
+**Which zone, for what** (a signed-in device may sit in a zone other than the stored
+one, http §5):
+
+| use | zone, signed in | zone, account-less |
+|---|---|---|
+| classification (`formulationClass`, `decisionQueue`, `dueAutoParks`, `askCount`, `restartCandidates`) | the owner's stored `time_zone` (the formulation-clock owner input), so a device sitting in another zone classifies due-dated tasks exactly as the server parks them | the device's current zone |
+| the weekly notification instant (FR-036, M-25) and the "next review" the device shows (M-22) | the device's **current** zone (`TimeZone.current`), never the stored zone: it is a local notification on this device and fires at the chosen day and time where the device is | the device's current zone |
+| any time or date shown to the person | the device's current zone | the device's current zone |
+
+So `ReviewReminderPlanner.nextFireDate` is always called with `timeZone:
+TimeZone.current`; it reads only `review_weekday` and `review_time` from `settings` and
+ignores `settings.time_zone`. On a device sitting in the stored zone its result equals
+the server's `next_review_at`; elsewhere it intentionally differs.
 
 Pure Core functions for behaviour that otherwise lives only in app or widget targets
 (so it is Linux-testable, testability finding campaign 1):
 
 - `ReviewReminderPlanner.nextFireDate(settings:lastCountedReview:now:timeZone:) -> Date?`
-  — the FR-036 rule (one per week, skipped after a counted review in the preceding
-  6 days, follows time-zone changes); the app's `ReviewReminderScheduler` only
-  registers what it returns.
+  — the FR-036 rule (one per week at `review_weekday` / `review_time` in `timeZone`,
+  the device's current zone per the table above; skipped after a counted review in the
+  preceding 6 days; follows time-zone changes of the device); the app's
+  `ReviewReminderScheduler` only registers what it returns, and re-registers on the
+  system time-zone-change notification.
 - `ReviewRoute.parse(_ url: URL) -> ReviewRoute?` and
   `ReviewEntryPlanner.start(for: .widgetDecisions, state:) -> [ReviewScreen]` — the
   deep link and the entry order of design.md (explainer, onboarding, While you were
@@ -298,13 +320,27 @@ Pure Core functions for behaviour that otherwise lives only in app or widget tar
 - `NavigatorProposalFilter.dropDuplicates(_:projectOpenTitles:)` — drops a proposal
   whose `FormulationKey` equals that of any open task of the project in the local
   store, not only the 20 titles sent (FR-019; contracts/navigator.md §2 rule 5).
+- `ReviewLayout.summaryColumns(isAccessibilitySize:)` and
+  `ReviewLayout.stepBarScrolls(isAccessibilitySize:)` — the Dynamic Type rule of design
+  "Mobile viability" and M-22 "accessibility text size": one summary column and a
+  sideways-scrolling step bar exactly at accessibility text sizes, two columns and a
+  fixed bar otherwise (owner decision 2026-10-06; FR-033, FR-034; T133, T134).
+- `DeviceZoneTracker.change(lastObserved:current:) -> TimeZone?` — the zone rule of §2
+  `updateSettings`: a zone to send only when the device's current zone differs from
+  `local.lastObservedTimeZone`, never because the pulled `time_zone` differs (owner
+  decision 2026-10-06; FR-035, US5-5; http §5; T151, T152).
+- `ReviewAccountLinking.convertLocalAutoParks(_:)` — the account-linking step of §7
+  (unsent `autoParkTask` → plain move to Someday counted as seen; unsent `extend`
+  decisions on those tasks dropped and listed; owner decision 2026-10-06; FR-014;
+  T091).
 
 ## 7. Persistence (`StoreDocument` v2)
 
 `StoreDocument.currentVersion` becomes 2. `StoreDocumentCoding.migrationStep(from: 1)`
 (`BrainBuddyPersistence/StoreDocumentCoding.swift:117`) adds an empty
-`base.review`/`local` and sets `local.activatedAt = nil`, `local.formDrafts = [:]` and
-`local.lastObservedTimeZone = nil` (§2 `updateSettings`).
+`base.review`/`local` and sets `local.activatedAt = nil`, `local.formDrafts = [:]`,
+`local.lastObservedTimeZone = nil` (§2 `updateSettings`) and
+`local.linkedExtensionNotices = []` (account linking below).
 Activation happens when the person first dismisses the auto-park explainer (M-26,
 FR-051), never at migration: account-less, that instant is `local.activatedAt`;
 signed in, the device queues `acknowledgeExplainer` and uses the server's
@@ -327,14 +363,34 @@ over the unsent outbox:
 - the converted parks count as seen: the device drops their local park markers and any
   unsent `acknowledgeParks` entries for them, so M-09 / "While you were away" does not
   offer them again on this or any device;
-- every other queued operation — `decideTask`, `undoDecision`, sessions, bulk
-  releases, settings, consent, park acknowledgements of other tasks — is kept as queued
-  and pushed as usual under the ordinary rules of §4 (a decision the server rejects
-  becomes a visible Sync issue with its Ref).
+- **unsent `extend` decisions** ("Keep 7 more days") are not pushed. The server starts
+  the clock of every task it receives at upload and clamps it to the activation the
+  linking acknowledgement records (formulation-clock §3), so such a task does not ask
+  for a decision on the server yet and an `extend` would predictably get 400
+  `extension_not_due` and become a Sync issue. The step removes each unsent
+  `decideTask` of type `extend` (and its `undoDecision`, if queued), keeps the task in
+  Next with the server's fresh clock — which gives it at least as much time as the
+  extension would have — and lists the task once on "While you were away" as an
+  information row without a Return button (design M-09 "account linked: extension
+  restarted"); the reason text is discarded with the operation, never sent or logged.
+  The list entry is device-local (`local.linkedExtensionNotices`, task ids only,
+  removed when M-09 is continued or closed);
+- every other queued operation — other `decideTask` types, `undoDecision`, sessions,
+  bulk releases, settings, consent, park acknowledgements of other tasks — is kept as
+  queued and pushed as usual under the ordinary rules of §4 (a decision the server
+  rejects becomes a visible Sync issue with its Ref).
+
+What linking does not carry over, by design: the server keeps no E6
+`review_park_acks` row for a converted park (it never saw a park), and it counts each
+task's consecutive stalled formulations from 0, because the device's local history is
+not uploaded; so the "parks returned" read-out and FR-005's third-stall offer start
+afresh for those tasks after linking. Account-less parks are visible only in the
+device's own data until then.
 
 The step is deterministic and runs once per linking; a Swift test asserts that, after
 linking and one sync against `BrainBuddyFakeServer`, every account-less park is in
-Someday on the server with `parked` null, nothing is back in Next, and there are
+Someday on the server with `parked` null, nothing is back in Next, an unsent `extend`
+was dropped and its task listed, the other decisions are applied, and there are
 0 sync issues.
 
 `local.formDrafts: [DraftKey: String]` holds unsaved form text (FR-052), keyed by

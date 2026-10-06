@@ -123,7 +123,10 @@ fails until every requirement has a test, so it is the full-feature gate and joi
     `park_floor_at` ≥ change + 7 d. Then sign in a second device that sits in another
     zone and has never changed zone, and open both repeatedly. **Expect**: the second
     device sends no zone change; the stored zone and `park_floor_at` stay as they are
-    (http §5, FR-035).
+    (http §5, FR-035). Move a device into the zone already stored. **Expect**: its
+    `PUT /review/settings` is a no-op: same `revision`, no new floor. With the stored
+    zone Berlin and a device in New York: its markers follow Berlin, its notification
+    and "next review" follow New York (ios-commands §6, FR-036).
 
 ## Scenario 3 — offline and account-less iOS (FR-014, FR-040, SC-007)
 
@@ -150,15 +153,24 @@ fails until every requirement has a test, so it is the full-feature gate and joi
 6. Account-less: dismiss the explainer at instant A, replay the store. **Expect**: every
    Next task's clock is clamped to A (post-replay activation step) and nothing parks
    before A + 14 d.
-7. Account-less with 3 local auto-parks (one seen on M-09, two not) and 2 decisions,
-   then sign in to an account against `BrainBuddyFakeServer`. **Expect**: the 3 tasks
-   are in Someday on the server with `parked` null, none is back in Next, M-09 shows
-   none of them, both decisions are applied, 0 sync issues (ios-commands §7, FR-014).
+7. Account-less with 3 local auto-parks (one seen on M-09, two not), 2 unsent
+   decisions of type `reformulate` and `waiting`, and 1 unsent `extend` on another
+   Next task, then sign in to an account against `BrainBuddyFakeServer`. **Expect**:
+   the 3 tasks are in Someday on the server with `parked` null, none is back in Next,
+   M-09 shows none of them; the `reformulate` and `waiting` decisions are applied; the
+   `extend` is not sent, its task is in Next with a fresh clock and M-09 lists it once
+   as "stays in Next" without a Return button; 0 sync issues (ios-commands §7, FR-014).
 8. Package test and trace: a decision is applied on the server, its response is lost,
-   the device stays offline for 2 days and retries with the same key. **Expect**: 200
-   as already applied (the server no longer holds the idempotency record but the
-   stored decision matches), the decision applied once, 0 sync issues. The same id
-   with a different task or type → 409 `id_conflict` (http "Client-supplied ids").
+   the device stays offline for 2 days and retries with the same key and the now-stale
+   `expected_revision`. **Expect**: 200 as already applied (the server no longer holds
+   the idempotency record but the stored decision matches, checked before the
+   revision), the decision applied once, 0 sync issues. The same id with a different
+   task or type → 409 `id_conflict` (http "Client-supplied ids"). A review progress
+   change (`active_seconds` 60 on `decisions`, `inbox_processed_delta` 1) retried after
+   2 days with the same `progress_id` → the session's active time and "Inbox
+   processed" grow once (http §6). A decision Undo retried after its first delivery
+   applied → 404, acknowledged as success; a bulk-release Undo retried → 200 with the
+   stored result.
 
 ## Scenario 4 — navigator (US3; M-05 – M-08, D-02)
 
@@ -229,7 +241,9 @@ fails until every requirement has a test, so it is the full-feature gate and joi
    `not_eligible`. A person onboarded 22 days ago with no counted review → restart mode;
    a person never onboarded → onboarding, no restart mode (FR-017).
 7. iOS: a partial review on Wednesday. **Expect**: Friday's pending notification is
-   removed (`ReviewReminderPlanner` in Core, plus a recorded manual device check);
+   removed (`ReviewReminderPlanner` in Core, plus a recorded manual device check); with
+   the stored zone `Europe/Berlin` and the device in `America/New_York`, the planner
+   returns Friday 16:00 New York time, not `next_review_at`;
    widget shows "3 ask" (the aggregate, including "moves tomorrow") and its medium-size
    chip opens the decision step after the entry-order screens.
 8. Every review screen and string. **Expect**: no streak, no "overdue", no red for age

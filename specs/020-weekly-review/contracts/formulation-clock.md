@@ -87,7 +87,7 @@ row of §3 is part of a normal task write and bumps `revision`.
 | activation for an owner (FR-016, FR-051): `activated_at` is set | every task in Next: if `formulation_started_at` is `null`, start a formulation at `activated_at`; otherwise `formulation_started_at = max(formulation_started_at, activated_at)` (same `formulation_id`, the **activation clamp**); in all cases `formulation_park_floor_at = max(existing, activated_at + 14 d)`. So nothing asks before `activated_at + T` and nothing parks before `activated_at + 14 d` |
 | sweep finds a Next task with `formulation_started_at = null` after activation (old-client save or rollback repair) | start a formulation at `now` with `formulation_park_floor_at = now + 14 d` |
 | the sweep runs for an owner after a gap of ≥ 24 h since its last effective run for that owner (flag off then on, outage) | `owner_park_floor_at = max(existing, now + 7 d)`, so a visible "moves to Someday tomorrow" marker precedes every park that the gap made due (SC-006) |
-| owner `time_zone` changes | every Next task with a due date: `formulation_park_floor_at = max(existing, now + 7 d)` (the FR-046 floor), because `due_start` moves with the zone |
+| owner `time_zone` changes (the new value differs from the stored one; a `time_zone` equal to the stored zone is no change and raises no floor, http §5) | every Next task with a due date: `formulation_park_floor_at = max(existing, now + 7 d)` (the FR-046 floor), because `due_start` moves with the zone |
 
 **Closing a formulation** (§4): the formulation **reached "asks for a decision"**
 (FR-005) iff `formulation_extended_at` is set (an extension is only allowed once the

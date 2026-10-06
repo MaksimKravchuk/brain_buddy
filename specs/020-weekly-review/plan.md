@@ -312,7 +312,9 @@ frontend/src/
 │                            ReviewSettingsSection.tsx, navigatorInput.ts (incl. the
 │                            project-wide duplicate filter), activeTime.ts (SC-004),
 │                            stallRecommendation.ts (FR-007), wywaPresentation.ts
-│                            (FR-015 once a day), FormulationBlock.tsx (D-06), __tests__/
+│                            (FR-015 once a day), FormulationBlock.tsx (D-06),
+│                            deviceZone.ts (FR-035), reviewSlot.ts (next review in the
+│                            browser's zone, FR-033/FR-036), __tests__/
 ├── pages/PrivacyPolicyPage.tsx                # retention/export wording
 └── test/allureTaxonomy.ts                     # /features/review/ rule
 frontend/tests/e2e/weekly-review.spec.ts (new); frontend/tests/allure.fixtures.ts (path rule)
@@ -490,8 +492,10 @@ widget targets; the web gets one feature folder. Router and module file names av
 - Account linking (owner decision 2026-10-06; FR-014): before an account-less store is
   uploaded at sign-in, the Core step `ReviewAccountLinking.convertLocalAutoParks`
   turns every unsent `autoParkTask` into an ordinary `transitionTask` move to Someday
-  and marks those parks seen; decisions, sessions and the rest of the outbox push as
-  usual (contracts/ios-commands.md §7).
+  and marks those parks seen, and drops each unsent `extend` decision (the server's
+  fresh clock would answer `extension_not_due`), listing its task once on M-09 as kept
+  in Next; the other decisions, sessions and the rest of the outbox push as usual
+  (contracts/ios-commands.md §7).
 - M-09 sheet at app open when unseen parks exist: per-row "Return to Next", "Return all
   N", "Continue" (acknowledges); swipe-down does not acknowledge and the sheet shows
   again at most once a day (Core `WhileAwayPresentation` with
@@ -634,7 +638,10 @@ widget targets; the web gets one feature folder. Router and module file names av
   nothing) and at onboarding, then changed only when a device's own zone changes
   (owner decision 2026-10-06; iOS `local.lastObservedTimeZone`, web
   `bb.reviewLastZone…`; contracts/http.md §5), so two devices in different zones never
-  alternate it.
+  alternate it; a PUT with the stored zone is a no-op. The stored zone drives
+  classification and `next_review_at`; each client fires (iOS) and shows the next
+  review in its own current zone (iOS `ReviewReminderPlanner` with `TimeZone.current`,
+  web `reviewSlot.ts`).
 - **iOS**: onboarding once (M-12) then notification permission prompt; one weekly local
   notification, skipped per FR-036 (R17), with the decision in Core
   (`ReviewReminderPlanner`); widget "N ask" chip (the `asks_for_decision` aggregate)
@@ -681,9 +688,11 @@ widget targets; the web gets one feature folder. Router and module file names av
 | Device clock ahead of server | due parks evaluated with the last observed server offset; online, the device parks locally only after `applied: true`; offline, the optimistic park gets `applied: false` on push and is not re-issued | R9, ios-commands §5 |
 | Review idle for 7 days | the sweep closes it as partial or abandoned; the device that had it shows "closed after a week" with its decisions kept | http §9, design M-11 / M-13 / D-03 |
 | Idempotent replay / lost write after record | existing `_reconcile_idempotent_result` with new prefixes | R7 |
-| Retry after the 24 h idempotency retention (lost response, long offline window) | a stored record that matches the retry (same kind and identifying fields) answers as already applied, nothing applied twice; only a non-matching record is `id_conflict` (owner decision 2026-10-06) | http "Client-supplied ids", ios-commands §4 |
-| Account-less install linked to an account with unsent device parks | the parks become ordinary moves to Someday, marked seen; decisions and sessions push as usual; nothing returns to Next (owner decision 2026-10-06) | ios-commands §7 |
-| Two signed-in devices in different time zones | only a device whose own zone changed sends a zone change; the other never resets it, so the FR-046 floor is not raised repeatedly (owner decision 2026-10-06) | http §5 |
+| Retry after the 24 h idempotency retention (lost response, long offline window) | a stored decision, session or bulk release that matches the retry (same owner, id and identifying fields) answers as already applied, checked before the stale `expected_revision`; nothing applied twice; only a non-matching record is `id_conflict` (owner decision 2026-10-06; constitution IV exception in Complexity Tracking) | http "Client-supplied ids", "Retry after the idempotency retention", ios-commands §4 |
+| Session progress retried after a lost response | each PATCH carries a `progress_id`; a known id with the same body digest is not merged again, at any age, so active time and "Inbox processed" are counted once and a late retry never rewinds `current_step` | http §6 "Progress is replay-safe" |
+| Undo retried after a lost response | decision undo: 404 "already undone" is a success on the device; bulk-release undo: an already undone release answers 200 with its stored result | http §3, §6; ios-commands §4 |
+| Account-less install linked to an account with unsent device parks | the parks become ordinary moves to Someday, marked seen; an unsent "Keep 7 more days" is dropped (the server's fresh clock would reject it as `extension_not_due`) and its task is listed once on M-09 as kept in Next; other decisions and sessions push as usual; nothing returns to Next (owner decision 2026-10-06) | ios-commands §7, design M-09 |
+| Two signed-in devices in different time zones | only a device whose own zone changed sends a zone change; the other never resets it, so the FR-046 floor is not raised repeatedly; a sent zone equal to the stored one is a no-op; classification uses the stored zone, the notification and the shown "next review" use each device's current zone (owner decision 2026-10-06) | http §5, ios-commands §6 |
 | Undo after another change (task or created follow-up) | 409 `undo_unavailable`; design "undo didn't apply": "Couldn't undo: "<title>" changed on another device. It's in <list> now." + Ref | R8, design M-03/D-02 |
 | Bulk release with stale items | 200 with `skipped`; M-10/M-15 partial-failure copy; undo restores clocks exactly and names skipped ones | http §6 |
 | Sweep fails for one owner | logged with owner id, `type(exc).__name__` and a reason code (never `str(exc)`); other owners and other sweeps continue | http §9 |
@@ -988,7 +997,10 @@ Campaign 2 (`020-weekly-review-c2`, the last allowed campaign) dispositions are 
   extension precondition excluded `park_due`, bulk-release undo had no clock to restore,
   `client_occurred_at` had no defined rule). Those are now aligned with `data-model.md`
   (E-numbers referenced from http and ios contracts); additive changes; backend before
-  clients.
+  clients. Client ids (constitution IV) — PASS with one justified exception: the
+  matching-record replay after the 24 h idempotency retention uses a client id for
+  de-duplication (never authorization), bounded as stated in Complexity Tracking and
+  ADR-0027 §7.
 - Observability — PASS: Ref on every failure; reason codes; sweep and decision logs.
 - Mobile/resilience — PASS: offline outbox for all task/review commands with a stated
   conflict rule per review command; yield rule; idempotent parks; resumable review;
@@ -1005,4 +1017,5 @@ Delivery risk: **HIGH / ASK** remains for the feature (PR-01, PR-02, PR-07, PR-0
 |---|---|---|
 | Review records stored in the Tasks module's SQLite file instead of ADR-0001's separate Review module | atomic decision + task write, exact Undo, one idempotency record per decision | separate store needs a saga for every decision and a second export/purge path (R1); recorded by ADR-0027 |
 | Clock rule implemented three times (Python, Swift, TS key only) | iOS must work offline/account-less; web shows the cosmetic-edit note | server-only rule cannot serve offline iOS; mitigated by one byte-identical vector file with a drift test (R3) |
+| A client-supplied record id is a de-duplication input in one case (constitution IV: client ids are "observability labels only and never authorization or idempotency inputs"): the matching-record replay of contracts/http.md "Retry after the idempotency retention" for decisions, sessions, bulk releases and session progress (`progress_id`) | owner decision 2026-10-06 (offline-sync CHK023): a device that lost a response and stays offline longer than the 24 h idempotency retention must get its retry answered as already applied, not as a conflict or a second application; after the retention the client id is the only thing identifying the retry. Mitigations: owner-scoped `(owner_id, id)` lookup, never an authorization input; fixed `<prefix>_<uuid>` shape (422 otherwise), so no content travels in it; match only on equal identifying fields (progress: body digest); a match writes nothing and is checked before `expected_revision` and eligibility; any mismatch is 409 `id_conflict`; recorded as a bounded exception in ADR-0027 §7 | a longer idempotency retention only moves the window (offline can last weeks), keeps content-bearing response bodies longer and grows `idempotency_records` for every owner; treating the retry as a conflict contradicts the owner decision and would set aside work the server already holds |
 | Possible first third-party iOS dependency (PR-09) | FR-023 (a) downloadable on-device model; Russian is not listed as supported by Apple's model (unverified, treated as unsupported) | isolated behind `NavigatorModel`, app target only, approved by the owner (NC-2), gated by a dependency-exception ADR and its own ASK slice; Core AI's raw framework without the package would need a hand-written tokenizer/decoder (`research-on-device-model.md` §2) |

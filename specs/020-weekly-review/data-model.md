@@ -90,7 +90,7 @@ One row per owner. Columns: `owner_id PK`, `revision`, `payload` (JSON).
 | `owner_park_floor_at` | datetime \| null | null | `threshold_changed_at + 7 d` on every change (FR-039) |
 | `review_weekday` | 1..7 (ISO, Monday = 1) | 5 (Friday) | |
 | `review_time` | `HH:MM` | `16:00` | local wall time |
-| `time_zone` | IANA name | `UTC` until a client sends one | validated with `zoneinfo`; set from the device zone by the activating explainer acknowledgement (http §5) and on onboarding; afterwards changed only when a device's **own** zone changes (that device's last observed zone, E10 / E11), never because a device's zone merely differs from the stored one (FR-035, US5-5; owner decision 2026-10-06) |
+| `time_zone` | IANA name | `UTC` until a client sends one | validated with `zoneinfo`; set from the device zone by the activating explainer acknowledgement (http §5) and on onboarding; afterwards changed only when a device's **own** zone changes (that device's last observed zone, E10 / E11), never because a device's zone merely differs from the stored one (FR-035, US5-5; owner decision 2026-10-06); a PUT with the stored value is no change (no FR-046 floor, no `revision` bump, http §5). Used for classification and `next_review_at`; the notification and the "next review" a client shows use that client's current zone (http §5) |
 | `revision` | int ≥ 1 | 1 | optimistic concurrency for PUT |
 
 ## E3. Review session — table `review_sessions`
@@ -108,10 +108,11 @@ PK `(owner_id, id)`; index `(owner_id, status, started_at)`.
 | `origin` | `ios \| web \| macos` | shown on the resume card (M-11) |
 | `current_step` | step code | resume point (US4-7); last writer wins (http §6) |
 | `steps` | map step code → `pending \| finished \| skipped`, plus `finished_empty: bool` | merged monotonically (`finished` > `skipped` > `pending`) |
-| `active_seconds_by_step` | map step code → int seconds | SC-004: clients add the seconds a step was on screen and in use, counting a gap of more than 2 minutes without interaction as 0, and never counting time in the background; the server adds the reported deltas. Content-free. The client rule is one pure accumulator per client with an injected clock (Core `ActiveTimeAccumulator`, web `features/review/activeTime.ts`), checked against the `active_time` section of `review_flow_vectors.json` (plan Test strategy) |
+| `active_seconds_by_step` | map step code → int seconds | SC-004: clients add the seconds a step was on screen and in use, counting a gap of more than 2 minutes without interaction as 0, and never counting time in the background; the server adds the reported deltas, each once (`applied_progress` below). Content-free. The client rule is one pure accumulator per client with an injected clock (Core `ActiveTimeAccumulator`, web `features/review/activeTime.ts`), checked against the `active_time` section of `review_flow_vectors.json` (plan Test strategy) |
 | `decision_queue` | list of task ids, in formulation-clock §5 queue order | snapshot of the `asks_for_decision` aggregate taken when the decision step first opens; ids only (edge case "threshold changed during an open review") |
 | `set_aside_task_ids` | list of task ids | "Not now" (FR-050); non-empty excludes the session from SC-002 |
-| `counts` | `{done, reformulated, first_step, waiting, someday, cancelled, extended, inbox_processed, kept, moved_to_next}` | the ten FR-033 counters; maintained from E4 `review_counts_as` inside the same transaction; `inbox_processed` from progress deltas (an Inbox Undo sends −1) |
+| `applied_progress` | map `progress_…` id → SHA-256 hex of the canonical progress body | server-internal replay protection for `PATCH /review/sessions/{id}` (http §6 "Progress is replay-safe"): a known id with the same digest is not merged again, at any age; ids and digests only, no content; kept while the session is `open`, dropped when it ends; not on the wire |
+| `counts` | `{done, reformulated, first_step, waiting, someday, cancelled, extended, inbox_processed, kept, moved_to_next}` | the ten FR-033 counters; maintained from E4 `review_counts_as` inside the same transaction; `inbox_processed` from progress deltas (an Inbox Undo sends −1), each applied once per `progress_id` |
 | `qualifying_activity` | bool | true after ≥ 1 item decision or ≥ 1 step other than `summary` finished (not skipped) with nothing to decide (FR-029) |
 | `clear_start` | `yes \| not_really \| null` | FR-033 |
 | `revision` | int | bumped on every change; informative only (progress is merged, http §6) |
@@ -142,8 +143,8 @@ days ago" (FR-038) and the SC-001 weekly read-out.
 
 **Wire subset**: `SessionResponse` carries every field above except
 `set_aside_task_ids` (sent as `set_aside_count`), `decision_queue` (served through the
-`decisions` queue) and the per-step `finished_empty` flags; the exact list is in
-contracts/http.md §6.
+`decisions` queue), the per-step `finished_empty` flags and `applied_progress`; the
+exact list is in contracts/http.md §6.
 
 ## E4. Review decision — table `review_decisions`
 
@@ -227,7 +228,9 @@ ids and instants. Content-free.
 PK `(owner_id, id)` (`bulk_…`, client-supplied when made on iOS); payload
 `kind (restart | inbox_remainder)`, `session_id?`, `released: [{task_id,
 revision_after, previous_state, clock_before?}]`, `skipped: [{task_id, reason: stale |
-not_eligible}]`, `created_at`, `undone_at?`. `previous_state` is `next` (restart) or
+not_eligible}]`, `created_at`, `undone_at?`, `undo_result?: {restored: [task_id],
+skipped: [{task_id, reason: stale}]}` (ids and codes only; returned unchanged when the
+undo is retried, http §6). `previous_state` is `next` (restart) or
 `inbox` (Inbox remainder). `clock_before` is set for Next tasks: `{formulation_id,
 started_at, extended_at, extension_reason, park_floor_at, stalled_before}`, so Undo
 puts each task back "as it was, including its clock" (M-10, FR-017) without starting a
@@ -235,8 +238,8 @@ new formulation. Undo restores each released task whose revision is still
 `revision_after`; others are reported as `skipped` (M-10 / M-15 "undone, some
 skipped"). Ids, instants and codes only, **except** `extension_reason`, which is
 content-bearing: every `clock_before` is nulled 7 days after `created_at` by the
-retention part of the sweep (as E4 `undo`), after which Undo returns
-`undo_unavailable`.
+retention part of the sweep (as E4 `undo`), after which an Undo that never happened
+returns `undo_unavailable` (an already applied Undo still returns its `undo_result`).
 
 ## E8. Navigator consent — table `navigator_consents`
 
@@ -278,7 +281,9 @@ real-use acceptance rate (plan Test strategy, read-out). Content-free. Rows olde
   once-per-day rule of FR-015), `serverClockOffset` (last observed `server_now` minus
   device time, signed in only; ios-commands §5), `lastObservedTimeZone` (the IANA zone
   this device last observed; a zone change is sent only when the device's current zone
-  differs from it, ios-commands §2; removed with the store on sign-out).
+  differs from it, ios-commands §2; removed with the store on sign-out),
+`linkedExtensionNotices` (task ids only: tasks whose unsent "Keep 7 more days" was
+dropped when an account-less install was linked, shown once on M-09; ios-commands §7).
 
 Device-local retention mirrors the server (contracts/ios-commands.md §5
 `runLocalReviewMaintenance`): local decision undo snapshots and bulk-release clock
