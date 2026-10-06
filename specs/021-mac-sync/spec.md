@@ -27,6 +27,18 @@ The owner delegated the detail ("ты сам справишься, особо м
 - Q: Should the indicator and the waiting count appear on every sync and every edit? → A: No. The indicator appears only for a sync longer than 1 s and stays at least 0.5 s. The waiting count shows while online only after a change has waited 10 s (FR-012, FR-013). Owner: "Пороги".
 - Q: Should a Mac sign-out with nothing unsent be confirmed? → A: Yes, "Sign out?", as on the iPhone, because the account's data leaves this Mac (FR-017). Owner accepted.
 - Q: Should a pre-feature archived project that unarchives empty explain itself? → A: Yes, with one neutral line saying its tasks are still in their lists (FR-027, US5-4). Owner accepted.
+### Session 2026-10-06 (after /speckit-plan)
+
+The owner delegated these. Each one resolves a contradiction or gap the plan found:
+
+- Task deletion and reorder: no client or server deletes or reorders a task today, so FR-007 and FR-009 no longer mention them. The deleted-task edge case now covers completed or cancelled tasks.
+- SC-001 runs in both directions, so FR-032 makes the iPhone (foreground) and the web (visible tab) fetch at least every 60 s.
+- Completion dates after the first sign-in use the upload day, as on the iPhone; this is recorded in Assumptions. Keeping the original dates would need client timestamps on the server, which is out of scope.
+- The pre-upgrade backup outliving sign-out is intended, since it was never account data (Assumptions).
+- A second copy of the app gets design X-08 and is listed in FR-017.
+
+### Session 2026-10-06 (design sign-off, continued)
+
 - Design gaps G-1 – G-3 were resolved as recommended: "Not synced yet" and day/date wording (FR-012), and the deletion-cancelled note inside the sign-in sheet (FR-017).
 
 ## User Scenarios & Testing *(mandatory)*
@@ -132,7 +144,7 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 ### Edge Cases
 
 - **Two Macs, or a Mac and an iPhone, editing the same task offline**: last change to reach the account wins per field (FR-011). Changes to different fields of the same task both survive.
-- **Same task deleted on one device and edited on another**: the deletion stands. The edit becomes a sync issue in plain words ("Couldn't save your change to 'X': it was deleted on another device.") with a reference id.
+- **Same task completed or cancelled on one device and edited on another**: each field ends with the change that reached the account last (FR-011). An edit the account no longer accepts becomes a sync issue in plain words, with a reference id.
 - **A task added on the Mac offline to a project archived elsewhere meanwhile**: when the Mac syncs, the task keeps its other fields and lands without that project. The person sees a sync issue saying the project was archived.
 - **Duplicate names**: creating a project or tag on the Mac whose name exists on the account (created elsewhere while offline) merges into the existing one instead of failing or duplicating.
 - **Session expires while offline**: nothing is shown until the Mac is online and the server refuses the session. Then the footer shows "Sign in again to sync", and waiting changes are kept and sent after sign-in.
@@ -140,7 +152,7 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 - **Sign-out with unsent changes**: the person is warned with the count and can keep waiting, or sign out and remove the unsent changes from this Mac (as on the iPhone). It never happens silently.
 - **Very large account** (thousands of tasks): the first load does not block the window. Local data, or an empty state with the indicator, is usable at once, and the rest fills in.
 - **Clock on the Mac is wrong**: "Synced N min ago" never shows a negative or future time ("just now" instead). Ordering of changes does not depend on the Mac's clock.
-- **App open on two Macs, or two copies on one Mac**: two processes never corrupt local data. A second copy on the same Mac either refuses to start or shares safely, and the person is told in plain words.
+- **App open on two Macs, or two copies on one Mac**: two processes never corrupt local data. A second copy on the same Mac brings the running window to the front and quits. Only if it cannot reach the running copy does it say "Brain Buddy is already open." in a plain alert (design X-08).
 - **Server unreachable for days**: changes keep waiting with no repeated alerts. The footer stays at its compact warning with the oldest waiting change's age in details.
 - **Old iPhone build still in use while the server moves to lossless archive**: the old build keeps working. Tasks in archived projects stay visible and editable, and nothing crashes or drops the project. The new semantics apply on the server whichever client archives.
 - **Voice-to-draft and quick capture offline**: unchanged; they never wait for the network.
@@ -167,7 +179,7 @@ Archiving a project hides it from active navigation but keeps its tasks attached
   - periodically while the app is open, at least once every 60 s while it is active.
   - A "Sync now" command MUST exist (menu and status popover) but MUST never be needed.
 - **FR-007**: The Mac MUST sync all of these:
-  - tasks with all their fields: title, notes, list, Waiting's waiting-for, project, tags, dates, priority, manual order, completion, cancellation, deletion;
+  - tasks with all their fields: title, notes, list, Waiting's waiting-for, project, tags, dates, priority, order, completion, cancellation. No client deletes or reorders a task today, so neither is synced;
   - subtasks and comments;
   - projects: name, colour, archive state, desired outcome;
   - tags: name, colour, deletion.
@@ -175,7 +187,7 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 - **FR-009**: Incoming changes MUST NOT do any of the following:
   - move the person's current selection, scroll position or keyboard focus;
   - overwrite text the person is editing and has not saved;
-  - reorder the list under the pointer while the person is dragging.
+  - move the row under the pointer while the person is pointing at or editing it.
 - **FR-010**: Work on the Mac MUST never wait on the network. Capture, quick-capture hotkey, voice-to-draft, Smart Add parsing, edits and the Mac's local Waiting/Someday/Project reviews MUST work identically online and offline.
 - **FR-011**: Conflicts MUST resolve exactly as they do on the iPhone today:
   - the change that reaches the account last wins, per field;
@@ -212,7 +224,8 @@ Archiving a project hides it from active navigation but keeps its tasks attached
   - sign-in;
   - sign-out confirmation: "Sign out?" when nothing is unsent, because the account's data leaves this Mac, or the unsent-changes warning (FR-018);
   - account switch refusal (FR-004);
-  - the one-time upgrade notice (FR-022).
+  - the one-time upgrade notice (FR-022);
+  - the "already open" alert, shown only when a second copy cannot reach the running one (X-08).
 
   When signing in cancels a pending account deletion, the sign-in sheet says so before it closes, as the iPhone does. This is not a separate dialog.
 - **FR-018**: Signing out with unsent changes MUST warn with the count and offer two choices: keep the changes (cancel sign-out) or sign out and remove them from this Mac. This matches the iPhone.
@@ -238,6 +251,7 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 - **FR-029**: The Mac MUST send nothing to the server until the person signs in. After sign-in it sends only what FR-007 lists. Voice audio and voice transcription stay on the Mac.
 - **FR-030**: Logs and metrics from the Mac, the iPhone and the server MUST carry only ids, counts, timings and error classes. They MUST never carry task, project or tag text, comments, desired outcomes or the person's email.
 - **FR-031**: Requests from the Mac MUST identify the client type and version, as the iPhone does, so that server-side failures can be attributed to Mac builds.
+- **FR-032**: So that SC-001 holds in every direction, the iPhone while it is in the foreground and the web while its tab is visible MUST also fetch changes made elsewhere at least every 60 s, with no action from the person. Neither shows anything for it beyond FR-012/FR-019 on the iPhone.
 
 ### Key Entities
 
@@ -271,4 +285,6 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 - The web stays online-only and already shows request failures with a reference id. It gets no sync status line.
 - No AI, paid provider or new consent is involved. Signing in is the person's explicit act to sync.
 - The Mac app stays a locally built app (no App Store, signing or notarisation work), as today.
+- The server stamps creation, completion and waiting-since times itself. After the Mac's first sign-in, tasks completed on the Mac before the upgrade show the upload day as their completion date in History, as the iPhone's account-less upload does today. Order, due dates and every other field are kept. Preserving original timestamps would need the server to accept client times, which is out of scope.
+- The pre-upgrade backup (FR-021) holds only the person's own pre-upgrade Mac data. It may outlive a sign-out because it was never account data; data retention documents it.
 - 020 PR-06 adds a sidebar row to the Mac app before this feature's Mac UI lands. The two are sequenced, not merged.

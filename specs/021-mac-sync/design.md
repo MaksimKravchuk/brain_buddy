@@ -81,6 +81,7 @@ Rules shared by both platforms:
 | X-05 | macOS app-modal alert at launch | One-time upgrade notice | Only when the old local store can't be read: says so once, says where the file is, then starts empty. The normal upgrade is silent | FR-020, FR-021, FR-022, FR-017 |
 | X-06 | macOS sidebar + project view | Archived project | Archive keeps tasks; the "Archived projects" section works signed in; the archived project view with "Unarchive"; Mac copy changes from "restore" to "unarchive" | FR-024, FR-025, FR-026, FR-027, FR-028 |
 | X-07 | macOS menu bar + toolbar | "Sync now" and account menu items | File › "Sync now" ⌘R; app menu "Sign in…" / "Sign in again…" / "Sign out…"; toolbar "Refresh" removed | FR-006, FR-001 |
+| X-08 | macOS system alert | Second copy of the app | Brings the open window forward; alert only if unreachable | edge case "two copies" |
 | M-01 | iPhone list screens, Lists hub, Settings › Sync | List-screen sync status, aligned | Same states and wording as X-01; indicator instead of "Syncing…"; failure only after 60 s; attention rows act (Retry, Sign in again, open Sync issues); before/after | FR-019, FR-012, FR-013, FR-014, FR-015, FR-017 |
 | M-02 | iPhone Projects, Archived projects, project screen | Archived projects with unarchive | Archive copy no longer says tasks lose the project; archived projects open and list their tasks; "Unarchive" by swipe and toolbar | FR-024, FR-025, FR-026, FR-027 |
 | D-01 | web sidebar + project page | Archived projects with unarchive | A collapsed "Archived projects" disclosure under Projects; the archived project page with "Unarchive"; archive hint line | FR-024, FR-025, FR-026, FR-027 |
@@ -230,6 +231,16 @@ disabled.
 | keyboard | ⌘R anywhere in the main window, also while typing | Same as "Sync now" in the popover; the popover does not open | — | FR-006 |
 | dark mode | Dark | System menus | — | — |
 | loading / empty / error / partial / offline | **n/a**: the menu reflects X-01 and shows no message of its own | — | — | — |
+
+### X-08 — Second copy of the app (macOS, added 2026-10-06 from plan gap G-8)
+
+There is no mockup: it is a standard system alert.
+
+| state | trigger | what the user sees | copy | FR/SC refs |
+|---|---|---|---|---|
+| default | a second copy launches while one is running | Nothing new: the running window comes to the front and the second copy quits | — | edge case "two copies" |
+| unreachable | the running copy cannot be brought forward | One standard alert, default button "OK", then the second copy quits | "Brain Buddy is already open." / "Switch to the open window to keep working." | edge case "two copies", FR-017 |
+| loading / empty / error / partial / offline / dark | **n/a**: system alert | — | — | — |
 
 ### M-01 — List-screen sync status, aligned (iPhone)
 
