@@ -10,18 +10,18 @@
   ASK-class change (ADR-0008, ADR-0012: `scripts/` and gate-integrity guarded files).
   Its acceptance still rides on the owner's recorded ASK approval of that PR.
 - **Source**: `specs/020-weekly-review/adr-draft.md`, copied without changes to the
-  decision text.
+  decision text except the validator wording quoted in Decision §6, aligned to the
+  design-skill test this slice adds.
 - **Supersedes in part**: ADR-0006, only "Weekly Review remains explicitly deferred"
-  (Context, lines 29-31), audit row B-09's "do not turn `due Sun` into product state
-  until Weekly Review cadence is separately accepted" (line 81), and the UI-control
-  row "Weekly review coming later — keep visibly non-interactive until its accepted
-  workflow exists" (line 322). Build-contract open item D-11
-  (`docs/vnext-cloud-design-build-contract.md:757`, "Define cadence, timezone, and
-  due calculation before showing a badge") is closed by this record.
-- **Amends**: ADR-0001, only the **Review** module row (line 61), the
-  `WeeklyReview`/`WeeklyReviewOutcome` model (lines 266-293), the
-  `/weekly-reviews` endpoints (lines 468-470) and the `reviews/{owner_id}/…json`
-  storage line (line 619), for **native tasks**. The capture-based review model stays
+  (Context), audit row B-09's "do not turn `due Sun` into product state until Weekly
+  Review cadence is separately accepted", and the UI-control row "Weekly review
+  coming later — keep visibly non-interactive until its accepted workflow exists".
+  Build-contract open item D-11 (`docs/vnext-cloud-design-build-contract.md`, "Define
+  cadence, timezone, and due calculation before showing a badge") is closed by this
+  record.
+- **Amends**: ADR-0001, only the **Review** module row, the
+  `WeeklyReview`/`WeeklyReviewOutcome` model, the `/weekly-reviews` endpoints and the
+  `reviews/{owner_id}/…json` storage line, for **native tasks**. The capture-based review model stays
   reserved for the Organize/Capture tranche and is not built here.
 - **Narrows**: ADR-0019/ADR-0021 flag rule: adds one runtime-managed flag,
   `weekly_review`, default OFF.

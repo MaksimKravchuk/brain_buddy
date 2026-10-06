@@ -271,6 +271,8 @@ class SwiftAndSliceCoverageTests(unittest.TestCase):
         report = self.report(out)
         self.assertEqual(sorted(report["coverage"]), ["FR-001", "SC-002"])
         self.assertEqual(report["uncovered"], [])
+        # A consumer must be able to tell a slice check from the full gate.
+        self.assertEqual(report["requirements_filter"], ["FR-001", "SC-002"])
 
     def test_requirements_filter_still_fails_a_listed_uncovered_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -308,6 +310,7 @@ class SwiftAndSliceCoverageTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertEqual(self.report(out)["uncovered"], ["FR-002", "FR-041", "FR-047"])
+        self.assertIsNone(self.report(out)["requirements_filter"])
 
     def test_requirements_filter_rejects_an_id_spec_does_not_define(self) -> None:
         """A typo or a stale manifest id must not pass as 'nothing to check'."""

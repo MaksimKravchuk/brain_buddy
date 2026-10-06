@@ -225,6 +225,30 @@ class InvariantEnforcementTests(unittest.TestCase):
             )
             self.assertIn("check-specs runs feature requirement coverage", report)
 
+    def test_narrowing_feature_requirement_coverage_in_check_specs_is_caught(self) -> None:
+        line = "\tpython3 scripts/check_requirement_coverage.py specs/019-miro-like-crt-canvas\n"
+        for suffix in (" --requirements 019-FR-001", " || true"):
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as tmp:
+                report = self._assert_invariant_fires(
+                    tmp,
+                    "Makefile",
+                    lambda text, suffix=suffix: text.replace(line, line[:-1] + suffix + "\n"),
+                )
+                self.assertIn("check-specs runs feature requirement coverage", report)
+
+    def test_slice_filter_in_a_gate_recipe_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "Makefile",
+                lambda text: text.replace(
+                    "check-specs:\n",
+                    "check-specs:\n\tpython3 scripts/check_requirement_coverage.py"
+                    " specs/020-weekly-review --requirements 020-FR-001\n",
+                ),
+            )
+            self.assertIn("no slice-filtered requirement coverage in the gates", report)
+
     def test_skipping_external_adapter_pin_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = self._assert_invariant_fires(

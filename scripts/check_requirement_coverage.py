@@ -64,7 +64,10 @@ QUALIFIED_ID_RE = re.compile(r"^(\d{3})-((?:FR|SC)-\d+)$")
 # The two Swift trees are the iOS package's test targets and the macOS host
 # tests. Some requirements are honestly testable only there (feature 020,
 # research R19). The iOS app target has no test target, and `ios/BrainBuddy`
-# and both `Sources` trees are product code, so they stay out.
+# and both `Sources` trees are product code, so they stay out. CI runs no
+# `macos/` lane: an id named under `macos/Tests` proves only that a test exists,
+# so a requirement traced there also needs the recorded macOS-host run that
+# its feature's plan names, which /speckit-accept checks.
 DEDICATED_TEST_TREES = (
     "backend/tests",
     "frontend/tests",
@@ -218,7 +221,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(
             json.dumps(
-                {"feature": number, "coverage": result, "uncovered": uncovered},
+                {
+                    "feature": number,
+                    "coverage": result,
+                    "uncovered": uncovered,
+                    # null for the full-feature gate; the checked ids for a slice.
+                    "requirements_filter": (
+                        sorted(result) if args.requirements is not None else None
+                    ),
+                },
                 indent=2,
             )
         )
