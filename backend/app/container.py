@@ -33,6 +33,8 @@ from app.modules.agents.service import (
 )
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.autocomplete import TaskTitleAutocompleteService
+from app.modules.tasks.review_flow import ReviewFlowService
+from app.modules.tasks.review_service import ReviewService
 from app.repositories import (
     CrtCommandRepository,
     FeatureFlagOverrideRepository,
@@ -119,6 +121,8 @@ class Container:
     task_title_autocomplete_service: TaskTitleAutocompleteService
     auth_migration: AuthMigration
     modern_auth_service: ModernAuthService
+    review_service: ReviewService
+    review_flow_service: ReviewFlowService
 
 
 class _UnavailableRelaySecretBox(SecretBox):
@@ -407,6 +411,26 @@ def build_container(config: AppConfig) -> Container:
         ),
     )
 
+    def _weekly_review_exposed_for_owner(owner_id: str) -> bool:
+        """Whether ``weekly_review`` is effective for one owner (spec 020 §9).
+
+        The review sweep's exposure part asks this per candidate owner; an
+        owner that no longer resolves to a ``User`` is never exposed.
+        """
+
+        user = user_repo.get_by_id(owner_id)
+        if user is None:
+            return False
+        return feature_flag_service.is_effective("weekly_review", user)
+
+    # Spec 020: the review service reads ``task_service.clock``, so the one
+    # ``frozen_clock`` seam drives decisions, activation and the sweep too.
+    review_service = ReviewService(
+        task_service, is_exposed=_weekly_review_exposed_for_owner
+    )
+    review_flow_service = ReviewFlowService(review_service)
+    review_service.idle_session_closer = review_flow_service.close_idle_sessions
+
     def _voice_enabled_for_owner(owner_id: str) -> bool:
         """Whether ``voice_brain_dump`` is effective for the operation's owner.
 
@@ -628,4 +652,6 @@ def build_container(config: AppConfig) -> Container:
         task_title_autocomplete_service=task_title_autocomplete_service,
         auth_migration=auth_migration,
         modern_auth_service=modern_auth_service,
+        review_service=review_service,
+        review_flow_service=review_flow_service,
     )

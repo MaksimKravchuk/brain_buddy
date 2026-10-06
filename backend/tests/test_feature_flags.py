@@ -651,3 +651,54 @@ def test_006_FR_015_mobile_classification_flag_is_exposed_once_rolled_out(
         assert flags[MOBILE_CLASSIFICATION_FLAG] is True
         # Exposure only: other flags are untouched by this one's rollout.
         assert flags["delivery_canary"] is False
+
+
+# ---------------------------------------------------------------------------
+# Feature 020 — weekly review rollout flag (ADR-0027 §6, research R12)
+# ---------------------------------------------------------------------------
+
+WEEKLY_REVIEW_FLAG = "weekly_review"
+
+
+def test_020_FR_042_weekly_review_is_a_runtime_managed_flag() -> None:
+    """The weekly review flag is server-owned, runtime-managed and never env-owned."""
+
+    with allure.step("Inspect the declared feature-flag ownership sets"):
+        assert WEEKLY_REVIEW_FLAG in KNOWN_FEATURE_FLAGS
+        assert WEEKLY_REVIEW_FLAG in RUNTIME_MANAGED_FLAGS
+        assert WEEKLY_REVIEW_FLAG not in ENVIRONMENT_OWNED_FLAGS
+        allure.attach(
+            "known=true\nruntime_managed=true\nenvironment_owned=false",
+            name="Weekly review feature-flag ownership evidence",
+            attachment_type=allure.attachment_type.TEXT,
+        )
+
+
+def test_020_FR_042_weekly_review_defaults_off_and_resolves_for_selected_users(
+    second_api_client: tuple[TestClient, TestClient],
+) -> None:
+    """Default OFF for everyone; SELECTED_USERS turns it on for that account only."""
+
+    member, outsider = second_api_client
+    container: Container = member.app.state.container  # type: ignore[attr-defined]
+
+    with allure.step("Both accounts see the flag delivered and resolved off"):
+        for client in (member, outsider):
+            flags = client.get("/api/auth/me").json()["feature_flags"]
+            assert flags[WEEKLY_REVIEW_FLAG] is False
+
+    with allure.step("An operator selects one account"):
+        member_id = member.get("/api/auth/me").json()["id"]
+        container.feature_flag_service.set_mode(
+            WEEKLY_REVIEW_FLAG, "selected_users", operator_id="test-operator"
+        )
+        container.feature_flag_service.add_selected_user(
+            WEEKLY_REVIEW_FLAG, operator_id="test-operator", account_id=member_id
+        )
+
+    with allure.step("Only the selected account resolves the flag on"):
+        assert member.get("/api/auth/me").json()["feature_flags"][WEEKLY_REVIEW_FLAG]
+        assert (
+            outsider.get("/api/auth/me").json()["feature_flags"][WEEKLY_REVIEW_FLAG]
+            is False
+        )

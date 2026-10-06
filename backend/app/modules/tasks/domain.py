@@ -9,6 +9,8 @@ from pydantic import Field, model_validator
 
 from app.schemas.common import StorageBaseModel
 
+from . import formulation
+
 TaskState = Literal["inbox", "next", "waiting", "someday", "completed", "cancelled"]
 TaskPriority = Literal["none", "low", "medium", "high"]
 # "archived" is a legacy-only stored value; the SQLite migration rewrites it to
@@ -83,6 +85,29 @@ class TaskCommentDocument(StorageBaseModel):
     revision: int = Field(default=1, ge=1)
 
 
+class ClockBeforeDocument(StorageBaseModel):
+    """The formulation clock immediately before an auto-park closed it.
+
+    Spec 020 (data-model E1): kept so the yield rule restores it exactly; it is
+    server-side only and not part of ``TaskResponse``.
+    """
+
+    started_at: datetime
+    extended_at: datetime | None = None
+    extension_reason: str | None = Field(default=None, min_length=1, max_length=500)
+    park_floor_at: datetime | None = None
+    stalled_before: int = Field(default=0, ge=0)
+
+
+class TaskParkDocument(StorageBaseModel):
+    """``TaskDocument.parked``: written only by auto-park (data-model E1)."""
+
+    at: datetime
+    formulation_id: str
+    from_revision: int = Field(ge=1)
+    clock_before: ClockBeforeDocument
+
+
 class TaskDocument(StorageBaseModel):
     """A mutable, owner-scoped task; it is never a CRT node."""
 
@@ -105,6 +130,17 @@ class TaskDocument(StorageBaseModel):
     cancelled_at: datetime | None = None
     schema_version: int = Field(default=1, ge=1)
     revision: int = Field(default=1, ge=1)
+    # Spec 020 formulation clock (data-model E1, contracts/formulation-clock.md
+    # §2). Optional with defaults, so payloads written before it load unchanged.
+    formulation_id: str | None = None
+    formulation_started_at: datetime | None = None
+    formulation_extended_at: datetime | None = None
+    formulation_extension_reason: str | None = Field(
+        default=None, min_length=1, max_length=500
+    )
+    formulation_park_floor_at: datetime | None = None
+    consecutive_stalled_formulations: int = Field(default=0, ge=0)
+    parked: TaskParkDocument | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -112,6 +148,41 @@ class TaskDocument(StorageBaseModel):
         if isinstance(data, dict) and "tag_ids" not in data and "context_ids" in data:
             data = {**data, "tag_ids": data.get("context_ids") or []}
         return data
+
+
+class FormulationSettingsDocument(StorageBaseModel):
+    """The owner clock settings one stored response was projected with.
+
+    Spec 020 (contracts/http.md §2, "Mutations"): the derived instants of
+    ``TaskResponse.formulation`` depend on these values, and a same-key replay
+    returns the original response. An idempotency record therefore keeps them
+    and a replay projects with them, not with the live settings. A record
+    written before this snapshot existed has none and projects live.
+    """
+
+    threshold_days: int
+    time_zone: str
+    owner_park_floor_at: datetime | None = None
+    activated_at: datetime | None = None
+
+    @classmethod
+    def of(
+        cls, settings: formulation.OwnerClockSettings
+    ) -> FormulationSettingsDocument:
+        return cls(
+            threshold_days=settings.threshold_days,
+            time_zone=settings.time_zone,
+            owner_park_floor_at=settings.owner_park_floor_at,
+            activated_at=settings.activated_at,
+        )
+
+    def clock_settings(self) -> formulation.OwnerClockSettings:
+        return formulation.OwnerClockSettings(
+            threshold_days=self.threshold_days,
+            time_zone=self.time_zone,
+            owner_park_floor_at=self.owner_park_floor_at,
+            activated_at=self.activated_at,
+        )
 
 
 class SmartAddCreatedDocument(StorageBaseModel):
@@ -128,3 +199,4 @@ class SmartAddTaskResultDocument(StorageBaseModel):
     project: ProjectDocument | None = None
     tags: list[TagDocument] = Field(default_factory=list)
     created: SmartAddCreatedDocument = Field(default_factory=SmartAddCreatedDocument)
+    formulation_settings: FormulationSettingsDocument | None = None

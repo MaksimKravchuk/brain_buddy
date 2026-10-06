@@ -24,7 +24,13 @@
   `reviews/{owner_id}/…json` storage line, for **native tasks**. The capture-based review model stays
   reserved for the Organize/Capture tranche and is not built here.
 - **Narrows**: ADR-0019/ADR-0021 flag rule: adds one runtime-managed flag,
-  `weekly_review`, default OFF.
+  `weekly_review`, default OFF. Implementation note (slice PR-15): the post-marker
+  upgrade now accepts any store that holds every ADR-0019 row and no unknown row, and
+  adds each missing post-ADR-0019 row (`task_title_autocomplete`, `crt_canvas`,
+  `task_mcp` from feature 022, `weekly_review`) as OFF with no cohort. Before, only the exact earlier row sets were
+  upgraded, so a store that had lost one of those later rows stayed degraded until an
+  operator repaired it; now the next start re-creates it OFF. A missing ADR-0019 row
+  still leaves the store degraded.
 - **Related**: spec `specs/020-weekly-review/` (spec, design, plan), ADR-0002
   (`weekly_review_voice` stays a later phase), ADR-0008, ADR-0012, ADR-0020,
   ADR-0022, constitution Principle I.

@@ -348,6 +348,11 @@ class AccountService:
             write_json("tasks/subtasks.json", subtasks)
             write_json("tasks/comments.json", comments)
 
+            # Spec 020 (FR-043): every weekly-review table except the
+            # content-free navigator usage counters, which the manifest names.
+            for name, records in self.task_repo.iter_review_export(user.id):
+                write_json(f"review/{name}", records)
+
             relay = self.agent_repo.export_owner_data(owner_id=user.id, now=now)
             write_json("relay/relay.json", relay)
 
@@ -399,6 +404,8 @@ class AccountService:
                         "session records (revoked secrets)",
                         "idempotency records (transient request-dedup copies "
                         "of data already exported)",
+                        "navigator_usage (weekly-review AI suggestion cost and call "
+                        "counters: operational, content-free, deleted after 35 days)",
                         "relay credentials, inbound signing secrets, and sealed secret boxes",
                         "relay idempotency keys and raw request/response receipts",
                         "relay content already expired or redacted under the retention policy",

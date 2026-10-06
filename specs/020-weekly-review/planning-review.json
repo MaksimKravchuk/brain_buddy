@@ -77,6 +77,26 @@
       },
       "resolution": "All 4 advisories fixed in the commit that records this entry: reduce_notes separator fixed to U+000A U+2026 U+000A with CR dropped (navigator §1); dates meta orders task_ids within a day and accepts a one-day edge difference on devices in another zone (http §6); the DST gap/fold rule binds every slot evaluator, the web reviewSlot.ts included (http §5); a repeat park of the same formulation resets seen_at and returned_at (data-model E6).",
       "artifacts_digest_after_fixes": "6e521feaf7b1a8e4517ff315b11323dd2265913546b375ff6b6fabe83f5147c7"
+    },
+    "post_acceptance_review_4": {
+      "reason": "Compensating measure 5: contract edits made in slice PR-15 (c5a7dcb, e735439) to data-model E2/E4/E6, formulation-clock §3, http §3/§4/§5/§9, research R7, tasks T030/T174 and the ADR-0027 note were reviewed instead of relying on the acceptance.",
+      "reviewed_range": "c9a8cc8..e735439 (specs/020-weekly-review, docs/decisions/0027)",
+      "reviewer": "claude-opus-5-5 independent reviewer subagent, read-only",
+      "date": "2026-10-06",
+      "verdict": "changes-required",
+      "findings": {
+        "blocking": 0,
+        "important": 1,
+        "advisory": 3
+      },
+      "owner_decision": {
+        "by": "Max (product owner)",
+        "date": "2026-10-06",
+        "question": "On a decision Undo, should the server keep notice periods written after the decision (time-zone floor, activation floor) instead of restoring the clock exactly as FR-048 literally says? It only ever delays an auto-park.",
+        "answer": "Keep later notices (server); align devices in a later iOS slice."
+      },
+      "resolution": "Important item (decision-undo rule changed a shared contract without vectors or iOS alignment) resolved in e735439 by scoping the rule to the server, keeping the shared exact-restore rule and vectors unchanged, recording the ~25 h residual, and adding follow-up task T174 (slice PR-12, depends on PR-03 and PR-05) for device alignment; the FR-048 precedence was acknowledged by the owner (owner_decision). Advisories fixed in e735439: the sweep-gap row names the device auto-park; research R7 and T030 list park_ack:; http §3 details_too_long has web copy and the device offline check is queued with T174's slice.",
+      "artifacts_digest_after_fixes": "1bd67c3fc7528e75db3e68b12eed0a69bb7b0ad9c5d2aad5d6fd6d182b0dab49"
     }
   }
 }

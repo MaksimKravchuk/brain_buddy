@@ -57,14 +57,48 @@ describe("PrivacyPolicyPage", () => {
     renderPolicy();
 
     // docs/data-retention.md names this page as the user-facing summary that
-    // must stay in sync with it. The runtime store now covers six managed flags.
-    // The decided facts pinned here are what it holds, that purge scrubs it,
-    // and that it is outside the export.
+    // must stay in sync with it. The runtime store now covers seven managed flags
+    // (022 added task_mcp, 020 added weekly_review). The decided facts pinned here
+    // are what it holds, that purge scrubs it, and that it is outside the export.
     expect(screen.getByText(/one SQLite store/i)).toBeInTheDocument();
-    expect(screen.getByText(/covering six managed flags/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering seven managed flags/i)).toBeInTheDocument();
     expect(screen.getByText(/holds only your account id per flag/i)).toBeInTheDocument();
     expect(screen.getByText(/scrubbed when your account is purged/i)).toBeInTheDocument();
-    expect(screen.getByText(/covering six managed flags:.*excluded from your data export/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering seven managed flags:.*excluded from your data export/i)).toBeInTheDocument();
+  });
+
+  it("020-FR-043: names the weekly review settings and records, their export, purge and undo window", () => {
+    renderPolicy();
+    const collected = screen.getByRole("heading", { name: /what we collect/i }).closest("section");
+    const retention = screen.getByRole("heading", { name: /how long we keep it/i }).closest("section");
+
+    // docs/data-retention.md (spec 020 rows): review day, time and time zone are
+    // stored review settings; review records live for the account's life, are
+    // exported and purged; the content-bearing undo copies last 7 days.
+    expect(collected).toHaveTextContent(/weekly review/i);
+    expect(collected).toHaveTextContent(/review day, time and time zone/i);
+    expect(retention).toHaveTextContent(/review records.*kept until you delete your account/i);
+    expect(retention).toHaveTextContent(/included in your data export and erased when your account is purged/i);
+    expect(retention).toHaveTextContent(/undo copies.*7 days/i);
+  });
+
+  it("020-FR-043 020-FR-044: names the task timing data kept for every account, flag on or off", () => {
+    renderPolicy();
+    const collected = screen.getByRole("heading", { name: /what we collect/i }).closest("section");
+
+    // Clock fields are written on every user's Next tasks whatever the flag
+    // state, and decisions, settings and the explainer acknowledgement are
+    // accepted with the flag off, so the disclosure is not conditional on it.
+    expect(collected).not.toHaveTextContent(/if the weekly review is switched on for you/i);
+    expect(collected).toHaveTextContent(/for every account, whether or not the\s+weekly review is switched on/i);
+    expect(collected).toHaveTextContent(/when its current wording started/i);
+    expect(collected).toHaveTextContent(/keep it 7 more days and your reason/i);
+    expect(collected).toHaveTextContent(/the moment before which it will not move to Someday/i);
+    expect(collected).toHaveTextContent(/how many times in a row its wording\s+stalled/i);
+    expect(collected).toHaveTextContent(/moved to Someday automatically, when that happened/i);
+    expect(collected).toHaveTextContent(/first acknowledged the weekly review's explanation/i);
+    expect(collected).toHaveTextContent(/stall-reason code you pick/i);
+    expect(collected).toHaveTextContent(/accepted from your devices even while the weekly review is switched off/i);
   });
 
   it("012-FR-007: names OpenAI's title-suggestion processing purpose", () => {

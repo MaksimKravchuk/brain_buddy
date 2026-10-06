@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
 from datetime import date
 from uuid import UUID, uuid4
 
@@ -22,6 +21,9 @@ from app.api.dependencies import (
     require_voice_brain_dump_enabled,
     voice_brain_dump_enabled,
 )
+from app.api.task_mapping import comment_response as _to_comment_response
+from app.api.task_mapping import subtask_response as _to_subtask_response
+from app.api.task_mapping import task_response as _to_response
 from app.core.config import AppConfig
 from app.core.rate_limit import title_completion_rate_limiter
 from app.exceptions import ValidationFailure
@@ -32,13 +34,14 @@ from app.modules.tasks.autocomplete import (
     TaskTitleAutocompleteService,
 )
 from app.modules.tasks.domain import (
+    FormulationSettingsDocument,
     ProjectDocument,
     SmartAddTaskResultDocument,
     TagDocument,
-    TaskCommentDocument,
     TaskDocument,
-    TaskSubtaskDocument,
 )
+from app.modules.tasks.review_domain import FormulationView
+from app.modules.tasks.service import TaskCommandResult
 from app.schemas.auth import User
 from app.schemas.tasks import (
     BrainDumpActionReceiptResponse,
@@ -763,7 +766,12 @@ def get_task(
     task, subtasks, comments = task_service.get_task_detail(
         task_id, owner_id=current_user.id
     )
-    return _to_response(task, subtasks=subtasks, comments=comments)
+    return _to_response(
+        task,
+        subtasks=subtasks,
+        comments=comments,
+        formulation=_formulation(task_service, current_user.id, task),
+    )
 
 
 @router.post(
@@ -895,13 +903,15 @@ def update_task(
     current_user: User = Depends(get_current_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
-    return _to_response(
-        task_service.update_task(
+    return _command_response(
+        task_service,
+        current_user.id,
+        task_service.update_task_result(
             task_id,
             payload,
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
-        )
+        ),
     )
 
 
@@ -917,13 +927,15 @@ def transition_task(
     current_user: User = Depends(get_current_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
-    return _to_response(
-        task_service.transition_task(
+    return _command_response(
+        task_service,
+        current_user.id,
+        task_service.transition_task_result(
             task_id,
             payload,
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
-        )
+        ),
     )
 
 
@@ -939,12 +951,14 @@ def create_task(
     current_user: User = Depends(get_current_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
-    return _to_response(
-        task_service.create_task(
+    return _command_response(
+        task_service,
+        current_user.id,
+        task_service.create_task_result(
             payload,
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
-        )
+        ),
     )
 
 
@@ -988,8 +1002,9 @@ def list_tasks(
         cursor=cursor,
         limit=limit,
     )
+    views = task_service.formulation_views(current_user.id, items)
     return TaskListResponse(
-        items=[_to_response(task) for task in items],
+        items=[_to_response(task, formulation=views.get(task.id)) for task in items],
         next_cursor=next_cursor,
         has_more=has_more,
         counts_by_state=TaskCounts(**counts_by_state),
@@ -1180,32 +1195,36 @@ def _to_brain_dump_proposal_response(
     )
 
 
-def _to_response(
+def _formulation(
+    task_service: TaskService, owner_id: str, task: TaskDocument
+) -> FormulationView | None:
+    """Spec 020 (http §2): the task's formulation projection, if it has one."""
+
+    return task_service.formulation_views(owner_id, [task]).get(task.id)
+
+
+def _with_formulation(
+    task_service: TaskService,
+    owner_id: str,
     task: TaskDocument,
-    *,
-    subtasks: Sequence[TaskSubtaskDocument] = (),
-    comments: Sequence[TaskCommentDocument] = (),
+    settings: FormulationSettingsDocument | None,
 ) -> TaskResponse:
-    return TaskResponse(
-        id=task.id,
-        title=task.title,
-        details=task.details,
-        state=task.state,
-        project_id=task.project_id,
-        tag_ids=task.tag_ids,
-        due_date=task.due_date,
-        priority=task.priority,
-        waiting_for=task.waiting_for,
-        waiting_since=task.waiting_since,
-        order_key=task.order_key,
-        source_capture_ids=task.source_capture_ids,
-        created_at=task.created_at,
-        updated_at=task.updated_at,
-        completed_at=task.completed_at,
-        cancelled_at=task.cancelled_at,
-        revision=task.revision,
-        subtasks=[_to_subtask_response(item) for item in subtasks],
-        comments=[_to_comment_response(item) for item in comments],
+    """A command's task with the projection its stored result was made with.
+
+    ``settings`` is the idempotency record's snapshot, so a same-key replay
+    returns the original ``formulation`` (http "Mutations"); ``None`` (a
+    record from before the snapshot) projects with the live settings.
+    """
+
+    views = task_service.formulation_views(owner_id, [task], settings=settings)
+    return _to_response(task, formulation=views.get(task.id))
+
+
+def _command_response(
+    task_service: TaskService, owner_id: str, result: TaskCommandResult
+) -> TaskResponse:
+    return _with_formulation(
+        task_service, owner_id, result.task, result.formulation_settings
     )
 
 
@@ -1216,7 +1235,9 @@ def _to_smart_add_response(
     owner_id: str,
 ) -> SmartAddTaskResponse:
     return SmartAddTaskResponse(
-        task=_to_response(result.task),
+        task=_with_formulation(
+            task_service, owner_id, result.task, result.formulation_settings
+        ),
         project=(
             _to_project_response(
                 result.project, task_service=task_service, owner_id=owner_id
@@ -1261,25 +1282,4 @@ def _to_tag_response(
         state="deleted" if tag.state == "archived" else tag.state,
         revision=tag.revision,
         open_task_count=task_service.open_task_count_for_tag(tag.id, owner_id=owner_id),
-    )
-
-
-def _to_subtask_response(subtask: TaskSubtaskDocument) -> TaskSubtaskResponse:
-    return TaskSubtaskResponse(
-        id=subtask.id,
-        title=subtask.title,
-        state=subtask.state,
-        order_key=subtask.order_key,
-        revision=subtask.revision,
-    )
-
-
-def _to_comment_response(comment: TaskCommentDocument) -> TaskCommentResponse:
-    return TaskCommentResponse(
-        id=comment.id,
-        body=comment.body,
-        actor_id=comment.actor_id,
-        created_at=comment.created_at,
-        edited_at=comment.edited_at,
-        revision=comment.revision,
     )

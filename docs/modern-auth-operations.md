@@ -212,6 +212,13 @@ its storage capability, checks the fresh ledger before deploy mutation, and
 checks again before changing rollback flags or either image. These are the
 implemented guard commands, **not deployment commands**:
 
+The forward check also detects a nonempty legacy account/session root and an
+unfinished cleanup checkpoint. It refuses that first deployment before staging
+secrets or replacing either image. The previous service stays running until the
+explicit stopped-writer migration window. Configure the master key and complete
+the migration before retrying the release; merging code alone does not migrate
+the production volume. A genuinely empty root may initialize normally.
+
 ```sh
 python3 scripts/auth_migration_guard.py capture --app '<backend-app>' \
   --image '<actual-captured-registry.fly.io-image>' --output '<private-capture.json>'
