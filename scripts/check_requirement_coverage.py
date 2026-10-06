@@ -27,6 +27,14 @@ idiomatic.
 
     python3 scripts/check_requirement_coverage.py specs/006-example
     python3 scripts/check_requirement_coverage.py specs/006-example --json
+
+A multi-PR feature cannot pass the full gate until its last slice lands, so a
+slice checks only the ids its `## PR-срезы` entry lists. Every listed id must be
+feature-qualified and defined in `spec.md`; an unknown id is an error, never a
+silently empty check:
+
+    python3 scripts/check_requirement_coverage.py specs/006-example \\
+        --requirements 006-FR-001,006-SC-002
 """
 
 from __future__ import annotations
@@ -43,6 +51,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Definitions look like `- **FR-001**: ...`; mentions elsewhere do not define.
 DEFINITION_RE = re.compile(r"^\s*[-*]\s*\*\*((?:FR|SC)-\d+)\*\*", re.MULTILINE)
 FEATURE_NUMBER_RE = re.compile(r"^(\d{3})-")
+# `--requirements` takes the same feature-qualified form the gate matches.
+QUALIFIED_ID_RE = re.compile(r"^(\d{3})-((?:FR|SC)-\d+)$")
 
 # Trees that hold nothing but tests: every file in them is evidence, whatever
 # it is called. The (since removed) Expo client's `mobile/integration/run.ts`
@@ -50,9 +60,19 @@ FEATURE_NUMBER_RE = re.compile(r"^(\d{3})-")
 # filtered out again by the name hints below, so every integration assertion in
 # the repository was invisible to this gate. A tree named here asserts its own
 # contents; do not add a broad one.
+#
+# The two Swift trees are the iOS package's test targets and the macOS host
+# tests. Some requirements are honestly testable only there (feature 020,
+# research R19). The iOS app target has no test target, and `ios/BrainBuddy`
+# and both `Sources` trees are product code, so they stay out. CI runs no
+# `macos/` lane: an id named under `macos/Tests` proves only that a test exists,
+# so a requirement traced there also needs the recorded macOS-host run that
+# its feature's plan names, which /speckit-accept checks.
 DEDICATED_TEST_TREES = (
     "backend/tests",
     "frontend/tests",
+    "ios/BrainBuddyKit/Tests",
+    "macos/Tests",
 )
 
 # Trees that hold product code with tests mixed in, where a filename hint is
@@ -60,7 +80,7 @@ DEDICATED_TEST_TREES = (
 MIXED_TEST_TREES = ("frontend/src",)
 
 TEST_TREES = DEDICATED_TEST_TREES + MIXED_TEST_TREES
-TEST_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx")
+TEST_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".swift")
 TEST_NAME_HINTS = ("test", "spec", "__tests__")
 
 
@@ -111,13 +131,52 @@ def marker_pattern(number: str, requirement: str) -> re.Pattern[str]:
     )
 
 
-def coverage(root: Path, feature_dir: Path) -> dict[str, list[str]]:
+def select_requirements(
+    number: str, defined: list[str], requested: str
+) -> list[str]:
+    """Resolve a `--requirements` value to the bare ids it names.
+
+    Each entry must be `NNN-FR-###` or `NNN-SC-###` for this feature and be
+    defined in `spec.md`. Anything else fails: a bare id would reintroduce the
+    cross-feature ambiguity the gate exists to prevent, and an unknown id would
+    otherwise turn a slice's check into a check of nothing.
+    """
+    entries = [entry.strip() for entry in requested.split(",") if entry.strip()]
+    if not entries:
+        raise SystemExit("--requirements: no requirement ids given")
+
+    defined_set = set(defined)
+    selected: set[str] = set()
+    problems: list[str] = []
+    for entry in entries:
+        match = QUALIFIED_ID_RE.match(entry)
+        if match is None:
+            problems.append(f"{entry} (expected {number}-FR-### or {number}-SC-###)")
+        elif match.group(1) != number:
+            problems.append(
+                f"{entry} (belongs to feature {match.group(1)}, not {number})"
+            )
+        elif match.group(2) not in defined_set:
+            problems.append(f"{entry} (not defined in spec.md)")
+        else:
+            selected.add(match.group(2))
+
+    if problems:
+        raise SystemExit("--requirements: rejected " + "; ".join(problems))
+    return sorted(selected)
+
+
+def coverage(
+    root: Path, feature_dir: Path, only: str | None = None
+) -> dict[str, list[str]]:
     spec_path = feature_dir / "spec.md"
     if not spec_path.is_file():
         raise SystemExit(f"{feature_dir}: spec.md is missing")
 
     number = feature_number(feature_dir)
     wanted = requirements(spec_path)
+    if only is not None:
+        wanted = select_requirements(number, wanted, only)
     found: dict[str, list[str]] = {req: [] for req in wanted}
     if not wanted:
         return found
@@ -139,6 +198,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("feature_dir", help="path to specs/NNN-<slug>")
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
+    parser.add_argument(
+        "--requirements",
+        metavar="NNN-FR-001,NNN-SC-002",
+        help=(
+            "check only these comma-separated, feature-qualified ids (one PR "
+            "slice's `requirements`); each must be defined in spec.md"
+        ),
+    )
     args = parser.parse_args(argv)
 
     feature_dir = Path(args.feature_dir)
@@ -148,13 +215,21 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"{args.feature_dir}: not a directory")
 
     number = feature_number(feature_dir)
-    result = coverage(REPO_ROOT, feature_dir)
+    result = coverage(REPO_ROOT, feature_dir, args.requirements)
     uncovered = sorted(req for req, paths in result.items() if not paths)
 
     if args.json:
         print(
             json.dumps(
-                {"feature": number, "coverage": result, "uncovered": uncovered},
+                {
+                    "feature": number,
+                    "coverage": result,
+                    "uncovered": uncovered,
+                    # null for the full-feature gate; the checked ids for a slice.
+                    "requirements_filter": (
+                        sorted(result) if args.requirements is not None else None
+                    ),
+                },
                 indent=2,
             )
         )
@@ -191,7 +266,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    print(f"\nRequirement coverage passed: {len(result)}/{len(result)} traced")
+    scope = (
+        " (--requirements subset only; not the full-feature gate)"
+        if args.requirements is not None
+        else ""
+    )
+    print(f"\nRequirement coverage passed: {len(result)}/{len(result)} traced{scope}")
     return 0
 
 

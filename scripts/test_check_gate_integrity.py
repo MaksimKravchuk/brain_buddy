@@ -225,6 +225,58 @@ class InvariantEnforcementTests(unittest.TestCase):
             )
             self.assertIn("check-specs runs feature requirement coverage", report)
 
+    def test_narrowing_feature_requirement_coverage_in_check_specs_is_caught(self) -> None:
+        line = "\tpython3 scripts/check_requirement_coverage.py specs/019-miro-like-crt-canvas\n"
+        for suffix in (" --requirements 019-FR-001", " || true"):
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as tmp:
+                report = self._assert_invariant_fires(
+                    tmp,
+                    "Makefile",
+                    lambda text, suffix=suffix: text.replace(line, line[:-1] + suffix + "\n"),
+                )
+                self.assertIn("check-specs runs feature requirement coverage", report)
+
+    def test_slice_filter_in_a_gate_recipe_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._assert_invariant_fires(
+                tmp,
+                "Makefile",
+                lambda text: text.replace(
+                    "check-specs:\n",
+                    "check-specs:\n\tpython3 scripts/check_requirement_coverage.py"
+                    " specs/020-weekly-review --requirements 020-FR-001\n",
+                ),
+            )
+            self.assertIn("no slice-filtered requirement coverage in the gates", report)
+
+    def test_slice_filter_on_a_continuation_line_is_caught(self) -> None:
+        """A shell `\\` continuation or a folded YAML scalar moves the flag to the next line."""
+        cases = (
+            (
+                "Makefile",
+                "check-specs:\n",
+                "check-specs:\n\tpython3 scripts/check_requirement_coverage.py \\\n"
+                "\t  specs/020-weekly-review \\\n\t  --requirements 020-FR-001\n",
+                "no slice-filtered requirement coverage in the gates",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                "jobs:\n",
+                "jobs:\n  sneaky:\n    runs-on: ubuntu-latest\n    steps:\n"
+                "      - run: >\n          python3 scripts/check_requirement_coverage.py\n"
+                "          specs/020-weekly-review\n          --requirements 020-FR-001\n",
+                "no slice-filtered requirement coverage in CI",
+            ),
+        )
+        for relative, anchor, replacement, name in cases:
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as tmp:
+                report = self._assert_invariant_fires(
+                    tmp,
+                    relative,
+                    lambda text, a=anchor, r=replacement: text.replace(a, r, 1),
+                )
+                self.assertIn(name, report)
+
     def test_skipping_external_adapter_pin_is_caught(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = self._assert_invariant_fires(

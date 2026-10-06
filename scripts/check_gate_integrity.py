@@ -216,9 +216,29 @@ INVARIANTS: tuple[Invariant, ...] = (
     MustMatch(
         "Makefile",
         "check-specs runs feature requirement coverage",
-        r"^check-specs:(?:\n\t[^\n]*)*?\n\tpython3 scripts/check_requirement_coverage\.py specs/019-miro-like-crt-canvas",
+        # Anchored at end of line: a trailing `--requirements …` subset or
+        # `|| true` would otherwise keep matching while the gate stops gating.
+        r"^check-specs:(?:\n\t[^\n]*)*?\n\tpython3 scripts/check_requirement_coverage\.py specs/019-miro-like-crt-canvas[ \t]*$",
         "Feature-019 traceability must execute in the authoritative spec gate; "
         "unit-testing the validator alone cannot prove requirement coverage.",
+    ),
+    MustNotMatch(
+        "Makefile",
+        "no slice-filtered requirement coverage in the gates",
+        # The bare flag, not "on the coverage line": a `\` continuation or a
+        # folded YAML scalar puts it on the next physical line.
+        r"--requirements\b",
+        "--requirements checks a slice's ids only. In a gate recipe it would "
+        "report a pass for a feature whose other requirements are untraced.",
+    ),
+    MustNotMatch(
+        ".github/workflows/ci.yml",
+        "no slice-filtered requirement coverage in CI",
+        # The bare flag, not "on the coverage line": a `\` continuation or a
+        # folded YAML scalar puts it on the next physical line.
+        r"--requirements\b",
+        "--requirements checks a slice's ids only. In CI it would report a pass "
+        "for a feature whose other requirements are untraced.",
     ),
     MustMatch(
         "Makefile",

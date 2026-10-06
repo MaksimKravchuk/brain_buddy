@@ -754,7 +754,7 @@ CI dependency.
 | D-08 | Comment scope | Owner-only notes vs future collaborators. Proposed T2 owner-authored notes; do not design mentions/permissions now. | Product; before comments |
 | D-09 | Brain Dump selection default | Proposed safe new additions may be preselected after reconciliation, but confirmation remains explicit; low-confidence/conflicted items are not preselected. | Product/safety; before Slice 4 |
 | D-10 | Desktop Brain Dump layout | Modal, side sheet, or dedicated route. All must use the same persisted operation; choose via responsive usability testing, not domain divergence. | Design; does not block backend Slice 2 |
-| D-11 | Weekly Review scheduling | `due Sun` is mock data. Define cadence, timezone, and due calculation before showing a badge. | Product; before Slice 6 |
+| D-11 | Weekly Review scheduling | **Resolved:** [ADR-0027](decisions/0027-native-task-weekly-review-and-auto-park.md) makes review day and time (default Friday 16:00), IANA time zone and threshold per-owner product state for native tasks, behind the `weekly_review` flag; the cadence and due rules are in `specs/020-weekly-review/`. `due Sun` stays mock data. | Resolved 2026-10-06 (ADR-0027) |
 | D-12 | Native task hard-delete/retention | Define privacy deletion and source-provenance consequences. Soft completion/cancel is not erasure. | Product/privacy; before deletion API |
 
 ## 12. Definition of contract completion

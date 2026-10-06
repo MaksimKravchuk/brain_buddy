@@ -2,6 +2,10 @@
 
 Date: 2026-07-18
 Status: Accepted
+Superseded in part by [ADR-0027](0027-native-task-weekly-review-and-auto-park.md)
+(2026-10-06), for Weekly Review only: the Context's "Weekly Review remains explicitly
+deferred", audit row B-09's cadence restriction and the UI-control row "Weekly Review
+coming later". Each is marked where it stands; the rest of this record is unchanged.
 Decision owner: BrainBuddy
 Related: ADR-0001, ADR-0002, `docs/vnext-cloud-design-build-contract.md`,
 `docs/e2e-acceptance-charter.md`, origin `main` at
@@ -30,6 +34,11 @@ It does not redesign the approved information architecture. The four open GTD li
 the primary navigation; Projects and Tags remain secondary organization; date views are
 derived queries, not new lifecycle states; Weekly Review remains explicitly deferred; and
 the CRT remains isolated under `/crt`.
+
+> Superseded in part by ADR-0027 (2026-10-06): native-task Weekly Review is accepted
+> behind the runtime-managed `weekly_review` flag. While the flag is off the entry stays
+> visibly deferred. The four open lists are unchanged; review markers are derived, not
+> a fifth list or a new lifecycle state.
 
 ## Decision
 
@@ -78,7 +87,7 @@ is scoped to the named row.
 | B-06 | Tag navigation/filter | **Working** | `/tags/:tagId`, the sidebar tag cloud, and `tag_id` query are wired in `AppRoutes.tsx:40-47`, `AppShell.tsx:207-220`, and `client.ts:185-192`. Tag-first API behavior and retired `/contexts` are tested in `backend/tests/test_task_tag_project_mvp_api.py:18-49`. | Tag is canonical product terminology. Historical Context aliases remain migration input only. |
 | B-07 | Complete result pagination in the UI | **Broken** | Backend supports opaque cursor pages with limit 50/200 in `backend/app/api/tasks.py:487-507` and `service.py:818-842`. Frontend request/filter types have no cursor or limit and render only `items` from the first response in `frontend/src/api/taskTypes.ts:55-60`, `client.ts:177-193`, and `TaskListPage.tsx:78-81`. | Implement load-more/infinite retrieval or a server aggregate. Project/tag/date/search views and counts must never present the first 50 rows as the complete result. |
 | B-08 | Loading, empty, error, and retry states | **Working** | `TaskListPage.tsx:97-170,392-427` renders explicit loading, empty, error, and retry states for tasks/projects/tags. | Preserve these states in detail, search, and management surfaces. |
-| B-09 | Weekly Review honesty | **Working** | The sidebar says `coming later` and exposes no fake workflow at `AppShell.tsx:222-224`, matching the accepted deferral. | Do not turn the CloudDesign `due Sun` mock value into product state until Weekly Review cadence is separately accepted. |
+| B-09 | Weekly Review honesty | **Working** | The sidebar says `coming later` and exposes no fake workflow at `AppShell.tsx:222-224`, matching the accepted deferral. | Do not turn the CloudDesign `due Sun` mock value into product state until Weekly Review cadence is separately accepted. Superseded in part by ADR-0027: review day, time, time zone and threshold are per-owner product state for native tasks; the `due Sun` mock value still is not. |
 | B-10 | CRT boundary | **Working** | `/crt/*` renders the existing `TreeWorkspace` in `AppRoutes.tsx:64-71`; the task shell links to it as legacy CRT at `AppShell.tsx:225-227`; route isolation is tested in `AppRoutes.test.tsx:140-148`. | Do not make Projects trees or Tasks nodes. Naming can improve separately without changing ownership. |
 
 ### Capture, task detail, and lifecycle
@@ -319,7 +328,7 @@ The current information architecture is preserved, but controls must be truthful
 | `Move to Next` | May remain a shortcut; detail exposes the complete valid lifecycle set. |
 | `Show completed tasks` | Scope to the current filters, label its effect clearly, and reopen only after destination selection. Provide equivalent Cancelled recovery without adding a primary list. |
 | Project and Tag labels in navigation | Add management affordances only when their create/rename/archive/delete commands are wired. |
-| Weekly Review coming later | Keep visibly non-interactive until its accepted workflow exists. |
+| Weekly Review coming later | Keep visibly non-interactive until its accepted workflow exists. Superseded in part by ADR-0027: the workflow is accepted behind the `weekly_review` flag; the entry stays non-interactive `coming later` while the flag is off and is replaced by the working entry when it is on. |
 | Brain Dump recording/review labels | Use provisional/confirm language; every action remains backed by the persisted operation. |
 | Account avatar | Make it a real account/sign-out control or render it as non-interactive identity, not a button-shaped dead end. |
 

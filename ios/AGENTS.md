@@ -90,8 +90,9 @@ tests and leave the app build to CI (the `ios-app` lane of
   To Next Actions"), calm second person, short imperatives. List names are
   "Inbox", "Next actions", "Waiting for", "Someday / maybe". Use `·` between
   inline metadata. Sync state is always words ("Offline — 3 changes
-  waiting"), never a colour alone. No emoji. Weekly review stays visibly
-  deferred.
+  waiting"), never a colour alone. No emoji. Weekly review is flag-gated: a
+  non-interactive `coming later` entry while the `weekly_review` flag is off
+  (account-less: while its release switch is off; ADR-0027).
 
 ## Style
 

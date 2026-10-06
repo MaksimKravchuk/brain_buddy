@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -159,6 +162,190 @@ class RequirementCoverageTests(unittest.TestCase):
             found = {p.name for p in module.iter_test_files(root)}
 
         self.assertNotIn("widget.ts", found)
+
+
+# Feature 020 has requirements whose only honest evidence is Swift (research
+# R19): the iOS package tests and the macOS host tests.
+SWIFT_SPEC = (
+    "## Requirements\n"
+    "- **FR-001**: Formulation clock.\n"
+    "- **FR-002**: Substantive change.\n"
+    "- **FR-041**: Mac shows a coming-later row.\n"
+    "- **FR-047**: Account-less iOS parks on device.\n"
+    "## Success Criteria\n"
+    "- **SC-002**: Decisions are fast.\n"
+)
+
+
+class SwiftAndSliceCoverageTests(unittest.TestCase):
+    """The gate traces Swift test trees and can check one PR slice's ids."""
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def build(self, tmp: str, files: dict[str, str]) -> tuple[Path, Path]:
+        root = Path(tmp)
+        feature_dir = root / "specs" / "020-weekly-review"
+        feature_dir.mkdir(parents=True)
+        (feature_dir / "spec.md").write_text(SWIFT_SPEC, encoding="utf-8")
+        for relative, text in files.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        return root, feature_dir
+
+    def run_main(self, root: Path, argv: list[str]) -> tuple[int, str, str]:
+        self.module.REPO_ROOT = root
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = self.module.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    @staticmethod
+    def report(out: str) -> dict:
+        # `--json` prints the report, then the pass line, on stdout.
+        return json.JSONDecoder().raw_decode(out)[0]
+
+    def test_swift_tests_in_ios_package_and_macos_trees_satisfy_the_gate(self) -> None:
+        ios_test = "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/LocalParkTests.swift"
+        mac_test = "macos/Tests/BrainBuddyMacTests/SidebarEntriesTests.swift"
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(
+                tmp,
+                {
+                    ios_test: "func test_020_FR_047_accountLessDeviceParks() {}\n",
+                    mac_test: (
+                        '@Test("020-FR-041 weekly review row is coming later")\n'
+                        "func comingLaterRow() {}\n"
+                    ),
+                },
+            )
+
+            result = self.module.coverage(root, feature_dir)
+
+        self.assertEqual(result["FR-047"], [ios_test])
+        self.assertEqual(result["FR-041"], [mac_test])
+
+    def test_swift_outside_the_test_trees_is_not_coverage(self) -> None:
+        """App and package sources are product code, not evidence."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(
+                tmp,
+                {
+                    "ios/BrainBuddy/App/RootView.swift": "// 020-FR-047\n",
+                    "ios/BrainBuddyKit/Sources/BrainBuddyCore/Park.swift": (
+                        "// 020-FR-047\n"
+                    ),
+                    "macos/Sources/BrainBuddyMac/ContentView.swift": "// 020-FR-041\n",
+                },
+            )
+
+            result = self.module.coverage(root, feature_dir)
+
+        self.assertEqual(result["FR-047"], [])
+        self.assertEqual(result["FR-041"], [])
+
+    def test_requirements_filter_checks_only_the_listed_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(
+                tmp,
+                {
+                    "backend/tests/test_review_formulation.py": (
+                        "def test_020_FR_001_clock_starts():\n    pass\n"
+                        'allure.story("020-SC-002 decisions are fast")\n'
+                    ),
+                },
+            )
+
+            code, out, err = self.run_main(
+                root,
+                [
+                    str(feature_dir),
+                    "--requirements",
+                    "020-FR-001,020-SC-002",
+                    "--json",
+                ],
+            )
+
+        self.assertEqual(code, 0, err)
+        report = self.report(out)
+        self.assertEqual(sorted(report["coverage"]), ["FR-001", "SC-002"])
+        self.assertEqual(report["uncovered"], [])
+        # A consumer must be able to tell a slice check from the full gate.
+        self.assertEqual(report["requirements_filter"], ["FR-001", "SC-002"])
+
+    def test_requirements_filter_still_fails_a_listed_uncovered_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(
+                tmp,
+                {
+                    "backend/tests/test_review_formulation.py": (
+                        "def test_020_FR_001_clock_starts():\n    pass\n"
+                    ),
+                },
+            )
+
+            code, out, err = self.run_main(
+                root, [str(feature_dir), "--requirements", "020-FR-001, 020-SC-002"]
+            )
+
+        self.assertEqual(code, 1)
+        self.assertIn("020-SC-002", err)
+        self.assertNotIn("020-FR-002", out + err)
+        self.assertNotIn("020-FR-041", out + err)
+
+    def test_without_the_filter_every_defined_id_is_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(
+                tmp,
+                {
+                    "backend/tests/test_review_formulation.py": (
+                        "def test_020_FR_001_clock_starts():\n    pass\n"
+                        'allure.story("020-SC-002 decisions are fast")\n'
+                    ),
+                },
+            )
+
+            code, out, _err = self.run_main(root, [str(feature_dir), "--json"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(self.report(out)["uncovered"], ["FR-002", "FR-041", "FR-047"])
+        self.assertIsNone(self.report(out)["requirements_filter"])
+
+    def test_requirements_filter_rejects_an_id_spec_does_not_define(self) -> None:
+        """A typo or a stale manifest id must not pass as 'nothing to check'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(
+                tmp,
+                {
+                    "backend/tests/test_review_formulation.py": (
+                        "def test_020_FR_001_clock_starts():\n    pass\n"
+                    ),
+                },
+            )
+
+            with self.assertRaises(SystemExit) as raised:
+                self.run_main(
+                    root,
+                    [str(feature_dir), "--requirements", "020-FR-001,020-FR-099"],
+                )
+
+        self.assertIn("020-FR-099", str(raised.exception.code))
+
+    def test_requirements_filter_rejects_bare_and_foreign_ids(self) -> None:
+        """The filter keeps the feature-qualified rule of the gate itself."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(tmp, {})
+
+            for value in ("FR-001", "019-FR-001", "020-XX-001", ""):
+                with self.subTest(value=value):
+                    with self.assertRaises(SystemExit) as raised:
+                        self.run_main(
+                            root, [str(feature_dir), "--requirements", value]
+                        )
+                    # The script's own rejection, not an argparse usage error.
+                    self.assertIsInstance(raised.exception.code, str)
+                    self.assertIn("--requirements", raised.exception.code)
 
 
 if __name__ == "__main__":
