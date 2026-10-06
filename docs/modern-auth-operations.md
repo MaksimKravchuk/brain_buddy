@@ -1,6 +1,6 @@
 # Modern authentication operations
 
-This guide covers spec 022's direct Google, Apple and email-code setup and the
+This guide covers spec 023's direct Google, Apple and email-code setup and the
 Identity storage transition. It supplements [auth.md](auth.md), whose older
 JSON/invite-only limitations do not describe the modern implementation. The
 settings below come from `ModernAuthSettings`; migration and image checks come

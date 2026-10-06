@@ -6,7 +6,15 @@ evidence, including failures. It does not certify launch or GDPR compliance.
 ## Candidate and compatibility
 
 - Implementation branch: `feat/modern-auth`; current main
-  `afaa820ae8f5edcac99764c386ed748d6dca037c` integrated in `90035ca`.
+  `21f08d26698a434f7b1d16b991b2b43d4e0ea0f2` integrated in `ce49b38`.
+  Concurrent main introduced `022-task-mcp`; this feature moved to
+  `023-modern-auth` after checking all 113 local refs. Only its authored paths
+  and qualified test labels changed; original reviewer outputs/digests remain
+  verbatim historical evidence, with a separate renumbering disposition.
+- Review PR: [#270](https://github.com/MaksimKravchuk/brain_buddy/pull/270), draft.
+  Smart-HTTP push returned 401; publishing uses authenticated Git Data API with
+  remote/local tree equality checked. Original local history is retained in
+  `backup/modern-auth-local-7dfc962`; no main or production ref was modified.
 - Mac PR [#265](https://github.com/MaksimKravchuk/brain_buddy/pull/265)
   inspected before implementation and rechecked at head
   `10923345745dd38e6c176ea79e91bfff6c2a7885`: open, unmerged, planning changes
@@ -25,6 +33,8 @@ evidence, including failures. It does not certify launch or GDPR compliance.
 | First backend coverage | lines 97.21%, branches 92.35% | Below immutable floors 98.47% / 95.61%; verification remains red. Pytest's separate 95% aggregate check is insufficient. |
 | First complete web run | 1,658 tests / 71 files passed, 390.46 s | All existing and new unit tests passed. |
 | First web coverage | statements 97.38%, branches 96.14%, functions 97.30%, lines 98.83% | Below repository floors; verification remains red. Additional failure/recovery coverage in progress. |
+| Complete web run after coverage repair | 1,710 tests / 73 files passed, 417.53 s | Actual full lint, typecheck, Vitest, taxonomy and build passed before the latest main MCP merge; candidate-bound rerun follows. |
+| Repaired web coverage | statements 99.01%, branches 97.83%, functions 98.80%, lines 99.51% | All immutable repository floors passed; no suppression or floor decrease. |
 | Independent security review | initial changes requested; repaired Apple changes approved | Actual review files below. Three reproduced defects: relay delivery disable, revoked-state wire/reconnection, associated notice receipt erasure. Red tests reproduced all three; 44 focused tests and independent equal/newer-consent checks passed after repair. Whole-feature acceptance was not granted. |
 | Provider return hydration regression | 1 failing regression / 3 old passing; then 4 passed | Actual browser found callback racing account hydration. Repair waits for settled hydration before owner assertion; timeout invalidates continuation. |
 | Disabled-provider reconnection | 1 failing regression / 6 old passing; then 7 passed | Inactive connected methods offer Reconnect and fresh consent rather than ineffective Remove. |
@@ -36,10 +46,17 @@ evidence, including failures. It does not certify launch or GDPR compliance.
 | Headed accessibility | zero Axe violations on all three scanned surfaces | Login's moderate landmark findings were repaired by using the existing layout's semantic main landmark. This is web evidence, not native device evidence. |
 | Repository meta gates | check-specs passed; validate-ci passed with local socket access | Default sandbox first blocked socket fixtures; rerun with approved local execution passed. |
 | Previous native package run | 614 tests in 65 suites passed | Implementation worker's Linux Swift 6.2 run before final aggregate. Candidate-bound native/CI evidence still required. |
+| Aggregate Linux native package | 614 tests / 65 suites passed, 59.213 s | Actual Swift 6.2 run on the integrated foundation/auth tree. Device/Xcode acceptance is separate. |
+| Native Apple corrupt/retired-key regression | 79 cases passed / 2 reproduced failures; after repair 81 passed | Decryption moved into the claimed attempt's terminal exception boundary. No upstream call or authority on either failure; unchanged tests passed after repair. |
+| Final aggregate start after main merge | meta gates and backend static checks passed; runner blocked before pytest | Workspace filled during local Docker rebuild; removed only enumerated disposable task build caches, preserving images/data. Fresh full chain follows. |
+| Signed Apple browser continuation | 10/10 full browser journeys passed | Includes actual cross-site form POST/binder, valid ES256 client secret and RS256 Apple assertions, relay signup, stable-subject return without email, and collision rejection. Synthetic boundary evidence only. |
 
 Independent reviews:
 [initial](reviews/implementation-security-5fc4a6a.json),
-[repair review](reviews/implementation-security-8f3adb83.json).
+[repair review](reviews/implementation-security-8f3adb83.json),
+[merge and renumbering disposition](renumbering-review.json).
+The bounded disposition checks immutable `ce49b38`; historical six-lens
+review bytes and original planning digest are preserved, without restamping.
 
 Log files remain in this execution workspace under `/tmp/modern-auth-*`.
 Generated Allure and browser artifacts are ignored build evidence; fresh final
@@ -71,7 +88,8 @@ CI artifacts must bind to the frozen implementation SHA.
 
 1. Finish coverage repairs, execute the complete required suite on the final
    SHA, and verify native CI really executes against that same candidate.
-2. Complete synthetic Apple browser acceptance and headed web reference checks.
+2. Retain final-candidate synthetic Apple browser and headed web reference artifacts.
+   The implemented ten-journey suite already passed; final aggregate rerun follows.
 3. Physical iOS: ASWebAuthenticationSession/Apple cancellation and return,
    autofill, Dynamic Type, 44-pt controls, pending feedback and preserved outbox.
 4. Real configured Google, Apple and SMTP smoke. Provider accounts existing
