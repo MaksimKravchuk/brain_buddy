@@ -32,6 +32,11 @@ public struct APIError: Error, Hashable, Sendable, CustomStringConvertible, Loca
         case unauthorized
         /// 429.
         case rateLimited
+        /// 404 `{"reason": "weekly_review_disabled"}` (spec 020, http "Gate"):
+        /// the weekly review is switched off for the account. Like
+        /// `rateLimited`: keep the operation and its key, back off, never set
+        /// it aside; the review UI hides while local review state is kept.
+        case featureDisabled
         /// 409: `expected_revision` did not match. `resource` is the server's
         /// name: `Task`, `Project`, `Tag`, `Subtask` or `Comment`.
         case staleRevision(resource: String, id: String)
@@ -88,7 +93,7 @@ public struct APIError: Error, Hashable, Sendable, CustomStringConvertible, Loca
     /// token storage.
     public var isRetryable: Bool {
         switch kind {
-        case .network, .cancelled, .tokenStorage, .rateLimited, .server: true
+        case .network, .cancelled, .tokenStorage, .rateLimited, .featureDisabled, .server: true
         case .unauthorized, .staleRevision, .idempotencyConflict, .duplicateName, .notFound, .rejected, .decoding: false
         }
     }
@@ -105,10 +110,14 @@ public struct APIError: Error, Hashable, Sendable, CustomStringConvertible, Loca
         case .rateLimited: true
         case .server: !isRedirect
         case .decoding: statusCode.map { (200..<300).contains($0) } ?? false
-        case .tokenStorage, .unauthorized, .staleRevision, .idempotencyConflict, .duplicateName, .notFound, .rejected:
+        case .tokenStorage, .unauthorized, .staleRevision, .idempotencyConflict, .duplicateName, .notFound, .rejected,
+            .featureDisabled:
             false
         }
     }
+
+    /// The envelope's `detail.reason`, when the server gave one.
+    public var reason: String? { detail?["reason"]?.stringValue }
 
     /// The answer was a 3xx, which Brain Buddy never follows.
     public var isRedirect: Bool {
@@ -175,6 +184,8 @@ extension APIError {
             )
         case 401:
             return make(.unauthorized, "Sign in again to continue.")
+        case 404 where detail?["reason"]?.stringValue == "weekly_review_disabled":
+            return make(.featureDisabled, "The weekly review isn't available for this account right now.")
         case 404:
             return make(
                 .notFound(resource: detail?["resource"]?.stringValue, id: detail?["id"]?.stringValue),

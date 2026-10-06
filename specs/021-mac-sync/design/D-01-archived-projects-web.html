@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>D-01 · Archived projects with unarchive (web)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky500:#0ea5e9;--sky700:#0369a1;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--rose50:#fff1f2;--rose200:#fecdd3;--rose700:#be123c;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-feature-settings:"cv11","ss01","ss03";-webkit-font-smoothing:antialiased;font-size:14px}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1200px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 6px;font-size:13px;line-height:1.5;color:var(--s600);max-width:1080px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+figure{margin:0 0 34px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 8px;max-width:1080px}figcaption b{color:var(--s900);font-size:13px;margin-right:6px}
+.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.i.sm{width:14px;height:14px}
+.app{width:1180px;height:640px;display:grid;grid-template-columns:248px 1fr;border:1px solid var(--s300);border-radius:12px;overflow:hidden;box-shadow:var(--raised);background:var(--s50)}
+.side{background:var(--s50);border-right:1px solid var(--s200);padding:16px 12px;display:flex;flex-direction:column;gap:18px;font-size:14px;position:relative}
+.sl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);padding:0 10px 6px}
+.nr{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:8px;color:var(--s600);font-weight:500}
+.nr.on{background:#fff;color:var(--s900);box-shadow:var(--soft)}
+.nr .c{margin-left:auto;font-size:12px;color:var(--s400)}
+.nr .b{margin-left:auto;font-size:11px;font-weight:600;color:#fff;background:var(--sky700);border-radius:999px;padding:1px 6px}
+.nr.arch{color:var(--s500)}
+.nr.disc{color:var(--s500);font-size:13px}
+.nr.disc .c{color:var(--s400)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.main{padding:28px 36px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.top{display:flex;align-items:center;gap:10px}
+.top h1{margin:0;font-size:20px;font-weight:600;letter-spacing:-.015em}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:500;border-radius:999px;padding:2px 8px;background:var(--s100);border:1px solid var(--s200);color:var(--s600)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;border-radius:8px;border:1px solid transparent;font-size:13px;font-weight:600;padding:0 14px}
+.btn.sec{background:#fff;border-color:var(--s200);color:var(--s900);box-shadow:var(--soft)}
+.btn.pri{background:var(--sky700);color:#fff}
+.btn.dis{opacity:.5}
+.top .btn{margin-left:auto}
+.meta{font-size:13px;color:var(--s500)}
+.info{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--s600)}
+.task{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--s200);border-radius:12px;padding:10px 14px;box-shadow:var(--soft)}
+.task .cb{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--s300);flex:none}
+.task .t{font-weight:500}
+.task .p{margin-left:auto;font-size:11px;color:var(--s400);min-width:140px;text-align:right}
+.task .tag{font-size:11px;background:var(--s100);color:var(--s600);border-radius:999px;padding:2px 8px}
+.lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin-top:4px}
+.pop{position:absolute;background:#fff;border:1px solid var(--s200);border-radius:14px;box-shadow:var(--float);padding:10px;display:flex;flex-direction:column;gap:8px;width:220px;z-index:3}
+.pop .inp{height:32px;border:1px solid var(--s200);border-radius:6px;padding:0 8px;display:flex;align-items:center;font-size:13px}
+.pop .row2{display:flex;gap:6px}
+.pop .b{flex:1;min-height:30px;border-radius:8px;font-size:12px;font-weight:600;border:1px solid var(--s200);background:#fff;display:flex;align-items:center;justify-content:center}
+.pop .b.p{background:var(--sky700);color:#fff;border-color:var(--sky700)}
+.pop .hint{font-size:11px;color:var(--s500);line-height:1.4;margin:0}
+.banner{display:flex;gap:8px;align-items:flex-start;border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700)}
+.banner.warn{background:var(--amb50);border-color:var(--amb200);color:var(--amb800)}
+.ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--s600)}
+.toast{background:rgba(15,23,42,.92);color:#fff;border-radius:20px;padding:10px 16px;font-size:13px;box-shadow:var(--float);align-self:center}
+.skel{background:var(--s200);border-radius:6px;height:12px}
+.grid{display:grid;grid-template-columns:repeat(3,370px);gap:22px}
+.mini{background:var(--s50);border:1px solid var(--s300);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--raised);min-height:220px}
+.mini h3{margin:0;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500)}
+.mini p{margin:0;font-size:12px;line-height:1.5;color:var(--s700)}
+.empty{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:16px 8px}
+.empty h4{margin:0;font-size:15px;font-weight:600}
+.empty p{color:var(--s500)}
+.phone{width:390px;height:700px;background:var(--s50);border:1px solid var(--s300);border-radius:20px;overflow:hidden;box-shadow:var(--raised);display:flex;flex-direction:column}
+.ph-top{height:52px;border-bottom:1px solid var(--s200);display:flex;align-items:center;gap:10px;padding:0 12px;background:rgba(255,255,255,.9)}
+.note{background:#fff;border:1px solid var(--s200);border-radius:12px;padding:14px 16px;font-size:12px;line-height:1.55;color:var(--s700);max-width:1180px}
+.note h3{margin:0 0 6px;font-size:13px;color:var(--s900)}
+.note ul{margin:4px 0 0;padding-left:18px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></symbol>
+<symbol id="i-unarchive" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="m9.5 14.5 2.5-2.5 2.5 2.5M12 12v6"/></symbol>
+<symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+<symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01M8.5 16.43a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M5 13a10 10 0 0 1 5.24-2.76M2 2l20 20"/></symbol>
+<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+<symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>D-01 · Archived projects with unarchive (web)</h1>
+  <p>The web can archive a project today (sidebar › project options › "Archive", no confirmation) but has no list of archived projects and no unarchive: an archived project simply disappears. With ADR-0020 (FR-024 – FR-027) archive keeps every task's project, so the archived project needs a place and a way back. Placement (left open by the spec): a <b>collapsed "Archived projects" disclosure at the end of the sidebar's Projects section</b>, the same place the Mac uses, opening each archived project at its normal <code>/projects/:id</code> route with an "Unarchive" button.</p>
+  <p><b>Copy check</b>: no web string says archive detaches tasks (verified in <code>AppShell.tsx</code> and <code>TaskListPage.tsx</code>), so the only web copy change is additive. The web stays online-only with no sync status (spec Assumptions); failures use the existing inline notice with the correlation ID.</p>
+</header>
+
+<figure>
+<figcaption><b>D-01 · default: archived project open</b>Disclosure expanded (it starts collapsed with its count). Archived rows use the archive icon and muted text plus the section name, never colour alone. The page lists the project's tasks (still editable, FR-025), has no "Add a next action" composer, and offers "Unarchive" top right.</figcaption>
+<div class="app">
+  <nav class="side" aria-label="Task navigation">
+    <div>
+      <div class="nr"><svg class="i"><use href="#i-inbox"/></svg>Inbox<span class="b">4</span></div>
+      <div class="nr"><svg class="i"><use href="#i-arrow"/></svg>Next actions<span class="c">12</span></div>
+      <div class="nr"><svg class="i"><use href="#i-clock"/></svg>Waiting for<span class="c">3</span></div>
+      <div class="nr"><svg class="i"><use href="#i-archive"/></svg>Someday / maybe<span class="c">9</span></div>
+    </div>
+    <div>
+      <div class="sl">Projects</div>
+      <div class="nr"><span class="dot" style="background:#10b981"></span>Garden</div>
+      <div class="nr"><span class="dot" style="background:#6366f1"></span>Move flat</div>
+      <div class="nr"><svg class="i sm"><use href="#i-plus"/></svg>New project</div>
+      <button class="nr disc" aria-expanded="true" style="border:0;background:none;width:100%"><svg class="i sm"><use href="#i-chev-d"/></svg>Archived projects<span class="c">2</span></button>
+      <div class="nr arch on"><svg class="i sm"><use href="#i-archive"/></svg>Old flat</div>
+      <div class="nr arch"><svg class="i sm"><use href="#i-archive"/></svg>Tax return 2024</div>
+    </div>
+    <div><div class="sl">Tags</div></div>
+  </nav>
+  <section class="main">
+    <div class="top"><h1>Old flat</h1><span class="chip"><svg class="i sm"><use href="#i-archive"/></svg>Archived</span><button class="btn sec"><svg class="i"><use href="#i-unarchive"/></svg>Unarchive</button></div>
+    <div class="meta">3 open tasks</div>
+    <div class="info"><svg class="i"><use href="#i-info"/></svg>Archived projects don't take new tasks. Unarchive it to add tasks.</div>
+    <div class="task"><span class="cb"></span><span class="t">Chase the deposit with the landlord</span><span class="p">Waiting for</span></div>
+    <div class="task"><span class="cb"></span><span class="t">Cancel the electricity contract</span><span class="tag">calls</span><span class="p">Next actions</span></div>
+    <div class="task"><span class="cb"></span><span class="t">Return the old router</span><span class="p">Someday / maybe</span></div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-01 · sidebar: collapsed (default), the archive action, and an archived project's options</b>Left: collapsed disclosure with the count; hidden entirely when there are no archived projects. Middle: the existing options popover on an active project, unchanged ("Rename" / "Archive"), plus one quiet hint line, because the person may not expect archive to be reversible. Right: options on an archived project offer only "Unarchive".</figcaption>
+<div style="display:flex;gap:24px">
+  <div class="app" style="width:300px;height:330px;grid-template-columns:248px"><nav class="side">
+    <div><div class="sl">Projects</div>
+      <div class="nr"><span class="dot" style="background:#10b981"></span>Garden</div>
+      <div class="nr"><span class="dot" style="background:#6366f1"></span>Move flat</div>
+      <div class="nr"><svg class="i sm"><use href="#i-plus"/></svg>New project</div>
+      <button class="nr disc" aria-expanded="false" style="border:0;background:none;width:100%"><svg class="i sm"><use href="#i-chev-r"/></svg>Archived projects<span class="c">2</span></button>
+    </div></nav></div>
+  <div class="app" style="width:300px;height:330px;grid-template-columns:248px"><nav class="side">
+    <div><div class="sl">Projects</div>
+      <div class="nr on"><span class="dot" style="background:#f59e0b"></span>Old flat<svg class="i sm" style="margin-left:auto"><use href="#i-more"/></svg></div>
+      <div class="nr"><span class="dot" style="background:#6366f1"></span>Move flat</div>
+    </div>
+    <div class="pop" style="left:20px;top:80px" role="dialog" aria-label="Edit project Old flat"><span class="inp">Old flat</span><div class="row2"><span class="b p">Rename</span><span class="b">Archive</span></div><p class="hint">Archiving keeps its tasks. You can unarchive it from Archived projects.</p></div>
+  </nav></div>
+  <div class="app" style="width:300px;height:330px;grid-template-columns:248px"><nav class="side">
+    <div><div class="sl">Projects</div>
+      <div class="nr"><span class="dot" style="background:#10b981"></span>Garden</div>
+      <button class="nr disc" style="border:0;background:none;width:100%"><svg class="i sm"><use href="#i-chev-d"/></svg>Archived projects<span class="c">2</span></button>
+      <div class="nr arch on"><svg class="i sm"><use href="#i-archive"/></svg>Old flat<svg class="i sm" style="margin-left:auto"><use href="#i-more"/></svg></div>
+    </div>
+    <div class="pop" style="left:20px;top:150px" role="dialog" aria-label="Archived project Old flat"><div class="row2"><span class="b p">Unarchive</span></div></div>
+  </nav></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-01 · other states</b>The web has no offline queue: offline disables the action with the existing offline pattern. Loading placeholders appear after 300 ms and are static.</figcaption>
+<div class="grid">
+  <div class="mini"><h3>loading</h3><p>Sidebar archived rows and the project page load with the projects query.</p><div class="skel" style="width:55%"></div><div class="skel" style="width:75%"></div><div class="skel" style="width:65%"></div></div>
+  <div class="mini"><h3>unarchiving (saving)</h3><div class="top"><h1 style="font-size:17px">Old flat</h1><button class="btn sec dis" aria-disabled="true" style="margin-left:auto">Unarchiving…</button></div><p>The button is aria-disabled with a busy label while the request runs, and stays focusable; "Unarchiving…" is announced politely; the page stays readable.</p></div>
+  <div class="mini"><h3>unarchived</h3><div class="top"><h1 style="font-size:17px">Old flat</h1></div><p>The chip, button and info line go away; the composer returns; the project moves back to Projects in the sidebar and the disclosure count drops. Focus moves to the page heading.</p><div class="toast" role="status">Unarchived “Old flat”</div></div>
+  <div class="mini"><h3>error</h3><div class="banner warn" role="alert" style="flex-direction:column;gap:4px"><span>Couldn't unarchive “Old flat”. It's still archived.</span><span class="ref">Ref 5a9e31c4-0b7d-4f2a-8c63-d14e7a2b9f05</span></div><button class="btn sec" style="align-self:flex-start">Retry</button></div>
+  <div class="mini"><h3>offline / interrupted</h3><div class="banner" role="status"><svg class="i"><use href="#i-wifi-off"/></svg><span><b>You're offline.</b> Unarchive is available when you're back online.</span></div><button class="btn sec dis" aria-disabled="true" style="align-self:flex-start">Unarchive</button><p>A request cut off mid-way is retried with the same idempotency key, so it applies once.</p></div>
+  <div class="mini"><h3>partial failure</h3><p><b>n/a</b>: unarchive is one project command; its tasks never change, so there is nothing to half-apply.</p></div>
+  <div class="mini"><h3>empty: no archived projects</h3><p>The "Archived projects" disclosure is not shown at all. If the last one is unarchived while its page is open, the page simply becomes the active project.</p></div>
+  <div class="mini"><h3>empty: archived before this change</h3><div class="empty"><svg class="i" style="width:28px;height:28px;color:var(--s400)"><use href="#i-archive"/></svg><h4>No tasks in this project</h4><p>Unarchive it to add tasks.</p><p style="font-size:12px">Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists.</p></div></div>
+  <div class="mini"><h3>empty: filtered to nothing</h3><div class="empty"><h4>No tasks match this filter</h4><p>Clear the filter to see this project's tasks.</p></div></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>D-01 · a task of an archived project in Next actions, and narrow (390 px)</b>Left: the row's project column reads "Old flat · archived"; nothing else about the task changes (FR-024). Right: in the navigation drawer the disclosure sits under Projects as on desktop; on the project page the Unarchive button wraps under the title at full width (44 px tall). No horizontal scroll at 390 × 851.</figcaption>
+<div style="display:flex;gap:24px;align-items:flex-start">
+  <div class="app" style="width:740px;height:240px;grid-template-columns:1fr"><section class="main">
+    <div class="top"><h1>Next actions</h1></div>
+    <div class="lbl">Garden</div>
+    <div class="task"><span class="cb"></span><span class="t">Order soil for the raised bed</span><span class="p">Garden</span></div>
+    <div class="lbl">Old flat · archived</div>
+    <div class="task"><span class="cb"></span><span class="t">Cancel the electricity contract</span><span class="tag">calls</span><span class="p">Old flat · archived</span></div>
+  </section></div>
+  <div class="phone">
+    <div class="ph-top"><svg class="i"><use href="#i-menu"/></svg><b>Old flat</b></div>
+    <div style="padding:16px;display:flex;flex-direction:column;gap:10px">
+      <div class="top" style="flex-wrap:wrap"><h1>Old flat</h1><span class="chip"><svg class="i sm"><use href="#i-archive"/></svg>Archived</span><button class="btn sec" style="margin-left:0;width:100%;min-height:44px"><svg class="i"><use href="#i-unarchive"/></svg>Unarchive</button></div>
+      <div class="meta">3 open tasks</div>
+      <div class="info" style="align-items:flex-start"><svg class="i"><use href="#i-info"/></svg>Archived projects don't take new tasks. Unarchive it to add tasks.</div>
+      <div class="task"><span class="cb"></span><span class="t">Chase the deposit with the landlord</span></div>
+      <div class="task"><span class="cb"></span><span class="t">Cancel the electricity contract</span></div>
+      <div class="task"><span class="cb"></span><span class="t">Return the old router</span></div>
+    </div>
+  </div>
+</div>
+</figure>
+
+<div class="note">
+  <h3>Keyboard and screen readers</h3>
+  <ul>
+    <li>The disclosure is a <code>button</code> with <code>aria-expanded</code> and the accessible name "Archived projects, 2". Its expanded state is remembered per browser.</li>
+    <li>Tab order on the project page: heading → Unarchive → task rows. "Unarchive" has the accessible name "Unarchive Old flat". After success, focus moves to the heading and the toast is announced (<code>role="status"</code>).</li>
+    <li>The archived row's options popover follows the existing popover rules: Esc closes and returns focus to the options button.</li>
+    <li>Contrast: slate-500 muted archived rows on slate-50 are 4.6:1; the chip's slate-600 on slate-100 is 6.9:1.</li>
+  </ul>
+</div>
+
+</body>
+</html>

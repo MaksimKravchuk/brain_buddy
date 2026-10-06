@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>X-02 · Sync status popover (macOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky300:#7dd3fc;--sky500:#0ea5e9;--sky700:#0369a1;--amb50:#fffbeb;--amb200:#fde68a;--amb300:#fcd34d;--amb800:#92400e;--rose600:#e11d48;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s800:#1e293b;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;font-size:13px;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1180px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 6px;font-size:13px;line-height:1.5;color:var(--s600);max-width:1080px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.frames{display:flex;flex-wrap:wrap;gap:30px 28px;align-items:flex-start}
+figure{margin:0;width:340px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 10px;min-height:70px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.i{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.i.sm{width:12px;height:12px}
+/* popover */
+.pop{width:320px;margin-left:6px;background:#fff;border:1px solid var(--s200);border-radius:12px;box-shadow:var(--float);padding:12px;position:relative;display:flex;flex-direction:column;gap:10px}
+.pop::after{content:"";position:absolute;left:28px;bottom:-7px;width:12px;height:12px;background:#fff;border-right:1px solid var(--s200);border-bottom:1px solid var(--s200);transform:rotate(45deg)}
+.kv{display:flex;justify-content:space-between;gap:12px;font-size:13px;line-height:1.4}
+.kv .k{color:var(--s600)}.kv .v{color:var(--s900);text-align:right}
+.kvs{display:flex;flex-direction:column;gap:6px}
+hr{border:0;border-top:1px solid var(--s200);margin:0}
+.lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:28px;border-radius:8px;border:1px solid var(--s200);background:#fff;font-size:13px;font-weight:500;padding:0 12px;box-shadow:var(--soft);color:var(--s900)}
+.btn.pri{background:var(--sky700);border-color:var(--sky700);color:#fff}
+.btn.lnk{border:0;background:none;box-shadow:none;color:var(--sky700);padding:0 4px;min-height:22px;font-size:12px}
+.btn.dis{color:var(--s400);background:var(--s50)}
+.btn.sm{min-height:24px;font-size:12px;padding:0 8px}
+.acct{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:var(--s600)}
+.notice{border-radius:10px;padding:10px 11px;font-size:12px;line-height:1.45;border:1px solid var(--s200);background:var(--s100);color:var(--s700);display:flex;flex-direction:column;gap:6px}
+.notice.warn{background:var(--amb50);border-color:var(--amb200);color:var(--amb800)}
+.notice b{font-size:13px;color:inherit}
+.ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--s600);word-break:break-all;user-select:text}
+.refrow{display:flex;align-items:flex-start;gap:6px;justify-content:space-between}
+.issues{display:flex;flex-direction:column;gap:8px}
+.issue{border:1px solid var(--s200);border-radius:10px;padding:9px 10px;display:flex;flex-direction:column;gap:4px;background:var(--s50)}
+.issue .w{font-weight:600;font-size:12px;line-height:1.4}
+.issue .m{font-size:12px;line-height:1.45;color:var(--s700)}
+.issue .t{font-size:11px;color:var(--s500)}
+.issue .acts{display:flex;gap:4px;justify-content:flex-end;margin-top:2px}
+.scroll{max-height:250px;overflow:hidden;position:relative}
+.scroll::after{content:"";position:absolute;left:0;right:0;bottom:0;height:28px;background:linear-gradient(rgba(255,255,255,0),#fff)}
+.spin{width:11px;height:11px;border-radius:50%;border:1.6px solid var(--s300);border-top-color:var(--s600);display:inline-block}
+/* footer crop */
+.crop{width:340px;margin-top:10px;background:#eef2f6;border:1px solid var(--s300);border-radius:12px;box-shadow:var(--raised)}
+.foot{display:flex;align-items:flex-start;gap:6px;min-height:34px;padding:9px 14px;font-size:11px;line-height:16px;color:var(--s600)}
+.foot .st{border:0;background:rgba(14,165,233,.12);padding:0 4px;margin:0 -4px;border-radius:4px;color:inherit;display:inline-flex;gap:5px;align-items:flex-start}
+.foot .st .i{margin-top:2px}
+.foot .sep{color:var(--s400)}
+.foot .act{border:0;background:none;padding:0;color:var(--sky700);font-weight:500}
+.foot.warn{color:var(--amb800)}
+.foot .slot{margin-left:auto;width:12px;height:16px;flex:none;display:flex;align-items:center}
+.ann{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;border-radius:50%;background:var(--sky700);color:#fff;font-size:10px;font-weight:700;margin-right:4px;flex:none}
+/* dark */
+.dark{background:#0f172a;border-radius:14px;padding:12px 0 12px}
+.dark .pop{background:#1e293b;border-color:#334155;color:#e2e8f0}
+.dark .pop::after{background:#1e293b;border-color:#334155}
+.dark .kv .k,.dark .acct{color:#94a3b8}.dark .kv .v{color:#e2e8f0}
+.dark hr{border-top-color:#334155}
+.dark .lbl{color:#94a3b8}
+.dark .btn{background:#273449;border-color:#334155;color:#e2e8f0}
+.dark .btn.lnk{background:none;color:var(--sky300)}
+.dark .issue{background:#172133;border-color:#334155}
+.dark .issue .m{color:#cbd5e1}.dark .issue .t,.dark .ref{color:#94a3b8}
+.dark .notice.warn{background:rgba(146,64,14,.25);border-color:rgba(252,211,77,.35);color:var(--amb300)}
+.dark .crop{background:#1b2331;border-color:#334155}
+.dark .foot{color:#94a3b8}.dark .foot.warn{color:var(--amb300)}.dark .foot .act{color:var(--sky300)}
+.note{background:#fff;border:1px solid var(--s200);border-radius:12px;padding:14px 16px;font-size:12px;line-height:1.55;color:var(--s700);max-width:1080px;margin-top:30px}
+.note h3{margin:0 0 6px;font-size:13px;color:var(--s900)}
+.note ol,.note ul{margin:4px 0 0;padding-left:18px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></symbol>
+<symbol id="i-user-x" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M19 8v3M19 15h.01"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+<symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01M8.5 16.43a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M5 13a10 10 0 0 1 5.24-2.76M2 2l20 20"/></symbol>
+<symbol id="i-laptop" viewBox="0 0 24 24"><path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>X-02 · Sync status popover (macOS)</h1>
+  <p>Opens from the status words in the sidebar footer (X-01), anchored above them. Small and <b>non-modal</b>: an <code>NSPopover</code> with transient behaviour, closed by Esc or a click outside, never blocking the window (FR-016, FR-017). It holds everything FR-016 lists: the exact last-sync time, how many changes are waiting and the age of the oldest, the sync issues in plain words with a reference ID and Dismiss, "Sync now", and the signed-in email with "Sign out…". Width 320 pt; the issue list scrolls inside it after about three issues.</p>
+  <p>Issue wording follows the iPhone's Sync issues screen: what was attempted, why it failed, the reference ID, the time. Example issues come from the spec's edge cases. Reference IDs are the request's <code>X-Correlation-ID</code>; the Mac sends its own ID, so a timeout with no reply still has one the server logs can match (FR-015).</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>X-02 · default (synced, no issues)</b>Empty issues means no issues section at all. "Sync now" is never needed (FR-006), so it is a plain bordered button, not the prominent one.</figcaption>
+<div class="pop" role="dialog" aria-label="Sync status">
+  <div class="kvs">
+    <div class="kv"><span class="k">Last synced</span><span class="v">Today at 14:31</span></div>
+    <div class="kv"><span class="k">Waiting to sync</span><span class="v">Nothing</span></div>
+  </div>
+  <div><button class="btn">Sync now</button></div>
+  <hr>
+  <div class="acct"><span>alex@example.com</span><button class="btn lnk">Sign out…</button></div>
+</div>
+<div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"></span></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-02 · changes waiting</b>The count and the age of the oldest waiting change (FR-016). Online, so this only stays long while retries are pending.</figcaption>
+<div class="pop">
+  <div class="kvs">
+    <div class="kv"><span class="k">Last synced</span><span class="v">Today at 14:31</span></div>
+    <div class="kv"><span class="k">Waiting to sync</span><span class="v">2 changes · oldest 40 s</span></div>
+  </div>
+  <div><button class="btn">Sync now</button></div>
+  <hr>
+  <div class="acct"><span>alex@example.com</span><button class="btn lnk">Sign out…</button></div>
+</div>
+<div class="crop"><div class="foot"><button class="st">Synced 3 min ago · 2 changes waiting</button><span class="slot"></span></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-02 · loading (a sync is running)</b>FR-013: no control is disabled. "Sync now" stays enabled and looks exactly as at rest. Pressing it while a sync runs joins that sync, or queues one follow-up sync if the running one has already sent its changes (single-flight). Nothing extra appears. The only sign of activity is the indicator beside the footer line. When the run ends, the times and counts update in place. Opening the popover never starts a sync by itself.</figcaption>
+<div class="pop">
+  <div class="kvs">
+    <div class="kv"><span class="k">Last synced</span><span class="v">Today at 14:31</span></div>
+    <div class="kv"><span class="k">Waiting to sync</span><span class="v">Nothing</span></div>
+  </div>
+  <div><button class="btn">Sync now</button></div>
+  <hr>
+  <div class="acct"><span>alex@example.com</span><button class="btn lnk">Sign out…</button></div>
+</div>
+<div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"><span class="spin"></span></span></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-02 · partial failure (with issues)</b>US3-6, FR-011, FR-015. Every other change synced; these two did not. Each issue: what, why, reference ID with Copy, time, Dismiss. Nothing is retried silently; the edit stays visible on the Mac only where the account allows it.</figcaption>
+<div class="pop">
+  <div class="kvs">
+    <div class="kv"><span class="k">Last synced</span><span class="v">Today at 14:31</span></div>
+    <div class="kv"><span class="k">Waiting to sync</span><span class="v">Nothing</span></div>
+  </div>
+  <hr>
+  <div class="lbl">2 changes couldn't sync</div>
+  <div class="issues" role="list">
+    <div class="issue" role="listitem">
+      <span class="w">Rename “Call the landlord”</span>
+      <span class="m">Couldn't save your change to “Call the landlord”: it was deleted on another device.</span>
+      <div class="refrow"><span class="ref">Reference ID 9b02c7e1-3d4a-4c55-8e21-6f0a9d3b7c18</span><button class="btn lnk" aria-label="Copy reference ID"><svg class="i sm"><use href="#i-copy"/></svg>Copy</button></div>
+      <div class="acts" style="justify-content:space-between;align-items:center"><span class="t">Today at 14:29</span><button class="btn sm" aria-label="Dismiss: Rename Call the landlord">Dismiss</button></div>
+    </div>
+    <div class="issue" role="listitem">
+      <span class="w">Add “Order soil” to Next actions</span>
+      <span class="m">Project “Garden” was archived on another device, so the task was added without a project.</span>
+      <div class="refrow"><span class="ref">Reference ID 4e5d9a20-c18b-4f6e-9a7d-2b1c0e8f3a51</span><button class="btn lnk" aria-label="Copy reference ID"><svg class="i sm"><use href="#i-copy"/></svg>Copy</button></div>
+      <div class="acts" style="justify-content:space-between;align-items:center"><span class="t">Today at 14:29</span><button class="btn sm" aria-label="Dismiss: Add Order soil to Next actions">Dismiss</button></div>
+    </div>
+  </div>
+  <div><button class="btn">Sync now</button></div>
+  <hr>
+  <div class="acct"><span>alex@example.com</span><button class="btn lnk">Sign out…</button></div>
+</div>
+<div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>2 changes couldn't sync</button><span class="slot"></span></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-02 · error (couldn't sync for 60 s)</b>One short reason, the time it started, the reference ID of the last failed request with Copy. "Sync now" is the retry. Changes waiting are safe and keep their count.</figcaption>
+<div class="pop">
+  <div class="notice warn" role="status">
+    <b>Couldn't sync since 14:02</b>
+    <span>Brain Buddy didn't answer. Your changes are safe on this Mac, and it keeps trying.</span>
+    <div class="refrow"><span class="ref">Reference ID 4e5d9a20-c18b-4f6e-9a7d-2b1c0e8f3a51</span><button class="btn lnk" aria-label="Copy reference ID"><svg class="i sm"><use href="#i-copy"/></svg>Copy</button></div>
+  </div>
+  <div class="kvs">
+    <div class="kv"><span class="k">Last synced</span><span class="v">Today at 14:01</span></div>
+    <div class="kv"><span class="k">Waiting to sync</span><span class="v">3 changes · oldest 33 min</span></div>
+  </div>
+  <div><button class="btn">Sync now</button></div>
+  <hr>
+  <div class="acct"><span>alex@example.com</span><button class="btn lnk">Sign out…</button></div>
+</div>
+<div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>Couldn't sync</button><span class="sep">·</span><button class="act">Retry</button><span class="slot"></span></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-02 · error, server unreachable for days</b>Edge case: no repeated alerts; the oldest waiting change's age is the only thing that grows.</figcaption>
+<div class="pop">
+  <div class="notice warn">
+    <b>Couldn't sync since Sat 3 Oct</b>
+    <span>Brain Buddy didn't answer. Your changes are safe on this Mac, and it keeps trying.</span>
+    <div class="refrow"><span class="ref">Reference ID 0c7d2e94-58a1-4b3f-b6e0-91f4a2c8d773</span><button class="btn lnk"><svg class="i sm"><use href="#i-copy"/></svg>Copy</button></div>
+  </div>
+  <div class="kvs">
+    <div class="kv"><span class="k">Last synced</span><span class="v">Sat 3 Oct at 09:12</span></div>
+    <div class="kv"><span class="k">Waiting to sync</span><span class="v">41 changes · oldest 3 days</span></div>
+  </div>
+  <div><button class="btn">Sync now</button></div>
+  <hr>
+  <div class="acct"><span>alex@example.com</span><button class="btn lnk">Sign out…</button></div>
+</div>
+<div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>Couldn't sync</button><span class="sep">·</span><button class="act">Retry</button><span class="slot"></span></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-02 · session ended</b>US3-5. "Sign in again" is the first and default button and opens X-03 with the email locked. "Sync now" is shown disabled, as offline and in the File menu (X-07), because it cannot work until then; it is skipped in the Tab order. Changes keep waiting. (Planning review c1: disabled, not hidden.)</figcaption>
+<div class="pop">
+  <div class="notice warn" role="status">
+    <b>Your session ended</b>
+    <span>Sign in again to keep syncing. Your changes stay on this Mac until then.</span>
+    <div><button class="btn pri">Sign in again</button></div>
+  </div>
+  <div class="kvs">
+    <div class="kv"><span class="k">Last synced</span><span class="v">Today at 11:40</span></div>
+    <div class="kv"><span class="k">Waiting to sync</span><span class="v">5 changes · oldest 2 h</span></div>
+  </div>
+  <div><button class="btn dis" aria-disabled="true">Sync now</button></div>
+  <hr>
+  <div class="acct"><span>alex@example.com</span><button class="btn lnk">Sign out…</button></div>
+</div>
+<div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-user-x"/></svg>Sign in again to sync</button><span class="slot"></span></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-02 · offline</b>Neutral, not amber. While offline no sync can run, so "Sync now" is disabled, and the line above it says why. It is enabled again the moment the network returns. This is the only state where it is disabled; it is never disabled because a sync is running (FR-013).</figcaption>
+<div class="pop">
+  <div class="notice"><span style="display:flex;gap:6px;align-items:flex-start"><svg class="i" style="margin-top:1px"><use href="#i-wifi-off"/></svg><span>You're offline. Changes are saved on this Mac and sync when you're back online.</span></span></div>
+  <div class="kvs">
+    <div class="kv"><span class="k">Last synced</span><span class="v">Today at 13:50</span></div>
+    <div class="kv"><span class="k">Waiting to sync</span><span class="v">3 changes · oldest 42 min</span></div>
+  </div>
+  <div><button class="btn dis" aria-disabled="true">Sync now</button></div>
+  <hr>
+  <div class="acct"><span>alex@example.com</span><button class="btn lnk">Sign out…</button></div>
+</div>
+<div class="crop"><div class="foot"><button class="st">Offline · 3 changes waiting</button><span class="slot"></span></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-02 · signed out (account-less, empty first run)</b>FR-002, FR-029. No times, no counts, no "Sync now": nothing is sent anywhere. One action.</figcaption>
+<div class="pop">
+  <div style="display:flex;gap:8px;align-items:flex-start;font-size:12px;line-height:1.5;color:var(--s700)"><svg class="i" style="margin-top:2px;color:var(--s500)"><use href="#i-laptop"/></svg><span><b style="color:var(--s900);font-size:13px">Your tasks are stored on this Mac</b><br>Nothing is sent anywhere until you sign in. Sign in to use the same tasks on your iPhone and the web.</span></div>
+  <div><button class="btn pri">Sign in…</button></div>
+</div>
+<div class="crop"><div class="foot"><button class="st">On this Mac</button><span class="sep">·</span><button class="act">Sign in to sync</button><span class="slot"></span></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-02 · long text, many issues</b>Titles are quoted on one line and shortened past 60 characters (the iPhone's rule). After about three issues the list scrolls inside the popover; the popover itself never grows past 480 pt.</figcaption>
+<div class="pop">
+  <div class="kvs"><div class="kv"><span class="k">Last synced</span><span class="v">Today at 14:31</span></div></div>
+  <hr>
+  <div class="lbl">7 changes couldn't sync</div>
+  <div class="scroll"><div class="issues">
+    <div class="issue"><span class="w">Rename “Write up the findings from the neighbourhood meeting ab…”</span><span class="m">Couldn't save your change: it was deleted on another device.</span><span class="ref">Reference ID 7a1f…</span><div class="acts" style="justify-content:space-between"><span class="t">Today at 14:20</span><button class="btn sm">Dismiss</button></div></div>
+    <div class="issue"><span class="w">Move “Pick up the drill from Sam” to Next actions</span><span class="m">The server kept rejecting this change.</span><span class="ref">Reference ID 2c90…</span><div class="acts" style="justify-content:space-between"><span class="t">Today at 14:18</span><button class="btn sm">Dismiss</button></div></div>
+    <div class="issue"><span class="w">Add “Order soil” to Next actions</span><span class="m">Project “Garden” was archived on another device…</span></div>
+  </div></div>
+  <div><button class="btn">Sync now</button></div>
+  <hr>
+  <div class="acct"><span>alexandra.konstantinopoulou@example.com</span><button class="btn lnk">Sign out…</button></div>
+</div>
+<div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>7 changes couldn't sync</button><span class="slot"></span></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-02 · last issue dismissed</b>The popover stays open; the issues section disappears and VoiceOver says "No sync issues". The footer returns to the synced line behind it. Reference ID copied: the Copy button reads "Copied" for 2 s.</figcaption>
+<div class="pop">
+  <div class="kvs">
+    <div class="kv"><span class="k">Last synced</span><span class="v">Today at 14:31</span></div>
+    <div class="kv"><span class="k">Waiting to sync</span><span class="v">Nothing</span></div>
+  </div>
+  <div><button class="btn">Sync now</button></div>
+  <hr>
+  <div class="acct"><span>alex@example.com</span><button class="btn lnk">Sign out…</button></div>
+</div>
+<div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"></span></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-02 · dark mode, with keyboard focus order</b>Numbers show the Tab order. Focus lands on the first control when the popover opens: the attention action when there is one (here "Copy"), otherwise "Sync now".</figcaption>
+<div class="dark">
+<div class="pop">
+  <div class="notice warn">
+    <b>Couldn't sync since 14:02</b>
+    <span>Brain Buddy didn't answer. Your changes are safe on this Mac, and it keeps trying.</span>
+    <div class="refrow"><span class="ref">Reference ID 4e5d9a20-c18b-4f6e-9a7d-2b1c0e8f3a51</span><span style="display:flex;align-items:center"><span class="ann">1</span><button class="btn lnk" style="box-shadow:var(--focus)"><svg class="i sm"><use href="#i-copy"/></svg>Copy</button></span></div>
+  </div>
+  <div class="lbl">1 change couldn't sync</div>
+  <div class="issue"><span class="w">Rename “Call the landlord”</span><span class="m">Couldn't save your change to “Call the landlord”: it was deleted on another device.</span><div class="refrow"><span class="ref">Reference ID 9b02c7e1-3d4a-…</span><span style="display:flex;align-items:center"><span class="ann">2</span><button class="btn lnk"><svg class="i sm"><use href="#i-copy"/></svg>Copy</button></span></div><div class="acts" style="align-items:center"><span class="ann">3</span><button class="btn sm">Dismiss</button></div></div>
+  <div style="display:flex;align-items:center"><span class="ann">4</span><button class="btn">Sync now</button></div>
+  <hr>
+  <div class="acct"><span>alex@example.com</span><span style="display:flex;align-items:center"><span class="ann">5</span><button class="btn lnk">Sign out…</button></span></div>
+</div>
+<div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>Couldn't sync</button><span class="sep">·</span><button class="act">Retry</button><span class="slot"></span></div></div>
+</div>
+</figure>
+
+</div>
+
+<div class="note">
+  <h3>Keyboard, VoiceOver and closing</h3>
+  <ul>
+    <li><b>Open</b>: click, Space or Return on the status words. The popover is announced as "Sync status" and VoiceOver reads its content in order (status notice, last synced, waiting, issues count) before the first control (FR-016).</li>
+    <li><b>Tab order</b>: attention action (Sign in again / Copy) → each issue's Copy → Dismiss → Sync now → Sign out…. Shift-Tab reverses. "Sync now" is skipped only where it is disabled: offline and session ended. It stays enabled and focusable during a sync (FR-013).</li>
+    <li><b>Sync now while syncing</b>: a press joins the running sync, or queues a single follow-up sync (single-flight). There is no visual or spoken change; the footer indicator is the only sign of activity.</li>
+    <li><b>Close</b>: Esc, a click outside, or choosing "Sign in again" or "Sign out…" (which open X-03 / X-04). Focus returns to the status words in the footer.</li>
+    <li><b>Live updates while open</b>: the times and counts update in place without moving focus. A new issue arriving while the popover is open is appended and announced politely; focus stays where it was (FR-009).</li>
+    <li><b>Never modal</b>: the window behind stays fully usable; typing in the window closes the popover like any transient popover.</li>
+  </ul>
+</div>
+
+</body>
+</html>

@@ -7,14 +7,21 @@ enum SyncTarget: Hashable, Sendable {
     case task(TaskID)
     case project(ProjectID)
     case tag(TagID)
+    /// The weekly review's state (`GET /review/state`, spec 020).
+    case review
 }
 
 extension GTDCommand {
     /// The server record a revision conflict on this command is about (the
     /// parent task for subtask and comment edits, whose detail carries the
-    /// children). Nil for creates of projects, tags and tasks.
+    /// children). Nil for creates of projects, tags and tasks. Review
+    /// commands re-read the review state, so none falls into the generic
+    /// set-aside path (contracts/ios-commands.md §4).
     var conflictTarget: SyncTarget? {
         switch self {
+        case .decideTask(let decide): .task(decide.taskID)
+        case .autoParkTask(let park): .task(park.taskID)
+        case .undoDecision, .bulkRelease, .undoBulkRelease, .review: .review
         case .createProject, .createTag, .createTask: nil
         case .updateProject(let update): .project(update.projectID)
         case .archiveProject(let id): .project(id)
@@ -49,14 +56,29 @@ extension GTDCommand {
             base.tasks[transition.taskID]?.subtasks.first { $0.id == transition.subtaskID }?.serverRevision
         case .updateComment(let update):
             base.tasks[update.taskID]?.comments.first { $0.id == update.commentID }?.serverRevision
+        case .decideTask(let decide): base.tasks[decide.taskID]?.serverRevision
+        case .undoDecision(let id): base.review.decisions[id].flatMap { base.tasks[$0.taskID]?.serverRevision }
+        case .review(.updateSettings): base.review.settings.revision
+        case .autoParkTask, .bulkRelease, .undoBulkRelease, .review: nil
+        }
+    }
+
+    /// Every revision the request body carries (a bulk release carries one
+    /// per task), so a new base that changes any of them gives a sent
+    /// operation a new key.
+    func bodyRevisions(in base: GTDState) -> [Int?] {
+        switch self {
+        case .bulkRelease(let release): release.taskIDs.map { base.tasks[$0]?.serverRevision }
+        default: [expectedRevision(in: base)]
         }
     }
 
     /// Archiving a project or deleting a tag also changes (and bumps the
-    /// revision of) every member task on the server, so a pull follows.
+    /// revision of) every member task on the server, so a pull follows; so
+    /// do a bulk release and its Undo, whose answers carry no tasks.
     var changesOtherRecords: Bool {
         switch self {
-        case .archiveProject, .deleteTag: true
+        case .archiveProject, .deleteTag, .bulkRelease, .undoBulkRelease: true
         default: false
         }
     }
@@ -81,7 +103,11 @@ extension GTDCommand {
         case .transitionSubtask(let transition): transition.taskID
         case .createComment(let create): create.taskID
         case .updateComment(let update): update.taskID
-        case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag: nil
+        case .decideTask(let decide): decide.taskID
+        case .autoParkTask(let park): park.taskID
+        case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag, .undoDecision,
+            .bulkRelease, .undoBulkRelease, .review:
+            nil
         }
     }
 
@@ -113,7 +139,25 @@ extension GTDCommand {
         case .updateComment(var update):
             update.taskID = swap(update.taskID)
             return .updateComment(update)
-        case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag:
+        case .decideTask(var decide):
+            decide.taskID = swap(decide.taskID)
+            decide.followUpTaskID = decide.followUpTaskID.map(swap)
+            return .decideTask(decide)
+        case .autoParkTask(var park):
+            park.taskID = swap(park.taskID)
+            return .autoParkTask(park)
+        case .bulkRelease(var release):
+            release.taskIDs = release.taskIDs.map(swap)
+            return .bulkRelease(release)
+        case .review(.acknowledgeParks(let items)):
+            return .review(
+                .acknowledgeParks(items.map { ParkAck(taskID: swap($0.taskID), formulationID: $0.formulationID, parkedAt: $0.parkedAt) })
+            )
+        case .review(.progressSession(var progress)):
+            progress.setAsideTaskID = progress.setAsideTaskID.map(swap)
+            return .review(.progressSession(progress))
+        case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag, .undoDecision,
+            .undoBulkRelease, .review:
             return self
         }
     }
