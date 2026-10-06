@@ -49,6 +49,12 @@ FIXTURE_COPIES: dict[str, tuple[str, ...]] = {
         "review_wire_fixtures.json",
         "frontend/src/features/review/__tests__/review_wire_fixtures.json",
     ),
+    # Slice PR-15 (tasks.md T086): the decision and park traces, replayed by
+    # the Swift sync tests against BrainBuddyFakeServer (T173).
+    "review_traces_tasks.json": (
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/"
+        "review_traces_tasks.json",
+    ),
 }
 
 

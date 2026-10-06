@@ -16,6 +16,9 @@ from app.exceptions import NotFoundError
 from app.modules.agents.service import AgentRelayService
 from app.modules.tasks import TaskService
 from app.modules.tasks.autocomplete import TaskTitleAutocompleteService
+from app.modules.tasks.review_domain import ReviewRequestError
+from app.modules.tasks.review_flow import ReviewFlowService
+from app.modules.tasks.review_service import ReviewService
 from app.schemas.auth import User
 from app.services import (
     AccountService,
@@ -110,6 +113,16 @@ def get_feature_flag_service(
 
 def get_task_service(container: Container = Depends(get_container)) -> TaskService:
     return container.task_service
+
+
+def get_review_service(container: Container = Depends(get_container)) -> ReviewService:
+    return container.review_service
+
+
+def get_review_flow_service(
+    container: Container = Depends(get_container),
+) -> ReviewFlowService:
+    return container.review_flow_service
 
 
 def get_task_title_autocomplete_service(
@@ -382,6 +395,33 @@ def require_voice_brain_dump_enabled(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Voice brain dump is not available.",
         )
+    return current_user
+
+
+def weekly_review_enabled(user: User, feature_flags: FeatureFlagService) -> bool:
+    """Whether the ADR-0027 ``weekly_review`` rollout flag is effective."""
+
+    return feature_flags.is_effective("weekly_review", user)
+
+
+def require_weekly_review_enabled(
+    current_user: User = Depends(get_current_user),
+    feature_flags: FeatureFlagService = Depends(get_feature_flag_service),
+) -> User:
+    """Gate the weekly review's exposure routes (spec 020, contracts/http.md).
+
+    Exposure control is not authorization, as for
+    :func:`require_voice_brain_dump_enabled`: only the reads that show the
+    feature (state, queues, sessions by id, navigator suggestions and consent
+    grant) are gated. Writes that finish work a client already started and the
+    consent read/revoke depend on :func:`get_current_user` alone, so a rollback
+    never strands a device's queued work. Unauthenticated callers still get
+    401 first; an authenticated caller without the flag gets the content-free
+    404 ``weekly_review_disabled``.
+    """
+
+    if not weekly_review_enabled(current_user, feature_flags):
+        raise ReviewRequestError(404, "weekly_review_disabled", "Not found")
     return current_user
 
 

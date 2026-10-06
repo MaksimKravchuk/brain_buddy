@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>X-07 · Menu bar: Sync now and account items (macOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky300:#7dd3fc;--sky500:#0ea5e9;--sky700:#0369a1;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s800:#1e293b;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;font-size:13px;-webkit-font-smoothing:antialiased}
+header.doc{margin:0 0 22px;max-width:1180px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 6px;font-size:13px;line-height:1.5;color:var(--s600);max-width:1080px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.frames{display:flex;flex-wrap:wrap;gap:30px 28px;align-items:flex-start}
+figure{margin:0;width:330px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 10px;min-height:70px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.mb{width:330px;height:300px;background:#f1f5f9;border:1px solid var(--s300);border-radius:12px;overflow:hidden;position:relative;box-shadow:var(--raised)}
+.bar{height:26px;background:rgba(255,255,255,.75);border-bottom:1px solid var(--s200);display:flex;align-items:center;gap:16px;padding:0 12px;font-size:13px}
+.bar b{font-weight:700}.bar .open{background:rgba(15,23,42,.10);border-radius:5px;padding:1px 7px;margin:0 -7px}
+.menu{position:absolute;top:28px;background:rgba(255,255,255,.98);border:1px solid var(--s200);border-radius:8px;box-shadow:var(--float);padding:5px;min-width:230px;font-size:13px}
+.mi{display:flex;justify-content:space-between;gap:20px;padding:3px 10px;border-radius:5px}
+.mi.hov{background:var(--sky700);color:#fff}
+.mi.dis{color:var(--s400)}
+.mi .k{color:var(--s500)}.mi.hov .k{color:#fff}.mi.dis .k{color:var(--s300)}
+.menu hr{border:0;border-top:1px solid var(--s200);margin:4px 6px}
+.dark .mb{background:#0f172a;border-color:#334155}
+.dark .bar{background:rgba(30,41,59,.85);border-color:#334155;color:#e2e8f0}.dark .bar .open{background:rgba(255,255,255,.12)}
+.dark .menu{background:#1e293b;border-color:#334155;color:#e2e8f0}
+.dark .mi .k{color:#94a3b8}.dark .mi.dis{color:#64748b}.dark .mi.dis .k{color:#475569}
+.dark .menu hr{border-top-color:#334155}
+/* toolbar */
+.tb{width:690px;height:52px;border:1px solid var(--s300);border-radius:12px;background:#f8fafc;display:flex;align-items:center;gap:6px;padding:0 14px;box-shadow:var(--raised)}
+.tb .sp{flex:1}
+.tbtn{width:30px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--s600)}
+.tbtn.x{outline:2px dashed #be123c;outline-offset:1px;color:var(--s400)}
+.srch{width:200px;height:26px;border-radius:7px;background:var(--s100);border:1px solid var(--s200);color:var(--s400);font-size:12px;display:flex;align-items:center;padding:0 8px}
+.sel{height:26px;border-radius:7px;border:1px solid var(--s200);background:#fff;font-size:12px;display:flex;align-items:center;padding:0 8px;color:var(--s700)}
+.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.note{background:#fff;border:1px solid var(--s200);border-radius:12px;padding:14px 16px;font-size:12px;line-height:1.55;color:var(--s700);max-width:1080px;margin-top:30px}
+.note h3{margin:0 0 6px;font-size:13px;color:var(--s900)}
+.note ul{margin:4px 0 0;padding-left:18px}
+table.st{border-collapse:collapse;font-size:12px;background:#fff;border:1px solid var(--s200);max-width:1080px}
+table.st th,table.st td{border-top:1px solid var(--s200);padding:7px 10px;text-align:left;vertical-align:top;line-height:1.45}
+table.st th{background:var(--s100);border-top:0}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+<symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>X-07 · Menu bar: "Sync now" and the account items (macOS)</h1>
+  <p>FR-006 needs a "Sync now" command in the menu (and in the popover, X-02) that is never needed. It goes in the <b>File</b> menu with <b>⌘R</b>, the shortcut people already try for "refresh"; the Mac app uses no ⌘R today. The account action goes where macOS apps keep it, in the <b>app menu</b>: "Sign in…" when account-less, "Sign out…" when signed in, "Sign in again…" when the session ended (FR-001). Today's toolbar "Refresh" button is removed: with background sync it has nothing left to do, and keeping it would suggest manual refresh is needed (owner intent, SC-007).</p>
+  <p>Our items use sentence case ("Sync now", "Sign out…"), as all product copy does; this differs from the macOS habit of title case and is deliberate. System items (Hide, Quit, Close) keep macOS's own wording.</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>X-07 · File menu, signed in (default)</b>Enabled while signed in and online, including during a running sync (a second request joins the running one) and while "Couldn't sync" shows (it is the retry).</figcaption>
+<div class="mb"><div class="bar"><b>Brain Buddy</b><span class="open">File</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span></div>
+<div class="menu" style="left:96px" role="menu"><div class="mi hov" role="menuitem"><span>Sync now</span><span class="k">⌘R</span></div><hr><div class="mi" role="menuitem"><span>Close Window</span><span class="k">⌘W</span></div></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-07 · File menu, unavailable</b>Disabled, never hidden, when account-less, offline, or after the session ended; the footer (X-01) already says why. VoiceOver reads "Sync now, dimmed".</figcaption>
+<div class="mb"><div class="bar"><b>Brain Buddy</b><span class="open">File</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span></div>
+<div class="menu" style="left:96px" role="menu"><div class="mi dis" role="menuitem" aria-disabled="true"><span>Sync now</span><span class="k">⌘R</span></div><hr><div class="mi" role="menuitem"><span>Close Window</span><span class="k">⌘W</span></div></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-07 · app menu, signed in</b>"Sign out…" opens X-04, which always asks first: "Sign out?" when nothing is unsent (FR-017), or the unsent-changes warning (FR-018). Ellipsis because it asks first.</figcaption>
+<div class="mb"><div class="bar"><b class="open">Brain Buddy</b><span>File</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span></div>
+<div class="menu" style="left:8px" role="menu"><div class="mi"><span>About Brain Buddy</span></div><hr><div class="mi hov"><span>Sign out…</span></div><hr><div class="mi"><span>Hide Brain Buddy</span><span class="k">⌘H</span></div><div class="mi"><span>Quit Brain Buddy</span><span class="k">⌘Q</span></div></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-07 · app menu, account-less (empty first run) and session ended</b>"Sign in…" opens X-03. After a session ended the item reads "Sign in again…" and opens X-03 with the email locked; "Sign out…" stays available below it.</figcaption>
+<div class="mb"><div class="bar"><b class="open">Brain Buddy</b><span>File</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span></div>
+<div class="menu" style="left:8px" role="menu"><div class="mi"><span>About Brain Buddy</span></div><hr><div class="mi hov"><span>Sign in…</span></div><hr><div class="mi"><span>Hide Brain Buddy</span><span class="k">⌘H</span></div><div class="mi"><span>Quit Brain Buddy</span><span class="k">⌘Q</span></div></div>
+<div class="menu" style="left:8px;top:170px" role="menu"><div class="mi"><span>About Brain Buddy</span></div><hr><div class="mi"><span>Sign in again…</span></div><div class="mi"><span>Sign out…</span></div></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-07 · dark mode</b>Same items. The menu bar is system chrome; only our item labels are ours.</figcaption>
+<div class="dark"><div class="mb"><div class="bar"><b>Brain Buddy</b><span class="open">File</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span></div>
+<div class="menu" style="left:96px"><div class="mi hov"><span>Sync now</span><span class="k">⌘R</span></div><hr><div class="mi"><span>Close Window</span><span class="k">⌘W</span></div></div></div></div>
+</figure>
+
+</div>
+
+<figure style="width:auto;margin-top:34px">
+<figcaption><b>X-07 · toolbar, before and after</b>Before: New task, Quick Open, Quick Capture, Voice to task draft, <b>Refresh</b>, Priority filter, Search. After: the same without Refresh (dashed outline marks the removal).</figcaption>
+<div class="tb"><span class="tbtn"><svg class="i"><use href="#i-plus"/></svg></span><span class="tbtn"><svg class="i"><use href="#i-search"/></svg></span><span class="tbtn"><svg class="i"><use href="#i-pencil"/></svg></span><span class="tbtn"><svg class="i"><use href="#i-mic"/></svg></span><span class="tbtn x" title="Refresh: removed"><svg class="i"><use href="#i-refresh"/></svg></span><span class="sel">All priorities ▾</span><span class="sp"></span><span class="srch">Search tasks</span></div>
+<div style="height:12px"></div>
+<div class="tb"><span class="tbtn"><svg class="i"><use href="#i-plus"/></svg></span><span class="tbtn"><svg class="i"><use href="#i-search"/></svg></span><span class="tbtn"><svg class="i"><use href="#i-pencil"/></svg></span><span class="tbtn"><svg class="i"><use href="#i-mic"/></svg></span><span class="sel">All priorities ▾</span><span class="sp"></span><span class="srch">Search tasks</span></div>
+</figure>
+
+<table class="st">
+  <tr><th>state (X-01)</th><th>File › Sync now ⌘R</th><th>app menu account item</th></tr>
+  <tr><td>account-less</td><td>disabled</td><td>Sign in…</td></tr>
+  <tr><td>synced, changes waiting, syncing</td><td>enabled</td><td>Sign out…</td></tr>
+  <tr><td>offline</td><td>disabled</td><td>Sign out…</td></tr>
+  <tr><td>session ended</td><td>disabled</td><td>Sign in again… · Sign out…</td></tr>
+  <tr><td>couldn't sync, changes couldn't sync</td><td>enabled</td><td>Sign out…</td></tr>
+</table>
+
+<div class="note">
+  <h3>Behaviour</h3>
+  <ul>
+    <li>⌘R works from anywhere in the main window, including while typing in a field (it does not insert text). It does the same as "Sync now" in the popover; the popover is not opened.</li>
+    <li>No menu item opens a dialog except "Sign in…" (X-03) and "Sign out…" (X-04), both started by the person (FR-017).</li>
+    <li>Loading, empty, error and partial-failure states are n/a for menus: the menu reflects the footer state and never shows its own message.</li>
+  </ul>
+</div>
+
+</body>
+</html>

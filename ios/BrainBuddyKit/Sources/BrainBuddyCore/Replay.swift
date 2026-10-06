@@ -44,21 +44,64 @@ public enum OutboxReplayer {
     ///   operations that depend on it are rejected in turn (a subtask of a
     ///   task that was never created) or lose the reference (a task keeps its
     ///   place without a project that was never created).
-    public static func replay(_ outbox: [PendingOperation], onto base: GTDState) -> ReplayResult {
+    ///
+    /// After the last operation the post-replay activation step runs
+    /// (`ReviewActivation`, spec 020): keyed on the activation instant the
+    /// state holds, or `activatedAt` (the account-less anchor) when it holds
+    /// none, so the same inputs always give the same clocks.
+    public static func replay(
+        _ outbox: [PendingOperation], onto base: GTDState, activatedAt fallback: Date? = nil
+    ) -> ReplayResult {
+        var result = replayOperations(outbox, onto: base)
+        ReviewActivation.apply(
+            to: &result.state, activatedAt: result.state.review.settings.activatedAt ?? fallback,
+            startsMissingClocks: result.state.review.server == nil
+        )
+        return result
+    }
+
+    private static func replayOperations(_ outbox: [PendingOperation], onto base: GTDState) -> ReplayResult {
         var state = base
         var pending = outbox
         var kept: [PendingOperation] = []
         var rejected: [RejectedOperation] = []
+        /// Decisions the replay could not apply, kept for the server to answer.
+        var unapplied = Set<DecisionID>()
+        /// Follow-up tasks those decisions create.
+        var waitingFollowUps = Set<TaskID>()
         kept.reserveCapacity(pending.count)
         var index = pending.startIndex
         while index < pending.endIndex {
             let operation = pending[index]
             index += 1
             let command = GTDReducer.replayable(operation.command, in: state)
+            if case .undoDecision(let id) = command, unapplied.contains(id) {
+                // Its decision waits for the server's answer; so does the Undo.
+                kept.append(operation)
+                continue
+            }
+            if let task = command.taskID, waitingFollowUps.contains(task), state.tasks[task] == nil {
+                // An edit of a follow-up whose decision waits for the server:
+                // the task exists once the server answers; the edit waits too.
+                kept.append(operation)
+                continue
+            }
             let outcome: ApplyOutcome
             do throws(GTDValidationError) {
                 outcome = try GTDReducer.apply(command, at: operation.issuedAt, to: &state, mode: .replay)
             } catch {
+                if case .decideTask(let decide) = operation.command {
+                    unapplied.insert(decide.decisionID)
+                    if let followUp = decide.followUpTaskID { waitingFollowUps.insert(followUp) }
+                    // Spec 020: a decision is never refused by the replay. It
+                    // may already be applied (an answer lost before a pull) or
+                    // yield to a park; the server answers it under the same
+                    // decision id (matching record, yield rule), and a real
+                    // conflict comes back as 409 with the "It's in <list> now"
+                    // copy and its Ref (ios-commands §4).
+                    kept.append(operation)
+                    continue
+                }
                 rejected.append(RejectedOperation(operation: operation, error: error))
                 continue
             }
@@ -197,7 +240,8 @@ extension GTDCommand {
             if case .set(let id) = update.changes.projectID { update.changes.projectID = .set(swap(id)) }
             return .updateTask(update)
         case .createTag, .renameTag, .deleteTag, .transitionTask, .createSubtask, .updateSubtask,
-            .transitionSubtask, .createComment, .updateComment:
+            .transitionSubtask, .createComment, .updateComment, .decideTask, .undoDecision, .autoParkTask,
+            .bulkRelease, .undoBulkRelease, .review:
             return self
         }
     }
@@ -227,7 +271,8 @@ extension GTDCommand {
             if case .set(let ids) = update.changes.tagIDs { update.changes.tagIDs = .set(swap(ids)) }
             return .updateTask(update)
         case .createProject, .updateProject, .archiveProject, .transitionTask, .createSubtask,
-            .updateSubtask, .transitionSubtask, .createComment, .updateComment:
+            .updateSubtask, .transitionSubtask, .createComment, .updateComment, .decideTask, .undoDecision,
+            .autoParkTask, .bulkRelease, .undoBulkRelease, .review:
             return self
         }
     }

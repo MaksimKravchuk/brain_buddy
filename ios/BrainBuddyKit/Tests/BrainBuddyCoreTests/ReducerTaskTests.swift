@@ -247,6 +247,9 @@ struct ReducerTransitionTests {
         var expected = before
         expected.state = .next
         expected.updatedAt = Fixture.at(4)
+        // Spec 020: entering Next starts a formulation (contracts/ios-commands.md §3).
+        #expect(task.formulation?.startedAt == Fixture.at(4))
+        expected.formulation = task.formulation
         #expect(task == expected, "order, project, tags, due date, priority and notes are kept")
     }
 

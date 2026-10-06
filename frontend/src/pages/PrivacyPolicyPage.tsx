@@ -51,6 +51,21 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             AI validation history, tasks, projects, tags, subtasks, and comments.
           </p>
           <p>
+            <strong>Weekly review and task timing:</strong> for every account, whether or not the
+            weekly review is switched on for you, each task in your Next list carries timing data:
+            when its current wording started, when you chose to keep it 7 more days and your reason,
+            the moment before which it will not move to Someday, how many times in a row its wording
+            stalled, and, for a task moved to Someday automatically, when that happened. We also
+            keep your review settings (review day, time and time zone, and how many days a task may
+            keep its wording), the moment you first acknowledged the weekly review's explanation
+            of automatic parking, and your review records: the decisions you make on tasks,
+            including the stall-reason code you pick (for example, too big) and any reason
+            you give for keeping a task 7 more days, reviews you run, and which automatically parked
+            tasks you have seen or brought back. Decisions, settings and that acknowledgement are
+            accepted from your devices even while the weekly review is switched off for you, so
+            work queued on a device is never lost.
+          </p>
+          <p>
             <strong>Voice brain dumps:</strong> if you use voice capture, the audio you record,
             transcripts derived from it, and a record of the consent you gave for each recording.
           </p>
@@ -126,8 +141,14 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
           <p>
             To turn a feature on or off for particular accounts we keep one SQLite store
-            covering six managed flags: it holds only your account id per flag, it is
+            covering seven managed flags: it holds only your account id per flag, it is
             scrubbed when your account is purged, and it is excluded from your data export.
+          </p>
+          <p>
+            Weekly review records (your review settings, decisions, reviews and parked-task
+            records) are kept until you delete your account; they are included in your data export
+            and erased when your account is purged. The undo copies a decision keeps so you can take
+            it back last 7 days, and are deleted after that.
           </p>
           <p>
             If you connect an external agent and hand a task to it, what you send and what it

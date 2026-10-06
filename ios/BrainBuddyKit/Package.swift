@@ -26,10 +26,18 @@ let package = Package(
         // An in-memory Brain Buddy server behind `HTTPTransport`, for tests
         // (sync, workspace) that need realistic server semantics offline.
         .target(name: "BrainBuddyFakeServer", dependencies: ["BrainBuddyCore", "BrainBuddyAPI"]),
-        .testTarget(name: "BrainBuddyCoreTests", dependencies: ["BrainBuddyCore"]),
+        // The shared review vectors and golden wire fixtures (spec 020) are
+        // byte-identical copies of `backend/tests/fixtures/*.json`; `.copy`
+        // keeps their bytes as they are.
+        .testTarget(
+            name: "BrainBuddyCoreTests", dependencies: ["BrainBuddyCore"], resources: [.copy("Resources")]
+        ),
         .testTarget(name: "BrainBuddyPersistenceTests", dependencies: ["BrainBuddyPersistence"]),
-        .testTarget(name: "BrainBuddyAPITests", dependencies: ["BrainBuddyAPI"]),
-        .testTarget(name: "BrainBuddySyncTests", dependencies: ["BrainBuddySync", "BrainBuddyFakeServer"]),
+        .testTarget(name: "BrainBuddyAPITests", dependencies: ["BrainBuddyAPI"], resources: [.copy("Resources")]),
+        .testTarget(
+            name: "BrainBuddySyncTests", dependencies: ["BrainBuddySync", "BrainBuddyFakeServer"],
+            resources: [.copy("Resources")]
+        ),
         .testTarget(name: "BrainBuddyWorkspaceTests", dependencies: ["BrainBuddyWorkspace", "BrainBuddyFakeServer"]),
     ]
 )

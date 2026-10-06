@@ -37,7 +37,8 @@ extension GTDReducer {
             update.changes = replayable(update.changes, for: task, in: state)
             return .updateTask(update)
         case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag, .transitionTask,
-            .createSubtask, .updateSubtask, .transitionSubtask, .createComment, .updateComment:
+            .createSubtask, .updateSubtask, .transitionSubtask, .createComment, .updateComment, .decideTask,
+            .undoDecision, .autoParkTask, .bulkRelease, .undoBulkRelease, .review:
             return command
         }
     }
