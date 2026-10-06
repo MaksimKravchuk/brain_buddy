@@ -606,7 +606,24 @@ PR-02 backend tolerant contract (ASK)  →  PR-03 lossless archive (SHOW)
 
 These are the proposed PR-sized slices. `/speckit-tasks` turns this table into the `## PR-срезы` manifest with file-level paths: no globs and no bare "tests", with each slice's own test files named.
 
-Classes follow ADR-0008 and `scripts/classify_path_risk.py` ("mech." = the classifier result; the final class is the stricter of mechanical and semantic).
+Classes follow ADR-0008 and `scripts/classify_path_risk.py` ("mech." = the classifier result; the final class is the stricter of mechanical and semantic). ASK means a PR plus the owner's recorded approval (see [Migration, deploy order and rollback](#migration-deploy-order-and-rollback)).
+
+**Mechanical classification, re-run for review c1** (blocking F01): every slice's full path list below was fed as `printf '%s\0' <paths> | python3 scripts/classify_path_risk.py --null` on 2026-10-06 at `0b9fffe`.
+
+| slice | paths | mech. | ASK paths (classifier reason) | final class |
+|---|---|---|---|---|
+| PR-01 | 5 | ASK | all five (`.github/`, `scripts/`) | ASK |
+| PR-02 | 19 | ASK | `backend/app/api/tasks.py`, `backend/app/api/middleware.py` (explicit API paths) | ASK |
+| PR-03 | 6 | SHIP | — | SHOW (semantic) |
+| PR-04 | 44 | SHIP | — | SHOW (semantic) |
+| PR-05 | 19 | **ASK** | `ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineSessionTests.swift`, `ios/BrainBuddyKit/Sources/BrainBuddyAPI/SessionTokenStore.swift` (token `session`) | **ASK** (was SHOW; corrected) |
+| PR-06 | 17 | SHIP | — | SHOW (semantic) |
+| PR-07 | 12 | SHIP | — | SHOW (semantic) |
+| PR-08 | 34 | SHIP | — | ASK (semantic) |
+| PR-09 | 20 | SHIP | — | ASK (semantic) |
+| PR-10 | 8 | ASK | `Makefile`, `scripts/check_manual_evidence.py`, `scripts/test_check_manual_evidence.py` | ASK |
+
+PR-05 was declared "SHOW (mech. SHIP)" in the first plan although its existing test file `SyncEngineSessionTests.swift` already classified ASK (the classifier camel-splits it into `sync`, `engine`, `session`, `tests`); `SyncEngine+Session.swift` tokenizes as `engine+session` and stays SHIP. It is now ASK, and the deploy order and lanes below follow. `/speckit-tasks` must re-run the classifier over the manifest's final paths, and a manifest path that changes a slice's mechanical class changes the slice's class.
 
 | id | outcome | depends on | main paths | class |
 |---|---|---|---|---|
