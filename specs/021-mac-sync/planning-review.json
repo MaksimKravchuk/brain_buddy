@@ -34,7 +34,7 @@
           "status": "technical-changes-required"
         }
       ],
-      "artifacts_digest_after_fixes": "b455c5241c979af79e9dd576629dad0312df92e300d8d516ea1cb2dbc2da4b15",
+      "artifacts_digest_after_fixes": "e8dab1b5fd6154a5238c20ebdbe4ae46b0105eaeb686bdff08c65ee99a85a8b7",
       "review_runtime": "Claude Code headless adapter, SHA-256 pinned per model: opus-5-5 15eca6f0192ac098f04ecdf5a73306480b8fb56da61c9eceaa66451ea6528a55, sonnet-5-5 89a1902c324243ea4b0dc6e84a96f9a4e579d545f6c62d71135c88449642ea33, fable-5-1 ad7f92066760499486445c647e6b68c0aec8b905823a6ba0e2ec3f6cde43376b (campaign 1 only)"
     }
   }
