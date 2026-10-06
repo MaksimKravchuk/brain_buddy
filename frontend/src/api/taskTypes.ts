@@ -30,6 +30,33 @@ export interface TaskResponse {
   revision: number;
   subtasks?: TaskSubtaskResponse[];
   comments?: TaskCommentResponse[];
+  /**
+   * Spec 020 (contracts/http.md §2): the current formulation clock, `null`
+   * unless the task is in Next with a started clock. The derived instants are
+   * advisory for display and `null` while the owner is not activated. Absent
+   * on backends that predate the field, which the web treats like `null`.
+   */
+  formulation?: TaskFormulationResponse | null;
+  /** Set only by auto-park; `null` for every other task, including a person's release. */
+  parked?: TaskParkResponse | null;
+}
+
+export interface TaskFormulationResponse {
+  id: string;
+  started_at: string;
+  extended_at: string | null;
+  extension_reason: string | null;
+  park_floor_at: string | null;
+  consecutive_stalled: number;
+  ageing_at: string | null;
+  ask_at: string | null;
+  park_due_at: string | null;
+  paused_until: string | null;
+}
+
+export interface TaskParkResponse {
+  at: string;
+  formulation_id: string;
 }
 
 export interface TaskSubtaskResponse {

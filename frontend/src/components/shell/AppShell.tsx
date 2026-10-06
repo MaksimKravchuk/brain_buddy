@@ -27,7 +27,15 @@ import { Link, NavLink, useLocation, useNavigate, useNavigationType, useSearchPa
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
 import { hasFeatureFlag } from "../../api/auth";
 import { useAuthStore } from "../../stores/authStore";
-import { ShellToastContext } from "./shellToast";
+import {
+  ACTION_TOAST_MS,
+  isTextEntryTarget,
+  isUndoShortcut,
+  ShellToastContext,
+  TEXT_TOAST_MS,
+  undoShortcutLabel
+} from "./shellToast";
+import type { ShellNotify, ShellToastAction } from "./shellToast";
 
 interface AppShellProps {
   children: ReactNode;
@@ -96,8 +104,8 @@ export function SoonChip(): React.JSX.Element {
 export function AppShell(props: AppShellProps): React.JSX.Element {
   const { children, panel, panelModal } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [toast, setToast] = useState<ShellToastState | null>(null);
+  const toastIdRef = useRef(0);
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
   const closeDrawer = useCallback(() => {
@@ -105,21 +113,13 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     navigationTriggerRef.current?.focus();
   }, []);
 
-  const notify = useCallback((message: string) => {
-    setToast(message);
-    if (toastTimerRef.current) {
-      clearTimeout(toastTimerRef.current);
-    }
-    toastTimerRef.current = setTimeout(() => setToast(null), 2600);
+  // Each toast gets its own id, so a newer one remounts the view with a fresh
+  // timer and an older one's Undo can never fire for the newer message.
+  const notify = useCallback<ShellNotify>((message, options) => {
+    toastIdRef.current += 1;
+    setToast({ id: toastIdRef.current, message, action: options?.action });
   }, []);
-
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current) {
-        clearTimeout(toastTimerRef.current);
-      }
-    };
-  }, []);
+  const dismissToast = useCallback(() => setToast(null), []);
 
   // Browser history can select a task while navigation is open. Do not leave
   // that drawer active behind the sheet; typing a search (same path, new
@@ -148,16 +148,107 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           <NavigationDrawer {...props} open={isDrawerOpen} onClose={closeDrawer} />
         </div>
         {panel}
-        {toast ? (
-          <div
-            role="status"
-            className="fixed bottom-6 left-1/2 z-[200] w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-center text-[13px] text-slate-700 shadow-floating backdrop-blur-sm motion-safe:animate-fade-in-up"
-          >
-            {toast}
-          </div>
-        ) : null}
+        {toast ? <ShellToastView key={toast.id} toast={toast} onDismiss={dismissToast} /> : null}
       </div>
     </ShellToastContext.Provider>
+  );
+}
+
+interface ShellToastState {
+  id: number;
+  message: string;
+  action?: ShellToastAction;
+}
+
+/**
+ * One toast. A text toast keeps its original 2.6 s, centred. An action toast
+ * (the decision Undo, FR-048) sits bottom-left for about 5 s; hover or focus
+ * holds it, and Ctrl/Cmd+Z outside a text field runs the action.
+ */
+function ShellToastView({ toast, onDismiss }: { toast: ShellToastState; onDismiss: () => void }): React.JSX.Element {
+  const { action } = toast;
+  const remainingRef = useRef(action ? ACTION_TOAST_MS : TEXT_TOAST_MS);
+  const startedAtRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const holdsRef = useRef(0);
+
+  const run = useCallback(() => {
+    startedAtRef.current = Date.now();
+    timerRef.current = setTimeout(onDismiss, remainingRef.current);
+  }, [onDismiss]);
+
+  useEffect(() => {
+    run();
+    return () => clearTimeout(timerRef.current);
+  }, [run]);
+
+  useEffect(() => {
+    if (!action) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isUndoShortcut(event) || isTextEntryTarget(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      onDismiss();
+      action.onAction();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [action, onDismiss]);
+
+  if (!action) {
+    return (
+      <div
+        role="status"
+        className="fixed bottom-6 left-1/2 z-[200] w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[12px] border border-slate-200 bg-white/95 px-4 py-2.5 text-center text-[13px] text-slate-700 shadow-floating backdrop-blur-sm motion-safe:animate-fade-in-up"
+      >
+        {toast.message}
+      </div>
+    );
+  }
+
+  // Hover and focus each hold the toast; it resumes with the time it had left.
+  const hold = () => {
+    holdsRef.current += 1;
+    if (holdsRef.current === 1) {
+      clearTimeout(timerRef.current);
+      remainingRef.current -= Date.now() - startedAtRef.current;
+    }
+  };
+  const release = () => {
+    holdsRef.current -= 1;
+    if (holdsRef.current === 0) {
+      run();
+    }
+  };
+  const hintId = `shell-toast-hint-${toast.id}`;
+
+  return (
+    <div
+      role="status"
+      aria-describedby={hintId}
+      onMouseEnter={hold}
+      onMouseLeave={release}
+      onFocus={hold}
+      onBlur={release}
+      className="fixed bottom-6 left-6 z-[200] flex max-w-[calc(100vw-3rem)] items-center gap-2 rounded-[12px] border border-slate-200 bg-white/95 py-1 pl-4 pr-1 text-[13px] text-slate-700 shadow-floating backdrop-blur-sm motion-safe:animate-fade-in-up"
+    >
+      <span className="min-w-0">{toast.message}</span>
+      <button
+        type="button"
+        aria-label={action.accessibleLabel}
+        className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg px-3 text-[13px] font-semibold text-sky-700 transition-colors duration-200 ease-smooth hover:bg-sky-50"
+        onClick={() => {
+          onDismiss();
+          action.onAction();
+        }}
+      >
+        {action.label}
+      </button>
+      <span id={hintId} className="sr-only">{`${action.accessibleLabel} (${undoShortcutLabel()})`}</span>
+    </div>
   );
 }
 

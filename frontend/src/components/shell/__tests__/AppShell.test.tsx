@@ -38,9 +38,23 @@ function RoutedTaskListContent() {
       <button type="button" onClick={() => notify("Thinking canvas isn't built yet — placeholder")}>
         Raise shell toast
       </button>
+      <button
+        type="button"
+        onClick={() => notify("“Renovate the bathroom” released to Someday", {
+          action: { label: "Undo", accessibleLabel: "Undo: Released to Someday Renovate the bathroom", onAction: undoSpy }
+        })}
+      >
+        Raise undo toast
+      </button>
+      <label>
+        Scratch field
+        <input />
+      </label>
     </div>
   );
 }
+
+const undoSpy = vi.fn();
 
 function renderShell(
   overrides: Partial<Parameters<typeof AppShell>[0]> = {},
@@ -454,6 +468,123 @@ describe("AppShell top bar", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("020-FR-048 AppShell action toast", () => {
+  beforeEach(() => {
+    undoSpy.mockReset();
+  });
+
+  it("020-FR-048 shows Undo about 5 s in a polite status that names the action and its shortcut", () => {
+    vi.useFakeTimers();
+    try {
+      renderShell();
+      fireEvent.click(screen.getByRole("button", { name: "Raise undo toast" }));
+
+      const toast = screen.getByRole("status");
+      expect(toast).toHaveTextContent("“Renovate the bathroom” released to Someday");
+      expect(toast).toHaveAccessibleDescription("Undo: Released to Someday Renovate the bathroom (Ctrl+Z)");
+      const undo = within(toast).getByRole("button", { name: "Undo: Released to Someday Renovate the bathroom" });
+      expect(undo).toHaveTextContent("Undo");
+      expect(undo).toHaveClass("min-h-11", "min-w-11");
+
+      act(() => {
+        vi.advanceTimersByTime(4999);
+      });
+      expect(screen.getByRole("status")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(undoSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("020-FR-048 runs Undo from the button once and closes the toast", () => {
+    renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Raise undo toast" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo: Released to Someday Renovate the bathroom" }));
+
+    expect(undoSpy).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("020-FR-048 pauses the timer while the toast has hover or focus, then lets it finish", () => {
+    vi.useFakeTimers();
+    try {
+      renderShell();
+      fireEvent.click(screen.getByRole("button", { name: "Raise undo toast" }));
+      const toast = screen.getByRole("status");
+
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      fireEvent.mouseEnter(toast);
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.getByRole("status")).toBeInTheDocument();
+      fireEvent.mouseLeave(toast);
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.getByRole("status")).toBeInTheDocument();
+
+      // Hover and focus overlap: the toast waits until both have let go.
+      const undo = within(toast).getByRole("button");
+      fireEvent.mouseEnter(toast);
+      act(() => undo.focus());
+      fireEvent.mouseLeave(toast);
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.getByRole("status")).toBeInTheDocument();
+      act(() => undo.blur());
+      act(() => {
+        vi.advanceTimersByTime(999);
+      });
+      expect(screen.getByRole("status")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("020-FR-048 triggers Undo with Ctrl+Z or Cmd+Z outside text fields while the toast is visible", () => {
+    renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Raise undo toast" }));
+
+    fireEvent.keyDown(screen.getByLabelText("Scratch field"), { key: "z", ctrlKey: true });
+    expect(undoSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+
+    fireEvent.keyDown(document.body, { key: "x", ctrlKey: true });
+    expect(undoSpy).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    expect(undoSpy).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+    expect(undoSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("020-FR-048 lets a plain toast replace an action toast, so a stale Undo cannot fire", () => {
+    renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Raise undo toast" }));
+    fireEvent.click(screen.getByRole("button", { name: "Raise shell toast" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("Thinking canvas isn't built yet — placeholder");
+    expect(screen.getByRole("status")).not.toHaveAccessibleDescription();
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+    expect(undoSpy).not.toHaveBeenCalled();
   });
 });
 

@@ -65,6 +65,9 @@ const PATH_RULES: Array<{ match: RegExp; epic: string; feature: string }> = [
   { match: /\/features\/agents\//, epic: "External agent relay", feature: "Connections & runs" },
   { match: /\/features\/brain-dump\//, epic: "Brain dump", feature: "Capture & review" },
   { match: /\/features\/account\//, epic: "Account & privacy", feature: "Account settings" },
+  // Spec 020: the weekly review is task-tracker behaviour (ADR-0027), so it
+  // shares the backend's "Task Management" epic; the feature names the review.
+  { match: /\/features\/review\//, epic: "Task Management", feature: "Weekly review" },
   { match: /PrivacyPolicyPage/, epic: "Account & privacy", feature: "Privacy policy" },
   { match: /\/stores\//, epic: "Frontend state", feature: "Client stores" },
   { match: /\/hooks\//, epic: "Frontend utilities", feature: "React hooks" },
