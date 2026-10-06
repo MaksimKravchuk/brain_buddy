@@ -25,7 +25,10 @@ try {
         $archiveName = 'bb-0.1.0-x86_64-pc-windows-msvc.zip'; $archivePath = Join-Path $downloadDir $archiveName
         $archive = [IO.Compression.ZipFile]::Open($archivePath,[IO.Compression.ZipArchiveMode]::Create)
         try { [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$Binary,$(if ($scenario -eq 'unsafe') {'../bb.exe'} else {'bb.exe'})) | Out-Null } finally { $archive.Dispose() }
-        $digest = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $hasher = [Security.Cryptography.SHA256]::Create()
+        $hashStream = [IO.File]::OpenRead($archivePath)
+        try { $digest = [BitConverter]::ToString($hasher.ComputeHash($hashStream)).Replace('-','').ToLowerInvariant() }
+        finally { $hashStream.Dispose(); $hasher.Dispose() }
         if ($scenario -eq 'corrupt') { $digest = '0' * 64 }
         $lines = @('x86_64-unknown-linux-gnu','aarch64-unknown-linux-gnu','x86_64-apple-darwin','aarch64-apple-darwin','x86_64-pc-windows-msvc') | ForEach-Object { $digest + '  bb-0.1.0-' + $_ + $(if ($_ -eq 'x86_64-pc-windows-msvc') {'.zip'} else {'.tar.gz'}) }
         if ($scenario -eq 'duplicate') { $lines += $lines[0] }

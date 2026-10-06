@@ -96,7 +96,11 @@ try {
     if ($entries.Count -ne 5) { throw 'Incomplete checksum manifest' }
     Download-ReleaseFile $archiveName 67108864
     $archivePath = Join-Path $stage $archiveName
-    if ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $entries[$archiveName]) { throw 'Archive checksum mismatch' }
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    $hashStream = [IO.File]::OpenRead($archivePath)
+    try { $actual = [BitConverter]::ToString($hasher.ComputeHash($hashStream)).Replace('-','').ToLowerInvariant() }
+    finally { $hashStream.Dispose(); $hasher.Dispose() }
+    if ($actual -ne $entries[$archiveName]) { throw 'Archive checksum mismatch' }
     $archive = [IO.Compression.ZipFile]::OpenRead($archivePath)
     try {
         if ($archive.Entries.Count -ne 1 -or $archive.Entries[0].FullName -ne 'bb.exe' -or $archive.Entries[0].Length -le 0 -or $archive.Entries[0].Length -gt 67108864) { throw 'Archive must contain exactly bb.exe' }
