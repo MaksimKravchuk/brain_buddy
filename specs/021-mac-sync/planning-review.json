@@ -36,6 +36,20 @@
       ],
       "artifacts_digest_after_fixes": "e8dab1b5fd6154a5238c20ebdbe4ae46b0105eaeb686bdff08c65ee99a85a8b7",
       "review_runtime": "Claude Code headless adapter, SHA-256 pinned per model: opus-5-5 15eca6f0192ac098f04ecdf5a73306480b8fb56da61c9eceaa66451ea6528a55, sonnet-5-5 89a1902c324243ea4b0dc6e84a96f9a4e579d545f6c62d71135c88449642ea33, fable-5-1 ad7f92066760499486445c647e6b68c0aec8b905823a6ba0e2ec3f6cde43376b (campaign 1 only)"
+    },
+    "post_acceptance_review": {
+      "reason": "Compensating measure 6: contract, plan, data-model and design edits made at /speckit-checklist and /speckit-analyze (6a6f617) were reviewed instead of relying on the acceptance.",
+      "reviewed_range": "1092334..6a6f617 (contracts/*, data-model.md, design.md, design/X-06, plan.md, quickstart.md; tasks.md sanity check)",
+      "reviewer": "claude-sonnet-5-5 subagent, read-only",
+      "date": "2026-10-06",
+      "verdict": "changes-required",
+      "findings": {
+        "blocking": 1,
+        "important": 1,
+        "advisory": 3
+      },
+      "resolution": "Fixed in b9ddd61. B1: tasks.md lacked the brainbuddy-pr-slices/v1 manifest (the validator skipped the absent section); the manifest is appended, covers T001-T139 once each, all FR/SC, plan.md path counts, depends_on, and cross-feature external_depends_on/serialize_with on 020 slices; the validator now parses it. I1: the dry run (BRAINBUDDY_MAC_DATA_DIR) now also skips the launch-time Keychain cleanup and makes no Keychain call until a sign-in inside the dry run (mac-app-host §1, step 4, §8; data-model E9; privacy CHK026; T096/T102/T103/T119). A1: the web rename clash names the server's 409 message. A2 kept. A3: 'added at /speckit-analyze'. Three visible-copy alignments raised by the review (undated signOutBackup sentence; duplicateProjectName copy for the rename clash; 'Old flat · archived' picker label) align the design with existing kit copy and change no owner decision; accepted by the coordinator under the owner's delegation for this feature.",
+      "artifacts_digest_after_fixes": "862e80eb01918f55515a019af6fb656c994a5a576f63025f6e4e5a72e774301c"
     }
   }
 }
