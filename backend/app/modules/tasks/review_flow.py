@@ -25,7 +25,8 @@ import logging
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as dt_time
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -132,6 +133,30 @@ class _Snapshot:
             self.settings,
             self.now,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewMetrics:
+    """The post-release read-out of one owner (plan "Post-release acceptance").
+
+    Counts and durations only, so nothing printed from it can carry content.
+    """
+
+    weeks: int
+    weeks_with_counted_review: int
+    answered_reviews: int
+    answered_yes: int
+    active_seconds_quick: list[int]
+    active_seconds_full: list[int]
+    shown_requests: int
+    cloud_accepted: int
+    device_decisions: int
+    device_accepted: int
+    parks: int
+    parks_returned: int
+
+
+_ACCEPTED = frozenset({"as_is", "edited"})
 
 
 class ReviewFlowService:
@@ -486,6 +511,65 @@ class ReviewFlowService:
             return queue.eligible_total == 0
         return not _stuck_projects(view)
 
+    # --------------------------------------------------------------- metrics
+    def metrics(self, owner_id: str, *, since: date) -> ReviewMetrics:
+        """Aggregates from ``since`` (UTC midnight) to now; a read, no writes.
+
+        SC-001: weeks (7-day spans from ``since``) holding a counted review's
+        regularity instant. SC-003: runs started in the window with a
+        clear-start answer. SC-004: total active seconds of completed runs per
+        mode. SC-005: decisions naming a server request accepted as is or
+        edited over the shown requests (``navigator_usage.shown``, so a shown
+        and then abandoned request stays in the denominator), and the
+        on-device share over decisions without a request id that saw a
+        proposal (an upper bound: abandoned on-device proposals are unseen).
+        Parks: rows parked in the window and how many were returned.
+        """
+
+        now = self.clock()
+        start = datetime.combine(since, dt_time.min, tzinfo=UTC)
+        repo = self.task_repo
+        weeks = max(1, -(-(now - start) // review_rules.WEEK))
+        sessions = repo.list_review_sessions(owner_id)
+        counted = {
+            (instant - start) // review_rules.WEEK
+            for instant in (_regularity_instant(s) for s in sessions)
+            if instant is not None and start <= instant <= now
+        }
+        in_window = [s for s in sessions if s.started_at >= start]
+        answered = [s for s in in_window if s.clear_start is not None]
+        completed = [s for s in in_window if s.status == "completed"]
+        decisions = [
+            d for d in repo.list_review_decisions(owner_id) if d.decided_at >= start
+        ]
+        device = [
+            d
+            for d in decisions
+            if d.navigator_request_id is None and d.ai_use != "none"
+        ]
+        parks = [p for p in repo.list_park_acks(owner_id) if p.parked_at >= start]
+        return ReviewMetrics(
+            weeks=weeks,
+            weeks_with_counted_review=len(counted),
+            answered_reviews=len(answered),
+            answered_yes=sum(s.clear_start == "yes" for s in answered),
+            active_seconds_quick=_active_seconds(completed, "quick"),
+            active_seconds_full=_active_seconds(completed, "full"),
+            shown_requests=sum(
+                usage.shown
+                for usage in repo.list_navigator_usage(owner_id)
+                if usage.day >= since
+            ),
+            cloud_accepted=sum(
+                d.navigator_request_id is not None and d.ai_use in _ACCEPTED
+                for d in decisions
+            ),
+            device_decisions=len(device),
+            device_accepted=sum(d.ai_use in _ACCEPTED for d in device),
+            parks=len(parks),
+            parks_returned=sum(p.returned_at is not None for p in parks),
+        )
+
     # ---------------------------------------------------------- bulk release
     @serialized_write
     def bulk_release(
@@ -708,6 +792,24 @@ def _ended(
             "revision": session.revision + 1,
         }
     )
+
+
+def _regularity_instant(session: ReviewSessionDocument) -> datetime | None:
+    """A counted run's regularity instant (data-model E3), else ``None``."""
+
+    if not review_rules.is_counted(session.status, session.qualifying_activity):
+        return None
+    if session.status == "completed" and session.ended_at is not None:
+        return session.ended_at
+    return session.last_activity_at
+
+
+def _active_seconds(sessions: list[ReviewSessionDocument], mode: str) -> list[int]:
+    return [
+        sum(session.active_seconds_by_step.values())
+        for session in sessions
+        if session.mode == mode
+    ]
 
 
 def _manual_order(task: TaskDocument) -> tuple[int, str, str]:
@@ -978,5 +1080,6 @@ __all__ = [
     "OpenSessionExistsError",
     "QueueView",
     "ReviewFlowService",
+    "ReviewMetrics",
     "progress_digest",
 ]
