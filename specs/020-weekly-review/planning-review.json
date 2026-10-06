@@ -35,6 +35,20 @@
       ],
       "artifacts_digest_after_fixes": "e4ecddd09600e384401004f891f07260206373245c59f0aff1ab826f888be48d",
       "review_runtime": "Claude Code headless adapter, SHA-256 pinned per model: opus-5-5 15eca6f0192ac098f04ecdf5a73306480b8fb56da61c9eceaa66451ea6528a55, sonnet-5-5 89a1902c324243ea4b0dc6e84a96f9a4e579d545f6c62d71135c88449642ea33, fable-5-1 ad7f92066760499486445c647e6b68c0aec8b905823a6ba0e2ec3f6cde43376b"
+    },
+    "post_acceptance_review": {
+      "reason": "Compensating measure 5: spec/plan/contract changes made after founder acceptance (checklist fixes and owner decisions after /speckit-tasks) were reviewed instead of relying on the acceptance.",
+      "reviewed_range": "eeaaae5..e4f7f29+ec65326 (spec.md, plan.md, contracts/*, data-model.md, design.md)",
+      "reviewer": "claude-fable-5-1 via headless Claude Code, read-only tools (Read, Grep, Glob)",
+      "date": "2026-10-06",
+      "verdict": "changes-required",
+      "findings": {
+        "blocking": 0,
+        "important": 2,
+        "advisory": 5
+      },
+      "resolution": "All 7 findings fixed in 5cc205e; the owner confirmed the three resulting refinements (linking drops unsent extensions; repeated bulk-release undo returns the stored result; web shows the next review in the browser zone, T172).",
+      "artifacts_digest_after_fixes": "4f981d87cad581f019462a413e6597d9bd17b81eed9f2954c14a9d9d8667cc3e"
     }
   }
 }
