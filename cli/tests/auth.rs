@@ -200,6 +200,9 @@ fn malformed_issued_cookie_reports_cleanup_uncertainty_024_fr_007_024_fr_013() {
     assert!(!output.contains("new-session-secret-sentinel"));
     let error: Value = serde_json::from_str(output.lines().last().unwrap()).unwrap();
     assert_eq!(error["error"]["detail"]["cleanup_uncertain"], true);
+    assert_eq!(error["error"]["detail"]["new_session_may_exist"], true);
+    assert_eq!(error["error"]["mutation_confirmed"], true);
+    assert_eq!(error["error"]["delivery_unknown"], false);
     assert!(!dir.path().join("config.json").exists());
 }
 
@@ -273,6 +276,10 @@ fn reflected_device_proof_is_rejected_and_candidate_revoked_024_fr_007_024_fr_01
         }
         assert!(!dir.path().join("config.json").exists());
         assert_eq!(captured.len(), 3);
+        let output = String::from_utf8_lossy(&result.stderr);
+        let error: Value = serde_json::from_str(output.lines().last().unwrap()).unwrap();
+        assert_eq!(error["error"]["mutation_confirmed"], true);
+        assert_eq!(error["error"]["delivery_unknown"], false);
         assert!(captured[2].headers.starts_with("POST /api/auth/logout "));
     }
 }

@@ -323,6 +323,8 @@ fn login(
         }
     };
     let credential = issued_credential(&reply, config).map_err(|mut error| {
+        error.mutation_confirmed = Some(true);
+        error.delivery_unknown = Some(false);
         error.detail = Some(Box::new(
             json!({"cleanup_uncertain":true,"new_session_may_exist":true}),
         ));
@@ -372,7 +374,9 @@ fn login(
     })();
     let identity = match save {
         Ok(value) => value,
-        Err(error) => {
+        Err(mut error) => {
+            error.mutation_confirmed = Some(true);
+            error.delivery_unknown = Some(false);
             // Rename has committed the locator even if its directory fsync failed.
             // Preserve both credentials; deleting the new one would break saved state.
             if config
@@ -380,7 +384,6 @@ fn login(
                 .as_ref()
                 .is_some_and(|connection| connection.locator == locator)
             {
-                let mut error = error;
                 error.detail = Some(Box::new(
                     json!({"connection_saved":true,"durability_uncertain":true,"previous_credential_retained":previous.is_some(),"cleanup_uncertain":previous.is_some()}),
                 ));
