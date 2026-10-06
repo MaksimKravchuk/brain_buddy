@@ -26,6 +26,15 @@ from .test_review_auto_park import sweep
 
 TRACES_PATH = Path(__file__).parent / "fixtures" / "review_traces_tasks.json"
 TRACES: dict[str, Any] = json.loads(TRACES_PATH.read_text(encoding="utf-8"))
+# Slice PR-11 (tasks.md T131): the run traces in the same format. Loaded only
+# when present so a missing file fails the schema test below, not collection.
+RUNS_PATH = Path(__file__).parent / "fixtures" / "review_traces_runs.json"
+RUNS: dict[str, Any] = (
+    json.loads(RUNS_PATH.read_text(encoding="utf-8"))
+    if RUNS_PATH.is_file()
+    else {"traces": []}
+)
+RUN_TRACE_IDS = ("TR-R01", "TR-R02", "TR-R03", "TR-R04", "TR-R05")
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 
 
@@ -130,6 +139,42 @@ def test_020_SC_007_020_FR_013_golden_trace_replays_against_the_real_api(
                 name="Trace step",
                 attachment_type=allure.attachment_type.JSON,
             )
+
+
+def _replay(trace: dict[str, Any], client: TestClient, clock: FrozenClock) -> None:
+    clock.set(from_isoformat(trace["start"]))
+    container = client.app.state.container  # type: ignore[attr-defined]
+    container.feature_flag_service.set_mode(
+        "weekly_review", trace["flag"], operator_id="trace"
+    )
+    captured: dict[str, Any] = {}
+    for step in trace["steps"]:
+        with allure.step(f"{trace['id']}: {step['name']}"):
+            _run_step(step, client, clock, captured)
+
+
+@pytest.mark.parametrize(
+    "trace", RUNS["traces"], ids=[trace["id"] for trace in RUNS["traces"]]
+)
+def test_020_FR_029_020_SC_007_run_trace_replays_against_the_real_api(
+    api_client: TestClient, frozen_clock: FrozenClock, trace: dict[str, Any]
+) -> None:
+    """Start, replace, merged progress, a late retry merged once, finish."""
+
+    _replay(trace, api_client, frozen_clock)
+
+
+def test_020_FR_011_020_SC_007_run_trace_file_declares_its_schema() -> None:
+    """The run traces exist in the shared format and name their requirements."""
+
+    assert RUNS_PATH.is_file(), f"{RUNS_PATH.name} is missing"
+    assert RUNS["schema"] == TRACES["schema"]
+    assert RUNS["conventions"] == TRACES["conventions"]
+    assert tuple(trace["id"] for trace in RUNS["traces"]) == RUN_TRACE_IDS
+    covered = {req for trace in RUNS["traces"] for req in trace["requirements"]}
+    assert {"020-FR-011", "020-FR-029", "020-SC-007"} <= covered
+    for trace in RUNS["traces"]:
+        assert all(req.startswith("020-") for req in trace["requirements"])
 
 
 def test_020_SC_007_trace_file_declares_its_schema_and_requirements() -> None:
