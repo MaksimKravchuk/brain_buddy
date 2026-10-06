@@ -559,7 +559,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Verify exact candidate checkout
-        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"
+        run: test "$(git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"
 
       - name: Show the toolchain
         if: env.RUN == 'true'
