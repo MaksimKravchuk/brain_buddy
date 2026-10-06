@@ -3,7 +3,7 @@
 **Feature**: `specs/021-mac-sync/`
 **Spec**: `spec.md` (Clarifications settled: 2026-10-06)
 **Screens**: `design/*.html`: self-contained static HTML, inline CSS, inline SVG icons, no CDN, no external fonts, no script
-**Human sign-off**: pending. Three decisions need the owner (see Sign-off).
+**Human sign-off**: approved by Max on 2026-10-06 (see Sign-off).
 
 <!--
   Produced by /speckit-design via the design-architect subagent, after
@@ -497,7 +497,12 @@ and failures appear only after 60 s, in one place.
 
 ## Sign-off
 
-**Pending.** Three genuine choices, each with a recommendation:
+**Approved by Max on 2026-10-06** ("Утверждаю"), with all three recommendations accepted: quiet thresholds (1), one neutral line for pre-feature archives (2), and confirming plain sign-out (3). The choices left as designed stand. Gaps G-1 – G-3 are resolved by the spec amendment of the same day:
+- G-1: "Not synced yet" goes into FR-012.
+- G-2: "Synced N days ago" (2–6 days) and then "Synced on <date>" go into FR-012.
+- G-3: the X-03 sign-in sheet says that signing in cancelled a pending account deletion before it closes (FR-017).
+
+The three choices as they were put to the owner:
 
 1. **Quiet thresholds** (X-01, M-01; FR-012, FR-013).
    - Taken literally, the indicator would blink at every 60 s pull and every edit, and "· 1 change waiting" would appear and vanish after every edit. That is the opposite of "не должно бросаться в глаза".

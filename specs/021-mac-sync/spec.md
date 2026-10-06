@@ -22,6 +22,13 @@ The owner delegated the detail ("ты сам справишься, особо м
 - Q: Do iPhone and web show the project desired outcome? → A: Not in this feature. It is kept intact and exported (FR-028); showing it elsewhere is a later change.
 - Q: Where does unarchive live on iPhone and web? → A: Wherever archived projects are listed on that client; placement is fixed at `/speckit-design`.
 
+### Session 2026-10-06 (design sign-off)
+
+- Q: Should the indicator and the waiting count appear on every sync and every edit? → A: No. The indicator appears only for a sync longer than 1 s and stays at least 0.5 s. The waiting count shows while online only after a change has waited 10 s (FR-012, FR-013). Owner: "Пороги".
+- Q: Should a Mac sign-out with nothing unsent be confirmed? → A: Yes, "Sign out?", as on the iPhone, because the account's data leaves this Mac (FR-017). Owner accepted.
+- Q: Should a pre-feature archived project that unarchives empty explain itself? → A: Yes, with one neutral line saying its tasks are still in their lists (FR-027, US5-4). Owner accepted.
+- Design gaps G-1 – G-3 were resolved as recommended: "Not synced yet" and day/date wording (FR-012), and the deletion-cancelled note inside the sign-in sheet (FR-017).
+
 ## User Scenarios & Testing *(mandatory)*
 
 Primary-loop impact: this feature makes the Mac a full capture and organise client of the same trusted system. Captures on the Mac (quick-capture hotkey, voice-to-draft, Smart Add) reach clarify → organise → weekly review on every device. It changes no rule of the loop itself. It is the prerequisite for weekly review on the Mac (020 US6, FR-041).
@@ -117,7 +124,7 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 1. **Given** a project with tasks, **When** it is archived on any client, **Then** it leaves active navigation everywhere, its tasks keep their project membership, and no task changes list, completion or trash state.
 2. **Given** an archived project, **Then** no task can be newly added to it on any client; tasks already in it can be edited without losing their membership.
 3. **Given** an archived project, **When** the person unarchives it on the Mac, iPhone or web, **Then** it returns to active navigation everywhere with the same tasks.
-4. **Given** a project archived before this feature (its tasks were already detached by the old behaviour), **When** it is unarchived, **Then** it returns empty. The person is not told it lost tasks, because nothing is lost by this change.
+4. **Given** a project archived before this feature (its tasks were already detached by the old behaviour), **When** it is unarchived, **Then** it returns empty with one neutral line: it was archived before projects kept their tasks, and those tasks are still in their lists (FR-027). Nothing says tasks were lost, because nothing is lost by this change.
 5. **Given** a project with a desired outcome set on the Mac, **When** it is renamed or recoloured on the iPhone or web, **Then** the outcome is kept unchanged on the account and on the Mac.
 
 ---
@@ -182,15 +189,16 @@ Archiving a project hides it from active navigation but keeps its tasks attached
   | State | Wording |
   |---|---|
   | Account-less | "On this Mac · Sign in to sync" |
-  | Synced | "Synced just now" / "Synced N min ago" / "Synced N h ago" / "Synced yesterday" |
-  | Changes waiting while online | the synced line plus " · N changes waiting" |
+  | Signed in, first sync not finished | "Not synced yet" |
+  | Synced | "Synced just now" / "Synced N min ago" / "Synced N h ago" / "Synced yesterday" / "Synced N days ago" (2–6 days) / "Synced on <date>" |
+  | Changes waiting while online | the synced line plus " · N changes waiting", once a change has waited longer than 10 s |
   | Offline | "Offline · N changes waiting", or "Offline" when nothing is waiting |
   | Session ended | "Sign in again to sync" |
   | Failing | "Couldn't sync · Retry" |
   | Rejected changes | "N changes couldn't sync" |
 
   The relative time MUST refresh at least once a minute.
-- **FR-013**: While a sync runs, the Mac MUST show only a small activity indicator beside the status line. It MUST NOT change the line's text, open a sheet, dialog or alert, take focus, or disable any control.
+- **FR-013**: While a sync runs longer than 1 s, the Mac MUST show only a small activity indicator beside the status line, kept for at least 0.5 s once shown. Shorter syncs show nothing. It MUST NOT change the line's text, open a sheet, dialog or alert, take focus, or disable any control.
 - **FR-014**: Transient failures MUST be retried automatically and shown only through the indicator. A failure MUST surface as the compact "Couldn't sync" line only once sending or loading has kept failing for 60 s, and it MUST clear itself after the next successful sync. The exception is an ended session, which surfaces at once (FR-012).
 - **FR-015**: Every surfaced failure and every sync issue MUST carry a reference id the person can see and copy. The same id identifies the failed request in server logs.
 - **FR-016**: Activating the status line MUST open a small, non-modal popover:
@@ -200,7 +208,13 @@ Archiving a project hides it from active navigation but keeps its tasks attached
   - "Sync now";
   - the signed-in email and "Sign out".
   - It MUST close with Esc or a click outside, MUST be fully keyboard-operable and MUST announce its content to VoiceOver.
-- **FR-017**: Routine sync MUST never show a modal dialog, alert, notification, sound or badge on any platform. The only sync dialogs allowed are the ones a person starts: sign-in, sign-out with unsent changes (FR-018), account switch refusal (FR-004) and the one-time upgrade notice (FR-022).
+- **FR-017**: Routine sync MUST never show a modal dialog, alert, notification, sound or badge on any platform. The only sync dialogs allowed are the ones a person starts or a one-time notice:
+  - sign-in;
+  - sign-out confirmation: "Sign out?" when nothing is unsent, because the account's data leaves this Mac, or the unsent-changes warning (FR-018);
+  - account switch refusal (FR-004);
+  - the one-time upgrade notice (FR-022).
+
+  When signing in cancels a pending account deletion, the sign-in sheet says so before it closes, as the iPhone does. This is not a separate dialog.
 - **FR-018**: Signing out with unsent changes MUST warn with the count and offer two choices: keep the changes (cancel sign-out) or sign out and remove them from this Mac. This matches the iPhone.
 - **FR-019**: On iPhone, the list-screen sync status MUST use the same states, the same wording (with "iPhone" for "Mac") and the same compact form as the Mac: words, a small activity indicator during sync, and failures only after 60 s. It MUST NOT use a dialog. The iPhone Settings Sync section and Sync issues screen stay as they are, with the same wording.
 
@@ -216,7 +230,7 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 - **FR-024**: Archiving a project MUST keep every task's project membership and change no task's list, completion or trash state, on every client and on the server (ADR-0020).
 - **FR-025**: An archived project MUST leave active navigation on every client. No task may be newly assigned to it. A task already in it MUST keep that membership when edited for other fields.
 - **FR-026**: A person MUST be able to unarchive a project on Mac, iPhone and web. It returns to active navigation with the membership it had when archived.
-- **FR-027**: Projects archived before this feature MUST stay as they are. Their tasks were detached by the old behaviour, and unarchiving them returns an empty project.
+- **FR-027**: Projects archived before this feature MUST stay as they are. Their tasks were detached by the old behaviour, and unarchiving them returns an empty project. When such a project is empty, every client MUST show one neutral line saying it was archived before projects kept their tasks and that those tasks are still in their lists. The System therefore MUST know which projects were archived before this feature.
 - **FR-028**: A project MUST be able to carry an optional desired outcome, as on the Mac today. It is synced with the project and kept unchanged when another client edits the project's other fields. It is included in the account's ZIP export and removed by account purge. Showing or editing it on iPhone and web is not required by this feature.
 
 **Privacy and observability**
