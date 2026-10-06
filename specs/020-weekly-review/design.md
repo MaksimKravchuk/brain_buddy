@@ -84,7 +84,7 @@ tapped").
 | M-22 | mobile (review step) | Summary | Counts per decision type, next review date, optional "Clear how to start the week?" | FR-033, FR-038, SC-003, SC-007 |
 | M-23 | mobile (iOS Settings) | Weekly review and Suggestions settings | Day, time, threshold, last review; on-device status, fallback choice, delete model, cloud consent revoke | FR-023, FR-049, FR-024, FR-035, FR-038, FR-039 |
 | M-24 | mobile (iOS widget) | Next actions widget with "N ask" | Shows how many tasks ask for a decision; in medium and large the chip deep-links into the review's decision step | FR-037 |
-| M-25 | mobile (iOS notification) | Weekly review notification | The single weekly cue, skipped if a complete or partial review happened in the preceding 6 days; iOS only | FR-036, FR-038 |
+| M-25 | mobile (iOS notification) | Weekly review notification | The single weekly cue, skipped if a counted review (FR-029) happened in the preceding 6 days; iOS only | FR-036, FR-038 |
 | M-26 | mobile (iOS sheet at first app open) | Auto-park explainer | One-time, short: the threshold rule, auto-park 7 days later, one-tap return, the only automatic change, the grace date for tasks already in Next; independent of the onboarding | FR-051, FR-016, FR-018, FR-014 |
 | D-01 | desktop (web) | Next actions with age markers + Weekly review sidebar entry | Web markers (as M-01, no ageing in the list) and the working entry replacing "Coming soon"; the sidebar "Last review" line is the web's only review cue | FR-046, FR-004, FR-010, FR-012, FR-038, FR-039, FR-042, FR-045 |
 | D-02 | desktop (web dialog) | Decision dialog with the AI navigator | M-03/M-04/M-05/M-07 content in a 560 px dialog; cloud-only navigator | FR-005 – FR-011, FR-019 – FR-021, FR-024, FR-025, FR-045 |
@@ -521,7 +521,7 @@ review's projects step (D-03 hosting M-19). A web project-page entry is out of s
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
 | default | chosen day/time in the iPhone's current time zone (it travels with the device; the account's stored zone, which may be another device's, only governs markers) | One banner; tap → M-11 | "Weekly review / Your review time. The quick one takes about 5 minutes." | FR-036, US5-2 |
-| skipped this week | a complete or partial review happened in the preceding 6 days (any device) | No notification. On iOS the pending one is cancelled when the review is recorded. | — | FR-036 |
+| skipped this week | a counted review (FR-029) happened in the preceding 6 days (any device) | No notification. On iOS the pending one is cancelled when the review is recorded. | — | FR-036 |
 | web | — | Never: the web sends no notifications; its only cue is the sidebar "Last review" line (D-01) | — | FR-036, FR-038 |
 | permission declined | iOS permission off | Nothing sent, nothing nags (M-12 note) | — | FR-036 |
 | offline | no connection | Fires anyway (local notification) | — | FR-040 |
@@ -585,7 +585,7 @@ the review onboarding (M-12). It ships in increment 1 with auto-park.
 | cloud consent | first Suggest | Consent dialog; focus starts on "Not now" | as M-07 | FR-024 |
 | loading (suggesting) | Suggest with consent | Placeholder lines in the navigator area with a "Stop" button (focus moves to "Stop"); the decisions and form stay usable; nothing is written | "Asking OpenAI…" · "Stop" | FR-019, FR-020 |
 | suggestion stopped | "Stop" while "Asking OpenAI…" | The request is aborted in the browser (the fetch is cancelled); the form field and the task are unchanged; a quiet line replaces the placeholder; focus to "Suggest again" | "Suggestion stopped." · "Suggest again" | FR-020 |
-| interrupted (suggesting) | the dialog closed (Close, Esc, Back) or the tab reloaded while "Asking OpenAI…"; or the connection dropped mid-request | Closing or reloading aborts the request quietly and applies nothing; when the dialog reopens for the same task the form shows its earlier state (typed text from the draft) with "Suggestion stopped." · "Suggest again"; a dropped connection shows the timeout copy with Ref | "Suggestion stopped." · "Suggest again" / as M-07 timeout | FR-020, FR-025, FR-045 |
+| interrupted (suggesting) | the dialog closed (Close, Esc, Back — after the FR-052 confirmation where a field holds unsaved text) or the tab reloaded while "Asking OpenAI…"; or the connection dropped mid-request | Closing or reloading aborts the request quietly and applies nothing. When the dialog is reopened in the same tab for the same task, the form shows its earlier state (typed text from the draft) with "Suggestion stopped." · "Suggest again". After a reload, the form reopens with its draft (FR-052) and the ordinary "Suggest" control; nothing records that a suggestion was in flight. A dropped connection shows the timeout copy with Ref | "Suggestion stopped." · "Suggest again" / as M-07 timeout | FR-020, FR-025, FR-045 |
 | proposals (cloud) | allowed | M-05 layout with provider line; Save first step | "Suggested by OpenAI from this task's details." | FR-019, FR-020 |
 | error: provider timeout / malformed | provider fails | Banner, Ref, Try again | as M-07 | FR-025, FR-045 |
 | error: cost cap | cap reached | Banner, Ref, no retry | as M-07 | FR-025, FR-045 |
@@ -921,7 +921,7 @@ reflected in the screens:
 2. **FR-030.** "Process 10 now, then release the remainder to Someday" (M-15).
 3. **Undo for decisions.** Every card decision shows an Undo toast or status line for about 5 s, like Process inbox. This covers the in-list sheet (M-03), the review decision step (M-16), Waiting (M-18), Someday (M-20) and web (D-02, D-03). Spec: FR-048.
 4. **Restart bulk-release Undo (FR-017).** It lasts until the person leaves the restart screen (M-10). Clarified 2026-10-06: leaving means "Start the review" or Close; an app kill, backgrounding or tab reload is not leaving, so the review reopens on the released state with Undo still offered.
-5. **Notifications (FR-036).** No notification in a week where a complete or partial review happened in the preceding 6 days. The web sends no notifications; its only cue is the sidebar "Last review" line (M-25, D-01, D-03 onboarding copy).
+5. **Notifications (FR-036).** No notification in a week where a counted review (FR-029) happened in the preceding 6 days. The web sends no notifications; its only cue is the sidebar "Last review" line (M-25, D-01, D-03 onboarding copy).
 6. **Wins** means the last 7 days (M-13).
 7. **Restart for someone onboarded but never reviewed.** Same neutral restart offer, with no "Welcome back" or "you've been away" wording (M-10, "set up but never reviewed").
 8. **"Not now" on a single card** maps to the new FR-050. The task keeps asking and auto-park continues on schedule. SC-002 is measured only over reviews whose decision step finished with no "Not now" (M-16, D-03).
@@ -1018,9 +1018,9 @@ Approved by **Max** on **2026-10-05**, with these decisions:
 1. **Decision card on iPhone outside the review**: a large-detent sheet over Next (M-03). Inside the review it is full-screen (M-16).
 2. **Marker prominence**: lists (M-01, D-01, M-17) show only "Asks for a decision" and "Moves to Someday tomorrow". "Ageing" appears only in task detail (M-02 and the web inline task detail).
 3. **Widget**: the "N ask" chip in the header is tappable and deep-links straight into the review's decision step at the first card (M-24 → M-16). It is a link in medium and large. In small, the chip is display-only and the widget keeps opening Next (follow-up owner decision; FR-037 scoped to medium and large).
-4. **Undo**: every card decision (M-03, M-16, D-02, D-03) and every Waiting/Someday decision (M-18, M-20) shows an Undo toast for a few seconds, like Process inbox.
+4. **Undo**: every card decision (M-03, M-16, D-02, D-03) and every Waiting/Someday decision (M-18, M-20) shows an Undo toast for about 5 s (at least 10 s on iOS with VoiceOver or Switch Control, FR-048), like Process inbox.
 5. **"Not now"** stays on a single card in the decision step. The task remains "asks for a decision" and auto-park continues on schedule (FR-050). SC-002 is measured only over reviews whose decision step finished with no "Not now".
-6. **Notification**: none for a week if a complete or partial review happened in the preceding 6 days. The web has no notifications, only the sidebar "Last review" line.
+6. **Notification**: none for a week if a counted review (FR-029) happened in the preceding 6 days. The web has no notifications, only the sidebar "Last review" line.
 
 Choices the owner left as designed:
 

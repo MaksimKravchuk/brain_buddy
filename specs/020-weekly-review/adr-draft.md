@@ -139,7 +139,7 @@ never causes an early server park.
 
 ADR-0006 B-09 is lifted: review day/time (default Friday 16:00), IANA time zone and
 threshold are stored per owner. iOS schedules at most one local notification per
-week, skipped when a complete or partial review happened in the preceding 6 days;
+week, skipped when a counted review (FR-029) happened in the preceding 6 days;
 the web sends none. No streaks, no escalation, no follow-up reminders.
 
 The stored zone changes only when a device's own zone changes, so two signed-in
