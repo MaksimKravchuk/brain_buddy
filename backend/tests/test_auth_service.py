@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
 import pytest
 
 from app.exceptions import ConflictError, ValidationFailure
+from app.repositories.session import SessionRepository
+from app.repositories.user import UserRepository
 from app.schemas.auth import Invite
 from app.services import InvalidCredentialsError, InvalidInviteError
+from app.services.auth_service import AuthService
 from app.utils.time import utcnow
 
 
@@ -14,6 +20,100 @@ def _create_invite(container) -> str:
     code = "invite_test_code"
     container.invite_repo.create(Invite(code=code, created_at=utcnow()))
     return code
+
+
+def test_023_fr002_auth_rejects_split_user_and_session_databases(container, tmp_path):
+    service = container.auth_service
+    with pytest.raises(ValueError, match="must share Identity storage"):
+        AuthService(
+            user_repo=container.user_repo,
+            session_repo=SessionRepository(tmp_path / "foreign-identity"),
+            invite_repo=container.invite_repo,
+            password_policy=service.password_policy,
+            session_settings=service.session_settings,
+        )
+    assert container.user_repo.list_users() == []
+
+
+@pytest.mark.parametrize("same_email", [False, True])
+def test_023_fr002_legacy_signup_races_preserve_one_session_and_unique_authority(
+    container, monkeypatch, same_email
+):
+    """Real competing writes cannot reuse an invite or duplicate an email owner."""
+    invite = _create_invite(container)
+    original_create = container.user_repo.create
+    barrier = Barrier(2)
+
+    def synchronized_create(user):
+        barrier.wait(timeout=10)
+        return original_create(user)
+
+    monkeypatch.setattr(container.user_repo, "create", synchronized_create)
+
+    def signup(index):
+        try:
+            return container.auth_service.signup(
+                email=f"signup-race-{0 if same_email else index}@example.com",
+                password="very-long-password",
+                invite_code=invite,
+            )
+        except (ConflictError, InvalidInviteError) as failure:
+            return failure
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(signup, range(2)))
+    winners = [outcome for outcome in outcomes if isinstance(outcome, tuple)]
+    failures = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
+    assert len(winners) == len(failures) == 1
+    assert isinstance(failures[0], ConflictError if same_email else InvalidInviteError)
+    owner, token = winners[0]
+    assert container.auth_service.get_user_for_token(token).id == owner.id
+    assert len(container.user_repo.list_users()) == (1 if same_email else 2)
+    with container.user_repo.store.connection() as connection:
+        sessions = connection.execute("SELECT user_id FROM sessions").fetchall()
+    assert [session["user_id"] for session in sessions] == [owner.id]
+    assert container.invite_repo.get(invite).used_by_user_id == owner.id
+
+
+def test_023_fr019_seed_rechecks_credentials_changed_during_password_verification(
+    container, monkeypatch
+):
+    service = container.auth_service
+    original = service.seed_admin(
+        email="seed-race@example.com", password="very-long-password"
+    )
+    _, token, _ = service.login(email=original.email, password="very-long-password")
+    competing_hash = service.hash_password("competing-password")
+    competing_users = UserRepository(container.user_repo.root)
+    original_verify = service._verify_password
+    triggered = False
+
+    def verify_then_compete(raw, hashed):
+        nonlocal triggered
+        verified = original_verify(raw, hashed)
+        if verified and not triggered:
+            triggered = True
+            competing_users.mutate(
+                original.id,
+                lambda fresh: fresh.model_copy(
+                    update={
+                        "password_hash": competing_hash,
+                        "auth_version": fresh.auth_version + 1,
+                    }
+                ),
+            )
+        return verified
+
+    monkeypatch.setattr(service, "_verify_password", verify_then_compete)
+    seeded = service.seed_admin(email=original.email, password="very-long-password")
+    assert triggered and seeded.id == original.id
+    assert service.get_user_for_token(token) is None
+    assert (
+        service.login(email=original.email, password="very-long-password")[0].id
+        == original.id
+    )
+    with pytest.raises(InvalidCredentialsError):
+        service.login(email=original.email, password="competing-password")
 
 
 def test_signup_happy_path(container) -> None:

@@ -11,7 +11,7 @@ from zipfile import ZipFile
 import pytest
 
 from .test_modern_auth_api import live_modern
-from .test_modern_auth_apple_integration import apple_runtime
+from .test_modern_auth_apple_integration import AppleProvider, apple_runtime
 from .test_modern_auth_service import VERIFIER, challenge
 
 __all__ = ["live_modern", "apple_runtime"]
@@ -24,6 +24,23 @@ pytestmark = [
         "023-FR-001 023-FR-018 023-SC-004 HTTP authority", label_type="story"
     ),
 ]
+
+
+class WebAppleProvider(AppleProvider):
+    """Stub only Apple's token endpoint, retaining the real broker and HTTP flow."""
+
+    def callback_uri(self, provider):
+        assert provider == "apple"
+        return "https://api.example.com/api/auth/providers/apple/callback"
+
+    def authorization_url(self, provider, **kwargs):
+        assert provider == "apple"
+        assert kwargs["redirect_uri"] == self.callback_uri(provider)
+        return "https://appleid.apple.com/auth/authorize?synthetic"
+
+    def exchange_apple(self, code, *, nonce, redirect_uri):
+        assert redirect_uri == self.callback_uri("apple")
+        return super().exchange_apple(code, nonce=nonce, native_identity_token=None)
 
 
 def email_step(runtime, email, purpose="login", **extra):
@@ -242,6 +259,86 @@ def test_023_FR_017_apple_form_exception_rejects_malformed_authority(
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "invalid_proof"
     assert service.auth.user_repo.list_users() == []
+
+
+@pytest.mark.parametrize(
+    "code,state",
+    [("", "a" * 43), ("x" * 4097, "a" * 43), ("synthetic", "invalid")],
+)
+def test_023_fr017_google_rejects_malformed_callback_before_exchange(
+    live_modern, code, state
+):
+    client, service, *_ = live_modern
+    response = client.get(
+        "/api/auth/providers/google/callback",
+        params={"code": code, "state": state},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "invalid_proof"
+    assert "location" not in response.headers
+    assert service.auth.user_repo.list_users() == []
+
+
+def test_023_fr017_apple_cross_site_form_finishes_only_bound_one_use_handoff(
+    apple_runtime, anonymous_api_client, container
+):
+    service, _, _, _, clock = apple_runtime
+    provider = WebAppleProvider(clock)
+    provider.identity = replace(provider.identity, audience="com.example.web")
+    service.provider = provider
+    client = anonymous_api_client
+    client.base_url = "https://api.example.com"
+    container.modern_auth_service = service
+    client.app.state.container = container
+    client.app.state.config = client.app.state.config.model_copy(
+        update={"modern_auth": service.settings}
+    )
+    started = client.post(
+        "/api/auth/providers/apple/start",
+        json={"purpose": "login", "client": "web", "client_challenge": challenge()},
+        headers={"Origin": "https://app.example.com"},
+    )
+    assert started.status_code == 200, started.text
+    assert "SameSite=none" in started.headers["set-cookie"]
+    body = {"code": "synthetic-web-apple-code", "state": started.json()["state"]}
+    cross_site = {"Origin": "https://appleid.apple.com", "Sec-Fetch-Site": "cross-site"}
+    callback = client.post(
+        "/api/auth/providers/apple/callback",
+        data=body,
+        headers=cross_site,
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303, callback.text
+    target = urlsplit(callback.headers["location"])
+    assert (target.scheme, target.netloc, target.path, target.query) == (
+        "https",
+        "app.example.com",
+        "/auth/complete",
+        "",
+    )
+    assert "synthetic-web-apple-code" not in callback.headers["location"]
+    assert callback.headers["Referrer-Policy"] == "no-referrer"
+    assert "Max-Age=0" in callback.headers["set-cookie"]
+    assert client.get("/api/auth/me").status_code == 401
+    fragment = parse_qs(target.fragment)
+    payload = {
+        "attempt_id": fragment["attempt"][0],
+        "state": fragment["state"][0],
+        "handoff_code": fragment["grant"][0],
+        "client_verifier": VERIFIER,
+    }
+    finished = client.post("/api/auth/providers/complete", json=payload)
+    assert finished.status_code == 200, finished.text
+    assert finished.json()["status"] == "signed_in"
+    owner = finished.json()["user"]["id"]
+    assert client.get("/api/auth/me").json()["id"] == owner
+    assert provider.received == [(body["code"], started.json()["nonce"], None)]
+    replay = client.post("/api/auth/providers/complete", json=payload)
+    assert replay.status_code == 400
+    assert "set-cookie" not in replay.headers
+    assert client.get("/api/auth/me").json()["id"] == owner
+    assert len(service.auth.user_repo.list_users()) == 1
 
 
 def test_023_FR_001_native_apple_http_finish_sets_one_session(

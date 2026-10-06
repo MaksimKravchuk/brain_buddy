@@ -50,6 +50,84 @@ def _store(root: Path) -> AuthStore:
     return AuthStore(root)
 
 
+@pytest.mark.parametrize("table", ["users", "sessions"])
+@pytest.mark.parametrize("payload", ["[]", "null", '{"broken":true}'])
+def test_023_fr019_corrupt_credential_payloads_fail_closed(tmp_path, table, payload):
+    """Malformed persisted credentials never become users or accepted sessions."""
+    store = _store(tmp_path)
+    users = UserRepository(tmp_path, store)
+    sessions = SessionRepository(tmp_path, store)
+    users.create(_user())
+    sessions.create(_session())
+    with store.transaction() as connection:
+        connection.execute(f"UPDATE {table} SET payload_json=?", (payload,))
+    with pytest.raises(RepositoryError) as failure:
+        users.get_by_id("owner") if table == "users" else sessions.get("digest")
+    assert str(failure.value) == (
+        "Authentication user record is invalid."
+        if table == "users"
+        else "Authentication session record is invalid."
+    )
+    with store.connection() as connection:
+        assert (
+            connection.execute(f"SELECT payload_json FROM {table}").fetchone()[0]
+            == payload
+        )
+
+
+@pytest.mark.parametrize("table", ["users", "sessions"])
+def test_023_fr019_invalid_json_write_rolls_back_without_damaging_credentials(
+    tmp_path, table
+):
+    store = _store(tmp_path)
+    users = UserRepository(tmp_path, store)
+    sessions = SessionRepository(tmp_path, store)
+    owner = users.create(_user())
+    session = _session()
+    sessions.create(session)
+    with pytest.raises(ConflictError), store.transaction() as connection:
+        connection.execute(f"UPDATE {table} SET payload_json=?", ("invalid-json",))
+    assert users.get_by_id(owner.id) == owner
+    assert sessions.get(session.token_hash) == session
+
+
+@pytest.mark.parametrize(
+    "table,field,value",
+    [
+        ("users", "id", "foreign-owner"),
+        ("users", "email", "foreign@example.com"),
+        ("users", "password_hash", "foreign-hash"),
+        ("users", "auth_version", 2),
+        ("users", "email_verified_at", "2026-01-01T00:00:00Z"),
+        ("sessions", "token_hash", "foreign-digest"),
+        ("sessions", "user_id", "foreign-owner"),
+        ("sessions", "auth_version", 2),
+        ("sessions", "auth_method", "email"),
+        ("sessions", "provider_binding_id", "foreign-binding"),
+        ("sessions", "expires_at", "2099-01-01T00:00:00Z"),
+    ],
+)
+def test_023_fr019_payload_cannot_override_indexed_credential_authority(
+    tmp_path, table, field, value
+):
+    """A valid credential payload still cannot override SQLite's indexed owner."""
+    store = _store(tmp_path)
+    users = UserRepository(tmp_path, store)
+    sessions = SessionRepository(tmp_path, store)
+    users.create(_user())
+    sessions.create(_session())
+    with store.transaction() as connection:
+        payload = json.loads(
+            connection.execute(f"SELECT payload_json FROM {table}").fetchone()[0]
+        )
+        payload[field] = value
+        connection.execute(f"UPDATE {table} SET payload_json=?", (json.dumps(payload),))
+    with pytest.raises(RepositoryError):
+        users.get_by_id("owner") if table == "users" else sessions.get("digest")
+    assert users.get_by_id("foreign-owner") is None
+    assert sessions.get("foreign-digest") is None
+
+
 def test_022_fr002_empty_root_sqlite_preserves_legacy_facade_results(tmp_path):
     """Users and sessions round trip without creating credential JSON files."""
     users = UserRepository(tmp_path)

@@ -52,6 +52,9 @@ evidence, including failures. It does not certify launch or GDPR compliance.
 | PR CI at e4e4eab | actual native kit passed; frontend, iOS host and secret scan failed | Node22 Blob realm assertion, inaccessible native error initializer, and two public-value scanner false positives repaired at 4439c00; rerun pending. Claude review runtime returned is_error:true without an assessment. |
 | Final independent code review at e4e4eab | changes requested | Reproduced removed-provider public sign-in/restoration and retention defect; native cancellation/compile findings also recorded. Scoped native fixes are at 4439; unlink repair and separate exact-SHA re-review follow. Obsolete local aggregate was stopped before product mutation; it is not a pass. |
 | Signed Apple browser continuation | 10/10 full browser journeys passed | Includes actual cross-site form POST/binder, valid ES256 client secret and RS256 Apple assertions, relay signup, stable-subject return without email, and collision rejection. Synthetic boundary evidence only. |
+| PR CI at 4439c00 | native and frontend passed; backend coverage failed | Run 37476125539 actually executed RUN=true. iOS simulator host/widgets build, 614 shared Swift tests, 71 Mac tests and 1,710 web tests passed. Backend: 4,270 tests passed, but lines 98.36% / branches 95.25% failed unchanged 98.47% / 95.61% floors. Dependent Docker/E2E/mutation lanes were skipped; the aggregate is not green. |
+| Explicit Remove regression and repair | initial 11 failed / 1 passed; repaired focused suites green | Storage repair 8151d74 integrated at 4594804. Google mappings are erased immediately; explicit Apple unlink retains only bounded cleanup linkage, erased after terminal/expired work. Public sign-in cannot reactivate removed ownership. Actual focused executions: 41 Apple/unlink, 150 authority, 140 storage/broker/regression; static and Allure checks passed. Final integrated rerun follows. |
+| Additional HTTP/storage/legacy boundaries | 74 tests passed, 37.14 s; Allure taxonomy and formatting/lint passed | Real SQLite payload/index disagreement rejection, invalid-JSON transaction rollback, Apple cross-site form and one-use handoff, Google malformed callback rejection, competing legacy email/invite writes and seed credential recheck. These preserve security behavior and immutable coverage floors. |
 
 Independent reviews:
 [initial](reviews/implementation-security-5fc4a6a.json),
@@ -89,7 +92,7 @@ CI artifacts must bind to the frozen implementation SHA.
 
 ## Remaining evidence
 
-1. Finish unlink authority/retention repair, execute the complete required suite on the final
+1. Execute the integrated unlink authority/retention repair and complete required suite on the final
    SHA, and verify native CI really executes against that same candidate.
 2. Retain final-candidate synthetic Apple browser and headed web reference artifacts.
    The implemented ten-journey suite already passed; final aggregate rerun follows.
