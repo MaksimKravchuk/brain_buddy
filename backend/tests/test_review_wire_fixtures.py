@@ -325,19 +325,20 @@ def test_020_FR_009_the_extension_reason_is_stripped_before_its_length_check() -
 def test_020_FR_051_task_api_returns_null_formulation_and_parked(
     api_client: TestClient,
 ) -> None:
-    """Before the behaviour slice, GET of one task and of the list carry
-    `formulation: null` and `parked: null` (020-FR-051, 020-FR-045)."""
+    """A task without a clock (here in the Inbox) carries `formulation: null`
+    and `parked: null` on create, GET of one task and of the list (020-FR-051,
+    020-FR-045). The clock itself is covered by `test_review_clock_api.py`."""
 
     created = api_client.post(
         "/api/tasks",
-        json={"title": "Call Bob", "state": "next"},
+        json={"title": "Call Bob", "state": "inbox"},
         headers={"Idempotency-Key": "review-null-fields"},
     )
     assert created.status_code == 201, created.text
     task_id = created.json()["id"]
 
     single = api_client.get(f"/api/tasks/{task_id}")
-    listed = api_client.get("/api/tasks", params={"state": "next"})
+    listed = api_client.get("/api/tasks", params={"state": "inbox"})
     assert single.status_code == 200, single.text
     assert listed.status_code == 200, listed.text
     assert single.headers["X-Correlation-ID"]

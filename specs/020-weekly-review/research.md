@@ -178,7 +178,7 @@ Recorded in spec.md Clarifications "Session 2026-10-06".
   `_apply_idempotent_record` for the new prefixes, spelled exactly as in
   contracts/http.md §9 (`decide_task:`, `undo_decision:`, `auto-park:`,
   `bulk_release:`, `undo_bulk_release:`, `review_session:`, `review_settings:`,
-  `explainer_ack:`), each with its own result reconstructor (the task service's default
+  `explainer_ack:`, `park_ack:`), each with its own result reconstructor (the task service's default
   branch validates the stored body as a `TaskDocument` and would raise on a composite
   response), so the repair-on-replay guarantee covers them; one test reconciles a
   record of each prefix. Dependency direction `review_service → service → repository`,

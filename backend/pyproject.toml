@@ -136,6 +136,8 @@ source_modules = ["app.api"]
 forbidden_modules = [
   "app.repositories",
   "app.modules.tasks.repository",
+  # Spec 020: the review tables' SQL mixin is storage like the task repository.
+  "app.modules.tasks.review_repository",
   "app.workflows.voice_brain_dump.repository",
 ]
 # Only a direct route-to-repository import is the shortcut worth failing on.
@@ -146,7 +148,27 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "The tasks module keeps its own service-over-repository layering"
 type = "layers"
-layers = ["app.modules.tasks.service", "app.modules.tasks.repository"]
+# Spec 020 (http §9, research R7): review_flow -> review_service -> service ->
+# repository -> review_repository (the SQL mixin TaskRepository composes).
+layers = [
+  "app.modules.tasks.review_flow",
+  "app.modules.tasks.review_service",
+  "app.modules.tasks.service",
+  "app.modules.tasks.repository",
+  "app.modules.tasks.review_repository",
+]
+
+# Spec 020 (c2 AC-01, ADR-0001 rule 9): network clients are concrete adapters
+# outside the Tasks module; the review navigator reaches its provider through a
+# port. The pre-existing title-completion service imports the shared candidate
+# validation from ``app.ai.title_completion``; that one edge predates this rule
+# and is the only exception, so no new code in the module can reach httpx.
+[[tool.importlinter.contracts]]
+name = "The tasks module holds no HTTP client and no provider adapter"
+type = "forbidden"
+source_modules = ["app.modules.tasks"]
+forbidden_modules = ["httpx", "app.ai"]
+ignore_imports = ["app.modules.tasks.autocomplete -> app.ai.title_completion"]
 
 [[tool.importlinter.contracts]]
 name = "The voice brain-dump workflow keeps its own service-over-repository layering"
@@ -210,6 +232,8 @@ only_mutate = [
   # nightly runs.
   "app/modules/tasks/formulation.py",
   "app/modules/tasks/review_rules.py",
+  # Spec 020 (research R20): the review command service, observed tier.
+  "app/modules/tasks/review_service.py",
 ]
 pytest_add_cli_args_test_selection = [
   # Task module and auth: non-ASGI only. The HTTP-level suites cover the same

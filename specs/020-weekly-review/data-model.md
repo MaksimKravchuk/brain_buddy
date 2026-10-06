@@ -83,7 +83,7 @@ One row per owner. Columns: `owner_id PK`, `revision`, `payload` (JSON).
 | field | type | default | rule |
 |---|---|---|---|
 | `activated_at` | datetime \| null | null; set to server `now` by the first `POST /review/explainer/acknowledge` from any device (FR-051) | immutable once set; first acknowledgement wins; the activation transition (formulation-clock §3) runs in the same transaction; the 14-day grace (FR-016) is `activated_at + 14 d`; while null the owner is not activated (no markers, no parks) |
-| `last_effective_sweep_at` | datetime \| null | set to `activated_at` at activation | updated by every exposure sweep run; a gap ≥ 24 h triggers the sweep-gap floor (formulation-clock §3) |
+| `last_effective_sweep_at` | datetime \| null | set to `activated_at` at activation | updated by every exposure sweep run and by every device auto-park evaluated while the flag is effective (http §4); a gap ≥ 24 h triggers the sweep-gap floor (formulation-clock §3), applied by whichever of the two runs first, before it evaluates any park |
 | `onboarded_at` | datetime \| null | null | set by the onboarding save (FR-035) |
 | `threshold_days` | 7 \| 14 \| 21 \| 28 | 14 | |
 | `threshold_changed_at` | datetime \| null | null | |
@@ -91,7 +91,7 @@ One row per owner. Columns: `owner_id PK`, `revision`, `payload` (JSON).
 | `review_weekday` | 1..7 (ISO, Monday = 1) | 5 (Friday) | |
 | `review_time` | `HH:MM` | `16:00` | local wall time |
 | `time_zone` | IANA name | `UTC` until a client sends one | validated with `zoneinfo`; set from the device zone by the activating explainer acknowledgement (http §5) and on onboarding; afterwards changed only when a device's **own** zone changes (that device's last observed zone, E10 / E11), never because a device's zone merely differs from the stored one (FR-035, US5-5; owner decision 2026-10-06); a PUT with the stored value is no change (no FR-046 floor, no `revision` bump, http §5). Used for classification and `next_review_at`; the notification and the "next review" a client shows use that client's current zone (http §5) |
-| `revision` | int ≥ 1 | 1 | optimistic concurrency for PUT |
+| `revision` | int ≥ 1 | 1 | optimistic concurrency for PUT. The activating acknowledgement increments `revision`; a later one does not; sweep bookkeeping (`last_effective_sweep_at`, gap `owner_park_floor_at`) never does |
 
 ## E3. Review session — table `review_sessions`
 
@@ -192,8 +192,12 @@ closes. Stall reason is a code, never free text.
 
 **Undo** (FR-048): allowed while `task.revision == task_revision_after` (no change
 since) **and**, when the decision created a follow-up task, that task's revision still
-equals `created_task_revision`. It restores `undo.task_before` field-for-field with
-`revision + 1`, deletes the follow-up task created by the decision, deletes any receipt
+equals `created_task_revision` **and** it has no tag link, subtask or comment (the rows
+that `ON DELETE CASCADE` with a task; adding a subtask or comment does not bump the
+revision, and Undo never deletes a row the person added). It restores
+`undo.task_before` field-for-field with `revision + 1`, except for clock bookkeeping
+written since the decision (formulation-clock §3 "decision undo"), deletes the
+follow-up task created by the decision, deletes any receipt
 it created, decrements the session counter, and **deletes the decision row**.
 Otherwise 409 `undo_unavailable` and nothing changes.
 
@@ -225,7 +229,13 @@ Kept out of the task so marking parks seen never bumps a task revision (no stale
 conflicts with pending edits on other devices). When a parked task is moved back to
 Next, the server upserts the row with `returned_at` in the same transaction, so the
 supporting metric "share of auto-parked tasks later returned" is derivable from stored
-ids and instants. Content-free.
+ids and instants. If the row is missing at that moment, nothing is written (its
+`source` is unknown) and a content-free warning is logged. A yield reversal (http §3)
+is not a return: it reverses the park itself, so the row keeps `parked_at`,
+`from_revision`, `source` and `seen_at` and `returned_at` is null afterwards, whatever
+the yielding decision does. An Undo that puts a task back into its park (for example of
+`return_to_next` from Someday) sets `returned_at` back to null, its value while the task
+was parked. Content-free.
 
 ## E7. Bulk release — table `review_bulk_releases`
 

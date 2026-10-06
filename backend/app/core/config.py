@@ -68,6 +68,11 @@ class AppEnvironment(str, Enum):
 # It is runtime-managed, defaults OFF, and is exposure control only; session
 # authentication and owner checks remain mandatory on every CRT route.
 #
+# ``weekly_review`` (ADR-0027 §6) gates the native-task weekly review. It is
+# runtime-managed, defaults OFF, and is exposure control only: it gates the
+# review reads, the navigator and the sweep's exposure part, while writes that
+# finish work a client already queued stay accepted when it is off.
+#
 # Runtime-manageable subset (spec 010, DD-1, DD-15, DD-16, superseded
 # 2026-08-15): ``voice_brain_dump``, ``mobile_task_classification`` and
 # ``external_agent_relay`` are managed exclusively by the SQLite-backed
@@ -91,6 +96,7 @@ KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "task_title_autocomplete",
     "crt_canvas",
     "task_mcp",
+    "weekly_review",
 )
 
 # Every flag name ``BRAIN_BUDDY_FEATURE_FLAGS`` may configure. There is no

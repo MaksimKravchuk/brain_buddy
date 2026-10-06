@@ -13,9 +13,11 @@ from app.api.auth import router as auth_router
 from app.api.errors import register_exception_handlers
 from app.api.mcp import install_task_mcp
 from app.api.middleware import CorrelationIdMiddleware
+from app.api.review import register_review_exception_handlers
 from app.container import Container, build_container
 from app.core import configure_logging, get_config
 from app.core.config import AppEnvironment
+from app.modules.tasks.review_service import ReviewSweepResult
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,30 @@ def _run_privacy_maintenance_sweep(container: Container) -> tuple[int, int, int]
         expired_crt_receipts = container.crt_command_repo.purge_expired()
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
         logger.exception("CRT command retention sweep iteration failed")
+
+    # Spec 020: its own block, so a review failure stops neither purge nor
+    # relay retention, and the 3-tuple above stays this function's contract.
+    _run_review_maintenance_sweep(container)
     return purged_accounts, expired_agent_runs, expired_crt_receipts
+
+
+def _run_review_maintenance_sweep(container: Container) -> ReviewSweepResult | None:
+    """One weekly-review sweep run (spec 020, contracts/http.md §9).
+
+    Retention for every owner with review rows whatever the flag state, then
+    the exposure part (sweep-gap floor, clock repair, auto-park) for activated
+    owners whose ``weekly_review`` flag is effective. Runs from the privacy
+    maintenance loop and, through it, from the startup sweep. A failure is
+    logged as the exception type only: the message could carry task content.
+    """
+
+    try:
+        return container.review_service.run_maintenance_sweep()
+    except Exception as exc:  # noqa: BLE001 - a sweep failure must not kill the loop
+        logger.error(
+            "review_sweep_failed error=%s reason=%s", type(exc).__name__, "sweep"
+        )
+        return None
 
 
 def _run_voice_maintenance_sweep(
@@ -286,6 +311,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(CorrelationIdMiddleware)
     register_exception_handlers(app)
+    register_review_exception_handlers(app)
     app.include_router(auth_router, prefix=f"{config.api_prefix}/auth")
     app.include_router(account_router, prefix=f"{config.api_prefix}/account")
     app.include_router(admin_router, prefix=f"{config.api_prefix}/admin")

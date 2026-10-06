@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, Field, StringConstraints, model_validator
 from pydantic_core import PydanticCustomError
 
 from .common import StrictBaseModel
+
+NewFormulationId = Annotated[
+    str,
+    StringConstraints(
+        pattern=(
+            r"^form_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        ),
+        max_length=64,
+    ),
+]
+"""Spec 020 (http §1): the client's id for a formulation the request starts."""
 
 TaskState = Literal["inbox", "next", "waiting", "someday", "completed", "cancelled"]
 OpenTaskState = Literal["inbox", "next", "waiting", "someday"]
@@ -108,6 +119,7 @@ class TaskCreateRequest(StrictBaseModel):
     priority: TaskPriority = "none"
     waiting_for: str | None = Field(default=None, max_length=500)
     source_capture_ids: list[str] = Field(default_factory=list)
+    new_formulation_id: NewFormulationId | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -159,6 +171,7 @@ class TaskUpdateRequest(StrictBaseModel):
     priority: TaskPriority | None = None
     waiting_for: str | None = Field(default=None, max_length=500)
     expected_revision: int = Field(ge=1)
+    new_formulation_id: NewFormulationId | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -174,6 +187,7 @@ class TaskTransitionRequest(StrictBaseModel):
     to_state: OpenTaskState | None = None
     waiting_for: str | None = Field(default=None, max_length=500)
     expected_revision: int = Field(ge=1)
+    new_formulation_id: NewFormulationId | None = None
 
 
 class TaskSubtaskCreateRequest(StrictBaseModel):
@@ -266,7 +280,6 @@ class TaskResponse(StrictBaseModel):
     subtasks: list[TaskSubtaskResponse] = Field(default_factory=list)
     comments: list[TaskCommentResponse] = Field(default_factory=list)
     # Spec 020 (http §2): additive and nullable, so older clients ignore them.
-    # Always null until the behaviour slice maintains the clock.
     formulation: TaskFormulationResponse | None = None
     parked: TaskParkResponse | None = None
 

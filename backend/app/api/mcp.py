@@ -26,7 +26,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 from starlette.middleware.authentication import AuthenticationMiddleware
 
-from app.api.tasks import _to_response
+from app.api.task_mapping import task_response as _to_response
 from app.container import Container
 from app.core.config import AppConfig
 from app.exceptions import BrainBuddyError

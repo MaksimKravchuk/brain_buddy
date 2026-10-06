@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import logging
 import unicodedata
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Concatenate, ParamSpec, TypeVar, cast
+from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -37,7 +40,9 @@ from app.utils.idempotency import (
 from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
 
+from . import formulation
 from .domain import (
+    FormulationSettingsDocument,
     IdempotencyRecord,
     ProjectDocument,
     SmartAddCreatedDocument,
@@ -53,6 +58,17 @@ from .repository import (
     display_tag_name,
     normalize_task_name,
 )
+from .review_domain import (
+    REVIEW_COMMAND_PREFIXES,
+    FormulationView,
+    ReviewSettingsDocument,
+    formulation_view,
+    task_clock,
+    with_clock,
+)
+
+# Spec 020: content-free clock events (ids only, FR-044).
+review_logger = logging.getLogger("app.modules.tasks.review")
 
 _OPEN_STATES = ("inbox", "next", "waiting", "someday")
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
@@ -60,15 +76,57 @@ _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
 _P = ParamSpec("_P")
 _Result = TypeVar("_Result")
 
+FORMULATION_SETTINGS_FIELD = "formulation_settings"
+"""Key of the settings snapshot inside a stored ``TaskDocument`` response body."""
 
-def _serialized_write(
-    command: Callable[Concatenate[TaskService, _P], _Result],
-) -> Callable[Concatenate[TaskService, _P], _Result]:
+
+@dataclass(frozen=True, slots=True)
+class TaskCommandResult:
+    """A task command's document and the settings its response projects with.
+
+    ``formulation_settings`` is the snapshot the idempotency record keeps
+    (spec 020, http "Mutations"); ``None`` for a record written before it,
+    which then projects with the live settings.
+    """
+
+    task: TaskDocument
+    formulation_settings: FormulationSettingsDocument | None
+
+
+def _stored_formulation_settings(
+    record: IdempotencyRecord,
+) -> FormulationSettingsDocument | None:
+    stored = record.response_body.get(FORMULATION_SETTINGS_FIELD)
+    if stored is None:
+        return None
+    return FormulationSettingsDocument.model_validate(stored)
+
+
+class SerializedWriter(Protocol):
+    """A service whose commands run under the owner lock with idempotency.
+
+    Spec 020 (c2 AC-05): ``TaskService`` and ``ReviewService`` both implement
+    it; each reconciles only the idempotency keys it issues.
+    """
+
+    @property
+    def task_repo(self) -> TaskRepository: ...
+
+    @property
+    def clock(self) -> Callable[[], datetime]: ...
+
+    def _reconcile_idempotent_result(self, *, owner_id: str, key: str) -> None: ...
+
+
+_Writer = TypeVar("_Writer", bound=SerializedWriter)
+
+
+def serialized_write(
+    command: Callable[Concatenate[_Writer, _P], _Result],
+) -> Callable[Concatenate[_Writer, _P], _Result]:
     """Hold the owner command lock over idempotency and resource persistence."""
 
-    def wrapped(
-        service: TaskService, /, *args: _P.args, **kwargs: _P.kwargs
-    ) -> _Result:
+    def wrapped(service: _Writer, /, *args: _P.args, **kwargs: _P.kwargs) -> _Result:
         owner_id = cast(str, kwargs["owner_id"])
         idempotency_key = cast(str, kwargs["idempotency_key"])
         with service.task_repo.command_lock(owner_id):
@@ -79,6 +137,37 @@ def _serialized_write(
             return command(service, *args, **kwargs)
 
     return wrapped
+
+
+_serialized_write = serialized_write
+
+
+def _stable_request_hash(command: str, payload: BaseModel) -> str:
+    """``request_fingerprint`` that ignores an unset ``new_formulation_id``.
+
+    Spec 020 added the optional field to three task requests. A body that does
+    not send it hashes exactly as it did before the field existed, so an
+    idempotent retry that crosses the deploy stays a replay (http §1: old
+    clients keep working).
+    """
+
+    if (
+        "new_formulation_id" not in type(payload).model_fields
+        or "new_formulation_id" in payload.model_fields_set
+    ):
+        return request_fingerprint(command, payload)
+    body = payload.model_dump(mode="json")
+    body.pop("new_formulation_id", None)
+    encoded = json.dumps(
+        {
+            "command": command,
+            "body": body,
+            "fields_set": sorted(payload.model_fields_set),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class TaskService:
@@ -179,7 +268,6 @@ class TaskService:
         self.task_repo.create_tag(tag)
         return tag
 
-    @_serialized_write
     def create_task(
         self,
         payload: TaskCreateRequest,
@@ -187,6 +275,20 @@ class TaskService:
         owner_id: str,
         idempotency_key: str,
     ) -> TaskDocument:
+        return self.create_task_result(
+            payload, owner_id=owner_id, idempotency_key=idempotency_key
+        ).task
+
+    @_serialized_write
+    def create_task_result(
+        self,
+        payload: TaskCreateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TaskCommandResult:
+        """``POST /tasks`` with the settings snapshot its response projects with."""
+
         command = "create_task"
         request_hash = self._request_hash(command, payload)
         record = self._idempotency_record(
@@ -196,7 +298,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self._task_result(record, owner_id=owner_id)
+            return self._task_command_result(record, owner_id=owner_id)
 
         self._assert_active_references(
             owner_id=owner_id,
@@ -228,6 +330,8 @@ class TaskService:
             created_at=now,
             updated_at=now,
         )
+        task = self._started_if_next(task, payload.new_formulation_id, now=now)
+        snapshot = self.formulation_settings(owner_id)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -235,9 +339,10 @@ class TaskService:
             request_hash=request_hash,
             resource_id=task.id,
             response=task,
+            formulation_settings=snapshot,
         )
         self.task_repo.create(task)
-        return task
+        return TaskCommandResult(task, snapshot)
 
     @_serialized_write
     def create_native_inbox_task(
@@ -347,6 +452,7 @@ class TaskService:
             created_at=now,
             updated_at=now,
         )
+        task = self._started_if_next(task, None, now=now)
         result = SmartAddTaskResultDocument(
             task=task,
             project=project,
@@ -355,6 +461,7 @@ class TaskService:
                 project_id=created_project_id,
                 tag_ids=created_tag_ids,
             ),
+            formulation_settings=self.formulation_settings(owner_id),
         )
         self._store_idempotency(
             owner_id=owner_id,
@@ -622,7 +729,6 @@ class TaskService:
             ),
         )
 
-    @_serialized_write
     def update_task(
         self,
         task_id: str,
@@ -631,6 +737,21 @@ class TaskService:
         owner_id: str,
         idempotency_key: str,
     ) -> TaskDocument:
+        return self.update_task_result(
+            task_id, payload, owner_id=owner_id, idempotency_key=idempotency_key
+        ).task
+
+    @_serialized_write
+    def update_task_result(
+        self,
+        task_id: str,
+        payload: TaskUpdateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TaskCommandResult:
+        """``PATCH /tasks/{id}`` with the settings snapshot of its response."""
+
         command = f"update_task:{task_id}"
         request_hash = self._request_hash(command, payload)
         record = self._idempotency_record(
@@ -640,7 +761,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self._task_result(record, owner_id=owner_id)
+            return self._task_command_result(record, owner_id=owner_id)
 
         task = self.get_task(task_id, owner_id=owner_id)
         self._assert_current(task, payload.expected_revision)
@@ -664,6 +785,7 @@ class TaskService:
             project_id=project_id,
             tag_ids=tag_ids or [],
         )
+        now = self.clock()
         updated = self._validated_task_update(
             task,
             title=payload.title if "title" in fields else task.title,
@@ -673,9 +795,17 @@ class TaskService:
             due_date=payload.due_date if "due_date" in fields else task.due_date,
             priority=payload.priority if "priority" in fields else task.priority,
             waiting_for=waiting_for,
-            updated_at=self.clock(),
+            updated_at=now,
             revision=task.revision + 1,
         )
+        updated = self._clock_after_edit(
+            task,
+            updated,
+            owner_id=owner_id,
+            now=now,
+            new_formulation_id=payload.new_formulation_id,
+        )
+        snapshot = self.formulation_settings(owner_id)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -683,11 +813,11 @@ class TaskService:
             request_hash=request_hash,
             resource_id=updated.id,
             response=updated,
+            formulation_settings=snapshot,
         )
         self.task_repo.save(updated)
-        return updated
+        return TaskCommandResult(updated, snapshot)
 
-    @_serialized_write
     def transition_task(
         self,
         task_id: str,
@@ -696,6 +826,21 @@ class TaskService:
         owner_id: str,
         idempotency_key: str,
     ) -> TaskDocument:
+        return self.transition_task_result(
+            task_id, payload, owner_id=owner_id, idempotency_key=idempotency_key
+        ).task
+
+    @_serialized_write
+    def transition_task_result(
+        self,
+        task_id: str,
+        payload: TaskTransitionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TaskCommandResult:
+        """``POST /tasks/{id}/transitions`` with its response's settings snapshot."""
+
         command = f"transition_task:{task_id}"
         request_hash = self._request_hash(command, payload)
         record = self._idempotency_record(
@@ -705,12 +850,56 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self._task_result(record, owner_id=owner_id)
+            return self._task_command_result(record, owner_id=owner_id)
 
         task = self.get_task(task_id, owner_id=owner_id)
         self._assert_current(task, payload.expected_revision)
         now = self.clock()
-        if payload.action == "complete":
+        updated = self._transitioned(
+            task,
+            action=payload.action,
+            to_state=payload.to_state,
+            waiting_for=payload.waiting_for,
+            new_formulation_id=payload.new_formulation_id,
+            owner_id=owner_id,
+            now=now,
+        )
+        snapshot = self.formulation_settings(owner_id)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+            formulation_settings=snapshot,
+        )
+        self.task_repo.save(updated)
+        self._note_park_return(task, updated, owner_id=owner_id, now=now)
+        return TaskCommandResult(updated, snapshot)
+
+    def _transitioned(
+        self,
+        task: TaskDocument,
+        *,
+        action: str,
+        to_state: str | None,
+        waiting_for: str | None,
+        new_formulation_id: str | None,
+        owner_id: str,
+        now: datetime,
+    ) -> TaskDocument:
+        """One transition as a new document at ``revision + 1`` (no write).
+
+        Undecorated on purpose: ``ReviewService`` calls it inside its own
+        serialized write so a decision and its move are one transaction.
+        Maintains the formulation clock (formulation-clock §3): leaving Next
+        closes the formulation, entering Next starts one, leaving Someday drops
+        the park marker.
+        """
+
+        updates: dict[str, Any]
+        if action == "complete":
             if task.state not in _OPEN_STATES:
                 raise ValidationFailure("Only open tasks can be completed.")
             updates = {
@@ -720,7 +909,7 @@ class TaskService:
                 "waiting_for": None,
                 "waiting_since": None,
             }
-        elif payload.action == "cancel":
+        elif action == "cancel":
             if task.state not in _OPEN_STATES:
                 raise ValidationFailure("Only open tasks can be cancelled.")
             updates = {
@@ -730,54 +919,173 @@ class TaskService:
                 "waiting_for": None,
                 "waiting_since": None,
             }
-        elif payload.action == "reopen":
-            if task.state not in {"completed", "cancelled"} or payload.to_state is None:
+        elif action == "reopen":
+            if task.state not in {"completed", "cancelled"} or to_state is None:
                 raise ValidationFailure(
                     "Reopen requires a terminal task and an open destination."
                 )
-            waiting_for = (
-                self._waiting_for(payload.waiting_for)
-                if payload.to_state == "waiting"
-                else None
+            reopened_for = (
+                self._waiting_for(waiting_for) if to_state == "waiting" else None
             )
             updates = {
-                "state": payload.to_state,
+                "state": to_state,
                 "completed_at": None,
                 "cancelled_at": None,
-                "waiting_for": waiting_for,
-                "waiting_since": now if waiting_for else None,
+                "waiting_for": reopened_for,
+                "waiting_since": now if reopened_for else None,
             }
         else:
-            if task.state not in _OPEN_STATES or payload.to_state is None:
+            if task.state not in _OPEN_STATES or to_state is None:
                 raise ValidationFailure("Move requires an open task and destination.")
-            if task.state == payload.to_state:
+            if task.state == to_state:
                 raise ValidationFailure("Move requires a different open destination.")
-            waiting_for = (
-                self._waiting_for(payload.waiting_for)
-                if payload.to_state == "waiting"
-                else None
+            moved_for = (
+                self._waiting_for(waiting_for) if to_state == "waiting" else None
             )
             updates = {
-                "state": payload.to_state,
-                "waiting_for": waiting_for,
-                "waiting_since": now if waiting_for else None,
+                "state": to_state,
+                "waiting_for": moved_for,
+                "waiting_since": now if moved_for else None,
             }
         updated = self._validated_task_update(
-            task,
-            **updates,
-            updated_at=now,
-            revision=task.revision + 1,
+            task, **updates, updated_at=now, revision=task.revision + 1
         )
-        self._store_idempotency(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-            resource_id=updated.id,
-            response=updated,
+        clock = formulation.move(
+            task_clock(task),
+            to_state=updated.state,
+            settings=self.clock_settings(owner_id),
+            now=now,
+            new_formulation_id=(
+                self._formulation_id(new_formulation_id)
+                if updated.state == "next"
+                else None
+            ),
         )
-        self.task_repo.save(updated)
-        return updated
+        return with_clock(updated, clock)
+
+    def _note_park_return(
+        self,
+        before: TaskDocument,
+        after: TaskDocument,
+        *,
+        owner_id: str,
+        now: datetime,
+    ) -> None:
+        """A parked task moved back to Next: ``returned_at`` on its park row.
+
+        Same transaction as the move (data-model E6), so "share of parks later
+        returned" is derivable from stored ids and instants. The row is written
+        at park time. Should it be missing, nothing is written: its ``source``
+        is unknown and is never made up. The warning carries ids only.
+        """
+
+        parked = before.parked
+        if parked is None or before.state != "someday" or after.state != "next":
+            return
+        ack = self.task_repo.get_park_ack(owner_id, before.id, parked.formulation_id)
+        if ack is None:
+            review_logger.warning(
+                "review_park_return_unrecorded owner_id=%s task_id=%s "
+                "formulation_id=%s",
+                owner_id,
+                before.id,
+                parked.formulation_id,
+            )
+            return
+        self.task_repo.save_park_ack(ack.model_copy(update={"returned_at": now}))
+
+    def _started_if_next(
+        self, task: TaskDocument, new_formulation_id: str | None, *, now: datetime
+    ) -> TaskDocument:
+        """A task created in Next starts its first formulation (FR-001)."""
+
+        if task.state != "next":
+            return task
+        clock = formulation.start_formulation(
+            task_clock(task),
+            formulation_id=self._formulation_id(new_formulation_id),
+            now=now,
+        )
+        return with_clock(task, clock)
+
+    def _clock_after_edit(
+        self,
+        before: TaskDocument,
+        after: TaskDocument,
+        *,
+        owner_id: str,
+        now: datetime,
+        new_formulation_id: str | None,
+    ) -> TaskDocument:
+        """PATCH in Next: a substantive title restarts, a due date floors.
+
+        Notes, tags, project, priority and waiting-for leave the clock alone
+        (FR-003). A due date set, moved or removed raises the task floor to
+        ``max(existing, now + 7 d)`` (FR-046) and logs a content-free event.
+        """
+
+        if before.state != "next":
+            return after
+        clock = task_clock(before)
+        if after.title != before.title and formulation.is_substantive(
+            before.title, after.title
+        ):
+            clock = formulation.change_title(
+                clock,
+                title=after.title,
+                settings=self.clock_settings(owner_id),
+                now=now,
+                new_formulation_id=self._formulation_id(new_formulation_id),
+            )
+        if after.due_date != before.due_date:
+            clock = formulation.change_due_date(clock, due_date=after.due_date, now=now)
+            review_logger.info(
+                "review_due_date_moved owner_id=%s task_id=%s", owner_id, before.id
+            )
+        return with_clock(after, clock)
+
+    @staticmethod
+    def _formulation_id(requested: str | None) -> str:
+        """The client's id when it sent one (http §1), else a server-minted id."""
+
+        return requested if requested is not None else generate_id("form")
+
+    def clock_settings(self, owner_id: str) -> formulation.OwnerClockSettings:
+        """The owner's clock inputs (one ``review_settings`` read)."""
+
+        stored = self.task_repo.get_review_settings(owner_id)
+        settings = stored or ReviewSettingsDocument(owner_id=owner_id)
+        return settings.clock_settings()
+
+    def formulation_settings(self, owner_id: str) -> FormulationSettingsDocument:
+        """The snapshot a command's idempotency record keeps (http "Mutations")."""
+
+        return FormulationSettingsDocument.of(self.clock_settings(owner_id))
+
+    def formulation_views(
+        self,
+        owner_id: str,
+        tasks: Iterable[TaskDocument],
+        *,
+        settings: FormulationSettingsDocument | None = None,
+    ) -> dict[str, FormulationView]:
+        """``TaskResponse.formulation`` per task, one settings read (http §2).
+
+        ``settings`` is a stored response's snapshot: a replay projects with
+        it, so it returns the original response; without one, live settings.
+        """
+
+        clock_settings = (
+            self.clock_settings(owner_id)
+            if settings is None
+            else settings.clock_settings()
+        )
+        views: dict[str, FormulationView] = {}
+        for task in tasks:
+            view = formulation_view(task, clock_settings)
+            if view is not None:
+                views[task.id] = view
+        return views
 
     def get_task(self, task_id: str, *, owner_id: str) -> TaskDocument:
         return self.task_repo.get_for_owner(task_id, owner_id=owner_id)
@@ -1153,6 +1461,10 @@ class TaskService:
     def _apply_idempotent_record(
         self, record: IdempotencyRecord, *, owner_id: str
     ) -> None:
+        if record.command.startswith(REVIEW_COMMAND_PREFIXES):
+            # Spec 020: composite review results are ReviewService's to
+            # reconcile; their bodies are not task snapshots.
+            return
         if record.command == "create_project" or record.command.startswith(
             ("update_project:", "archive_project:")
         ):
@@ -1185,7 +1497,21 @@ class TaskService:
         request_hash: str,
         resource_id: str,
         response: BaseModel,
+        formulation_settings: FormulationSettingsDocument | None = None,
     ) -> None:
+        """Persist one command's result; also its response's settings snapshot.
+
+        ``formulation_settings`` is for a bare ``TaskDocument`` body: it rides
+        beside the task's fields under ``FORMULATION_SETTINGS_FIELD``, which
+        ``TaskDocument`` ignores on load, so the reconciler and older code read
+        the body unchanged. Composite results carry it as their own field.
+        """
+
+        body = response.model_dump(mode="json")
+        if formulation_settings is not None:
+            body[FORMULATION_SETTINGS_FIELD] = formulation_settings.model_dump(
+                mode="json"
+            )
         self.task_repo.save_idempotency(
             owner_id=owner_id,
             record=IdempotencyRecord(
@@ -1193,7 +1519,7 @@ class TaskService:
                 command=command,
                 request_hash=request_hash,
                 resource_id=resource_id,
-                response_body=response.model_dump(mode="json"),
+                response_body=body,
                 created_at=self.clock(),
             ),
         )
@@ -1270,6 +1596,16 @@ class TaskService:
             self.task_repo.save(task)
         return task
 
+    def _task_command_result(
+        self, record: IdempotencyRecord, *, owner_id: str
+    ) -> TaskCommandResult:
+        """A replay: the stored task and the settings its first response used."""
+
+        return TaskCommandResult(
+            self._task_result(record, owner_id=owner_id),
+            _stored_formulation_settings(record),
+        )
+
     def _subtask_result(
         self, record: IdempotencyRecord, *, owner_id: str, task_id: str
     ) -> TaskSubtaskDocument:
@@ -1322,7 +1658,7 @@ class TaskService:
             | TaskUpdateRequest
         ),
     ) -> str:
-        return request_fingerprint(command, payload)
+        return _stable_request_hash(command, payload)
 
     @staticmethod
     def _assert_current(task: TaskDocument, expected_revision: int) -> None:

@@ -87,6 +87,7 @@ MANAGED_FLAGS: tuple[str, ...] = (
     "task_title_autocomplete",
     "crt_canvas",
     "task_mcp",
+    "weekly_review",
 )
 """The runtime-manageable flags after ADR-0019 and later inventory ADRs.
 
@@ -102,6 +103,7 @@ _POST_ADR_0019_DEFAULT_OFF_FLAGS: tuple[str, ...] = (
     "task_title_autocomplete",
     "crt_canvas",
     "task_mcp",
+    "weekly_review",
 )
 
 _LEGACY_JSON_MANAGED_FLAGS: frozenset[str] = frozenset(
@@ -424,18 +426,18 @@ class FeatureFlagOverrideRepository(BaseRepository):
             self._upsert_row(conn, flag, entry)
 
     def _upgrade_adr_0019_store(self, conn: sqlite3.Connection) -> None:
-        """Add later default-OFF rows only to a complete healthy older store."""
+        """Add later default-OFF rows only to a complete healthy older store.
+
+        A store is an upgrade source when it holds every ADR-0019 row and no
+        unknown row; only rows of later default-OFF flags may be missing, and
+        each missing one is added OFF (fail closed). A missing ADR-0019 row is
+        never reconstructed: that store stays degraded (DD-2).
+        """
         rows = conn.execute(
             "SELECT flag, mode, selected_users FROM feature_flags"
         ).fetchall()
-        present = {row["flag"] for row in rows}
-        valid_upgrade_sources = {
-            _ADR_0019_MANAGED_FLAGS,
-            _ADR_0019_MANAGED_FLAGS | {"task_title_autocomplete"},
-            _ADR_0019_MANAGED_FLAGS | {"task_title_autocomplete", "crt_canvas"},
-            frozenset(MANAGED_FLAGS),
-        }
-        if frozenset(present) not in valid_upgrade_sources:
+        present = frozenset(row["flag"] for row in rows)
+        if not _ADR_0019_MANAGED_FLAGS <= present <= frozenset(MANAGED_FLAGS):
             return
         for row in rows:
             try:
