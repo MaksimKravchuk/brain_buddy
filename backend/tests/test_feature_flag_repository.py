@@ -192,6 +192,61 @@ def test_019_FR_001_019_SC_006_reconstruction_accepts_retained_cohort(
     )
 
 
+def test_020_FR_042_fresh_store_seeds_weekly_review_off(tmp_path: Path) -> None:
+    """A fresh runtime store contains the default-OFF weekly review row."""
+
+    overlay = _repo(tmp_path).read()
+
+    assert overlay.degraded is False
+    assert overlay.flags["weekly_review"] == FlagOverride(mode=FlagMode.OFF)
+
+
+def test_020_FR_042_fresh_store_forces_weekly_review_off_despite_environment(
+    tmp_path: Path,
+) -> None:
+    """Deploy-staged environment text never turns the new flag on (ADR-0019)."""
+
+    repo = FeatureFlagOverrideRepository(
+        tmp_path / "data",
+        legacy_states={"weekly_review": FeatureFlagState.ON},
+    )
+
+    assert repo.read().flags["weekly_review"].mode is FlagMode.OFF
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [("weekly_review",), ("crt_canvas", "weekly_review")],
+    ids=["five-row-store", "four-row-store"],
+)
+def test_020_FR_042_existing_store_upgrade_adds_weekly_review_off(
+    tmp_path: Path, missing: tuple[str, ...]
+) -> None:
+    """An already-migrated deployment gains only the new default-OFF rows.
+
+    Covers both older healthy stores the ADR-0019 upgrade whitelist accepts:
+    the store before ``weekly_review`` and the one before ``crt_canvas``.
+    """
+
+    repo = _repo(tmp_path)
+    _set_mode(repo, "voice_brain_dump", FlagMode.SELECTED_USERS)
+    _add_user(repo, "voice_brain_dump", "user_retained")
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        for flag in missing:
+            conn.execute("DELETE FROM feature_flags WHERE flag = ?", (flag,))
+        conn.commit()
+
+    upgraded = FeatureFlagOverrideRepository(tmp_path / "data").read()
+
+    assert upgraded.degraded is False
+    assert set(upgraded.flags) == set(MANAGED_FLAGS)
+    for flag in missing:
+        assert upgraded.flags[flag] == FlagOverride(mode=FlagMode.OFF)
+    assert upgraded.flags["voice_brain_dump"] == FlagOverride(
+        mode=FlagMode.SELECTED_USERS, selected_users=("user_retained",)
+    )
+
+
 def test_012_FR_009_fresh_store_forces_autocomplete_off_despite_environment(
     tmp_path: Path,
 ) -> None:
@@ -210,6 +265,7 @@ def test_012_FR_009_fresh_store_forces_autocomplete_off_despite_environment(
         "external_agent_relay",
         "task_title_autocomplete",
         "crt_canvas",
+        "weekly_review",
     }
     assert overlay.flags["task_title_autocomplete"].mode is FlagMode.OFF
 
@@ -694,6 +750,7 @@ def test_010_DD_15_migration_seeds_exactly_the_managed_flags_plus_a_ledger_row(
         "external_agent_relay",
         "task_title_autocomplete",
         "crt_canvas",
+        "weekly_review",
     }
 
     _sqlite_repo(tmp_path)

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import logging
 import unicodedata
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime
-from typing import Concatenate, ParamSpec, TypeVar, cast
+from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -37,6 +39,7 @@ from app.utils.idempotency import (
 from app.utils.identifiers import generate_id
 from app.utils.time import utcnow
 
+from . import formulation
 from .domain import (
     IdempotencyRecord,
     ProjectDocument,
@@ -53,6 +56,18 @@ from .repository import (
     display_tag_name,
     normalize_task_name,
 )
+from .review_domain import (
+    REVIEW_COMMAND_PREFIXES,
+    FormulationView,
+    ReviewParkAckDocument,
+    ReviewSettingsDocument,
+    formulation_view,
+    task_clock,
+    with_clock,
+)
+
+# Spec 020: content-free clock events (ids only, FR-044).
+review_logger = logging.getLogger("app.modules.tasks.review")
 
 _OPEN_STATES = ("inbox", "next", "waiting", "someday")
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
@@ -61,14 +76,31 @@ _P = ParamSpec("_P")
 _Result = TypeVar("_Result")
 
 
-def _serialized_write(
-    command: Callable[Concatenate[TaskService, _P], _Result],
-) -> Callable[Concatenate[TaskService, _P], _Result]:
+class SerializedWriter(Protocol):
+    """A service whose commands run under the owner lock with idempotency.
+
+    Spec 020 (c2 AC-05): ``TaskService`` and ``ReviewService`` both implement
+    it; each reconciles only the idempotency keys it issues.
+    """
+
+    @property
+    def task_repo(self) -> TaskRepository: ...
+
+    @property
+    def clock(self) -> Callable[[], datetime]: ...
+
+    def _reconcile_idempotent_result(self, *, owner_id: str, key: str) -> None: ...
+
+
+_Writer = TypeVar("_Writer", bound=SerializedWriter)
+
+
+def serialized_write(
+    command: Callable[Concatenate[_Writer, _P], _Result],
+) -> Callable[Concatenate[_Writer, _P], _Result]:
     """Hold the owner command lock over idempotency and resource persistence."""
 
-    def wrapped(
-        service: TaskService, /, *args: _P.args, **kwargs: _P.kwargs
-    ) -> _Result:
+    def wrapped(service: _Writer, /, *args: _P.args, **kwargs: _P.kwargs) -> _Result:
         owner_id = cast(str, kwargs["owner_id"])
         idempotency_key = cast(str, kwargs["idempotency_key"])
         with service.task_repo.command_lock(owner_id):
@@ -79,6 +111,37 @@ def _serialized_write(
             return command(service, *args, **kwargs)
 
     return wrapped
+
+
+_serialized_write = serialized_write
+
+
+def _stable_request_hash(command: str, payload: BaseModel) -> str:
+    """``request_fingerprint`` that ignores an unset ``new_formulation_id``.
+
+    Spec 020 added the optional field to three task requests. A body that does
+    not send it hashes exactly as it did before the field existed, so an
+    idempotent retry that crosses the deploy stays a replay (http §1: old
+    clients keep working).
+    """
+
+    if (
+        "new_formulation_id" not in type(payload).model_fields
+        or "new_formulation_id" in payload.model_fields_set
+    ):
+        return request_fingerprint(command, payload)
+    body = payload.model_dump(mode="json")
+    body.pop("new_formulation_id", None)
+    encoded = json.dumps(
+        {
+            "command": command,
+            "body": body,
+            "fields_set": sorted(payload.model_fields_set),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class TaskService:
@@ -228,6 +291,7 @@ class TaskService:
             created_at=now,
             updated_at=now,
         )
+        task = self._started_if_next(task, payload.new_formulation_id, now=now)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -347,6 +411,7 @@ class TaskService:
             created_at=now,
             updated_at=now,
         )
+        task = self._started_if_next(task, None, now=now)
         result = SmartAddTaskResultDocument(
             task=task,
             project=project,
@@ -664,6 +729,7 @@ class TaskService:
             project_id=project_id,
             tag_ids=tag_ids or [],
         )
+        now = self.clock()
         updated = self._validated_task_update(
             task,
             title=payload.title if "title" in fields else task.title,
@@ -673,8 +739,15 @@ class TaskService:
             due_date=payload.due_date if "due_date" in fields else task.due_date,
             priority=payload.priority if "priority" in fields else task.priority,
             waiting_for=waiting_for,
-            updated_at=self.clock(),
+            updated_at=now,
             revision=task.revision + 1,
+        )
+        updated = self._clock_after_edit(
+            task,
+            updated,
+            owner_id=owner_id,
+            now=now,
+            new_formulation_id=payload.new_formulation_id,
         )
         self._store_idempotency(
             owner_id=owner_id,
@@ -710,63 +783,14 @@ class TaskService:
         task = self.get_task(task_id, owner_id=owner_id)
         self._assert_current(task, payload.expected_revision)
         now = self.clock()
-        if payload.action == "complete":
-            if task.state not in _OPEN_STATES:
-                raise ValidationFailure("Only open tasks can be completed.")
-            updates = {
-                "state": "completed",
-                "completed_at": now,
-                "cancelled_at": None,
-                "waiting_for": None,
-                "waiting_since": None,
-            }
-        elif payload.action == "cancel":
-            if task.state not in _OPEN_STATES:
-                raise ValidationFailure("Only open tasks can be cancelled.")
-            updates = {
-                "state": "cancelled",
-                "cancelled_at": now,
-                "completed_at": None,
-                "waiting_for": None,
-                "waiting_since": None,
-            }
-        elif payload.action == "reopen":
-            if task.state not in {"completed", "cancelled"} or payload.to_state is None:
-                raise ValidationFailure(
-                    "Reopen requires a terminal task and an open destination."
-                )
-            waiting_for = (
-                self._waiting_for(payload.waiting_for)
-                if payload.to_state == "waiting"
-                else None
-            )
-            updates = {
-                "state": payload.to_state,
-                "completed_at": None,
-                "cancelled_at": None,
-                "waiting_for": waiting_for,
-                "waiting_since": now if waiting_for else None,
-            }
-        else:
-            if task.state not in _OPEN_STATES or payload.to_state is None:
-                raise ValidationFailure("Move requires an open task and destination.")
-            if task.state == payload.to_state:
-                raise ValidationFailure("Move requires a different open destination.")
-            waiting_for = (
-                self._waiting_for(payload.waiting_for)
-                if payload.to_state == "waiting"
-                else None
-            )
-            updates = {
-                "state": payload.to_state,
-                "waiting_for": waiting_for,
-                "waiting_since": now if waiting_for else None,
-            }
-        updated = self._validated_task_update(
+        updated = self._transitioned(
             task,
-            **updates,
-            updated_at=now,
-            revision=task.revision + 1,
+            action=payload.action,
+            to_state=payload.to_state,
+            waiting_for=payload.waiting_for,
+            new_formulation_id=payload.new_formulation_id,
+            owner_id=owner_id,
+            now=now,
         )
         self._store_idempotency(
             owner_id=owner_id,
@@ -777,7 +801,200 @@ class TaskService:
             response=updated,
         )
         self.task_repo.save(updated)
+        self._note_park_return(task, updated, owner_id=owner_id, now=now)
         return updated
+
+    def _transitioned(
+        self,
+        task: TaskDocument,
+        *,
+        action: str,
+        to_state: str | None,
+        waiting_for: str | None,
+        new_formulation_id: str | None,
+        owner_id: str,
+        now: datetime,
+    ) -> TaskDocument:
+        """One transition as a new document at ``revision + 1`` (no write).
+
+        Undecorated on purpose: ``ReviewService`` calls it inside its own
+        serialized write so a decision and its move are one transaction.
+        Maintains the formulation clock (formulation-clock §3): leaving Next
+        closes the formulation, entering Next starts one, leaving Someday drops
+        the park marker.
+        """
+
+        updates: dict[str, Any]
+        if action == "complete":
+            if task.state not in _OPEN_STATES:
+                raise ValidationFailure("Only open tasks can be completed.")
+            updates = {
+                "state": "completed",
+                "completed_at": now,
+                "cancelled_at": None,
+                "waiting_for": None,
+                "waiting_since": None,
+            }
+        elif action == "cancel":
+            if task.state not in _OPEN_STATES:
+                raise ValidationFailure("Only open tasks can be cancelled.")
+            updates = {
+                "state": "cancelled",
+                "cancelled_at": now,
+                "completed_at": None,
+                "waiting_for": None,
+                "waiting_since": None,
+            }
+        elif action == "reopen":
+            if task.state not in {"completed", "cancelled"} or to_state is None:
+                raise ValidationFailure(
+                    "Reopen requires a terminal task and an open destination."
+                )
+            reopened_for = (
+                self._waiting_for(waiting_for) if to_state == "waiting" else None
+            )
+            updates = {
+                "state": to_state,
+                "completed_at": None,
+                "cancelled_at": None,
+                "waiting_for": reopened_for,
+                "waiting_since": now if reopened_for else None,
+            }
+        else:
+            if task.state not in _OPEN_STATES or to_state is None:
+                raise ValidationFailure("Move requires an open task and destination.")
+            if task.state == to_state:
+                raise ValidationFailure("Move requires a different open destination.")
+            moved_for = (
+                self._waiting_for(waiting_for) if to_state == "waiting" else None
+            )
+            updates = {
+                "state": to_state,
+                "waiting_for": moved_for,
+                "waiting_since": now if moved_for else None,
+            }
+        updated = self._validated_task_update(
+            task, **updates, updated_at=now, revision=task.revision + 1
+        )
+        clock = formulation.move(
+            task_clock(task),
+            to_state=updated.state,
+            settings=self.clock_settings(owner_id),
+            now=now,
+            new_formulation_id=(
+                self._formulation_id(new_formulation_id)
+                if updated.state == "next"
+                else None
+            ),
+        )
+        return with_clock(updated, clock)
+
+    def _note_park_return(
+        self,
+        before: TaskDocument,
+        after: TaskDocument,
+        *,
+        owner_id: str,
+        now: datetime,
+    ) -> None:
+        """A parked task moved back to Next: ``returned_at`` on its park row.
+
+        Same transaction as the move (data-model E6), so "share of parks later
+        returned" is derivable from stored ids and instants. The row is written
+        at park time; should old code have lost it, it is recreated from the
+        task's park marker (source unknown, recorded as the sweep's).
+        """
+
+        parked = before.parked
+        if parked is None or before.state != "someday" or after.state != "next":
+            return
+        ack = self.task_repo.get_park_ack(owner_id, before.id, parked.formulation_id)
+        if ack is None:
+            ack = ReviewParkAckDocument(
+                owner_id=owner_id,
+                task_id=before.id,
+                formulation_id=parked.formulation_id,
+                parked_at=parked.at,
+                from_revision=parked.from_revision,
+                source="sweep",
+            )
+        self.task_repo.save_park_ack(ack.model_copy(update={"returned_at": now}))
+
+    def _started_if_next(
+        self, task: TaskDocument, new_formulation_id: str | None, *, now: datetime
+    ) -> TaskDocument:
+        """A task created in Next starts its first formulation (FR-001)."""
+
+        if task.state != "next":
+            return task
+        clock = formulation.start_formulation(
+            task_clock(task),
+            formulation_id=self._formulation_id(new_formulation_id),
+            now=now,
+        )
+        return with_clock(task, clock)
+
+    def _clock_after_edit(
+        self,
+        before: TaskDocument,
+        after: TaskDocument,
+        *,
+        owner_id: str,
+        now: datetime,
+        new_formulation_id: str | None,
+    ) -> TaskDocument:
+        """PATCH in Next: a substantive title restarts, a due date floors.
+
+        Notes, tags, project, priority and waiting-for leave the clock alone
+        (FR-003). A due date set, moved or removed raises the task floor to
+        ``max(existing, now + 7 d)`` (FR-046) and logs a content-free event.
+        """
+
+        if before.state != "next":
+            return after
+        clock = task_clock(before)
+        if after.title != before.title and formulation.is_substantive(
+            before.title, after.title
+        ):
+            clock = formulation.change_title(
+                clock,
+                title=after.title,
+                settings=self.clock_settings(owner_id),
+                now=now,
+                new_formulation_id=self._formulation_id(new_formulation_id),
+            )
+        if after.due_date != before.due_date:
+            clock = formulation.change_due_date(clock, due_date=after.due_date, now=now)
+            review_logger.info(
+                "review_due_date_moved owner_id=%s task_id=%s", owner_id, before.id
+            )
+        return with_clock(after, clock)
+
+    @staticmethod
+    def _formulation_id(requested: str | None) -> str:
+        """The client's id when it sent one (http §1), else a server-minted id."""
+
+        return requested if requested is not None else generate_id("form")
+
+    def clock_settings(self, owner_id: str) -> formulation.OwnerClockSettings:
+        """The owner's clock inputs (one ``review_settings`` read)."""
+
+        stored = self.task_repo.get_review_settings(owner_id)
+        settings = stored or ReviewSettingsDocument(owner_id=owner_id)
+        return settings.clock_settings()
+
+    def formulation_views(
+        self, owner_id: str, tasks: Iterable[TaskDocument]
+    ) -> dict[str, FormulationView]:
+        """``TaskResponse.formulation`` per task, one settings read (http §2)."""
+
+        settings = self.clock_settings(owner_id)
+        views: dict[str, FormulationView] = {}
+        for task in tasks:
+            view = formulation_view(task, settings)
+            if view is not None:
+                views[task.id] = view
+        return views
 
     def get_task(self, task_id: str, *, owner_id: str) -> TaskDocument:
         return self.task_repo.get_for_owner(task_id, owner_id=owner_id)
@@ -1153,6 +1370,10 @@ class TaskService:
     def _apply_idempotent_record(
         self, record: IdempotencyRecord, *, owner_id: str
     ) -> None:
+        if record.command.startswith(REVIEW_COMMAND_PREFIXES):
+            # Spec 020: composite review results are ReviewService's to
+            # reconcile; their bodies are not task snapshots.
+            return
         if record.command == "create_project" or record.command.startswith(
             ("update_project:", "archive_project:")
         ):
@@ -1322,7 +1543,7 @@ class TaskService:
             | TaskUpdateRequest
         ),
     ) -> str:
-        return request_fingerprint(command, payload)
+        return _stable_request_hash(command, payload)
 
     @staticmethod
     def _assert_current(task: TaskDocument, expected_revision: int) -> None:

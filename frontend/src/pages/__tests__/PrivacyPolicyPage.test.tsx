@@ -57,14 +57,29 @@ describe("PrivacyPolicyPage", () => {
     renderPolicy();
 
     // docs/data-retention.md names this page as the user-facing summary that
-    // must stay in sync with it. The runtime store now covers five managed flags.
-    // The decided facts pinned here are what it holds, that purge scrubs it,
-    // and that it is outside the export.
+    // must stay in sync with it. The runtime store now covers six managed flags
+    // (020 added weekly_review). The decided facts pinned here are what it holds,
+    // that purge scrubs it, and that it is outside the export.
     expect(screen.getByText(/one SQLite store/i)).toBeInTheDocument();
-    expect(screen.getByText(/covering five managed flags/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering six managed flags/i)).toBeInTheDocument();
     expect(screen.getByText(/holds only your account id per flag/i)).toBeInTheDocument();
     expect(screen.getByText(/scrubbed when your account is purged/i)).toBeInTheDocument();
-    expect(screen.getByText(/covering five managed flags:.*excluded from your data export/i)).toBeInTheDocument();
+    expect(screen.getByText(/covering six managed flags:.*excluded from your data export/i)).toBeInTheDocument();
+  });
+
+  it("020-FR-043: names the weekly review settings and records, their export, purge and undo window", () => {
+    renderPolicy();
+    const collected = screen.getByRole("heading", { name: /what we collect/i }).closest("section");
+    const retention = screen.getByRole("heading", { name: /how long we keep it/i }).closest("section");
+
+    // docs/data-retention.md (spec 020 rows): review day, time and time zone are
+    // stored review settings; review records live for the account's life, are
+    // exported and purged; the content-bearing undo copies last 7 days.
+    expect(collected).toHaveTextContent(/weekly review/i);
+    expect(collected).toHaveTextContent(/review day, time and time zone/i);
+    expect(retention).toHaveTextContent(/review records.*kept until you delete your account/i);
+    expect(retention).toHaveTextContent(/included in your data export and erased when your account is purged/i);
+    expect(retention).toHaveTextContent(/undo copies.*7 days/i);
   });
 
   it("012-FR-007: names OpenAI's title-suggestion processing purpose", () => {
@@ -152,7 +167,7 @@ describe("PrivacyPolicyPage", () => {
 
   it("records the date the policy last changed", () => {
     renderPolicy();
-    expect(screen.getByText(/September 20, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/October 6, 2026/)).toBeInTheDocument();
   });
 
   it("links back to sign in", () => {

@@ -83,6 +83,29 @@ class TaskCommentDocument(StorageBaseModel):
     revision: int = Field(default=1, ge=1)
 
 
+class ClockBeforeDocument(StorageBaseModel):
+    """The formulation clock immediately before an auto-park closed it.
+
+    Spec 020 (data-model E1): kept so the yield rule restores it exactly; it is
+    server-side only and not part of ``TaskResponse``.
+    """
+
+    started_at: datetime
+    extended_at: datetime | None = None
+    extension_reason: str | None = Field(default=None, min_length=1, max_length=500)
+    park_floor_at: datetime | None = None
+    stalled_before: int = Field(default=0, ge=0)
+
+
+class TaskParkDocument(StorageBaseModel):
+    """``TaskDocument.parked``: written only by auto-park (data-model E1)."""
+
+    at: datetime
+    formulation_id: str
+    from_revision: int = Field(ge=1)
+    clock_before: ClockBeforeDocument
+
+
 class TaskDocument(StorageBaseModel):
     """A mutable, owner-scoped task; it is never a CRT node."""
 
@@ -105,6 +128,17 @@ class TaskDocument(StorageBaseModel):
     cancelled_at: datetime | None = None
     schema_version: int = Field(default=1, ge=1)
     revision: int = Field(default=1, ge=1)
+    # Spec 020 formulation clock (data-model E1, contracts/formulation-clock.md
+    # §2). Optional with defaults, so payloads written before it load unchanged.
+    formulation_id: str | None = None
+    formulation_started_at: datetime | None = None
+    formulation_extended_at: datetime | None = None
+    formulation_extension_reason: str | None = Field(
+        default=None, min_length=1, max_length=500
+    )
+    formulation_park_floor_at: datetime | None = None
+    consecutive_stalled_formulations: int = Field(default=0, ge=0)
+    parked: TaskParkDocument | None = None
 
     @model_validator(mode="before")
     @classmethod

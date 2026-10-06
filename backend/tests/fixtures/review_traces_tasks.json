@@ -1,0 +1,240 @@
+{
+  "schema": "brainbuddy-review-traces/v1",
+  "description": "Golden operation traces of the weekly review's decision and park paths (spec 020, plan Test strategy). Verified by backend/tests/test_review_traces.py against the real API and replayed against BrainBuddyFakeServer in Swift (tasks.md T173), so the fake server cannot drift from the backend on the offline and two-device paths.",
+  "conventions": {
+    "clock": "Each trace starts at `start` (UTC). An `advance` step moves the server clock forward by its days/hours/minutes; nothing else moves it.",
+    "owner": "One signed-in account per trace; `flag` is the weekly_review state at the start.",
+    "request": "`path` is under the server origin; `key` is the Idempotency-Key header (omitted for reads); `{name}` in a path or body is replaced by a captured value.",
+    "expect": "`status` is exact. `body` is a subset match: every listed key must be present and equal, recursively; a list must have the same length and match element-wise; the string `$present` matches any non-null value.",
+    "capture": "Maps a variable name to a dotted path in the response body.",
+    "sweep": "One server maintenance sweep run, with the 60 s loop having kept running (no sweep-gap floor).",
+    "flag": "Turns weekly_review on or off for the account from that step on."
+  },
+  "traces": [
+    {
+      "id": "TR-001",
+      "title": "decide: a stalled Next task gets a first step",
+      "requirements": ["020-FR-008", "020-FR-011", "020-SC-007"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "explainer acknowledged",
+          "request": {"method": "POST", "path": "/api/review/explainer/acknowledge", "key": "tr001-ack", "body": {"time_zone": "Europe/Berlin"}},
+          "expect": {"status": 200, "body": {"explainer_seen": true, "settings": {"time_zone": "Europe/Berlin", "revision": 2}}}
+        },
+        {
+          "name": "a task created in Next",
+          "request": {"method": "POST", "path": "/api/tasks", "key": "tr001-create", "body": {"title": "Renovate the bathroom", "state": "next", "new_formulation_id": "form_0b0e1f30-0000-4000-8000-000000000001"}},
+          "expect": {"status": 201, "body": {"state": "next", "revision": 1, "formulation": {"id": "form_0b0e1f30-0000-4000-8000-000000000001", "started_at": "2026-10-09T14:02:00Z", "ask_at": "2026-10-23T14:02:00Z", "park_due_at": "2026-10-30T14:02:00Z"}}},
+          "capture": {"task_id": "id"}
+        },
+        {"name": "fifteen days pass", "advance": {"days": 15}},
+        {
+          "name": "decide first step",
+          "request": {"method": "POST", "path": "/api/tasks/{task_id}/decisions", "key": "tr001-decide", "body": {"decision_id": "decision_0b0e1f30-0000-4000-8000-000000000001", "type": "first_step", "expected_revision": 1, "formulation_id": "form_0b0e1f30-0000-4000-8000-000000000001", "stall_reason": "too_big", "title": "Measure the bathroom wall", "new_formulation_id": "form_0b0e1f30-0000-4000-8000-000000000002", "client_decided_at": "2026-10-24T14:00:00Z"}},
+          "expect": {"status": 200, "body": {"decision": {"id": "decision_0b0e1f30-0000-4000-8000-000000000001", "type": "first_step", "task_id": "{task_id}", "session_id": null, "substantive": true, "stall_reason": "too_big", "ai_use": "none", "yielded_auto_park": false}, "task": {"title": "Measure the bathroom wall", "details": "Was: Renovate the bathroom", "state": "next", "revision": 2, "formulation": {"id": "form_0b0e1f30-0000-4000-8000-000000000002", "started_at": "2026-10-24T14:02:00Z", "consecutive_stalled": 1}}, "created_task": null, "receipt": null, "session_counts": null}}
+        }
+      ]
+    },
+    {
+      "id": "TR-002",
+      "title": "decide stale: the task changed on another device first",
+      "requirements": ["020-FR-011"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "a task created in Next",
+          "request": {"method": "POST", "path": "/api/tasks", "key": "tr002-create", "body": {"title": "Call Bob", "state": "next"}},
+          "expect": {"status": 201, "body": {"revision": 1}},
+          "capture": {"task_id": "id", "formulation_id": "formulation.id"}
+        },
+        {
+          "name": "another device edits the notes",
+          "request": {"method": "PATCH", "path": "/api/tasks/{task_id}", "key": "tr002-notes", "body": {"details": "Bob is back on Monday", "expected_revision": 1}},
+          "expect": {"status": 200, "body": {"revision": 2}}
+        },
+        {
+          "name": "the card decision made on revision 1 is stale",
+          "request": {"method": "POST", "path": "/api/tasks/{task_id}/decisions", "key": "tr002-decide", "body": {"type": "complete", "expected_revision": 1, "formulation_id": "{formulation_id}"}},
+          "expect": {"status": 409, "body": {"detail": {"resource": "Task", "id": "{task_id}"}, "reference_id": "$present"}}
+        },
+        {
+          "name": "nothing was applied",
+          "request": {"method": "GET", "path": "/api/tasks/{task_id}"},
+          "expect": {"status": 200, "body": {"state": "next", "revision": 2}}
+        }
+      ]
+    },
+    {
+      "id": "TR-003",
+      "title": "auto-park from a device the server does not agree with is applied: false",
+      "requirements": ["020-FR-013"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "explainer acknowledged",
+          "request": {"method": "POST", "path": "/api/review/explainer/acknowledge", "key": "tr003-ack", "body": {}},
+          "expect": {"status": 200, "body": {"explainer_seen": true}}
+        },
+        {
+          "name": "a task created in Next",
+          "request": {"method": "POST", "path": "/api/tasks", "key": "tr003-create", "body": {"title": "Call Bob", "state": "next", "new_formulation_id": "form_0b0e1f30-0000-4000-8000-000000000031"}},
+          "expect": {"status": 201},
+          "capture": {"task_id": "id"}
+        },
+        {"name": "a skewed device thinks the park is due", "advance": {"days": 2}},
+        {
+          "name": "the device asks to park",
+          "request": {"method": "POST", "path": "/api/tasks/{task_id}/auto-park", "key": "tr003-park", "body": {"formulation_id": "form_0b0e1f30-0000-4000-8000-000000000031"}},
+          "expect": {"status": 200, "body": {"applied": false, "task": {"state": "next", "revision": 1, "parked": null}}}
+        }
+      ]
+    },
+    {
+      "id": "TR-004",
+      "title": "yield: a notes edit queued before an offline decision, a server park between them",
+      "requirements": ["020-FR-013", "020-SC-007"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "explainer acknowledged",
+          "request": {"method": "POST", "path": "/api/review/explainer/acknowledge", "key": "tr004-ack", "body": {}},
+          "expect": {"status": 200}
+        },
+        {
+          "name": "a task created in Next",
+          "request": {"method": "POST", "path": "/api/tasks", "key": "tr004-create", "body": {"title": "Call Bob", "state": "next", "new_formulation_id": "form_0b0e1f30-0000-4000-8000-000000000041"}},
+          "expect": {"status": 201},
+          "capture": {"task_id": "id"}
+        },
+        {"name": "21 days pass offline", "advance": {"days": 21}},
+        {"name": "the server parks the task", "sweep": true},
+        {
+          "name": "the task is parked automatically",
+          "request": {"method": "GET", "path": "/api/tasks/{task_id}"},
+          "expect": {"status": 200, "body": {"state": "someday", "revision": 2, "formulation": null, "parked": {"at": "2026-10-30T14:02:00Z", "formulation_id": "form_0b0e1f30-0000-4000-8000-000000000041"}}}
+        },
+        {
+          "name": "the queued notes edit is stale",
+          "request": {"method": "PATCH", "path": "/api/tasks/{task_id}", "key": "tr004-notes", "body": {"details": "Bob prefers mornings", "expected_revision": 1}},
+          "expect": {"status": 409}
+        },
+        {
+          "name": "the device replays it onto the parked task",
+          "request": {"method": "PATCH", "path": "/api/tasks/{task_id}", "key": "tr004-notes-replay", "body": {"details": "Bob prefers mornings", "expected_revision": 2}},
+          "expect": {"status": 200, "body": {"state": "someday", "revision": 3, "details": "Bob prefers mornings"}}
+        },
+        {
+          "name": "the offline decision, made before the park, yields it",
+          "request": {"method": "POST", "path": "/api/tasks/{task_id}/decisions", "key": "tr004-decide", "body": {"decision_id": "decision_0b0e1f30-0000-4000-8000-000000000041", "type": "waiting", "expected_revision": 1, "formulation_id": "form_0b0e1f30-0000-4000-8000-000000000041", "waiting_for": "Bob", "client_decided_at": "2026-10-30T09:00:00Z"}},
+          "expect": {"status": 200, "body": {"decision": {"type": "waiting", "yielded_auto_park": true}, "task": {"state": "waiting", "waiting_for": "Bob", "details": "Bob prefers mornings", "parked": null, "revision": 4}}}
+        }
+      ]
+    },
+    {
+      "id": "TR-005",
+      "title": "settings edited on two devices: the stale one gets 409",
+      "requirements": ["020-FR-039"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "first device changes the threshold",
+          "request": {"method": "PUT", "path": "/api/review/settings", "key": "tr005-first", "body": {"threshold_days": 21, "expected_revision": 1}},
+          "expect": {"status": 200, "body": {"threshold_days": 21, "revision": 2, "owner_park_floor_at": "2026-10-16T14:02:00Z"}}
+        },
+        {
+          "name": "second device sends its change on revision 1",
+          "request": {"method": "PUT", "path": "/api/review/settings", "key": "tr005-second", "body": {"threshold_days": 7, "expected_revision": 1}},
+          "expect": {"status": 409, "body": {"detail": {"resource": "Review settings"}}}
+        }
+      ]
+    },
+    {
+      "id": "TR-006",
+      "title": "flag turned off with queued writes: reads hidden, writes accepted",
+      "requirements": ["020-FR-042", "020-SC-007"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "explainer acknowledged",
+          "request": {"method": "POST", "path": "/api/review/explainer/acknowledge", "key": "tr006-ack", "body": {}},
+          "expect": {"status": 200}
+        },
+        {
+          "name": "a task created in Next",
+          "request": {"method": "POST", "path": "/api/tasks", "key": "tr006-create", "body": {"title": "Call Bob", "state": "next", "new_formulation_id": "form_0b0e1f30-0000-4000-8000-000000000061"}},
+          "expect": {"status": 201},
+          "capture": {"task_id": "id"}
+        },
+        {"name": "the flag is turned off for rollback", "flag": "off"},
+        {
+          "name": "the gated read is hidden",
+          "request": {"method": "GET", "path": "/api/review/state"},
+          "expect": {"status": 404, "body": {"message": "Not found", "detail": {"reason": "weekly_review_disabled"}}}
+        },
+        {
+          "name": "a queued device park is applied: false",
+          "request": {"method": "POST", "path": "/api/tasks/{task_id}/auto-park", "key": "tr006-park", "body": {"formulation_id": "form_0b0e1f30-0000-4000-8000-000000000061"}},
+          "expect": {"status": 200, "body": {"applied": false}}
+        },
+        {
+          "name": "a queued decision is accepted",
+          "request": {"method": "POST", "path": "/api/tasks/{task_id}/decisions", "key": "tr006-decide", "body": {"decision_id": "decision_0b0e1f30-0000-4000-8000-000000000061", "type": "complete", "expected_revision": 1}},
+          "expect": {"status": 200, "body": {"task": {"state": "completed"}}}
+        },
+        {
+          "name": "a queued settings change is accepted",
+          "request": {"method": "PUT", "path": "/api/review/settings", "key": "tr006-settings", "body": {"threshold_days": 21, "expected_revision": 2}},
+          "expect": {"status": 200, "body": {"threshold_days": 21}}
+        },
+        {
+          "name": "queued park acknowledgements are accepted",
+          "request": {"method": "POST", "path": "/api/review/parks/acknowledge", "key": "tr006-parks", "body": {"items": []}},
+          "expect": {"status": 204}
+        },
+        {
+          "name": "a queued undo is accepted",
+          "request": {"method": "POST", "path": "/api/review/decisions/decision_0b0e1f30-0000-4000-8000-000000000061/undo", "key": "tr006-undo", "body": {"expected_task_revision": 2}},
+          "expect": {"status": 200, "body": {"task": {"state": "next", "revision": 3}}}
+        }
+      ]
+    },
+    {
+      "id": "TR-007",
+      "title": "a decision retried after the 24 h idempotency retention is already applied",
+      "requirements": ["020-FR-011", "020-SC-007"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "a task created in Next",
+          "request": {"method": "POST", "path": "/api/tasks", "key": "tr007-create", "body": {"title": "Call Bob", "state": "next", "new_formulation_id": "form_0b0e1f30-0000-4000-8000-000000000071"}},
+          "expect": {"status": 201},
+          "capture": {"task_id": "id"}
+        },
+        {
+          "name": "the decision is applied but its response is lost",
+          "request": {"method": "POST", "path": "/api/tasks/{task_id}/decisions", "key": "tr007-decide", "body": {"decision_id": "decision_0b0e1f30-0000-4000-8000-000000000071", "type": "waiting", "expected_revision": 1, "formulation_id": "form_0b0e1f30-0000-4000-8000-000000000071", "waiting_for": "Bob"}},
+          "expect": {"status": 200, "body": {"task": {"state": "waiting", "revision": 2}}}
+        },
+        {"name": "the device stays offline past the retention", "advance": {"hours": 25}},
+        {
+          "name": "the retry with the same key and stale revision",
+          "request": {"method": "POST", "path": "/api/tasks/{task_id}/decisions", "key": "tr007-decide", "body": {"decision_id": "decision_0b0e1f30-0000-4000-8000-000000000071", "type": "waiting", "expected_revision": 1, "formulation_id": "form_0b0e1f30-0000-4000-8000-000000000071", "waiting_for": "Bob"}},
+          "expect": {"status": 200, "body": {"decision": {"id": "decision_0b0e1f30-0000-4000-8000-000000000071", "type": "waiting"}, "task": {"state": "waiting", "revision": 2}}}
+        },
+        {
+          "name": "applied once",
+          "request": {"method": "GET", "path": "/api/tasks/{task_id}"},
+          "expect": {"status": 200, "body": {"state": "waiting", "revision": 2}}
+        }
+      ]
+    }
+  ]
+}

@@ -33,6 +33,7 @@ from .domain import (
     TaskDocument,
     TaskSubtaskDocument,
 )
+from .review_repository import ReviewRepositoryMixin
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -60,8 +61,12 @@ def display_project_name(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).strip().split())
 
 
-class TaskRepository(SQLiteRepositorySupport, BaseRepository):
-    """Store task-module records in one owner-isolated SQLite database."""
+class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseRepository):
+    """Store task-module records in one owner-isolated SQLite database.
+
+    The weekly-review tables (spec 020) are composed in from
+    ``ReviewRepositoryMixin`` so they share this file, connection and lock.
+    """
 
     _thread_state: ClassVar[threading.local] = threading.local()
     _process_lock: ClassVar[threading.RLock] = threading.RLock()
@@ -183,6 +188,7 @@ class TaskRepository(SQLiteRepositorySupport, BaseRepository):
                 CREATE INDEX IF NOT EXISTS idx_idempotency_owner_created
                     ON idempotency_records(owner_id, created_at);
                 """)
+            self._initialize_review_tables(conn, utcnow())
 
     def _migrate_legacy_json_once(self) -> None:
         with self._owned_connection() as conn:
@@ -648,10 +654,13 @@ class TaskRepository(SQLiteRepositorySupport, BaseRepository):
         serializes with normal commands; both the SQLite deletes and the
         mirror-directory removals are idempotent, so an interrupted purge can
         simply run again. Table order respects the RESTRICT foreign keys
-        (tasks before tags/projects).
+        (tasks before tags/projects). The weekly-review tables (spec 020) go
+        first, inside the same lock, so the purge order in ``AccountService``
+        is unchanged.
         """
 
         with self.command_lock(owner_id), self._connection(self._thread_state) as conn:
+            self._delete_review_rows(conn, owner_id)
             for table in (
                 "task_tags",
                 "subtasks",

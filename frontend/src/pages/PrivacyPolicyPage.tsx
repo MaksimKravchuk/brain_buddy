@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 // Update these two constants when the policy text changes or the contact moves.
 const CONTACT_EMAIL = "maksim.v.kravchuk@gmail.com";
-const LAST_UPDATED = "September 20, 2026";
+const LAST_UPDATED = "October 6, 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -46,6 +46,13 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           <p>
             <strong>Content you create:</strong> thinking trees with their version snapshots and
             AI validation history, tasks, projects, tags, subtasks, and comments.
+          </p>
+          <p>
+            <strong>Weekly review:</strong> if the weekly review is switched on for you, your review
+            settings (review day, time and time zone, and how many days a task may keep its wording)
+            and your review records: the decisions you make on tasks, including any reason you give
+            for keeping a task 7 more days, reviews you run, and which automatically parked tasks you
+            have seen or brought back.
           </p>
           <p>
             <strong>Voice brain dumps:</strong> if you use voice capture, the audio you record,
@@ -101,8 +108,14 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
           <p>
             To turn a feature on or off for particular accounts we keep one SQLite store
-            covering five managed flags: it holds only your account id per flag, it is
+            covering six managed flags: it holds only your account id per flag, it is
             scrubbed when your account is purged, and it is excluded from your data export.
+          </p>
+          <p>
+            Weekly review records (your review settings, decisions, reviews and parked-task
+            records) are kept until you delete your account; they are included in your data export
+            and erased when your account is purged. The undo copies a decision keeps so you can take
+            it back last 7 days, and are deleted after that.
           </p>
           <p>
             If you connect an external agent and hand a task to it, what you send and what it
