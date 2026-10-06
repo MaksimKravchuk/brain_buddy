@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>X-01 · Sidebar footer status line (macOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky300:#7dd3fc;--sky500:#0ea5e9;--sky700:#0369a1;--amb50:#fffbeb;--amb200:#fde68a;--amb300:#fcd34d;--amb800:#92400e;--rose700:#be123c;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s800:#1e293b;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;font-size:13px;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1180px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 6px;font-size:13px;line-height:1.5;color:var(--s600);max-width:1080px}
+figure{margin:0 0 34px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 10px;max-width:1080px}figcaption b{color:var(--s900);font-size:13px;margin-right:6px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.i{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.i.sm{width:12px;height:12px}
+/* window */
+.win{width:1040px;height:600px;display:grid;grid-template-columns:340px 1fr;border:1px solid var(--s300);border-radius:12px;overflow:hidden;box-shadow:var(--float);background:#fff}
+.side{background:#eef2f6;display:flex;flex-direction:column;border-right:1px solid var(--s200)}
+.tl{display:flex;gap:8px;padding:14px 16px 6px}.tl span{width:12px;height:12px;border-radius:50%;background:var(--s300)}
+.rows{flex:1;padding:4px 10px;overflow:hidden}
+.sec{font-size:11px;font-weight:600;color:var(--s500);padding:10px 8px 3px}
+.row{display:flex;align-items:center;gap:10px;height:28px;padding:0 8px;border-radius:6px;color:var(--s700)}
+.row.on{background:rgba(14,165,233,.22);color:var(--s900)}
+.row .n{margin-left:auto;font-size:11px;color:var(--s600);background:rgba(15,23,42,.06);border-radius:999px;padding:1px 7px}
+.row.dis{color:var(--s400)}.row.dis .soon{margin-left:auto;font-size:11px}
+.dot{width:9px;height:9px;border-radius:50%}
+.tags{display:flex;flex-wrap:wrap;gap:6px;padding:4px 8px}
+.tag{font-size:11px;font-weight:500;border-radius:999px;padding:3px 9px;background:#fff;border:1px solid var(--s200);color:var(--s600)}
+.main{padding:26px 30px;display:flex;flex-direction:column;gap:10px;background:var(--s50)}
+.main h2{margin:0;font-size:26px;font-weight:700;letter-spacing:-.02em}
+.cap{color:var(--s500);font-size:13px}
+.task{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--s200);border-radius:12px;padding:11px 14px;box-shadow:var(--soft)}
+.task .c{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--s300);flex:none}
+.task .t{font-weight:500}.task .p{margin-left:auto;font-size:11px;color:var(--s500)}
+.lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500);margin-top:6px}
+/* footer status line */
+.foot{display:flex;align-items:flex-start;gap:6px;min-height:34px;padding:9px 14px;border-top:1px solid rgba(15,23,42,.08);font-size:11px;line-height:16px;color:var(--s600);position:relative}
+.foot .st{border:0;background:none;padding:0 2px;margin:0 -2px;text-align:left;border-radius:4px;color:inherit;display:inline-flex;gap:5px;align-items:flex-start}
+.foot .st .i{margin-top:2px}
+.foot .sep{color:var(--s400)}
+.foot .act{border:0;background:none;padding:0 2px;margin:0 -2px;color:var(--sky700);font-weight:500;border-radius:4px;white-space:nowrap}
+.foot.warn{color:var(--amb800)}
+.foot .slot{margin-left:auto;width:12px;height:16px;display:flex;align-items:center;justify-content:center;flex:none}
+.spin{width:11px;height:11px;border-radius:50%;border:1.6px solid var(--s300);border-top-color:var(--s600)}
+.ring{box-shadow:var(--focus)}
+/* crops */
+.crop{width:340px;background:#eef2f6;border:1px solid var(--s300);border-radius:12px;overflow:visible;position:relative;box-shadow:var(--raised)}
+.crop .fade{height:40px;padding:6px 10px 0;overflow:hidden;opacity:.55}
+.dark .crop{background:#1b2331;border-color:#334155}
+.dark .crop .tag{background:#243042;border-color:#334155;color:#cbd5e1}
+.dark .foot{color:#94a3b8;border-top-color:rgba(255,255,255,.08)}
+.dark .foot .sep{color:#64748b}
+.dark .foot.warn{color:var(--amb300)}
+.dark .foot .act{color:var(--sky300)}
+.dark .spin{border-color:#475569;border-top-color:#cbd5e1}
+.grid{display:grid;grid-template-columns:260px 340px 340px;gap:14px 24px;align-items:start}
+.grid .h{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--s500)}
+.grid .d{font-size:12px;line-height:1.45;color:var(--s700)}
+.grid .d b{display:block;color:var(--s900);font-size:13px}
+.darkbg{background:#0f172a;border-radius:14px;padding:10px}
+.tip{position:absolute;left:12px;bottom:40px;max-width:316px;background:#fff;border:1px solid var(--s300);border-radius:6px;box-shadow:var(--float);padding:5px 8px;font-size:11px;line-height:1.4;color:var(--s900);z-index:2}
+.dark .tip{background:#243042;border-color:#475569;color:#e2e8f0}
+.ref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+.note{background:#fff;border:1px solid var(--s200);border-radius:12px;padding:14px 16px;font-size:12px;line-height:1.55;color:var(--s700);max-width:1080px}
+.note h3{margin:0 0 6px;font-size:13px;color:var(--s900)}
+.note ul{margin:4px 0 0;padding-left:18px}
+.tline{display:grid;grid-template-columns:repeat(5,1fr);gap:0;max-width:1080px;border:1px solid var(--s200);border-radius:12px;overflow:hidden;background:#fff}
+.tline div{padding:10px 12px;border-left:1px solid var(--s200);font-size:12px;line-height:1.45;color:var(--s700)}
+.tline div:first-child{border-left:0}
+.tline .t{font-weight:600;color:var(--s900);display:block;margin-bottom:4px}
+.tline .crop{width:100%;box-shadow:none;margin-top:8px}
+.ann{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--sky700);color:#fff;font-size:11px;font-weight:700;margin-right:4px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></symbol>
+<symbol id="i-rotate" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+<symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></symbol>
+<symbol id="i-user-x" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M19 8v3M19 15h.01"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+</svg>
+
+<header class="doc">
+  <h1>X-01 · Sidebar footer status line (macOS)</h1>
+  <p>Replaces today's footer (account name plus the <code>internaldrive</code> icon "Stored on this Mac", or the account name plus "Sign out") with <b>one short line of words</b> (FR-012). The account email and "Sign out" move into the status popover (X-02). The line is quiet: secondary label colour, 11 pt, no colour-only signal, no glyph in calm states. A fixed 12 pt slot at the trailing edge holds the activity indicator, so the words never move when it appears (FR-013).</p>
+  <p>Two click targets at most. The <b>status words</b> open the popover (FR-016) in every state. A <b>trailing action</b> after " · " appears in two states only: "Sign in to sync" (opens the sign-in sheet, X-03) and "Retry" (runs Sync now). Example data: today Tue 6 Oct 2026, 14:34; the sidebar shows the 020 PR-06 "Weekly review · coming later" row, which lands first.</p>
+</header>
+
+<figure>
+<figcaption><b>X-01 · default, in the window</b>Signed in, synced 3 minutes ago, nothing waiting. Nothing else about sync is visible anywhere in the window: no toolbar button (today's toolbar "Refresh" is removed; "Sync now" lives in the menu bar, X-07, and the popover, X-02).</figcaption>
+<div class="win" role="img" aria-label="Brain Buddy window, signed in, sidebar footer reads Synced 3 min ago">
+  <aside class="side">
+    <div class="tl"><span></span><span></span><span></span></div>
+    <div class="rows">
+      <div class="sec">Lists</div>
+      <div class="row"><svg class="i"><use href="#i-inbox"/></svg>Inbox<span class="n">4</span></div>
+      <div class="row on"><svg class="i"><use href="#i-arrow"/></svg>Next actions<span class="n">12</span></div>
+      <div class="row"><svg class="i"><use href="#i-clock"/></svg>Waiting for<span class="n">3</span></div>
+      <div class="row"><svg class="i"><use href="#i-archive"/></svg>Someday / maybe<span class="n">9</span></div>
+      <div class="row dis"><svg class="i"><use href="#i-rotate"/></svg>Weekly review<span class="soon">coming later</span></div>
+      <div class="sec">Dates</div>
+      <div class="row"><svg class="i"><use href="#i-cal"/></svg>Today</div>
+      <div class="sec">Projects</div>
+      <div class="row"><span class="dot" style="background:#10b981"></span>Garden</div>
+      <div class="row"><span class="dot" style="background:#6366f1"></span>Move flat</div>
+      <div class="sec">Tags</div>
+      <div class="tags"><span class="tag">calls</span><span class="tag">errands</span><span class="tag">deep-work</span></div>
+    </div>
+    <div class="foot"><button class="st" aria-label="Sync status: Synced 3 minutes ago. Show details" title="Last synced today at 14:31">Synced 3 min ago</button><span class="slot" aria-hidden="true"></span></div>
+  </aside>
+  <section class="main">
+    <h2>Next actions</h2>
+    <div class="cap">12 open tasks</div>
+    <div class="lbl">Garden</div>
+    <div class="task"><span class="c"></span><span class="t">Order soil for the raised bed</span><span class="p">Garden</span></div>
+    <div class="task"><span class="c"></span><span class="t">Call the nursery about hedge plants</span><span class="p">Garden</span></div>
+    <div class="lbl">Move flat</div>
+    <div class="task"><span class="c"></span><span class="t">Book the moving van for Sat 17 Oct</span><span class="p">Move flat</span></div>
+  </section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>X-01 · every state, light and dark</b>Exact copy per FR-012 (singular forms: "1 change waiting", "1 change couldn't sync"). Attention states (amber words plus a glyph) are the only ones with a glyph; the words alone carry the meaning, so colour is never the only signal. Dark mode derives from the slate scale (sidebar slate-800-ish, words slate-400, attention amber-300, action sky-300). Contrast: slate-600 on the light sidebar 6.6:1; amber-800 6.5:1; sky-700 5.3:1; dark slate-400 5.6:1, amber-300 10:1, sky-300 9.5:1 (WCAG 2.2 AA for 11 pt text).</figcaption>
+<div class="grid">
+  <div class="h">state</div><div class="h">light</div><div class="h">dark</div>
+
+  <div class="d"><b>account-less</b>Never signed in, or signed out. "On this Mac" opens the popover; "Sign in to sync" opens X-03 directly. FR-002, FR-012, US4-2.</div>
+  <div class="crop"><div class="foot"><button class="st">On this Mac</button><span class="sep">·</span><button class="act">Sign in to sync</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">On this Mac</button><span class="sep">·</span><button class="act">Sign in to sync</button><span class="slot"></span></div></div></div></div>
+
+  <div class="d"><b>first load (loading)</b>Just signed in; nothing synced yet. Indicator visible, app fully usable (US1-1). Words reuse the iPhone's existing "Not synced yet" (gap: not in the FR-012 table).</div>
+  <div class="crop"><div class="foot"><button class="st">Not synced yet</button><span class="slot"><span class="spin" role="progressbar" aria-label="Syncing"></span></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Not synced yet</button><span class="slot"><span class="spin"></span></span></div></div></div></div>
+
+  <div class="d"><b>synced · just now</b>Under a minute ago, or a last-sync time that is in the future by the Mac's clock (edge case: never negative).</div>
+  <div class="crop"><div class="foot"><button class="st">Synced just now</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Synced just now</button><span class="slot"></span></div></div></div></div>
+
+  <div class="d"><b>synced · minutes / hours / yesterday</b>Refreshes at least once a minute. 1–59 min; 1–23 h; then "yesterday" for the previous calendar day.</div>
+  <div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced 2 h ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced yesterday</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced 2 h ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced yesterday</button><span class="slot"></span></div></div></div></div>
+
+  <div class="d"><b>syncing</b>The words stay exactly as they were; only the small indicator appears in the reserved slot. No control is disabled, nothing takes focus (FR-013). Shown only for a sync running longer than 1 s (sign-off decision 1).</div>
+  <div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"><span class="spin" role="progressbar" aria-label="Syncing"></span></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"><span class="spin"></span></span></div></div></div></div>
+
+  <div class="d"><b>syncing · Reduce Motion</b>With "Reduce motion" on, the indicator is a static sync glyph that appears and disappears without animation.</div>
+  <div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"><svg class="i sm" role="img" aria-label="Syncing"><use href="#i-refresh"/></svg></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"><svg class="i sm"><use href="#i-refresh"/></svg></span></div></div></div></div>
+
+  <div class="d"><b>changes waiting (online)</b>A local change has waited longer than 10 s, for example while a retry is pending. A routine edit that sends within seconds never changes the words (sign-off decision 1). FR-008, FR-012.</div>
+  <div class="crop"><div class="foot"><button class="st">Synced 3 min ago · 2 changes waiting</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Synced 3 min ago · 2 changes waiting</button><span class="slot"></span></div></div></div></div>
+
+  <div class="d"><b>offline</b>No network path. Quiet, not amber: offline is normal, nothing is wrong. No dialog (US2-1). Changes keep waiting across quit and relaunch (US2-2).</div>
+  <div class="crop"><div class="foot"><button class="st">Offline · 3 changes waiting</button><span class="slot"></span></div><div class="foot"><button class="st">Offline</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Offline · 3 changes waiting</button><span class="slot"></span></div><div class="foot"><button class="st">Offline</button><span class="slot"></span></div></div></div></div>
+
+  <div class="d"><b>session ended</b>Surfaces at once when the server refuses the session (FR-014 exception). Work continues; changes keep waiting (US3-5). The words open the popover, whose first, default button is "Sign in again".</div>
+  <div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-user-x"/></svg>Sign in again to sync</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-user-x"/></svg>Sign in again to sync</button><span class="slot"></span></div></div></div></div>
+
+  <div class="d"><b>error · couldn't sync</b>Only after sending or loading has kept failing for 60 s (FR-014). "Retry" runs Sync now. Clears itself after the next successful sync. Reference ID on hover and in the popover (FR-015).</div>
+  <div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>Couldn't sync</button><span class="sep">·</span><button class="act">Retry</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>Couldn't sync</button><span class="sep">·</span><button class="act">Retry</button><span class="slot"></span></div></div></div></div>
+
+  <div class="d"><b>error · retrying</b>"Retry" pressed, or an automatic retry is running: the words stay, the indicator shows. On success the line goes straight to "Synced just now".</div>
+  <div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>Couldn't sync</button><span class="sep">·</span><button class="act">Retry</button><span class="slot"><span class="spin"></span></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>Couldn't sync</button><span class="sep">·</span><button class="act">Retry</button><span class="slot"><span class="spin"></span></span></div></div></div></div>
+
+  <div class="d"><b>partial failure · changes couldn't sync</b>The account rejected some changes; every other change synced. The words open the popover with the list (US3-6). Clears when the last issue is dismissed.</div>
+  <div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>2 changes couldn't sync</button><span class="slot"></span></div><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>1 change couldn't sync</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>2 changes couldn't sync</button><span class="slot"></span></div><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>1 change couldn't sync</button><span class="slot"></span></div></div></div></div>
+
+  <div class="d"><b>long text · large sidebar text</b>With System Settings › Appearance › Sidebar icon size "Large", or a narrow sidebar, the line wraps after " · " to a second line. It is never truncated, so a count is never cut off.</div>
+  <div class="crop" style="width:250px"><div class="foot"><button class="st" style="font-size:13px;line-height:18px">Synced yesterday · 1,284 changes waiting</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop" style="width:250px"><div class="foot"><button class="st" style="font-size:13px;line-height:18px">Synced yesterday · 1,284 changes waiting</button><span class="slot"></span></div></div></div></div>
+
+  <div class="d"><b>keyboard focus</b>Tab reaches the status words (and the trailing action, when present) as the last stops in the sidebar. Space or Return opens the popover; focus ring is the brand double ring.</div>
+  <div class="crop"><div class="foot warn"><button class="st ring"><svg class="i sm"><use href="#i-alert"/></svg>Couldn't sync</button><span class="sep">·</span><button class="act">Retry</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st ring">Synced 3 min ago</button><span class="slot"></span></div></div></div></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>X-01 · hover tooltips</b>The tooltip (<code>.help</code>) gives the exact time and, for failures, the reference ID. It is information only; copying the ID happens in the popover (X-02), because a tooltip can't be selected.</figcaption>
+<div class="grid" style="grid-template-columns:340px 340px 340px">
+  <div class="crop" style="margin-top:70px"><div class="tip">Last synced today at 14:31. Click for details.</div><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"></span></div></div>
+  <div class="crop" style="margin-top:70px"><div class="tip">Couldn't reach Brain Buddy since 14:02. It keeps trying.<br>Reference ID <span class="ref">4e5d9a20-c18b-4f6e-9a7d-2b1c0e8f3a51</span></div><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>Couldn't sync</button><span class="sep">·</span><button class="act">Retry</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop" style="margin-top:60px"><div class="tip">You're offline. 3 changes are saved on this Mac and sync when you're back online.</div><div class="foot"><button class="st">Offline · 3 changes waiting</button><span class="slot"></span></div></div></div></div>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>X-01 · interrupted: a transient failure that recovers, and one that doesn't</b>FR-014, SC-005. The line stays calm for the first 60 s of continuous failure; only the indicator shows during each automatic attempt.</figcaption>
+<div class="tline">
+  <div><span class="t">14:01 · last success</span>Words: synced line.<div class="crop"><div class="foot"><button class="st">Synced just now</button><span class="slot"></span></div></div></div>
+  <div><span class="t">14:02 · server error, retry</span>Indicator during the attempt; words unchanged.<div class="crop"><div class="foot"><button class="st">Synced 1 min ago</button><span class="slot"><span class="spin"></span></span></div></div></div>
+  <div><span class="t">14:02:40 · still failing</span>Between attempts: nothing at all.<div class="crop"><div class="foot"><button class="st">Synced 1 min ago</button><span class="slot"></span></div></div></div>
+  <div><span class="t">14:03 · 60 s of failure</span>Now, and only now, the warning.<div class="crop"><div class="foot warn"><button class="st"><svg class="i sm"><use href="#i-alert"/></svg>Couldn't sync</button><span class="sep">·</span><button class="act">Retry</button><span class="slot"></span></div></div></div>
+  <div><span class="t">next success</span>Clears itself; no "back online" message.<div class="crop"><div class="foot"><button class="st">Synced just now</button><span class="slot"></span></div></div></div>
+</div>
+</figure>
+
+<div class="note">
+  <h3>Rules the screens above rely on</h3>
+  <ul>
+    <li><b>Precedence</b> when several states hold: session ended → changes couldn't sync → couldn't sync → offline → synced with changes waiting → synced. The most actionable state wins; the popover always shows all of them.</li>
+    <li><b>No flicker</b>: the words change only when the state changes, never because a sync started or stopped. The indicator slot is always reserved.</li>
+    <li><b>Never interrupts</b>: no state opens a sheet, alert, notification, sound or badge, and none moves focus or selection (FR-009, FR-013, FR-017, SC-004).</li>
+    <li><b>VoiceOver</b>: the status words are one button, "Sync status: Synced 3 minutes ago. Show details". The trailing action is a separate button ("Sign in to sync", "Retry sync"). A state change into an attention state (session ended, couldn't sync, changes couldn't sync) is announced once at polite priority; calm changes (minutes ticking, syncing) are not announced. The indicator has the label "Syncing" and is not announced on appearance.</li>
+    <li><b>Offline while the session expired</b>: nothing about the session shows until the Mac is online and the server refuses it; until then the line says "Offline · N changes waiting" (edge case).</li>
+  </ul>
+</div>
+
+</body>
+</html>

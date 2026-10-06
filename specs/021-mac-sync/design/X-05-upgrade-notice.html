@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>X-05 · One-time upgrade notice, unreadable old store (macOS)</title>
+<style>
+:root{--sky50:#f0f9ff;--sky200:#bae6fd;--sky300:#7dd3fc;--sky500:#0ea5e9;--sky700:#0369a1;--amb50:#fffbeb;--amb200:#fde68a;--amb800:#92400e;--s50:#f8fafc;--s100:#f1f5f9;--s200:#e2e8f0;--s300:#cbd5e1;--s400:#94a3b8;--s500:#64748b;--s600:#475569;--s700:#334155;--s900:#0f172a;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--soft:0 1px 2px rgba(15,23,42,.04),0 1px 1px rgba(15,23,42,.03);--raised:0 1px 2px rgba(15,23,42,.05),0 8px 24px -12px rgba(15,23,42,.12);--float:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}
+body{margin:0;padding:28px;background:#e2e8f0;color:var(--s900);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif;font-size:13px;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}button:focus-visible{outline:none;box-shadow:var(--focus)}
+header.doc{margin:0 0 22px;max-width:1180px}header.doc h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 6px}header.doc p{margin:0 0 6px;font-size:13px;line-height:1.5;color:var(--s600);max-width:1080px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.frames{display:flex;flex-wrap:wrap;gap:30px 28px;align-items:flex-start}
+figure{margin:0;width:400px}figcaption{font-size:12px;line-height:1.45;color:var(--s700);margin:0 0 10px;min-height:70px}figcaption b{display:block;color:var(--s900);font-size:13px}
+.stage{width:400px;height:430px;background:#f1f5f9;border:1px solid var(--s300);border-radius:12px;display:flex;align-items:center;justify-content:center;position:relative;box-shadow:var(--raised)}
+.alert{width:300px;background:rgba(255,255,255,.98);border:1px solid var(--s200);border-radius:16px;box-shadow:var(--float);padding:18px 16px 16px;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+.logo{width:44px;height:44px;border-radius:11px;background:var(--sky50);border:1px solid var(--sky200);display:flex;align-items:center;justify-content:center}
+.logo svg{width:28px;height:28px}
+.alert h3{margin:2px 0 0;font-size:13px;font-weight:700;line-height:1.35}
+.alert p{margin:0;font-size:11px;line-height:1.5;color:var(--s700)}
+.path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.45;background:var(--s100);border:1px solid var(--s200);border-radius:6px;padding:6px 8px;color:var(--s900);text-align:left;width:100%;word-break:break-all;user-select:text}
+.btns{display:flex;flex-direction:column;gap:8px;width:100%;margin-top:6px}
+.btn{min-height:28px;border-radius:8px;border:1px solid var(--s200);background:#fff;font-size:13px;font-weight:500;box-shadow:var(--soft);color:var(--s900);width:100%}
+.btn.def{background:var(--sky700);border-color:var(--sky700);color:#fff}
+.dark .stage{background:#0f172a;border-color:#334155}
+.dark .alert{background:#1e293b;border-color:#334155;color:#e2e8f0}
+.dark .alert p{color:#cbd5e1}
+.dark .path{background:#0f172a;border-color:#334155;color:#e2e8f0}
+.dark .btn{background:#273449;border-color:#334155;color:#e2e8f0}
+.dark .btn.def{background:var(--sky700);border-color:var(--sky700);color:#fff}
+.win{width:400px;height:430px;display:grid;grid-template-columns:150px 1fr;border:1px solid var(--s300);border-radius:12px;overflow:hidden;box-shadow:var(--raised);background:#fff}
+.side{background:#eef2f6;display:flex;flex-direction:column;border-right:1px solid var(--s200);font-size:12px}
+.rows{flex:1;padding:8px}
+.row{display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:6px;color:var(--s700)}
+.row.on{background:rgba(14,165,233,.22)}
+.row .n{margin-left:auto;font-size:10px;color:var(--s600)}
+.foot{padding:8px 10px;border-top:1px solid rgba(15,23,42,.08);font-size:10px;line-height:14px;color:var(--s600)}
+.foot .act{color:var(--sky700);font-weight:500}
+.main{padding:16px;display:flex;flex-direction:column;gap:8px;background:var(--s50)}
+.main h2{margin:0;font-size:18px;font-weight:700}
+.task{background:#fff;border:1px solid var(--s200);border-radius:10px;padding:8px 10px;font-size:12px}
+.skel{height:32px;border-radius:10px;background:var(--s100)}
+.add{border:1px dashed var(--s300);border-radius:10px;padding:8px 10px;color:var(--s400);font-size:12px}
+.note{background:#fff;border:1px solid var(--s200);border-radius:12px;padding:14px 16px;font-size:12px;line-height:1.55;color:var(--s700);max-width:1080px;margin-top:30px}
+.note h3{margin:0 0 6px;font-size:13px;color:var(--s900)}
+.note ul{margin:4px 0 0;padding-left:18px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="logo" viewBox="0 0 24 24"><g fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9.1 3.3-.2 4.3-.9 1-.6 1.9-1.8 2.7-3.6-2.4-.5-4-.3-5-.1-.4.1-.7.3-.9.6z"/></g></symbol>
+</svg>
+
+<header class="doc">
+  <h1>X-05 · One-time upgrade notice, only when the old store can't be read (macOS)</h1>
+  <p>The normal upgrade is <b>silent</b>: on first launch after the update, every record of <code>local-gtd.json</code> is carried into the new local workspace (FR-020) and the old file is kept untouched until the new workspace is verified, then kept as a backup (FR-021). The person sees their tasks as before and the account-less footer (US4-1, US4-2). Nothing says "upgraded".</p>
+  <p>Only when the old file cannot be read (corrupt, or written by a newer version) does the Mac speak, <b>once</b>, in plain words, saying where the file is, and only then start with an empty workspace (FR-022). An app-modal alert at launch, before the workspace opens; the old file is never overwritten or deleted. This is one of the four dialogs FR-017 allows.</p>
+</header>
+
+<div class="frames">
+
+<figure>
+<figcaption><b>X-05 · default: normal upgrade (no notice)</b>US4-1. Same lists, order, dates, projects, outcomes, archive state and review marks. Footer: account-less.</figcaption>
+<div class="win">
+  <aside class="side"><div class="rows"><div class="row">Inbox<span class="n">4</span></div><div class="row on">Next actions<span class="n">12</span></div><div class="row">Waiting for<span class="n">3</span></div><div class="row">Someday / maybe<span class="n">9</span></div></div><div class="foot">On this Mac · <span class="act">Sign in to sync</span></div></aside>
+  <section class="main"><h2>Next actions</h2><div class="task">Order soil for the raised bed</div><div class="task">Call the nursery about hedge plants</div><div class="task">Book the moving van for Sat 17 Oct</div></section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>X-05 · loading: a large store is being carried over</b>If opening takes over 300 ms, the list shows static placeholders, exactly as any slow local open. No progress text, no notice.</figcaption>
+<div class="win">
+  <aside class="side"><div class="rows"><div class="row">Inbox</div><div class="row on">Next actions</div><div class="row">Waiting for</div><div class="row">Someday / maybe</div></div><div class="foot">On this Mac · <span class="act">Sign in to sync</span></div></aside>
+  <section class="main" aria-busy="true"><h2>Next actions</h2><div class="skel"></div><div class="skel"></div><div class="skel"></div></section>
+</div>
+</figure>
+
+<figure>
+<figcaption><b>X-05 · error: old file can't be read (corrupt)</b>FR-022. Says what happened, that the file is untouched, exactly where it is (selectable), and what happens next. "Continue" is the default.</figcaption>
+<div class="stage"><div class="alert" role="alertdialog" aria-labelledby="u1" aria-describedby="u1d">
+  <span class="logo"><svg><use href="#logo"/></svg></span>
+  <h3 id="u1">Brain Buddy couldn't read your earlier tasks</h3>
+  <p id="u1d">The file from the previous version was left exactly as it was. It's here:</p>
+  <div class="path">~/Library/Application Support/BrainBuddyMac/local-gtd.json</div>
+  <p>Brain Buddy will start with an empty workspace. Keep the file if you'd like help recovering it.</p>
+  <div class="btns"><button class="btn def">Continue</button><button class="btn">Show in Finder</button></div>
+</div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-05 · error: written by a newer version</b>Same notice, different reason, with the one thing that would help.</figcaption>
+<div class="stage"><div class="alert" role="alertdialog">
+  <span class="logo"><svg><use href="#logo"/></svg></span>
+  <h3>Brain Buddy couldn't read your earlier tasks</h3>
+  <p>They were saved by a newer version of Brain Buddy, so this version left the file exactly as it was. It's here:</p>
+  <div class="path">~/Library/Application Support/BrainBuddyMac/local-gtd.json</div>
+  <p>Brain Buddy will start with an empty workspace. Install the newer version to open the file again.</p>
+  <div class="btns"><button class="btn def">Continue</button><button class="btn">Show in Finder</button></div>
+</div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-05 · long text (long home folder path), dark mode</b>The path wraps anywhere and stays selectable; the alert grows in height, never in width.</figcaption>
+<div class="dark"><div class="stage"><div class="alert" role="alertdialog">
+  <span class="logo"><svg><use href="#logo"/></svg></span>
+  <h3>Brain Buddy couldn't read your earlier tasks</h3>
+  <p>The file from the previous version was left exactly as it was. It's here:</p>
+  <div class="path">/Users/alexandra.konstantinopoulou/Library/Application Support/BrainBuddyMac/local-gtd.json</div>
+  <p>Brain Buddy will start with an empty workspace. Keep the file if you'd like help recovering it.</p>
+  <div class="btns"><button class="btn def">Continue</button><button class="btn">Show in Finder</button></div>
+</div></div></div>
+</figure>
+
+<figure>
+<figcaption><b>X-05 · after Continue (empty, first run)</b>Only now does the empty workspace start. The notice is recorded as seen and never shown again.</figcaption>
+<div class="win">
+  <aside class="side"><div class="rows"><div class="row on">Inbox</div><div class="row">Next actions</div><div class="row">Waiting for</div><div class="row">Someday / maybe</div></div><div class="foot">On this Mac · <span class="act">Sign in to sync</span></div></aside>
+  <section class="main"><h2>Inbox</h2><div class="add">Add a task</div></section>
+</div>
+</figure>
+
+</div>
+
+<div class="note">
+  <h3>Behaviour</h3>
+  <ul>
+    <li><b>Once</b>: shown at the first launch that finds the unreadable file. "Continue" or "Show in Finder" records it as seen. Quitting the app while the notice is open (interrupted) means it was not seen, and it appears again at the next launch.</li>
+    <li><b>Show in Finder</b> reveals the file with it selected and closes the notice; the workspace then starts empty, as with Continue.</li>
+    <li><b>Never offered</b>: delete, overwrite or "try again" on the old file. The app does not touch it (FR-022).</li>
+    <li><b>Keyboard and VoiceOver</b>: focus on "Continue" (default, Return). Tab reaches "Show in Finder". VoiceOver reads the title, the message and the path on open. Esc is not mapped, because the notice must be read once; Return continues.</li>
+    <li><b>Partial read</b> (some records readable, some not) is treated as unreadable: nothing is half-imported, and the whole file is kept (n/a as a separate state).</li>
+  </ul>
+</div>
+
+</body>
+</html>
