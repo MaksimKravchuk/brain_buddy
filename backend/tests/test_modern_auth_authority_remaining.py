@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import timedelta
@@ -82,6 +83,107 @@ AppleRuntime = tuple[
     AppleProvider,
     Clock,
 ]
+
+
+def test_023_FR_004_native_apple_attempt_cannot_use_web_callback(apple_runtime):
+    """A native attempt cannot be exchanged through the browser return endpoint."""
+    service, _, _, provider, _ = apple_runtime
+    started, _ = native_start(service)
+    with pytest.raises(ModernAuthError):
+        service.provider_callback(
+            "apple", code="synthetic-code", state=started.payload.state
+        )
+    assert provider.received == []
+    assert authority_counts(service) == (0, 0, 0)
+
+
+@pytest.mark.parametrize("claims", [None, []])
+def test_023_FR_004_invalid_sealed_claims_cannot_consume_valid_handoff(modern, claims):
+    """Authenticated storage with invalid claim shape grants no session or account."""
+    service = modern[0]
+    payload = handoff(service, start_provider(service))
+    with service.store.transaction() as connection:
+        row = connection.execute("SELECT * FROM auth_attempts").fetchone()
+        original = row["sealed_payload"]
+        sealed = service.box.seal(
+            json.dumps(claims).encode(),
+            service._attempt_context(row, "provider_identity"),
+        )
+        connection.execute(
+            "UPDATE auth_attempts SET sealed_payload=? WHERE id=?",
+            (sealed, payload.attempt_id),
+        )
+    with pytest.raises(ModernAuthError):
+        service.complete_provider(payload)
+    assert authority_counts(service) == (0, 0, 0)
+    with service.store.transaction() as connection:
+        connection.execute(
+            "UPDATE auth_attempts SET sealed_payload=? WHERE id=?",
+            (original, payload.attempt_id),
+        )
+    assert service.complete_provider(payload).payload.status == "signed_in"
+
+
+def test_023_FR_007_unlink_rechecks_binding_after_independent_confirmation(modern):
+    """A confirmed mailbox cannot unlink a provider that has since been retired."""
+    service = modern[0]
+    user, _ = provider_owner(modern)
+    pending, code = delivered(modern, user.email)
+    token = finish_email(service, pending, code).raw_token
+    assert token
+    proof = email_proof(modern, user, token, "unlink:google")
+    with service.store.transaction() as connection:
+        connection.execute("UPDATE auth_identity_bindings SET state='disabled'")
+    before = authority_counts(service)
+    with pytest.raises(ModernAuthError) as failure:
+        service.unlink(
+            "google",
+            AccountActionRequest(recent_proof=proof, expected_account_id=user.id),
+            raw_token=token,
+        )
+    assert failure.value.status_code == 404
+    assert authority_counts(service) == before
+    assert session_user(service, token).id == user.id
+
+
+@pytest.mark.parametrize("deletion_age", [None, timedelta(days=15)])
+def test_023_FR_012_provider_login_cannot_cancel_stale_or_expired_deletion(
+    modern, deletion_age
+):
+    """A staged login cannot undo a later deletion request or its expired grace."""
+    service, _, _, _, clock = modern
+    user, _ = provider_owner(modern)
+    payload = handoff(service, start_provider(service))
+    if deletion_age is None:
+        clock.now += timedelta(seconds=1)
+    requested_at = clock() - (deletion_age or timedelta())
+    service.auth.user_repo.mutate(
+        user.id,
+        lambda fresh: fresh.model_copy(update={"deletion_requested_at": requested_at}),
+    )
+    before = authority_counts(service)
+    with pytest.raises(ModernAuthError):
+        service.complete_provider(payload)
+    assert authority_counts(service) == before
+    assert current_user(service, user.id).deletion_requested_at == requested_at
+
+
+@pytest.mark.parametrize("changed", ["deleted", "generation"])
+def test_023_FR_004_provider_handoff_rechecks_binding_after_exchange(modern, changed):
+    """A proved provider handoff cannot cross removal or replacement of its source."""
+    service = modern[0]
+    provider_owner(modern)
+    payload = handoff(service, start_provider(service))
+    with service.store.transaction() as connection:
+        connection.execute(
+            "DELETE FROM auth_identity_bindings"
+            if changed == "deleted"
+            else "UPDATE auth_identity_bindings SET generation=generation+1"
+        )
+    before = authority_counts(service)
+    with pytest.raises(ModernAuthError):
+        service.complete_provider(payload)
+    assert authority_counts(service) == before
 
 
 def native_start(
