@@ -23,14 +23,17 @@ export async function createClientProof(): Promise<ClientProof> {
   return { verifier, challenge: base64url(new Uint8Array(digest)) };
 }
 export function saveProviderAttempt(attempt: PendingProvider): void { sessionStorage.setItem(PENDING_KEY, JSON.stringify(attempt)); }
-export function takeProviderCallback(): { request: ProviderComplete; pending: PendingProvider } {
+export function takeProviderCallback(): { request: ProviderComplete; pending: PendingProvider } | { cancelled: true; pending: PendingProvider } {
   const fragment = window.location.hash.slice(1);
   window.history.replaceState(window.history.state, "", "/auth/complete");
   const stored = sessionStorage.getItem(PENDING_KEY); sessionStorage.removeItem(PENDING_KEY);
   const params = new URLSearchParams(fragment);
-  if (params.size !== 3 || ["attempt", "state", "grant"].some(key => params.getAll(key).length !== 1 || !TOKEN.test(params.get(key) ?? "")) || !stored) throw new Error("This sign-in attempt is invalid or has expired. Start again.");
+  const cancelled = params.get("error") === "cancelled";
+  const outcome = cancelled ? "error" : "grant";
+  if (params.size !== 3 || ["attempt", "state"].some(key => params.getAll(key).length !== 1 || !TOKEN.test(params.get(key) ?? "")) || params.getAll(outcome).length !== 1 || (!cancelled && !TOKEN.test(params.get("grant") ?? "")) || !stored) throw new Error("This sign-in attempt is invalid or has expired. Start again.");
   const pending = JSON.parse(stored) as PendingProvider;
   if (!TOKEN.test(pending.verifier) || !Number.isFinite(pending.expiresAt) || pending.expiresAt <= Date.now() || pending.expiresAt > Date.now() + 600000 || pending.attemptId !== params.get("attempt") || pending.state !== params.get("state") || !["login", "link", "reauth"].includes(pending.purpose)) throw new Error("This sign-in attempt is invalid or has expired. Start again.");
+  if (cancelled) return { pending, cancelled: true };
   return { pending, request: { attempt_id: pending.attemptId, state: pending.state, handoff_code: params.get("grant") ?? "", client_verifier: pending.verifier } };
 }
 export async function startBrowserProvider(provider: Provider, options: Omit<ProviderStart, "client" | "client_challenge">, destination = "/"): Promise<void> {

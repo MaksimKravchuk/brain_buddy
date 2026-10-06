@@ -26,6 +26,7 @@ export function ProviderCompletionPage(): React.JSX.Element {
   const [message, setMessage] = useState("Completing sign-in…");
   const [failed, setFailed] = useState(false);
   const [destination, setDestination] = useState("/login");
+  const [retryFrom, setRetryFrom] = useState<{ pathname: string; search: string }>();
   const [mailbox, setMailbox] = useState<{ challenge: Challenge; verifier: string } | null>(null);
   useEffect(() => {
     if (started.current) return;
@@ -33,6 +34,13 @@ export function ProviderCompletionPage(): React.JSX.Element {
     let pending: PendingProvider | undefined;
     void (async () => {
       const parsed = takeProviderCallback(); pending = parsed.pending;
+      if ("cancelled" in parsed) {
+        const retry = new URL(safeAuthDestination(pending.destination), window.location.origin);
+        setRetryFrom({ pathname: retry.pathname, search: retry.search });
+        setMessage("Sign-in cancelled. Try again or choose another method.");
+        setDestination(pending.expectedOwner ? `/settings/account?expected_owner=${encodeURIComponent(pending.expectedOwner)}` : "/login");
+        setFailed(true); return;
+      }
       if (pending.expectedOwner) await waitForSessionHydration();
       if (pending.expectedOwner) assertActingOwner(pending.expectedOwner);
       const result = await modernAuthApi.completeProvider(parsed.request);
@@ -53,5 +61,5 @@ export function ProviderCompletionPage(): React.JSX.Element {
       setDestination(pending?.expectedOwner ? `/settings/account?expected_owner=${encodeURIComponent(pending.expectedOwner)}` : "/login"); setFailed(true);
     });
   }, [navigate]);
-  return <AuthLayout title={mailbox ? "Check your email" : "Complete sign-in"}>{mailbox ? <AuthEntry destination={destination} initialCode={mailbox} /> : <><p role={failed ? "alert" : "status"}>{message}</p>{failed ? <Link className="mt-4 inline-flex min-h-11 items-center text-sky-700 underline" to={destination}>{destination.startsWith("/settings/account") ? "Check your sign-in methods" : "Back to sign in"}</Link> : null}</>}</AuthLayout>;
+  return <AuthLayout title={mailbox ? "Check your email" : "Complete sign-in"}>{mailbox ? <AuthEntry destination={destination} initialCode={mailbox} /> : <><p role={failed ? "alert" : "status"}>{message}</p>{failed ? <Link className="mt-4 inline-flex min-h-11 items-center text-sky-700 underline" to={destination} state={retryFrom ? { from: retryFrom } : undefined}>{destination.startsWith("/settings/account") ? "Check your sign-in methods" : "Back to sign in"}</Link> : null}</>}</AuthLayout>;
 }

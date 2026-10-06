@@ -1,5 +1,5 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { modernAuthApi } from "../../../api/modernAuth";
 import { useAuthStore } from "../../../stores/authStore";
@@ -53,5 +53,24 @@ describe("023-FR-006/015/021 callback owner and one-use handoff", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/check your sign-in methods/i));
     expect(modernAuthApi.completeProvider).toHaveBeenCalledTimes(1);
     expect(sessionStorage.length).toBe(0);
+  });
+  it("024-FR-013 cancellation returns to sign-in while retaining the CLI destination", async () => {
+    function Destination() { const here = useLocation(); return <p>Retry {JSON.stringify(here.state)}</p>; }
+    saveProviderAttempt({ attemptId: token, state: token, verifier: "v".repeat(43), purpose: "login", destination: "/cli/authorize", expiresAt: Date.now() + 60000 });
+    history.replaceState(null, "", `/auth/complete#attempt=${token}&state=${token}&error=cancelled`);
+    render(<MemoryRouter initialEntries={["/auth/complete"]}><Routes><Route path="/auth/complete" element={<ProviderCompletionPage />} /><Route path="/login" element={<Destination />} /></Routes></MemoryRouter>);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/sign-in cancelled/i);
+    expect(modernAuthApi.completeProvider).not.toHaveBeenCalled();
+    expect(location.hash).toBe(""); expect(sessionStorage.length).toBe(0);
+    fireEvent.click(screen.getByRole("link", { name: "Back to sign in" }));
+    expect(await screen.findByText(/Retry/)).toHaveTextContent('"pathname":"/cli/authorize"');
+  });
+  it.each(["link", "reauth"] as const)("cancelling %s returns to the original account without spending a proof", async purpose => {
+    saveProviderAttempt({ attemptId: token, state: token, verifier: "v".repeat(43), purpose, expectedOwner: "A", action: purpose === "link" ? "link:google" : "export", destination: "/settings/account", expiresAt: Date.now() + 60000 });
+    history.replaceState(null, "", `/auth/complete#attempt=${token}&state=${token}&error=cancelled`);
+    show();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/sign-in cancelled/i);
+    expect(screen.getByRole("link", { name: "Check your sign-in methods" })).toHaveAttribute("href", "/settings/account?expected_owner=A");
+    expect(modernAuthApi.completeProvider).not.toHaveBeenCalled();
   });
 });

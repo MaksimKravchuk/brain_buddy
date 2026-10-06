@@ -438,7 +438,11 @@ class FeatureFlagOverrideRepository(BaseRepository):
             "SELECT flag, mode, selected_users FROM feature_flags"
         ).fetchall()
         present = frozenset(row["flag"] for row in rows)
-        if not _ADR_0019_MANAGED_FLAGS <= present <= frozenset(MANAGED_FLAGS):
+        if (
+            not _ADR_0019_MANAGED_FLAGS
+            <= present
+            <= frozenset(MANAGED_FLAGS + OPTIONAL_MANAGED_FLAGS)
+        ):
             return
         for row in rows:
             try:

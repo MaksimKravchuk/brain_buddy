@@ -130,6 +130,37 @@ async function finishGoogle(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Continue as synthetic identity" }).click();
 }
 
+for (const provider of ["google", "apple"] as const) {
+  test(`023-FR-004 024-FR-013 ${provider} cancellation returns to recoverable sign-in without a session`, async ({ page }, testInfo) => {
+    const upstream = provider === "google" ? "https://accounts.google.com/o/oauth2/v2/auth?**" : "https://appleid.apple.com/auth/authorize?**";
+    await page.route(upstream, async route => {
+      const authorization = new URL(route.request().url());
+      await route.fulfill({ contentType: "text/html", body: `<html><body><h1>Cancel synthetic sign-in</h1><form action="${escapeHtml(authorization.searchParams.get("redirect_uri")!)}" method="${provider === "google" ? "get" : "post"}"><input type="hidden" name="state" value="${escapeHtml(authorization.searchParams.get("state")!)}"><input type="hidden" name="error" value="access_denied"><button type="submit">Cancel authorization</button></form></body></html>` });
+    });
+    await test.step("cancel a real bound provider attempt without returning any code", async () => {
+      await page.goto("/login");
+      await page.getByRole("button", { name: provider === "google" ? "Sign in with Google" : "Sign in with Apple", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Cancel synthetic sign-in" })).toBeVisible();
+      const callback = page.waitForResponse(response => new URL(response.url()).pathname === `/api/auth/providers/${provider}/callback`);
+      await page.getByRole("button", { name: "Cancel authorization" }).click();
+      expect((await callback).status()).toBe(303);
+      await expect(page.getByRole("alert")).toHaveText(/Sign-in cancelled/);
+      expect(new URL(page.url()).hash).toBe("");
+      expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+      expect((await page.context().cookies()).some(cookie => cookie.name === "brainbuddy_auth_binder")).toBe(false);
+      expect((await api(page, "/auth/me")).status).toBe(401);
+      await accessible(page);
+      await page.screenshot({ path: testInfo.outputPath(`${provider}-cancel.png`) });
+    });
+    await test.step("return to enabled sign-in choices for a fresh attempt", async () => {
+      await page.getByRole("link", { name: "Back to sign in" }).click();
+      await expect(page.getByRole("button", { name: "Sign in with Google", exact: true })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Sign in with Apple", exact: true })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Continue with email", exact: true })).toBeEnabled();
+    });
+  });
+}
+
 async function fakeApple(page: Page, email: string | null, subject: string): Promise<void> {
   await page.route("https://appleid.apple.com/auth/authorize?**", async route => {
     const authorization = new URL(route.request().url());
