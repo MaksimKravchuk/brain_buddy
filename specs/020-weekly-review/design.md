@@ -4,7 +4,7 @@
 **Spec**: `spec.md` (Clarifications settled: 2026-10-05)
 **Screens**: `design/*.html` — self-contained static HTML, inline CSS, inline SVG icons, no CDN, no external fonts, no script
 **Human sign-off**: approved by Max on 2026-10-05, with decisions 1–6 (see Sign-off)
-**Amended**: 2026-10-06, after planning-review campaign 1 — owner decisions PD-1 – PD-3 (spec Clarifications "Session 2026-10-06") and the review's design findings; see "Amendments 2026-10-06". Sign-off decisions 1–6 are unchanged.
+**Amended**: 2026-10-06, after planning-review campaign 1 — owner decisions PD-1 – PD-3 (spec Clarifications "Session 2026-10-06") and the review's design findings; see "Amendments 2026-10-06". Amended again on 2026-10-06 after campaign 2 (state completeness, focus, D-06); see "Amendments 2026-10-06 (campaign 2)". Sign-off decisions 1–6 are unchanged.
 
 <!--
   Produced by /speckit-design via the design-architect subagent, after
@@ -75,7 +75,7 @@ tapped").
 | M-13 | mobile (review step) | Wins of the week (+ shared step chrome, leave) | First step, before any backlog: completed tasks and their count | FR-028, FR-029 |
 | M-14 | mobile (review step, full) | Mind sweep | Capture anything on the mind into Inbox | FR-028, FR-029 |
 | M-15 | mobile (review step) | Inbox to zero | ">15 items" choice; one item at a time via Process inbox | FR-028, FR-030, FR-034 |
-| M-16 | mobile (review step) | Tasks that ask for a decision | The M-03 card one at a time, oldest first; "Not now" passes a card; Undo after each decision | FR-028, FR-034, FR-050, FR-006 |
+| M-16 | mobile (review step) | Tasks that ask for a decision | The M-03 card one at a time, earliest-asking first; "Not now" passes a card; Undo after each decision | FR-028, FR-034, FR-050, FR-006 |
 | M-17 | mobile (review step, full) | The rest of Next with capacity mirror | Count, 4-week weekly average, implied weeks; no limit | FR-028, FR-031 |
 | M-18 | mobile (review step, full) | Waiting for, older than 7 days | One at a time: keep waiting / follow-up / return to Next / cancel | FR-028, FR-032, FR-034 |
 | M-19 | mobile (review step, full) | Projects without a next action | Add or suggest a next action per project | FR-019, FR-028 |
@@ -91,6 +91,7 @@ tapped").
 | D-03 | desktop (web route) | Weekly review shell | Focused route with step rail; hosts M-09 … M-22 content; onboarding dialog | FR-015, FR-017, FR-027 – FR-035, FR-045 |
 | D-04 | desktop (web settings) | Weekly review and Suggestions settings | M-23 minus on-device rows | FR-024, FR-035, FR-038, FR-039, FR-045 |
 | D-05 | desktop (web dialog at first web open) | Auto-park explainer | M-26 content as a dialog; once per owner across devices | FR-051, FR-016, FR-018, FR-014 |
+| D-06 | desktop (web task inline detail) | "This wording" block (web) | M-02 content in the existing web inline task detail: the only web place for "Ageing" and the paused, moves-tomorrow, extension and parked facts; "Decide" opens D-02 (added 2026-10-06, campaign 2) | FR-001, FR-003, FR-004, FR-009, FR-010, FR-012, FR-046 |
 
 Files:
 
@@ -120,19 +121,20 @@ Files:
 | `design/D-04-settings.html` | D-04 |
 | `design/M-26-auto-park-explainer.html` | M-26 |
 | `design/D-05-auto-park-explainer.html` | D-05 |
+| (no separate file) | D-06: the M-02 frames (`design/M-02-task-detail-formulation.html`) placed in the existing web inline task detail panel; layout notes and states in the D-06 table |
 
 ### Marker system (M-01, M-02, D-01, M-17, M-24)
 
 By owner decision 2 (2026-10-05), list surfaces (M-01, D-01, M-17, and the
 widget rows) show **only** "asks for a decision" and "moves to Someday
 tomorrow". "Ageing" is shown only in task detail: M-02 on iOS, and the same
-"This wording" block in the web task's inline detail.
+"This wording" block in the web task's inline detail (D-06).
 
 | state | rule (threshold T) | visual | where shown | interactive |
 |---|---|---|---|---|
 | fresh | age < T/2 | none | — | — |
 | ageing | T/2 ≤ age < T | slate-100 chip, slate-600 text, Lucide `Hourglass`, "Ageing" | task detail only (M-02, web inline detail); **never in lists** | no |
-| asks for a decision | age ≥ T (or ≥ T+7 after extension) | indigo-50 chip, indigo-200 border, indigo-700 text, `CircleHelp`, "Asks for a decision" | lists and detail | opens the card |
+| asks for a decision | age ≥ T; after an extension, from 7 days after the extension day | indigo-50 chip, indigo-200 border, indigo-700 text, `CircleHelp`, "Asks for a decision" | lists and detail | opens the card |
 | moves to Someday tomorrow | within 24 h of auto-park | amber-50 / amber-200 / amber-800 (warning semantic, not the reserved needs-you alias), `Archive`, "Moves to Someday tomorrow" | lists and detail | opens the card |
 | future due date | due date after today | no age marker; the existing rose due chip only; detail says "Paused until the due date" | — | — |
 
@@ -191,7 +193,8 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | decision applied, with Undo | any decision confirmed | Sheet closes and the row updates. A toast names the decision and offers Undo for about 5 s, like Process inbox; with VoiceOver or Switch Control running it stays at least 10 s and until focus leaves it, and VoiceOver announces "Released to Someday. Undo available." Undo restores the task exactly, including clock, extension and receipts. | ""Renovate the bathroom" released to Someday" · "Undo" | FR-006, FR-010, FR-048 |
 | undo didn't apply | Undo tapped, but the task (or the follow-up it created) changed elsewhere first, or the undo was rejected on sync | The toast turns into a short message; the task stays as it is now; on sync rejection the reason appears in the existing Sync issues screen with Ref and a non-blocking note on Next | "Couldn't undo: "Renovate the bathroom" changed on another device. It's in Someday / maybe now." | FR-048, FR-045 |
 | undo window expired | ~5 s pass | Toast fades. The decision stands and is changeable later through ordinary task moves. | — | FR-048 |
-| error | offline decision rejected by the server after sync (non-stale) | Reason, correlation ID, "Try again" / "Choose again". Because the sheet is long closed, it appears in the existing iOS Sync issues screen, with a non-blocking note on Next ("1 decision couldn't be saved") that opens it | "Your decision "Move to Waiting for" couldn't be saved to your account. The task is still in Next." + Ref | FR-011, FR-045 |
+| error | offline decision rejected by the server after sync (non-stale) | Reason, correlation ID, "Try again" / "Choose again". Because the sheet is long closed, it appears in the existing iOS Sync issues screen, with a non-blocking note on Next ("1 decision couldn't be saved") that opens it. The copy names the list the task is in **now** (from the server), never an assumed one | "Your decision "Move to Waiting for" on "Renovate the bathroom" couldn't be saved to your account. It's in Next actions now." + Ref | FR-011, FR-045 |
+| error: parked before the decision synced | an offline decision was rejected because the formulation changed and the task had been auto-parked meanwhile (the yield rule did not apply) | As "error"; the task is also listed on "While you were away" | "Your decision on "Renovate the bathroom" couldn't be saved: it moved to Someday / maybe automatically before your decision synced. You can bring it back from While you were away." + Ref | FR-011, FR-015, FR-045 |
 | error: decision not allowed | the server says the decision no longer fits the task's list | Reason and Ref; the card shows the current list | "This decision isn't available for this task's current list. Nothing was changed." + Ref | FR-011, FR-045 |
 | unsaved text — leave? | Close, swipe-down or Back while a form (M-04, M-05 answer) holds unsaved text | Swipe-down is blocked while text is unsaved; a confirmation asks first; "Keep editing" is the default | "Discard your new wording? It hasn't been saved." · "Keep editing" · "Discard" | FR-052 |
 | offline / interrupted | no connection; or app killed with the card open | Works offline, queued; killed before a choice → nothing applied; typed text is restored as a draft when the card for the same wording reopens | "Offline. Decisions are saved on this iPhone and sync later." / "Your unsaved wording is back." | FR-040, FR-052 |
@@ -244,6 +247,9 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | choice (device can't run models) | unsupported device | Download shown unavailable with reason; cloud and Not now | "Not available on this iPhone." | FR-023 |
 | loading: downloading | "Download" | Progress bar in bytes, time estimate, "Cancel download", card stays usable | "420 MB of 1.1 GB · about 3 minutes on Wi-Fi" | FR-049 |
 | offline / interrupted | connection lost mid-download | Why, "Retry download" (resumes), cloud alternative | "The connection dropped at 420 MB of 1.1 GB." | FR-049 |
+| download resumed after reopen | the app was backgrounded or killed mid-download and is opened again | The download continues from where the system kept it, with progress (also in M-23); if the system dropped it, the "interrupted" row with "Retry download" | "Downloading the model · 640 MB of 1.1 GB" | FR-049 |
+| download finished while away | the download completed while the card was closed | The next "Suggest" runs on the device; one quiet line the first time | "The downloaded model is ready. Suggestions in Russian now run on this iPhone." | FR-023 (a), FR-049 |
+| download cancelled | "Cancel download" | Back to the choice, "Download 1.1 GB" offered again; the partial file is removed | "Download cancelled. Nothing was kept." | FR-049 |
 | error: not enough storage | before or during download | Numbers, "Try again", cloud alternative; nothing deleted for the person | "The model needs 1.1 GB. This iPhone has 640 MB free." | FR-049 |
 | installed → suggestions | download complete | Proposals in the task's language, on-device note, offline OK | "Suggested on this iPhone by the downloaded model. Works offline." | FR-023 (a), FR-022 |
 | cloud unavailable | the server reports cloud suggestions off (`available: false`) | The cloud choice is shown disabled with its reason; download and Not now stay | "Cloud suggestions aren't available right now." | FR-023, FR-025 |
@@ -266,6 +272,8 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | proposals, notes shortened | as M-05 | Provider line plus the shortened-notes line | "Suggested by OpenAI from this task's details. Part of the notes was not considered." | FR-019 |
 | error: input too large | notes and project still too long after shortening (server 400 `navigator_input_too_large`) | Reason, Ref, no retry; the form stays usable | "These notes are too long for suggestions. Write your own step, or shorten the notes and try again." + Ref | FR-019, FR-045 |
 | interrupted | app backgrounded or sheet dismissed while "Asking OpenAI…"; or connection lost mid-request | Backgrounding or dismissal cancels quietly ("Suggestion stopped." · "Suggest again"); a lost connection shows the timeout copy with Ref | as M-07 timeout | FR-025, FR-045 |
+| clarifying question (cloud) | the cloud model asked one question instead of proposing | As M-05 "clarifying question" (question, answer field, "Add to notes and suggest again", "I'll write my own step"), with the provider line. The answer is a normal notes edit (applied locally, synced) and the next request carries the updated notes; the card adopts the task's new revision, so the person's own notes edit never makes the next decision stale | "OpenAI asked: What does "things" mean here?" | FR-021, FR-024 |
+| unsaved answer — leave? | as M-05 | as M-05 | as M-05 | FR-052 |
 | empty (first run / filtered) | **n/a** | — | — | — |
 | partial failure | as M-05 partial (fewer proposals) | — | — | FR-019 |
 
@@ -278,6 +286,7 @@ mutations disabled. Loading placeholders appear after 300 ms and are static
 | proposals → picked | model returns | Field + radios + provider/device line + "Add to Next actions" | "Add to Next actions" | FR-019, FR-020, US3-8 |
 | created | confirm | Task in Next in this project; status row gone; toast | "Added to Next actions in Garden" | US3-8 |
 | empty (first run) | project with no open tasks | One question; the answer is typed straight in as the next action | "What's the first thing you'd need to find out or decide for "Move abroad"?" | FR-021 |
+| model question | the project has open tasks but the model asked a clarifying question instead of proposing | Same layout as "empty (first run)": the model's question, an answer field that is the next action itself, "Add to Next actions". Nothing is appended anywhere (a project has no notes) and the navigator does not run again | "Which room comes first?" · "Add to Next actions" | FR-021 |
 | empty (filtered to nothing) | **n/a** | — | — | — |
 | error | cloud failure | Reason, Ref, Try again | "OpenAI couldn't be reached. Try again, or add a next action yourself." | FR-025, FR-045 |
 | partial failure | as M-05 | — | — | FR-019 |
@@ -333,6 +342,7 @@ review's projects step (D-03 hosting M-19). A web project-page entry is out of s
 | offline | no connection | Can review now; cross-device resume deferred | "Offline. You can review now and it syncs later. A review started on another device can be continued once you're back online." | FR-040 |
 | offline review replaced another | a review started offline here synced while another device had one open | The other device's review is closed as partial (decisions kept); this one continues; the resume card on the other device says so | "Your review on the web was closed when this one synced. Its 6 decisions are kept." | FR-029, SC-007 |
 | error | server check failed | Ref, Try again; can still start | "We couldn't check for a review in progress on your other devices." | FR-045 |
+| earlier review closed after a week | the person's open review was closed by the 7-day idle rule (FR-029) | A neutral line above Quick / Full; nothing is lost | "Your review from Fri 2 Oct was closed after a week without activity. Its 6 decisions are kept." | FR-029 |
 | empty (filtered) | **n/a** | — | — | — |
 | partial failure | **n/a** | — | — | — |
 
@@ -358,6 +368,7 @@ review's projects step (D-03 hosting M-19). A web project-page entry is out of s
 | leave with unsaved text, all steps | "Leave", "Skip" or "Next" while a field in the step holds unsaved text (M-14 line, M-18 follow-up or return title, M-20 concrete title, an M-16 card form) | The M-03 "unsaved text — leave?" confirmation comes first; the text is kept as a draft for that item | "Discard what you typed? It hasn't been saved." · "Keep editing" · "Discard" | FR-052 |
 | skipped, all steps | "Skip" | Next step; rail/progress shows the step as skipped | — | FR-029 |
 | review ended elsewhere, all steps | this device returns to a review that another device finished or replaced | A full-width notice instead of the step; nothing made here is lost | "This review was finished or replaced on your iPhone. Decisions you made here are kept." · "Open the review" | FR-029, SC-007 |
+| review closed after a week, all steps | this device returns to a review the 7-day idle rule closed (FR-029) | The same notice layout, with idle wording instead of "elsewhere" | "This review was closed after a week without activity. Its 6 decisions are kept." · "Open the review" | FR-029 |
 | review moved on elsewhere, all steps | the merged session's current step differs from this device's (another device continued) | Jumps to the merged step with a one-line note | "You continued this review on the web, so it's at step 6 now." | FR-029, US4-7 |
 | VoiceOver focus, all steps | step change; or a decision in M-16, M-18, M-20 | Focus moves to the step title on every step change, and to the next item's title after each decision | — | FR-034 |
 | offline | no connection | Identical (local) | — | FR-040 |
@@ -380,7 +391,8 @@ review's projects step (D-03 hosting M-19). A web project-page entry is out of s
 | > 15 items | Inbox > 15 | Three choices. The third processes 10 now, then releases the remainder to Someday (owner default). | "Process 10 now" / "Process all 23" / "Process 10, release the rest to Someday" | FR-030, US4-2 |
 | default: one at a time | processing | Existing Process inbox item view with its existing Undo toast | "Item 3 of 10" / "Is it actionable? Choose where it belongs." | FR-034 |
 | empty | Inbox empty | Finishes as a step with nothing to decide | "Inbox is empty / Nothing to process." | FR-029 |
-| done (with release) | queue finished | Processed and released counts, with Undo for the release until the step is left (as M-10) | "10 items processed · 12 released to Someday / maybe" · "Undo the release" | FR-030 |
+| done (with release) | queue finished | Processed and released counts, with Undo for the release until the step is left with Next, Skip or "Leave for now" (as M-10) | "10 items processed · 12 released to Someday / maybe" · "Undo the release" | FR-030 |
+| done (with release), resumed after interruption | app killed or backgrounded after the release, before the step was left | The step reopens on "done (with release)" with "Undo the release" still offered | "12 items were released to Someday / maybe." · "Undo the release" | FR-030 |
 | undo of one item | Undo in the existing Process inbox toast | The item returns to Inbox and becomes current again; "Inbox processed" goes down by one | (existing Process inbox copy) | FR-048 |
 | partial failure | an item changed elsewhere | Named; stays in Inbox | ""Buy printer paper" was changed on another device, so it stayed in Inbox." | FR-011 |
 | offline | no connection | Works locally | — | FR-040 |
@@ -390,10 +402,11 @@ review's projects step (D-03 hosting M-19). A web project-page entry is out of s
 
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
-| default | step opens, or the widget's "N ask" chip is tapped | M-03 card full-screen, "1 of 5 · oldest first", "Not now". The queue holds every task that asks for a decision, including moves-tomorrow ones, earliest-asking first (FR-004) | — | FR-034, US4-3, FR-037 |
+| default | step opens, or the widget's "N ask" chip is tapped | M-03 card full-screen, "1 of 5 · earliest-asking first", "Not now". The queue holds every task that asks for a decision, including moves-tomorrow ones, earliest-asking first (FR-004) | — | FR-034, US4-3, FR-037 |
 | next card, with Undo | a decision made | One status line with Undo (~5 s; with VoiceOver at least 10 s, announced), then the next card. Undo reverts the task and brings its card back as current. | ""Update the CV" released to Someday" · "Undo" | FR-034, FR-048 |
 | undo didn't apply | Undo after the task changed elsewhere | As M-03 "undo didn't apply"; the next card stays | as M-03 | FR-048 |
-| all decided | queue empty | Count | "All 5 decided / Nothing in Next is waiting for a decision now." | SC-002 |
+| all decided | queue empty, and none of the decided tasks still asks | Count | "All 5 decided / Nothing in Next is waiting for a decision now." | SC-002 |
+| all decided, one kept its wording | queue empty, but a card was saved with "Save anyway" (cosmetic change, FR-002): that is a decision and the card moved on, yet the task still asks | Count, and the second line names how many still ask instead of claiming none do | "All 5 decided / 1 kept its wording, so it still asks for a decision." | FR-002, SC-002 |
 | some left | "Not now" used | Neutral count. Those tasks keep asking and auto-park continues on schedule. This review is excluded from the SC-002 measurement. | "3 of 5 decided / 2 still ask for a decision. They stay in Next whenever you're ready, and move to Someday on their usual date if nothing is decided." | FR-050, SC-002 |
 | empty | nothing asks | Finishes with nothing to decide | "Nothing asks for a decision" | FR-029 |
 | threshold changed mid-review | change on another device | Queue unchanged; note | "Your threshold changed to 21 days. This list stays as it is…" | FR-039, edge case |
@@ -481,6 +494,9 @@ review's projects step (D-03 hosting M-19). A web project-page entry is out of s
 | delete model (confirm) | Delete downloaded model | Alert stating what is freed and what changes | "Delete the downloaded model? Frees 1.1 GB…" | FR-049 |
 | empty (first run) | nothing set up | Defaults; "Not yet"; "Not downloaded"; "Ask me"; consent off | "Last review: Not yet" | FR-023, FR-038 |
 | revoked | toggle off | Immediate stop, note | "Cloud suggestions are off. Nothing will be sent to OpenAI." | FR-024 |
+| model downloading | the downloadable model is downloading (started from M-06; it keeps running after the card is left) | The "Downloaded model" row shows progress and "Cancel download" | "Downloaded model · 420 MB of 1.1 GB" · "Cancel download" | FR-049 |
+| download interrupted | the download stopped (connection, storage, the system dropped it) | The row shows the reason and "Retry download" | "Download paused at 420 MB: no connection." · "Retry download" | FR-049 |
+| feature switched off, consent stored | the `weekly_review` flag is off for the account but a cloud consent exists | Only the "Cloud suggestions" switch is shown (the rest of the Weekly review section is hidden), so the consent can still be seen and turned off | "Cloud suggestions · OpenAI · allowed since Sat 3 Oct" | FR-024 |
 | offline | no connection | Editable; sync later; revoke effective at once on this iPhone | "Offline — 2 changes waiting. Other devices stop cloud suggestions once this change syncs." | FR-024, FR-040 |
 | error | account rejected change | Kept locally, retried, Ref | "Your new review day couldn't be saved to your account yet." | FR-045 |
 | loading / filtered / partial | **n/a** (local) | — | — | — |
@@ -537,7 +553,9 @@ the review onboarding (M-12). It ships in increment 1 with auto-park.
 | empty (filtered to nothing) | filter matches nothing | Copy + Clear filter | "No next actions tagged errands" | — |
 | error | list fetch failed | Reason, Ref, Retry | "We couldn't load your next actions" + Ref | FR-045 |
 | partial failure | **n/a** — one list response | — | — | — |
-| offline / interrupted | offline | Banner; markers still shown; marker buttons disabled | "You're offline. Decisions need a connection. Retry when you're back online." | FR-040 |
+| offline / interrupted | offline | Banner; markers still shown; marker buttons stay focusable and in the tab order with `aria-disabled="true"` and the offline reason as their accessible description; activating one opens D-02 in its offline state | "You're offline. Decisions need a connection. Retry when you're back online." | FR-040 |
+| sidebar recap: loading / failed | `GET /review/state` pending or failed | No "Last review" line; the "Weekly review" link works | — | FR-038 |
+| sidebar recap: never reviewed | no counted review yet | The recap line offers setup instead of a day count | "Set up in a minute" | FR-035, FR-038 |
 | threshold just changed | D-04 change | One-time note | as M-01 | FR-039 |
 | not activated | explainer never seen | No markers; D-05 opens first | — | FR-051 |
 | While you were away (dialog at app open) | unseen parks at web open | M-09 content in a modal dialog. Focus goes to the dialog heading and is trapped. Esc and Close close **without** acknowledging (as iOS swipe-down: shown again at the next web open, at most once per day); focus returns to the main list heading. "Continue" acknowledges | as M-09 | FR-015 |
@@ -545,6 +563,8 @@ the review onboarding (M-12). It ships in increment 1 with auto-park.
 | WYWA: return failed | non-stale failure | Row message with Ref and Retry | "Couldn't return "Update the CV" to Next. It's still in Someday / maybe." + Ref · "Retry" | FR-015, FR-045 |
 | WYWA: partial failure | Return all with stale or archived rows | As M-09 partial-failure rows | as M-09 | FR-011, FR-015 |
 | WYWA: offline | offline at web open | List shown; return buttons disabled with reason | "You're offline. Returning tasks needs a connection." | FR-040 |
+| WYWA: continue not saved | the acknowledgement request after "Continue" failed | The dialog stays; banner with Ref and Retry; the parks stay unseen | "Couldn't save that you've seen these. Try again." + Ref · "Retry" | FR-015, FR-045 |
+| WYWA: continued | "Continue" saved | The dialog closes; focus goes to the main list heading | — | FR-015 |
 | narrow (390 px) | viewport ≤ 390 px | Marker chip wraps under the title in the compact row (44 px hit area kept); the mobile navigation drawer shows the working "Weekly review" link with "Last review: 9 days ago" under it; no horizontal scroll | as default | FR-004, FR-038, FR-042 |
 
 ### D-02 — Decision dialog with the AI navigator (web)
@@ -569,6 +589,12 @@ the review onboarding (M-12). It ships in increment 1 with auto-park.
 | decision applied, with Undo | server confirmed | Dialog closes, row updates, and a bottom-left toast offers Undo for ~5 s. Focus goes to the next row. Ctrl+Z / Cmd+Z triggers Undo while the toast is visible (outside text fields), so keyboard users need not tab to it | ""Renovate the bathroom" released to Someday" · "Undo" | FR-006, FR-048 |
 | undo didn't apply | 409 `undo_unavailable` | The toast turns into a message with Ref | "Couldn't undo: "Renovate the bathroom" changed on another device. It's in Someday / maybe now." + Ref | FR-048, FR-045 |
 | offline / interrupted | offline; tab closed mid-dialog | Decisions disabled with reason; closing applies nothing to the task; typed text is kept as a browser-local draft (and the browser warns before the tab closes) | "You're offline. Decisions need a connection on the web." | FR-040, FR-052 |
+| clarifying question (cloud) | the cloud model asked one question | M-05 "clarifying question" content with the provider line: question, answer field, "Add to notes and suggest again", "I'll write my own step"; focus on the answer field | as M-07 "clarifying question (cloud)" | FR-021, FR-024 |
+| adding answer | "Add to notes and suggest again" pressed | Stage 1 saves the answer to the task's notes: "Saving…" on the button after 300 ms, other controls disabled | "Saving…" | FR-021 |
+| answer not saved | the notes save failed | Banner with Ref and Retry; the answer stays in the field and is kept as a browser-local draft (FR-052); nothing changed | "Couldn't add your answer to the notes. Nothing was changed." + Ref · "Retry" | FR-021, FR-045, FR-052 |
+| answer saved, suggestion failed | stage 2 (the new cloud request) failed after the notes were saved | The notes keep the answer (shown in the card); the M-07 timeout / cost-cap / provider copy with its Ref; "Try again" re-runs the navigator without adding the answer a second time | as M-07 errors | FR-021, FR-025, FR-045 |
+| answer saved, card current | the notes save succeeded | The card shows the new notes and adopts the task's new revision, so the person's own edit never makes the next decision show "Task changed elsewhere" | — | FR-011, FR-021 |
+| browser Back / route change | browser Back, a history change or an in-app link while the dialog is open | Back closes the dialog like Close (focus returns to the control that opened it); when a field holds unsaved text the "Discard your new wording?" confirmation comes first (focus "Keep editing"), and "Keep editing" keeps the dialog and the URL | as "unsaved text — leave?" | FR-052 |
 | empty (first run / filtered) | **n/a** | — | — | — |
 | partial failure | **n/a** — single command (as M-03) | — | — | — |
 
@@ -577,27 +603,38 @@ the review onboarding (M-12). It ships in increment 1 with auto-park.
 | state | trigger | what the user sees | copy | FR/SC refs |
 |---|---|---|---|---|
 | default: entry / resume | /review | Resume card first if open; Quick / Full | as M-11 | FR-027, FR-029 |
+| entry: last review summary | /review with no open review and a last counted review (`last_counted_review` in `GET /review/state`) | Below Quick / Full, a compact card "Last review · Wed 30 Sep · on iPhone" with the ten M-22 counts (zero dimmed) and the "clear start" answer if given; a review finished offline on iOS appears here once it has synced | "Last review · Wed 30 Sep · on iPhone" | FR-033, FR-038, SC-007 |
+| entry: earlier review closed after a week | as M-11 | as M-11 | as M-11 | FR-029 |
 | onboarding | first time | M-12 as a dialog with selects and a segmented threshold. It states that the web sends no reminders. | "The web doesn't send reminders; the sidebar shows when your last review was." | FR-035, FR-036 |
-| While you were away | unseen parks | M-09 as a list | as M-09 | FR-015 |
+| While you were away | unseen parks | M-09 as a list. D-01's "WYWA: returning", "WYWA: return failed", "WYWA: partial failure" and "WYWA: continue not saved" rows apply here unchanged | as M-09 | FR-015 |
 | restart mode | 21+ days | M-10 with Undo, including "undone, some skipped" and, after a tab reload, "released, resumed after interruption" | as M-10 | FR-017 |
-| step with rail | any step | 240 px rail (done / skipped / current, not jumpable) and a single 600 px column. The decision, Inbox, Waiting and Someday steps show an Undo status line for ~5 s after each decision (Ctrl+Z / Cmd+Z while visible). "Not now" passes a card. In the decision step the D-02 card is inline: Esc does nothing there (it never closes the review) and keys 1–7 still work; D-02's saving, save-failed, stale, decision-not-allowed and undo-didn't-apply rows apply to the inline card. | — | FR-028, FR-029, FR-034, FR-050, FR-048 |
+| restart: releasing | "Release 17 to Someday" pressed | "Releasing…" on the button after 300 ms; other controls disabled | "Releasing…" | FR-017 |
+| restart: release failed | the bulk release request failed (non-stale) | Banner with Ref and Retry; nothing moved | "Couldn't release these tasks. Nothing was moved." + Ref · "Retry" | FR-017, FR-045 |
+| restart: undoing / undo failed | "Undo the 17" pending / failed (non-stale) | "Undoing…" on the button; on failure a banner with Ref and Retry, and Undo stays offered | "Couldn't undo the release. The 17 tasks are still in Someday / maybe." + Ref · "Retry" | FR-017, FR-045 |
+| step with rail | any step | 240 px rail (done / skipped / current, not jumpable) and a single 600 px column. The decision, Inbox, Waiting and Someday steps show an Undo status line for ~5 s after each decision (Ctrl+Z / Cmd+Z while visible). "Not now" passes a card. In the decision step the D-02 card is inline: Esc on the card itself does nothing (it never closes the review); Esc inside one of its forms behaves as in D-02 — it returns to the card, and when the field holds unsaved text the "Discard your new wording?" confirmation comes first, focus on "Keep editing". Keys 1–7 still work; D-02's saving, save-failed, stale, decision-not-allowed, undo-didn't-apply and clarifying-question rows apply to the inline card. | — | FR-028, FR-029, FR-034, FR-050, FR-048, FR-052 |
+| step loading | a step's content (`GET /review/queues/{step}`) has not arrived | The step heading is visible and focused; static placeholders in the column after 300 ms; Skip step and Leave stay enabled | — | FR-028 |
+| step load failed | that request failed | Banner in the column with Ref, "Retry" and "Skip step"; progress is safe | "We couldn't load this step. Your progress is safe." + Ref · "Retry" · "Skip step" | FR-029, FR-045 |
 | Inbox step: over 15 items | Inbox > 15 | The three FR-030 choices as buttons, focus on the heading | as M-15 | FR-030 |
 | Inbox step: one at a time | processing | "Item 3 of 10", the item title, and the web choices: Next actions, Waiting for (with who/what), Someday / maybe, Done (2-minute rule), Cancel, Edit title; tab order heading → title → choices; after each choice focus moves to the next item's heading; Undo status line ~5 s returns the item to Inbox (FR-048) | "Item 3 of 10" / "Is it actionable? Choose where it belongs." | FR-030, FR-034, FR-048 |
 | Inbox step: saving / failed | a choice pending / failed (non-stale) | Pending on the chosen button only, others disabled, "Saving…" after 300 ms; failure: banner with Ref and Retry, item stays current | "Couldn't save that choice. Nothing was changed." + Ref | FR-045 |
 | Inbox step: partial failure | an item changed elsewhere | Named; it stays in Inbox | ""Buy printer paper" was changed on another device, so it stayed in Inbox." | FR-011 |
-| Inbox step: done (with release) / empty | queue finished / Inbox empty | As M-15, with "Undo the release" until the step is left | as M-15 | FR-029, FR-030 |
+| Inbox step: done (with release) / empty | queue finished / Inbox empty | As M-15, with "Undo the release" until the step is left (Next, Skip or Leave); after a tab reload the step reopens on this state with Undo still offered | as M-15 | FR-029, FR-030 |
+| Inbox step: releasing / release failed | "Process 10, release the rest" reaches the release, or it fails (non-stale) | "Releasing…" after 300 ms; on failure a banner with Ref and Retry, nothing moved | "Couldn't release the rest of your Inbox. Nothing was moved." + Ref · "Retry" | FR-030, FR-045 |
+| Inbox step: undo of the release failed | "Undo the release" failed (non-stale) | Banner with Ref and Retry; Undo stays offered | "Couldn't undo the release. The 12 items are still in Someday / maybe." + Ref · "Retry" | FR-030, FR-045 |
 | step action saving | any web step action (M-14 Add, M-15 item, M-18 decision, M-19 Add next action, M-20 decision, M-22 answer or Done) | Pending on the chosen button only, others disabled, "Saving…" after 300 ms | "Saving…" | FR-045 |
 | step action failed | that request failed (non-stale) | Banner in the column with Ref and Retry; nothing changed | "Couldn't save "Keep waiting". Nothing was changed." + Ref · "Retry" | FR-045 |
 | skip not saved | the session PATCH for Skip failed | Banner; the step stays current | "Couldn't save that you skipped this step. Try again." + Ref | FR-029, FR-045 |
 | review ended elsewhere / moved on elsewhere | as M-13 | As M-13, focus to the notice heading | as M-13 | FR-029, SC-007 |
 | leave with unsaved text | Leave, Skip or next item with a changed field | As M-13 "leave with unsaved text" (dialog, focus "Keep editing") plus the browser leave warning on tab close | as M-13 | FR-052 |
-| narrow (390 px) | viewport ≤ 390 px | The rail collapses into "Step 4 of 10" text above a full-width column; Skip and Leave stay at the top; no horizontal scroll | "Step 4 of 10" | FR-040 |
+| browser Back / route change | browser Back, a history change or an in-app link away from `/review` | Acts as "Leave": the Leave confirmation ("Take a break?…", focus on "Keep going"); if a field holds unsaved text, the "Discard what you typed?" confirmation comes first. "Keep going" stays on `/review` (the history entry is restored); "Leave for now" pauses the review as M-13 | as M-13 | FR-029, FR-052 |
+| review closed after a week | as M-13 | As M-13, focus to the notice heading | as M-13 | FR-029 |
+| narrow (390 px) | viewport ≤ 390 px | The rail collapses into "Step 4 of 10" text above a full-width column; Skip and Leave stay at the top; the Waiting step's decision buttons stack full width; the summary's counts grid becomes 2 columns; no horizontal scroll | "Step 4 of 10" | FR-040 |
 | Waiting / capacity mirror | full steps | Wider layouts of M-17 and M-18 | as M-17, M-18 | FR-031, FR-032 |
 | summary | last step | 4-column counts grid, next review, question | as M-22 | FR-033 |
 | loading | route load > 300 ms | Static placeholders | — | — |
 | error | review load failed | Reason, Ref, Retry; progress safe | "We couldn't load your review. Your progress is safe." | FR-045 |
 | offline / interrupted | offline; tab closed | Progress saved server-side as of the last decision; Retry; resume anywhere | "You're offline. Decisions made so far are saved. Retry when you're back online, here or on another device." | FR-029, FR-040 |
-| empty / partial | per-step as the matching M- screen; per-step saving and errors are the "step action" rows above, because on the web every step action is a server request (the M- rows' "n/a (local)" reasons do not apply) | — | — | — |
+| empty / partial | per-step as the matching M- screen; per-step loading, saving and errors are the "step loading", "step load failed", "step action", restart and Inbox-release rows above, because on the web every step's content and every step action is a server request (the M- rows' "n/a (local)" reasons do not apply) | — | — | — |
 
 ### D-04 — Settings (web)
 
@@ -612,6 +649,7 @@ the review onboarding (M-12). It ships in increment 1 with auto-park.
 | offline / interrupted | offline | Saving disabled; revoke still stops this tab at once | "You're offline. Changes can't be saved… Other devices keep cloud suggestions until you turn them off while online." | FR-024, FR-040 |
 | partial failure / filtered | **n/a** — each control saves independently | — | — | — |
 | narrow (390 px) | viewport ≤ 390 px | One column; each row stacks label above control | as default | FR-040 |
+| feature switched off, consent stored | the flag is off for the account but a cloud consent exists | Only the "Cloud suggestions" switch is shown, so the consent can be seen and turned off (`GET /review/navigator` and the revoke are never gated) | as M-23 | FR-024 |
 
 ### D-05 — Auto-park explainer (web; new, 2026-10-06, owner decision PD-3)
 
@@ -630,6 +668,31 @@ on, unless the explainer was already seen on any device (`explainer_seen` in
 | narrow (390 px) | viewport ≤ 390 px | Full-height sheet | as default | FR-040 |
 | loading / empty / partial / filtered | **n/a** — shown only after the state has loaded | — | — | — |
 
+### D-06 — Task inline detail, "This wording" block (web; new, 2026-10-06, campaign 2)
+
+The M-02 content placed in the existing web inline task detail
+(`frontend/src/features/tasks/TaskDetailPanel.tsx`), as a block under the title. No
+separate mockup: the M-02 frames show content and copy, laid out in the panel's
+single column. Web acceptance cites D-06 with the M-02 state id.
+
+| state | trigger | what the user sees | copy | FR/SC refs |
+|---|---|---|---|---|
+| asks + Decide | task asks for a decision | As M-02 "default (asks)"; "Decide" button | as M-02 | FR-001, FR-003, FR-010 |
+| ageing / fresh | age < T | As M-02: the "Ageing" chip (its only web place) and the ask date, or days only; no Decide | as M-02 | FR-004 |
+| clock paused | future due date | As M-02 | as M-02 | FR-046 |
+| moves to Someday tomorrow | within 24 h of park | As M-02, with Decide | as M-02 | FR-012, SC-006 |
+| kept 7 more days | extension used | As M-02 | as M-02 | FR-009 |
+| parked automatically / parked, project archived | task in Someday via auto-park | As M-02 | as M-02 | FR-012 |
+| not activated | explainer not yet seen | No block | — | FR-051 |
+| loading | task detail still loading | The block appears with the task; no separate placeholder | — | — |
+| error | **n/a** — computed from the task already loaded (server instants and the browser clock) | — | — | — |
+| offline | offline | Facts still shown; "Decide" stays focusable with `aria-disabled` and the D-01 offline reason | "You're offline. Decisions need a connection. Retry when you're back online." | FR-040 |
+| narrow (390 px) | viewport ≤ 390 px | The block stacks under the title at full width; "Decide" is full width with a 44 px target | as default | FR-040 |
+
+Keyboard: "Decide" follows the block's text in the tab order and opens D-02; when D-02
+closes, focus returns to "Decide" (or, after a decision removed the task from Next, to
+the panel heading).
+
 ## Affordance → requirement map
 
 Existing controls that this feature leaves unchanged (filters, list rows,
@@ -640,9 +703,10 @@ completion buttons, project/Tag pickers) are not listed.
 |---|---|---|---|
 | M-01, D-01 | "Asks for a decision" marker button | Opens the decision card for that task | FR-004, FR-010 |
 | M-01, D-01 | "Moves to Someday tomorrow" marker button | Opens the decision card | FR-004, FR-010, FR-012 |
-| M-02, web inline task detail | "Ageing" marker (not interactive; never in lists) | Shows the ageing state in task detail only | FR-004 |
+| M-02, D-06 | "Ageing" marker (not interactive; never in lists) | Shows the ageing state in task detail only | FR-004 |
 | M-01, D-01 | Threshold-changed note "OK" | Dismisses the one-time note | FR-039 |
-| M-02 | "Decide" | Opens the decision card from the task, any day | FR-010 |
+| M-02, D-06 | "Decide" | Opens the decision card from the task, any day (D-06 opens D-02) | FR-010 |
+| M-01 | Note "1 decision couldn't be saved" | Opens the Sync issues screen with the rejected decision and its Ref | FR-011, FR-045 |
 | M-03, M-16, D-02, D-03 | Stall reason chips (6, toggle) | Records optional reason; highlights a recommended decision | FR-007 |
 | M-03, M-16, D-02, D-03 | Done | Completes the task | FR-006 |
 | M-03, M-16, D-02, D-03 | Reformulate | Opens the reformulate form | FR-006 |
@@ -672,8 +736,9 @@ completion buttons, project/Tag pickers) are not listed.
 | M-05, M-07, M-08, D-02 | Stop | Cancels a running suggestion | FR-020 |
 | M-05, M-06, M-07, M-08, D-02 | Proposal radio | Fills the field for editing | FR-020 |
 | M-05, M-06, M-07, M-08, D-02 | None of these | Discards proposals, task unchanged | FR-020 |
-| M-05 | Clarifying answer field + "Add to notes and suggest again" | Appends the answer to notes, re-runs | FR-021 |
-| M-05 | "I'll write my own step" | Closes the question | FR-021 |
+| M-05, M-07, D-02 | Clarifying answer field + "Add to notes and suggest again" | Appends the answer to notes, re-runs | FR-021 |
+| M-05, M-07, D-02 | "I'll write my own step" | Closes the question | FR-021 |
+| M-05, M-07, M-08, D-02 | "Suggest again" after "Suggestion stopped." | Re-runs a suggestion that was cancelled by backgrounding or dismissal | FR-020 |
 | M-05 | Try again (on-device error) | Re-runs on device | FR-022 |
 | M-06 | "Download 1.1 GB" | Starts the explicit model download | FR-023, FR-049 |
 | M-06 | "Continue with cloud" / "Use OpenAI in the cloud instead" | Goes to consent (M-07) | FR-023, FR-024 |
@@ -685,7 +750,8 @@ completion buttons, project/Tag pickers) are not listed.
 | M-07, M-08, D-02 | Try again (cloud) | Retries after a provider failure | FR-025 |
 | M-08, M-19 | "Suggest a next action" / "Suggest" | Runs the navigator for a project | FR-019 |
 | M-08 | "Add to Next actions" | Creates the confirmed next action in the project | FR-020 |
-| M-08 | Empty-project answer field + "Add to Next actions" | Creates the next action typed in answer to the question | FR-021 |
+| M-08 | Empty-project or model-question answer field + "Add to Next actions" | Creates the next action typed in answer to the question | FR-021 |
+| M-23 | "Cancel download" / "Retry download" on the Downloaded model row | Stops (and discards) / resumes the model download from settings | FR-049 |
 | M-09, D-03 | Return to Next (per row) | Returns one parked task with a fresh formulation | FR-015 |
 | M-09, D-03 | Return all N / the other N | Returns every unreturned parked task | FR-015 |
 | M-09, D-01, D-03 | Continue | Marks parks as seen, proceeds | FR-015 |
@@ -701,7 +767,8 @@ completion buttons, project/Tag pickers) are not listed.
 | M-11, D-03 | Continue (resume) | Resumes an open review at its step | FR-029 |
 | M-11, D-03 | Start a new review | Starts fresh; the open one is closed as partial/abandoned | FR-027, FR-029 |
 | M-11, D-03 | Close | Leaves the review entry | FR-029 |
-| M-11, M-12, D-01, D-03 | Try again / Retry (server error) | Retries the failed request | FR-045 |
+| M-11, M-12, D-01, D-02, D-03, D-05 | Try again / Retry (server error) | Retries the failed request (D-01 WYWA return or continue; D-02 save failed or answer not saved; D-03 step load, step action, restart or Inbox release and their Undo; D-05 saving failed) | FR-045 (and FR-015, FR-017, FR-021, FR-030, FR-051 for those rows) |
+| M-13, D-03 | "Open the review" on the "review ended elsewhere" / "closed after a week" notice | Opens the review entry (M-11) with the current state | FR-029 |
 | M-12, D-03 | Day, Time, threshold (7/14/21/28) | Collect review settings | FR-035 |
 | M-12, D-03 | Continue | Saves settings; triggers the iOS notification permission prompt | FR-035, FR-036 |
 | M-13 – M-21, D-03 | Skip / Skip step | Skips the current step | FR-029 |
@@ -728,8 +795,9 @@ completion buttons, project/Tag pickers) are not listed.
 | M-25 | Notification tap | Opens the review entry | FR-036 |
 
 Display-only surfaces carrying requirements: "N days in Next" and help line
-(M-02: FR-001, FR-003), paused line (M-02: FR-046), parked facts (M-02, M-09,
-M-20: FR-012), "Last review: N days ago" (M-11, M-23, D-01, D-04: FR-038),
+(M-02, D-06: FR-001, FR-003), paused line (M-02, D-06: FR-046), parked facts (M-02,
+D-06, M-09, M-20: FR-012), "Last review: N days ago" (M-11, M-23, D-01, D-04: FR-038),
+last review summary on the web review entry (D-03: FR-033, SC-007),
 onboarding promises (M-12: FR-016, FR-018), capacity mirror (M-17: FR-031),
 on-device note (M-05: FR-022), correlation IDs on every failure (FR-045).
 
@@ -777,7 +845,7 @@ Voice-led review and review of agent-delegated work are out of scope.
 ## Mobile viability
 
 - **Viewport**: every M- frame is drawn at 390 × 851 with no horizontal scroll. Long sheets (M-03, M-12, M-26) scroll vertically. The decision list sits in the lower half for thumb reach.
-- **Narrow web**: every D- screen has a "narrow (390 px)" state (D-01 chip wraps and drawer recap, D-02 full-height sheet, D-03 rail collapsed into "Step N of M", D-04 one column, D-05 full-height sheet). Playwright checks no horizontal overflow at 390 px for `/review` and the decision dialog; once the flag is on for the test user, E2E-MOBILE-02 expects a working "Weekly review" link instead of the disabled entry.
+- **Narrow web**: every D- screen has a "narrow (390 px)" state (D-01 chip wraps and drawer recap, D-02 full-height sheet, D-03 rail collapsed into "Step N of M" with stacked Waiting buttons and a 2-column summary grid, D-04 one column, D-05 full-height sheet, D-06 stacked block). Playwright checks no horizontal overflow at 390 × 851 for `/tasks/next` with markers, the decision dialog, `/review` (including the Waiting step and the summary), the review section of `/settings/account`, and D-05; once the flag is on for the test user, E2E-MOBILE-02 expects a working "Weekly review" link instead of the disabled entry.
 - **Unsaved text**: no typed text is lost without a choice (FR-052): sheets holding unsaved text cannot be swiped away, leaving asks first, and drafts survive an app kill.
 - **Tap targets**: 44 pt minimum everywhere. Reason chips and decision rows are 44–54 pt. Marker chips are about 22 pt tall but have a 44 × 44 pt hit area through an invisible inset (`button.mk::after`), and the whole row also opens the task. In medium and large widgets, the "N ask ›" chip is a link with a 44 × 44 pt hit area; in the small widget the chip is display-only and the widget opens Next. Undo buttons in toasts and status lines are 44 × 44 pt.
 - **One-handed reach**: primary actions are in the bottom bar (review steps) or the lower half of the sheet (card). "Leave" / "Skip" are at the top, deliberately harder to hit by accident.
@@ -802,10 +870,13 @@ Voice-led review and review of agent-delegated work are out of scope.
   - D-03 onboarding focuses its heading "A weekly reset"; Esc / Close saves nothing, onboarding shows again next time, and focus returns to the entry's Close.
   - The Leave confirmation focuses "Keep going"; Esc means Keep going and focus returns to "Leave".
   - The unsaved-text confirmation focuses "Keep editing"; Esc means Keep editing.
-  - The While-you-were-away dialog (D-01) and D-05 focus their headings.
+  - The While-you-were-away dialog (D-01) and D-05 focus their headings. After the While-you-were-away "Continue" (or Esc / Close), focus goes to the main list heading.
   - iOS: VoiceOver focus goes to the card title (as Process inbox does), to the step title on every step change, and to the next item's title after each decision in M-16, M-18 and M-20.
+  - iOS sheets and covers that appear without a tap — M-26 and M-09 at app open, and the review covers M-10, M-11 and M-12 — move VoiceOver focus to their heading when they appear.
+  - iOS after dismissal: when M-26 or M-09 closes, focus goes to the current tab's navigation title, or to M-11's heading when they were shown on the way into the review (entry order). When M-06 or M-07 closes ("Not now", "Allow and suggest", "Continue with cloud"), focus returns to the "Suggest" control, or to the first proposal when proposals arrived.
 - **Focus restored on close to**: the marker chip or "Decide" button that opened the card. After a decision removes that row, focus goes to the next row's title. Closing the consent dialog returns focus to "Suggest" (D-02) or to the switch (D-04).
-- **Escape**: closes D-02 with no change (asking first when a form holds unsaved text). Inside a form it returns to the card first. In D-03, Escape closes nested dialogs only, never the review; on the inline decision card in D-03 it does nothing.
+- **Escape**: closes D-02 with no change (asking first when a form holds unsaved text). Inside a form it returns to the card first. In D-03, Escape closes nested dialogs only, never the review. On the inline decision card in D-03, Escape on the card itself does nothing; inside one of the card's forms it acts as in D-02 (returns to the card, asking first with focus on "Keep editing" when the field holds unsaved text). These rules are ordered: the unsaved-text confirmation (FR-052) always comes first, then "return to the card", and nothing ever closes the review.
+- **Browser Back**: on `/review` it acts as "Leave"; with D-02 open it acts as Close; in both cases the unsaved-text confirmation comes first (D-02, D-03 "browser Back / route change").
 - **Number keys** (D-02 and the inline card): 1 … 7 are inactive while a text field has focus; elsewhere they map to the numerals shown beside the decisions, so the mapping stays visible when only six are offered.
 - **Accessible names**:
   - Marker buttons: "Asks for a decision. Open decision for <title>".
@@ -863,6 +934,33 @@ caption on Suggest; focus traps and Escape rules; keyboard and VoiceOver Undo; w
 entry order (M-24); Undo for the Inbox-remainder release (M-15); M-09 swipe-down
 meaning; third-stall offer without a canvas on iOS (M-03); M-04 date copy corrected
 to "Fri 16 Oct" (NC-1).
+
+## Amendments 2026-10-06 (campaign 2)
+
+Planning-review campaign 2 (`020-weekly-review-c2`) found state, focus and
+traceability gaps; no owner decision was needed or changed (details in
+`review-c2-disposition.md`):
+
+- **New screen D-06**: the web inline task detail "This wording" block, with states
+  and keyboard rules (no separate mockup; M-02 content).
+- **Web server-request states**: D-03 step loading / load failed; restart releasing,
+  release failed, undo failed; Inbox-remainder releasing / failed / undo failed; the
+  D-01 While-you-were-away rows apply inside D-03; "continue not saved".
+- **Cloud clarifying question**: M-07 and D-02 rows, including D-02's two-stage
+  answer save and suggestion, and the card adopting its own notes edit.
+- **Model download lifecycle**: M-06 resumed after reopen, finished while away,
+  cancelled; M-23 downloading and interrupted rows.
+- **Browser Back / route change** on D-02 and D-03; Escape order on the inline card.
+- **Review closed after a week** (M-11, M-13, D-03), web **last review summary** on the
+  review entry (SC-007), Inbox-release Undo after an interruption (M-15).
+- **iOS VoiceOver focus** for screens shown without a tap and after dismissal.
+- **Offline marker buttons** stay focusable (D-01); sidebar recap loading / failed /
+  never reviewed; settings keep the cloud-consent switch when the feature is off
+  (M-23, D-04).
+- **Copy**: "earliest-asking first" replaces "oldest first" (M-16, D-03, M-24
+  mockups); the marker table states the extension rule as in NC-1; the M-03 error copy
+  names the task's current list and has a "parked before the decision synced"
+  variant; M-16 "all decided, one kept its wording"; M-08 "model question".
 
 ## Notes for the plan
 

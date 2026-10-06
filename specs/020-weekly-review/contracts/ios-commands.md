@@ -149,8 +149,8 @@ early.
   decision applied with `yielded_auto_park: true`, zero sync issues). Only if the
   formulation itself changed is the operation set aside as a `SyncIssue` with its
   reference id and copy that names the task's **current** list from the refetched
-  task, never an assumed one: "Your decision "Move to Waiting for" on "<title>"
-  couldn't be saved to your account. It's in <current list> now." When that list is
+  task, never an assumed one: "Your decision "<decision>" on "<title>" couldn't be
+  saved to your account. It's in <current list> now." When that list is
   Someday because of an auto-park, the copy says "It moved to Someday / maybe
   automatically before your decision synced" and the task is listed on "While you
   were away" (design M-03 error rows).
@@ -168,7 +168,7 @@ early.
   | `acknowledgeExplainer` | idempotent, first wins | always succeeds; pulled `activatedAt` replaces the local one |
   | `updateSettings` | 409 on `expected_revision` mismatch | refetch state, re-apply only the fields this change set (field-level last writer wins), resend with the new revision |
   | `acknowledgeParks` | idempotent, unknown ids ignored | always succeeds |
-  | `startSession` | client `id`, `replace_open: true`; replay with the same id returns the session | never 409; if another device's open session was replaced, that device shows "review ended elsewhere" |
+  | `startSession` | client `id`, `replace_open: true`; replay only by the same Idempotency-Key (the id is a label, http "Client-supplied ids"); the device keeps the key until success | never 409; if another device's open session was replaced, that device shows "review ended elsewhere" |
   | `progressSession` | merged, never 409 (http §6) | adopt the merged session; if its `current_step` differs, show "review moved on elsewhere" |
   | `finishSession` | idempotent | adopt the returned session |
   | `grant/revokeNavigatorConsent` | idempotent | revoke blocks locally at once |

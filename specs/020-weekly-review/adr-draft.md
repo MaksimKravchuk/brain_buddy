@@ -206,7 +206,7 @@ change. The review works offline on iOS and account-less. Parity is testable fro
 rule and one vector file.
 
 **Negative.** The Tasks module grows (formulation clock, review records, navigator
-adapter). `TaskResponse` and the iOS `TaskDTO`/`TaskRecord` gain fields; the iOS
+schema, validation and consent rules; the HTTP adapter stays in `backend/app/ai/`). `TaskResponse` and the iOS `TaskDTO`/`TaskRecord` gain fields; the iOS
 `StoreDocument` moves to version 2. The maintenance thread gains a per-owner sweep.
 A due date that keeps moving forward defers the rule (accepted; measured, not
 blocked).
