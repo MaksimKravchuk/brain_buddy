@@ -289,7 +289,7 @@ Errors:
 | 400 | `decision_not_allowed` | type not allowed for the task's state | "This decision isn't available for this task's current list. Nothing was changed." + Ref (M-03 / D-02 "decision not allowed") |
 | 400 | `extension_already_used` / `extension_not_due` | FR-009 | card hides the option; server is the backstop |
 | 400 | `project_archived` | `follow_up`/`return_to_next` into an archived project | M-18 archived, M-09 partial |
-| 400 | `details_too_long` | `first_step` when `"Was: <old title>\n\n<old details>"` would exceed 20 000 characters; nothing changes | |
+| 400 | `details_too_long` | `first_step` when `"Was: <old title>\n\n<old details>"` would exceed 20 000 characters; nothing changes | D-02 (web): "The notes would be too long with the old title added. Shorten the notes, then try again. Nothing was changed." + Ref; the form stays open with the typed step. iOS applies the same 20 000-character check offline in its reducer (`firstStep` → `GTDValidationError.detailsTooLong`), so the request is not sent |
 | 404 | `{resource, id}` | task not found or not owned (path id) | |
 | 409 | `id_conflict` | a supplied client id is already used by a record that does not match this request ("Retry after the idempotency retention": a matching record answers 200 as already applied, checked before the revision and eligibility rows above) | iOS sets aside with Ref (cannot happen with UUIDs in practice) |
 | 422 | (validation) | missing/oversized fields | |

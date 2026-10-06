@@ -194,7 +194,7 @@ a contract):
 - [x] T027 Write and observe RED `backend/tests/test_review_repository.py`: the eight review tables exist after `_initialize_database` (`CREATE TABLE IF NOT EXISTS`) with the ledger row `review-v1`; every read filters by `owner_id`; another owner's record reads as absent; `delete_all_for_owner` removes the review tables first inside its lock and is idempotent. *(020-FR-043)*
 - [x] T028 Make T027 GREEN with the records in `backend/app/modules/tasks/review_domain.py`, the TaskDocument fields in `backend/app/modules/tasks/domain.py`, and the SQL mixin `backend/app/modules/tasks/review_repository.py` composed into `backend/app/modules/tasks/repository.py`, quoting the data-model constraints: E1 `formulation_extension_reason` "`str | None` (1..500)", `consecutive_stalled_formulations` "`int ≥ 0`", `parked` "non-null only while `state == "someday"`" and "written **only by auto-park**"; E2 `threshold_days` "7 \| 14 \| 21 \| 28" default 14, `review_weekday` "1..7 (ISO, Monday = 1)" default 5, `review_time` "`HH:MM`" default `16:00`, `time_zone` "IANA name" default `UTC`, `activated_at` "immutable once set; first acknowledgement wins", `revision` "int ≥ 1"; E3 `mode` `quick | full`, `entry` `list | notification | widget_decisions | sidebar | restart`, `origin` `ios | web | macos`, `counts` "`{done, reformulated, first_step, waiting, someday, cancelled, extended, inbox_processed, kept, moved_to_next}`"; E4 `type` ∈ "`complete, reformulate, first_step, waiting, someday, cancel, extend, keep_waiting, follow_up, return_to_next, keep_someday`", `reason_text` "str (1..500) \| null … only for `extend`"; E5 `kind` "`waiting | someday`", `source` `keep | release`, `hidden_until` "`+7 d` waiting, `+30 d` someday"; E6 `source` "`sweep | device`"; E7 `kind (restart | inbox_remainder)`, `skipped` `reason: stale | not_eligible`; E8 `consent_text_version` and `history[]`; E9 `calls`, `estimated_cost_usd`, `reserved_cost_usd`, `shown`. *(020-FR-043)*
 - [x] T029 Generalise `_serialized_write` (`backend/app/modules/tasks/service.py` l.64-79) into a `SerializedWriter` protocol (`task_repo`, `_reconcile_idempotent_result`) with no behaviour change; `backend/tests/test_tasks_idempotency_repair.py` and the task suites stay green (c2 AC-05).
-- [x] T030 Create `ReviewService` in `backend/app/modules/tasks/review_service.py` (composes `TaskService` and calls its undecorated helpers inside its own serialized write; injected clock; its own `_apply_idempotent_record` registry for `decide_task:`, `undo_decision:`, `auto-park:`, `bulk_release:`, `undo_bulk_release:`, `review_session:`, `review_settings:`, `explainer_ack:`; logger `app.modules.tasks.review`), an empty `ReviewFlowService` in `backend/app/modules/tasks/review_flow.py` (filled by PR-11), and wire both in `backend/app/container.py`; `frozen_clock` now sets their clock too.
+- [x] T030 Create `ReviewService` in `backend/app/modules/tasks/review_service.py` (composes `TaskService` and calls its undecorated helpers inside its own serialized write; injected clock; its own `_apply_idempotent_record` registry for `decide_task:`, `undo_decision:`, `auto-park:`, `bulk_release:`, `undo_bulk_release:`, `review_session:`, `review_settings:`, `explainer_ack:`, `park_ack:`; logger `app.modules.tasks.review`), an empty `ReviewFlowService` in `backend/app/modules/tasks/review_flow.py` (filled by PR-11), and wire both in `backend/app/container.py`; `frozen_clock` now sets their clock too.
 - [x] T031 Write and observe RED `backend/tests/test_review_gate_api.py`: with `weekly_review` not effective, `GET /review/state` returns 404 `{"message": "Not found", "detail": {"reason": "weekly_review_disabled"}}`; with it effective the route answers; every response carries `X-Correlation-ID`. *(020-FR-042, 020-FR-045)*
 - [x] T032 Make T031 GREEN: `get_review_service`, `get_review_flow_service` and `require_weekly_review_enabled` (exposure only, the `require_voice_brain_dump_enabled` rule, l.361-385) in `backend/app/api/dependencies.py`; the routers `backend/app/api/review.py`, `backend/app/api/review_navigator.py` (empty) and `backend/app/api/review_flow.py` (empty), all mounted in `backend/app/api/__init__.py`. *(020-FR-042, 020-FR-045)*
 - [x] T033 Move the router-private `_to_response` (`backend/app/api/tasks.py` l.1183) to a public `task_response(task, *, subtasks, comments, formulation)` in `backend/app/api/task_mapping.py`, used by `backend/app/api/tasks.py`; `backend/tests/test_task_api.py` stays green (c2 AC-04).
@@ -398,6 +398,10 @@ a contract):
 - [ ] T142 [US4] M-17 – M-21 in the new `ios/BrainBuddy/Screens/Review/RestOfNextStep.swift`, `ios/BrainBuddy/Screens/Review/WaitingStep.swift`, `ios/BrainBuddy/Screens/Review/ProjectsStep.swift` (the M-08 block from PR-08), `ios/BrainBuddy/Screens/Review/SomedayStep.swift` and `ios/BrainBuddy/Screens/Review/DatesStep.swift`: the capacity mirror without a limit; Waiting keep / follow-up / return / cancel with Undo and the archived-project block; Someday keep / move to Next / cancel with Undo; unsaved titles kept as drafts. *(020-FR-019, 020-FR-028, 020-FR-031, 020-FR-032, 020-FR-034, 020-FR-048, 020-FR-052)*
 - [ ] T143 [US4] M-22 in the new `ios/BrainBuddy/Screens/Review/SummaryStep.swift`: ten counts in fixed order (zero dimmed), in two columns, one column at accessibility text sizes per `ReviewLayout` (M-22 "accessibility text size"), the calm all-zero line, "done without any step", the next review date, the optional "Clear how to start the week?", Done → `finishSession`; the restart, summary and step strings added to `ios/BrainBuddyKit/Sources/BrainBuddyCore/ReviewCopy.swift` (the banned-term test stays green). *(020-FR-029, 020-FR-033, 020-SC-003)*
 
+### Device decision Undo keeps the server's clock bookkeeping (slice PR-12, follow-up from PR-15)
+
+- [ ] T174 [US1] Align the device's decision Undo with the server's (contracts/formulation-clock.md §3 "decision undo", today scoped "Server only"). Write and observe RED first: add transition vectors to `backend/tests/fixtures/review_formulation_vectors.json` and, in the same commit, its byte-identical copies `ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources/review_formulation_vectors.json` and `frontend/src/features/review/__tests__/review_formulation_vectors.json` (formulation-clock §6 "Changing a vector after PR-02": this slice depends on every consumer, PR-03, PR-05, PR-15 and PR-11) for **floor kept** (a time-zone floor or an activation floor written after the decision survives an Undo back into Next: `formulation_park_floor_at = max(snapshot's, the current task's while it is in Next)`) and **clamp on restore** (a decision made before activation and undone after it gets the activation clamp on the restored clock), with the `undo_decision` event carrying the current task and the settings. Then GREEN: give the pure restore the current task and the settings (`formulation.restore` in `backend/app/modules/tasks/formulation.py`, its runner in `backend/tests/test_review_formulation_vectors.py`, and the restore in `ios/BrainBuddyKit/Sources/BrainBuddyCore/Formulation.swift`), make `ReviewService._restored_task` in `backend/app/modules/tasks/review_service.py` delegate to it so the server keeps one rule, and apply it in the reducer's `undoDecision` in `ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Review.swift` (tests in `ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/FormulationTests.swift` and `ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerReviewTests.swift`, names carrying `020-FR-048`); update `specs/020-weekly-review/contracts/ios-commands.md` §2 `undoDecision` (restores the snapshot, keeping the clock bookkeeping written since the decision) and drop the "Server only" scoping from formulation-clock §3, so an account-less device restores as the server does. *(020-FR-016, 020-FR-046, 020-FR-048)*
+
 ### Web review (slice PR-13)
 
 - [ ] T144 [US4] Add the path rule for `frontend/tests/e2e/weekly-review.spec.ts` to `frontend/tests/allure.fixtures.ts` (single owner of this file).
@@ -495,7 +499,7 @@ accepted on the pre-sync row and its recorded macOS-host run.
 - **Foundational (Phase 2)**: PR-02 depends on PR-01; PR-15 depends on PR-02. The iOS core (PR-03) and web (PR-05) lanes need only PR-02; the backend story work needs PR-15, and so does the iOS app slice PR-04 (it replays PR-15's decision and park traces, T173).
 - **US1 and US2 (Phases 3–4, P1)**: one increment. Activation (US2's explainer) is what makes US1's markers appear (FR-004 "Before activation"), so they ship together.
 - **US3 (Phase 5, P2)**: backend PR-07 after PR-15; iOS PR-08 after PR-04 and PR-07; PR-09 after PR-08 (late); web PR-10 after PR-05 and PR-07.
-- **US4 and US5 (Phases 6–7)**: backend PR-11 after PR-15 (a sibling of PR-07); iOS PR-12 after PR-08 and PR-11; web PR-13 after PR-10 and PR-11.
+- **US4 and US5 (Phases 6–7)**: backend PR-11 after PR-15 (a sibling of PR-07); iOS PR-12 after PR-08 and PR-11, and after PR-05 because T174 changes the formulation vectors that PR-05 consumes (formulation-clock §6); web PR-13 after PR-10 and PR-11.
 - **US6 (Phase 8)**: PR-06 after PR-01 only; the full Mac review is blocked on the Mac-sync spec.
 - **Polish (Phase 9, PR-14)**: after PR-06, PR-12 and PR-13 (and therefore every lane except the late PR-09; approved by the owner on 2026-10-06: FR-023 (a) and FR-049's remaining clauses are accepted when PR-09 lands).
 
@@ -517,7 +521,7 @@ PR-15                  → PR-07 (navigator backend), PR-11 (review-flow backend
 PR-03 + PR-15          → PR-04   # PR-15's decision/park traces replayed in Swift (T173)
 PR-04 + PR-07          → PR-08
 PR-08                  → PR-09 (late; may slip)
-PR-08 + PR-11          → PR-12
+PR-05 + PR-08 + PR-11  → PR-12   # PR-05: T174 changes the formulation vectors (formulation-clock §6)
 PR-05 + PR-07          → PR-10
 PR-10 + PR-11          → PR-13
 PR-06 + PR-12 + PR-13  → PR-14
@@ -1276,9 +1280,9 @@ last `acceptance` entry.
     },
     {
       "id": "PR-12",
-      "outcome": "iOS app increment 3: run-trace replay against the fake server (the decision and park traces replay in PR-04), review cover and step chrome, M-10 restart, M-11 entry/resume, M-12 onboarding, M-13 - M-22 steps, M-23 schedule, M-24 widget chip with deep link, M-25 notification scheduler and the device time-zone hook, Lists entry replacing DeferredRow, Dynamic Type up to AX5, iOS docs; manual evidence.",
-      "tasks": ["T136", "T137", "T138", "T139", "T140", "T141", "T142", "T143", "T153", "T154", "T155", "T156", "T157", "T158", "T159"],
-      "requirements": ["020-FR-002", "020-FR-006", "020-FR-016", "020-FR-017", "020-FR-018", "020-FR-019", "020-FR-027", "020-FR-028", "020-FR-029", "020-FR-030", "020-FR-031", "020-FR-032", "020-FR-033", "020-FR-034", "020-FR-035", "020-FR-036", "020-FR-037", "020-FR-038", "020-FR-042", "020-FR-045", "020-FR-048", "020-FR-050", "020-FR-051", "020-FR-052", "020-SC-002", "020-SC-003", "020-SC-007"],
+      "outcome": "iOS app increment 3: run-trace replay against the fake server (the decision and park traces replay in PR-04), review cover and step chrome, M-10 restart, M-11 entry/resume, M-12 onboarding, M-13 - M-22 steps, M-23 schedule, M-24 widget chip with deep link, M-25 notification scheduler and the device time-zone hook, Lists entry replacing DeferredRow, Dynamic Type up to AX5, iOS docs; manual evidence; and the follow-up from PR-15: the device decision Undo keeps the server's clock bookkeeping (floor kept, clamp on restore) through a shared pure restore with new vectors.",
+      "tasks": ["T136", "T137", "T138", "T139", "T140", "T141", "T142", "T143", "T153", "T154", "T155", "T156", "T157", "T158", "T159", "T174"],
+      "requirements": ["020-FR-002", "020-FR-006", "020-FR-016", "020-FR-017", "020-FR-018", "020-FR-019", "020-FR-027", "020-FR-028", "020-FR-029", "020-FR-030", "020-FR-031", "020-FR-032", "020-FR-033", "020-FR-034", "020-FR-035", "020-FR-036", "020-FR-037", "020-FR-038", "020-FR-042", "020-FR-045", "020-FR-046", "020-FR-048", "020-FR-050", "020-FR-051", "020-FR-052", "020-SC-002", "020-SC-003", "020-SC-007"],
       "paths": [
         "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ReviewTraceReplayTests.swift",
         "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServer+Review.swift",
@@ -1307,19 +1311,34 @@ last `acceptance` entry.
         "ios/BrainBuddy/Screens/Settings/ReviewSettingsSection.swift",
         "docs/native-ios-app.md",
         "ios/README.md",
-        "specs/020-weekly-review/evidence/manual-ios-increment3.md"
+        "specs/020-weekly-review/evidence/manual-ios-increment3.md",
+        "backend/tests/fixtures/review_formulation_vectors.json",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources/review_formulation_vectors.json",
+        "frontend/src/features/review/__tests__/review_formulation_vectors.json",
+        "backend/app/modules/tasks/formulation.py",
+        "backend/tests/test_review_formulation_vectors.py",
+        "backend/app/modules/tasks/review_service.py",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Formulation.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Review.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/FormulationTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerReviewTests.swift",
+        "specs/020-weekly-review/contracts/ios-commands.md",
+        "specs/020-weekly-review/contracts/formulation-clock.md"
       ],
-      "depends_on": ["PR-08", "PR-11"],
+      "depends_on": ["PR-05", "PR-08", "PR-11"],
       "tests": [
         "sh ios/scripts/swift-linux.sh test",
         "sh ios/scripts/swift-linux.sh test --filter ReviewTraceReplayTests",
+        "cd backend && pytest tests/test_review_formulation_vectors.py tests/test_review_decisions_api.py -q --no-cov",
+        "make test-backend",
         "(cd ios && xcodegen generate) && xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-006,020-FR-016,020-FR-017,020-FR-018,020-FR-019,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-035,020-FR-036,020-FR-037,020-FR-038,020-FR-042,020-FR-045,020-FR-048,020-FR-050,020-FR-051,020-FR-052,020-SC-002,020-SC-003,020-SC-007"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-006,020-FR-016,020-FR-017,020-FR-018,020-FR-019,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-035,020-FR-036,020-FR-037,020-FR-038,020-FR-042,020-FR-045,020-FR-046,020-FR-048,020-FR-050,020-FR-051,020-FR-052,020-SC-002,020-SC-003,020-SC-007"
       ],
       "acceptance": [
         "ReviewTraceReplayTests: review_traces_runs.json (PR-11) replays against BrainBuddyFakeServer with the recorded responses, incl. a progress change retried after the retention merged once",
         "previews for every M-10 - M-25 state, incl. M-22 'accessibility text size'; ios-app lane green on the exact SHA",
         "specs/020-weekly-review/evidence/manual-ios-increment3.md (labelled manual): notification registration, widget Link, one decision per screen, Lists row, VoiceOver focus M-10/M-11/M-12, every screen at Dynamic Type AX5, the travel check for the device time zone",
+        "T174: the floor-kept and clamp-on-restore vectors pass in Python and Swift, the three vector copies stay byte-identical, and a decision Undo gives the same clock on the server, a signed-in device and an account-less device",
         "landing class SHOW (scripts/classify_path_risk.py: SHIP)"
       ]
     },
