@@ -257,9 +257,8 @@ def create_app() -> FastAPI:
     )
     os.environ.pop("BRAIN_BUDDY_ADMIN_EMAIL", None)
     os.environ.pop("BRAIN_BUDDY_ADMIN_PASSWORD", None)
-    # app/__init__.py eagerly imports main. Every app import belongs after
-    # configuration; reuse main's single app so no second default SMTP worker
-    # can race this fixture's captured mail delivery.
+    # Configure before importing app.main; reuse its single app so no second
+    # default SMTP worker can race this fixture's captured mail delivery.
     from app.core.config import AppEnvironment
     from app.main import app as application
     from app.schemas.auth import User
@@ -296,7 +295,7 @@ def create_app() -> FastAPI:
     if apple_lifecycle is None:
         raise RuntimeError("The real app must wire the Apple credential lifecycle.")
     apple_lifecycle.gateway = modern.provider
-    application.add_event_handler("shutdown", upstream.close)
+    application.router.add_event_handler("shutdown", upstream.close)
 
     def capture_mail(recipient: str, code: str, purpose: str) -> None:
         message = (
