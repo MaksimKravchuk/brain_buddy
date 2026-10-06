@@ -156,12 +156,15 @@ Facts this plan builds on (verified 2026-10-05).
 | `backend/app/api/tasks.py` (**ASK**) | task routes; `_to_response` (l.1183) builds `TaskResponse`; title-completion routes and log line | map `formulation`/`parked`; accept `new_formulation_id` |
 | `backend/app/api/dependencies.py` (**ASK**) | `get_task_service` (l.111), `require_voice_brain_dump_enabled` (l.361) | `get_review_service`, `require_weekly_review_enabled` |
 | `backend/app/api/__init__.py` | mounts `task_router` into `api_router` | mount review routers |
-| `backend/app/main.py` | `_run_privacy_maintenance_sweep` (l.26), `_run_maintenance_sweep` (l.85), `_start_privacy_maintenance_thread` (l.156); threads off in TEST unless `BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST=1` | `_run_review_maintenance_sweep` on the same thread |
+| `backend/app/main.py` | `_run_privacy_maintenance_sweep` (l.26, returns a 3-tuple asserted by `tests/test_crt_receipt_retention.py:364`), `_run_maintenance_sweep` (l.85), `_start_privacy_maintenance_thread` (l.156); threads off in TEST unless `BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST=1` | `_run_review_maintenance_sweep` as its own try/except block inside the privacy sweep, return shape unchanged |
+| `backend/app/container.py` | builds providers; title completion, STT and reconciler all degrade to a disabled provider without a key (l.184-272, 384-392) | `ReviewService` with injected clock; `_build_review_navigator_provider` that raises without a key |
+| `backend/app/cli.py` | `python -m app.cli create-invite` and other operator commands | TEST-only `review-seed-aged-task`, `review-run-sweep` (research R21) |
+| `backend/pyproject.toml` | import-linter: routes may not import `app.modules.tasks.repository`; tasks layers `service → repository` (l.131-148) | add `app.modules.tasks.review_repository` to the forbidden modules; extend the tasks layers to the review modules |
 | `backend/app/services/account_service.py` | ZIP export (l.207, `tasks/*.json`, manifest `excluded`), `purge_account` (l.416) ordered and idempotent | `review/*.json` export; purge unchanged (covered by task repo) |
 | `backend/app/ai/title_completion.py` | provider build (`disabled`/`deterministic`/`openai`), timeouts, candidate validation; per-request consent echo | pattern for the navigator adapter |
 | `backend/app/core/config.py` | `KNOWN_FEATURE_FLAGS` (l.86), provider settings | `weekly_review`; navigator settings |
 | `backend/app/repositories/feature_flag.py` | `MANAGED_FLAGS` (l.83), `_POST_ADR_0019_DEFAULT_OFF_FLAGS` (l.100), upgrade whitelist (l.426) | register `weekly_review` OFF |
-| `backend/app/core/rate_limit.py` | `title_completion_rate_limiter` (l.255) | `navigator_rate_limiter` |
+| `backend/app/core/rate_limit.py` | `title_completion_rate_limiter` (l.257) | `navigator_rate_limiter` |
 | `backend/tests/test_voice_workflow_architecture.py` | l.250 forward guard: any `app/**` path containing `weekly_review` must import `app.workflows.voice_brain_dump` | kept; docstring clarified; non-voice code avoids the token (R1) |
 
 ### iOS and macOS
@@ -217,7 +220,8 @@ specs/020-weekly-review/
 ├── intake.md, spec.md, design.md, design/*.html, checklists/requirements.md   (existing)
 ├── plan.md                         # this file
 ├── research.md                     # Phase 0
-├── research-on-device-model.md     # separate on-device model research (not written by this stage)
+├── research-on-device-model.md     # separate on-device model research (exists, 2026-10-05)
+├── review-c1-disposition.md        # planning-review campaign 1: every finding and its disposition
 ├── data-model.md                   # Phase 1
 ├── contracts/
 │   ├── http.md                     # backend HTTP API
@@ -240,9 +244,10 @@ backend/
 │   │   ├── __init__.py                       # mount review routers
 │   │   ├── dependencies.py                   # ASK: get_review_service, require_weekly_review_enabled
 │   │   ├── tasks.py                          # ASK: _to_response maps formulation/parked
-│   │   ├── review.py                         (new) decisions, undo, auto-park, state, settings, park acks
-│   │   ├── review_navigator.py               (new) navigator consent + suggestions
-│   │   └── review_flow.py                    (new) review runs, queues, bulk release
+│   │   ├── review.py                         (new) decisions, undo, auto-park, state, settings, park acks, explainer ack
+│   │   ├── review_navigator.py               (new; mounted empty in PR-02) navigator consent + suggestions
+│   │   └── review_flow.py                    (new; mounted empty in PR-02) review runs, queues, bulk release
+│   ├── cli.py                                # TEST-only review seed and sweep commands (R21)
 │   ├── core/config.py                        # weekly_review flag; navigator settings
 │   ├── core/rate_limit.py                    # navigator limiter
 │   ├── repositories/feature_flag.py          # register weekly_review (default OFF)
@@ -263,7 +268,9 @@ backend/
 │   └── main.py                               # _run_review_maintenance_sweep
 └── tests/
     ├── fixtures/review_formulation_vectors.json   (new, canonical)
-    ├── fixtures/navigator/eval_v1.json            (new, synthetic SC-005 eval set)
+    ├── fixtures/review_flow_vectors.json          (new, canonical review-flow vectors)
+    ├── fixtures/review_wire/*.json                (new, golden wire fixtures validated against schemas/review.py)
+    ├── fixtures/navigator/eval_v1.json            (new in PR-07, synthetic SC-005 eval set)
     ├── allure_taxonomy.py                         # rules for the new modules
     ├── test_review_formulation.py                 (new)
     ├── test_review_formulation_vectors.py         (new, incl. copy-drift check)
@@ -281,7 +288,8 @@ frontend/src/
 ├── features/tasks/TaskListPage.tsx, TaskDetailPanel.tsx
 ├── features/account/AccountSettingsPage.tsx
 ├── features/review/ (new)  formulation.ts, ReviewGate.tsx, DecisionDialog.tsx,
-│                            WhileYouWereAway.tsx, ReviewShell.tsx, steps/*.tsx,
+│                            WhileYouWereAway.tsx, AutoParkExplainer.tsx (D-05),
+│                            reviewFormDrafts.ts (FR-052), ReviewShell.tsx, steps/*.tsx,
 │                            ReviewSettingsSection.tsx, navigatorInput.ts, __tests__/
 ├── pages/PrivacyPolicyPage.tsx                # retention/export wording
 └── test/allureTaxonomy.ts                     # /features/review/ rule
@@ -300,13 +308,16 @@ ios/BrainBuddyKit/Sources/
 ├── BrainBuddyWorkspace/Workspace.swift
 └── BrainBuddyFakeServer/  (review endpoints, StubNavigatorModel)
 ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/  FormulationTests.swift, ReducerReviewTests.swift,
-                     QueriesReviewTests.swift, NavigatorValidatorTests.swift (new),
-                     Resources/review_formulation_vectors.json (new copy)
+                     QueriesReviewTests.swift, NavigatorValidatorTests.swift,
+                     ReviewPlannersTests.swift (new),
+                     Resources/review_formulation_vectors.json, review_flow_vectors.json,
+                     review_wire/*.json (new copies, written by PR-02)
 ios/BrainBuddyKit/Tests/BrainBuddySyncTests/  ReviewSyncTests.swift (new)
 ios/BrainBuddyKit/Package.swift               # test resource for the vector copy
 ios/BrainBuddy/
 ├── Screens/Review/ (new)  DecisionCardSheet, DecisionForms, WhileYouWereAwaySheet,
-│                          RestartScreen, ReviewEntry, OnboardingScreen, steps…
+│                          AutoParkExplainerSheet (M-26), RestartScreen, ReviewEntry,
+│                          OnboardingScreen, steps…
 ├── Screens/Lists/TaskListScreen.swift, Screens/Detail/TaskDetailScreen.swift,
 │   Screens/Browse/ListsHubScreen.swift, Screens/Settings/SettingsScreen.swift
 ├── Components/TaskRow.swift, Chips.swift
@@ -348,9 +359,13 @@ widget targets; the web gets one feature folder. Router and module file names av
   applies the type table (FR-006, FR-008, FR-009), records the decision with stall
   reason code (FR-007), `ai_use` (FR-026), undo snapshot, and session counter when in a
   review (FR-010: same path in and out of a review).
-- `ReviewService.undo_decision` (FR-048), allowed while the task revision is unchanged.
-- `TaskResponse.formulation` carries raw fields plus derived `ask_at` / `park_due_at` /
-  `paused_until` and `consecutive_stalled` (FR-004, FR-005).
+- `ReviewService.undo_decision` (FR-048), allowed while the task revision (and a
+  created follow-up's revision) is unchanged.
+- `TaskResponse.formulation` carries raw fields plus derived `ageing_at` / `ask_at` /
+  `park_due_at` / `paused_until` and `consecutive_stalled` (FR-004, FR-005); all
+  derived instants are null before activation (FR-051).
+- Client-supplied ids (`decision_id`, `new_formulation_id`, `follow_up_task_id`) are
+  adopted (contracts/http.md "Client-supplied ids").
 - Settings `PUT /review/settings` threshold change sets the owner park floor (FR-039).
 
 **iOS** (`BrainBuddyCore` rules; app UI)
@@ -367,10 +382,13 @@ widget targets; the web gets one feature folder. Router and module file names av
 - M-03/M-04: decision card + forms (reformulate with the cosmetic-edit note from
   `FormulationKey`, first step with "Was:" preview, Waiting for, keep 7 more days with
   required reason and computed date), stall-reason → recommendation mapping, third-stall
-  offer (canvas link opens the existing Thinking entry only where it exists; on iOS
-  there is no canvas, so the offer shows "Release to Someday" only — see
-  Inconsistencies), stale (was/now), error with Ref, Undo toast ~5 s via
-  `ToastCenter`.
+  offer (iOS has no canvas, so the offer shows "Release to Someday" only; design M-03
+  amended), stale (was/now), error with Ref, decision-not-allowed and
+  undo-didn't-apply copy, Undo toast ~5 s via `ToastCenter` (≥ 10 s and announced under
+  VoiceOver / Switch Control).
+- FR-052: forms track dirty fields; `interactiveDismissDisabled` while dirty; the
+  "unsaved text — leave?" confirmation; drafts in `local.formDrafts` keyed by task and
+  formulation, restored on reopen, deleted on save/discard/formulation change/7 days.
 - M-23: threshold picker (7/14/21/28) with the floor note (FR-039).
 
 **Web**
@@ -378,62 +396,92 @@ widget targets; the web gets one feature folder. Router and module file names av
   Open decision for <title>"); inline detail gets the "This wording" block (ageing only
   there). Classification uses server instants and the browser clock, re-evaluated every
   minute without refetch.
-- D-02: `DecisionDialog` (560 px, focus on title, Esc closes with no change, keys 1–7,
-  per-row "Saving…", stale heading "Task changed elsewhere", save-failed banner with
-  Ref, offline disabled state), Undo toast via the extended `shellToast` (role="status",
-  timer pauses on focus/hover, focus to next row).
+- D-02: `DecisionDialog` (560 px, full-height sheet at 390 px, focus on title, focus
+  trap, Esc closes with no change unless a form is dirty, keys 1–7 shown as numerals and
+  inactive in text fields, per-row "Saving…", stale heading "Task changed elsewhere",
+  save-failed banner with Ref, offline disabled state, third-stall "Think it through"
+  only when `crt_canvas` is effective), Undo toast via the extended `shellToast`
+  (role="status", timer pauses on focus/hover, Ctrl/Cmd+Z while visible, focus to next
+  row). FR-052 drafts via `reviewFormDrafts.ts` (`localStorage`, data-model E11) and a
+  `beforeunload` warning.
 - D-04: threshold control in a new `ReviewSettingsSection` on `/settings/account`.
 
-### US2 — Auto-park and a shame-free return (P1) — design M-01/M-02 (moves tomorrow, parked), M-09, D-01, D-03 (M-09 content); restart mode M-10 ships with US4
+### US2 — Auto-park and a shame-free return (P1) — design M-26, D-05 (explainer, increment 1), M-01/M-02 (moves tomorrow, parked), M-09, D-01 (WYWA dialog), D-03 (M-09 content); restart mode M-10 ships with US4
 
 **Backend**
+- `POST /review/explainer/acknowledge` (FR-051, http §5): first acknowledgement on any
+  device sets `activated_at` and runs the activation clamp and floors (FR-016, R4) in
+  one owner-locked transaction, without bumping task revisions. Nothing else activates
+  an owner.
 - `ReviewService.run_auto_park_sweep(now)` from `_run_review_maintenance_sweep`
-  (http §9): per activated owner with the flag effective, park tasks whose class is
-  `park_due` with key `auto-park:<task>:<formulation>`; re-check under lock (FR-012,
-  FR-013, FR-014); keep project, tags, notes, due date, priority.
+  (http §9): retention part for every owner with review rows; exposure part per
+  **activated** owner with the flag effective: sweep-gap floor, clock repair, then park
+  tasks whose class is `park_due` with key `auto-park:<task>:<formulation>`, storing
+  `parked.clock_before`; re-check under lock (FR-012, FR-013, FR-014); keep project,
+  tags, notes, due date, priority. Short transactions; no I/O under the process-wide
+  lock.
 - `POST /tasks/{id}/auto-park` for device-observed parks; `applied: false` is success
   (US2-6).
-- Yield rule for earlier offline decisions (R9).
-- Activation backfill and floors (FR-016, R4); rollback repair (formulation-clock §3).
+- Yield rule for earlier offline card decisions only (R9), restoring `clock_before`.
 - `GET /review/state.unseen_parks` + `POST /review/parks/acknowledge` (FR-015).
   Returning uses the existing `transition move → next`, which starts a new formulation
-  (US2-4) and clears `parked`.
+  (US2-4), clears `parked` and records `returned_at` on the park ack (metrics).
 
 **iOS**
+- M-26 explainer sheet at the first app open after exposure, before anything else
+  (`GTDQueries.explainerNeeded`); "Got it"/Close queues `acknowledgeExplainer`;
+  account-less records `local.activatedAt`; the reducer's post-replay activation step
+  (contracts/ios-commands.md §3). Ships in PR-04 with the markers and M-09.
 - `Workspace.applyDueAutoParks()` on load/foreground/pull/background refresh;
-  account-less parks are final; signed-in parks are optimistic and never re-issued per
-  formulation (contracts/ios-commands.md §5).
+  nothing before activation; at most 10 parks per call (safety valve); account-less
+  parks are final; signed-in parks are optimistic and never re-issued per formulation
+  (contracts/ios-commands.md §5). `runLocalReviewMaintenance()` keeps the local 7-day
+  bounds.
+- Clock-aware compaction for account-less correctness (ios-commands §3).
 - M-09 sheet at app open when unseen parks exist: per-row "Return to Next", "Return all
-  N", "Continue" (acknowledges). Partial failures: archived project (row disabled with
+  N", "Continue" (acknowledges); swipe-down does not acknowledge and the sheet shows
+  again at most once a day. Partial failures: archived project (row disabled with
   reason) and changed elsewhere (named). Offline: works locally, shows again until
   Continue.
 
 **Web**
-- M-09 content as a dialog at app open (D-01 context) and as the first screen of
-  `/review` (D-03); loading/error states per D-03 with Ref.
+- D-05 explainer dialog at the first web open when `explainer_seen` is false.
+- M-09 content as a modal dialog at app open (design D-01 "While you were away
+  (dialog at app open)" states: focus trap, Esc does not acknowledge, per-row
+  "Returning…", failure with Ref, offline) and as the first screen of `/review` (D-03).
 
 ### US3 — The AI navigator proposes a first step (P2) — design M-04 ("Suggest"), M-05, M-06, M-07, M-08, M-19 (AI states), M-23 (Suggestions section), D-02 (navigator states), D-04 (cloud consent)
 
 - Contract: [contracts/navigator.md](contracts/navigator.md) (input exactly FR-019,
   validator for FR-019/FR-021, `NavigatorModel` protocol, prompt v1).
-- **Backend**: `navigator.py` adapter (`disabled`/`deterministic`/`openai`), consent
-  table and endpoints, per-owner rate limit, per-call and daily cost caps, error reasons
-  mapped to 400/429/503 with Ref (FR-024, FR-025, FR-045). No text persisted; one log
-  line of codes/counts.
+- **Backend**: `navigator.py` adapter (`disabled`/`deterministic`/`openai`), with
+  `_build_review_navigator_provider` raising at container build when `openai` lacks its
+  key (or `deterministic` outside TEST, or an unknown provider; research R13), consent
+  table and endpoints with `consent_text_version` currency, per-owner rate limit,
+  per-call and daily cost caps, the shared `reduce_notes` backstop, error reasons mapped
+  to 400/429/503 with Ref (FR-024, FR-025, FR-045). No language field in the request.
+  No text persisted; one log line of codes/counts.
 - **iOS**: `NavigatorRouter` chooses Apple on-device when `available` for the task's
   language (FR-022), else M-06 choice (FR-023) with the remembered preference (M-23);
   cloud path requires consent (M-07) and an account ("Cloud suggestions need a Brain
   Buddy account" state); proposals fill the field, the task changes only on Save
   (FR-020); clarifying question appends the answer to notes via a normal `updateTask`
-  (no clock change) and re-runs (FR-021); "Stop" cancels the `Task`.
+  (no clock change) and re-runs (FR-021); "Stop" cancels the `Task`; backgrounding or
+  dismissal cancels quietly and keeps arrived proposals (design M-05/M-07 "interrupted").
+  The Suggest control shows its resolved route before the tap ("· on this iPhone" /
+  "· OpenAI").
   M-08: project without a next action uses `kind: project_next_action`; confirm creates
-  the task in Next in that project (`createTask`).
-- **Language routing**: Apple's model does not support Russian on iOS 26.x or 27
-  (`research-on-device-model.md` §1), so the router classifies the task text with
+  the task in Next in that project (`createTask`). The web offers this only in the full
+  review's projects step (design note under M-08).
+- **Language routing**: Russian is not listed as supported by Apple's model on iOS
+  26.x or 27 (unverified; treated as unsupported, so the FR-023 choice is the designed
+  path; `research-on-device-model.md` §1). The router classifies the task text with
   `NLLanguageRecognizer` first and goes straight to the M-06 choice for unsupported
-  languages; `unsupportedLanguageOrLocale` thrown at `respond` is the backstop. Input
-  budget: Apple's window is 4,096 tokens on iOS 26.x; the middle of the notes is dropped
-  (beginning and most recent lines kept) with a visible note (owner decision NC-3; contracts/navigator.md §1).
+  languages; `unsupportedLanguageOrLocale` thrown at `respond` is the backstop. The
+  detected language stays on the device. Input: one shared `reduce_notes` with a fixed
+  6 000-character notes budget for every model, so on-device and cloud receive exactly
+  the same reduced input, with a visible note when anything was dropped (owner decision
+  NC-3; contracts/navigator.md §1); token counts are only a guard.
 - **Downloadable model** (FR-023 (a), FR-049): slice PR-09, behind the same protocol;
   recommended Core AI + Qwen3-1.7B 4-bit in an Apple-hosted Background Assets pack,
   iOS/macOS 27+ with a memory check and the `increased-memory-limit` entitlement
@@ -449,31 +497,48 @@ widget targets; the web gets one feature folder. Router and module file names av
 ### US4 — The guided weekly review (P2) — design M-10, M-11, M-13 – M-22, D-03
 
 - **Backend** `review_flow.py` + `api/review_flow.py`: start/resume/progress/finish
-  runs (FR-027, FR-029, data-model E3 transitions), queues per step with server-side
-  snapshot of the decision queue (edge case "threshold changed during an open review"),
-  wins (FR-028), capacity mirror (FR-031), Waiting > 7 days and Someday ≤ 7 not reviewed
-  in 30 days with receipts (FR-032), projects without a next action, dates in 14 days,
-  summary counts and "clear start" (FR-033), bulk release with partial results and undo
-  for restart (FR-017) and Inbox remainder (FR-030), regularity instant for restart mode.
+  runs with client-supplied session ids, `replace_open`, merged (never-409) progress,
+  idempotent finish (FR-027, FR-029, data-model E3 transitions including
+  `completed_empty`), active seconds per step (SC-004), queues per step with a
+  server-side snapshot of the `asks_for_decision` aggregate in formulation-clock §5 order
+  (edge case "threshold changed during an open review"), wins (FR-028), capacity mirror
+  with the < 4-weeks rule (FR-031), Waiting > 7 days and Someday ≤ 7 by the FR-032
+  eligibility and order, projects without a next action, dates in 14 days, the ten
+  summary counts and "clear start" (FR-033), bulk release with client ids, partial
+  results and clock-exact undo for restart (FR-017) and Inbox remainder (FR-030),
+  regularity instant from counted reviews only. Foreign and unknown task ids in bodies
+  are indistinguishable.
 - **iOS**: review cover with shared step chrome (Leave/Skip at top, primary action at
-  bottom, "N of M"), each step's states as designed; decision step reuses M-03
-  full-screen with "Not now" (FR-050) and Undo status line; Inbox step reuses
-  `ProcessInboxScreen` item view; one item at a time in steps 3, 4, 6, 8 (FR-034).
-  Offline: everything local via outbox; cross-device resume after sync (M-11 offline).
+  bottom, "N of M"), each step's states as designed, including "review ended / moved on
+  elsewhere" and "leave with unsaved text"; decision step reuses M-03 full-screen with
+  "Not now" (FR-050) and Undo status line; Inbox step reuses `ProcessInboxScreen` item
+  view (its Undo also sends `inbox_processed_delta: -1`); one item at a time in the
+  Inbox, decision, Waiting and Someday steps (FR-034). M-10 reopens on the released
+  state after an interruption. Offline: everything local via outbox; cross-device resume
+  after sync (M-11 offline).
 - **Web**: `/review` route (`ReviewShell`, 240 px non-focusable rail, 600 px column,
-  focus to step heading on change, Esc never closes the review), same steps; offline per
-  D-03.
+  collapsed to "Step N of M" at 390 px, focus to step heading on change, Esc never
+  closes the review), same steps, plus the web-only states of design D-03: the new
+  Inbox step (one item at a time, Undo, saving/failed), per-step "step action saving /
+  failed" and "skip not saved", inline-card Esc rule; offline per D-03.
 
 ### US5 — Schedule, cue, onboarding and settings (P3) — design M-11 (Lists row), M-12, M-23, M-24, M-25, D-01 (sidebar recap), D-03 (onboarding dialog), D-04
 
 - **Backend**: settings fields and `next_review_at`/`last_counted_review_at` in
   `GET /review/state` (FR-035, FR-038); time zone follows the client (US5-5).
 - **iOS**: onboarding once (M-12) then notification permission prompt; one weekly local
-  notification, skipped per FR-036 (R17); widget "N ask" chip with deep link in
-  medium/large, display-only in small (FR-037); neutral "Last review: N days ago", no
-  streak anywhere (FR-038); Lists row replaces `DeferredRow` when exposed (FR-042).
+  notification, skipped per FR-036 (R17), with the decision in Core
+  (`ReviewReminderPlanner`); widget "N ask" chip (the `asks_for_decision` aggregate)
+  with deep link in medium/large following the entry order (`ReviewEntryPlanner`),
+  display-only in small, none for a Today widget (FR-037); neutral "Last review: N days
+  ago" from counted reviews, no streak anywhere (FR-038); Lists row replaces
+  `DeferredRow` when exposed (FR-042).
 - **Web**: sidebar link replaces the disabled entry when the flag is on, with the
-  "Last review" line (FR-036 web has no notification, FR-042); onboarding dialog.
+  "Last review" line, also in the 390 px mobile drawer (FR-036 web has no notification,
+  FR-042); onboarding dialog (focus on its heading, Esc saves nothing). E2E-MOBILE-02
+  (`frontend/tests/e2e/mobile.spec.ts`) keeps asserting the disabled entry with the flag
+  off; a flag-on variant in `weekly-review.spec.ts` expects the working link and no
+  overflow at 390 px.
 
 ### US6 — The same review on Mac (P3) — no mockups (design "Applicability")
 
@@ -489,16 +554,23 @@ widget targets; the web gets one feature folder. Router and module file names av
 | situation | behaviour | where |
 |---|---|---|
 | Decision on a task changed elsewhere | 409, nothing applied; client shows was/now (M-03 stale, D-02 stale) | http §3 |
-| Decision made offline before a server park | server reverses the park and applies the decision (yield rule) | R9 |
+| Decision made offline before a server park | server restores `parked.clock_before` and applies the decision (yield rule; card decisions only, `extend` allowed) | R9, http §3 |
+| Plain edit or move made offline before a server park | ordinary 409 → iOS refetch/replay re-applies it to the parked task; the park stands | http §1 |
+| Offline-started review while another device has one open | client session id + `replace_open: true`; the other session is closed by the E3 rule and shows "review ended elsewhere"; no decision lost | http §6, ios-commands §4 |
+| Decision naming an unknown session | recorded without a session (200) | http §3 |
+| Settings edited on two devices | 409 → refetch, re-apply only the changed fields, resend | ios-commands §4 |
+| Navigator configured `openai` without its key | container build raises at startup; the deploy fails its health check | R13 |
+| Flag turned off then on again, or sweep outage ≥ 24 h | owner park floor = now + 7 d, so every park is preceded by a visible marker | formulation-clock §3 |
+| Account-less clock defect | Release ships the account-less switch off until the synced path is clean; ≤ 10 device parks per call, then M-09 | ios-commands §5, §8 |
 | Two devices park the same formulation | one park; the other gets `applied: false` (200) | http §4 |
 | Device clock ahead of server | device park is optimistic; server returns `applied: false`; not re-issued | R9 |
 | Idempotent replay / lost write after record | existing `_reconcile_idempotent_result` with new prefixes | R7 |
-| Undo after another change | 409 `undo_unavailable`; toast copy says the task changed | R8 |
-| Bulk release with stale items | 200 with `skipped`; M-10/M-15 partial-failure copy | http §6 |
+| Undo after another change (task or created follow-up) | 409 `undo_unavailable`; design "undo didn't apply": "Couldn't undo: "<title>" changed on another device. It's in <list> now." + Ref | R8, design M-03/D-02 |
+| Bulk release with stale items | 200 with `skipped`; M-10/M-15 partial-failure copy; undo restores clocks exactly and names skipped ones | http §6 |
 | Sweep fails for one owner | logged with owner id and code; other owners and other sweeps continue | http §9 |
 | Cloud timeout / provider error / malformed / cost cap / rate limit / consent missing / flag off | 503 / 503 / 503 / 429 / 429 / 400 / 404 with reasons; card stays usable | http §7 |
 | On-device model becomes unavailable mid-session | `unavailable(reason)` → M-06 | navigator §4 |
-| App killed mid-form or mid-review | form discarded; review progress persisted per decision/progress command | design M-04, M-13 |
+| App killed mid-form or mid-review | nothing applied to the task; typed text kept as a local draft and restored on reopen (FR-052); review progress persisted per decision/progress command; M-10 reopens on the released state with Undo | design M-04, M-10, M-13 |
 | Old client saves a task (drops clock) | sweep restarts the clock with a 14-day floor | formulation-clock §3 |
 
 ## Migration, deploy order and rollback
@@ -510,11 +582,18 @@ widget targets; the web gets one feature folder. Router and module file names av
 - **Deploy order**: backend (flag OFF) → iOS and web builds that understand the fields →
   flag `weekly_review` SELECTED_USERS (owner) → ON. Clients tolerate the backend
   without the feature (flag absent → old UI).
-- **Rollback**: turn the flag OFF (immediate: routes 404, sweep inert, clients show
-  "coming later"). Code rollback is safe: old code ignores the tables and the payload
-  fields; on roll-forward the sweep repairs clocks dropped by old-code saves with a
-  14-day floor, so no early park can result. Nothing is irreversible except an auto-park
-  that already happened, which the person can undo in one tap (M-09).
+- **Rollback**: turn the flag OFF (immediate: routes 404, the sweep's exposure part is
+  inert, clients show "coming later"). The sweep's retention part keeps running for
+  every owner with review rows, so the 7-day snapshot and 35-day usage bounds hold while
+  the feature is off (stated in `docs/data-retention.md`). Turning the flag on again
+  triggers the sweep-gap floor (no park for 7 days, markers first). Code rollback is
+  safe: old code ignores the tables and the payload fields; on roll-forward the sweep
+  repairs clocks dropped by old-code saves with a 14-day floor, so no early park can
+  result. Nothing is irreversible except an auto-park that already happened, which the
+  person can undo in one tap (M-09).
+- **Account-less iOS** has no remote switch: `BBWeeklyReviewLocal` stays `NO` in Release
+  until the synced path has run clean for one threshold cycle (owner decision recorded
+  at PR-14); the device caps parks per call (ios-commands §5, §8).
 - **iOS store**: v1 → v2 migration is additive; a downgraded app reports
   `.unsupportedVersion` and asks to update (existing behaviour).
 
@@ -523,15 +602,19 @@ widget targets; the web gets one feature folder. Router and module file names av
 - Correlation: existing middleware; clients send `X-Correlation-ID` (iOS already does)
   and show `Ref` from `ApiError.correlationId` / `APIError.referenceID` on every
   failure state named in design.
-- Logs (ids/codes/counts/timings only): `review_decision`, `review_undo`,
-  `review_auto_park` (`applied`, `source=sweep|device`, `yielded`), `review_sweep`,
-  `review_settings_changed` (threshold old/new), `review_run` (mode, status, counts),
-  `navigator` (outcome, provider, kind, tokens, proposals count). A pytest log-capture
-  test proves sentinel content never appears (FR-044).
-- Supporting metrics (intake §3) are computed from stored codes and counts:
-  decision/stall-reason distribution, re-stall rate (consecutive count), parks returned,
-  due-date moves on Next tasks (counter on `update_task` when `due_date` changes in
-  Next), median formulation age.
+- Logs (ids/codes/counts/timings only; never the stall reason): `review_decision`,
+  `review_undo`, `review_auto_park` (`applied`, `source=sweep|device`, `yielded`),
+  `review_sweep`, `review_settings_changed` (threshold old/new), `review_activated`,
+  `review_run` (mode, status, counts), `review_due_date_moved` (owner and task ids
+  only), `navigator` (outcome, provider, kind, tokens, proposals count,
+  notes_truncated). A pytest log-capture test proves sentinel content and stall-reason
+  values never appear (FR-044).
+- Supporting metrics (intake §3) and their sources: decision/stall-reason distribution
+  from `review_decisions`; re-stall rate from the consecutive count; parks returned from
+  `review_park_acks.returned_at`; due-date moves on Next tasks from the
+  `review_due_date_moved` log event (no persisted counter); median formulation age from
+  task clocks; median active review time from `active_seconds_by_step`. The read-out is
+  `python -m app.cli review-metrics` (content-free aggregates; Test strategy).
 
 ## Test strategy
 
