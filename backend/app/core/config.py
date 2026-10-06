@@ -90,6 +90,7 @@ KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "external_agent_relay",
     "task_title_autocomplete",
     "crt_canvas",
+    "task_mcp",
 )
 
 # Every flag name ``BRAIN_BUDDY_FEATURE_FLAGS`` may configure. There is no

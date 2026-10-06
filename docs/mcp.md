@@ -45,9 +45,18 @@ host only if a different access path actually forwards it. The `/api` frontend
 proxy also carries MCP. Serve external clients over HTTPS. Requests with an `Origin` header are
 rejected; this endpoint is for server/client integrations.
 
-MCP defaults **OFF**. Only `BRAIN_BUDDY_MCP_ENABLED=1` enables it; disabling the
-setting and restarting removes the endpoint without altering tasks. The switch
-controls exposure; it never grants access to data.
+MCP defaults **OFF** at two levels. `BRAIN_BUDDY_MCP_ENABLED=1` mounts the transport;
+the server-owned `task_mcp` runtime flag controls its audience. In the existing
+Admin Portal, choose **Selected users** for `task_mcp` and add the intended
+accounts before connecting them. **On** admits all authenticated accounts;
+**Off** admits none. Fresh and upgraded stores initialize this flag OFF, even
+if an environment migration seed names it ON. Runtime changes apply to the next
+request without a restart. Discovery is also gated: a valid session outside the
+audience receives HTTP 403. A degraded flag store fails closed.
+
+Disabling the deployment setting and restarting removes the endpoint without
+altering tasks. `/api/auth/me` reports `task_mcp: false` when the transport is
+disabled. These controls govern exposure; ownership still comes from the session.
 
 ## Authenticate
 
@@ -131,7 +140,8 @@ Typical failures:
 | --- | --- |
 | 404 | Verify the exposure setting, API prefix and trailing slash |
 | 401 | Obtain a valid dedicated session and send the bearer header |
-| 403 / 421 | Check Origin rejection and the exact Host allowlist |
+| 403 | Check task_mcp mode/cohort and flag-store health, then Origin rejection |
+| 421 | Check the exact Host allowlist |
 | Tool error: revision conflict | Read the task again and reconcile before a new command |
 | Tool error: idempotency conflict | Reuse the original arguments/key for a retry; use a fresh key for a new command |
 | Tool error: operation unavailable | Retry with the same mutation key and arguments; inspect correlation-ID logs |

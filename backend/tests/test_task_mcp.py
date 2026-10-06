@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from collections.abc import Iterator
 from datetime import timedelta
 from typing import Any
@@ -16,6 +17,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from app.core.config import get_config
+from app.repositories.feature_flag import FlagMode
 from app.utils.time import utcnow
 
 pytestmark = [
@@ -32,6 +34,9 @@ def mcp_client(
     monkeypatch.setenv("BRAIN_BUDDY_MCP_ENABLED", "1")
     monkeypatch.setenv("BRAIN_BUDDY_MCP_ALLOWED_HOSTS", "testserver")
     client: TestClient = request.getfixturevalue("api_client")
+    flags = client.app.state.container.feature_flag_service
+    assert flags.repository.read().flags["task_mcp"].mode is FlagMode.OFF
+    flags.set_mode("task_mcp", FlagMode.ON, operator_id="test_operator")
     with client:
         yield client
 
@@ -332,6 +337,11 @@ def test_022_FR_006_host_origin_and_malformed_requests(mcp_client: TestClient) -
 def test_022_FR_007_disabled_by_default(api_client: TestClient) -> None:
     """022-SC-003: An unchanged deployment has no MCP endpoint and keeps task routes."""
     assert api_client.post("/api/mcp/", json={}).status_code == 404
+    container = api_client.app.state.container
+    container.feature_flag_service.set_mode(
+        "task_mcp", FlagMode.ON, operator_id="test_operator"
+    )
+    assert api_client.get("/api/auth/me").json()["feature_flags"]["task_mcp"] is False
     assert api_client.get("/api/tasks").status_code == 200
 
 
@@ -344,6 +354,77 @@ def test_022_FR_007_config_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.mcp_enabled is False
     assert config.mcp_allowed_hosts == ["example.com", "localhost:*"]
     get_config.cache_clear()
+
+
+def test_022_FR_007_selected_cohort_gates_discovery_and_mutations(
+    mcp_client: TestClient,
+) -> None:
+    """Only the selected account can discover and mutate; removal applies immediately."""
+    container = mcp_client.app.state.container
+    flags = container.feature_flag_service
+    user_id = mcp_client.get("/api/auth/me").json()["id"]
+    flags.set_mode("task_mcp", FlagMode.OFF, operator_id="test_operator")
+    assert _rpc(mcp_client, "tools/list").status_code == 403
+    flags.set_mode("task_mcp", FlagMode.SELECTED_USERS, operator_id="test_operator")
+    assert _rpc(mcp_client, "tools/list").status_code == 403
+    denied = _rpc(
+        mcp_client,
+        "tools/call",
+        {
+            "name": "create_task",
+            "arguments": {"title": "Denied", "idempotency_key": "denied"},
+        },
+    )
+    assert denied.status_code == 403
+    assert mcp_client.get("/api/tasks").json()["items"] == []
+    flags.add_selected_user("task_mcp", account_id=user_id, operator_id="test_operator")
+    assert mcp_client.get("/api/auth/me").json()["feature_flags"]["task_mcp"] is True
+    task = _create(mcp_client)
+    flags.remove_selected_user(
+        "task_mcp", account_id=user_id, operator_id="test_operator"
+    )
+    assert _rpc(mcp_client, "tools/list").status_code == 403
+    assert mcp_client.get("/api/auth/me").json()["feature_flags"]["task_mcp"] is False
+    assert mcp_client.get(f"/api/tasks/{task['id']}").json()["state"] == "inbox"
+
+
+def test_022_FR_007_degraded_rollout_fails_closed(mcp_client: TestClient) -> None:
+    """An unreadable rollout inventory blocks MCP while native tasks remain usable."""
+    container = mcp_client.app.state.container
+    task = _create(mcp_client)
+    with sqlite3.connect(container.feature_flag_repo.db_path) as connection:
+        connection.execute(
+            "DELETE FROM feature_flags WHERE flag = ?", ("voice_brain_dump",)
+        )
+    assert _rpc(mcp_client, "tools/list").status_code == 403
+    assert mcp_client.get("/api/auth/me").json()["feature_flags"]["task_mcp"] is False
+    assert mcp_client.get(f"/api/tasks/{task['id']}").status_code == 200
+
+
+def test_022_FR_007_rollout_rechecked_before_mutation(
+    mcp_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Revocation between HTTP authentication and command execution cannot create a task."""
+    container = mcp_client.app.state.container
+    get_user = container.auth_service.get_user_for_token
+    checks = 0
+
+    def revoke_in_worker(token: str) -> Any:
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            container.feature_flag_service.set_mode(
+                "task_mcp", FlagMode.OFF, operator_id="test_operator"
+            )
+        return get_user(token)
+
+    monkeypatch.setattr(container.auth_service, "get_user_for_token", revoke_in_worker)
+    result = _call(
+        mcp_client, "create_task", title="Blocked", idempotency_key="blocked"
+    )
+    assert result["isError"] is True
+    assert "unavailable for this account" in str(result)
+    assert mcp_client.get("/api/tasks").json()["items"] == []
 
 
 def test_022_FR_006_safe_failure_and_logs(

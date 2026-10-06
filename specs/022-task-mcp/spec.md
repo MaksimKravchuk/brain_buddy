@@ -27,8 +27,12 @@ Status: implementation candidate; independent review and production release pend
 - **FR-006**: Enforce configured Host checks and reject browser Origins. Produce
   operation/result logs with correlation context without credentials, titles or
   details. Unexpected failures expose only a safe retry instruction.
-- **FR-007**: Default MCP OFF and require explicit opt-in. Disabling removes the
-  endpoint without altering tasks. Document enablement and a GPT Responses API client.
+- **FR-007**: Default both the MCP transport and runtime `task_mcp` audience OFF.
+  Require deployment opt-in plus server-owned OFF/selected-users/ON admission for
+  discovery and commands; recheck admission before mutation. Fresh/upgraded stores
+  seed OFF, degraded stores refuse access, and runtime revocation applies without
+  restart. Disabling the transport removes the endpoint without altering tasks.
+  Document both controls and a GPT Responses API client.
 
 ## Edge cases and privacy
 
@@ -51,6 +55,7 @@ not enter prompts, logs or version control. No new persistent data is introduced
 - **SC-003**: OFF, validation and transport failures are covered without changing
   existing task behavior. Backend quality gates pass on the candidate.
 
-No rendered UI changes. Weekly Review, voice, agent relay, CRT, hard erasure and
+The existing generic Admin Portal lists the new flag; privacy copy reflects six
+managed flags. Weekly Review, voice, agent relay, CRT, hard erasure and
 OAuth onboarding are outside this iteration. Review/release evidence remains
 pending rather than being recorded as passing.

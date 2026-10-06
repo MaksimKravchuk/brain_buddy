@@ -14,5 +14,8 @@ revocation checks.
 
 Scope: one backend endpoint and four tools, reused native task services,
 dedicated existing sessions, opt-in exposure, connection documentation.
-Untouched: task persistence/schema, browser/mobile clients, Weekly Review,
+Follow-up: the owner assigned PR babysitting; existing CI/review findings are
+triaged and confirmed implementation defects corrected. Server-owned `task_mcp`
+rollout uses the existing admin controls; the privacy inventory count is updated.
+Untouched: task persistence/schema, native clients, Weekly Review,
 voice, agent relay and CRT. OAuth onboarding and independent review are deferred.

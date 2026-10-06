@@ -76,6 +76,11 @@ regexTarget = "line"
 # Pin both complete synthetic lines; any replacement value still gets scanned.
 regexes = ['''^\s*key="(015|018)-cancel-transition",\s*$''']
 
+[[allowlists]]
+description = "Never-issued MCP owner-isolation test password"
+regexTarget = "line"
+regexes = ['''^\s*(email="other@example\.com", password="OtherPass12345"|json=\{"email": "other@example\.com", "password": "OtherPass12345"\},)\s*$''']
+
 [[rules]]
 id = "generic-api-key"
 
