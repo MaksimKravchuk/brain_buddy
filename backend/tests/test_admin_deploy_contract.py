@@ -344,7 +344,7 @@ def fake_flyctl(tmp_path: Path) -> Path:
         'if [ "$1 $2" = "machines list" ]; then\n'
         '  printf \'%s\\n\' \'[{"id":"0123456789abcd","config":{"image":"registry.fly.io/brain-buddy-backend:previous"}}]\'\n'
         'elif [ "$1 $2" = "ssh console" ]; then\n'
-        '  printf \'%s\\n\' \'{"schema_epoch":0,"import_committed":false,"cleanup_complete":true,"image_schema_epoch":0}\'\n'
+        '  printf \'%s\\n\' \'{"schema_epoch":0,"import_committed":false,"cleanup_complete":true,"image_schema_epoch":0,"legacy_auth_present":false}\'\n'
         "fi\nexit 0\n",
         encoding="utf-8",
     )
