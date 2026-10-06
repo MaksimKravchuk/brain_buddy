@@ -31,6 +31,7 @@ from app.exceptions import BrainBuddyError, StorageUnavailableError, ValidationF
 from app.repositories import UserRepository
 from app.repositories.feature_flag import (
     MANAGED_FLAGS,
+    OPTIONAL_MANAGED_FLAGS,
     DegradedRuntimeFlagsError,
     FeatureFlagOverrideRepository,
     FlagMode,
@@ -134,7 +135,9 @@ class FeatureFlagService:
             )
         }
         overlay = self.repository.read()
-        for name in MANAGED_FLAGS:
+        for name in MANAGED_FLAGS + tuple(
+            name for name in OPTIONAL_MANAGED_FLAGS if name in overlay.flags
+        ):
             entry = overlay.flags.get(name)
             effective = False if entry is None else _entry_admits(entry, user)
             if name == _RELAY_FLAG:
@@ -187,7 +190,7 @@ class FeatureFlagService:
         resolved_mode = self._require_mode(flag, mode, operator_id=operator_id)
 
         def _apply(current: dict[str, FlagOverride]) -> dict[str, FlagOverride]:
-            existing = current[flag]
+            existing = current.get(flag, FlagOverride(mode=FlagMode.OFF))
             # DD-6: a cohort is retained, not cleared, by a mode change.
             current[flag] = FlagOverride(
                 mode=resolved_mode, selected_users=existing.selected_users
@@ -300,7 +303,7 @@ class FeatureFlagService:
     # ------------------------------------------------------------------
 
     def _require_managed(self, flag: str, *, operator_id: str, action: str) -> None:
-        if flag not in MANAGED_FLAGS:
+        if flag not in MANAGED_FLAGS + OPTIONAL_MANAGED_FLAGS:
             self._record(
                 action,
                 flag=flag,
@@ -309,7 +312,7 @@ class FeatureFlagService:
             )
             raise ValidationFailure(
                 f"'{flag}' is not a runtime-manageable feature flag; "
-                f"manageable flags are {sorted(MANAGED_FLAGS)}."
+                f"manageable flags are {sorted(MANAGED_FLAGS + OPTIONAL_MANAGED_FLAGS)}."
             )
 
     def _require_mode(
@@ -422,7 +425,9 @@ class FeatureFlagService:
 
     def _view(self, overlay: RuntimeOverlay) -> RuntimeFlagsView:
         flags: list[ManagedFlagView] = []
-        for name in MANAGED_FLAGS:
+        for name in MANAGED_FLAGS + tuple(
+            name for name in OPTIONAL_MANAGED_FLAGS if name in overlay.flags
+        ):
             entry = overlay.flags.get(name)
             flags.append(
                 ManagedFlagView(

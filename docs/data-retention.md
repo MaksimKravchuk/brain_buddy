@@ -10,6 +10,7 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 
 | Data | Where | Retention | Enforced by |
 |---|---|---|---|
+| **CLI authorization grants** (only hashed private proof/short code and source authority) | Identity `auth.sqlite3` | 600 seconds in every state; next privacy sweep after expiry, including OFF/startup after downtime | Shared AuthStore secure-delete/WAL checkpoint; source/session/provider/user cascades; excluded from export |
 | Account record (email, display name, Argon2id password hash) | `data/users/<user_id>.json` + `users/_by_email.json` index | Life of account + 14-day deletion grace | Account purge (below) |
 | Sessions | `data/sessions/<sha256>.json` | 30 days, or logout / revocation | Lazy delete on read; bulk revoke on password change & deletion |
 | Trees, versions, AI validation history | `data/<tree_id>/…` + `data/index.json` | Life of account | Account purge |

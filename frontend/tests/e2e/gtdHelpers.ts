@@ -33,6 +33,18 @@ async function requireOk(response: Awaited<ReturnType<APIRequestContext["get"]>>
 }
 
 export async function mintInvite(): Promise<string> {
+  const modernData = process.env.BRAIN_BUDDY_MODERN_E2E_DATA_DIR;
+  if (modernData) {
+    const { stdout } = await execFileAsync(
+      process.env.BRAIN_BUDDY_MODERN_E2E_PYTHON ?? "python3",
+      ["-m", "app.cli", "create-invite"],
+      { cwd: path.join(repoRoot, "backend"), timeout: 30_000,
+        env: { ...process.env, BRAIN_BUDDY_ENV: "test", BRAIN_BUDDY_DATA_DIR: modernData } }
+    );
+    const code = stdout.trim().split(/\s+/).at(-1);
+    if (!code) throw new Error("Isolated invite command returned no code");
+    return code;
+  }
   if (!composeProject) {
     throw new Error("BRAIN_BUDDY_E2E_COMPOSE_PROJECT is required to mint invites for Compose E2E");
   }
@@ -47,7 +59,7 @@ export async function mintInvite(): Promise<string> {
 }
 
 export async function signupThroughUi(page: Page, email: string, inviteCode: string): Promise<void> {
-  await page.goto("/signup");
+  await page.goto("/signup?invite=1");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByLabel("Invite code").fill(inviteCode);
@@ -67,6 +79,7 @@ export async function createUserViaApi(request: APIRequestContext, testInfo: Tes
 
 export async function loginThroughUi(page: Page, email: string, loginPassword = password): Promise<void> {
   await page.goto("/login");
+  await page.getByRole("button", { name: "Use your password" }).click();
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(loginPassword);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -87,6 +100,16 @@ export async function openTaskWorkspace(page: Page, email?: string, pathName = "
 }
 
 export async function apiPost<T>(page: Page, pathName: string, data: Record<string, unknown>): Promise<T> {
+  if (process.env.BRAIN_BUDDY_MODERN_E2E_DATA_DIR) {
+    // Chromium owns the fixture hostname mapping and its cookie origin;
+    // Node's request context cannot resolve that generated local hostname.
+    return page.evaluate(async ({ pathName, data, key }) => {
+      const response = await fetch(pathName, { method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": key }, body: JSON.stringify(data) });
+      if (!response.ok) throw new Error(`POST ${pathName} failed with ${response.status}`);
+      return response.json();
+    }, { pathName, data, key: uniqueKey("post") }) as Promise<T>;
+  }
   const response = await page.request.post(`${backendUrl}${pathName}`, {
     data,
     headers: { "Idempotency-Key": uniqueKey("post") }

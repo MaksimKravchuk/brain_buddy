@@ -122,6 +122,7 @@ BRAIN_BUDDY_FEATURE_FLAGS=voice_brain_dump=on \
 BRAIN_BUDDY_AGENT_ALLOW_PRIVATE_DESTINATIONS=1 \
 BRAIN_BUDDY_AGENT_OBSERVATION_INTERVAL_SECONDS="${BRAIN_BUDDY_E2E_OBSERVATION_INTERVAL_SECONDS:-5}" \
 BRAIN_BUDDY_PUBLIC_BASE_URL="http://backend:8000" \
+BRAIN_BUDDY_CLI_VERIFICATION_ORIGIN="${FRONTEND_URL}" \
 BRAIN_BUDDY_PORT="${BACKEND_PORT}" \
 FRONTEND_PORT="${FRONTEND_PORT}" \
 BRAIN_BUDDY_HERMES_A2A_PORT="${HERMES_PORT}" \
@@ -200,6 +201,17 @@ flag = next(item for item in payload["flags"] if item["name"] == "crt_canvas")
 assert flag["mode"] == "selected_users"
 assert [user["email"] for user in flag["selected_users"]] == [os.environ["CRT_SELECTED_EMAIL"]]
 PY
+# Isolated per-run CLI exposure, created only through its explicit operator mutation.
+CLI_FLAGS_RESPONSE="$(curl -fsS -b "${OPERATOR_COOKIE_JAR}" -X PUT \
+  "${BACKEND_URL}/api/admin/feature-flags/cli_auth/mode" \
+  -H 'Content-Type: application/json' -d '{"mode":"on"}')"
+CLI_FLAGS_RESPONSE="${CLI_FLAGS_RESPONSE}" python3 - <<'PYCLI'
+import json
+import os
+payload = json.loads(os.environ["CLI_FLAGS_RESPONSE"])
+assert not payload["degraded"]
+assert next(flag for flag in payload["flags"] if flag["name"] == "cli_auth")["mode"] == "on"
+PYCLI
 rm -f "${OPERATOR_COOKIE_JAR}"
 
 echo "[e2e] Running short Compose API smoke."

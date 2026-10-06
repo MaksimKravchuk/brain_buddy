@@ -471,6 +471,7 @@ describe("CrtWorkspace tree lifecycle", () => {
     expect(screen.getByRole("heading", { name: "Local draft" })).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Current Reality Tree canvas" })).not.toBeInTheDocument();
 
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Review the sync conflict" })).toHaveAttribute("aria-busy", "false"));
     fireEvent.keyDown(document, { key: "Escape" });
     expect(await screen.findByText(/Local draft retained/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Review local draft" }));
@@ -583,9 +584,10 @@ describe("CrtWorkspace tree lifecycle", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Export saved server copy" }));
     await waitFor(() => expect(exportTree).toHaveBeenCalledWith("tree-old"));
     expect(downloadBackup).toHaveBeenCalledWith(expect.objectContaining({ filename: "Older-tree.json", mime_type: "application/json" }));
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Export saved server copy" })).not.toBeInTheDocument());
 
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /current tree: older tree/i })); });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete tree" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete tree" }));
     expect(await screen.findByRole("alertdialog", { name: "Delete ‘Older tree’?" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Delete tree" }));
     await waitFor(() => expect(deleteTree).toHaveBeenCalledWith("tree-old", expect.objectContaining({ expectedRevision: 1, idempotencyKey: expect.any(String) })));
@@ -995,8 +997,12 @@ describe("CrtWorkspace tree lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(updateTree).toHaveBeenCalledOnce();
-    expect(screen.getByText("Save failed", { selector: ".crt-save-status" })).toBeInTheDocument();
+    // Native crypto persistence finishes outside the fake timer queue. Wait
+    // for the actual failed save, keeping the single-write assertion intact.
+    await vi.waitFor(() => {
+      expect(updateTree).toHaveBeenCalledOnce();
+      expect(screen.getByText("Save failed", { selector: ".crt-save-status" })).toBeInTheDocument();
+    });
     expect(screen.getByRole("button", { name: "Root cause: Still local" })).toBeInTheDocument();
   });
 

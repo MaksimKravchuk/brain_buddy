@@ -88,6 +88,7 @@ MANAGED_FLAGS: tuple[str, ...] = (
     "crt_canvas",
     "task_mcp",
 )
+OPTIONAL_MANAGED_FLAGS: tuple[str, ...] = ("cli_auth",)
 """The runtime-manageable flags after ADR-0019 and later inventory ADRs.
 
 `admin_portal` is not excluded — it does not exist as a flag at all (DD-14).
@@ -569,11 +570,12 @@ class FeatureFlagOverrideRepository(BaseRepository):
             "SELECT flag, mode, selected_users FROM feature_flags"
         ).fetchall()
         present = {row["flag"]: row for row in rows}
-        if set(present) != set(MANAGED_FLAGS):
+        if not set(MANAGED_FLAGS).issubset(present) or not set(present).issubset(
+            set(MANAGED_FLAGS + OPTIONAL_MANAGED_FLAGS)
+        ):
             return RuntimeOverlay(degraded=True, flags={})
         flags: dict[str, FlagOverride] = {}
-        for flag in MANAGED_FLAGS:
-            row = present[flag]
+        for flag, row in present.items():
             try:
                 mode = FlagMode(row["mode"])
                 raw_cohort = json.loads(row["selected_users"])
@@ -651,8 +653,12 @@ class FeatureFlagOverrideRepository(BaseRepository):
                         if overlay.degraded:
                             raise DegradedRuntimeFlagsError()
                         updated = dict(apply(dict(overlay.flags)))
-                        for flag in MANAGED_FLAGS:
-                            self._upsert_row(conn, flag, updated[flag])
+                        if not set(MANAGED_FLAGS).issubset(updated) or not set(
+                            updated
+                        ).issubset(set(MANAGED_FLAGS + OPTIONAL_MANAGED_FLAGS)):
+                            raise DegradedRuntimeFlagsError()
+                        for flag, entry in updated.items():
+                            self._upsert_row(conn, flag, entry)
                         conn.commit()
                     except BaseException:
                         conn.rollback()

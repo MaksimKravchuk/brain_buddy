@@ -33,7 +33,7 @@ test.describe("auth acceptance", () => {
     await logoutSession(page);
 
     await test.step("reject reuse of a consumed invite", async () => {
-      await page.goto("/signup");
+      await page.goto("/signup?invite=1");
       await page.getByLabel("Email").fill(uniqueEmail("auth-reuse", testInfo));
       await page.getByLabel("Password").fill(password);
       await page.getByLabel("Invite code").fill(invite);
@@ -43,6 +43,7 @@ test.describe("auth acceptance", () => {
 
     await test.step("reject an invalid password without exposing the workspace", async () => {
       await page.goto("/login");
+      await page.getByRole("button", { name: "Use your password" }).click();
       await page.getByLabel("Email").fill(email);
       await page.getByLabel("Password").fill(`${password}-wrong`);
       await page.getByRole("button", { name: "Sign in" }).click();

@@ -39,11 +39,31 @@ public struct SignInResult: Hashable, Sendable {
     }
 }
 
+public struct NativeSignInAttempt: Hashable, Sendable {
+    public let id: UUID
+    public let serverURL: URL
+    public let expectedAccountID: String?
+    public init(id: UUID, serverURL: URL, expectedAccountID: String?) {
+        self.id = id
+        self.serverURL = serverURL
+        self.expectedAccountID = expectedAccountID
+    }
+}
+
+public enum NativeSignInOutcome: Hashable, Sendable {
+    case signedIn(SignInResult)
+    /// No session is installed for mailbox/recovery/collision continuations.
+    case continuation(AuthCompletionDTO)
+}
+
 /// What `Workspace` needs from sync. `SyncEngine` is the implementation;
 /// workspace tests use fakes. Every write the engine makes goes through the
 /// shared `DocumentStore` (read-modify-write under its lock), so the engine
 /// never holds a stale copy of the outbox and never races the workspace.
 public protocol SyncService: Sendable {
+    func beginSignIn(serverURL: URL) async throws(SignInFailure) -> NativeSignInAttempt
+    func completeSignIn(_ attempt: NativeSignInAttempt, credential: NativeSignInCredential) async throws(SignInFailure) -> NativeSignInOutcome
+    func cancelSignIn(_ attempt: NativeSignInAttempt) async
     func setEventHandler(_ handler: @escaping @Sendable (SyncEvent) async -> Void) async
     /// Starts syncing the account already linked in the stored document
     /// (after launch). Emits `.status` and schedules a `.launch` cycle.
@@ -78,6 +98,13 @@ public protocol SyncService: Sendable {
 }
 
 extension SyncService {
+    public func beginSignIn(serverURL: URL) async throws(SignInFailure) -> NativeSignInAttempt {
+        throw SignInFailure(message: "This app can't start this sign-in method.")
+    }
+    public func completeSignIn(_ attempt: NativeSignInAttempt, credential: NativeSignInCredential) async throws(SignInFailure) -> NativeSignInOutcome {
+        throw SignInFailure(message: "This app can't complete this sign-in method.")
+    }
+    public func cancelSignIn(_ attempt: NativeSignInAttempt) async {}
     /// Services that cannot tell a cancelled deletion report none.
     public func signInWithResult(
         serverURL: URL, email: String, password: String

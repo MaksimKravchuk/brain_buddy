@@ -36,6 +36,8 @@ from app.repositories import (
 from app.repositories.validation import VALIDATION_DIRNAME
 from app.repositories.version import _slugify_version_id
 from app.schemas.auth import User
+from app.services.auth_apple_lifecycle import AuthAppleLifecycle
+from app.services.auth_migration import AuthMigration
 from app.services.auth_service import ACCOUNT_DELETION_GRACE, AuthService
 from app.services.tree_service import TreeService
 from app.utils.time import utcnow
@@ -75,6 +77,7 @@ class AccountService:
         auth_service: AuthService,
         reserved_emails: frozenset[str] = frozenset(),
         deletion_grace: timedelta = DELETION_GRACE,
+        auth_migration: AuthMigration | None = None,
     ) -> None:
         self.user_repo = user_repo
         self.session_repo = session_repo
@@ -94,6 +97,8 @@ class AccountService:
         # invert the layering for one frozenset (009-FR-012).
         self.reserved_emails = reserved_emails
         self.deletion_grace = deletion_grace
+        self.auth_migration = auth_migration
+        self.apple_lifecycle: AuthAppleLifecycle | None = None
 
     # ------------------------------------------------------------------
     # Helpers
@@ -102,6 +107,29 @@ class AccountService:
     def _require_current_password(self, user: User, raw: str) -> None:
         if not self.auth_service.verify_password(user, raw):
             raise ReauthFailedError()
+
+    def _confirmed_owner(self, snapshot: User) -> User:
+        fresh = self.user_repo.get_by_id(snapshot.id)
+        if (
+            fresh is None
+            or not self.auth_service.same_authority(snapshot, fresh)
+            or (
+                fresh.deletion_requested_at is not None
+                and utcnow() >= fresh.deletion_requested_at + self.deletion_grace
+            )
+        ):
+            raise ReauthFailedError()
+        return fresh
+
+    def _keep_current_session(self, user: User, token_hash: str | None) -> None:
+        if token_hash is None:
+            return
+        session = self.session_repo.get(token_hash)
+        if session is None or session.user_id != user.id:
+            raise ReauthFailedError()
+        self.session_repo.create(
+            session.model_copy(update={"auth_version": user.auth_version})
+        )
 
     def purge_at_for(self, user: User) -> datetime | None:
         if user.deletion_requested_at is None:
@@ -137,7 +165,12 @@ class AccountService:
         )
 
     def change_email(
-        self, user: User, *, new_email: str, current_password: str
+        self,
+        user: User,
+        *,
+        new_email: str,
+        current_password: str,
+        keep_token_hash: str | None = None,
     ) -> User:
         """Move the account to a new address after re-checking the password.
 
@@ -154,7 +187,12 @@ class AccountService:
         if self.user_repo.normalize_email(new_email) in self.reserved_emails:
             raise ValidationFailure(_EMAIL_REJECTED_MESSAGE)
         try:
-            return self.user_repo.update_email(user.id, new_email)
+            with self.user_repo.store.transaction():
+                self._confirmed_owner(user)
+                updated = self.user_repo.update_email(user.id, new_email)
+                self._keep_current_session(updated, keep_token_hash)
+                self.session_repo.delete_all_for_user(user.id, keep=keep_token_hash)
+                return updated
         except ConflictError as exc:
             raise ValidationFailure(_EMAIL_REJECTED_MESSAGE) from exc
 
@@ -175,11 +213,16 @@ class AccountService:
         self._require_current_password(user, current_password)
         self.auth_service.validate_password_format(new_password)
         new_hash = self.auth_service.hash_password(new_password)
-        self.user_repo.mutate(
-            user.id,
-            lambda fresh: fresh.model_copy(update={"password_hash": new_hash}),
-        )
-        revoked = self.session_repo.delete_all_for_user(user.id, keep=keep_token_hash)
+        with self.user_repo.store.transaction():
+            self._confirmed_owner(user)
+            updated = self.user_repo.mutate(
+                user.id,
+                lambda fresh: fresh.model_copy(update={"password_hash": new_hash}),
+            )
+            self._keep_current_session(updated, keep_token_hash)
+            revoked = self.session_repo.delete_all_for_user(
+                user.id, keep=keep_token_hash
+            )
         logger.info(
             "Password changed for %s; revoked %s other session(s)", user.id, revoked
         )
@@ -231,6 +274,15 @@ class AccountService:
             account = user.model_dump(mode="json")
             account.pop("password_hash", None)
             write_json("account.json", account)
+            with self.user_repo.store.connection() as connection:
+                bindings = connection.execute(
+                    "SELECT provider,issuer,namespace,subject,email,email_verified,is_private_email,state,created_at,updated_at FROM auth_identity_bindings WHERE user_id=? ORDER BY provider",
+                    (user.id,),
+                ).fetchall()
+                write_json(
+                    "auth/connected-methods.json",
+                    [dict(binding) for binding in bindings],
+                )
 
             tree_count = 0
             for entry in self.tree_service.list_trees(owner_id=user.id):
@@ -343,6 +395,7 @@ class AccountService:
                         "relay_audit_entries": len(relay["audit"]),
                     },
                     "excluded": [
+                        "CLI device grants, hashed codes and source-session provenance (transient authorization material)",
                         "password hash (secret, not portable personal data)",
                         "session records (revoked secrets)",
                         "idempotency records (transient request-dedup copies "
@@ -375,10 +428,30 @@ class AccountService:
         def _schedule(fresh: User) -> User:
             if fresh.deletion_requested_at is not None:
                 return fresh
-            return fresh.model_copy(update={"deletion_requested_at": utcnow()})
+            return fresh.model_copy(
+                update={
+                    "deletion_requested_at": utcnow(),
+                    "auth_version": fresh.auth_version + 1,
+                }
+            )
 
-        user = self.user_repo.mutate(user.id, _schedule)
-        revoked = self.session_repo.delete_all_for_user(user.id)
+        with self.user_repo.store.transaction() as connection:
+            self._confirmed_owner(user)
+            user = self.user_repo.mutate(user.id, _schedule)
+            if self.apple_lifecycle is not None:
+                for binding in connection.execute(
+                    "SELECT id FROM auth_identity_bindings WHERE user_id=? AND provider='apple'",
+                    (user.id,),
+                ).fetchall():
+                    self.apple_lifecycle.schedule_cleanup(
+                        connection, binding["id"], "delete"
+                    )
+            connection.execute("DELETE FROM auth_proofs WHERE user_id=?", (user.id,))
+            connection.execute(
+                "DELETE FROM auth_challenges WHERE user_id=?", (user.id,)
+            )
+            connection.execute("DELETE FROM auth_attempts WHERE user_id=?", (user.id,))
+            revoked = self.session_repo.delete_all_for_user(user.id)
         logger.info(
             "Account deletion requested for %s (purge at %s); revoked %s session(s)",
             user.id,
@@ -470,6 +543,8 @@ class AccountService:
                 ),
             )
 
+        if self.auth_migration is not None:
+            self.auth_migration.erase_backup()
         self.feature_flag_repo.scrub_user(user_id)
         self.session_repo.delete_all_for_user(user_id)
         self.voice_operation_repo.delete_all_for_owner(owner_id=user_id)

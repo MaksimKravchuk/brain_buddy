@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
+import allure
 import pytest
 from typer.testing import CliRunner
 
@@ -86,11 +88,17 @@ def test_invite_repository_rejects_duplicate_and_consumed_or_unknown_codes(
         repository.mark_used("once", user_id="other", used_at=datetime.now(UTC))
 
 
+@allure.epic("Authentication & Access")
+@allure.feature("Identity storage")
+@allure.story("023-FR-002: canonical session expiry preserves other sessions")
 def test_session_repository_removes_expired_sessions_and_ignores_missing_delete(
     data_dir,
 ) -> None:
     repository = SessionRepository(data_dir)
     now = datetime.now(UTC)
+    UserRepository(data_dir, repository.store).create(
+        User(id="user", email="owner@example.com", password_hash="hash", created_at=now)
+    )
     expired = Session(
         token_hash="expired",
         user_id="user",
@@ -98,17 +106,31 @@ def test_session_repository_removes_expired_sessions_and_ignores_missing_delete(
         expires_at=now - timedelta(hours=1),
     )
     repository.create(expired)
+    valid = expired.model_copy(
+        update={"token_hash": "valid", "expires_at": now + timedelta(hours=1)}
+    )
+    repository.create(valid)
+    with repository.store.connection() as connection:
+        assert connection.execute("SELECT count(*) FROM sessions").fetchone()[0] == 2
 
     assert repository.get(expired.token_hash) is None
-    assert not repository._session_path(expired.token_hash).exists()
+    with repository.store.connection() as connection:
+        assert (
+            connection.execute("SELECT token_hash FROM sessions").fetchall()[0][0]
+            == valid.token_hash
+        )
+        assert connection.execute("SELECT count(*) FROM sessions").fetchone()[0] == 1
     repository.delete("already-missing")
+    assert repository.get(valid.token_hash) == valid
 
 
-def test_user_repository_handles_malformed_index_and_normalizes_new_users(
+@allure.epic("Authentication & Access")
+@allure.feature("Identity storage")
+@allure.story("023-FR-002: legacy email normalization survives reopening")
+def test_user_repository_normalizes_canonical_sqlite_record_and_payload(
     data_dir,
 ) -> None:
     repository = UserRepository(data_dir)
-    repository.index_path.write_text("[]", encoding="utf-8")
     now = datetime.now(UTC)
     user = User(
         id="user_1",
@@ -122,6 +144,13 @@ def test_user_repository_handles_malformed_index_and_normalizes_new_users(
 
     assert created.email == "user@example.com"
     assert repository.get_by_email("USER@example.com") == created
+    with repository.store.connection() as connection:
+        row = connection.execute(
+            "SELECT email,payload_json FROM users WHERE id=?", (created.id,)
+        ).fetchone()
+    assert row["email"] == "user@example.com"
+    assert json.loads(row["payload_json"])["email"] == row["email"]
+    assert UserRepository(data_dir).get_by_email(" USER@example.com ") == created
     with pytest.raises(ConflictError):
         repository.create(user)
 

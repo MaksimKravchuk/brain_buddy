@@ -1,0 +1,80 @@
+{
+  "findings": [
+    {
+      "category": "ownership-and-authorization",
+      "description": "The new HTTP contract requires owner/session/client checks but does not specify 404 for a resource belonging to another caller. It declares owner_mismatch and includes 403 among new failures, while omitting 404 entirely. This leaves the distinction between failed same-account reauthentication and wrong-owner resource access undefined.",
+      "evidence": [
+        "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md: Authorization and privacy assumptions requires owner-scoped reads, transitions, references and lists, with 404 for a wrong owner.",
+        ".specify/review-rubrics/security-privacy-reviewer.md: Ownership and authorization explicitly classifies unstated wrong-owner 404 semantics as at least important.",
+        "specs/022-modern-auth/contracts/http-auth.md: Common rules defines owner_mismatch without a status mapping; Email and recovery, Providers and Additive account management declare failures without 404."
+      ],
+      "recommendation": "Add an explicit contract rule and endpoint status declarations for owner-restricted lookups: foreign resources and nonexistent resources return indistinguishable 404 responses before disclosure or mutation. Preserve 403 for failed reauthentication of the caller's own account. Specify any expected-owner mismatch rejected before lookup separately, and require negative evidence that foreign account, attempt and challenge references neither disclose existence nor mutate authority.",
+      "severity": "important"
+    },
+    {
+      "category": "pii-in-logs",
+      "description": "The identity-seeding path reused and modified by this plan currently logs the normalized operator email during creation, password rotation and the already-current case. The plan describes existing logging as safe and explicitly addresses callback redaction, but does not identify this existing email emission for remediation. Leaving that path intact violates the constitution's prohibition on real user data in logs.",
+      "evidence": [
+        ".specify/memory/constitution.md: Principle I prohibits real user data in logs, metrics, committed fixtures and PR evidence.",
+        "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md: Authorization and privacy assumptions explicitly excludes emails from logs and analytics.",
+        "backend/app/services/auth_service.py:350,358,361 — AuthService.seed_admin passes normalized email to logger.info/logger.debug.",
+        "specs/022-modern-auth/plan.md: Phase 1 A and contracts/persistence-migration.md: Store facade retain and change seeding; Constitution Check describes existing safe logging and callback-query redaction."
+      ],
+      "recommendation": "Explicitly include the seed_admin email-log correction in the planned privacy work. Require content-free creation/rotation/current outcomes using permitted opaque IDs and coarse metadata, and extend leakage acceptance evidence to these startup paths at INFO and DEBUG levels.",
+      "severity": "blocking"
+    }
+  ],
+  "oracle": {
+    "adapter": "external-stdin-v1",
+    "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+    "artifacts_digest": "9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c",
+    "claimed_model": "inherited-model-unverified",
+    "claimed_provider": "openai-codex-collaboration",
+    "configured_integration": "codex",
+    "configured_model": "gpt-5.6-sol",
+    "degraded": true,
+    "executable": "/tmp/modern-auth-review-transport",
+    "integration": "external-unverified",
+    "model": "unverified",
+    "reason": "external reviewer model identity is not verified"
+  },
+  "product_decisions": [],
+  "reviewed_files": [
+    ".specify/workflows/runs/modern-auth-20261006-c2/requests/privacy-consent-security.txt",
+    ".specify/workflows/speckit/review.schema.json",
+    ".specify/review-rubrics/security-privacy-reviewer.md",
+    ".specify/memory/constitution.md",
+    "AGENTS.md",
+    "docs/auth.md",
+    "docs/data-retention.md",
+    "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md",
+    "docs/decisions/0002-async-voice-operation-substrate.md",
+    "docs/decisions/0008-verified-trunk-serial-landing.md",
+    "docs/decisions/0017-operator-account-administration-narrow-owner-scoping-exception.md",
+    "docs/decisions/0021-operator-account-lifecycle-administration.md",
+    "specs/022-modern-auth/spec.md",
+    "specs/022-modern-auth/plan.md",
+    "specs/022-modern-auth/design.md",
+    "specs/022-modern-auth/research.md",
+    "specs/022-modern-auth/data-model.md",
+    "specs/022-modern-auth/quickstart.md",
+    "specs/022-modern-auth/checklists/requirements.md",
+    "specs/022-modern-auth/contracts/http-auth.md",
+    "specs/022-modern-auth/contracts/native-auth.md",
+    "specs/022-modern-auth/contracts/persistence-migration.md",
+    "backend/app/api/account.py",
+    "backend/app/api/dependencies.py",
+    "backend/app/api/middleware.py",
+    "backend/app/core/logging.py",
+    "backend/app/main.py",
+    "backend/app/services/account_service.py",
+    "backend/app/services/auth_service.py",
+    "backend/app/schemas/auth.py",
+    "backend/app/repositories/session.py",
+    "backend/app/repositories/user.py",
+    "deploy/nginx/default.conf"
+  ],
+  "role": "privacy-consent-security",
+  "summary": "The artifacts define strong consent separation, account-bound proofs, bounded provider cleanup, export exclusions and purge coverage. Two technical corrections remain: explicit wrong-owner 404 semantics and remediation of email-bearing logs in the reused identity-seeding path. No product decision is required. This was a read-only planning review; no implementation or tests were run.",
+  "verdict": "changes-required"
+}

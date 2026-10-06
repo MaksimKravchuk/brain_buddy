@@ -85,9 +85,21 @@ regexes = ['''^\s*(email="other@example\.com", password="OtherPass12345"|json=\{
 id = "generic-api-key"
 
   [[rules.allowlists]]
+  description = "Public cryptography P-256 class identifier in Apple key validation"
+  regexTarget = "line"
+  # This is a Python class name, not key material. Pin the complete source
+  # line so replacement or a credential on the same/another line is scanned.
+  regexes = ['''^\s*key\.curve, ec\.SECP256R1\s*$''']
+
+  [[rules.allowlists]]
   description = "Synthetic CRT UUID-shaped idempotency keys"
   regexTarget = "secret"
   # Feature 019 deliberately exercises UUID-shaped idempotency keys. Pin only
   # the published fixture families and allocated numeric suffixes across the PR
   # commit range; correlation suffix 000 and every other value remain scanned.
   regexes = ['''^123e4567-e89b-(42d3-a456-426614174001|12d3-a456-426614174(00[1-9]|01[0-9]|02[0-7]|09[7-9]|10[0-6]|199))$''']
+
+[[allowlists]]
+description = "Public immutable auth review input commit id"
+regexTarget = "line"
+regexes = ['''^\s*"prior_auth_commit": "bc7fc72c35b7bf794eff912c07bdd38a1d1f0816",\s*$''']

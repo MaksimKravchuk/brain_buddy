@@ -52,6 +52,7 @@ test-frontend:
 
 test-e2e:
 	./scripts/run_playwright_e2e.sh
+	python3 scripts/run_modern_auth_e2e.py
 	python3 scripts/validate_ci_artifacts.py results --path frontend/allure-results/playwright --label playwright-e2e --since-file frontend/allure-results/playwright/.run-started-at
 	python3 scripts/validate_allure_taxonomy.py --path frontend/allure-results/playwright --label playwright-e2e
 	python3 scripts/validate_ci_artifacts.py product-e2e-results --path frontend/allure-results/playwright
@@ -152,6 +153,7 @@ check-specs:
 	python3 -m unittest scripts/test_check_spec_kit_specs.py -v
 	python3 -m unittest scripts/test_check_speckit_manifests.py -v
 	python3 -m unittest scripts/test_check_gate_integrity.py -v
+	python3 -m unittest scripts/test_auth_migration_guard.py -v
 	python3 -m unittest scripts/test_spec_kit_planning_review.py -v
 	python3 -m unittest scripts/test_render_feature_report.py -v
 	python3 scripts/check_spec_kit_specs.py

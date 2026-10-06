@@ -117,6 +117,7 @@ async function signup(page: Page, label = unique("user")): Promise<{ email: stri
 
 async function loginViaUi(page: Page, email: string): Promise<void> {
   await page.goto("/login");
+  await page.getByRole("button", { name: "Use your password" }).click();
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();

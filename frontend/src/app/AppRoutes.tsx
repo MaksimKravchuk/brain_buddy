@@ -11,6 +11,8 @@ import { TaskListPage } from "../features/tasks/TaskListPage";
 import LoginPage from "../pages/LoginPage";
 import PrivacyPolicyPage from "../pages/PrivacyPolicyPage";
 import SignupPage from "../pages/SignupPage";
+import { ProviderCompletionPage } from "../features/auth/ProviderCompletionPage";
+import { CliAuthorizeEntry } from "../features/cli-auth/CliAuthorizePage";
 
 // Brain dump is a modal over the workspace, so its routes render twice: the
 // first <Routes> resolves whatever view stays *behind* the panel, and the second
@@ -53,6 +55,9 @@ function workspaceRoutes(): React.JSX.Element {
     <>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/auth/complete" element={<ProviderCompletionPage />} />
+      <Route path="/cli/authorize" element={<CliAuthorizeEntry />} />
+      <Route path="/settings/account/delete" element={<ProtectedRoute><AccountSettingsPage directDelete /></ProtectedRoute>} />
       {/* Public on purpose: the policy must be readable before signing up, and
           the catch-all below would otherwise bounce signed-out visitors. */}
       <Route path="/privacy" element={<PrivacyPolicyPage />} />

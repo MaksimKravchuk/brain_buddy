@@ -30,7 +30,7 @@ describe("PrivacyPolicyPage", () => {
       expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
     }
 
-    // Subprocessors and the single strictly-necessary cookie are named.
+    // Processors and the strictly necessary session cookie are named.
     expect(screen.getAllByText(/OpenAI/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Fly\.io/).length).toBeGreaterThan(0);
     expect(screen.getByText(/brainbuddy_session/)).toBeInTheDocument();
@@ -150,9 +150,43 @@ describe("PrivacyPolicyPage", () => {
     expect(retention).toHaveTextContent(/excluded from.*data export/i);
   });
 
+  it("023-FR-020 names optional identity providers, minimum scopes, and direct code delivery", () => {
+    renderPolicy();
+    const collection = screen.getByRole("heading", { name: /what we collect/i }).closest("section");
+    const purposes = screen.getByRole("heading", { name: /why we process it/i }).closest("section");
+    const processors = screen.getByRole("heading", { name: /who else processes your data/i }).closest("section");
+    const cookies = screen.getByRole("heading", { name: /^cookies$/i }).closest("section");
+
+    expect(collection).toHaveTextContent(/if you set a password/i);
+    expect(collection).toHaveTextContent(/Google or Apple.*stable provider identifier.*email.*private relay/i);
+    expect(processors).toHaveTextContent(/Google.*Apple.*identity.*email/i);
+    expect(processors).toHaveTextContent(/do not request access to your contacts or mailbox/i);
+    expect(processors).toHaveTextContent(/configured email delivery provider.*recipient.*code.*SMTP/i);
+    expect(processors).toHaveTextContent(/no separate authentication SaaS/i);
+    expect(purposes).toHaveTextContent(/signing in does not give consent for AI or content processing/i);
+    expect(cookies).toHaveTextContent(/provider sign-in.*HttpOnly.*10 minutes/i);
+    expect(processors).not.toHaveTextContent(/agreement is in place|transfers are covered/i);
+  });
+
+  it("023-FR-018 023-FR-020 023-FR-025 distinguishes temporary proofs, retained identities, and secret-free exports", () => {
+    renderPolicy();
+    const retention = screen.getByRole("heading", { name: /how long we keep it/i }).closest("section");
+    const rights = screen.getByRole("heading", { name: /your rights/i }).closest("section");
+
+    expect(retention).toHaveTextContent(/sign-in attempts.*email codes.*10 minutes/i);
+    expect(retention).toHaveTextContent(/recent-confirmation proofs.*5 minutes.*callback handoffs.*60 seconds/i);
+    expect(retention).toHaveTextContent(/encrypted delivery payload.*sent.*fails.*expires/i);
+    expect(retention).toHaveTextContent(/abuse-prevention fingerprints.*24 hours/i);
+    expect(retention).toHaveTextContent(/connected identity metadata.*disconnect.*account.*purged/i);
+    expect(retention).toHaveTextContent(/Apple.*revocation.*24 hours.*purge deadline/i);
+    expect(retention).toHaveTextContent(/verified Apple notification.*8 days/i);
+    expect(rights).toHaveTextContent(/linked-method.*verification metadata.*provider identifiers/i);
+    expect(rights).toHaveTextContent(/excludes password hashes.*codes.*proofs.*session tokens.*provider credentials/i);
+  });
+
   it("records the date the policy last changed", () => {
     renderPolicy();
-    expect(screen.getByText(/September 20, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/October 6, 2026/)).toBeInTheDocument();
   });
 
   it("links back to sign in", () => {
