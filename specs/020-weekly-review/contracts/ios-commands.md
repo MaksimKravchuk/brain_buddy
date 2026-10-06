@@ -143,15 +143,27 @@ early.
   `autoParkTask` is satisfied when the task is not in Next or already parked for that
   formulation; `decideTask` is satisfied when a decision with its `decisionID` is
   already in `review.decisions`; `undoDecision` when the decision is absent;
-  `acknowledgeParks` when every ack exists.
+  `acknowledgeParks` when every ack exists. A decision whose Undo snapshot only the
+  server holds (known only from the server's answer, or its device snapshot expired
+  while an Undo names it) keeps a queued `undoDecision` for the server to answer: 200,
+  409 `undo_unavailable` with its Ref, or 404 naming the decision. Operations on a
+  follow-up whose decision waits for the server (a `decideTask` the replay could not
+  apply is kept for the server to answer) wait with it.
 - **Compaction** (`OutboxCompactor`): an unsent `decideTask` followed by its
   `undoDecision` cancels both (and the created follow-up task); an unsent
-  `bulkRelease` followed by its `undoBulkRelease` cancels both. `progressSession`
+  `bulkRelease` followed by its `undoBulkRelease` cancels both. A decision and its
+  Undo do not cancel across an archive, a tag delete, or (for a decision in a review)
+  a later `startSession`, `progressSession` or `finishSession` or another decision of
+  the same review. An Undo restores the task field for field, `updatedAt` included.
+  `progressSession`
   operations are never folded into each other, so each keeps the `progressID` it may
   already have been sent with. Sent operations are never modified (existing rule).
 - **`undoDecision` answered 404** (http §3: the decision is already undone, e.g. a retry
   of an undo whose response was lost): acknowledged as success, because the replay goal
   (the decision is absent) holds; it is never set aside.
+- **Known limit, `undoBulkRelease`**: a restart item that the server's answer released
+  but this device's replay did not has no pre-release clock on the device; its Undo
+  restores it to Next without a local clock until the next pull.
 - **409 stale on `decideTask`**: the existing refetch path (`SyncEngine+Push.swift`
   `handleFailure`/`refetch`) runs; after the refetched task is upserted, replay
   re-evaluates the decision. When the refetched task is parked for the decision's
@@ -223,7 +235,7 @@ early.
 `Workspace` (`BrainBuddyWorkspace/Workspace.swift`) gains
 `func applyDueAutoParks()`; it is called on load, on foreground
 (`scenePhase == .active`), after each pull, and from the existing background refresh
-task (`BrainBuddyApp.swift:43`). It queries `GTDQueries.dueAutoParks(in:now:settings:)`
+task (`BrainBuddyApp.swift:43`). It queries `GTDQueries.dueAutoParks(in:now:timeZone:)`
 and performs one `autoParkTask` per task via the private `perform(_:)`.
 
 - Nothing parks before activation (FR-051): `dueAutoParks` is empty while no
@@ -248,6 +260,10 @@ after pull, background refresh) and keeps the device copy within the server's
 retention bounds, signed in or not: it closes local sessions idle ≥ 7 days (partial
 or abandoned, data-model E3), nulls local decision undo snapshots and bulk-release
 clock snapshots older than 7 days, and deletes form drafts (FR-052) older than 7 days.
+Signed in, a decision record that a queued `undoDecision` names is kept past 7 days
+without its snapshot, so the Undo reaches the server instead of being replayed as
+already done. An unsent `decideTask` or `bulkRelease` that a queued Undo names keeps
+its snapshot past 7 days, because that Undo replays from it.
 - Widgets and intents never park (they open the workspace with `enableSync: false`
   and only read); the widget counts `park_due` tasks as "moves to Someday tomorrow"
   until the app applies the park.
@@ -255,16 +271,18 @@ clock snapshots older than 7 days, and deletes form drafts (FR-052) older than 7
 ## 6. Queries (`BrainBuddyCore/Queries+Review.swift`, new)
 
 `GTDQueries.formulationClass(of:now:settings:timeZone:)`,
-`decisionQueue(in:now:settings:)` (the `asks_for_decision` aggregate in the order of
-formulation-clock §5), `dueAutoParks(in:now:settings:)`, `unseenParks(in:)`,
-`restartCandidates(in:now:settings:)`, `wins(in:now:)` (completed in the last
+`decisionQueue(in:now:timeZone:)` (the `asks_for_decision` aggregate in the order of
+formulation-clock §5), `dueAutoParks(in:now:timeZone:)`, `unseenParks(in:)`,
+`restartCandidates(in:now:timeZone:)`, `wins(in:now:)` (completed in the last
 7 days), `capacityMirror(in:now:)` (Next count; 4-week weekly average and implied
 weeks only with ≥ 4 full weeks of history and ≥ 1 completion, else `nil`, FR-031),
 `waitingDue(in:now:)`, `somedayDue(in:now:limit: 7)` (eligibility and order of
 http §6), `projectsNeedingNextAction(in:)` (reuses `ProjectSummary.needsNextAction`,
 `Queries.swift:183`), `datesAhead(in:today:days: 14)`,
-`lastCountedReview(in:)` (completed and partial only), `askCount(in:now:settings:)`
+`lastCountedReview(in:)` (completed and partial only), `askCount(in:now:timeZone:)`
 (widget; the same aggregate as `decisionQueue`), `explainerNeeded(in:)` (FR-051).
+The state-taking queries read the settings from the state; `timeZone:` (nil = the
+stored zone) selects the classification zone of the table below.
 **Which zone, for what** (a signed-in device may sit in a zone other than the stored
 one, http §5):
 
@@ -393,7 +411,8 @@ Someday on the server with `parked` null, nothing is back in Next, an unsent `ex
 was dropped and its task listed, the other decisions are applied, and there are
 0 sync issues.
 
-`local.formDrafts: [DraftKey: String]` holds unsaved form text (FR-052), keyed by
+`local.formDrafts: [DraftKey: FormDraft]` (`FormDraft`: `text` + `savedAt`) holds
+unsaved form text (FR-052), keyed by
 form kind + task id + formulation id (or session id + step item, or project id for a
 project's first next action, M-08 / M-19). It is never sent,
 never part of an outbox operation and never logged; it is removed on save, discard,

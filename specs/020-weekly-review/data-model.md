@@ -120,6 +120,12 @@ PK `(owner_id, id)`; index `(owner_id, status, started_at)`.
 Step codes: `wins, mind_sweep, inbox, decisions, rest_of_next, waiting, projects,
 someday, dates, summary`. Quick = `wins, inbox, decisions, summary` (FR-028).
 
+A finished step has **nothing to decide** when its queue is empty at that moment
+(inbox: no Inbox task; decisions: no `asks_for_decision` task; waiting and someday: the
+queue rules of http §6; projects: no active project without a next action). Wins, the
+mind sweep, the rest of Next and Dates have nothing to decide; the summary never
+qualifies.
+
 **Status transitions** (FR-029, owner decision 2026-10-06)
 
 ```
@@ -302,7 +308,10 @@ dropped when an account-less install was linked, shown once on M-09; ios-command
 Device-local retention mirrors the server (contracts/ios-commands.md §5
 `runLocalReviewMaintenance`): local decision undo snapshots and bulk-release clock
 snapshots are nulled after 7 days, idle local sessions are closed after 7 days, drafts
-expire after 7 days — signed in or account-less.
+expire after 7 days — signed in or account-less. Signed in, the device also drops
+decisions and bulk releases once their snapshots are nulled, and ended runs after 35
+days; ended runs keep no progress ids. What a queued Undo still names is kept as
+ios-commands §5 states.
 
 The downloaded model file lives in the app's Application Support (not the App Group,
 so the widget never maps it). Both are removed with the app and are **not** in the

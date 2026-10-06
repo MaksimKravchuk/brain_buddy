@@ -406,6 +406,8 @@ iOS becomes visible on the web (SC-007). `restart_mode` is
 `onboarded_at != null and now - coalesce(last_counted_review_at, onboarded_at) >= 21 d`
 (FR-017): a person who has not onboarded gets onboarding first and no restart mode, and
 one who onboarded but never had a counted review counts from onboarding.
+An `open_session` the client cannot read still marks that session id as open; clients
+must not end their local copy of it.
 
 `next_review_at` is the next review slot (`review_weekday` at `review_time`, skipping a
 slot that has a counted review in the preceding 6 days, FR-036) evaluated in the stored
