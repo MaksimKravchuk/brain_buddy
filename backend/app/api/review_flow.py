@@ -141,7 +141,7 @@ def start_review_session(
 @router.get(
     "/review/sessions/{session_id}",
     response_model=SessionResponse,
-    responses=error_responses(401, 404),
+    responses=error_responses(401, 404, 422),
 )
 def get_review_session(
     session_id: str,
@@ -245,7 +245,7 @@ def bulk_release(
 @router.post(
     "/review/bulk-releases/{bulk_id}/undo",
     response_model=BulkReleaseUndoResponse,
-    responses=error_responses(400, 401, 404, 409),
+    responses=error_responses(400, 401, 404, 409, 422),
 )
 def undo_bulk_release(
     bulk_id: str,
