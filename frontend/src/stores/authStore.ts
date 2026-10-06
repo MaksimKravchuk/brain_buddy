@@ -31,7 +31,7 @@ interface AuthStoreState {
   refreshSession: () => Promise<void>;
   login: (payload: LoginPayload) => Promise<void>;
   signup: (payload: SignupPayload) => Promise<void>;
-  logout: () => Promise<boolean>;
+  logout: (options?: { requireServerConfirmation: boolean }) => Promise<boolean>;
   /** Immediate local boundary used by 401 handlers; cleanup is started for the captured owner. */
   clearSession: () => boolean;
   /** Fail-closed boundary for destructive transitions such as account deletion. */
@@ -154,18 +154,26 @@ export const useAuthStore = create<AuthStoreState>((set, get) => ({
     set({ user, status: "authed" });
   },
 
-  async logout() {
+  async logout(options) {
     const requestGeneration = ++sessionGeneration;
+    const departingOwner = get().user?.id;
+    const stillCurrent = () => requestGeneration === sessionGeneration && get().user?.id === departingOwner;
     if (!(await cleanupDepartingOwner(get().user))) return false;
-    if (requestGeneration !== sessionGeneration) return false;
-    // Always clear local state, even if the network call fails — the user
-    // asked to sign out and we shouldn't block them on a transient error.
+    if (!stillCurrent()) return false;
+    // Ordinary logout remains available offline. Account-switch admission
+    // additionally confirms that the browser no longer carries a session.
     try {
       await authApi.logout();
-    } catch {
-      /* swallow: local state is the source of truth for logout UX */
+      if (!stillCurrent()) return false;
+      if (options?.requireServerConfirmation) {
+        const remaining = await authApi.me();
+        if (!stillCurrent()) return false;
+        if (remaining !== null) throw new Error("Could not confirm server sign-out");
+      }
+    } catch (caught) {
+      if (options?.requireServerConfirmation) throw caught;
     }
-    if (requestGeneration !== sessionGeneration) return false;
+    if (!stillCurrent()) return false;
     set({ user: null, status: "anon" });
     return true;
   },

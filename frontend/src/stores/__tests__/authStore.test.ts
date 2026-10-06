@@ -125,6 +125,40 @@ describe("authStore", () => {
     expect(useAuthStore.getState().user).toBeNull();
   });
 
+  it.each(["cleanup", "logout", "confirmation"])("confirmed logout preserves an owner change during %s", async boundary => {
+    useAuthStore.setState({ user: { id: "B", email: "b@example.com" }, status: "authed" });
+    let release!: () => void;
+    const cleanup = vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 0 });
+    const logout = vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    const me = vi.spyOn(authApi, "me").mockResolvedValue(null);
+    if (boundary === "cleanup") cleanup.mockReturnValueOnce(new Promise(resolve => { release = () => resolve({ ok: true, removed: 0 }); }));
+    if (boundary === "logout") logout.mockReturnValueOnce(new Promise(resolve => { release = () => resolve(undefined); }));
+    if (boundary === "confirmation") me.mockReturnValueOnce(new Promise(resolve => { release = () => resolve(null); }));
+    const pending = useAuthStore.getState().logout({ requireServerConfirmation: true });
+    await vi.waitFor(() => expect(boundary === "cleanup" ? cleanup : boundary === "logout" ? logout : me).toHaveBeenCalledOnce());
+    // Even direct owner replacement, without a generation bump, invalidates
+    // the explicit action for B and must never clear the new owner C.
+    useAuthStore.setState({ user: { id: "C", email: "c@example.com" }, status: "authed" });
+    release();
+    await expect(pending).resolves.toBe(false);
+    expect(useAuthStore.getState().user?.id).toBe("C");
+    if (boundary === "cleanup") expect(logout).not.toHaveBeenCalled();
+    if (boundary !== "confirmation") expect(me).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale anonymous confirmation after a newer anonymous transition", async () => {
+    useAuthStore.setState({ user: null, status: "anon" });
+    vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    let release!: (value: null) => void;
+    const me = vi.spyOn(authApi, "me").mockReturnValue(new Promise(resolve => { release = resolve; }));
+    const pending = useAuthStore.getState().logout({ requireServerConfirmation: true });
+    await vi.waitFor(() => expect(me).toHaveBeenCalledOnce());
+    useAuthStore.getState().clearSession();
+    release(null);
+    await expect(pending).resolves.toBe(false);
+    expect(useAuthStore.getState().status).toBe("anon");
+  });
+
   it("signup stores the returned user and marks the session authed", async () => {
     vi.spyOn(authApi, "signup").mockResolvedValue({ id: "u2", email: "new@example.com" });
     await useAuthStore.getState().signup({ email: "new@example.com", password: "secret", invite_code: "invite" });

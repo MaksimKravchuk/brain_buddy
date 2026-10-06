@@ -1,13 +1,17 @@
 import { Link, Navigate, useLocation } from "react-router-dom";
+import { useState } from "react";
 import { Sprout } from "lucide-react";
 import { useAuthStore } from "../stores/authStore";
 import { AuthEntry } from "../features/auth/AuthEntry";
 import { safeAuthDestination } from "../features/auth/authFlow";
+import { useAuthOperation } from "../features/auth/authOperation";
+import { Button } from "../components/ui/Button";
 
 export default function LoginPage(): React.JSX.Element {
-  const status = useAuthStore(state => state.status);
-  const user = useAuthStore(state => state.user);
-  const deletionScheduledFor = useAuthStore(state => state.deletionScheduledFor);
+  const session = useAuthStore();
+  const { status, user, deletionScheduledFor } = session;
+  const [confirmedSession, setConfirmedSession] = useState<typeof session | null>(null);
+  const switchAccount = useAuthOperation();
   const location = useLocation();
   const state = location.state as { from?: { pathname?: string; search?: string }; deletionScheduled?: string; authNotice?: string } | null;
   const destination = safeAuthDestination(state?.from ? `${state.from.pathname ?? "/"}${state.from.search ?? ""}` : "/");
@@ -18,8 +22,18 @@ export default function LoginPage(): React.JSX.Element {
     {expected ? <p role="status" className="mb-4 text-sm text-slate-700">Use the account linked to this device before continuing.</p> : null}
     {state?.authNotice ? <p role="status" className="mb-4 text-sm text-slate-700">{state.authNotice}</p> : null}
     {deletionScheduled ? <p role="status" className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Your account is deactivated and will be permanently deleted on {new Date(deletionScheduled).toLocaleDateString()}. Sign back in before then to cancel the deletion. Apple cleanup may still be pending or unconfirmed; your deletion date is unchanged.</p> : null}
-    <AuthEntry destination={destination} />
-    <p className="mt-4 text-center text-xs text-slate-500">Have a password and invite code? <Link to="/signup?invite=1" className="inline-flex min-h-11 items-center text-sky-700 underline">Create an account with an invite</Link></p>
+    {expected && status === "loading" ? <p role="status">Checking your current account…</p> : expected && (confirmedSession !== session || switchAccount.busy || switchAccount.error) ? <div className="flex flex-col gap-4">
+      <p className="text-sm text-slate-700">First sign out of this browser before using the account linked to your device.</p>
+      {switchAccount.error ? <p role="alert" className="text-sm text-rose-700">{switchAccount.error}</p> : null}
+      <Button className="min-h-11" disabled={switchAccount.busy} onClick={() => void switchAccount.run(async () => {
+        if (useAuthStore.getState() !== session) throw new Error("Session changed");
+        if (!(await session.logout({ requireServerConfirmation: true }))) throw new Error("Sign-out was not completed");
+        setConfirmedSession(useAuthStore.getState());
+      }, "Couldn't confirm sign-out. Try again before signing in to the linked account.")}>Sign out and use linked account</Button>
+    </div> : <>
+      <AuthEntry destination={destination} />
+      <p className="mt-4 text-center text-xs text-slate-500">Have a password and invite code? <Link to="/signup?invite=1" className="inline-flex min-h-11 items-center text-sky-700 underline">Create an account with an invite</Link></p>
+    </>}
   </AuthLayout>;
 }
 export function AuthLayout({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
