@@ -27,7 +27,12 @@ _VOICE_SWEEP_INTERVAL_SECONDS = float(
 
 
 def _run_privacy_maintenance_sweep(container: Container) -> tuple[int, int, int]:
-    """Purge due accounts, relay content, and expired CRT receipts."""
+    """Purge authentication metadata, due accounts, relay content, and CRT receipts."""
+
+    try:
+        container.modern_auth_service.cleanup_expired_metadata()
+    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
+        logger.warning("Authentication metadata cleanup deferred")
 
     try:
         container.auth_migration.cleanup_expired_backup()

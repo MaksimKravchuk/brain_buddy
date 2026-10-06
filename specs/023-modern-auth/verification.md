@@ -155,3 +155,21 @@ Focused frontend: **75 passed**, typecheck and lint passed
 (`/tmp/modern-auth-unconfigured-frontend-final2.log`); earlier test fixture/name
 errors were corrected without removing outcome assertions. A fresh final full
 chain and independently reviewed candidate are still required.
+
+## Independent retention finding and bounded repair
+
+Independent review of `deacdb8cedd015bfddfd13f9d772d40bc745bff4` returned
+**request_changes**, finding `SEC-FINAL-004`: normal privacy maintenance did not
+expire authentication metadata when the delivery worker was disabled by missing
+keys. The original review and synthetic reproduction remain at
+`/tmp/modern-auth-final-code-review-deacdb8.json`. Two regression cases first
+failed against that candidate (`/tmp/modern-auth-retention-red.log`).
+
+Local expiry now runs in the regular privacy sweep independently of delivery,
+using the same existing expiry/lease rules. The targeted unlink and maintenance
+suite passed **34 tests** in 18.38 seconds
+(`/tmp/modern-auth-retention-green.log`); the three final boundary cases passed
+in 3.16 seconds (`/tmp/modern-auth-retention-final.log`), covering missing keys,
+provider unavailability without network calls, and isolation of a transient
+store failure from account deletion. These are focused results, not a full
+candidate acceptance verdict.

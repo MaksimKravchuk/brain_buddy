@@ -306,3 +306,9 @@ The web UI keeps connected-method metadata and binds these requests to its
 displayed owner. A failed discovery request is a retry state, not a downgrade
 to this mode. Passwordless accounts continue to use the proof-bound actions;
 missing operational keys must be restored rather than bypassing ownership proof.
+
+Local authentication expiry runs at startup and in the regular privacy sweep,
+independently of provider delivery and authentication keys. Losing a key or a
+provider outage must not retain disconnected identity mappings past their
+cleanup deadline. A transient store failure is logged and retried on the next
+sweep without stopping the other privacy duties.

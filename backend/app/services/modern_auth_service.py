@@ -1700,6 +1700,11 @@ class ModernAuthService:
     def dispatch_one(self) -> bool:
         delivered = self.mail.dispatch_one() if self.mail else False
         revoked = self.apple.dispatch_one() if self.apple else False
+        self.cleanup_expired_metadata()
+        return delivered or revoked
+
+    def cleanup_expired_metadata(self) -> None:
+        """Run local expiry independently of cryptographic keys and provider delivery."""
         with self.store.transaction() as connection:
             connection.execute(
                 "UPDATE auth_attempts SET status='failed',sealed_payload=NULL,key_id=NULL,lease_id=NULL,lease_expires_at=NULL WHERE status='exchanging' AND lease_expires_at<=?",
@@ -1708,7 +1713,6 @@ class ModernAuthService:
         AuthMetadataRepository(self.store.root, self.store).cleanup_expired(
             now=self.clock(), limit=100
         )
-        return delivered or revoked
 
     def _reserve_provider_start(
         self, connection: sqlite3.Connection, client: str, network: str

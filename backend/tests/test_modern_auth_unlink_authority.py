@@ -327,6 +327,71 @@ def test_023_fr025_fresh_explicit_apple_link_cancels_obsolete_cleanup_safely(
         )
 
 
+@pytest.mark.parametrize("unavailable", ["missing_keys", "provider_failure"])
+def test_023_fr018_privacy_sweep_erases_expired_unlink_without_provider_access(
+    apple_runtime, container, unavailable
+):
+    """Expired disconnected identities are erased even when sign-in keys or delivery are unavailable."""
+    from app.main import _run_privacy_maintenance_sweep
+
+    service, _, _, provider, clock = apple_runtime
+    owner, token = owner_with_binding(service, provider, clock)
+    remove(service, owner, token, "apple")
+    assert binding(service)["state"] == "unlinked"
+    clock.now += timedelta(hours=25)
+    if unavailable == "missing_keys":
+        service.settings = service.settings.model_copy(
+            update={"current_key_id": None, "keyring": {}}
+        )
+        service.box = None
+        service.mail = None
+        service.apple = None
+        assert not service.settings.crypto_ready
+    else:
+
+        def cannot_dispatch():
+            raise AssertionError("Privacy cleanup must not contact a provider")
+
+        service.apple.dispatch_one = cannot_dispatch
+        service.mail.dispatch_one = cannot_dispatch
+    container.modern_auth_service = service
+
+    _run_privacy_maintenance_sweep(container)
+
+    assert binding(service) is None
+    with service.store.connection() as connection:
+        for table in ("auth_apple_cleanup_jobs", "auth_apple_grants"):
+            assert (
+                connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
+            )
+    assert provider.revocations == []
+    assert service.auth.get_user_for_token(token).id == owner.id
+
+
+def test_023_fr018_auth_cleanup_failure_preserves_other_privacy_duties(
+    container, monkeypatch, caplog
+):
+    """A transient authentication-store error must not stop the account deletion sweep."""
+    from app.main import _run_privacy_maintenance_sweep
+
+    def unavailable_store():
+        raise RuntimeError("synthetic unavailable authentication store")
+
+    account_sweeps = []
+
+    def purge_accounts():
+        account_sweeps.append("purged")
+        return 1
+
+    monkeypatch.setattr(
+        container.modern_auth_service, "cleanup_expired_metadata", unavailable_store
+    )
+    monkeypatch.setattr(container.account_service, "purge_due_accounts", purge_accounts)
+    assert _run_privacy_maintenance_sweep(container) == (1, 0, 0)
+    assert account_sweeps == ["purged"]
+    assert "Authentication metadata cleanup deferred" in caplog.text
+
+
 def test_023_fr025_live_apple_cleanup_lease_blocks_explicit_relink(apple_runtime):
     """An in-flight old revoke must settle before the owner can commit newer consent."""
     service, _, _, provider, clock = apple_runtime
