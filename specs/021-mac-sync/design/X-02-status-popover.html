@@ -201,7 +201,7 @@ hr{border:0;border-top:1px solid var(--s200);margin:0}
 </figure>
 
 <figure>
-<figcaption><b>X-02 · session ended</b>US3-5. "Sign in again" is the first and default button and opens X-03 with the email locked. "Sync now" is hidden because it cannot work until then. Changes keep waiting.</figcaption>
+<figcaption><b>X-02 · session ended</b>US3-5. "Sign in again" is the first and default button and opens X-03 with the email locked. "Sync now" is shown disabled, as offline and in the File menu (X-07), because it cannot work until then; it is skipped in the Tab order. Changes keep waiting. (Planning review c1: disabled, not hidden.)</figcaption>
 <div class="pop">
   <div class="notice warn" role="status">
     <b>Your session ended</b>
@@ -212,6 +212,7 @@ hr{border:0;border-top:1px solid var(--s200);margin:0}
     <div class="kv"><span class="k">Last synced</span><span class="v">Today at 11:40</span></div>
     <div class="kv"><span class="k">Waiting to sync</span><span class="v">5 changes · oldest 2 h</span></div>
   </div>
+  <div><button class="btn dis" aria-disabled="true">Sync now</button></div>
   <hr>
   <div class="acct"><span>alex@example.com</span><button class="btn lnk">Sign out…</button></div>
 </div>
@@ -299,7 +300,7 @@ hr{border:0;border-top:1px solid var(--s200);margin:0}
   <h3>Keyboard, VoiceOver and closing</h3>
   <ul>
     <li><b>Open</b>: click, Space or Return on the status words. The popover is announced as "Sync status" and VoiceOver reads its content in order (status notice, last synced, waiting, issues count) before the first control (FR-016).</li>
-    <li><b>Tab order</b>: attention action (Sign in again / Copy) → each issue's Copy → Dismiss → Sync now → Sign out…. Shift-Tab reverses. "Sync now" is skipped only offline, the one state where it is disabled. It stays enabled and focusable during a sync (FR-013).</li>
+    <li><b>Tab order</b>: attention action (Sign in again / Copy) → each issue's Copy → Dismiss → Sync now → Sign out…. Shift-Tab reverses. "Sync now" is skipped only where it is disabled: offline and session ended. It stays enabled and focusable during a sync (FR-013).</li>
     <li><b>Sync now while syncing</b>: a press joins the running sync, or queues a single follow-up sync (single-flight). There is no visual or spoken change; the footer indicator is the only sign of activity.</li>
     <li><b>Close</b>: Esc, a click outside, or choosing "Sign in again" or "Sign out…" (which open X-03 / X-04). Focus returns to the status words in the footer.</li>
     <li><b>Live updates while open</b>: the times and counts update in place without moving focus. A new issue arriving while the popover is open is appended and announced politely; focus stays where it was (FR-009).</li>

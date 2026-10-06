@@ -6,17 +6,17 @@
 
 **Design authority**: [design.md](design.md), signed off by Max on 2026-10-06 with decisions 1 – 3 accepted and gaps G-1 – G-3 resolved by the spec amendment of the same day. It covers:
 
-- **macOS**: screens X-01 – X-07;
+- **macOS**: screens X-01 – X-08 (X-08 "Second copy of the app" was added on 2026-10-06 from this plan's gap G-8 and is cited by FR-017);
 - **iPhone**: M-01, M-02;
 - **web**: D-01.
 
-The design's post-sign-off review fixes (commit `20b3451`) and the FR-019 amendment (commit `b83d367`) are included:
+The design's post-sign-off review fixes (commit `20b3451`), the FR-019 amendment (commit `b83d367`) and the spec amendment that resolved this plan's first findings (commit `0b9fffe`: FR-007, FR-009, FR-017, FR-032, X-08, Assumptions) are included:
 
 - the X-03 "signed in, account deletion cancelled" state;
 - the approved FR-027 line only;
 - "Sync now" stays enabled during a sync (single-flight) on Mac and iPhone.
 
-This plan answers the design's "Notes for the plan" and gap G-7 (G-1 – G-6 were resolved at sign-off), and adds design gap G-8.
+This plan answers the design's "Notes for the plan" and gap G-7 (G-1 – G-6 were resolved at sign-off; G-8 by X-08). Planning review campaign `021-mac-sync-c1` (63 findings) is dispositioned in [review-c1-disposition.md](review-c1-disposition.md); its fixes are in this plan, the contracts, data-model, research, quickstart, design.md (states added under "Planning review c1 additions") and a minimal spec amendment (FR-003, FR-017, FR-018, FR-021 sentences, new FR-033, two edge cases, Assumptions).
 
 **Risk**: **High / ASK** for the feature as a whole:
 
@@ -24,7 +24,7 @@ This plan answers the design's "Notes for the plan" and gap G-7 (G-1 – G-6 wer
 - a session credential in the macOS Keychain;
 - a one-time import of real local data;
 - a behaviour change of an existing endpoint (ADR-0020);
-- the ASK paths `backend/app/api/tasks.py`, `backend/app/api/middleware.py`, `.github/workflows/ci.yml`, `scripts/validate_ci_artifacts.py`, `scripts/render_feature_report.py` and `Makefile`.
+- the ASK paths `backend/app/api/tasks.py`, `backend/app/api/middleware.py`, `.github/workflows/ci.yml`, `scripts/validate_ci_artifacts.py`, `scripts/render_feature_report.py`, `scripts/check_manual_evidence.py`, `Makefile`, `ios/BrainBuddyKit/Sources/BrainBuddyAPI/SessionTokenStore.swift` and `ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineSessionTests.swift` (the last two by the classifier's `session` token).
 
 Per-slice classes are in [Delivery slices](#delivery-slices). There is no feature flag (research R15).
 
@@ -94,7 +94,7 @@ Every product test names a `021-FR-…` / `021-SC-…` id. pytest, Vitest and Pl
 
 **Performance Goals**:
 
-- A change appears on the other open client within 60 s (SC-001). The 15 s tick and 45 s pull age bound staleness at about 60 s (research R8).
+- A change appears on the other open client within 60 s (SC-001). The 15 s tick and 30 s pull age keep the gap between pulls under 45 s plus one pull, so the worst case is about 50 s; the web refetches every 45 s while visible (research R8).
 - Local commands apply synchronously; no UI waits on the network (FR-010).
 - The legacy import of 2,000 tasks finishes in under 2 s on an M-series Mac. Kit replay of 2,000 operations takes about 45 ms (`docs/native-ios-app.md:328-331`); placeholders show after 300 ms.
 - The first load of a large account does not block the window (edge case).
@@ -114,7 +114,7 @@ Every product test names a `021-FR-…` / `021-SC-…` id. pytest, Vitest and Pl
 
 - Invite-gated beta: tens of owners, hundreds to low thousands of tasks each.
 - One new endpoint, one new query parameter and four new fields.
-- 10 designed screens (X-01 – X-07, M-01, M-02, D-01).
+- 11 designed screens (X-01 – X-08, M-01, M-02, D-01); X-08 is a system alert without a mockup.
 - Three clients.
 
 ## Constitution Check (pre-design)
@@ -123,12 +123,13 @@ Every product test names a `021-FR-…` / `021-SC-…` id. pytest, Vitest and Pl
 
 - **Spec workflow** — PASS.
   - `intake.md`, `spec.md` (Clarifications for 2026-10-06 and the design sign-off), `checklists/requirements.md` (all checked) and the signed-off `design.md` exist. There are no NEEDS CLARIFICATION markers.
-  - Inconsistencies found while planning are listed below. None blocks planning; one owner question is in [Open questions](#open-questions-for-the-product-owner).
+  - Inconsistencies found while planning are listed below, with their resolutions (spec commit `0b9fffe` and review c1). None blocks planning. The earlier owner question is answered in spec Assumptions; review c1 adds two owner questions with recommended defaults, neither blocking (see [Open questions](#open-questions-for-the-product-owner)).
 - **Consent & Safety** — PASS with design.
   - Nothing leaves the Mac until the person signs in (kit `runCycle` guards on `account`, FR-029). Voice stays local.
   - The session token goes only in the Keychain (E9).
   - No title, note, outcome or email appears in any log, on the server (log-capture test) or the Mac (import report test).
-  - The import never overwrites or deletes the old store before verification, and never deletes an unreadable one (FR-021, FR-022).
+  - The import never overwrites or deletes the old store before verification, and never deletes an unreadable one (FR-021, FR-022). It never writes into or replaces a workspace in use: `store.json` is created only by the exclusive rename of a verified staging file, and a previous-version file that appears later is kept and surfaced (FR-033, data-model E7.1).
+  - The Mac's device files, their protection and their lifetime after the app is deleted are written out in data-model E5, E7, E8 and E9 for `docs/data-retention.md`; the pre-021 cookie session is ended and its cookie removed at the first launch.
   - The new server field is exported and purged (E1).
   - Evidence comes from synthetic data only.
   - No AI and no provider.
@@ -149,12 +150,12 @@ Every product test names a `021-FR-…` / `021-SC-…` id. pytest, Vitest and Pl
   - The import is crash-safe at every step (mac-legacy-import §6).
   - Single instance.
   - There is no canvas impact.
-- **Delivery boundary** — PASS. Spec Kit artifacts are planning input only. Each slice uses its own worktree, TDD, independent verification and exact-SHA CI, and carries the ADR-0008 class stated per slice; ASK slices need recorded approval.
-- **Design citation** — PASS. Each user-story section below names the design ids and states it realizes. Requirements with no affordance (design "Requirements with no affordance": FR-005, FR-007 – FR-011, FR-017, FR-020, FR-021, FR-023, FR-027 – FR-031) are covered by backend, kit and Mac tests named in the Test strategy.
+- **Delivery boundary** — PASS. Spec Kit artifacts are planning input only. Each slice uses its own worktree, TDD, independent verification and exact-SHA CI, and carries the ADR-0008 class stated per slice, re-derived from `scripts/classify_path_risk.py --null` over every slice's full path list (see [Delivery slices](#delivery-slices)); ASK slices need a PR plus the owner's recorded approval.
+- **Design citation** — PASS. Each user-story section below names the design ids and states it realizes. Requirements with no affordance (design "Requirements with no affordance": FR-005, FR-007 – FR-011, FR-017, FR-020, FR-021, FR-023, FR-027 – FR-032) are covered by backend, kit, web and Mac tests named in the Test strategy.
 
 ## Current repository trace
 
-Facts this plan builds on, verified 2026-10-06 at `e50b144`.
+Facts this plan builds on, verified 2026-10-06 at `e50b144` and re-checked at `0b9fffe`: every commit since `e50b144` changes only `specs/`, so the code facts hold. Review c1 re-read the files it cites (rows marked c1).
 
 ### Backend
 
@@ -165,7 +166,8 @@ Facts this plan builds on, verified 2026-10-06 at `e50b144`.
 | `backend/app/modules/tasks/domain.py` | `ProjectDocument` (l.31 – 43: no `archived_at`, no outcome) | E1 fields |
 | `backend/app/modules/tasks/repository.py` | `projects` table with JSON payload (l.102 – 109); `migration_ledger` (174 – 238); `delete_all_for_owner` (644 – 680) | `_mark_detached_archives()` startup step |
 | `backend/app/schemas/tasks.py` | `ProjectCreateRequest` (53 – 55), `ProjectUpdateRequest` (58 – 61), `ExpectedRevisionRequest` (64 – 65), `ProjectResponse` (82 – 88); `StrictBaseModel` `extra="forbid"` | E2 |
-| `backend/app/api/middleware.py` (**ASK**) | `CorrelationIdMiddleware` (l.22 – 75): incoming `X-Correlation-ID`, `api_request` log line | `client` / `client_version` fields |
+| `backend/app/api/middleware.py` (**ASK**) | `CorrelationIdMiddleware` (l.22 – 75): incoming `X-Correlation-ID` or `X-Request-ID` accepted verbatim (l.38 – 41), bound into every log line and echoed (l.65) (c1) | `client` / `client_version` fields; incoming id accepted only when it matches `^[0-9A-Za-z._-]{1,64}$` |
+| `backend/app/api/tasks.py:562`, `backend/tests/test_api_contract.py:247` (c1) | `GET /projects` declares `error_responses(401)`; the contract map asserts `{"401"}` by exact set equality | `(401, 422)` for `?state=` |
 | `backend/app/services/account_service.py` | export writes every project with `model_dump` (l.265 – 273); purge (416 – 493) | unchanged; covered by tests |
 | `backend/tests/test_task_api.py:753`, `test_task_lifecycle_detail_api.py:367`, `test_task_tag_project_mvp_api.py:52`, `test_task_api.py:470` (556 – 566) | assert archive **clears** memberships | flipped in PR-03 |
 | `backend/tests/test_task_branch_coverage.py` (~326 `test_update_task_rejects_inactive_project_on_reassignment`, 1513 `test_list_projects_filters_inactive_records`) | reassignment rejection; active-only list | kept; extended for the unchanged-membership case and `?state=` in PR-02 |
@@ -181,27 +183,30 @@ Facts this plan builds on, verified 2026-10-06 at `e50b144`.
 | `…/BrainBuddyCore/Commands.swift` | `GTDCommand` (60 – 74), validation copy (`.projectNotActive` l.280) | `setProjectOutcome`, `unarchiveProject`, `createProject.desiredOutcome`, new errors |
 | `…/BrainBuddyCore/Reducer+Organize.swift` | archive clears membership (56 – 70); merge by name (22 – 25, 89 – 92) | lossless archive, unarchive, outcome merge rule |
 | `…/BrainBuddyCore/Reducer+Validation.swift`, `Reducer+Replay.swift` | `checkReferences` (78 – 89); `replayable` drops archived refs (31 – 75) | carried-membership rule |
+| `…/BrainBuddyCore/Replay.swift` (c1) | `rewritingAfterMerge(_:project:into:)` (l.101 – 118) calls `withdrawing(project:from:)` (l.145 – 159) when the outbox archives the merged project, creating its tasks without a project | membership follows the survivor; the archive becomes a sync issue (kit-commands §3) |
+| `…/BrainBuddyCore/Compaction.swift` (c1) | `foldMove` folds a move into an unsent creation (l.100 – 112); compaction changes `waitingSince`, `orderKey`, `editedAt` (l.24 – 28) | not used by the legacy import |
 | `…/BrainBuddyCore/Outbox.swift` | `StoreDocument` v1 (127 – 152), `SyncMetadata` (112 – 121), `SyncStatus` (156 – 166) | E5 fields |
 | `…/BrainBuddyCore/SmartAdd+Resolution.swift` | archived project refusal copy (96 – 101) | "Unarchive … before adding a task to it." |
 | `…/BrainBuddyAPI/BrainBuddyAPI.swift`, `BrainBuddyAPIClient.swift` | constant `clientName = "brainbuddy-ios"` (l.14), headers (308 – 321), per-id archived fetch (l.90) | `ClientIdentity`; `listProjects(state:)`; `unarchiveProject` |
-| `…/BrainBuddyAPI/SessionTokenStore.swift` | `KeychainSessionTokenStore(service:accessGroup:)` (130) | reused by the Mac with its own service |
-| `…/BrainBuddySync/SyncEngine.swift`, `SyncEngine+Cycle.swift`, `SyncEngine+Pull.swift`, `SyncEngine+Push.swift`, `SyncConfiguration.swift`, `BrainBuddySync.swift` | triggers without `.periodic`; `pullInterval` 60 s checked per cycle (`+Cycle.swift:34`); account-switch text with "iPhone" (`SyncEngine.swift:195`); `.failing` after 2 cycles | `.periodic`; `failingSince`; device-neutral refusal; `?state=all` pull |
+| `…/BrainBuddyAPI/SessionTokenStore.swift` (**ASK** by token) | `KeychainSessionTokenStore(service:accessGroup:)` (130); sets `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` on add and update (l.168, 224) (c1) | reused by the Mac with its own service; on macOS no `kSecAttrAccessible`, explicit non-synchronizable (PR-05) |
+| `…/BrainBuddySync/SyncEngine.swift`, `SyncEngine+Cycle.swift`, `SyncEngine+Pull.swift`, `SyncEngine+Push.swift`, `SyncConfiguration.swift`, `BrainBuddySync.swift` | triggers without `.periodic`; every non-`localChange` trigger sets `pullRequested` and kicks a cycle (`SyncEngine.swift:235-250`), every cycle starts with `.syncing` (`+Cycle.swift:16`); `kick()` cancels a scheduled retry (l.320 – 345); `retryDelay` 2 s, 4 s, 8 s … ±20 % (`SyncConfiguration.swift:76`); `pullInterval` 60 s checked per cycle (`+Cycle.swift:34`); account-switch text with "iPhone" (`SyncEngine.swift:195`); `.failing` after 2 cycles (c1) | `.periodic` (no-op when idle); `failingSince` and `lastFailedAttemptAt`; one attempt at the 60 s mark; device-neutral refusal; `?state=all` pull; immediate revert on a refused unarchive |
+| `…/BrainBuddySync/SyncScheduler.swift` | `SyncScheduler` and `ManualSyncScheduler` | used by the new `PeriodicSyncTicker` |
 | `…/BrainBuddyPersistence/FileDocumentStore.swift`, `DocumentFile.swift` | injectable `fileURL`; `flock` lock; atomic write with `F_FULLFSYNC` | used by the Mac unchanged |
-| `…/BrainBuddyWorkspace/Workspace.swift` | `@MainActor @Observable`; `archiveProject` doc says there is no unarchive (320 – 324); `signIn` / `signOut(discardUnsyncedChanges:)` / `syncNow` / `networkAvailabilityChanged` | `unarchiveProject`, `setProjectOutcome`, `apply([…])`, `syncSnapshot`, device kind |
+| `…/BrainBuddyWorkspace/Workspace.swift` | `@MainActor @Observable`; `archiveProject` doc says there is no unarchive (320 – 324); `signIn` / `signOut(discardUnsyncedChanges:)` / `syncNow` / `networkAvailabilityChanged`; `signOut` counts only outbox operations, ends the session (`sync.signOut()`, l.407) **before** `store.destroy` (l.412) (c1) | `unarchiveProject`, `setProjectOutcome`, `apply([…])`, `syncSnapshot`, device kind; sign-out order: destroy first, end the session after |
 | `…/BrainBuddyFakeServer/FakeServer+Organize.swift` (75 – 89) | archive clears membership; no unarchive | mirrors http.md |
 | `ios/BrainBuddy/Components/SyncStatusLabel.swift` (37 – 68) | iPhone wording with em dashes, "Syncing…", immediate "Sync failed — …" | renders `SyncStatusDescriber` (M-01) |
 | `ios/BrainBuddy/Screens/Settings/SyncIssuesScreen.swift` (104 – 244) | issue descriptions | delegates to `SyncIssueDescriber` (kit) |
 | `ios/BrainBuddy/Screens/Browse/ProjectsScreen.swift` (76 – 86, 126 – 145, 193 – 220) | destructive archive confirmation; read-only Archived projects list | M-02 copy, swipe and toolbar Unarchive |
 | `ios/BrainBuddy/Screens/Lists/TaskListScreen.swift` (280 – 287) | "This project is archived / … read-only" | M-02 archived project screen |
-| `ios/BrainBuddy/App/BrainBuddyApp.swift` | foreground `syncNow`, NWPathMonitor, BGAppRefresh (58 – 166) | `.periodic` 15 s tick while active |
+| `ios/BrainBuddy/App/BrainBuddyApp.swift` | foreground `syncNow`, NWPathMonitor, BGAppRefresh (58 – 166); `WidgetReloadAfterSync` reloads every widget timeline on each syncing → idle change (l.124 – 135) (c1) | toggles the kit `PeriodicSyncTicker` with the scene phase |
 
 ### Mac
 
 | file | current responsibility | planned use |
 |---|---|---|
 | `macos/Package.swift` | tools 5.10, WhisperKit, XCTest target | tools 6.2, kit products, test resources |
-| `macos/Sources/BrainBuddyMac/LocalGTDStore.swift` (1363 lines) | JSON snapshot store, rules, review receipts, archive/restore | **deleted** after import code reads its format (`LegacySnapshot.swift`) |
-| `macos/Sources/BrainBuddyMac/APIClient.swift` (731) | online-only REST client, shared cookie jar | **deleted** |
+| `macos/Sources/BrainBuddyMac/LocalGTDStore.swift` (1363 lines) | JSON snapshot store, rules, review receipts, archive/restore; `init` never writes (l.194 – 206), but `mutate` creates `local-gtd.json` on the first write when it is missing and the in-memory generation is 0 (l.214 – 262), so a pre-021 copy launched after the update writes a fresh file (c1) | **deleted** after import code reads its format (`LegacySnapshot.swift`); the FR-033 rule handles the fresh file |
+| `macos/Sources/BrainBuddyMac/APIClient.swift` (731) | online-only REST client, `httpCookieStorage = .shared` (l.431 – 432) (c1) | **deleted**; its cookie is removed and its session ended by `LegacyCookieCleanup` |
 | `macos/Sources/BrainBuddyMac/SmartAddParser.swift` (270) | Smart Add | **deleted**; kit `CapturePlanner` |
 | `macos/Sources/BrainBuddyMac/ContentView.swift` (4201) | `BrainBuddyModel` (14 – 1379) + all views; sidebar (1958 – 2083); `isLocalWorkspace` gates; sign-in view, session overlay, conflict banner, toolbar Refresh | binds to `Workspace`; removals per contracts/mac-app-host.md §3; footer → X-01 |
 | `macos/Sources/BrainBuddyMac/ProjectReviewView.swift`, `QuickCaptureView.swift`, `QuickOpenView.swift`, `VoiceCapture.swift` | project review, ⌃⌥⇧B capture panel, Quick Open, WhisperKit | rebind to `Workspace` and the sidecar; `VoiceTranscriber` actor (R2) |
@@ -215,7 +220,7 @@ Facts this plan builds on, verified 2026-10-06 at `e50b144`.
 |---|---|---|
 | `frontend/src/api/client.ts` (343 – 369) | `listProjects`, `createProject`, `updateProject`, `archiveProject` | `listProjects(state)`, `unarchiveProject` |
 | `frontend/src/api/taskTypes.ts` (59 – 66) | `ProjectResponse.state: "active" \| "completed" \| "archived"` (drifted) | `"active" \| "archived"`; new fields |
-| `frontend/src/api/taskHooks.ts` (35, 71) | `useTaskList`, `useProjects` without polling | `state: "all"`, `refetchInterval: 45_000` while visible |
+| `frontend/src/api/taskHooks.ts` (35, 62, 71, 78) | `useTaskList`, `useTaskDetail`, `useProjects`, `useTags`, none polling; the list items carry no subtasks or comments (`backend/app/api/tasks.py:766`, only the detail route fills them) (c1) | `state: "all"`; `refetchInterval: 45_000` while visible on all four |
 | `frontend/src/components/shell/AppShell.tsx` (568 – 649) | Projects section, active only, archive button | "Archived projects" disclosure (D-01) |
 | `frontend/src/features/tasks/TaskListPage.tsx` (411 – 434, 475, 1073 – 1095) | archive mutation; project title fallback "Project"; grouping fallback "No project" | archived project page, Unarchive, "· archived" labels |
 | `frontend/src/features/tasks/TaskDetailPanel.tsx` (349) | project name from the active list | resolves archived names |
@@ -227,8 +232,9 @@ Facts this plan builds on, verified 2026-10-06 at `e50b144`.
 | `.github/workflows/ci.yml` (**ASK**) | `changes` outputs `backend`, `frontend`, `ios` (`^ios/` only, l.179); `ios-kit` (515), `ios-app` (547, `macos-26` when iOS changed); no `macos/` lane | `macos` output and `macos-app` lane (research R3) |
 | `scripts/validate_ci_artifacts.py` (**ASK**) | `LANE_DEPENDENCY_LIMITS` (702 – 731), path-filter job list (602 – 611), `full-ci` / `allure-report` completeness (757 – 790) | register `macos-app` |
 | `scripts/render_feature_report.py` (**ASK**) | `SCREEN_ID_RE = [DM]-\d{2}` (l.53) | `[DMX]-\d{2}` (G-7) |
-| `scripts/check_requirement_coverage.py` (**ASK**, guarded) | scans no Swift on `main` | 020 PR-01 adds `.swift` + `ios/BrainBuddyKit/Tests` + `macos/Tests` (in flight); 021 consumes it, no edit |
+| `scripts/check_requirement_coverage.py` (**ASK**, guarded) | scans only `.py .ts .tsx .js .jsx` under `backend/tests`, `frontend/tests`, `frontend/src`; no `--requirements` flag (l.54 – 63, 141) (c1) | 020 PR-01 adds `.swift` + `ios/BrainBuddyKit/Tests` + `macos/Tests` and `--requirements` (in flight); 021 consumes it, no edit; interim evidence rule in the Test strategy |
 | `Makefile` (**ASK**, guarded) | `check-specs` runs coverage for 019 only | add 021 in PR-10 |
+| `.github/workflows/ci.yml` `changes` (l.160 – 190), `.github/workflows/ios.yml:86` (c1) | the landing path exercises every stack whatever the diff; `ios.yml` uploads to TestFlight on any `^ios/` change on `main` | the trace-equality pytest runs on every landing; backend slices write nothing under `ios/` |
 
 ## Project Structure
 
@@ -247,6 +253,7 @@ specs/021-mac-sync/
 │   ├── mac-legacy-import.md     # local-gtd.json → StoreDocument
 │   └── mac-app-host.md          # Mac process, files, triggers, sign-in, UI binding
 ├── quickstart.md                # validation scenarios
+├── review-c1-disposition.md     # planning review campaign 1 dispositions
 ├── evidence/                    (new, during delivery; manual host records, owner week)
 └── tasks.md                     # /speckit-tasks (not created here)
 ```
@@ -278,32 +285,35 @@ backend/
 contracts/api-client-parity.json
 
 ios/BrainBuddyKit/
-├── Package.swift                             # test resources for BrainBuddySyncTests (trace copy)
+├── Package.swift                             # test resources for BrainBuddySyncTests (trace copy, PR-04)
 ├── Sources/BrainBuddyCore/   Records.swift, Commands.swift, Reducer+Organize.swift,
 │                             Reducer+Validation.swift, Reducer+Replay.swift, Replay.swift,
 │                             Outbox.swift, SmartAdd+Resolution.swift,
 │                             SyncPresentation.swift (new), SyncActivityIndicator.swift (new),
-│                             SyncIssueDescriber.swift (new)
+│                             SyncIssueDescriber.swift (new), TaskEditDraft.swift (new),
+│                             RecordContentStamp.swift (new), Queries+ProjectDisplay.swift (new)
 ├── Sources/BrainBuddyAPI/    BrainBuddyAPI.swift, BrainBuddyAPIClient.swift, APIError.swift,
-│                             WireModels.swift, RequestBodies.swift
+│                             WireModels.swift, RequestBodies.swift, SessionTokenStore.swift (ASK)
 ├── Sources/BrainBuddySync/   BrainBuddySync.swift, SyncConfiguration.swift, SyncEngine.swift,
 │                             SyncEngine+Cycle.swift, SyncEngine+Pull.swift, SyncEngine+Push.swift,
 │                             SyncEngine+Session.swift, GTDCommand+Sync.swift, PushPlanner.swift,
-│                             StoreDocument+Merge.swift
+│                             StoreDocument+Merge.swift, PeriodicSyncTicker.swift (new)
 ├── Sources/BrainBuddyWorkspace/Workspace.swift
 ├── Sources/BrainBuddyFakeServer/ FakeServer+Organize.swift, ServerState.swift
 └── Tests/  BrainBuddyCoreTests/{ReducerOrganizeTests.swift, ReducerArchiveTests.swift (new),
-            SmartAddParserTests.swift, SyncPresentationTests.swift (new),
-            SyncActivityIndicatorTests.swift (new), SyncIssueDescriberTests.swift (new)}
+            ReplayTests.swift, SmartAddParserTests.swift, SyncPresentationTests.swift (new),
+            SyncActivityIndicatorTests.swift (new), SyncIssueDescriberTests.swift (new),
+            TaskEditDraftTests.swift (new), RecordContentStampTests.swift (new),
+            ProjectDisplayTests.swift (new)}
             BrainBuddyPersistenceTests/StoreDocumentCodingTests.swift
             BrainBuddyAPITests/{EndpointRequestTests.swift, WireDecodingTests.swift,
             ClientIdentityTests.swift (new)}
             BrainBuddySyncTests/{SyncEnginePullTests.swift, SyncEngineSchedulingTests.swift,
-            SyncEngineSessionTests.swift, ProjectArchiveSyncTests.swift (new),
+            SyncEngineSessionTests.swift (ASK), ProjectArchiveSyncTests.swift (new),
             SyncEngineFailingClockTests.swift (new), ProjectArchiveTraceReplayTests.swift (new),
-            Resources/project_archive_traces.json (new copy)}
+            PeriodicSyncTickerTests.swift (new), Resources/project_archive_traces.json (new copy)}
             BrainBuddyWorkspaceTests/{WorkspaceCommandTests.swift, WorkspaceSyncTests.swift,
-            MacIPhoneConvergenceTests.swift (new)}
+            MacIPhoneConvergenceTests.swift (new), FirstSignInMergeTests.swift (new)}
 
 ios/BrainBuddy/
 ├── App/BrainBuddyApp.swift                   # .periodic tick while active
@@ -320,26 +330,33 @@ macos/
 │   │   QuickCaptureView.swift, QuickOpenView.swift, VoiceCapture.swift
 │   ├── WorkspaceHost.swift (new), SingleInstanceGuard.swift (new), MacLocalState.swift (new),
 │   │   LegacySnapshot.swift (new), LegacyStoreImporter.swift (new), UpgradeNotice.swift (new),
+│   │   LegacyCookieCleanup.swift (new), ProjectMenuCommands.swift (new),
 │   │   SyncTriggerSource.swift (new), SyncStatusLine.swift (new), SyncStatusPopover.swift (new),
-│   │   SignInSheet.swift (new), SignOutConfirmation.swift (new), SyncMenuCommands.swift (new)
+│   │   SignInSheet.swift (new), SignOutConfirmation.swift (new), SyncMenuCommands.swift (new),
+│   │   MacPresentationRouter.swift (new)
 │   └── LocalGTDStore.swift, APIClient.swift, SmartAddParser.swift (deleted)
 └── Tests/BrainBuddyMacTests/
     ├── OfflineWorkspaceTests.swift            # rewritten against the kit, Swift Testing
     ├── LegacyStoreImporterTests.swift (new), MacLocalStateTests.swift (new),
-    │   SingleInstanceGuardTests.swift (new), SyncTriggerSourceTests.swift (new),
-    │   MacSyncFlowTests.swift (new)
+    │   SingleInstanceGuardTests.swift (new), LegacyCookieCleanupTests.swift (new),
+    │   SyncTriggerSourceTests.swift (new), MacSyncFlowTests.swift (new),
+    │   MacPresentationRouterTests.swift (new), MacKeychainTests.swift (new),
+    │   MacPrivacyGuardTests.swift (new)
     ├── Resources/legacy-populated.json, legacy-corrupt.json, legacy-newer.json (new, synthetic)
     └── APIClientTests.swift, LocalGTDStoreTests.swift, SmartAddParserTests.swift (deleted)
 
 frontend/
-├── src/api/client.ts, taskTypes.ts, taskHooks.ts, __tests__/client.test.ts, __tests__/clientParity.test.ts
+├── src/api/client.ts, taskTypes.ts, taskHooks.ts, __tests__/client.test.ts, __tests__/clientParity.test.ts,
+│   __tests__/taskHooks.test.ts
 ├── src/components/shell/AppShell.tsx, __tests__/AppShell.test.tsx
 ├── src/features/tasks/TaskListPage.tsx, TaskDetailPanel.tsx, ArchivedProjectNotice.tsx (new),
-│   __tests__/TaskListPage.test.tsx, __tests__/ArchivedProjectNotice.test.tsx (new)
-└── tests/e2e/archived-projects.spec.ts (new)
+│   __tests__/TaskListPage.test.tsx, __tests__/ArchivedProjectNotice.test.tsx (new),
+│   __tests__/TaskDetailAutosaveUI.contract.test.tsx
+└── tests/e2e/archived-projects.spec.ts (new), tests/e2e/cross-client-refresh.spec.ts (new)
 
 .github/workflows/ci.yml, scripts/validate_ci_artifacts.py, scripts/test_validate_ci_artifacts.py,
 scripts/render_feature_report.py, scripts/test_render_feature_report.py, Makefile,
+scripts/check_manual_evidence.py (new), scripts/test_check_manual_evidence.py (new),
 .specify/gate-integrity.json
 docs/native-macos-app.md (new), docs/api-compatibility.md, docs/data-retention.md, AGENTS.md
 ```
@@ -349,37 +366,40 @@ docs/native-macos-app.md (new), docs/api-compatibility.md, docs/data-retention.m
 - **Backend**: the work stays inside the Tasks module (`backend/app/modules/tasks/`), which owns projects and tasks (ADR-0001). Thin route changes live in the existing `backend/app/api/tasks.py`, and nothing touches CRT trees or another module's data.
 - **Rules**: every GTD rule stays in `BrainBuddyCore`, and both Apple apps render its queries. The kit stays at `ios/BrainBuddyKit` (research R1 rejects the rename).
 - **Mac target**: it gains only AppKit glue and Mac-only device state. New Mac file names avoid the classifier's ASK tokens only where the content is not an ASK surface. The ASK classes of PR-08 and PR-09 are stated semantically below, not hidden by naming.
+- **No renaming around the gate** (review c1, F01): PR-05's session-end, account-switch, sign-out-order and token-store changes are a session surface, so its existing `SyncEngineSessionTests.swift` and `SessionTokenStore.swift` keep their names and PR-05 is ASK, rather than moving the tests to a file whose name carries no token.
 
 ## Architecture by user story
 
-### US1 — Sign in on the Mac and stay in sync (P1) — design X-03 (default, loading, errors, after sign-in: first load), X-01 (first load, synced, syncing), X-02 (default, loading), X-04 (nothing unsent, unsent changes, error, after sign-out), X-07 (default, app menu), M-01 (synced, first sync)
+### US1 — Sign in on the Mac and stay in sync (P1) — design X-03 (default, loading, errors incl. "no answer" and "couldn't save sign-in", after sign-in: first load), X-01 (first load, first upload, synced, syncing), X-02 (default, loading, first upload), X-04 (nothing unsent, unsent changes, open sync issues, backup kept, during the first upload, error, after sign-out), X-07 (default, app menu), X-08 (default, unreachable), M-01 (synced, first sync, Settings › Sync running, sign-out with open issues)
 
 **Mac**
 
-- **Store**: `WorkspaceHost` builds the kit `Workspace` over `~/Library/Application Support/BrainBuddyMac/store.json` with the Mac keychain service, the macOS client identity and a 45 s pull age (contracts/mac-app-host.md §1).
-- **Sign-in (X-03)**: the sheet replaces the full-window sign-in and the session overlay. It calls `Workspace.signIn` (FR-001). After success the sheet closes with no toast, and X-01 reads "Not synced yet" with the indicator while the first pull fills lists progressively (US1-1). The kit's `pullFirst` makes the first cycle pull before it pushes, so account-less data merges by name (FR-003).
+- **Store**: `WorkspaceHost` builds the kit `Workspace` over `~/Library/Application Support/BrainBuddyMac/store.json` with the Mac keychain service, the macOS client identity and a 30 s pull age (contracts/mac-app-host.md §1).
+- **Single instance (X-08)**: a second copy brings the running window forward and quits; only when that is impossible it shows X-08 ("Brain Buddy is already open." / "Switch to the open window to keep working.", "OK") and quits (research R6).
+- **Sign-in (X-03)**: the sheet replaces the full-window sign-in and the session overlay. It calls `Workspace.signIn` (FR-001). After success the sheet closes with no toast, and X-01 reads "Not synced yet" with the indicator while the first pull fills lists progressively (US1-1). The kit's `pullFirst` makes the first cycle pull before it pushes, so account-less data merges by name (FR-003). Cancel and Esc stay enabled while "Signing in…" runs; focus returns to the status words when the opener is gone (contracts/mac-app-host.md §7).
 - **Cancelled deletion (X-03)**: when signing in cancelled a pending account deletion, the sheet shows its "signed in, account deletion cancelled" note before closing (FR-017).
-- **Triggers (FR-006)**: `SyncTriggerSource` drives launch, activation (forced pull, US1-4), the 2 s local-change debounce, network return and the 15 s `.periodic` tick, plus "Sync now" ⌘R from File and from the popover (X-07). The toolbar "Refresh" is removed.
+- **Triggers (FR-006)**: `SyncTriggerSource` drives launch, activation (forced pull, US1-4), the 2 s local-change debounce, network return and the kit's `PeriodicSyncTicker` (15 s), plus "Sync now" ⌘R from File and from the popover (X-07). The toolbar "Refresh" is removed. A tick with nothing to do runs no cycle and changes no status (kit-commands §4).
 - **"Sync now" is single-flight**: it is never disabled by a running sync. A press during a sync joins it or queues one follow-up (FR-019 as amended; contracts/kit-commands.md §4).
-- **Selection, scroll and editing (FR-009, US1-5)**: selection, scroll and focus are keyed by `EntityID`. The inline editor sends only changed fields, so incoming changes to other fields survive and the person's fields win (research R18).
+- **Selection, scroll and editing (FR-009, US1-5)**: selection, scroll and focus are keyed by `EntityID` through the kit's `SelectionAnchor`. The inline editor holds a kit `TaskEditDraft` and sends only changed fields, so incoming changes to other fields survive and the person's fields win (research R18; kit-commands §8). Both are Linux-tested pure helpers, not view code.
 - **Sign-out (X-04, US1-6, FR-005, FR-018)**:
-  - The confirmation shows `signOutNothingUnsent` (decision 3) or the unsent-changes variants, with "Cancel" as the default.
-  - The kit removes the token and the account's data, and queues the logout when offline.
+  - The confirmation shows `signOutNothingUnsent` (decision 3) or the unsent-changes variants, with "Cancel" as the default, followed by `signOutIssues(n)` when sync issues are open (they never reached the account) and `signOutBackup(until)` while the pre-upgrade backup exists.
+  - The kit removes the account's data first and only then ends the session and removes the token, queueing the logout when offline (kit-commands §4 "Sign-out order").
   - The sidecar marks and the backup follow E7 and E8.
-  - A local removal failure shows "Couldn't sign out" and removes nothing.
+  - A local removal failure shows "Couldn't sign out", removes nothing, and leaves the person signed in, as the copy says.
 
 **Kit**
 
 - `ClientIdentity.macOS(version:)` is used (FR-031).
-- The `.periodic` trigger and the forced pull on foreground are added (contracts/kit-commands.md §4).
+- The `.periodic` trigger, the `PeriodicSyncTicker`, the forced pull on foreground and the sign-out order are added (contracts/kit-commands.md §4).
 
-**iPhone**
+**iPhone (FR-032)**
 
-- **Periodic pull**: the `.periodic` 15 s tick runs while the scene is active (`ios/BrainBuddy/App/BrainBuddyApp.swift`), so Mac changes reach an open iPhone within SC-001's 60 s (research R8; inconsistency 2).
+- **Periodic pull**: the iPhone toggles the kit's `PeriodicSyncTicker` with the scene phase (`ios/BrainBuddy/App/BrainBuddyApp.swift`), so Mac changes reach an open iPhone within SC-001's 60 s (research R8). `WidgetReloadAfterSync` keeps firing only on real cycles, because an idle tick changes no status.
+- **Sign-out**: the Settings sign-out confirmation names open sync issues with the same catalogue sentence (FR-018).
 
-**Web**
+**Web (FR-032)**
 
-- **Polling**: `useTaskList` and `useProjects` refetch every 45 s while the tab is visible (SC-001 Mac → web; research R8). The detail query is unchanged.
+- **Polling**: `useTaskList`, `useProjects`, `useTags` and the open task's `useTaskDetail` refetch every 45 s while the tab is visible (SC-001 Mac → web; research R8). The detail refetch goes through the panel's existing autosave conflict handling, so typed text is never overwritten and scroll and selection do not move.
 
 ### US2 — Keep working offline; nothing is lost (P1) — design X-01 (offline / interrupted, changes waiting), X-02 (changes waiting, offline), X-06 (offline / interrupted), M-01 (offline)
 
@@ -390,7 +410,7 @@ docs/native-macos-app.md (new), docs/api-compatibility.md, docs/data-retention.m
 - **Conflicts**: per field, the last change to reach the server wins. A rejected change becomes a sync issue with its reference id (US2-5). The archived-elsewhere case is resent without the project and listed (contracts/kit-commands.md §5).
 - **Proof**: SC-002 is proven by the kit's offline matrix (quickstart Scenario 4).
 
-### US3 — Compact status, errors only when something is wrong (P2) — design X-01 (every state incl. hover tooltip, long text, dark, keyboard focus), X-02 (every state), X-07 (unavailable), M-01 (every state, Lists hub and Settings › Sync)
+### US3 — Compact status, errors only when something is wrong (P2) — design X-01 (every state incl. "error, then offline", hover tooltip with "Last tried", long text, dark, keyboard focus), X-02 (every state incl. issue dismissal focus and the kept-outcome issue), X-07 (unavailable), M-01 (every state, Lists hub and Settings › Sync)
 
 - **One describer**: `SyncStatusDescriber`, `SyncActivityIndicator` and `SyncTiming` in `BrainBuddyCore` (contracts/sync-status.md) decide the words, precedence, tone, glyph, action, tooltip and the 1 s / 0.5 s / 10 s / 60 s thresholds for both devices (FR-012 – FR-014, FR-019). The apps only render.
 - **Mac X-01** (`SyncStatusLine.swift`): one line of 11 pt secondary text. It has a reserved indicator slot (a static glyph under Reduce Motion), at most one trailing action ("Sign in to sync" / "Retry"), and wraps after " · " for large sidebar text. Its accessibility name is "Sync status: … Show details". Entering an attention state is announced once, politely. It never opens a sheet or takes focus (FR-017, SC-004).
@@ -401,27 +421,31 @@ docs/native-macos-app.md (new), docs/api-compatibility.md, docs/data-retention.m
   - the email with "Sign out…".
 
   Focus order: attention action → Copy → Dismiss → Sync now → Sign out…. Esc or a click outside closes it and focus returns to the words (FR-015, FR-016). It is at most 480 pt tall.
-- **Failing clock**: `failingSince` is persisted (E5), so "Couldn't sync · Retry" appears only after 60 s of continuous server-side failure, survives a relaunch, and clears on the next success (FR-014, SC-005). An ended session shows at once (US3-5).
+- **Failing clock**: `failingSince` and `lastFailedAttemptAt` are persisted (E5). The engine keeps its backoff but schedules one attempt at exactly `failingSince + 60 s`; "Couldn't sync · Retry" appears only if that attempt fails, so an outage that ends within 60 s never shows (FR-014, SC-005). It survives a relaunch, clears on the next success, and yields to "Offline" while offline without restarting the clock. "Last tried" updates after every attempt, Retry included (FR-013's quiet indicator otherwise hides a fast failing Retry). An ended session shows at once (US3-5).
+- **No dialog by construction (SC-004)**: `MacPresentationRouter` is the only presenter and takes only user intents; a macOS-lane test sweeps every status state and transition and asserts no presentation and no focus request (contracts/mac-app-host.md §6, §8).
 - **iPhone M-01**:
-  - The list screens' status uses `SyncStatusLabel`, which renders the describer: words plus the indicator, with "Syncing…" and immediate failures gone. The attention rows become buttons: Retry runs Sync now; "Sign in again" opens the sign-in sheet with the email locked; "N changes couldn't sync" opens Sync issues.
+  - The list screens' status uses `SyncStatusLabel`, which renders the describer: words plus the indicator, with "Syncing…" and immediate failures gone. The attention rows become buttons: Retry runs Sync now; "Sign in again" opens the sign-in sheet with the email locked; "N changes couldn't sync" opens Sync issues. The "Couldn't sync" row's long-press offers "Copy reference ID", and Settings › Sync shows the Reference ID from the first failure on (SC-004).
   - Settings › Sync keeps its detailed section with the same words (US3-8). Its "Sync now" button stops being disabled while a sync runs, because it is single-flight on both platforms (FR-019 as amended).
   - `ios/AGENTS.md`'s copy example becomes "Offline · 3 changes waiting".
 
-### US4 — Upgrade the Mac without losing anything (P2) — design X-05 (every state), X-01 (account-less), X-02 (empty: signed out), X-03 (first sign-in with local tasks, account switch refused, partial failure)
+### US4 — Upgrade the Mac without losing anything (P2) — design X-05 (every state incl. "couldn't carry over" and "later file"), X-01 (account-less, first upload), X-02 (empty: signed out, first upload, outcome kept on account, archive not applied at merge, pre-upgrade backup, earlier-version file kept), X-03 (first sign-in with local tasks, account switch refused, partial failure)
 
-- **Import (FR-020 – FR-022)**: `LegacyStoreImporter` (contracts/mac-legacy-import.md) runs before the workspace opens. It turns every legacy record into kit commands at their original instants, verifies field by field, and only then records completion and renames the old file to a backup.
+- **Import (FR-020 – FR-022, FR-033)**: `LegacyStoreImporter` (contracts/mac-legacy-import.md) runs before the workspace opens. It turns every legacy record into kit commands at their original instants, in one global order per list, without compaction, into a staging file; verifies it field by field; records completion; only then moves it to `store.json` with an exclusive rename and renames the old file to a backup.
   - A normal upgrade is silent (X-05 default), and placeholders show after 300 ms.
-  - An unreadable, newer or partly bad file leaves the old file untouched and shows the X-05 alert once.
+  - An unreadable, newer or partly bad file leaves the old file untouched and shows the X-05 alert once; a verification failure has its own "couldn't carry over" copy, because the file is fine.
   - The interpretation "partial read = unreadable" is confirmed.
-- **Review marks (FR-023)**: they move to `mac-local.json`, keep their meaning, and survive sign-in and sign-out (E7).
-- **Account-less use (US4-2)**: the account-less Mac shows "On this Mac · Sign in to sync" and works fully offline (FR-002). Nothing is sent (FR-029).
+  - **Import state** (review c1, blocking F02): explicit and durable (`none`, `inProgress`, `completed`, `unreadable`, `laterFileKept`; data-model E7.1). The importer never writes into or replaces a workspace in use, even when `mac-local.json` is lost, because it creates `store.json` only by an exclusive rename. A `local-gtd.json` that appears after the workspace exists (an older copy run after the update, a restore, a moved file) is kept untouched and surfaced once (X-05 "later file") and then by a quiet X-02 line, never imported, merged or overwritten (FR-033).
+- **Review marks (FR-023)**: they move to `mac-local.json`, keep their meaning, and survive sign-in and sign-out (E7.2). Their stamp is the kit's `RecordContentStamp`, a salted digest of user-visible fields, so the upload's server-minted times and the `c:` → `s:` re-keying do not invalidate them.
+- **Legacy session** (review c1, F36): the pre-021 app's session cookie is removed from the shared cookie storage at the first launch and its server session is ended, or queued for logout (contracts/mac-app-host.md §1).
+- **Account-less use (US4-2)**: the account-less Mac shows "On this Mac · Sign in to sync" and works fully offline (FR-002). Nothing is sent (FR-029); a counting-transport test proves it.
 - **First sign-in (US4-3, FR-003, SC-003)**:
   - X-03 shows the one-time info box when the outbox holds account-less data.
-  - The kit merges projects and tags by name and appends tasks.
-  - A merged project's desired outcome is kept or reported (contracts/kit-commands.md §3).
+  - The kit merges projects and tags by name and appends tasks. Merging joins **active** projects only. An archived Mac project that meets an active account project joins it with its membership kept, and its archive becomes a sync issue; one that meets only an archived account project stays a separate archived project, a documented limit not counted under SC-003 (kit-commands §3; spec edge case "Same-named archived projects").
+  - A merged project's desired outcome is kept, or, when the account already has one, shown in full in a sync issue with "Copy outcome" (FR-003).
+  - The first upload reads "Not synced yet" and, in X-02, "Adding your tasks to your account · N left"; waiting ages count from the account link, not from the records' original dates (data-model E6).
   - Rejected records become sync issues (X-03 partial failure).
 - **Account switch (US4-5, FR-004)**: refused while the outbox or issues are non-empty, with the device-neutral copy and the "Mac" noun.
-- **Known limit**: after the first sign-in, server-minted timestamps replace local `createdAt` and `completedAt` (research R5). See the open question.
+- **Known limit**: after the first sign-in, server-minted timestamps replace local `createdAt` and `completedAt` (research R5). Resolved in spec Assumptions (`0b9fffe`).
 
 ### US5 — Archive without losing tasks, and unarchive (P3) — design X-06 (every state), M-02 (every state), D-01 (every state)
 
@@ -435,13 +459,16 @@ docs/native-macos-app.md (new), docs/api-compatibility.md, docs/data-retention.m
 
 **Mac X-06**:
 
-- "Archived projects · N" is collapsible, collapsed by default and remembered.
-- Right-click offers "Archive project" (no confirmation) or "Unarchive project".
+- "Archived projects · N" is collapsible, collapsed by default and remembered; the disclosure is a tab stop with its state in its accessible name.
+- Right-click offers "Archive project" (no confirmation) or "Unarchive project"; File › "Archive project" / "Unarchive project" (`ProjectMenuCommands.swift`) gives both a keyboard path. Today's guard stays: archiving is disabled while a task edit is unsaved or the capture draft is not empty.
+- Archiving the open project keeps it selected, re-renders it as the archived view, expands the Archived section and focuses the title ("archived (just now)").
 - The archived project view has the "Archived" chip and "Unarchive"; the outcome is read-only; there is no "Add a task"; focus goes to the title after unarchive.
+- An unarchive refused because an active project has the same name shows "Another active project is already called “Old flat”. Rename one first." with "Rename…" and no Retry.
 - "<name> · archived" labels and picker entries.
 - Smart Add's block reads "Unarchive “Old flat” before adding a task to it."
 - Every "Restore" string becomes "Unarchive".
-- The FR-027 line (decision 2, option B) shows for a marked, empty project.
+- The FR-027 line (decision 2, option B) shows for a marked, empty project. The rule, "accepts no new task" and the label come from the kit's `GTDQueries.projectDisplay`, Linux-tested, so the Mac and iPhone render one rule.
+- Evidence: `manual-macos-archive.md` (contracts/mac-app-host.md §4).
 
 **iPhone M-02**:
 
@@ -449,12 +476,15 @@ docs/native-macos-app.md (new), docs/api-compatibility.md, docs/data-retention.m
 - Archived projects can be opened and their tasks edited.
 - Unarchive is available by swipe, by a VoiceOver custom action and from the toolbar.
 - The toast reads "Unarchived “Old flat”".
+- A name clash refuses the unarchive at once with "Rename…" (M-02 "unarchive refused: name in use").
+- The archived project screen renders the kit's `projectDisplay`.
 - `SyncIssueDescriber` has the unarchive case.
 
 **Web D-01**:
 
 - The "Archived projects" disclosure under Projects (`AppShell.tsx`) is hidden when there are none.
-- The archived project page has the chip, a secondary "Unarchive" button, no composer and the info line. While the request runs it shows "Unarchiving…", and errors use the existing notice with Ref and Retry. When offline the button is disabled.
+- The archived project page has the chip, a secondary "Unarchive" button, no composer and the info line. While the request runs it shows "Unarchiving…", and errors use the existing notice with Ref and Retry. A 409 name clash shows "Another active project is already called “Old flat”. Rename one first." with Ref and "Rename…", and no Retry. When offline the button is disabled.
+- Archiving the open project turns the page into the archived page, focuses the heading and shows the toast "Archived “Old flat”".
 - The archive popover gets the hint line.
 - Archived names resolve to "Old flat · archived" in groupings and in the detail panel.
 - The empty pre-feature project shows the FR-027 line (`ArchivedProjectNotice.tsx`).
@@ -468,21 +498,30 @@ docs/native-macos-app.md (new), docs/api-compatibility.md, docs/data-retention.m
 |---|---|---|
 | Edit of a task in a project archived on another device | accepted; membership kept (server tolerant PATCH, kit carried-membership rule) | http §5, kit §3 |
 | Offline capture into a project archived elsewhere | resent without the project under a new key; sync issue "…was archived on another device, so the task was added without a project." | kit §5 (existing engine path) |
-| Unarchive clashing with an active name | 409 → sync issue "Another active project is already called …"; locally reverts to archived on the next pull | http §3, kit §4 |
+| Unarchive clashing with an active name | locally: refused at once, with "Rename…" (X-06, M-02); on the server (clash made while offline): 409 → the engine reverts the project to archived **at once** and rewrites captures queued into it to no project, under one sync issue that counts them | http §3, kit §4 |
+| Archived Mac project meets an active account project of the same name at first sign-in | merged with membership kept; the archive is not applied to the account's project and becomes a sync issue | kit §3 |
+| Archived Mac project meets only an archived account project | stays a separate archived project (documented limit) | kit §3, spec edge case |
+| Repeat archive of an archived project | only revision and `updated_at` change; `archived_at` and the FR-027 marker are kept | http §4 |
 | Unarchive retried after a lost reply | same `Idempotency-Key` → stored response; after 24 h → already active → 200 unchanged | http §3 |
 | Two devices archive or unarchive the same project offline | the second gets a stale-revision 409 → refetch → replay drops it if the goal already holds | kit (existing) |
-| Merged project with outcomes on both sides | the account's wins; the local one becomes a sync issue, never silently dropped | kit §3 |
-| Server failing (5xx, 429, timeout while online) | backoff 2 → 300 s; indicator only for 60 s; then "Couldn't sync · Retry" with Ref; clears on success; `failingSince` survives relaunch | sync-status §3, kit §4 |
+| Merged project with outcomes on both sides | the account's wins; the local one becomes a sync issue that shows it in full with "Copy outcome", never silently dropped | kit §3 |
+| Server failing (5xx, 429, timeout while online) | backoff 2 → 300 s with one attempt at exactly 60 s; indicator only until that attempt fails; then "Couldn't sync · Retry" with Ref and "Last tried"; clears on success; `failingSince` survives relaunch | sync-status §3, kit §4 |
+| Server failing, then the device goes offline | "Offline …" while offline (Retry could not act); `failingSince` kept, so back online one failed attempt shows "Couldn't sync" at once | sync-status §3 |
 | Session ended or revoked (401) | "Sign in again to sync" at once; work continues; the outbox is kept; the token is removed | kit, sync-status §3 |
 | Offline for days | "Offline · N changes waiting"; no repeated alerts; X-02 shows the oldest age | sync-status §3 |
 | Sign in as another account with pending work | refused, nothing sent (FR-004) | kit `AccountSwitchRefused` |
-| Sign-out with unsent changes | X-04 warning with the count; "Sign out and remove" discards; Cancel keeps | mac-app-host §7 |
-| Second Mac process | brings the first forward or shows the "already open" alert; exits; the store is untouched | research R6 |
+| Sign-out with unsent changes or open issues | X-04 warning with the count, and a sentence naming open issues; "Sign out and remove" discards; Cancel keeps | mac-app-host §7 |
+| Sign-out when the local removal fails | "Couldn't sign out"; the session was not ended yet, so the person is still signed in | kit §4 "Sign-out order" |
+| Second Mac process | brings the first forward, or shows X-08 "Brain Buddy is already open." / "Switch to the open window to keep working." with "OK"; exits; the store is untouched | research R6, design X-08 |
 | Old pre-021 Mac copy running during the upgrade | the import holds its `lockf`; after the rename its writes fail with its existing 409 | mac-legacy-import §6 |
-| Crash during the import | the next launch resumes from the recorded state; the legacy bytes are untouched until the rename | research R5 |
+| Old pre-021 Mac copy launched after the upgrade, a restored folder, a deleted `mac-local.json` | the `local-gtd.json` it brings is kept untouched and never imported; X-05 "later file" once; X-02 quiet line | data-model E7.1, FR-033 |
+| Crash during the import | the next launch resumes from the recorded state; `store.json` never holds an unverified import; the legacy bytes are untouched until the rename | data-model E7.1 |
 | Legacy store unreadable, newer or partly bad | never touched; X-05 once; empty workspace after Continue | mac-legacy-import §5 |
+| Import verification fails | X-05 "couldn't carry over"; the file is kept for a later build | mac-legacy-import §5 |
 | Wrong Mac clock | relative time clamps to "just now"; ordering uses the server and outbox order, not the Mac clock | sync-status §3 |
-| Keychain item unreadable (rebuilt ad-hoc binary refused access) | treated as no token → "Sign in again to sync"; the outbox is kept | research R17 |
+| Keychain write fails at sign-in | X-03 "couldn't save sign-in" with Ref; the server session just opened is ended; nothing linked | kit §4, data-model E9 |
+| Keychain item unreadable (rebuilt ad-hoc binary refused access) | treated as no token → "Sign in again to sync"; logged as `keychain_read_failed`; the outbox is kept | research R17 |
+| A sign-in that hangs | Cancel and Esc stay enabled; a reply after cancel has its session ended; "Brain Buddy didn't answer. Try again." on timeout | mac-app-host §7 |
 | Very large account | the first pull fills progressively and the window stays usable; the full pull is paged by 200 | kit (existing) |
 | Old iPhone build archives | its local clearing is undone by the next pull; nothing is dropped | http §7 |
 
@@ -493,13 +532,16 @@ docs/native-macos-app.md (new), docs/api-compatibility.md, docs/data-retention.m
 **Deploy order**:
 
 ```text
-PR-01 (CI lane; any time)
-PR-02 backend tolerant contract  →  PR-03 lossless archive
-   →  PR-06 web  ‖  PR-04 kit contract → PR-05 kit status → (PR-07 iPhone ‖ PR-08 Mac adoption → PR-09 Mac sync UI)
-   →  PR-10 release gates
+PR-01 (CI lane; any time; ASK)
+PR-02 backend tolerant contract (ASK)  →  PR-03 lossless archive (SHOW)
+   →  PR-06 web (SHOW)  ‖  PR-04 kit contract (SHOW) → PR-05 kit status and session (ASK)
+         → (PR-07 iPhone (SHOW) ‖ PR-08 Mac adoption (ASK) → PR-09 Mac sync UI (ASK))
+   →  PR-10 release gates (ASK)
 ```
 
-- Kit and iPhone slices land only after PR-03 is deployed, because `ios.yml` uploads every `ios/` change on `main` to TestFlight.
+- **Landing mechanics** (ADR-0008; review c1, F01): SHIP and SHOW slices land through verified trunk. ASK slices (PR-01, PR-02, PR-05, PR-08, PR-09, PR-10) never land automatically: `scripts/submit_to_trunk.sh` refuses a mechanically ASK diff in preflight and the release workflow's `land` job re-checks it. Each goes as a PR carrying the evidence, the owner's recorded approval, green required CI on the exact SHA, and the audited temporary ruleset intervention.
+- **PR-05 is ASK** (mechanical: `SyncEngineSessionTests.swift` and `SessionTokenStore.swift` carry the `session` token; semantic: session end, account-switch refusal, sign-out order and the macOS token store). So PR-07 and PR-08 wait for PR-05's approved landing, not for an automatic one. Its development can start in parallel with PR-04: the pure status files (`SyncPresentation`, `SyncActivityIndicator` and their tests) touch nothing PR-04 writes; `Workspace.swift` is owned by PR-04's tasks first, and PR-05 lands after PR-04.
+- **TestFlight**: kit and iPhone slices land only after PR-03 is deployed, because `ios.yml` uploads every `ios/` change on `main` to TestFlight. Each of PR-04, PR-05 and PR-07 therefore produces one TestFlight build when it lands; PR-05's comes from its ASK landing, which runs the same push CI on `main`. PR-02 and PR-03 now write nothing under `ios/` (the trace copy moved to PR-04), so they produce no build.
 - The Mac is built locally, so its slices reach the owner when they rebuild.
 
 **Rollback**:
@@ -509,7 +551,7 @@ PR-02 backend tolerant contract  →  PR-03 lossless archive
 - **Older code re-saving a project** drops `desired_outcome` and `archived_at` (stated limit, http.md §8).
 - **Client rollback**: a 021 kit document holds new command cases that an older build cannot decode, so an older build reports the store unreadable rather than overwriting it. Downgrade is not a supported path (contracts/kit-commands.md §6).
 
-**Mac data**: the import is reversible for 30 days or longer, because the backup is the untouched original (E8). An unreadable store is never touched.
+**Mac data**: the import is reversible for 30 days or longer, because the backup is the untouched original (E8). An unreadable store, and a previous-version file that appears later, are never touched (FR-022, FR-033).
 
 **Irreversible**: nothing on the server. On the Mac, sign-out with "Sign out and remove" discards unsent changes after an explicit warning (FR-018). The backup's deletion after 30 days and a sign-out is irreversible by design (FR-021).
 
@@ -519,12 +561,13 @@ PR-02 backend tolerant contract  →  PR-03 lossless archive
   - `api_request` and `api_request_failed` gain `client` and `client_version` (contracts/http.md §6), so Mac failures can be filtered (FR-031).
   - No project or task route logs content. A pytest log-capture test seeds sentinel names and outcomes and asserts their absence (FR-030).
 - **Correlation**:
-  - The kit mints a lower-cased UUID `X-Correlation-ID` per request. The server echoes it, or the server's own id, as `reference_id`.
+  - The kit mints a lower-cased UUID `X-Correlation-ID` per request. The server echoes it, or the server's own id, as `reference_id`. The server accepts an incoming id only when it matches `^[0-9A-Za-z._-]{1,64}$`, so a client cannot inject text into log lines (http.md §6).
   - `SyncMetadata.lastFailureReferenceID` keeps it for the X-01 tooltip and X-02, and `SyncIssue.referenceID` keeps it per issue. A timeout keeps the id the client sent (FR-015).
-- **Mac**: an `os.Logger` with subsystem `com.brainbuddy.mac` and categories `import`, `sync` and `instance`. It logs counts, durations, trigger names, error classes and reference ids, never content (research R21).
+- **Mac**: an `os.Logger` with subsystem `com.brainbuddy.mac` and categories `import`, `sync` and `instance`. It logs counts, durations, trigger names, error classes and reference ids, never content, paths, file names or digests (research R21). Tests cover the import and sync categories.
+- **iPhone and kit**: neither logs today (no `Logger`, `os_log` or `print` outside the fake server, re-checked 2026-10-06), and 021 adds none.
 - **Supporting signals** (intake KPI table):
-  - SC-001 is measured by the kit convergence test and the owner week.
-  - Failures shown to the person are the attention states with Ref; SC-004 is the host checklist.
+  - SC-001 is measured by the kit convergence test at the worst tick phase, the web polling tests and the Playwright fake-clock check, then the owner week.
+  - Failures shown to the person are the attention states with Ref; SC-004 is the `MacPresentationRouterTests` sweep plus the host checklist.
   - There is no new server metric, so no new alert is required (AGENTS.md "Monitoring requirements").
 
 ## Test strategy
