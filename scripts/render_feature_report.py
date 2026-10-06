@@ -50,7 +50,8 @@ NEXT_ACTION_NOTES = (
 )
 
 DEFINITION_RE = re.compile(r"^\s*[-*]\s*\*\*((?:FR|SC)-\d+)\*\*", re.MULTILINE)
-SCREEN_ID_RE = re.compile(r"\b([DM]-\d{2})\b")
+# D- desktop web, M- mobile, X- the native Mac app (021-mac-sync design gap G-7).
+SCREEN_ID_RE = re.compile(r"\b([DMX]-\d{2})\b")
 VERDICT_RE = re.compile(r"\*\*VERDICT\*\*:\s*(\w+)|^VERDICT:\s*(\w+)", re.MULTILINE)
 
 
