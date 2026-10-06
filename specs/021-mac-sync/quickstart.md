@@ -87,6 +87,7 @@ These run as kit tests (contracts/sync-status.md §5) and as host checks.
 2. **Transient failure** (`FakeServerTransport`): fail with 503 for 45 s, then recover. **Expect**: the indicator only, no warning (SC-005).
    Fail for 61 s. **Expect**: "Couldn't sync · Retry" with a reference id in the tooltip. One success later, **expect** "Synced just now".
 3. **Session ended**: return 401. **Expect**: "Sign in again to sync" at once, and the waiting changes are kept.
+   **Single-flight**: press "Sync now" three times during a running cycle. **Expect**: one follow-up cycle at most, and the button never disabled (FR-019).
 4. **Mac host check**: run through every state in sequence:
    - account-less;
    - first load;

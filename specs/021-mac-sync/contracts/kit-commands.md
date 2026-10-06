@@ -74,6 +74,11 @@ New `GTDValidationError` cases carry user copy in the existing catalogue (`Comma
 - `SyncTrigger.periodic` is added.
 - `.foreground`, `.manual`, `.networkRestored` and `.periodic` request a pull through the existing `pullRequested`, except that `.periodic` requests one only when the last pull is older than `configuration.pullInterval`.
 
+**"Sync now" is single-flight** (FR-019 as amended in `b83d367`; design X-02 "loading (a sync is running)"):
+
+- `Workspace.syncNow()` never fails or is refused because a cycle is running. A press while a cycle runs either joins that cycle (when it has not yet passed its pull decision) or queues exactly one follow-up cycle with `pullRequested`. Further presses while that follow-up is queued are no-ops.
+- Neither app disables "Sync now" because of a running sync. It is disabled only where no sync can run: account-less, offline or session ended (`SyncStatusDescription.syncNowEnabled`, contracts/sync-status.md §2). This also changes the iPhone Settings › Sync button, which is disabled while syncing today (PR-07).
+
 **Configuration** (`SyncConfiguration.swift`):
 
 - `pullInterval` defaults to 60 s, unchanged for callers that do not set it.

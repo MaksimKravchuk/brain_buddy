@@ -109,7 +109,7 @@ Sync runs only while the app runs: there is no login item and no agent (spec Ass
   - Focus order and Esc behaviour are as in design "Keyboard and focus".
   - At most 480 pt tall, with an internal scroll.
 - **X-07**: `SyncMenuCommands.swift` (SwiftUI `Commands`):
-  - File › "Sync now" ⌘R is disabled when the state is `accountLess`, `sessionEnded` or `offline`.
+  - File › "Sync now" ⌘R follows `syncNowEnabled`: it is disabled only when the state is `accountLess`, `sessionEnded` or `offline`, and it is never disabled by a running sync. A press during a sync is single-flight (contracts/kit-commands.md §4). The same rule applies to the X-02 "Sync now" and the X-01 "Retry".
   - The app menu offers "Sign in…", "Sign in again…" and "Sign out…".
 
 ## 7. Sign-in and sign-out (FR-001, FR-003 – FR-005, FR-017, FR-018)
@@ -123,7 +123,10 @@ Sync runs only while the app runs: there is no login item and no agent (spec Ass
   - offline;
   - "sign in again", with the email locked;
   - "account switch refused", with the copy catalogue's `accountSwitchRefused` and the device `.mac`.
-- **Cancelled deletion**: when `Workspace.signInCancelledAccountDeletion` is true, the sheet shows the iPhone's wording inside itself before it closes (G-3; FR-017).
+- **Cancelled deletion**: when `Workspace.signInCancelledAccountDeletion` is true, the sheet shows the design's "signed in, account deletion cancelled" state before it closes:
+  - the same sheet replaces its form with the note "Your account deletion was cancelled" / "Signing in cancels a deletion you requested in the last 14 days. Delete your account again on the web if you still want to.";
+  - focus moves to the note, and "OK", Return or Esc closes the sheet;
+  - sync has already started behind it (G-3; FR-017).
 
 **X-04** (`SignOutConfirmation.swift`, an alert sheet):
 

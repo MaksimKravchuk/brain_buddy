@@ -35,6 +35,8 @@ public struct SyncStatusDescription: Equatable, Sendable {
     public var accessibilityLabel: String     // "Sync status: <text>. Show details"
     public var tooltip: String                // X-01 hover
     public var announceOnEntry: Bool          // attention states only (design "Announcements")
+    public var syncNowEnabled: Bool           // false only for accountLess, sessionEnded, offline;
+                                              // never false because a sync is running (single-flight, FR-019)
 }
 
 public enum SyncStatusDescriber {
@@ -131,4 +133,5 @@ Each test names its requirement id (`@Test("021-FR-012 …")`):
 - offline with N = 0, 1 and 2;
 - singular and plural forms;
 - the indicator: 0.9 s sync gives nothing, 1.1 s sync gives visible ≥ 0.5 s, back-to-back cycles give one continuous span;
+- `syncNowEnabled` is false exactly for `accountLess`, `sessionEnded` and `offline`, and is true while `isSyncing` in every other state (`021-FR-019`, `021-FR-006`);
 - no string contains "—" (the em-dash form is retired, M-01 "before").
