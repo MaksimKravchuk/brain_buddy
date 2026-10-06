@@ -1,7 +1,7 @@
 # ADR-0029: Runtime-managed CLI authorization and compatible activation
 
 Date: 2026-10-06
-Status: Proposed; requires owner acceptance of this reviewed plan before implementation
+Status: Accepted for isolated implementation/testing by owner2026-10-06; see specs/023-agent-cli/review/founder-acceptance.json
 Amends: ADR-0019 only for optional cli_auth inventory; extends accepted ADR-0028 modern Identity with device proof consumption and issuance in its existing transaction
 Preserves: ADR-0001 Identity ownership/opaque sessions, ADR-0008 release authority, ADR-0022 significant-feature flags
 Related: specs/023-agent-cli/ and ADR-0025 runtime-managed CRT rollout

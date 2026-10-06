@@ -158,6 +158,7 @@ check-specs:
 	python3 scripts/check_speckit_manifests.py
 	python3 scripts/check_gate_integrity.py
 	python3 scripts/check_requirement_coverage.py specs/019-miro-like-crt-canvas
+	python3 scripts/check_requirement_coverage.py specs/024-agent-cli
 
 # --- Aggregate verification (mirrors the CI job graph) ---
 

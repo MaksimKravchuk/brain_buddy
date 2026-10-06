@@ -222,6 +222,12 @@ INVARIANTS: tuple[Invariant, ...] = (
         "Feature-019 traceability must execute in the authoritative spec gate; "
         "unit-testing the validator alone cannot prove requirement coverage.",
     ),
+    MustMatch(
+        "Makefile",
+        "check-specs runs CLI requirement coverage",
+        r"^check-specs:(?:\n\t[^\n]*)*?\n\tpython3 scripts/check_requirement_coverage\.py specs/024-agent-cli[ \t]*$",
+        "Feature-023 traceability must run unfiltered in the authoritative spec gate.",
+    ),
     MustNotMatch(
         "Makefile",
         "no slice-filtered requirement coverage in the gates",

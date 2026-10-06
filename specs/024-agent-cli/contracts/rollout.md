@@ -12,4 +12,4 @@ Source configuration includes reviewed fly.backend.toml BRAIN_BUDDY_CLI_VERIFICA
 
 Tests prove absent optional row survives all writes, old-reader rollback after initial failure, subsequent seven-row rollback plus account purge, no grants before exposure, malformed stores remain degraded, startup/periodic cleanup with OFF, and actual intended-account exposure. Six required flags include task_mcp from main21f08d2; preserve all six cohorts and historical healthy3/4/5-row upgrades before optional seventh-row activation. Reconcile further inventory changes before freeze.
 
-Reviewed ADR source SHA-256: 61addd4012b90e9b8fc60a69fbd0e3768d11752663b9a38b1d45e4ffa9870219. Editing that proposed ADR requires updating this reviewed binding and rerunning preflight.
+Reviewed ADR source SHA-256: 18959ed7e31f19e7050a759c9f6413851b44f7271352490f9679cd5b16ef26bb. Editing that proposed ADR requires updating this reviewed binding and rerunning preflight.

@@ -23,8 +23,10 @@ During the frozen review, origin/feat/modern-auth@bc7fc72c35b7bf794eff912c07bdd3
 
 ## Remaining authority
 
-Current artifact digest:28073fd7e1991aa4c27141ba0c0ed9bbe8e0f7eb100b6104829ac0c8a80498d5. No technical finding or product decision remains open within those verification scopes. High-risk planning acceptance is still pending; no human-signoff or founder-acceptance record has been fabricated. The two-campaign cap is reached. [Concrete approval packet](review/approval-packet.md) proposes bounded founder acceptance for isolated implementation and testing, including ADR-0029, with compensating measures and expiry.
+Current artifact digest:28073fd7e1991aa4c27141ba0c0ed9bbe8e0f7eb100b6104829ac0c8a80498d5. No technical finding or product decision remains open within those verification scopes. High-risk planning acceptance was explicitly given by the owner2026-10-06 ("Делай") in response to the concrete packet; see review/founder-acceptance.json and review/planning-review-accepted.json. The two-campaign cap is reached. [Concrete approval packet](review/approval-packet.md) records bounded founder acceptance for isolated implementation and testing, including ADR-0029, with compensating measures and expiry.
 
 Only approved or honestly recorded founder-accepted permits implementation under speckit-review. Exact-SHA implementation review/QA, required CI, ASK landing and production/binary publication are subsequent concrete gates. No authorization for production is inferred from approved UX or reviewer agreement.
 
 Spec artifact completeness, deterministic defects, manifest consistency, gate integrity and diff formatting are planning checks. Native builds, installation, shared-login journeys, production smoke and publication remain unpassed.
+
+Implementation authorization: founder-accepted through2026-10-20. Finalized digest:2496d4980e0dce7dd51c305a552043f295a5997d10afd30c1b4368f5826186ca. Only task/ADR acceptance metadata and its linked hash changed after the approved packet; no new product scope.

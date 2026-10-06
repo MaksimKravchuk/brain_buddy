@@ -1,7 +1,7 @@
 # Tasks: Agent-friendly BrainBuddy CLI
 
 Input: specs/023-agent-cli/{spec,design,plan,research,data-model}.md and contracts/.
-Status: Draft portable execution list. UX approved2026-10-06. The owner rejected a second Codex login and directed use of the current agent runtime. Second planning campaign uses native read-only reviewer sessions with explicit unverified/correlated provenance; no external Codex login is required. This list does not bypass the planning verdict or authorize production. One serial candidate, no multi-PR split.
+Status: Approved portable execution list, owner founder acceptance2026-10-06. UX approved2026-10-06. The owner rejected a second Codex login and directed use of the current agent runtime. Second planning campaign uses native read-only reviewer sessions with explicit unverified/correlated provenance; no external Codex login is required. This list does not bypass the planning verdict or authorize production. One serial candidate, no multi-PR split.
 
 Delivery gates: isolated feat/agent-cli worktree; observe failing behavioral tests before implementation; qualify requirement IDs023-FR/SC in test names/stories; central Allure taxonomy for pytest/Vitest/Playwright; mandatory approved/founder-accepted planning verdict and proposed ADR0029 acceptance. Independent exact-SHA review/QA, required CI, recorded ASK landing approval and normal Fly release remain separate obligations. Before freeze produce .specify/templates/pre-freeze-receipt.schema.json receipt and run scripts/validate_pre_freeze_receipt.py with exact SHA. Writer receipts never claim independent or release evidence.
 
