@@ -148,7 +148,7 @@ table.copy th{background:var(--s100);border-top:0}
 </figure>
 
 <figure>
-<figcaption><b>M-02 · empty: archived before this change (decision 2), and no archived projects</b>Top: an archived project with no tasks. Option A (spec) shows only the title and line; option B (ADR-0020, recommended) adds the grey line. Bottom: the Archived projects screen with none (reachable only if the last one was just unarchived; the Lists hub hides the row otherwise).</figcaption>
+<figcaption><b>M-02 · empty: archived before this change, and no archived projects</b>Top: a project archived before this feature, with no tasks. It shows the title, the action line and one neutral grey line (FR-027, US5-4, ADR-0020). The grey line stays after unarchiving until the project gets a task. Bottom: the Archived projects screen with none (reachable only if the last one was just unarchived; the Lists hub hides the row otherwise).</figcaption>
 <div class="phone">
   <div class="sb"><span>14:34</span><span>●●● 100%</span></div>
   <div class="nb"><button><svg class="i"><use href="#i-chev-l"/></svg>Archived</button><button>Unarchive</button></div>
@@ -156,7 +156,7 @@ table.copy th{background:var(--s100);border-top:0}
   <div class="empty" style="flex:.55">
     <svg class="i" style="width:40px;height:40px;color:var(--s400)"><use href="#i-archive"/></svg>
     <h3>No tasks in this project</h3><p>Unarchive it to add tasks.</p>
-    <p style="font-size:13px;color:var(--s500)">Option B: Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists.</p>
+    <p style="font-size:13px;color:var(--s500)">Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists.</p>
   </div>
   <div class="empty" style="flex:.45;border-top:1px dashed var(--s300)">
     <svg class="i" style="width:40px;height:40px;color:var(--s400)"><use href="#i-folder-minus"/></svg>
@@ -210,7 +210,7 @@ table.copy th{background:var(--s100);border-top:0}
   <tr><td>Archive confirmation button / swipe</td><td>"Archive project", destructive role, rose tint</td><td>"Archive project", default role; swipe tint slate (secondary)</td></tr>
   <tr><td>Archived projects footer</td><td>Archived projects are read-only and can't be restored. Their tasks stayed in their lists.</td><td>Archived projects keep their tasks. Unarchive one to add tasks to it again.</td></tr>
   <tr><td>Archived projects empty state</td><td>No archived projects / Projects you archive are listed here, read-only.</td><td>No archived projects / Projects you archive are listed here. Unarchive one to bring it back.</td></tr>
-  <tr><td>Archived project, empty list</td><td>This project is archived / Archived projects are read-only. Its tasks stayed in their lists.</td><td>No tasks in this project / Unarchive it to add tasks. (+ option B line, decision 2)</td></tr>
+  <tr><td>Archived project, empty list</td><td>This project is archived / Archived projects are read-only. Its tasks stayed in their lists.</td><td>No tasks in this project / Unarchive it to add tasks. / Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists. (the last line only for a project archived before this feature)</td></tr>
   <tr><td>Archived project status row</td><td>Archived project</td><td>Archived project · it doesn't take new tasks</td></tr>
   <tr><td>Sync issues description</td><td>(no unarchive command)</td><td>Unarchive project “Old flat”</td></tr>
   <tr><td>Unarchive toast</td><td>—</td><td>Unarchived “Old flat”</td></tr>

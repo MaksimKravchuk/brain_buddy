@@ -119,13 +119,13 @@ hr{border:0;border-top:1px solid var(--s200);margin:0}
 </figure>
 
 <figure>
-<figcaption><b>X-02 · loading (Sync now running)</b>"Sync now" is disabled with the small indicator beside it until the run ends; nothing else in the popover changes. Opening the popover never starts a sync by itself.</figcaption>
+<figcaption><b>X-02 · loading (a sync is running)</b>FR-013: no control is disabled. "Sync now" stays enabled and looks exactly as at rest. Pressing it while a sync runs joins that sync, or queues one follow-up sync if the running one has already sent its changes (single-flight). Nothing extra appears. The only sign of activity is the indicator beside the footer line. When the run ends, the times and counts update in place. Opening the popover never starts a sync by itself.</figcaption>
 <div class="pop">
   <div class="kvs">
     <div class="kv"><span class="k">Last synced</span><span class="v">Today at 14:31</span></div>
     <div class="kv"><span class="k">Waiting to sync</span><span class="v">Nothing</span></div>
   </div>
-  <div style="display:flex;gap:8px;align-items:center"><button class="btn dis" aria-disabled="true">Sync now</button><span class="spin" role="progressbar" aria-label="Syncing"></span></div>
+  <div><button class="btn">Sync now</button></div>
   <hr>
   <div class="acct"><span>alex@example.com</span><button class="btn lnk">Sign out…</button></div>
 </div>
@@ -219,7 +219,7 @@ hr{border:0;border-top:1px solid var(--s200);margin:0}
 </figure>
 
 <figure>
-<figcaption><b>X-02 · offline</b>Neutral, not amber. "Sync now" is disabled and says why in the line above it; it comes back the moment the network does.</figcaption>
+<figcaption><b>X-02 · offline</b>Neutral, not amber. While offline no sync can run, so "Sync now" is disabled, and the line above it says why. It is enabled again the moment the network returns. This is the only state where it is disabled; it is never disabled because a sync is running (FR-013).</figcaption>
 <div class="pop">
   <div class="notice"><span style="display:flex;gap:6px;align-items:flex-start"><svg class="i" style="margin-top:1px"><use href="#i-wifi-off"/></svg><span>You're offline. Changes are saved on this Mac and sync when you're back online.</span></span></div>
   <div class="kvs">
@@ -299,7 +299,8 @@ hr{border:0;border-top:1px solid var(--s200);margin:0}
   <h3>Keyboard, VoiceOver and closing</h3>
   <ul>
     <li><b>Open</b>: click, Space or Return on the status words. The popover is announced as "Sync status" and VoiceOver reads its content in order (status notice, last synced, waiting, issues count) before the first control (FR-016).</li>
-    <li><b>Tab order</b>: attention action (Sign in again / Copy) → each issue's Copy → Dismiss → Sync now → Sign out…. Shift-Tab reverses. Disabled "Sync now" is skipped.</li>
+    <li><b>Tab order</b>: attention action (Sign in again / Copy) → each issue's Copy → Dismiss → Sync now → Sign out…. Shift-Tab reverses. "Sync now" is skipped only offline, the one state where it is disabled. It stays enabled and focusable during a sync (FR-013).</li>
+    <li><b>Sync now while syncing</b>: a press joins the running sync, or queues a single follow-up sync (single-flight). There is no visual or spoken change; the footer indicator is the only sign of activity.</li>
     <li><b>Close</b>: Esc, a click outside, or choosing "Sign in again" or "Sign out…" (which open X-03 / X-04). Focus returns to the status words in the footer.</li>
     <li><b>Live updates while open</b>: the times and counts update in place without moving focus. A new issue arriving while the popover is open is appended and announced politely; focus stays where it was (FR-009).</li>
     <li><b>Never modal</b>: the window behind stays fully usable; typing in the window closes the popover like any transient popover.</li>

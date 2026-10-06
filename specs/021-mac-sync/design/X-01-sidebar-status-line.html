@@ -136,7 +136,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
   <div class="crop"><div class="foot"><button class="st">On this Mac</button><span class="sep">·</span><button class="act">Sign in to sync</button><span class="slot"></span></div></div>
   <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">On this Mac</button><span class="sep">·</span><button class="act">Sign in to sync</button><span class="slot"></span></div></div></div></div>
 
-  <div class="d"><b>first load (loading)</b>Just signed in; nothing synced yet. Indicator visible, app fully usable (US1-1). Words reuse the iPhone's existing "Not synced yet" (gap: not in the FR-012 table).</div>
+  <div class="d"><b>first load (loading)</b>Just signed in; nothing synced yet. Indicator visible, app fully usable (US1-1). Wording "Not synced yet", as on the iPhone (FR-012).</div>
   <div class="crop"><div class="foot"><button class="st">Not synced yet</button><span class="slot"><span class="spin" role="progressbar" aria-label="Syncing"></span></span></div></div>
   <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Not synced yet</button><span class="slot"><span class="spin"></span></span></div></div></div></div>
 
@@ -144,11 +144,11 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
   <div class="crop"><div class="foot"><button class="st">Synced just now</button><span class="slot"></span></div></div>
   <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Synced just now</button><span class="slot"></span></div></div></div></div>
 
-  <div class="d"><b>synced · minutes / hours / yesterday</b>Refreshes at least once a minute. 1–59 min; 1–23 h; then "yesterday" for the previous calendar day.</div>
-  <div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced 2 h ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced yesterday</button><span class="slot"></span></div></div>
-  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced 2 h ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced yesterday</button><span class="slot"></span></div></div></div></div>
+  <div class="d"><b>synced · minutes / hours / days / date</b>Refreshes at least once a minute. 1–59 min; 1–23 h; "yesterday" for the previous calendar day; "N days ago" for 2–6 days; then the date (FR-012). Days and dates show mainly at launch after the Mac was closed, until the first sync of the session ends.</div>
+  <div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced 2 h ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced yesterday</button><span class="slot"></span></div><div class="foot"><button class="st">Synced 4 days ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced on 28 Sep</button><span class="slot"></span></div></div>
+  <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced 2 h ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced yesterday</button><span class="slot"></span></div><div class="foot"><button class="st">Synced 4 days ago</button><span class="slot"></span></div><div class="foot"><button class="st">Synced on 28 Sep</button><span class="slot"></span></div></div></div></div>
 
-  <div class="d"><b>syncing</b>The words stay exactly as they were; only the small indicator appears in the reserved slot. No control is disabled, nothing takes focus (FR-013). Shown only for a sync running longer than 1 s (sign-off decision 1).</div>
+  <div class="d"><b>syncing</b>The words stay exactly as they were; only the small indicator appears in the reserved slot. No control is disabled, nothing takes focus (FR-013). Shown only for a sync running longer than 1 s, then kept at least 0.5 s; shorter syncs show nothing (FR-013, approved threshold).</div>
   <div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"><span class="spin" role="progressbar" aria-label="Syncing"></span></span></div></div>
   <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"><span class="spin"></span></span></div></div></div></div>
 
@@ -156,7 +156,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
   <div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"><svg class="i sm" role="img" aria-label="Syncing"><use href="#i-refresh"/></svg></span></div></div>
   <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Synced 3 min ago</button><span class="slot"><svg class="i sm"><use href="#i-refresh"/></svg></span></div></div></div></div>
 
-  <div class="d"><b>changes waiting (online)</b>A local change has waited longer than 10 s, for example while a retry is pending. A routine edit that sends within seconds never changes the words (sign-off decision 1). FR-008, FR-012.</div>
+  <div class="d"><b>changes waiting (online)</b>A local change has waited longer than 10 s, for example while a retry is pending. A routine edit that sends within seconds never changes the words (approved 10 s threshold). FR-008, FR-012.</div>
   <div class="crop"><div class="foot"><button class="st">Synced 3 min ago · 2 changes waiting</button><span class="slot"></span></div></div>
   <div class="dark"><div class="darkbg"><div class="crop"><div class="foot"><button class="st">Synced 3 min ago · 2 changes waiting</button><span class="slot"></span></div></div></div></div>
 

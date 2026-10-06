@@ -166,9 +166,9 @@ table.copy th{background:var(--s100);font-weight:600;border-top:0}
     <div class="add">Add a task</div>
   </div>
   <div class="mini">
-    <h4>empty: archived before this change (sign-off decision 2)</h4>
-    <div class="empty" style="min-height:120px"><svg class="i" style="width:28px;height:28px;color:var(--s400)"><use href="#i-archive"/></svg><h3>No tasks in this project</h3><p>Unarchive this project to add tasks to it.</p></div>
-    <p style="margin:0;font-size:12px;color:var(--s700);line-height:1.5"><b>Option A (spec US5-4, FR-027)</b>: as above, nothing more.<br><b>Option B (ADR-0020 "state that limit", recommended)</b>: one extra line, only on a project archived before this feature that has no tasks: <i>"Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists."</i></p>
+    <h4>empty: archived before this change</h4>
+    <div class="empty" style="min-height:120px"><svg class="i" style="width:28px;height:28px;color:var(--s400)"><use href="#i-archive"/></svg><h3>No tasks in this project</h3><p>Unarchive this project to add tasks to it.</p><p style="font-size:12px;color:var(--s500)">Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists.</p></div>
+    <p style="margin:0;font-size:12px;color:var(--s700);line-height:1.5">FR-027, US5-4, ADR-0020. The neutral line appears only on a project archived before this feature that has no tasks. It stays after unarchiving until the project gets a task. It never says anything was lost.</p>
   </div>
   <div class="mini">
     <h4>empty, filtered to nothing</h4>

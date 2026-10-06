@@ -51,10 +51,10 @@ draw from.
 | state | Mac (X-01) | iPhone (M-01) | shows when | interactive |
 |---|---|---|---|---|
 | account-less | "On this Mac · Sign in to sync" | "On this iPhone · Sign in to sync" | no account linked | "Sign in to sync" opens sign-in |
-| first load | "Not synced yet" + indicator | same | signed in, no sync has finished yet (gap G-1) | Mac: words open popover |
-| synced | "Synced just now" / "Synced N min ago" / "Synced N h ago" / "Synced yesterday" | same | last sync succeeded | Mac: words open popover |
-| syncing | the line unchanged + indicator | same | a sync has run longer than 1 s (decision 1) | — |
-| changes waiting, online | synced line + " · N changes waiting" | same | a change has waited longer than 10 s (decision 1) | Mac: words open popover |
+| first load | "Not synced yet" + indicator | same | signed in, no sync has finished yet (FR-012) | Mac: words open popover |
+| synced | "Synced just now" / "Synced N min ago" / "Synced N h ago" / "Synced yesterday" / "Synced N days ago" (2–6 days) / "Synced on 28 Sep" | same | last sync succeeded | Mac: words open popover |
+| syncing | the line unchanged + indicator | same | a sync has run longer than 1 s; the indicator then stays at least 0.5 s (FR-013) | — |
+| changes waiting, online | synced line + " · N changes waiting" | same | a change has waited longer than 10 s (FR-012) | Mac: words open popover |
 | offline | "Offline · N changes waiting" / "Offline" | same | no network path | Mac: words open popover |
 | session ended | "Sign in again to sync" | same | the server refused the session (at once) | Mac: popover with "Sign in again" first; iPhone: row opens sign-in |
 | failing | "Couldn't sync · Retry" | same | sending or loading has kept failing for 60 s | "Retry" runs Sync now |
@@ -67,7 +67,8 @@ Rules shared by both platforms:
 - **Relative time** refreshes at least once a minute. It never shows a negative or future time ("just now" instead).
 - **Failures clear themselves** after the next successful sync. Nothing says "back online".
 - **Colour is never the only signal**: attention states use amber words plus a glyph. Offline is a calm state and stays slate.
-- The timing constants (1 s, 10 s, 60 s) belong in shared code so the two apps cannot drift (Notes for the plan).
+- **Nothing is disabled by a running sync** (FR-013). "Sync now" stays enabled while a sync runs. A press during a sync joins the running sync, or queues one follow-up sync (single-flight), and shows no extra state. "Sync now" is disabled only when no sync can run: account-less, offline, or session ended.
+- The timing constants (1 s, 0.5 s, 10 s, 60 s) belong in shared code so the two apps cannot drift (Notes for the plan).
 
 ## Screen inventory
 
@@ -113,13 +114,13 @@ disabled.
 |---|---|---|---|---|
 | default (synced) | last sync succeeded 1–59 min ago, nothing waiting | One line of 11 pt secondary text, no glyph; empty indicator slot at the trailing edge | "Synced 3 min ago" | FR-012, US3-1 |
 | synced: just now | under a minute, or the server time is ahead of the Mac clock | As default | "Synced just now" | FR-012, edge case "clock" |
-| synced: hours / yesterday | 1–23 h; then the previous calendar day | As default | "Synced 2 h ago" / "Synced yesterday" | FR-012 |
-| loading (first load) | just signed in; no sync finished yet | Indicator in the slot; the window is usable at once and lists fill in | "Not synced yet" | US1-1, FR-013 (gap G-1) |
-| syncing | a sync has run > 1 s | Words unchanged, small indicator appears in the reserved slot; no control disabled, no focus change | (unchanged line) | FR-013, SC-004 (decision 1) |
+| synced: hours / days / date | 1–23 h; the previous calendar day; 2–6 days; older | As default. Days and dates show mainly at launch after the Mac was closed, until the first sync ends | "Synced 2 h ago" / "Synced yesterday" / "Synced 4 days ago" / "Synced on 28 Sep" | FR-012 |
+| loading (first load) | just signed in; no sync finished yet | Indicator in the slot; the window is usable at once and lists fill in | "Not synced yet" | US1-1, FR-012, FR-013 |
+| syncing | a sync has run > 1 s | Words unchanged, small indicator appears in the reserved slot and stays at least 0.5 s; shorter syncs show nothing; no control disabled, no focus change | (unchanged line) | FR-013, SC-004 |
 | syncing, Reduce Motion | the same, with Reduce Motion on | A static sync glyph instead of the rotating indicator | (unchanged line) | FR-013 |
 | empty (first run): account-less | never signed in, or signed out | "On this Mac" opens the popover; "Sign in to sync" in sky opens X-03 | "On this Mac · Sign in to sync" | FR-002, FR-012, US4-2 |
 | empty (filtered to nothing) | **n/a**: the line has no filter | — | — | — |
-| changes waiting (online) | a change has waited > 10 s (a retry pending) | The synced line gains a suffix | "Synced 3 min ago · 2 changes waiting" | FR-008, FR-012 (decision 1) |
+| changes waiting (online) | a change has waited > 10 s (a retry pending) | The synced line gains a suffix | "Synced 3 min ago · 2 changes waiting" | FR-008, FR-012 |
 | offline / interrupted | no network path; also after quit and relaunch with waiting changes | Calm slate text, no dialog | "Offline · 3 changes waiting" / "Offline" | US2-1, US2-2, FR-008, FR-010 |
 | offline, session expired meanwhile | session expired while offline | Nothing about the session until the server refuses it online | "Offline · N changes waiting" | edge case |
 | session ended | the server refused the session | Amber words + person glyph, at once; work continues locally | "Sign in again to sync" | FR-012, FR-014, US3-5 |
@@ -138,14 +139,14 @@ disabled.
 |---|---|---|---|---|
 | default (no issues) | click the status words when synced | Last synced, waiting "Nothing", "Sync now" (plain button), email + "Sign out…"; no issues section | "Last synced · Today at 14:31", "Waiting to sync · Nothing" | FR-016 |
 | changes waiting | changes waiting | Count and age of the oldest | "Waiting to sync · 2 changes · oldest 40 s" | FR-016, FR-008 |
-| loading (Sync now running) | "Sync now" pressed | "Sync now" disabled with the small indicator beside it; nothing else changes | "Sync now" | FR-006, FR-013 |
+| loading (a sync is running) | "Sync now" pressed, or any sync running with the popover open | Nothing in the popover changes. "Sync now" stays enabled; pressing it again joins the running sync or queues one follow-up sync (single-flight), with no extra state. The only activity sign is the footer indicator. Times and counts update in place when the run ends | "Sync now" | FR-006, FR-013 |
 | empty (first run): signed out | account-less | One explanation and "Sign in…" (primary); no times, no counts, no "Sync now" | "Your tasks are stored on this Mac" / "Nothing is sent anywhere until you sign in. Sign in to use the same tasks on your iPhone and the web." | FR-002, FR-029, FR-001 |
 | empty (filtered to nothing) | **n/a**: no filter in the popover | — | — | — |
 | partial failure (with issues) | rejected changes exist | A section with the count; each issue: what was attempted, why, reference ID + Copy, time, Dismiss | "Rename “Call the landlord”" / "Couldn't save your change to “Call the landlord”: it was deleted on another device." ; "Add “Order soil” to Next actions" / "Project “Garden” was archived on another device, so the task was added without a project." | FR-011, FR-015, FR-016, US3-6, edge cases |
 | error (couldn't sync) | 60 s of failure | Amber notice with start time, plain reason, reference ID + Copy; "Sync now" is the retry | "Couldn't sync since 14:02" / "Brain Buddy didn't answer. Your changes are safe on this Mac, and it keeps trying." | FR-014, FR-015, FR-016 |
 | error, unreachable for days | server unreachable for days | Same notice; only the oldest-age figure grows; no repeated alerts | "Couldn't sync since Sat 3 Oct" / "41 changes · oldest 3 days" | edge case "server unreachable" |
 | session ended | session refused | Amber notice, "Sign in again" primary and first in focus; "Sync now" hidden | "Your session ended" / "Sign in again to keep syncing. Your changes stay on this Mac until then." | US3-5, FR-001 |
-| offline / interrupted | no network | Neutral notice; "Sync now" disabled | "You're offline. Changes are saved on this Mac and sync when you're back online." | FR-008, FR-010 |
+| offline / interrupted | no network | Neutral notice; "Sync now" disabled, because no sync can run (the one state where it is disabled; it is never disabled because a sync is running) | "You're offline. Changes are saved on this Mac and sync when you're back online." | FR-008, FR-010 |
 | long text, many issues | > 3 issues; long titles; long email | Titles quoted on one line, shortened past 60 characters; the list scrolls inside; popover ≤ 480 pt tall; the email wraps | "7 changes couldn't sync" | FR-016 |
 | last issue dismissed | Dismiss on the last issue | Section disappears; VoiceOver says "No sync issues"; the footer returns to the synced line | — | FR-016 |
 | reference ID copied | Copy | The button reads "Copied" for 2 s, announced politely | "Copied" | FR-015 |
@@ -166,6 +167,7 @@ disabled.
 | account switch refused | credentials belong to another account while this Mac holds unsent changes or open issues | Amber message; sheet stays open; nothing sent | "Sign out first to use another account." / "Changes from the other account are still waiting on this Mac." | FR-004, US4-5 |
 | long text / invalid server address | Advanced expanded; long values; bad URL | Fields scroll horizontally; the rule is stated; "Use the default server" | "Use an https server address. http works only for localhost." | FR-001 |
 | dark mode | Dark | As light | as light | — |
+| signed in, account deletion cancelled | the sign-in succeeded and cancelled a pending account deletion | Before closing, the same sheet replaces its form with a sky note (not a separate dialog). Focus moves to the note and VoiceOver reads it. "OK" is the only button; Return or Esc closes the sheet. Sync has already started behind it | "Your account deletion was cancelled" / "Signing in cancels a deletion you requested in the last 14 days. Delete your account again on the web if you still want to." · "OK" | FR-017 |
 | after sign-in: first load | success | Sheet closes, no toast; window usable at once; lists fill in; X-01 shows "Not synced yet" + indicator; a very large account fills in progressively | — | US1-1, edge case "very large account" |
 | partial failure | some local records rejected during the first upload | Those become sync issues (X-02); everything else is on the account | (X-02 copy) | FR-003, FR-011 |
 | empty (filtered to nothing) | **n/a** | — | — | — |
@@ -177,7 +179,7 @@ disabled.
 | default: unsent changes | "Sign out…" with N > 1 waiting | Alert sheet; "Cancel" default; "Sign out and remove" destructive (rose text) | "3 changes haven't synced yet." / "Sign out and remove them from this Mac? They haven't reached your account." | FR-018, US1-6 |
 | one change, offline | N = 1, offline | Singular; one extra sentence | "1 change hasn't synced yet." / "Sign out and remove it from this Mac? It hasn't reached your account. You're offline, so it can't be sent now." | FR-018 |
 | session ended with unsent changes | session refused, N waiting | Says how to send them first, without a third button | "5 changes haven't synced yet." / "Sign out and remove them from this Mac? To send them first, choose Cancel and sign in again." | FR-018, US3-5 |
-| nothing unsent | "Sign out…" with nothing waiting | **Decision 3**. Recommended: confirm, as the iPhone does | "Sign out?" / "Your tasks are removed from this Mac. They stay in your account." · "Cancel" · "Sign out" | US1-6, FR-017 |
+| nothing unsent | "Sign out…" with nothing waiting | Confirmed, as on the iPhone, because the account's data leaves this Mac (approved) | "Sign out?" / "Your tasks are removed from this Mac. They stay in your account." · "Cancel" · "Sign out" | US1-6, FR-017 |
 | error | local data couldn't be removed | Stays signed in; nothing removed; no reference ID | "Couldn't sign out" / "Brain Buddy couldn't remove your tasks from this Mac, so you're still signed in. Nothing was removed." | US1-6 |
 | empty (first run) after sign-out | confirmed | Immediate: empty account-less workspace; selection resets to Inbox; footer account-less; the logout is queued if offline | "On this Mac · Sign in to sync" | US1-6, FR-005, FR-002 |
 | loading | **n/a**: sign-out is local and immediate (FR-005) | — | — | — |
@@ -208,7 +210,7 @@ disabled.
 | task of an archived project elsewhere | a Next action whose project is archived | Stays in its list; group header and row label say "archived"; picker shows "Old flat (archived)" | "Old flat · archived" | FR-024, FR-025 |
 | capture into an archived project | Smart Add names an archived project | Existing block, new verb | "Unarchive “Old flat” before adding a task to it." | FR-025 |
 | unarchived | "Unarchive" | Chip and button go; "Add a task" and "Edit outcome" return; project back in Projects; focus to the title; no toast | — | FR-026, US5-3 |
-| empty: archived before this change | archived pre-feature, no tasks | **Decision 2.** A: "No tasks in this project / Unarchive this project to add tasks to it." B adds one neutral line | B: "Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists." | FR-027, US5-4, ADR-0020 |
+| empty: archived before this change | archived pre-feature, no tasks (also after unarchiving, until it gets a task) | Empty state with one neutral grey line; nothing says tasks were lost | "No tasks in this project" / "Unarchive this project to add tasks to it." / "Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists." | FR-027, US5-4, ADR-0020 |
 | empty (filtered to nothing) | search or priority filter matches nothing | Existing filtered empty state | "No matching tasks" / "Clear the search or priority filter to see this project's tasks." | — |
 | offline / interrupted | offline, or quit before sending | Applies at once; waits like any change | "Offline · 1 change waiting" | FR-008, FR-010 |
 | error | local write failed | Existing inline error with Retry | "Couldn't unarchive “Old flat”. Try again." | FR-026 |
@@ -235,10 +237,10 @@ disabled.
 |---|---|---|---|---|
 | before (today, reference only) | — | "Syncing…" text during every sync; "Sync failed — reason" + "Reference ID: …" at once; em dash; cloud glyphs | "Syncing…", "Offline — 3 changes waiting", "Sync failed — The server had a problem (HTTP 503). Try again later." | — |
 | default (synced) | last sync succeeded | One centred 13 pt line at the end of the list; not interactive | "Synced 3 min ago" | FR-019 |
-| loading: first sync after sign-in | signed in, nothing synced | Line with the indicator | "Not synced yet" | FR-019, US1-1 (gap G-1) |
-| syncing | sync running > 1 s | Words unchanged + indicator | (unchanged line) | FR-019, FR-013 (decision 1) |
+| loading: first sync after sign-in | signed in, nothing synced | Line with the indicator | "Not synced yet" | FR-019, FR-012, US1-1 |
+| syncing | sync running > 1 s | Words unchanged + indicator, kept at least 0.5 s | (unchanged line) | FR-019, FR-013 |
 | syncing, Reduce Motion / Dynamic Type AX5 | settings | Static glyph; line wraps after " · ", centred, never truncated | "Synced 3 min ago · 2 changes waiting" | FR-019 |
-| changes waiting (online) | a change waited > 10 s | Suffix | "Synced 3 min ago · 2 changes waiting" | FR-019 (decision 1) |
+| changes waiting (online) | a change waited > 10 s | Suffix | "Synced 3 min ago · 2 changes waiting" | FR-019, FR-012 |
 | offline / interrupted | no network | Calm line | "Offline · 3 changes waiting" | FR-019 |
 | session ended | session refused | Amber row button with glyph; opens the existing sign-in sheet with the email locked | "Sign in again to sync" | FR-019, US3-5 |
 | transient failure (< 60 s) | failure that recovers | Indicator only | (unchanged line) | FR-014, FR-019, SC-005 |
@@ -256,7 +258,7 @@ disabled.
 | default: Archived projects | Lists hub › Archived | Rows open the project and show counts; swipe "Unarchive" (sky, full swipe allowed); footer | "Archived projects keep their tasks. Unarchive one to add tasks to it again." | FR-025, FR-026 |
 | archived project opened | tap a row | Tasks listed and editable; toolbar "Unarchive"; status row; capture files nothing here (as today) | "Archived project · it doesn't take new tasks" | FR-025, FR-026 |
 | unarchived | Unarchive | Becomes active; toolbar button and status row gone; toast | "Unarchived “Old flat”" | FR-026, US5-3 |
-| empty: archived before this change | pre-feature archived, no tasks | **Decision 2** (A or A + line) | "No tasks in this project" / "Unarchive it to add tasks." (+ B line) | FR-027, US5-4 |
+| empty: archived before this change | pre-feature archived, no tasks (also after unarchiving, until it gets a task) | Empty state with one neutral grey line | "No tasks in this project" / "Unarchive it to add tasks." / "Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists." | FR-027, US5-4 |
 | empty (first run): none archived | all unarchived | Existing screen, new copy; the hub row is hidden when none | "No archived projects" / "Projects you archive are listed here. Unarchive one to bring it back." | FR-026 |
 | empty (filtered to nothing) | list filter on the project | Existing filtered copy | "No tasks match these filters" | — |
 | offline / interrupted | offline | Applies locally, waits | "Offline · 1 change waiting" | FR-008 |
@@ -279,7 +281,7 @@ disabled.
 | offline / interrupted | no connection; request cut off | Offline banner, Unarchive disabled; a cut-off request retries with the same idempotency key | "You're offline. Unarchive is available when you're back online." | FR-026 |
 | partial failure | **n/a**: one project command, its tasks unchanged | — | — | — |
 | empty: none archived | no archived projects | Disclosure not shown | — | — |
-| empty: archived before this change | pre-feature archived, no tasks | **Decision 2** | "No tasks in this project" / "Unarchive it to add tasks." (+ B line) | FR-027, US5-4 |
+| empty: archived before this change | pre-feature archived, no tasks (also after unarchiving, until it gets a task) | Empty state with one neutral line | "No tasks in this project" / "Unarchive it to add tasks." / "Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists." | FR-027, US5-4 |
 | empty (filtered to nothing) | filter on the project page | Filtered empty copy | "No tasks match this filter" / "Clear the filter to see this project's tasks." | — |
 | task of an archived project in Next | Next actions | Project column and group read "archived" | "Old flat · archived" | FR-024, FR-025 |
 | narrow (390 px) | drawer layout | Disclosure in the drawer; Unarchive full-width 44 px under the title; no horizontal scroll | as default | FR-026 |
@@ -302,14 +304,14 @@ listed.
 | X-02 | "Copy" beside a reference ID | Copies the ID | FR-015 |
 | X-02 | "Dismiss" per issue | Removes the issue once read | FR-016, FR-011 |
 | X-02 | "Sync now" | Runs a sync now | FR-006, FR-016 |
-| X-02 | "Sign out…" | Opens X-04 (or signs out, decision 3) | FR-001, FR-016, FR-018 |
+| X-02 | "Sign out…" | Opens X-04 ("Sign out?", or the unsent-changes warning) | FR-001, FR-016, FR-018 |
 | X-02 | Esc / click outside | Closes the popover, focus back to the status words | FR-016 |
 | X-03 | Email, Password, "Sign in" | Signs in; first sign-in merges local tasks | FR-001, FR-003 |
 | X-03 | "Cancel" / Esc | Closes without change | FR-001 |
 | X-03 | "Advanced" › Server address, "Use the default server" | Chooses the server (today's "API URL", renamed as on the iPhone) | FR-001 |
 | X-04 | "Cancel" (default) | Keeps the changes; no sign-out | FR-018 |
 | X-04 | "Sign out and remove" | Signs out and removes unsent changes from this Mac | FR-018 |
-| X-04 | "Sign out" (nothing unsent) | Signs out (decision 3) | FR-001, US1-6 |
+| X-04 | "Sign out" (nothing unsent) | Signs out after the "Sign out?" confirmation | FR-001, FR-017, US1-6 |
 | X-04 | "OK" (error) | Closes; still signed in | US1-6 |
 | X-05 | "Continue" | Records the notice as seen; starts the empty workspace | FR-022 |
 | X-05 | "Show in Finder" | Reveals the untouched old file; then as Continue | FR-022 |
@@ -349,10 +351,10 @@ Display-only surfaces carrying requirements:
 - **FR-009** (incoming changes never move selection, scroll, focus or unsaved text): behaviour. The design adds no surface that could move focus; X-02 "new issue while open" keeps focus.
 - **FR-010** (never wait on the network): behaviour. X-03 offline copy states it.
 - **FR-011** (conflict rules): behaviour. Rejections surface as X-02 / M-01 issues.
-- **FR-017** (no routine dialogs): a constraint, met by the absence of any dialog outside X-03, X-04, X-05 and the refusal state of X-03.
+- **FR-017** (no routine dialogs): a constraint, met by the absence of any dialog outside X-03 (including its refusal and deletion-cancelled states), X-04 and X-05.
 - **FR-020, FR-021** (lossless upgrade, backup kept): silent by design; X-05 only for FR-022.
 - **FR-023** (Mac review marks stay local): no UI change; the Mac's Waiting / Someday / Project review buttons must keep working signed in (Notes for the plan).
-- **FR-027** (old archives stay detached): display only (empty archived project, decision 2).
+- **FR-027** (old archives stay detached): display only (the neutral line in the empty archived project on X-06, M-02 and D-01).
 - **FR-028** (desired outcome synced): display only on Mac (X-06). Not shown on iPhone or web by scope.
 - **FR-029, FR-030, FR-031** (privacy, logs, client identification): no UI beyond the X-02 account-less line.
 
@@ -367,17 +369,19 @@ None. Borderline items, each traced:
 - App menu account items (X-07): FR-001.
 - The web archive hint line (D-01) and the iPhone/web "Unarchived" toast are copy and feedback, not controls.
 
-### Requirements gaps found while designing (not designed past)
+### Requirements gaps found while designing
 
-| id | gap | what the design does | needs |
+G-1 to G-6 were resolved on 2026-10-06 by the owner's sign-off and the spec amendment in commit e50b144. G-7 is a tooling task for the plan.
+
+| id | gap | resolution | status |
 |---|---|---|---|
-| G-1 | FR-012 has no wording for "signed in, first sync not finished". | Uses the iPhone's existing "Not synced yet". | Confirm in the plan or add to FR-012. |
-| G-2 | FR-012 stops at "Synced yesterday". On launch after days closed, the old time shows until the first sync of the session ends. | Not drawn. Proposal: "Synced N days ago" (2–6), then "Synced on 28 Sep". | Plan decides; trivial copy. |
-| G-3 | Signing in cancels a pending account deletion. The iPhone says so in an alert after sign-in. The spec has no Mac requirement, and FR-017's list of allowed dialogs excludes it. | Not designed (X-03 note). Proposal: the iPhone's wording, shown inside the X-03 sheet before it closes. | Spec amendment or a plan decision. |
-| G-4 | ADR-0020 says the UI must state that old archives lost their memberships; US5-4 says not to tell the person they lost tasks. | Both options drawn. | Sign-off decision 2. |
-| G-5 | FR-013 says "while a sync runs" the indicator shows, and FR-012 says the waiting suffix shows while changes wait; taken literally, both flicker. | Thresholds drawn. | Sign-off decision 1. |
-| G-6 | FR-017 lists only "sign-out with unsent changes" as a sign-out dialog; the iPhone always confirms. | Both drawn. | Sign-off decision 3. |
-| G-7 | Pipeline tooling recognises only `D-`/`M-` screen ids. | `X-` used as asked. | Plan widens `SCREEN_ID_RE`. |
+| G-1 | FR-012 had no wording for "signed in, first sync not finished". | "Not synced yet" is in FR-012 (X-01, M-01). | resolved |
+| G-2 | FR-012 stopped at "Synced yesterday". | "Synced N days ago" (2–6 days), then "Synced on <date>", are in FR-012 (X-01, M-01). | resolved |
+| G-3 | Signing in can cancel a pending account deletion, and the Mac had no requirement to say so. | FR-017: the X-03 sheet shows the iPhone's note before closing ("signed in, account deletion cancelled" state). | resolved |
+| G-4 | ADR-0020 says state the limit for old archives; US5-4 says never say tasks were lost. | Sign-off 2: one neutral line on every client (FR-027, US5-4). | resolved |
+| G-5 | A literal FR-012 and FR-013 would flicker. | Sign-off 1: the indicator shows only after 1 s and stays at least 0.5 s; the waiting count shows after 10 s (FR-012, FR-013). | resolved |
+| G-6 | FR-017 listed only sign-out with unsent changes. | Sign-off 3: "Sign out?" confirmation (FR-017). | resolved |
+| G-7 | Pipeline tooling recognises only `D-`/`M-` screen ids. | `X-` used as asked. | open: the plan widens `SCREEN_ID_RE` |
 
 ## Primary loop impact
 
@@ -461,7 +465,7 @@ and failures appear only after 60 s, in one place.
   - unarchive → `tray.and.arrow.up`.
 - The logo path in X-04 and X-05 is an inline copy of `assets/logo.svg`.
 - **Activity indicator vs "ambient loops only in brain dump"**: reconciled.
-  - The indicator is the platform's own small progress control, shown only while work actually runs (and only past 1 s, decision 1).
+  - The indicator is the platform's own small progress control, shown only while work actually runs, and only past 1 s, then for at least 0.5 s (FR-013).
   - It is static under Reduce Motion.
   - It is not a brand ambient loop, and no brand animation is added.
 - **Menu casing**: Mac menu items we own use sentence case ("Sync now", "Sign out…"), per the product's casing rule, deliberately unlike the macOS title-case habit. System items keep macOS wording.
@@ -470,7 +474,7 @@ and failures appear only after 60 s, in one place.
 
 ## Notes for the plan
 
-- **Shared status logic**. Put the state machine, the precedence and the 1 s / 10 s / 60 s thresholds (decision 1) in `BrainBuddyKit` (Core, Linux-testable). The Mac and iPhone then render one description and cannot drift. Today `SyncStatusLabel.describe` holds the iPhone's copy; it moves or is shared.
+- **Shared status logic**. Put the state machine, the precedence and the thresholds in `BrainBuddyKit` (Core, Linux-testable): 1 s indicator delay, 0.5 s minimum, 10 s waiting suffix, 60 s failure (FR-012 – FR-014). Also the single-flight rule for "Sync now" during a running sync. The Mac and iPhone then render one description and cannot drift. Today `SyncStatusLabel.describe` holds the iPhone's copy; it moves or is shared.
 - **Mac removals**:
   - the full-window `signIn` view and the `sessionExpired` overlay;
   - the "Sync needs attention" banner (`syncConflictTaskID`), because conflicts become FR-011 issues;
@@ -490,10 +494,11 @@ and failures appear only after 60 s, in one place.
 - **Web**:
   - The projects API must return archived projects (with their tasks reachable at `/projects/:id`).
   - An unarchive endpoint is needed.
-  - Decision 2 option B needs the server to know a project was archived before this change (for example, archived before the cutover).
+  - The FR-027 neutral line needs the server to know which projects were archived before this change (for example, archived before the cutover). This applies to every client.
 - **Upgrade**: confirm the X-05 "partial read = unreadable" interpretation.
 - **Tooling**: widen `SCREEN_ID_RE` in `scripts/render_feature_report.py` to include `X-`.
-- **Gaps G-1 … G-3** above need a spec amendment or a plan decision. The design did not design past them.
+- **Gaps G-1 … G-6** are resolved (spec commit e50b144). Only G-7, the tooling item above, is left.
+- **iPhone Settings › Sync** keeps its existing behaviour (FR-019, "stay as they are"). Its "Sync now" button is disabled while a sync runs today. FR-013 governs the Mac only, so this design leaves it unchanged. If the plan wants full parity, it can adopt the Mac's single-flight rule there.
 
 ## Sign-off
 
@@ -502,7 +507,12 @@ and failures appear only after 60 s, in one place.
 - G-2: "Synced N days ago" (2–6 days) and then "Synced on <date>" go into FR-012.
 - G-3: the X-03 sign-in sheet says that signing in cancelled a pending account deletion before it closes (FR-017).
 
-The three choices as they were put to the owner:
+Every screen and state table above shows only the accepted options; the alternatives are not designed. Review fixes after sign-off (Codex review on PR #265):
+- X-03 gained the "signed in, account deletion cancelled" state.
+- The pre-feature archive empty state shows only the approved line on X-06, M-02 and D-01.
+- "Sync now" stays enabled while a sync runs (FR-013, single-flight).
+
+The three choices as they were put to the owner (kept for the record; in each, the **Recommended** option was accepted):
 
 1. **Quiet thresholds** (X-01, M-01; FR-012, FR-013).
    - Taken literally, the indicator would blink at every 60 s pull and every edit, and "· 1 change waiting" would appear and vanish after every edit. That is the opposite of "не должно бросаться в глаза".
