@@ -98,12 +98,39 @@ extension GTDState {
     /// comment's `editedAt`.
     var ignoringServerAssignedFields: GTDState {
         var copy = self
-        for id in copy.tasks.keys {
-            copy.tasks[id]!.orderKey = 0
-            copy.tasks[id]!.updatedAt = Fixture.epoch
-            copy.tasks[id]!.waitingSince = copy.tasks[id]!.waitingSince.map { _ in Fixture.epoch }
-            for index in copy.tasks[id]!.comments.indices { copy.tasks[id]!.comments[index].editedAt = nil }
+        for id in copy.tasks.keys { copy.tasks[id] = copy.tasks[id]!.ignoringServerAssignedFields }
+        // Spec 020: the review records carry the same task fields (Undo
+        // snapshots and the "changed since" stamps).
+        for (id, decision) in copy.review.decisions {
+            var normalized = decision
+            normalized.taskAfter.updatedAt = nil
+            if let before = decision.undo?.taskBefore { normalized.undo?.taskBefore = before.ignoringServerAssignedFields }
+            normalized.undo?.createdTaskAfter?.updatedAt = nil
+            normalized.undo?.receiptReplaced?.taskUpdatedAt = nil
+            copy.review.decisions[id] = normalized
         }
+        for index in copy.review.receipts.indices { copy.review.receipts[index].taskUpdatedAt = nil }
+        copy.review.receipts.sort { ($0.taskID, $0.kind.rawValue) < ($1.taskID, $1.kind.rawValue) }
+        // An undone release is bookkeeping: a replayed Undo leaves the record
+        // marked undone, compaction's cancel leaves none; the tasks are the same.
+        copy.review.bulkReleases = copy.review.bulkReleases.filter { $0.value.undoneAt == nil }
+        for id in copy.review.bulkReleases.keys {
+            for index in copy.review.bulkReleases[id]!.released.indices {
+                copy.review.bulkReleases[id]!.released[index].taskAfter.updatedAt = nil
+                copy.review.bulkReleases[id]!.released[index].receiptReplaced?.taskUpdatedAt = nil
+            }
+        }
+        return copy
+    }
+}
+
+extension TaskRecord {
+    var ignoringServerAssignedFields: TaskRecord {
+        var copy = self
+        copy.orderKey = 0
+        copy.updatedAt = Fixture.epoch
+        copy.waitingSince = copy.waitingSince.map { _ in Fixture.epoch }
+        for index in copy.comments.indices { copy.comments[index].editedAt = nil }
         return copy
     }
 }
@@ -131,7 +158,72 @@ struct CommandGenerator {
     private var serial = 0
     private var recent: [TaskID] = []
 
-    init(seed: UInt64) { rng = SeededGenerator(seed: seed) }
+    /// Spec 020: also generate decisions and their Undo, bulk releases and
+    /// their Undo, and review-run commands (only once the review is exposed,
+    /// so with clock-aware compaction). Off, the sequence is unchanged.
+    var includeReview = false
+
+    init(seed: UInt64, includeReview: Bool = false) {
+        rng = SeededGenerator(seed: seed)
+        self.includeReview = includeReview
+    }
+
+    mutating func reviewCommand(for state: GTDState) -> GTDCommand? {
+        let tasks = state.tasks.values.filter(\.isOpen).sorted { $0.id < $1.id }
+        let open = state.review.openSession?.id
+        let session = chance(50) ? open : nil
+        switch Int.random(in: 0..<100, using: &rng) {
+        case 0..<35:
+            guard let task = tasks.randomElement(using: &rng) else { return nil }
+            let type: DecisionType =
+                switch task.state {
+                case .next: pick([.someday, .complete, .cancel, .waiting, .reformulate, .firstStep])
+                case .waiting: pick([.keepWaiting, .followUp, .returnToNext, .complete])
+                case .someday: pick([.keepSomeday, .returnToNext, .cancel])
+                default: .complete
+                }
+            return .decideTask(
+                .init(
+                    decisionID: DecisionID("decision-\(serial)"), taskID: task.id, type: type,
+                    formulationID: type.decidesOnFormulation ? task.formulation?.id : nil,
+                    newFormulationID: FormulationID("form-\(serial)"), title: pick(["Call Ana", "Measure the wall", "call ana."]),
+                    waitingFor: "Bob", sessionID: session,
+                    followUpTaskID: type == .followUp ? TaskID("task-followup-\(serial)") : nil
+                )
+            )
+        case 35..<55:
+            guard let id = state.review.decisions.values.max(by: { ($0.decidedAt, $0.id) < ($1.decidedAt, $1.id) })?.id
+            else { return nil }
+            return .undoDecision(id)
+        case 55..<65:
+            let candidates = tasks.filter { $0.state == .inbox }.prefix(3).map(\.id)
+            guard !candidates.isEmpty else { return nil }
+            return .bulkRelease(.init(bulkID: BulkID("bulk-\(serial)"), kind: .inboxRemainder, sessionID: session, taskIDs: Array(candidates)))
+        case 65..<72:
+            guard let id = state.review.bulkReleases.values.filter({ $0.undoneAt == nil }).map(\.id).max() else { return nil }
+            return .undoBulkRelease(id)
+        case 72..<80:
+            return .review(.startSession(StartSession(sessionID: ReviewSessionID("review-\(serial)"), mode: pick([.quick, .full]), entry: .list)))
+        case 80..<92:
+            guard let open else { return nil }
+            return .review(
+                .progressSession(
+                    SessionProgress(
+                        sessionID: open, progressID: ProgressID("progress-\(serial)"), currentStep: pick(ReviewStep.allCases),
+                        step: pick(ReviewStep.allCases), stepStatus: pick([.finished, .skipped]), activeStep: .wins,
+                        activeSeconds: Int.random(in: 0...90, using: &rng), inboxProcessedDelta: pick([nil, 1, -1])
+                    )
+                )
+            )
+        case 92..<96:
+            guard let open else { return nil }
+            return .review(.finishSession(FinishSession(sessionID: open, clearStart: pick([nil, .yes]))))
+        default:
+            return chance(50)
+                ? .review(.grantNavigatorConsent(provider: "openai", consentTextVersion: 1))
+                : .review(.revokeNavigatorConsent(provider: "openai"))
+        }
+    }
 
     private static let titles = ["Call Ana", "  Buy milk ", "Draft plan", "Review", "   "]
     private static let details: [String?] = ["", "Notes", "Before noon", nil]
@@ -142,6 +234,7 @@ struct CommandGenerator {
 
     mutating func next(for state: GTDState) -> GTDCommand {
         serial += 1
+        if includeReview, chance(30), let command = reviewCommand(for: state) { return command }
         let tasks = state.tasks.keys.sorted()
         // Oldest first, so `likelyNewest` can favour a project or tag created
         // moments ago (an edit referencing it must stay after its creation).

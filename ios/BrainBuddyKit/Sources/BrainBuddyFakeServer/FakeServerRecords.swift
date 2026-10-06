@@ -23,14 +23,48 @@ struct TaskRow: Hashable, Sendable {
     var completedAt: Date?
     var cancelledAt: Date?
     var revision: Int
+    /// Spec 020: the formulation clock, maintained by every task write.
+    var formulation: FormulationClock? = nil
+    var consecutiveStalledFormulations = 0
+    /// Auto-park only; `fromRevision` and `clockBefore` stay server-side.
+    var parked: ParkMarker? = nil
+
+    /// The fields the formulation rule reads and writes.
+    var clocked: ClockedTask {
+        get {
+            ClockedTask(
+                state: state, title: title, revision: revision, formulation: formulation,
+                consecutiveStalledFormulations: consecutiveStalledFormulations, dueDate: dueDate, parked: parked
+            )
+        }
+        set {
+            if let state = newValue.state { self.state = state }
+            if let title = newValue.title { self.title = title }
+            revision = newValue.revision
+            formulation = newValue.formulation
+            consecutiveStalledFormulations = newValue.consecutiveStalledFormulations
+            dueDate = newValue.dueDate
+            parked = newValue.parked
+        }
+    }
 
     /// `_to_response`: list pages and mutations carry no children; `GET /tasks/{id}` passes them.
+    /// The derived instants are advisory for display and left out here.
     func dto(subtasks: [SubtaskDTO] = [], comments: [CommentDTO] = []) -> TaskDTO {
         TaskDTO(
             id: id, title: title, details: details, state: state, projectID: projectID, tagIDs: tagIDs,
             dueDate: dueDate, priority: priority, waitingFor: waitingFor, waitingSince: waitingSince,
             orderKey: orderKey, createdAt: createdAt, updatedAt: updatedAt, completedAt: completedAt,
-            cancelledAt: cancelledAt, revision: revision, subtasks: subtasks, comments: comments
+            cancelledAt: cancelledAt, revision: revision, subtasks: subtasks, comments: comments,
+            formulation: state == .next
+                ? formulation.map {
+                    TaskFormulationDTO(
+                        id: $0.id.rawValue, startedAt: $0.startedAt, extendedAt: $0.extendedAt,
+                        extensionReason: $0.extensionReason, parkFloorAt: $0.parkFloorAt,
+                        consecutiveStalled: consecutiveStalledFormulations
+                    )
+                } : nil,
+            parked: state == .someday ? parked.map { TaskParkDTO(at: $0.at, formulationID: $0.formulationID.rawValue) } : nil
         )
     }
 }
@@ -90,6 +124,8 @@ enum StoredResult: Hashable, Sendable {
     case tag(TagRow)
     case subtask(SubtaskRow)
     case comment(CommentRow)
+    /// A review command's response as first sent (spec 020).
+    case response(status: Int, body: Data)
 }
 
 /// `IdempotencyRecord`: one owner-scoped key, the command it was used for
@@ -110,6 +146,8 @@ struct OwnerData: Sendable {
     var subtasks: [String: SubtaskRow] = [:]
     var comments: [String: CommentRow] = [:]
     var idempotency: [String: IdempotencyRow] = [:]
+    /// The weekly review's tables (spec 020).
+    var review = FakeReviewData()
 
     func openTaskCount(project id: String) -> Int {
         tasks.values.filter { $0.projectID == id && $0.state.isOpen }.count
@@ -147,6 +185,9 @@ struct FakeAccount: Sendable {
     var displayName: String?
     /// Within the deletion grace period; a login cancels it.
     var deletionScheduled = false
+    /// The `weekly_review` flag, effective for this account; OFF by default,
+    /// as in production (`setWeeklyReview(email:enabled:)`).
+    var weeklyReview = false
 }
 
 extension OwnerData {
