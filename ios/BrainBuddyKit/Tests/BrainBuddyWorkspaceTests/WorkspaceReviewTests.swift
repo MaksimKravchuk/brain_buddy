@@ -289,6 +289,149 @@ import Testing
         #expect(workspace.state.review.decisions[decision] == nil)
     }
 
+    // MARK: - Retention and an unsent pair compaction kept (round 4)
+
+    /// Whether the queued `decideTask` / `bulkRelease` still asks for its snapshot.
+    private func retainsUndo(_ workspace: Workspace, decision: DecisionID? = nil, bulk: BulkID? = nil) -> Bool? {
+        for operation in workspace.document.outbox {
+            switch operation.command {
+            case .decideTask(let decide) where decide.decisionID == decision: return decide.undoRetained
+            case .bulkRelease(let release) where release.bulkID == bulk: return release.undoRetained
+            default: continue
+            }
+        }
+        return nil
+    }
+
+    @Test("020-FR-043 020-FR-048 account-less, an Undo after the run moved on still holds once 7-day retention runs")
+    func accountlessUndoneDecisionSurvivesRetention() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        let other = try nextTask("Sell the bike", in: workspace)
+        clock.advance(by: 15 * Self.day)
+        let run = try workspace.startReview(mode: .quick, entry: .list)
+        let decision = try workspace.decide(.someday, on: task, sessionID: run)
+        try workspace.recordReviewProgress(run, currentStep: .summary)
+        clock.advance(by: 3)
+        try workspace.undoDecision(decision)
+        let kept = try workspace.decide(.someday, on: other)
+        await workspace.flush()
+        #expect(workspace.task(task)?.state == .next)
+        #expect(retainsUndo(workspace, decision: decision) == true, "the run moved on: compaction kept the pair")
+        let counts = workspace.state.review.sessions[run]?.counts
+
+        clock.advance(by: 8 * Self.day)
+        workspace.runLocalReviewMaintenance()
+        await workspace.flush()
+        #expect(workspace.task(task)?.state == .next, "the Undo still holds")
+        #expect(workspace.issues.isEmpty)
+        #expect(workspace.state.review.sessions[run]?.counts == counts)
+        #expect(retainsUndo(workspace, decision: decision) == true, "its Undo needs the snapshot")
+        #expect(retainsUndo(workspace, decision: kept) == false, "R15: a snapshot no Undo needs still expires")
+        #expect(workspace.state.review.decisions[kept]?.undo == nil)
+        #expect(workspace.state == workspace.replayedState.closingIdle(workspace.localReview))
+    }
+
+    @Test("020-FR-017 020-FR-043 account-less, a bulk-release Undo compaction kept still holds once 7-day retention runs")
+    func accountlessUndoneReleaseSurvivesRetention() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        let edited = try nextTask("Clean the gutter", in: workspace)
+        clock.advance(by: 29 * Self.day)
+        let bulk = try #require(try workspace.bulkRelease(.restart, taskIDs: [task, edited]).first)
+        // An edit of a released task keeps compaction from cancelling the pair.
+        try workspace.updateTask(edited, TaskChanges(details: .set("Ladder first")))
+        clock.advance(by: 3)
+        try workspace.undoBulkRelease([bulk])
+        await workspace.flush()
+        #expect(workspace.task(task)?.state == .next)
+        #expect(retainsUndo(workspace, bulk: bulk) == true)
+        let before = workspace.state.tasks
+
+        clock.advance(by: 8 * Self.day)
+        workspace.runLocalReviewMaintenance()
+        await workspace.flush()
+        #expect(workspace.task(task)?.state == .next, "the Undo still holds, clock included")
+        #expect(workspace.state.tasks == before)
+        #expect(workspace.issues.isEmpty)
+        #expect(retainsUndo(workspace, bulk: bulk) == true)
+    }
+
+    /// A signed-in device with the review exposed and activated, online.
+    private func signedInDevice(_ world: World) async throws -> (phone: AppDevice, workspace: Workspace) {
+        world.server.setWeeklyReview(email: World.email, enabled: true)
+        let phone = await world.device()
+        let workspace = phone.workspace
+        workspace.deviceTimeZone = { Self.berlin }
+        try await phone.signIn()
+        await workspace.syncNow()
+        try workspace.acknowledgeExplainer()
+        return (phone, workspace)
+    }
+
+    @Test("020-FR-043 020-FR-048 signed in, an unsent decision and its Undo kept past 7 days offline sync with no issue")
+    func signedInUnsentPairSurvivesRetention() async throws {
+        let world = World()
+        let (phone, workspace) = try await signedInDevice(world)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        await workspace.syncNow()
+        world.clock.advance(by: 15 * Self.day)
+
+        phone.transport.inject(.offline, times: 1_000)
+        let run = try workspace.startReview(mode: .quick, entry: .list)
+        let decision = try workspace.decide(.someday, on: task, sessionID: run)
+        try workspace.recordReviewProgress(run, currentStep: .summary)
+        world.clock.advance(by: 3)
+        try workspace.undoDecision(decision)
+        await workspace.flush()
+        #expect(retainsUndo(workspace, decision: decision) == true)
+        world.clock.advance(by: 8 * Self.day)
+        workspace.runLocalReviewMaintenance()
+        await workspace.flush()
+        #expect(workspace.task(task)?.state == .next)
+        #expect(retainsUndo(workspace, decision: decision) == true)
+
+        phone.transport.clearFaults()
+        await workspace.syncNow()
+        await workspace.syncNow()
+        #expect(workspace.issues.isEmpty, "\(workspace.issues.map(\.message))")
+        #expect(workspace.document.outbox.isEmpty)
+        #expect(world.snapshot.tasks.values.first?.state == .next)
+        #expect(workspace.task(task)?.state == .next)
+    }
+
+    @Test("020-FR-017 020-FR-043 signed in, an unsent bulk release and its Undo kept past 7 days offline sync with no issue")
+    func signedInUnsentReleaseSurvivesRetention() async throws {
+        let world = World()
+        let (phone, workspace) = try await signedInDevice(world)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        let edited = try nextTask("Clean the gutter", in: workspace)
+        await workspace.syncNow()
+        world.clock.advance(by: 29 * Self.day)
+
+        phone.transport.inject(.offline, times: 1_000)
+        let bulk = try #require(try workspace.bulkRelease(.restart, taskIDs: [task, edited]).first)
+        try workspace.updateTask(edited, TaskChanges(details: .set("Ladder first")))
+        world.clock.advance(by: 3)
+        try workspace.undoBulkRelease([bulk])
+        await workspace.flush()
+        #expect(retainsUndo(workspace, bulk: bulk) == true)
+        world.clock.advance(by: 8 * Self.day)
+        workspace.runLocalReviewMaintenance()
+        await workspace.flush()
+        #expect(workspace.task(task)?.state == .next)
+
+        phone.transport.clearFaults()
+        await workspace.syncNow()
+        await workspace.syncNow()
+        #expect(workspace.issues.isEmpty, "\(workspace.issues.map(\.message))")
+        #expect(workspace.document.outbox.isEmpty)
+        #expect(world.snapshot.task(titled: "Renovate the bathroom")?.state == .next)
+        #expect(workspace.task(task)?.state == .next)
+    }
+
     // MARK: - Runs (T135)
 
     @Test("020-SC-007 an offline quick review with 3 decisions keeps its counts")

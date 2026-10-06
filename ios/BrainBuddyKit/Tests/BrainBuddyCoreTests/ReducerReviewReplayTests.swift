@@ -299,6 +299,60 @@ struct ReducerReviewReplayTests {
         #expect(accountless.decisions[decided.id]?.snapshotOnServer == false)
     }
 
+    // MARK: - Round 4: an unsent pair compaction kept keeps its snapshot
+
+    @Test("020-FR-017 020-FR-043 020-FR-048 an unsent decision or release a queued Undo names keeps asking for its snapshot")
+    func outboxSnapshotsAQueuedUndoNeeds() throws {
+        let now = Review.now
+        let old = now.addingTimeInterval(-8 * Review.day)
+        let decide = Review.op(Review.decide(.someday, "t1", decision: 1), at: old)
+        let otherDecide = Review.op(Review.decide(.someday, "t2", decision: 2), at: old)
+        let release = Review.op(.bulkRelease(.init(bulkID: Review.bulk(1), kind: .restart, taskIDs: ["t3"])), at: old)
+        let otherRelease = Review.op(.bulkRelease(.init(bulkID: Review.bulk(2), kind: .restart, taskIDs: ["t4"])), at: old)
+        let undos = ReviewRetention.QueuedUndos([
+            Review.op(.undoDecision(Review.decision(1)), at: old), Review.op(.undoBulkRelease(Review.bulk(1)), at: old),
+        ])
+        #expect(undos.decisions == [Review.decision(1)] && undos.bulkReleases == [Review.bulk(1)])
+
+        #expect(ReviewRetention.expiringSnapshot(of: decide, now: now, undos: undos) == nil, "its Undo needs it")
+        #expect(ReviewRetention.expiringSnapshot(of: release, now: now, undos: undos) == nil, "its Undo needs it")
+        // R15 still holds for the rest.
+        guard case .decideTask(let expired)? = ReviewRetention.expiringSnapshot(of: otherDecide, now: now, undos: undos)?.command,
+            case .bulkRelease(let expiredRelease)? = ReviewRetention.expiringSnapshot(of: otherRelease, now: now, undos: undos)?.command
+        else {
+            Issue.record("a snapshot no Undo needs should expire")
+            return
+        }
+        #expect(!expired.undoRetained && !expiredRelease.undoRetained)
+        // Inside the window, or already sent: untouched.
+        let fresh = Review.op(Review.decide(.someday, "t2", decision: 2), at: now.addingTimeInterval(-6 * Review.day))
+        #expect(ReviewRetention.expiringSnapshot(of: fresh, now: now, undos: undos) == nil)
+        var sent = otherDecide
+        sent.attempts = 1
+        #expect(ReviewRetention.expiringSnapshot(of: sent, now: now, undos: undos) == nil)
+    }
+
+    @Test("020-FR-043 020-FR-048 replaying a decision and its Undo works with the kept snapshot and fails without it")
+    func undoNeedsTheKeptSnapshot() throws {
+        let task = Review.nextTask("t1", started: t0)
+        let base = Review.state([task])
+        let decide = Review.op(Review.decide(.someday, "t1", decision: 1, formulation: Review.form(1)), at: Review.now)
+        let undo = Review.op(.undoDecision(Review.decision(1)), at: Review.now.addingTimeInterval(3))
+        let kept = OutboxReplayer.replay([decide, undo], onto: base)
+        #expect(kept.rejected.isEmpty)
+        #expect(kept.state.tasks["t1"]?.state == .next)
+
+        // What retention used to do to the decision: the Undo is then refused.
+        var stripped = decide
+        if case .decideTask(var command) = stripped.command {
+            command.undoRetained = false
+            stripped.command = .decideTask(command)
+        }
+        let lost = OutboxReplayer.replay([stripped, undo], onto: base)
+        #expect(lost.rejected.map(\.error) == [.undoUnavailable])
+        #expect(lost.state.tasks["t1"]?.state == .someday)
+    }
+
     // MARK: - N3: recorded idle closes are read from the state
 
     @Test("020-FR-029 a recorded idle close stays while the run underneath is open and goes once it ended otherwise")

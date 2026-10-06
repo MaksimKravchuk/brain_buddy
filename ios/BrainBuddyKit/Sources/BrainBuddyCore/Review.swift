@@ -935,6 +935,8 @@ public struct LocalReviewState: Hashable, Sendable, Codable {
 /// its snapshot and marked `snapshotOnServer` (a signed-in base holds only
 /// acknowledged decisions), so the server answers that Undo (200, or 409
 /// `undo_unavailable` with its Ref) rather than the replay taking it as done.
+/// In the outbox, an unsent decision or release keeps asking for its snapshot
+/// while a queued Undo names it (`expiringSnapshot(of:now:undos:)`).
 /// Account-less, the store is the only copy: nothing but the snapshots is dropped.
 public enum ReviewRetention {
     public static let snapshotWindow: TimeInterval = 7 * FormulationRule.day
@@ -980,6 +982,48 @@ public enum ReviewRetention {
                 review.sessions[id]?.appliedProgress = []
             }
         }
+    }
+
+    /// The decisions and bulk releases a queued Undo names.
+    public struct QueuedUndos: Hashable, Sendable {
+        public var decisions: Set<DecisionID> = []
+        public var bulkReleases: Set<BulkID> = []
+
+        public init(_ operations: [PendingOperation]) {
+            for operation in operations {
+                switch operation.command {
+                case .undoDecision(let id): decisions.insert(id)
+                case .undoBulkRelease(let id): bulkReleases.insert(id)
+                default: break
+                }
+            }
+        }
+    }
+
+    /// `operation` once its 7-day snapshot window has passed at `now`: an
+    /// unsent decision or bulk release stops asking the reducer for its Undo
+    /// snapshot. Not while a queued Undo names it: that Undo was taken inside
+    /// the window and needs the snapshot to replay, and dropping the pair
+    /// instead would change the run and the operations compaction kept
+    /// because they depend on the decision. The undone replay holds no
+    /// decision snapshot, and signed in the pair leaves the outbox together.
+    /// Nil when nothing changes; sent operations are never modified.
+    public static func expiringSnapshot(
+        of operation: PendingOperation, now: Date, undos: QueuedUndos
+    ) -> PendingOperation? {
+        guard !operation.hasBeenSent, operation.issuedAt <= now.addingTimeInterval(-snapshotWindow) else { return nil }
+        var expired = operation
+        switch operation.command {
+        case .decideTask(var decide) where decide.undoRetained && !undos.decisions.contains(decide.decisionID):
+            decide.undoRetained = false
+            expired.command = .decideTask(decide)
+        case .bulkRelease(var release) where release.undoRetained && !undos.bulkReleases.contains(release.bulkID):
+            release.undoRetained = false
+            expired.command = .bulkRelease(release)
+        default:
+            return nil
+        }
+        return expired
     }
 }
 

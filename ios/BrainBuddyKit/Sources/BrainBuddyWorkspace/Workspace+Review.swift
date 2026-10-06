@@ -429,11 +429,11 @@ extension Workspace {
 
     /// Keeps the device copy within the server's retention bounds, signed in
     /// or not (ios-commands §5): undo and bulk-release snapshots are nulled 7
-    /// days after they were taken (unsent operations stop retaining theirs),
-    /// open runs idle for 7 days are closed, and expired or orphaned drafts go.
+    /// days after they were taken (unsent operations stop retaining theirs
+    /// unless a queued Undo needs them), open runs idle for 7 days are
+    /// closed, and expired or orphaned drafts go.
     public func runLocalReviewMaintenance() {
         let instant = now()
-        let cutoff = instant.addingTimeInterval(-Self.localRetention)
         let signedIn = account != nil
         let idle = ReviewSessionUpkeep.idleSessions(in: state, now: instant)
         let current = state
@@ -443,46 +443,24 @@ extension Workspace {
         // read from `state` (which shows them closed): no extra replay.
         let keptClosed = ReviewSessionUpkeep.recordedIdleCloses(local.idleClosedSessions, in: current)
         let closed = keptClosed + idle.filter { !keptClosed.contains($0) }
-        // A decision a queued Undo names keeps its record, so that Undo is
-        // answered (or refused visibly) rather than replayed as already done.
+        // What a queued Undo names keeps what it needs: a decision record in
+        // the base (answered by the server, not replayed as already done) and
+        // the snapshot of an unsent decision or release (`ReviewRetention`).
         let pending = document.outbox + unpersisted
-        let undone = Set(pending.compactMap { operation -> DecisionID? in
-            if case .undoDecision(let id) = operation.command { id } else { nil }
-        })
+        let undos = ReviewRetention.QueuedUndos(pending)
         let expiresSnapshots =
-            ReviewRetention.isDue(document.base.review, now: instant, signedIn: signedIn, keeping: undone)
-            || pending.contains { Self.retainsSnapshot($0, before: cutoff) }
+            ReviewRetention.isDue(document.base.review, now: instant, signedIn: signedIn, keeping: undos.decisions)
+            || pending.contains { ReviewRetention.expiringSnapshot(of: $0, now: instant, undos: undos) != nil }
         guard expiresSnapshots || !staleDrafts.isEmpty || closed != local.idleClosedSessions else { return }
         edit { document in
-            ReviewRetention.apply(to: &document.base.review, now: instant, signedIn: signedIn, keeping: undone)
+            // The stored outbox plus the operations not yet written with it.
+            let undos = ReviewRetention.QueuedUndos(document.outbox + pending)
+            ReviewRetention.apply(to: &document.base.review, now: instant, signedIn: signedIn, keeping: undos.decisions)
             document.outbox = document.outbox.map { operation in
-                guard Self.retainsSnapshot(operation, before: cutoff) else { return operation }
-                var operation = operation
-                switch operation.command {
-                case .decideTask(var decide):
-                    decide.undoRetained = false
-                    operation.command = .decideTask(decide)
-                case .bulkRelease(var release):
-                    release.undoRetained = false
-                    operation.command = .bulkRelease(release)
-                default:
-                    break
-                }
-                return operation
+                ReviewRetention.expiringSnapshot(of: operation, now: instant, undos: undos) ?? operation
             }
             for key in staleDrafts { document.local.formDrafts[key] = nil }
             document.local.idleClosedSessions = closed
-        }
-    }
-
-    /// An unsent operation older than `cutoff` that still asks the reducer to
-    /// keep an undo snapshot (sent operations are never modified).
-    nonisolated static func retainsSnapshot(_ operation: PendingOperation, before cutoff: Date) -> Bool {
-        guard !operation.hasBeenSent, operation.issuedAt <= cutoff else { return false }
-        switch operation.command {
-        case .decideTask(let decide): return decide.undoRetained
-        case .bulkRelease(let release): return release.undoRetained
-        default: return false
         }
     }
 
