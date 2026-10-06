@@ -82,6 +82,7 @@ Rules shared by both platforms:
 | X-06 | macOS sidebar + project view | Archived project | Archive keeps tasks; the "Archived projects" section works signed in; the archived project view with "Unarchive"; Mac copy changes from "restore" to "unarchive" | FR-024, FR-025, FR-026, FR-027, FR-028 |
 | X-07 | macOS menu bar + toolbar | "Sync now" and account menu items | File › "Sync now" ⌘R; app menu "Sign in…" / "Sign in again…" / "Sign out…"; toolbar "Refresh" removed | FR-006, FR-001 |
 | X-08 | macOS system alert | Second copy of the app | Brings the open window forward; alert only if unreachable | edge case "two copies" |
+| X-09 | macOS main window content | Tasks couldn't be opened | The Mac's own workspace file cannot be read (damaged, or written by a newer version): explains, offers "Try again" and a confirmed "Start fresh…"; nothing syncs meanwhile (added in planning review c2) | FR-008, FR-017, FR-022 |
 | M-01 | iPhone list screens, Lists hub, Settings › Sync | List-screen sync status, aligned | Same states and wording as X-01; indicator instead of "Syncing…"; failure only after 60 s; attention rows act (Retry, Sign in again, open Sync issues); before/after | FR-019, FR-012, FR-013, FR-014, FR-015, FR-017 |
 | M-02 | iPhone Projects, Archived projects, project screen | Archived projects with unarchive | Archive copy no longer says tasks lose the project; archived projects open and list their tasks; "Unarchive" by swipe and toolbar | FR-024, FR-025, FR-026, FR-027 |
 | D-01 | web sidebar + project page | Archived projects with unarchive | A collapsed "Archived projects" disclosure under Projects; the archived project page with "Unarchive"; archive hint line | FR-024, FR-025, FR-026, FR-027 |
@@ -116,7 +117,9 @@ disabled.
 | default (synced) | last sync succeeded 1–59 min ago, nothing waiting | One line of 11 pt secondary text, no glyph; empty indicator slot at the trailing edge | "Synced 3 min ago" | FR-012, US3-1 |
 | synced: just now | under a minute, or the server time is ahead of the Mac clock | As default | "Synced just now" | FR-012, edge case "clock" |
 | synced: hours / days / date | 1–23 h; the previous calendar day; 2–6 days; older | As default. Days and dates show mainly at launch after the Mac was closed, until the first sync ends | "Synced 2 h ago" / "Synced yesterday" / "Synced 4 days ago" / "Synced on 28 Sep" | FR-012 |
-| loading (first load) | just signed in; no sync finished yet | Indicator in the slot; the window is usable at once and lists fill in | "Not synced yet" | US1-1, FR-012, FR-013 |
+| loading (first load) | just signed in; no sync finished yet | Indicator in the slot when the load runs longer than 1 s (FR-013; during a first upload it follows each cycle the same way); the window is usable at once and lists fill in | "Not synced yet" | US1-1, FR-012, FR-013 |
+| first load, empty list | just signed in; a list is still empty because the account's tasks have not arrived | Instead of the list's celebratory empty copy, one static neutral line; no spinner over content (planning review c2) | "Your tasks are still arriving." | US1-1, edge case "very large account" |
+| sidebar hidden | the sidebar is collapsed (toggle or divider) | Calm states: nothing about sync anywhere. Attention states (session ended, couldn't sync, changes couldn't sync): one compact toolbar item with the same words and glyph, which opens X-02; it appears without taking focus. Nothing in the toolbar whenever all is well (X-07 rule) (planning review c2) | "Sign in again to sync" / "Couldn't sync · Retry" / "2 changes couldn't sync" | FR-012, FR-014, FR-017, US3-4, US3-5 |
 | syncing | a sync has run > 1 s | Words unchanged, small indicator appears in the reserved slot and stays at least 0.5 s; shorter syncs show nothing; no control disabled, no focus change | (unchanged line) | FR-013, SC-004 |
 | syncing, Reduce Motion | the same, with Reduce Motion on | A static sync glyph instead of the rotating indicator | (unchanged line) | FR-013 |
 | empty (first run): account-less | never signed in, or signed out | "On this Mac" opens the popover; "Sign in to sync" in sky opens X-03 | "On this Mac · Sign in to sync" | FR-002, FR-012, US4-2 |
@@ -151,16 +154,17 @@ disabled.
 | session ended | session refused | Amber notice, "Sign in again" primary and first in focus; "Sync now" shown **disabled** (as in offline and X-07), never hidden | "Your session ended" / "Sign in again to keep syncing. Your changes stay on this Mac until then." | US3-5, FR-001 |
 | offline / interrupted | no network | Neutral notice; "Sync now" disabled, because no sync can run (it is never disabled because a sync is running). After an earlier failure, the details keep its time and reference ID with Copy | "You're offline. Changes are saved on this Mac and sync when you're back online." / "Last failed 14:35 · Reference ID …" | FR-008, FR-010, FR-015 |
 | first upload | just signed in; local or imported tasks are being sent | Instead of the waiting line, a calm progress line; no "oldest" age for them | "Adding your tasks to your account · 1,284 left" | FR-003, FR-016, US4-3 |
-| outcome kept on account | a merged project already had a desired outcome on the account | An issue row: what happened, then the Mac's own outcome **in full**, selectable, never shortened; "Copy outcome" before "Dismiss"; the Dismiss button's accessible name says the text is discarded | "Desired outcome for “Garden”" / "Kept the desired outcome already on your account. Yours is below, so you can copy it." / (the full outcome) · "Copy outcome" · "Dismiss" | FR-003, FR-015, FR-028 |
+| outcome kept on account | a merged project already had a desired outcome on the account | An issue row: what happened, then the Mac's own outcome **in full**, selectable, never shortened; "Copy outcome", then a visible **"Discard outcome"** (not "Dismiss"; accessible name "Discard your outcome for “Garden”"). After Discard the row reads "Outcome discarded · Undo" for 5 s, announced politely; Undo restores it; then it goes (planning review c2) | "Desired outcome for “Garden”" / "Kept the desired outcome already on your account. Yours is below, so you can copy it." / (the full outcome) · "Copy outcome" · "Discard outcome" · "Outcome discarded · Undo" | FR-003, FR-015, FR-028 |
 | archive not applied at merge | an archived Mac project met an active account project of the same name at first sign-in | An issue row like the others | "Archive project “Old flat”" / "Your account already has an active project called “Old flat”. This Mac's tasks were added to it, and it stays active." | FR-003, FR-024 |
-| pre-upgrade backup | the backup from before the update still exists | One quiet line under the account section; "Show in Finder" reveals the file | "Backup from before the update · kept until 5 Nov" · "Show in Finder" | FR-021 |
+| pre-upgrade backup | the backup from before the update still exists | One quiet line under the account section; "Show in Finder" reveals the file. The date is never in the past: once it has passed the line says when the backup goes (planning review c2) | "Backup from before the update · kept until 5 Nov" / "Backup from before the update · removed when you sign out" / "Backup from before the update · kept because some records couldn't be carried over" · "Show in Finder" | FR-021 |
+| details changed during the update | the upgrade adjusted names or long text (an import report exists) | One quiet line; "Show in Finder" reveals the report beside the backup (planning review c2) | "Some details changed during the update." · "Show in Finder" | FR-020 |
 | earlier-version file kept | a previous-version file appeared after the update (FR-033) | One quiet line; "Show in Finder" reveals the file; it stays while the file exists | "A file from the previous version is on this Mac. It was not added." · "Show in Finder" | FR-033 |
 | long text, many issues | > 3 issues; long titles; long email | Titles quoted on one line, shortened past 60 characters (a kept outcome is the exception, shown in full); the list scrolls inside; popover ≤ 480 pt tall; the email wraps | "7 changes couldn't sync" | FR-016 |
 | issue dismissed (not last) | Dismiss on an issue while others remain | The row goes; focus moves to the next issue's Copy, or to the previous issue's when the last row was dismissed; announced politely | — | FR-016 |
 | last issue dismissed | Dismiss on the last issue | Section disappears; VoiceOver says "No sync issues"; focus moves to "Sync now", or to "Sign out…" when Sync now is disabled; the footer returns to the synced line | — | FR-016 |
 | reference ID copied | Copy | The button reads "Copied" for 2 s, announced politely | "Copied" | FR-015 |
 | new issue while open | an issue arrives with the popover open | Appended and announced politely; focus does not move | — | FR-009, FR-016 |
-| dark mode + focus order | Dark; Tab | Numbered order: attention action → each issue's Copy → Dismiss → Sync now → Sign out… | — | FR-016 |
+| dark mode + focus order | Dark; Tab | Numbered order (completed in planning review c2): attention action → each issue's Copy → Copy outcome → Dismiss / Discard outcome → Sync now (skipped when disabled) → offline last-failure Copy → Sign out… → the "Show in Finder" links (backup, report, earlier-version file) | — | FR-016 |
 
 The "partial failure" example "it was deleted on another device" is a defensive path: no client deletes a task and the server has no project delete route, so it occurs only for a foreign or purged record (contracts/kit-commands.md §5). The copy stays for that path; the archived-elsewhere example is the reachable one. The rows "error, then offline", "first upload", "outcome kept on account", "archive not applied at merge", "pre-upgrade backup", "earlier-version file kept" and "issue dismissed (not last)" were added by planning review c1 and have no mockup: they reuse the layout of the rows above.
 
@@ -181,7 +185,7 @@ The "partial failure" example "it was deleted on another device" is a defensive 
 | long text / invalid server address | Advanced expanded; long values; bad URL | Fields scroll horizontally; the rule is stated; "Use the default server" | "Use an https server address. http works only for localhost." | FR-001 |
 | dark mode | Dark | As light | as light | — |
 | signed in, account deletion cancelled | the sign-in succeeded and cancelled a pending account deletion | Before closing, the same sheet replaces its form with a sky note (not a separate dialog). Focus moves to the note and VoiceOver reads it. "OK" is the only button; Return or Esc closes the sheet. Sync has already started behind it | "Your account deletion was cancelled" / "Signing in cancels a deletion you requested in the last 14 days. Delete your account again on the web if you still want to." · "OK" | FR-017 |
-| after sign-in: first load | success | Sheet closes, no toast; window usable at once; lists fill in; X-01 shows "Not synced yet" + indicator; a very large account fills in progressively | — | US1-1, edge case "very large account" |
+| after sign-in: first load | success | Sheet closes, no toast; window usable at once; lists fill in when the first load lands (all at once, not page by page; planning review c2); an empty list meanwhile reads "Your tasks are still arriving." (X-01 "first load, empty list"); X-01 shows "Not synced yet", with the indicator once the load lasts longer than 1 s (FR-013); a very large account never blocks the window | — | US1-1, edge case "very large account" |
 | partial failure | some local records rejected during the first upload | Those become sync issues (X-02); everything else is on the account | (X-02 copy) | FR-003, FR-011 |
 | empty (filtered to nothing) | **n/a** | — | — | — |
 
@@ -194,7 +198,10 @@ The "partial failure" example "it was deleted on another device" is a defensive 
 | session ended with unsent changes | session refused, N waiting | Says how to send them first, without a third button | "5 changes haven't synced yet." / "Sign out and remove them from this Mac? To send them first, choose Cancel and sign in again." | FR-018, US3-5 |
 | nothing unsent | "Sign out…" with nothing waiting | Confirmed, as on the iPhone, because the account's data leaves this Mac (approved) | "Sign out?" / "Your tasks are removed from this Mac. They stay in your account." · "Cancel" · "Sign out" | US1-6, FR-017 |
 | open sync issues | any of the variants above while issues are open | One more sentence after the variant's text, same buttons; the iPhone confirmation adds the same sentence with "iPhone" | "2 changes that couldn't sync will also be removed from this Mac." / "1 change that couldn't sync will also be removed from this Mac." | FR-011, FR-018 |
-| backup kept | any variant while the pre-upgrade backup exists | One more sentence, last, with the date it can be deleted | "A copy of your tasks from before the update stays on this Mac until 5 Nov." | FR-021 |
+| backup kept | any variant while the pre-upgrade backup exists and its date is in the future | One more sentence, last, with the date it can be deleted | "A copy of your tasks from before the update stays on this Mac until 5 Nov." | FR-021 |
+| backup removed | this sign-out will delete the backup (its date has passed, nothing unsent from the first upload, every record carried) | One more sentence, last, instead of "backup kept"; the deletion is never silent (planning review c2) | "The copy of your tasks from before the update will also be removed from this Mac." | FR-021 |
+| unsaved edit or capture draft | "Sign out…" while a task edit is unsaved or the capture draft is not empty | First the existing discard confirmation for that draft (today's guard); X-04 opens only after "Discard" or when there is nothing to discard. Cancel there cancels the sign-out (planning review c2) | (the existing discard confirmation copy) | FR-018, constitution V |
+| changes arrived while open | a capture or other change, or a new sync issue, appeared while X-04 was showing | At confirm nothing is signed out; X-04 shows again with the new count, focus on "Cancel". "Sign out and remove" removes only what the dialog named (planning review c2) | "4 changes haven't synced yet." (the count updated) | FR-018 |
 | during the first upload | signed in moments ago; local or imported tasks are still being sent | The unsent-changes variant with their count, since they have not reached the account | "1,284 changes haven't synced yet." / "Sign out and remove them from this Mac? They haven't reached your account." | FR-018, US4-3 |
 | error | local data couldn't be removed | Stays signed in; nothing removed; no reference ID | "Couldn't sign out" / "Brain Buddy couldn't remove your tasks from this Mac, so you're still signed in. Nothing was removed." | US1-6 |
 | empty (first run) after sign-out | confirmed | Immediate: empty account-less workspace; selection resets to Inbox; footer account-less; the logout is queued if offline | "On this Mac · Sign in to sync" | US1-6, FR-005, FR-002 |
@@ -209,12 +216,13 @@ The "partial failure" example "it was deleted on another device" is a defensive 
 | loading | carrying over a large store takes > 300 ms | Static list placeholders; no progress text | — | FR-020 |
 | error: corrupt | old file unreadable | App-modal alert before the workspace opens; selectable path; "Continue" default, "Show in Finder" | "Brain Buddy couldn't read your earlier tasks" / "The file from the previous version was left exactly as it was. It's here:" / "~/Library/Application Support/BrainBuddyMac/local-gtd.json" / "Brain Buddy will start with an empty workspace. Keep the file if you'd like help recovering it." | FR-022, US4-4 |
 | error: newer version | file written by a newer build | Same alert, other reason | "They were saved by a newer version of Brain Buddy, so this version left the file exactly as it was." / "Install the newer version to open the file again." | FR-022 |
-| error: couldn't carry over | the file was read, but the carried-over copy did not match it (a fault in Brain Buddy, not in the file) | Same alert; it says the file is fine | "Brain Buddy couldn't carry over your earlier tasks" / "Your file is fine and was left exactly as it was. It's here:" / path / "This is a problem in Brain Buddy. Brain Buddy will start with an empty workspace; keep the file so a later version can carry it over." | FR-021, FR-022 |
+| error: couldn't carry over | the file was read, but the carried-over copy did not match it (a fault in Brain Buddy, not in the file) | Same alert; it says the file is fine | "Brain Buddy couldn't carry over your earlier tasks" / "Your file is fine and was left exactly as it was. It's here:" / path / "This is a problem in Brain Buddy. Brain Buddy will start with an empty workspace. Keep the file: it still has all your earlier tasks." (planning review c2: no promise that a later version carries it over) | FR-021, FR-022 |
+| partly carried over | the file was read and imported, but a few records could not be carried | Same alert, once; the workspace opens with everything else; the report and the untouched previous file stay on this Mac (planning review c2) | "Brain Buddy carried over your earlier tasks, except a few it couldn't read" / "They're listed in a report next to the file from the previous version, which stays on this Mac. It's here:" / path · "Continue" · "Show in Finder" | FR-020, FR-022 |
 | later file | a file from the previous version appears after the new workspace exists (an older copy ran, a restore, a moved file) | Same alert, once per Mac, before the window opens; the workspace is unchanged; afterwards X-02 keeps a quiet line | "Brain Buddy found tasks from the previous version" / "An older copy of Brain Buddy saved tasks on this Mac after the update. They were not added here, and the file was left exactly as it was. It's here:" / path / "Your current tasks are unchanged." · "Continue" · "Show in Finder" | FR-033, FR-017 |
 | long text / dark | long home path; Dark | The path wraps anywhere; the alert grows in height only | as above | FR-022 |
 | empty (first run) after Continue | Continue or Show in Finder | Only now the empty workspace starts; notice recorded as seen | — | FR-022 |
 | interrupted | app quit while the notice is open | Not seen: shown again at next launch | — | FR-022 |
-| partial read | some records readable, some not | Treated as unreadable: nothing half-imported, the whole file kept (design interpretation for the plan to confirm) | as "corrupt" | FR-020, FR-022 |
+| partial read | some records readable, some not | Revised in planning review c2 (this interpretation was the plan's, not a sign-off decision): a file that decodes is imported; values the new workspace cannot hold as they were are adjusted by rule and listed in the import report (silent, X-02 line); a record that still cannot be carried makes the "partly carried over" notice. Only a file that does not decode is "corrupt". Nothing is half-imported silently and nothing is stranded | see "partly carried over" | FR-020, FR-022 |
 | empty (filtered) | **n/a** | — | — | — |
 
 ### X-06 — Archived project (macOS)
@@ -226,6 +234,7 @@ The "partial failure" example "it was deleted on another device" is a defensive 
 | archiving (sidebar) | right-click active project → "Archive project", or File › "Archive project" | No confirmation (reversible); the project moves to Archived projects; tasks keep it. Disabled, with the existing help text, while a task edit is unsaved or the capture draft is not empty | "Archive project" / "Add or clear the current task draft before archiving" | FR-024, SC-006 |
 | archived (just now) | the open project was archived | Selection stays on it; the view becomes the archived view with chip and "Unarchive"; the Archived section expands to show its row; focus to the title | — | FR-024, FR-025 |
 | unarchive refused: name in use | "Unarchive" while another active project has the same name | Inline message under the title; no Retry; "Rename…" renames the archived project; focus stays on "Unarchive". Refused at once on this Mac; it becomes an X-02 issue only if the clash appeared while offline | "Another active project is already called “Old flat”. Rename one first." · "Rename…" | FR-026 |
+| rename archived project | "Rename…" in the refusal | The existing rename sheet (the sidebar's "Rename…") for the archived project, current name selected. Saving: the sheet's button reads "Saving…" while the local write runs. Error: "Another project is already called “<name>”." under the field, focus kept in the field. Success: the sheet closes, the refusal message clears, focus returns to "Unarchive"; the person presses Unarchive again (no automatic unarchive) (planning review c2) | "Rename project" / "Another project is already called “Old flat 2”." | FR-026 |
 | archiving (project review) | "Archive completed project…" | Existing confirmation, copy unchanged | "Archive this completed project?" / "The project and its tasks remain available in Archived projects." | FR-024 |
 | task of an archived project elsewhere | a Next action whose project is archived | Stays in its list; group header and row label say "archived"; picker shows "Old flat (archived)" | "Old flat · archived" | FR-024, FR-025 |
 | capture into an archived project | Smart Add names an archived project | Existing block, new verb | "Unarchive “Old flat” before adding a task to it." | FR-025 |
@@ -233,8 +242,8 @@ The "partial failure" example "it was deleted on another device" is a defensive 
 | empty: archived before this change | archived pre-feature, no tasks (also after unarchiving, until it gets a task) | Empty state with one neutral grey line; nothing says tasks were lost | "No tasks in this project" / "Unarchive this project to add tasks to it." / "Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists." | FR-027, US5-4, ADR-0020 |
 | empty (filtered to nothing) | search or priority filter matches nothing | Existing filtered empty state | "No matching tasks" / "Clear the search or priority filter to see this project's tasks." | — |
 | offline / interrupted | offline, or quit before sending | Applies at once; waits like any change | "Offline · 1 change waiting" | FR-008, FR-010 |
-| error | local write failed | Existing inline error with Retry | "Couldn't unarchive “Old flat”. Try again." | FR-026 |
-| partial failure | the account rejected the archive or unarchive | Returns to the account's state; issue in X-02 with reference ID | "Unarchive project “Old flat”" / "The server kept rejecting this change." | FR-011, FR-015 |
+| error | local write failed | Existing inline error with Retry; focus moves to "Retry" and the message is announced (planning review c2) | "Couldn't unarchive “Old flat”. Try again." | FR-026 |
+| partial failure | the account rejected the archive or unarchive | Returns to the account's state; issue in X-02 with reference ID; the copy says where the project stands and what to do (planning review c2) | "Unarchive project “Old flat”" / "Brain Buddy couldn't unarchive it, so it's still archived. Try Unarchive again later." (archive: "Brain Buddy couldn't archive it, so it's still active. Try again later.") | FR-011, FR-015 |
 | loading | > 300 ms (local) | Static placeholders | — | — |
 | dark mode | Dark | As light | — | — |
 
@@ -261,6 +270,19 @@ There is no mockup: it is a standard system alert.
 | unreachable | the running copy cannot be brought forward | One standard alert, default button "OK", then the second copy quits | "Brain Buddy is already open." / "Switch to the open window to keep working." | edge case "two copies", FR-017 |
 | loading / empty / error / partial / offline / dark | **n/a**: system alert | — | — | — |
 
+### X-09 — Tasks couldn't be opened (macOS, added in planning review c2)
+
+There is no mockup: it follows the iPhone's existing load-error view (`ios/BrainBuddy/App/RootView.swift`, "We couldn't open your tasks") in the Mac's main window, in place of the lists.
+
+| state | trigger | what the user sees | copy | FR/SC refs |
+|---|---|---|---|---|
+| default | `store.json` cannot be read, or was written by a newer version | The lists are replaced by one calm panel; the sidebar footer shows nothing about sync; nothing is sent; "Try again" is the default button | "We couldn't open your tasks" / "Your tasks are still on this Mac and nothing was changed." + the reason · "Try again" · "Start fresh…" | FR-008, FR-022 |
+| loading | "Try again" pressed | The button reads "Trying again…" and is not pressable twice | "Trying again…" | — |
+| confirm start fresh | "Start fresh…" | A person-started confirmation; "Keep trying" is the default | "Set the file aside and start fresh?" / "The unreadable file stays on this Mac, set aside where Brain Buddy won't use it. You start with empty lists; tasks you synced come back when you sign in." · "Keep trying" · "Set aside and start fresh" | FR-017 |
+| after start fresh | confirmed | Empty account-less workspace; footer account-less; the set-aside file is removed by the next sign-out | "On this Mac · Sign in to sync" | FR-002 |
+| error | setting the file aside failed | The panel stays with the reason | (the kit's message) | FR-022 |
+| empty / partial / offline / dark | **n/a** beyond the above: nothing loads, nothing syncs; dark follows the system | — | — | — |
+
 ### M-01 — List-screen sync status, aligned (iPhone)
 
 | state | trigger | what the user sees | copy | FR/SC refs |
@@ -274,9 +296,11 @@ There is no mockup: it is a standard system alert.
 | offline / interrupted | no network | Calm line | "Offline · 3 changes waiting" | FR-019 |
 | session ended | session refused | Amber row button with glyph; opens the existing sign-in sheet with the email locked | "Sign in again to sync" | FR-019, US3-5 |
 | transient failure (< 60 s) | failure that recovers | Indicator only | (unchanged line) | FR-014, FR-019, SC-005 |
-| error | 60 s of failure | Amber row button: Retry runs Sync now. Long-press on the row offers "Copy reference ID"; Settings › Sync shows the Reference ID from the first failure on, not only after 60 s | "Couldn't sync · Retry" | FR-014, FR-015, FR-019 |
+| error | 60 s of failure | Amber row button: Retry runs Sync now. Long-press on the row offers "Copy reference ID", also a VoiceOver custom action on the row (planning review c2); Settings › Sync shows the Reference ID from the first failure on, not only after 60 s | "Couldn't sync · Retry" | FR-014, FR-015, FR-019 |
+| error, then offline | the network drops after "Couldn't sync" | Calm offline line, no Retry; Settings › Sync keeps the earlier failure's time and Reference ID with Copy (planning review c2) | "Offline · 3 changes waiting" / Settings: "Last failed 14:35 · Reference ID …" | FR-014, FR-015, FR-019 |
+| first upload | just signed in with local tasks still being sent | "Not synced yet" + indicator (FR-013); Settings › Sync shows the progress line (planning review c2) | "Not synced yet" / Settings: "Adding your tasks to your account · 1,284 left" | FR-003, FR-019 |
 | partial failure | rejected changes | Amber row button opening the existing Sync issues screen (new on list screens) | "2 changes couldn't sync" | FR-011, FR-019, US3-6, US3-8 |
-| empty (first run) | list empty; account-less | Existing empty state, status under it; "Sign in to sync" opens sign-in | "Inbox zero" / "On this iPhone · Sign in to sync" | FR-019 |
+| empty (first run) | list empty; account-less | Existing empty state, status under it; "Sign in to sync" opens sign-in; that target is at least 44 pt tall (planning review c2) | "Inbox zero" / "On this iPhone · Sign in to sync" | FR-019 |
 | empty (filtered to nothing) | filters match nothing | Existing filtered copy, status under it | "No tasks match these filters" | FR-019 |
 | Lists hub and Settings › Sync | Lists tab; Settings | Settings row subtitle and the Sync section's status line use the new words; every other Settings row unchanged | "Synced 3 min ago · 2 changes waiting" | FR-019, US3-8 |
 | Settings › Sync, sync running | a sync is running with Settings open | "Sync now" stays enabled (FR-019 as amended); a press joins the running sync or queues one follow-up, with no extra state | "Sync now" | FR-019 |
@@ -294,8 +318,9 @@ There is no mockup: it is a standard system alert.
 | empty (first run): none archived | all unarchived | Existing screen, new copy; the hub row is hidden when none | "No archived projects" / "Projects you archive are listed here. Unarchive one to bring it back." | FR-026 |
 | empty (filtered to nothing) | list filter on the project | Existing filtered copy | "No tasks match these filters" | — |
 | offline / interrupted | offline | Applies locally, waits | "Offline · 1 change waiting" | FR-008 |
-| error / partial failure | account rejected it | Back to archived; issue in Sync issues with a new description | "Unarchive project “Old flat”" / "The server kept rejecting this change." | FR-011, FR-015 |
+| error / partial failure | account rejected it | Back to archived; issue in Sync issues with a new description (copy revised in planning review c2) | "Unarchive project “Old flat”" / "Brain Buddy couldn't unarchive it, so it's still archived. Try Unarchive again later." | FR-011, FR-015 |
 | unarchive refused: name in use | Unarchive while another active project has the same name | Refused at once, on the device; a short message with "Rename…" for the archived project, no Retry; VoiceOver focus stays on Unarchive. A Sync issue only if the clash appeared while offline | "Another active project is already called “Old flat”. Rename one first." | FR-026 |
+| rename archived project | "Rename…" in the refusal | The existing project editor sheet (`ProjectEditorSheet`) for the archived project, name selected; saving disables Save; error "Another project is already called “<name>”." with VoiceOver focus kept in the field; success closes the sheet, clears the refusal and returns VoiceOver focus to Unarchive; no automatic unarchive (planning review c2) | "Another project is already called “Old flat 2”." | FR-026 |
 | task of an archived project elsewhere | Next actions | Group header "Old flat · archived" | "Old flat · archived" | FR-024, FR-025 |
 | loading | **n/a**: local store | — | — | — |
 
@@ -308,10 +333,13 @@ There is no mockup: it is a standard system alert.
 | archive action | project options on an active project | Existing "Rename" / "Archive" plus one hint line | "Archiving keeps its tasks. You can unarchive it from Archived projects." | FR-024 |
 | archived project options | options on an archived row | Only "Unarchive" | "Unarchive" | FR-026 |
 | loading | projects query pending > 300 ms | Static skeleton rows | — | — |
-| unarchiving | Unarchive clicked | Button disabled | "Unarchiving…" | FR-026 |
+| unarchiving | Unarchive clicked | The button stays focusable: `aria-disabled` and a busy label, not `disabled`, so focus does not fall to the page; "Unarchiving…" is announced through a polite status region (planning review c2) | "Unarchiving…" | FR-026 |
 | unarchived | success | Page becomes active; project back in Projects; focus to heading; toast | "Unarchived “Old flat”" | FR-026, US5-3 |
-| error | request failed | Existing notice pattern with Ref and Retry | "Couldn't unarchive “Old flat”. It's still archived." + Ref | FR-026, FR-015 |
-| unarchive refused: name in use | the server answers 409 because another active project has the name | Notice with Ref and "Rename…" for the archived project; no Retry (it would fail the same way); focus stays on Unarchive | "Another active project is already called “Old flat”. Rename one first." + Ref | FR-026, FR-015 |
+| error | request failed | Existing notice pattern with Ref and Retry; the notice is announced (`role=alert`) and focus moves to Retry (planning review c2) | "Couldn't unarchive “Old flat”. It's still archived." + Ref | FR-026, FR-015 |
+| unarchive refused: name in use | the server answers 409 because another active project has the name | Notice with Ref and "Rename…" for the archived project; no Retry (it would fail the same way); the notice is announced (`role=alert`) and focus stays on Unarchive | "Another active project is already called “Old flat”. Rename one first." + Ref | FR-026, FR-015 |
+| rename archived project | "Rename…" in the refusal | The project options popover opens for the archived project with its name field (the same field active projects use), name selected; Save shows "Saving…"; a clash shows "Another project is already called “<name>”." with focus kept in the field; success closes the popover, clears the refusal and returns focus to Unarchive; no automatic unarchive. Escape closes the popover and returns focus to its trigger (planning review c2) | "Another project is already called “Old flat 2”." | FR-026 |
+| options popover closed with Escape | Escape in any project options popover | Focus returns to the options button that opened it (planning review c2) | — | FR-026 |
+| task project picker | the project field of a task in the detail panel | Lists active projects only; for a task already in an archived project, that one project too, labelled "Old flat · archived" and selected. Archived projects never appear as a new choice (FR-025) (planning review c2) | "Old flat · archived" | FR-025 |
 | archived (just now) | the open project was archived from its options | The page becomes the archived page; focus to the heading; toast | "Archived “Old flat”" | FR-024, FR-025 |
 | offline / interrupted | no connection; request cut off | Offline banner, Unarchive disabled; a cut-off request retries with the same idempotency key | "You're offline. Unarchive is available when you're back online." | FR-026 |
 | partial failure | **n/a**: one project command, its tasks unchanged | — | — | — |
@@ -330,6 +358,7 @@ listed.
 | screen | affordance | what it does | FR ref |
 |---|---|---|---|
 | X-01 | Status words (button) | Opens the X-02 popover in every state | FR-016, FR-012 |
+| X-01 | Toolbar status item (sidebar hidden, attention states only) | Opens the X-02 popover | FR-012, FR-016 |
 | X-01, M-01 | "Sign in to sync" (account-less) | Opens sign-in (X-03 / the iPhone sheet) | FR-001, FR-012, FR-019 |
 | X-01, M-01 | "Retry" (failing) | Runs Sync now | FR-012, FR-014, FR-006, FR-019 |
 | M-01 | "Sign in again to sync" row | Opens the iPhone sign-in sheet, email locked | FR-019, US3-5 |
@@ -337,7 +366,8 @@ listed.
 | X-02 | "Sign in again" | Opens X-03 locked to the account | FR-001, US3-5 |
 | X-02 | "Sign in…" (account-less) | Opens X-03 | FR-001 |
 | X-02 | "Copy" beside a reference ID | Copies the ID | FR-015 |
-| X-02 | "Copy outcome" (outcome kept on account) | Copies the Mac's own desired outcome before it is dismissed | FR-003, FR-028 |
+| X-02 | "Copy outcome" (outcome kept on account) | Copies the Mac's own desired outcome before it is discarded | FR-003, FR-028 |
+| X-02 | "Discard outcome" and its 5 s "Undo" (outcome kept on account) | Removes the issue and its outcome text; Undo restores it | FR-003, FR-016, FR-028 |
 | X-02 | "Dismiss" per issue | Removes the issue once read | FR-016, FR-011 |
 | X-02 | "Show in Finder" (pre-upgrade backup; earlier-version file kept) | Reveals the file | FR-021, FR-033 |
 | X-02 | "Sync now" | Runs a sync now | FR-006, FR-016 |
@@ -357,6 +387,10 @@ listed.
 | X-06 | "Archive project" (right-click; File menu; review sheet) | Archives, keeping tasks | FR-024 |
 | X-06, M-02, D-01 | "Rename…" (unarchive refused: name in use) | Renames the archived project so it can be unarchived | FR-026 |
 | X-08 | "OK" (unreachable) | Closes the alert; the second copy quits | FR-017, edge case "two copies" |
+| X-03 | "OK" (account deletion cancelled) | Closes the sheet; sync is already running | FR-017 |
+| X-09 | "Try again" | Reloads the workspace file | FR-022 |
+| X-09 | "Start fresh…" → "Set aside and start fresh" | Sets the unreadable file aside (kept until sign-out) and starts an empty workspace | FR-017, FR-022 |
+| D-01 | Task project picker | Assigns a task to an active project; shows a task's current archived project, labelled | FR-025 |
 | M-01 | Long-press "Copy reference ID" on the "Couldn't sync · Retry" row | Copies the ID | FR-015, FR-019 |
 | X-07 | File › "Sync now" ⌘R | Runs a sync now | FR-006 |
 | X-07 | App menu "Sign in…" / "Sign in again…" / "Sign out…" | Opens X-03 / X-04 | FR-001 |
@@ -391,7 +425,7 @@ Display-only surfaces carrying requirements:
 - **FR-009** (incoming changes never move selection, scroll, focus or unsaved text): behaviour. The design adds no surface that could move focus; X-02 "new issue while open" keeps focus.
 - **FR-010** (never wait on the network): behaviour. X-03 offline copy states it.
 - **FR-011** (conflict rules): behaviour. Rejections surface as X-02 / M-01 issues.
-- **FR-017** (no routine dialogs): a constraint, met by the absence of any dialog outside X-03 (including its refusal and deletion-cancelled states), X-04 (including its "Couldn't sign out" error), X-05 (including "later file") and X-08 (only when the running copy cannot be brought forward).
+- **FR-017** (no routine dialogs): a constraint, met by the absence of any dialog outside X-03 (including its refusal and deletion-cancelled states), X-04 (including its "Couldn't sign out" error), X-05 (including "later file" and "partly carried over"), X-08 (only when the running copy cannot be brought forward) and X-09's person-started "Start fresh" confirmation. The sidebar-hidden toolbar item is not a dialog and takes no focus.
 - **FR-020, FR-021** (lossless upgrade, backup kept): silent by design; X-05 only for FR-022.
 - **FR-023** (Mac review marks stay local): no UI change; the Mac's Waiting / Someday / Project review buttons must keep working signed in (Notes for the plan).
 - **FR-027** (old archives stay detached): display only (the neutral line in the empty archived project on X-06, M-02 and D-01).
@@ -448,7 +482,9 @@ and failures appear only after 60 s, in one place.
 - **Dynamic Type**: the status line wraps after " · " up to AX5 and is never truncated (M-01).
 - **Reduce Motion**: the indicator becomes a static glyph on both platforms.
 - **Destructive actions**:
-  - The only one is X-04 "Sign out and remove". It names what is lost: "N changes haven't synced yet … They haven't reached your account".
+  - X-04 "Sign out and remove". It names what is lost: "N changes haven't synced yet … They haven't reached your account", and, when this sign-out also deletes the pre-upgrade backup, says so.
+  - X-02 "Discard outcome" (added in planning review c2): it deletes text the person wrote that exists nowhere else, so its visible label says "Discard", and a 5 s Undo follows.
+  - X-09 "Set aside and start fresh" (planning review c2): behind a confirmation; the file is kept, set aside, until sign-out.
   - iPhone archive is no longer destructive: it loses the rose tint and destructive role, and says it can be undone.
   - Unarchive needs no confirmation, because archiving again reverses it.
 - **Contrast** (WCAG 2.2 AA):
@@ -460,12 +496,13 @@ and failures appear only after 60 s, in one place.
 
 - **Tab order**:
   - X-01: the status words, then the trailing action when present, are the last stops in the sidebar.
-  - X-02: attention action (Sign in again / Copy) → each issue's Copy → Dismiss → Sync now → Sign out…. A disabled "Sync now" is skipped.
+  - X-02 (completed in planning review c2): attention action (Sign in again, Sign in… when account-less, or the failing notice's Copy) → each issue's Copy → Copy outcome → Dismiss / Discard outcome → Sync now (skipped when disabled) → the offline notice's last-failure Copy → Sign out… → backup "Show in Finder" → import report "Show in Finder" → earlier-version "Show in Finder".
   - X-03: Email → Password → Advanced → (Server address → Use the default server) → Cancel → Sign in.
   - X-06: title → Unarchive → task rows. In the sidebar, the "Archived projects · N" disclosure is a tab stop, named "Archived projects, 2, collapsed" or "…, expanded".
   - D-01: heading → Unarchive → task rows.
 - **Focus on open**:
-  - X-02 focuses its first control (the attention action if any, otherwise "Sync now"); VoiceOver reads the content first.
+  - X-02 focuses the attention action if any; otherwise "Sync now" when enabled; otherwise "Sign in…" when account-less; otherwise the first enabled control (planning review c2). VoiceOver reads the content first. "Show in Finder" brings Finder forward, which closes the transient popover; when the person returns, focus is on the status words.
+  - X-09 focuses "Try again"; its confirmation focuses "Keep trying".
   - X-03 focuses Email, or Password when the email is known or locked. After an error, focus goes to Password with its text selected.
   - X-04 focuses "Cancel".
   - X-05 focuses "Continue".
@@ -486,7 +523,7 @@ and failures appear only after 60 s, in one place.
   - Trailing actions: "Sign in to sync", "Retry sync".
   - Indicator: "Syncing" (not announced on appearance).
   - Copy: "Copy reference ID".
-  - Dismiss: "Dismiss: <issue>"; for a kept outcome, "Dismiss and discard the outcome for <project>".
+  - Dismiss: "Dismiss: <issue>". A kept outcome has no "Dismiss": its button reads "Discard outcome", named "Discard your outcome for “<project>”" (planning review c2).
   - Unarchive: "Unarchive <project>".
   - Web disclosure: "Archived projects, 2".
 - **Announcements**:
@@ -554,6 +591,18 @@ Planning review campaign `021-mac-sync-c1` added states and copy without changin
 - X-05: "error: couldn't carry over", "later file" (FR-033).
 - X-06: File menu keyboard path, "archived (just now)", "unarchive refused: name in use", the disclosure in the tab order.
 - M-01: the reference ID path from the list row, "Settings › Sync, sync running", sign-out with open issues. M-02 and D-01: "unarchive refused: name in use"; D-01: "archived (just now)".
+
+## Planning review c2 additions (2026-10-06)
+
+Planning review campaign `021-mac-sync-c2` added the following, again without changing any signed-off decision; each reuses an existing layout and has no new mockup unless stated. Dispositions are in `review-c2-disposition.md`.
+
+- **X-01**: "first load, empty list" ("Your tasks are still arriving."); "sidebar hidden" (a toolbar item only in attention states, so the toolbar shows nothing about sync whenever all is well); the first-load indicator follows FR-013's 1 s rule.
+- **X-02**: "Discard outcome" with a 5 s Undo instead of "Dismiss" for a kept outcome; the backup line never shows a past date; "details changed during the update" with the import report; the complete Tab order and focus on open.
+- **X-04**: "backup removed" (the sentence when this sign-out deletes the backup), "unsaved edit or capture draft", "changes arrived while open".
+- **X-05**: "partly carried over"; the "couldn't carry over" copy no longer promises that a later version carries the file over; "partial read" now imports what decodes (it was the plan's interpretation, not a sign-off decision).
+- **X-06, M-02, D-01**: "rename archived project"; error and refusal focus; the partial-failure copy says where the project stands; D-01's task project picker and Escape focus return.
+- **X-09** (new screen id): tasks couldn't be opened.
+- **M-01**: "first upload", "error, then offline", the VoiceOver action for "Copy reference ID", 44 pt for the account-less "Sign in to sync".
 
 ## Sign-off
 

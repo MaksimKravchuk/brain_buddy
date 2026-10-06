@@ -17,7 +17,9 @@
 | `state` | `active` \| `archived` \| `all` | `active`: the same project set and order as today; each object gains the §2 fields | 422 |
 
 - The response is `list[ProjectResponse]`, sorted by case-folded name, then id (unchanged).
+- Results are the caller's projects only, whatever `state` says; an owner with none gets 200 `[]` (review c2, G53). Test: `test_021_FR_026_list_projects_state_is_owner_scoped` in `test_project_archive_lossless_api.py`: the second owner's archived and active projects never appear in the first owner's `?state=archived` or `?state=all`, and an owner with none gets `[]`.
 - `open_task_count` stays per project. With lossless archive, it counts the open tasks still attached to an archived project; X-06 shows "Archived project · 3 open tasks".
+- **One pass** (review c2, G42): today `_to_project_response` calls `open_task_count_for_project` for each project, and each call loads every task of the owner (`backend/app/modules/tasks/service.py:896-900`), so a list costs projects × tasks row loads. With 021 the list runs on every Apple-client pull (every 30 s) and every web refetch (45 s), with `state=all`. PR-02 adds `TaskService.open_task_counts_by_project(owner_id) -> dict[str, int]`, computed from one `list_for_owner` call, and the list route uses it; the single-project routes keep the per-project call. A pytest asserts equal counts both ways and one task load per list request.
 - Errors: 401, 422. The 422 is new for this operation (review c1, F44): the route's `responses=error_responses(401)` (`backend/app/api/tasks.py:562`) becomes `error_responses(401, 422)`, and `backend/tests/test_api_contract.py` changes `("/api/projects", "get"): {"401"}` (l.247) to `{"401", "422"}` in PR-02, because that test asserts exact set equality.
 
 ## 2. `ProjectResponse` and request bodies (PR-02)
@@ -57,9 +59,10 @@ ProjectUpdateRequest { name?, color?, desired_outcome?: str | null, expected_rev
 | 409 | stale `expected_revision` (existing conflict body); or an active project with the same normalized name exists, giving `ConflictError("Project", name)`, the same body `POST /projects` returns for a duplicate name |
 | 422 | body shape |
 
+- **Order of checks** (review c2, G44): (1) the idempotency record for this key, if any, returns its stored response; (2) the project is loaded (404 when unknown or foreign); (3) **a project already active returns 200 unchanged, before** `expected_revision` is checked, so a retry after the key has expired (it carries the old, now stale revision) still gets 200; (4) a stale `expected_revision` gives 409; (5) an active name clash gives 409. `archive_project` checks the revision first today (`service.py:962-981`); unarchive deliberately differs, and the golden traces pin it (an unarchive with a stale revision on an already active project → 200).
 - **Service**: `TaskService.unarchive_project`, decorated `@_serialized_write`, with idempotency command `unarchive_project:{project_id}`. The prefix is added to `_apply_idempotent_record` / `_project_result` (`service.py:1145-1203`), and the request model to `_request_hash` (`service.py:1294-1314`).
 - **API contract test**: `backend/tests/test_api_contract.py` adds the operation with `{400, 401, 404, 409, 422}` to `expected_error_statuses` (exact set equality, l.411).
-- **Parity inventory**: `contracts/api-client-parity.json` gains `unarchiveProject` and `listProjects(state)`.
+- **Parity inventory** (moved to PR-06 in review c2, G09): `contracts/api-client-parity.json` gains `unarchiveProject` and `listProjects(state)` in **PR-06**, together with the web client methods, their adapters and the count in `frontend/src/api/__tests__/clientParity.test.ts` (today "exactly 42 operations", l.96-103, which is the manifest's only reader). Landed in PR-02 without the web adapters, it would turn the frontend lane red on the landing path, which runs every stack.
 
 ## 4. `POST /projects/{project_id}/archive` — side effect changes (PR-02, then PR-03)
 
@@ -107,7 +110,7 @@ These routes are unchanged:
 | client | after PR-02 | after PR-03 |
 |---|---|---|
 | iPhone build without 021 | Unchanged responses for its calls: `GET /projects` default; ignores new fields | Its own archive clears memberships locally, and the next pull restores them. Tasks in archived projects show with the project, which it fetches by id. Edits to them are accepted (§5). Unarchive done elsewhere shows the project active again. Nothing crashes or is dropped. |
-| Web bundle cached before 021 | Ignores new fields | Its archive keeps memberships. It shows the tasks with "No project" until reload, because it resolves names from active projects only (`frontend/src/features/tasks/TaskListPage.tsx:1073-1095`). A display-only lag. |
+| Web bundle before PR-06 | Ignores new fields | Its archive keeps memberships. It shows tasks of archived projects with "No project", because it resolves names from active projects only (`frontend/src/features/tasks/TaskListPage.tsx:1073-1095`). The web is served by the same deploy as the API, so this lasts **from the PR-03 deploy until PR-06 is deployed**, not just until a reload (review c2, G45). It is display-only and accepted; the deploy notes keep the gap short by deploying PR-06 next after PR-03 (plan "Migration, deploy order and rollback"). |
 | Mac build without 021 | Local only, never calls the API | — |
 
 ## 8. Deploy order and rollback
@@ -121,7 +124,7 @@ PR-02 (tolerant validation, unarchive, ?state=, desired_outcome, marker, X-Clien
 
 **Rolling back the image**:
 
-- **PR-03 back to PR-02**: future archives clear memberships again, and memberships retained so far stay valid, because PR-02 accepts them.
+- **PR-03 back to PR-02**: safe only **before any 021 kit build (PR-04 onward) has shipped**: future archives clear memberships again, and memberships retained so far stay valid, because PR-02 accepts them. Once a PR-04 client exists it applies lossless archive locally (including the Mac's first-upload `archiveProject` of imported archived projects); against a PR-02 image the server would clear those members and the next pull would strip them, irreversibly (ADR-0020 forbids reconstruction). **From then on PR-03 is rolled forward, never back** (review c2, G62); the `docs/api-compatibility.md` runbook note written in PR-02 says so, and the kit raises a sync issue if an archive reply shows a clearing server (kit-commands §4 "Push").
 - **PR-02 back to the previous image**: safe, because no retained memberships exist before PR-03.
 - **Rolling back below PR-02 after PR-03 has run**: unsafe. Every task in a project archived meanwhile would reject edits with 400 until roll-forward. The release workflow's automatic rollback only goes one image back, and PR-02 and PR-03 are separate releases, so this needs a manual multi-step rollback. The runbook note in `docs/api-compatibility.md` says to roll forward instead.
 

@@ -99,17 +99,20 @@ Numbers use the locale's grouping ("1,284 changes waiting", design X-01 long tex
 | `popoverFirstUpload` | "Adding your tasks to your account · 1,284 left" (shown instead of `popoverWaiting` while `initialUploadRemaining > 0`; review c1 F33) |
 | `popoverSessionEnded` | "Your session ended" + "Sign in again to keep syncing. Your changes stay on this <device> until then." |
 | `popoverAccountLess` | "Your tasks are stored on this <device>" + "Nothing is sent anywhere until you sign in. Sign in to use the same tasks on your iPhone and the web." (Mac) |
-| `popoverBackup(until)` | Mac only, while the pre-upgrade backup exists: "Backup from before the update · kept until 5 Nov" + "Show in Finder" (review c1 F27, F62) |
+| `popoverBackup(until)` | Mac only, while the pre-upgrade backup exists and `until` is in the future: "Backup from before the update · kept until 5 Nov" + "Show in Finder" (review c1 F27, F62). Once `until` has passed and the backup is still kept: "Backup from before the update · removed when you sign out", or, when the import report lists records not carried, "Backup from before the update · kept because some records couldn't be carried over" (review c2, G24; data-model E8) |
 | `popoverLaterFile` | Mac only, while a previous-version file is kept (FR-033): "A file from the previous version is on this Mac. It was not added." + "Show in Finder" |
+| `popoverImportAdjusted` | Mac only, while the import report exists (contracts/mac-legacy-import.md §2a): "Some details changed during the update." + "Show in Finder" (review c2, G02) |
+| `popoverFirstLoadEmpty` | Mac only, the empty-list line while `notSyncedYet` holds after a sign-in: "Your tasks are still arriving." (design X-01 "first load, empty list"; review c2, G56) |
 | `signOutUnsent(n, offline, sessionEnded)` | design X-04 rows, verbatim |
 | `signOutNothingUnsent` | "Sign out?" + "Your tasks are removed from this <device>. They stay in your account." |
 | `signOutIssues(n)` | appended to either sign-out text when sync issues are open (FR-018; review c1 F06, F54): "1 change that couldn't sync will also be removed from this <device>." / "N changes that couldn't sync will also be removed from this <device>." |
-| `signOutBackup(until)` | Mac only, appended while the pre-upgrade backup exists and `until` (`importedAt + 30 days`) is still in the future (FR-021; review c1 F27): "A copy of your tasks from before the update stays on this Mac until 5 Nov." Once that date has passed, this sign-out deletes the backup (data-model E8), so no sentence is added and the base text is true |
-| `outcomeKeptIssue` | see kit-commands §5: the account's outcome is kept and the full local outcome is shown, with "Copy outcome" |
+| `signOutBackup(until)` | Mac only, appended while the pre-upgrade backup exists and `until` (`importedAt + 30 days`) is still in the future (FR-021; review c1 F27): "A copy of your tasks from before the update stays on this Mac until 5 Nov." Once that date has passed, see the next row |
+| `signOutBackupRemoved` | Mac only, appended, last, when **this** sign-out will delete the backup (all four conditions of data-model E8 hold at confirm time): "The copy of your tasks from before the update will also be removed from this Mac." The irreversible deletion is never silent (review c2, G24, G39, G63) |
+| `outcomeKeptIssue` | see kit-commands §5: the account's outcome is kept and the full local outcome is shown, with "Copy outcome" and "Discard outcome"; after Discard, "Outcome discarded · Undo" for 5 s, announced politely (review c2, G32) |
 
 The age format of `oldest` is "N s" under a minute, "N min" under an hour, "N h" under a day, and "1 day" / "N days" otherwise ("oldest 3 days", X-02 "unreachable for days"). The age is measured from the sendable time (data-model E6), so the first sign-in with months-old local data does not read as days of failure.
 
-**Order of the sign-out sentences**: the base text (`signOutUnsent` or `signOutNothingUnsent`), then `signOutIssues`, then `signOutBackup`. The iPhone uses the same catalogue for its sign-out confirmation (PR-07), so both devices name open issues the same way.
+**Order of the sign-out sentences**: the base text (`signOutUnsent` or `signOutNothingUnsent`), then `signOutIssues`, then either `signOutBackup` or `signOutBackupRemoved` (never both). The iPhone uses the same catalogue for its sign-out confirmation (PR-07), so both devices name open issues the same way.
 
 ## 4. Activity indicator (`SyncActivityIndicator`)
 
@@ -146,7 +149,7 @@ Each test names its requirement id (`@Test("021-FR-012 …")`):
 - singular and plural forms;
 - the indicator: 0.9 s sync gives nothing, 1.1 s sync gives visible ≥ 0.5 s, back-to-back cycles give one continuous span;
 - `syncNowEnabled` is false exactly for `accountLess`, `sessionEnded` and `offline`, and is true while `isSyncing` in every other state (`021-FR-019`, `021-FR-006`);
-- **copy catalogue, verbatim, for both device kinds** (review c1, F46): every key above, including `accountSwitchRefused`, each `popover*`, each `signOutUnsent` variant, `signOutNothingUnsent`, `signOutIssues` (1 and N), `signOutBackup`, and the sentence order (`021-FR-016`, `021-FR-018`, `021-FR-004`);
+- **copy catalogue, verbatim, for both device kinds** (review c1, F46): every key above, including `accountSwitchRefused`, each `popover*`, each `signOutUnsent` variant, `signOutNothingUnsent`, `signOutIssues` (1 and N), `signOutBackup`, `signOutBackupRemoved` (shown exactly when the E8 conditions hold, never with `signOutBackup`), the three `popoverBackup` forms (future date, date passed, kept because of records not carried), `popoverImportAdjusted`, `popoverFirstLoadEmpty`, and the sentence order (`021-FR-016`, `021-FR-018`, `021-FR-021`, `021-FR-004`; review c2, G24, G39);
 - **tooltip table, verbatim**, for every state, including "Last tried" in `failing` (`021-FR-015`);
 - **oldest-age formatter boundaries**: 59 s / 60 s ("59 s" / "1 min"), 59 min / 60 min ("59 min" / "1 h"), 23 h / 24 h ("23 h" / "1 day"), and "2 days";
 - **reference ids**: the `failing` tooltip and `popoverFailing` details contain the non-empty `lastFailureReferenceID`, and every `SyncIssueDescriber` output carries its issue's non-empty reference id (`021-FR-015`, `021-SC-004`);

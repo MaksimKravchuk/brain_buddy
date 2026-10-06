@@ -129,7 +129,7 @@ figure{margin:0;width:400px}figcaption{font-size:12px;line-height:1.45;color:var
     <li><b>Show in Finder</b> reveals the file with it selected and closes the notice; the workspace then starts empty, as with Continue.</li>
     <li><b>Never offered</b>: delete, overwrite or "try again" on the old file. The app does not touch it (FR-022).</li>
     <li><b>Keyboard and VoiceOver</b>: focus on "Continue" (default, Return). Tab reaches "Show in Finder". VoiceOver reads the title, the message and the path on open. Esc is not mapped, because the notice must be read once; Return continues.</li>
-    <li><b>Partial read</b> (some records readable, some not) is treated as unreadable: nothing is half-imported, and the whole file is kept (n/a as a separate state).</li>
+    <li><b>Partial read</b> (some records readable, some not), revised in planning review c2: a file that decodes is imported; values the new workspace cannot hold as they were are adjusted by rule and listed in an import report; a record that still cannot be carried is listed there and shown once with the "partly carried over" copy, and the untouched original stays on this Mac. Only a file that does not decode is unreadable.</li>
   </ul>
 </div>
 
