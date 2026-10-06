@@ -9,10 +9,11 @@ This is the single source for the status line on Mac (design **X-01**, **X-02**,
 | `indicatorDelay` | 1 s | the indicator appears only for a sync running longer than this |
 | `indicatorMinimum` | 0.5 s | once shown, it stays at least this long |
 | `waitingSuffixAfter` | 10 s | " · N changes waiting" while online only after the oldest change waited this long |
-| `failureSurfacesAfter` | 60 s | "Couldn't sync · Retry" only after `failingSince` is this old |
+| `failureSurfacesAfter` | 60 s | "Couldn't sync · Retry" only once an attempt that started at least this long after `failingSince` has failed (kit-commands §4 "Failing clock") |
 | `relativeRefresh` | 30 s | the apps re-describe at least this often (FR-012 "at least once a minute") |
-| `periodicTick` | 15 s | Mac (always while running) and iPhone (scene active) `.periodic` trigger |
-| `pullAge` | 45 s | `SyncConfiguration.pullInterval` passed by both apps (research R8) |
+| `periodicTick` | 15 s | Mac (always while running) and iPhone (scene active) `.periodic` trigger, through the kit's `PeriodicSyncTicker` |
+| `pullAge` | 30 s | `SyncConfiguration.pullInterval` passed by both apps; with the 15 s tick the gap between pulls stays under 45 s plus one pull (research R8; review c1 F07, F17) |
+| `webRefetch` | 45 s | not used by the kit; recorded here so the three clients' cadences sit in one table: the web's visible-tab refetch (research R8) |
 
 ## 2. Input and output
 
@@ -37,6 +38,7 @@ public struct SyncStatusDescription: Equatable, Sendable {
     public var announceOnEntry: Bool          // attention states only (design "Announcements")
     public var syncNowEnabled: Bool           // false only for accountLess, sessionEnded, offline;
                                               // never false because a sync is running (single-flight, FR-019)
+    public var lastTriedText: String?         // "Last tried 14:35" in the failing state (review c1 F53)
 }
 
 public enum SyncStatusDescriber {
@@ -54,10 +56,12 @@ Evaluate top to bottom. The first row that holds wins. This is design.md's prece
 | 1 | `accountLess` | `account == none` | "On this Mac · Sign in to sync" (`trailingActionTitle` = "Sign in to sync") | calm / none | `signIn` |
 | 2 | `sessionEnded` | `sessionEnded` | "Sign in again to sync" | attention / sessionEnded | `signInAgain` |
 | 3 | `rejected` | `issueCount ≥ 1` | "1 change couldn't sync" / "N changes couldn't sync" | attention / warning | `showIssues` |
-| 4 | `failing` | `failingSince != nil && now − failingSince ≥ 60 s` (design precedence puts it above offline; offline errors never start the clock, §4 of kit-commands) | "Couldn't sync · Retry" (`trailingActionTitle` = "Retry") | attention / warning | `retry` |
+| 4 | `failing` | `isOnline && failingSince != nil && lastFailedAttemptAt − failingSince ≥ 60 s` (offline errors never start the clock, §4 of kit-commands) | "Couldn't sync · Retry" (`trailingActionTitle` = "Retry") | attention / warning | `retry` |
 | 5 | `offline` | `!isOnline` | "Offline · 1 change waiting" / "Offline · N changes waiting" / "Offline" (N = 0) | calm / none | none (words open the popover on Mac) |
-| 6 | `notSyncedYet` | `lastSyncedAt == nil` | "Not synced yet" | calm / none | none |
-| 7 | `synced` (+ waiting) | otherwise | `<synced>` + (" · 1 change waiting" / " · N changes waiting" when `pendingCount ≥ 1 && now − oldestPendingAt > 10 s`) | calm / none | none |
+| 6 | `notSyncedYet` | `lastSyncedAt == nil`, or `initialUploadRemaining > 0` (the first upload after linking an account with local data is still draining) | "Not synced yet" | calm / none | none |
+| 7 | `synced` (+ waiting) | otherwise | `<synced>` + (" · 1 change waiting" / " · N changes waiting" when `pendingCount ≥ 1 && now − oldestPendingAt > 10 s`, where `oldestPendingAt` is the sendable time of data-model E6) | calm / none | none |
+
+**Failing while offline** (review c1, F13): row 4 holds only while online, so going offline after a minute of server failure shows "Offline …" (row 5), not a "Retry" that cannot act. `failingSince` is kept, not cleared, so the 60 s clock does not restart when the network returns: the first failed attempt back online shows row 4 at once. In that offline state X-02 shows `popoverOffline`, and its details keep the last failure's time and reference id ("Last failed 14:35 · Reference ID …", with Copy).
 
 **`<synced>` relative-time ladder** (FR-012, G-2). Let `Δ = max(0, now − lastSyncedAt)`; a future time counts as 0, the "clock" edge case:
 
@@ -77,7 +81,7 @@ Numbers use the locale's grouping ("1,284 changes waiting", design X-01 long tex
 | state | tooltip |
 |---|---|
 | `synced`, `notSyncedYet`, `offline` | "Last synced today at 14:31. Click for details." (today / yesterday / "on 28 Sep" at HH:mm), or "Not synced yet. Click for details." |
-| `failing` | "Couldn't reach Brain Buddy since 14:02. It keeps trying. Reference ID <id>" |
+| `failing` | "Couldn't reach Brain Buddy since 14:02. Last tried 14:35. It keeps trying. Reference ID <id>" ("Last tried" updates after every attempt, automatic or Retry; review c1 F53) |
 | `sessionEnded` | "Your session ended. Sign in again to keep syncing." |
 | `rejected` | "N changes couldn't sync. Click for details." |
 | `accountLess` | "Your tasks are stored on this Mac. Click for details." |
@@ -91,13 +95,21 @@ Numbers use the locale's grouping ("1,284 changes waiting", design X-01 long tex
 | `popoverWaitingNothing` | "Waiting to sync · Nothing" |
 | `popoverWaiting` | "Waiting to sync · 2 changes · oldest 40 s" |
 | `popoverOffline` | "You're offline. Changes are saved on this <device> and sync when you're back online." |
-| `popoverFailing` | "Couldn't sync since 14:02" + "Brain Buddy didn't answer. Your changes are safe on this <device>, and it keeps trying." |
+| `popoverFailing` | "Couldn't sync since 14:02" + "Brain Buddy didn't answer. Your changes are safe on this <device>, and it keeps trying." + "Last tried 14:35" |
+| `popoverFirstUpload` | "Adding your tasks to your account · 1,284 left" (shown instead of `popoverWaiting` while `initialUploadRemaining > 0`; review c1 F33) |
 | `popoverSessionEnded` | "Your session ended" + "Sign in again to keep syncing. Your changes stay on this <device> until then." |
 | `popoverAccountLess` | "Your tasks are stored on this <device>" + "Nothing is sent anywhere until you sign in. Sign in to use the same tasks on your iPhone and the web." (Mac) |
+| `popoverBackup(until)` | Mac only, while the pre-upgrade backup exists: "Backup from before the update · kept until 5 Nov" + "Show in Finder" (review c1 F27, F62) |
+| `popoverLaterFile` | Mac only, while a previous-version file is kept (FR-033): "A file from the previous version is on this Mac. It was not added." + "Show in Finder" |
 | `signOutUnsent(n, offline, sessionEnded)` | design X-04 rows, verbatim |
 | `signOutNothingUnsent` | "Sign out?" + "Your tasks are removed from this <device>. They stay in your account." |
+| `signOutIssues(n)` | appended to either sign-out text when sync issues are open (FR-018; review c1 F06, F54): "1 change that couldn't sync will also be removed from this <device>." / "N changes that couldn't sync will also be removed from this <device>." |
+| `signOutBackup(until)` | Mac only, appended while the pre-upgrade backup exists (FR-021; review c1 F27): "A copy of your tasks from before the update stays on this Mac until 5 Nov." |
+| `outcomeKeptIssue` | see kit-commands §5: the account's outcome is kept and the full local outcome is shown, with "Copy outcome" |
 
-The age format of `oldest` is "N s" under a minute, "N min" under an hour, "N h" under a day, and "N days" otherwise ("oldest 3 days", X-02 "unreachable for days").
+The age format of `oldest` is "N s" under a minute, "N min" under an hour, "N h" under a day, and "1 day" / "N days" otherwise ("oldest 3 days", X-02 "unreachable for days"). The age is measured from the sendable time (data-model E6), so the first sign-in with months-old local data does not read as days of failure.
+
+**Order of the sign-out sentences**: the base text (`signOutUnsent` or `signOutNothingUnsent`), then `signOutIssues`, then `signOutBackup`. The iPhone uses the same catalogue for its sign-out confirmation (PR-07), so both devices name open issues the same way.
 
 ## 4. Activity indicator (`SyncActivityIndicator`)
 
@@ -126,12 +138,16 @@ Rules:
 Each test names its requirement id (`@Test("021-FR-012 …")`):
 
 - every row of §3 for both device kinds;
-- every precedence pair: a snapshot satisfying rows *i* and *j* gives *min(i, j)*;
+- every precedence pair: a snapshot satisfying rows *i* and *j* gives *min(i, j)*, except the pair `failing` + offline, which gives `offline` (row 4 requires `isOnline`); that pair has its own case, and so does the return online with `failingSince` kept (`021-FR-014`);
 - ladder boundaries at 59 s / 60 s, 59 min / 60 min, 23:59 / 00:00 across midnight, 6 / 7 days, the year change, and a future `lastSyncedAt` giving "just now";
-- waiting suffix at 10 s and 10.001 s;
-- failing at 59.999 s and 60 s, with `failingSince` surviving a relaunch (decoded snapshot);
+- waiting suffix at 10 s and 10.001 s, measured from the sendable time: an operation issued 213 days ago and linked 5 s ago shows no suffix; `initialUploadRemaining > 0` gives `notSyncedYet` and `popoverFirstUpload` (`021-FR-012`, `021-FR-016`);
+- failing when `lastFailedAttemptAt − failingSince` is 59.999 s (not failing) and 60 s (failing), with both surviving a relaunch (decoded snapshot);
 - offline with N = 0, 1 and 2;
 - singular and plural forms;
 - the indicator: 0.9 s sync gives nothing, 1.1 s sync gives visible ≥ 0.5 s, back-to-back cycles give one continuous span;
 - `syncNowEnabled` is false exactly for `accountLess`, `sessionEnded` and `offline`, and is true while `isSyncing` in every other state (`021-FR-019`, `021-FR-006`);
+- **copy catalogue, verbatim, for both device kinds** (review c1, F46): every key above, including `accountSwitchRefused`, each `popover*`, each `signOutUnsent` variant, `signOutNothingUnsent`, `signOutIssues` (1 and N), `signOutBackup`, and the sentence order (`021-FR-016`, `021-FR-018`, `021-FR-004`);
+- **tooltip table, verbatim**, for every state, including "Last tried" in `failing` (`021-FR-015`);
+- **oldest-age formatter boundaries**: 59 s / 60 s ("59 s" / "1 min"), 59 min / 60 min ("59 min" / "1 h"), 23 h / 24 h ("23 h" / "1 day"), and "2 days";
+- **reference ids**: the `failing` tooltip and `popoverFailing` details contain the non-empty `lastFailureReferenceID`, and every `SyncIssueDescriber` output carries its issue's non-empty reference id (`021-FR-015`, `021-SC-004`);
 - no string contains "—" (the em-dash form is retired, M-01 "before").

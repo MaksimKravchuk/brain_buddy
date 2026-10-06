@@ -2,8 +2,10 @@
 
 Applies to `ios/BrainBuddyKit` and binds both the iPhone app and the Mac app. Slices:
 
-- **PR-04**: §1 – §3, §4 "Pull" and "Push", §5, §6 and §7.
-- **PR-05**: §4 "Triggers", "Configuration", "Failing clock" and "Account-switch refusal text", together with contracts/sync-status.md. Rules live in `BrainBuddyCore`; the apps never re-check a rule (`ios/AGENTS.md`). Every target keeps building and testing on Linux.
+- **PR-04**: §1 – §3, §4 "Pull" and "Push", §5, §6, §7 and §8.
+- **PR-05**: §4 "Triggers", "Periodic ticker", "Configuration", "Failing clock", "Sign-out order", "Session token store on macOS" and "Account-switch refusal text", together with contracts/sync-status.md.
+
+Rules live in `BrainBuddyCore`; the apps never re-check a rule (`ios/AGENTS.md`). Every target keeps building and testing on Linux.
 
 ## 1. Records (`BrainBuddyCore/Records.swift`)
 
@@ -44,6 +46,7 @@ New `GTDValidationError` cases carry user copy in the existing catalogue (`Comma
 | rule | today | after PR-04 (ADR-0020) |
 |---|---|---|
 | `archiveProject` | clears `projectID` on every task (l.56 – 70) | keeps every task's `projectID`; sets `archivedAt = issuedAt`; changes no task |
+| `archiveProject` on a project already archived | goal already holds | unchanged: `alreadySatisfied`; `archivedAt` and `archivedBeforeLossless` are never touched (mirrors http.md §4 "Repeat archive") |
 | `unarchiveProject` | — | `state = .active`, `archivedAt = nil`; `archivedBeforeLossless` unchanged; no task changes |
 | `createTask` / Smart Add naming an archived project | `.projectNotActive` | unchanged. The Mac/iPhone copy for an archived project changes to "Unarchive “<name>” before adding a task to it." (design X-06) |
 | `updateTask` with `projectID: .set(p)`, `p` archived | `.projectNotActive` | `.projectNotActive` **only if** `p ≠ task.projectID`; repeating the current archived project is accepted |
@@ -51,10 +54,29 @@ New `GTDValidationError` cases carry user copy in the existing catalogue (`Comma
 | `replayable` (replay mode) | drops any reference to an archived project | drops only a **new** reference; a carried archived membership is kept |
 | `renameProject` / `setProjectColor` / `setProjectOutcome` on an archived project | allowed | allowed |
 
-**Merge by name at first sign-in** is unchanged (`Reducer+Organize.swift:22-25`, `Replay.swift:101-139`). When a merged local project carries a `desiredOutcome`, its `createProject` is dropped as today.
+**Merge by name at first sign-in** (review c1, F03, F15, F37). Merging still happens where it happens today: by replay when a local `createProject` meets an **active** project of the same normalized name (`Reducer+Organize.swift:22-25`), and by sync when the server answers the creation with 409 duplicate name (`Replay.swift:101-139`). The server's uniqueness check is active-only too. What changes is how the rest of the outbox is rewritten, because the old rule assumed clearing archive.
+
+Today `OutboxReplayer.rewritingAfterMerge(_:project:into:)` calls `withdrawing(project:from:)` whenever the outbox also archives the local project. That creates the project's tasks **without a project**, "as the local archive left them". Under lossless archive (FR-024) the local archive left them attached, so this would silently strip the membership of, for example, the legacy import's archived "Old flat" (mac-legacy-import §2) when the account has an active "Old flat". After PR-04:
+
+| local project (in the outbox) | account project with the same normalized name | result |
+|---|---|---|
+| active | active | merged, as today: references follow the survivor; the local rename or recolour is dropped |
+| **archived** by the outbox | active | **merged; membership kept**: every reference follows the survivor, so the tasks are in the account's project and are never created without one. The local `archiveProject` is not applied to the account's project, which other devices use; it is reported as a `RejectedOperation` with the new error `.archiveNotMerged(name)`, which becomes a sync issue (§5). `withdrawing(project:)` is no longer used for projects (it stays for tag deletion, which is a real deletion) |
+| active or archived | archived only | not merged: the server creates a separate project (uniqueness is active-only, and ADR-0020 forbids new assignments to an archived project, so joining it is not possible). An archived Mac project therefore stays a separate archived project beside the account's. Documented limit (spec edge case "Same-named archived projects"); not counted as a duplicate under SC-003 |
+
+The stale doc comments on `rewritingAfterMerge` and `withdrawing` are rewritten in the same slice.
+
+**Desired outcome at the merge**: when a merged local project carries a `desiredOutcome`, its `createProject` is dropped as today.
 
 - **Survivor has no outcome**: the local outcome is re-issued as `setProjectOutcome` on the survivor, so it is not lost (FR-003, FR-028).
-- **Survivor already has an outcome**: the account's outcome wins, and the local one becomes a sync issue: "Kept the desired outcome already on your account for “<name>”." This keeps "nothing is silently dropped" (US2-5).
+- **Survivor already has an outcome**: the account's outcome wins, and the local one becomes a sync issue (§5) that carries the **full local outcome text**. The issue's command holds it, the describer never clips it, and X-02 shows it selectable with "Copy outcome" before "Dismiss" (design X-02 "outcome kept on account"; review c1 F04, F34). This keeps "nothing is silently dropped" (US2-5, FR-003).
+
+**Tests** (`BrainBuddyCoreTests/ReplayTests.swift`, `BrainBuddyWorkspaceTests/FirstSignInMergeTests.swift`, failing first):
+
+- `021-FR-003` / `021-SC-003`: local archived "Old flat" with three tasks (the import's outbox shape) against an account with an active "Old flat": after sign-in, no task has lost its project, all three are in the account's "Old flat", it stays active, and one issue says the archive was not applied. The same through the 409 path.
+- `021-FR-003`: local active "Old flat" against an account with only an archived "Old flat": two projects, the local one active.
+- `021-SC-003`: local archived "Old flat" against an account with only an archived "Old flat": two archived projects; the duplicate assertion counts active names only, and this case is asserted explicitly.
+- `021-FR-003` / `021-FR-028`: both sides have an outcome: the account's stays, and the issue's description contains the local outcome in full (1,000 characters, not clipped).
 
 ## 4. Sync engine (`BrainBuddySync/*`)
 
@@ -66,13 +88,21 @@ New `GTDValidationError` cases carry user copy in the existing catalogue (`Comma
 
 **Push**:
 
-- `unarchiveProject` 409 duplicate name: becomes a sync issue with the description in §5. It is not adopted the way a create is: the record exists, and only its activation is refused.
+- `unarchiveProject` 409 duplicate name: becomes a sync issue with the description in §5. It is not adopted the way a create is: the record exists, and only its activation is refused. The interactive command already refuses a local name clash at once (`.duplicateProjectName`), so this path is reached only when the clash appeared while offline.
+- **Immediate local revert on that 409** (review c1, F60): the engine re-applies the archived state locally at once instead of waiting for the next pull, and rewrites the operations queued behind the unarchive that newly assign a task to that project: those tasks are created or kept without the project, under their own keys. The one unarchive issue then says how many tasks it affected ("2 tasks you added to it were kept without a project"), instead of one 400 issue per task. Test in `ProjectArchiveSyncTests` (`021-FR-011`, `021-FR-026`): a capture queued behind a refused unarchive produces one issue and no 400.
 - `setProjectOutcome` 409 stale revision: the existing refetch, replay and resend path.
 
 **Triggers** (`BrainBuddySync.swift`):
 
 - `SyncTrigger.periodic` is added.
-- `.foreground`, `.manual`, `.networkRestored` and `.periodic` request a pull through the existing `pullRequested`, except that `.periodic` requests one only when the last pull is older than `configuration.pullInterval`.
+- `.foreground`, `.manual` and `.networkRestored` request a pull through the existing `pullRequested` and kick a cycle, as `.launch` does today. `.manual` also cancels a scheduled retry and runs at once (existing `kick()` behaviour).
+- **`.periodic` never sets `pullRequested`** (review c1, F12). It is a no-op (no cycle, no `.status` event, no `.documentChanged`) unless the last pull is at least `pullInterval` old **or** sendable operations wait with no debounce scheduled; and it is always a no-op while a retry is scheduled, so it never shortens the backoff (review c1, F16). When it does run, the cycle decides the pull by age, as every cycle does. A tick with nothing to do therefore causes no status flip, so the iPhone's `WidgetReloadAfterSync` (reload on syncing → idle) fires only on real cycles.
+
+**Periodic ticker** (`BrainBuddySync/PeriodicSyncTicker.swift`, new; review c1, F18): the repeating "while active" timer lives in the kit, not in the apps, so both apps share one tested implementation.
+
+- `PeriodicSyncTicker(interval: SyncTiming.periodicTick, scheduler: SyncScheduler, fire: @Sendable () async -> Void)` with `setActive(_ active: Bool)`. While active it fires every 15 s; inactive, it schedules nothing.
+- The Mac sets it active for the life of the process (FR-006); the iPhone sets it active only while the scene is `.active` (FR-032).
+- Tests (`BrainBuddySyncTests/PeriodicSyncTickerTests.swift`, `ManualSyncScheduler`, Linux): `021-FR-006`, `021-FR-032`: fires at 15 s, 30 s, 45 s while active; stops when set inactive and fires nothing while inactive; restarts on reactivation; a tick reaches the engine as `.periodic`.
 
 **"Sync now" is single-flight** (FR-019 as amended in `b83d367`; design X-02 "loading (a sync is running)"):
 
@@ -82,17 +112,31 @@ New `GTDValidationError` cases carry user copy in the existing catalogue (`Comma
 **Configuration** (`SyncConfiguration.swift`):
 
 - `pullInterval` defaults to 60 s, unchanged for callers that do not set it.
-- The Mac and iPhone apps pass `SyncTiming.pullAge` (45 s, contracts/sync-status.md §1).
+- The Mac and iPhone apps pass `SyncTiming.pullAge` (**30 s**, contracts/sync-status.md §1; review c1, F07, F17). With the 15 s tick, the longest gap between two pulls is under 45 s plus one pull's duration, so a change pushed by the other client shows within about 50 s (research R8).
 
-**Failing clock** (`SyncEngine.swift`):
+**Failing clock** (`SyncEngine.swift`; review c1, F13, F16):
 
-- The engine maintains `SyncMetadata.failingSince` and `lastFailureReferenceID` (data-model E5).
-- A cycle blocked by a server-side failure sets `failingSince` if it is nil. Server-side failures are 5xx, 429, a redirect, an unreadable 2xx, or a timeout or connection error while the path monitor reports a network.
-- A cycle that completes clears both.
-- A network-unreachable error (path monitor offline) does not start the clock: that state is "offline".
+- The engine maintains `SyncMetadata.failingSince`, `lastFailedAttemptAt` and `lastFailureReferenceID` (data-model E5).
+- A cycle blocked by a server-side failure sets `failingSince` if it is nil, and sets `lastFailedAttemptAt` to the cycle's start. Server-side failures are 5xx, 429, a redirect, an unreadable 2xx, or a timeout or connection error while the path monitor reports a network.
+- **Retry cadence in the first minute**: retries keep the existing backoff (2 s, 4 s, 8 s … ±20 %, `SyncConfiguration.retryDelay`), so attempts land at about 2, 6, 14 and 30 s. The engine caps the delay so that one attempt starts at exactly `failingSince + 60 s`. "Couldn't sync" surfaces only if that attempt (or any later one) also fails; a server that recovered within 60 s is found by it, and nothing is shown (SC-005). After that the normal backoff continues up to 300 s.
+- A cycle that completes clears all three.
+- A network-unreachable error (path monitor offline) does not start the clock: that state is "offline". Going offline **keeps** `failingSince`, so the 60 s clock does not restart when the network returns; the describer shows "offline" while offline (sync-status §3).
 - 401 sets `needsSignIn`, as today.
 
+**Sign-out order** (`Workspace.swift`, `SyncEngine.swift`; review c1, F59): today `Workspace.signOut` ends the server session and removes the token (`sync.signOut()`) **before** `store.destroy`, so a local removal failure leaves the account linked with no session, contradicting the approved X-04 error copy ("you're still signed in"). After PR-05:
+
+1. the engine is stopped and its writes drained (`sync.pause()`), with the session and token untouched;
+2. `store.destroy` runs, with the existing unsent-changes check under the store's lock;
+3. only on success: `sync.signOut()` ends the server session (or queues the logout) and removes the token;
+4. on failure: `sync.resume()`; the person is still signed in, nothing was removed, and the X-04 error copy is true.
+
+Test in `WorkspaceSyncTests` (`021-FR-018`, `021-FR-005`): a failing `destroy` leaves the token, sends no logout, and the status is not `needsSignIn`; a successful one removes the token and sends or queues the logout.
+
+**Session token store on macOS** (`BrainBuddyAPI/SessionTokenStore.swift`; review c1, F25, F39): `KeychainSessionTokenStore` has never run on macOS. On macOS it no longer sets `kSecAttrAccessible` (on the login keychain it cannot deliver "this device only"), and it sets `kSecAttrSynchronizable = false` explicitly; iOS is unchanged. A `setToken` failure is thrown to `signIn` as a sign-in failure carrying the request's reference id, and the session the server just opened is ended with that token, best effort. A read failure other than "not found" is reported as `keychain_read_failed` to the host's log and treated as no token. The macOS-lane round trip is in contracts/mac-app-host.md §8.
+
 **Account-switch refusal text**: moves from `SyncEngine.swift:195` to the copy catalogue (contracts/sync-status.md §3) with the device noun. `AccountSwitchRefused` carries no text.
+
+**First upload** (review c1, F33): `Workspace` records `SyncMetadata.accountLinkedAt` when an account is linked, and `syncSnapshot` derives `oldestPendingAt` from `max(issuedAt, accountLinkedAt)` and `initialUploadRemaining` from the operations issued before it (data-model E6).
 
 ## 5. Sync issue descriptions (shared)
 
@@ -100,12 +144,14 @@ The iPhone's `SyncIssuesScreen.describe` (`ios/BrainBuddy/Screens/Settings/SyncI
 
 | command | "what was attempted" | example "why" |
 |---|---|---|
-| `unarchiveProject` | "Unarchive project “<name>”" | 409 name: "Another active project is already called “<name>”." · repeated 5xx: "The server kept rejecting this change." |
+| `unarchiveProject` | "Unarchive project “<name>”" | 409 name: "Another active project is already called “<name>”." plus, when §4's revert rewrote queued captures, "N tasks you added to it were kept without a project." · repeated 5xx: "The server kept rejecting this change." |
 | `setProjectOutcome` | "Change the desired outcome of “<name>”" | server message |
+| `setProjectOutcome` re-issued at a merge whose survivor already has an outcome (§3) | "Desired outcome for “<name>”" | "Kept the desired outcome already on your account. Yours is below, so you can copy it." + the **full local outcome**, never clipped; X-02 adds "Copy outcome" (review c1, F04, F34) |
+| `archiveProject` not applied at a merge (`.archiveNotMerged`, §3) | "Archive project “<name>”" | "Your account already has an active project called “<name>”. This Mac's tasks were added to it, and it stays active." |
 | `createTask` dropped from an archived project (edge case) | "Add “<title>” to <List>" | "Project “<name>” was archived on another device, so the task was added without a project." |
-| `updateTask` on a task deleted elsewhere, or other 404 | existing | "Couldn't save your change to “<title>”: it was deleted on another device." (spec edge case; for tasks the case is unreachable today because no client deletes tasks, see plan "Inconsistencies") |
+| `updateTask` on a task deleted elsewhere, or other 404 | existing | "Couldn't save your change to “<title>”: it was deleted on another device." **Defensive path**: no client deletes a task and the server has no project delete route (only `DELETE /tags/{id}`, `backend/app/api/tasks.py:691`), so for tasks and projects it is reachable only through a foreign or purged record. It is kept for completeness and is not used as an example (review c1, F41, F63) |
 
-Quoting stays curly quotes, clipped at 60 characters (`SyncIssuesScreen.swift:238-243`).
+Quoting stays curly quotes, clipped at 60 characters (`SyncIssuesScreen.swift:238-243`), except the desired outcome above, which is shown in full. Every description carries the issue's non-empty reference id (`SyncIssueDescriberTests`, `021-FR-015`, `021-SC-004`).
 
 ## 6. Client identity (`BrainBuddyAPI/BrainBuddyAPI.swift`, `BrainBuddyAPIClient.swift`)
 
@@ -134,6 +180,28 @@ The fake server mirrors §1 – §5 of contracts/http.md:
 - `?state=active|archived|all`;
 - `desired_outcome` (omit keeps, null clears);
 - the `archived_before_lossless` field, settable by a test helper to seed pre-feature archives;
+- a repeat archive that changes only the revision (http.md §4);
 - tolerant `PATCH /tasks/{id}` validation.
 
-**Parity**: golden traces in `backend/tests/fixtures/project_archive_traces.json`. Each trace is a request sequence plus the expected status and response. They pass in pytest against the real API (`backend/tests/test_project_archive_traces.py`) and are replayed against the fake server (`ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ProjectArchiveTraceReplayTests.swift`, a byte-identical copy in `Tests/BrainBuddySyncTests/Resources/`). The fake server therefore cannot drift from the backend on these paths.
+**Parity** (review c1, F21, F45, F61): golden traces in `backend/tests/fixtures/project_archive_traces.json`. Each trace is a request sequence plus the expected status and response. They pin:
+
+- archive (lossless after PR-03), and repeat archive of an archived project, including a seeded pre-feature archive (marker stays true, `archived_at` stays null);
+- unarchive: 200, active no-op, 409 stale revision, 409 duplicate name, 404 foreign;
+- `GET /projects?state=` with `active`, `archived`, `all` and an invalid value (422);
+- tolerant `PATCH /tasks/{id}`: omitted, same archived, different archived (400), `null`, active;
+- `desired_outcome`: omitted keeps, `null` clears, blank clears.
+
+They pass in pytest against the real API (`backend/tests/test_project_archive_traces.py`, PR-02 and PR-03) and are replayed against the fake server (`ProjectArchiveTraceReplayTests.swift`). The kit copy in `Tests/BrainBuddySyncTests/Resources/` and its `resources:` declaration in `ios/BrainBuddyKit/Package.swift` first appear in **PR-04**, the slice that reads them, so the backend slices write nothing under `ios/` and trigger no TestFlight build. PR-04 also adds a pytest case to `test_project_archive_traces.py` that reads both files from the checkout and asserts byte equality. The landing path runs every stack whatever the diff (`.github/workflows/ci.yml`, "landing path; exercising every stack"), so a drift on either side fails the landing.
+
+## 8. Pure helpers for the Mac views (`BrainBuddyCore`, PR-04)
+
+These keep view logic out of the 4,000-line `ContentView.swift` and make it testable on Linux (review c1, F19, F20, F23).
+
+| helper | does | tests (`BrainBuddyCoreTests`) |
+|---|---|---|
+| `TaskEditDraft` (`TaskEditDraft.swift`) | holds the editor's baseline and draft; `changes()` returns a `TaskChanges` with only the fields where draft ≠ baseline (omit / `null` / value); `rebased(onto: TaskRecord)` shows incoming values for untouched fields and keeps touched ones | `TaskEditDraftTests` (`021-FR-009`): untouched fields omitted; a touched field sent; an incoming change to an untouched field shown in the draft; an incoming change to a touched field not applied to the draft |
+| `SelectionAnchor` (in `TaskEditDraft.swift`) | resolves a selection or scroll anchor by `EntityID` in a new query result, falling back to the nearest surviving neighbour when the record left the list | same file (`021-FR-009`) |
+| `RecordContentStamp` (`RecordContentStamp.swift`) | the review-mark stamp of data-model E7.2: a salted HMAC over user-visible fields, never ids or server times | `RecordContentStampTests` (`021-FR-023`): unchanged by a pull that changes only `updatedAt` or `serverID`, by re-keying, and by sign-out and sign-in; changed by an edit of any listed field |
+| `GTDQueries.projectDisplay(_:)` (`Queries+ProjectDisplay.swift`) | for a project: `isArchived`, `acceptsNewTasks` (false when archived), `showsPreLosslessLine` (FR-027: marker true **and** no task in any state), and the "<name> · archived" label | `ProjectDisplayTests` (`021-FR-025`, `021-FR-027`): each combination of state, marker and task count |
+
+The Mac (X-06) and the iPhone (M-02) render `projectDisplay` and never re-derive the rule. The web implements the same rule in `ArchivedProjectNotice.tsx` with the same cases in Vitest. A `Workspace` test against the fake server (`BrainBuddyWorkspaceTests/FirstSignInMergeTests.swift`, `021-FR-023`) takes a valid Waiting, Someday and Project mark's stamps, signs in with upload, pulls, and asserts the stamps are unchanged; then signs out and in to the same account and asserts the same. Another (`WorkspaceCommandTests`, `021-FR-009`) edits field A locally while a pull changes A and B, saves, and asserts that only A was sent, B shows the incoming value and A the local one, and that every `EntityID` is unchanged across the pull.

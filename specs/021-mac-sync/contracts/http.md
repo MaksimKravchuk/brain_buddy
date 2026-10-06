@@ -14,11 +14,11 @@
 
 | query | values | default | invalid |
 |---|---|---|---|
-| `state` | `active` \| `archived` \| `all` | `active` (today's response, byte-identical) | 422 |
+| `state` | `active` \| `archived` \| `all` | `active`: the same project set and order as today; each object gains the §2 fields | 422 |
 
 - The response is `list[ProjectResponse]`, sorted by case-folded name, then id (unchanged).
 - `open_task_count` stays per project. With lossless archive, it counts the open tasks still attached to an archived project; X-06 shows "Archived project · 3 open tasks".
-- Errors: 401, 422.
+- Errors: 401, 422. The 422 is new for this operation (review c1, F44): the route's `responses=error_responses(401)` (`backend/app/api/tasks.py:562`) becomes `error_responses(401, 422)`, and `backend/tests/test_api_contract.py` changes `("/api/projects", "get"): {"401"}` (l.247) to `{"401", "422"}` in PR-02, because that test asserts exact set equality.
 
 ## 2. `ProjectResponse` and request bodies (PR-02)
 
@@ -71,7 +71,7 @@ The request, the response model and the status set are unchanged.
 | after PR-02 | as today (still cleared) | as today, plus `archived_before_lossless = true` |
 | after PR-03 (ADR-0020) | **unchanged**: no field, no revision, no `updated_at` change | `state = archived`, `archived_at = now`, `archived_before_lossless = false` |
 
-Archiving an already archived project is accepted, as today (revision bump, members untouched).
+**Repeat archive** (review c1, F14): archiving an already archived project is accepted, as today, and changes **only** `revision` and `updated_at`. `archived_at` and `archived_before_lossless` are left as they are, under PR-02 and PR-03 alike; members are untouched. Otherwise a repeat archive of a pre-feature project (marker true, `archived_at` null) would stamp `archived_at` and clear the marker, destroying FR-027's only signal. The service reads the current state before writing the two fields (there is no such guard today). Golden trace and a PR-03 pytest case (`test_021_FR_027_repeat_archive_keeps_marker`): seed a pre-feature archive, archive again → 200, marker still true, `archived_at` still null.
 
 ## 5. Task routes — validation of archived membership (PR-02)
 
@@ -100,7 +100,7 @@ These routes are unchanged:
 
 - **Where**: `CorrelationIdMiddleware` (`backend/app/api/middleware.py`, ASK path) parses the header once. It adds the two fields to the existing `api_request` and `api_request_failed` lines.
 - **Effect on behaviour**: none. The header is an observability label only (constitution IV), and no route reads it.
-- **Correlation id**: the existing behaviour (accept an incoming `X-Correlation-ID`) is unchanged. The Mac, through the kit, sends one per request, as the iPhone does.
+- **Correlation id** (review c1, F50, F57): today the middleware accepts any incoming `X-Correlation-ID` or `X-Request-ID` verbatim, binds it into every log line of the request and echoes it in the response (`backend/app/api/middleware.py:38-41, 65`). With 021 the client-minted id becomes the reference id people copy, so PR-02, which already edits this file, accepts an incoming id only when it matches `^[0-9A-Za-z._-]{1,64}$` and otherwise mints a fresh UUID. The kit's lower-cased UUID matches; the web sends none (it reads the header from responses). `test_client_attribution_logging.py` adds a newline-injection case: `X-Correlation-ID: abc\nforged=1` gives a fresh UUID in the response header, and the raw value appears in no captured log line.
 
 ## 7. What older clients see
 

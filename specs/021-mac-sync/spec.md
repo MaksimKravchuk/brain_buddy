@@ -27,6 +27,7 @@ The owner delegated the detail ("ты сам справишься, особо м
 - Q: Should the indicator and the waiting count appear on every sync and every edit? → A: No. The indicator appears only for a sync longer than 1 s and stays at least 0.5 s. The waiting count shows while online only after a change has waited 10 s (FR-012, FR-013). Owner: "Пороги".
 - Q: Should a Mac sign-out with nothing unsent be confirmed? → A: Yes, "Sign out?", as on the iPhone, because the account's data leaves this Mac (FR-017). Owner accepted.
 - Q: Should a pre-feature archived project that unarchives empty explain itself? → A: Yes, with one neutral line saying its tasks are still in their lists (FR-027, US5-4). Owner accepted.
+
 ### Session 2026-10-06 (after /speckit-plan)
 
 The owner delegated these. Each one resolves a contradiction or gap the plan found:
@@ -53,7 +54,7 @@ A person who uses the iPhone or web signs in on the Mac with the same email and 
 
 **Why this priority**: it is the whole point of the feature; without it the Mac stays a separate, untrusted system.
 
-**Independent Test**: sign in on a Mac and an iPhone (or web) with one account. Create, edit, move, complete and delete across both. Each change appears on the other device within the SC-001 window with no manual action.
+**Independent Test**: sign in on a Mac and an iPhone (or web) with one account. Create, edit, move and complete across both. Each change appears on the other device within the SC-001 window with no manual action.
 
 **Acceptance Scenarios**:
 
@@ -80,7 +81,7 @@ The Mac works with no connection, as it does today: capture, quick capture, voic
 2. **Given** unsent changes, **When** the person quits and relaunches the app, **Then** the changes are still there and still waiting.
 3. **Given** unsent changes, **When** the connection returns, **Then** they are sent without any action, within 60 s of the network coming back while the app is open.
 4. **Given** a change was sent but the reply was lost (connection dropped mid-request), **When** the Mac retries, **Then** the account ends up with the change exactly once.
-5. **Given** the Mac was offline for days while the iPhone edited the same task, **When** the Mac reconnects, **Then** each field ends with the change that reached the account last. Nothing is silently dropped: a change the account can no longer accept (for example, a project deleted elsewhere) becomes a sync issue the person can see (US3).
+5. **Given** the Mac was offline for days while the iPhone edited the same task, **When** the Mac reconnects, **Then** each field ends with the change that reached the account last. Nothing is silently dropped: a change the account can no longer accept (for example, a task added to a project archived elsewhere) becomes a sync issue the person can see (US3).
 
 ---
 
@@ -147,8 +148,10 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 - **Same task completed or cancelled on one device and edited on another**: each field ends with the change that reached the account last (FR-011). An edit the account no longer accepts becomes a sync issue in plain words, with a reference id.
 - **A task added on the Mac offline to a project archived elsewhere meanwhile**: when the Mac syncs, the task keeps its other fields and lands without that project. The person sees a sync issue saying the project was archived.
 - **Duplicate names**: creating a project or tag on the Mac whose name exists on the account (created elsewhere while offline) merges into the existing one instead of failing or duplicating.
+- **Same-named archived projects**: merging by name joins active projects only, because an archived project takes no new tasks (ADR-0020). A Mac project archived before sign-in whose name matches an *active* account project joins it: its tasks keep that project, the account's project stays active, and a sync issue says so. An archived Mac project whose name matches only an *archived* account project stays a separate archived project; this is not counted as a duplicate under SC-003.
+- **The previous Mac store appears again after the update**: an older copy of the app, a restore from backup or a moved file can bring back `local-gtd.json` after the new workspace exists. It is never imported into, merged with or written over the new workspace. The file is left untouched, and the person is told once where it is (FR-033).
 - **Session expires while offline**: nothing is shown until the Mac is online and the server refuses the session. Then the footer shows "Sign in again to sync", and waiting changes are kept and sent after sign-in.
-- **Account deleted or purged elsewhere**: the Mac's session fails and it shows "Sign in again to sync". Local data stays on this Mac until the person signs out (FR-019).
+- **Account deleted or purged elsewhere**: the Mac's session fails and it shows "Sign in again to sync". Local data stays on this Mac until the person signs out (FR-001, FR-018).
 - **Sign-out with unsent changes**: the person is warned with the count and can keep waiting, or sign out and remove the unsent changes from this Mac (as on the iPhone). It never happens silently.
 - **Very large account** (thousands of tasks): the first load does not block the window. Local data, or an empty state with the indicator, is usable at once, and the rest fills in.
 - **Clock on the Mac is wrong**: "Synced N min ago" never shows a negative or future time ("just now" instead). Ordering of changes does not depend on the Mac's clock.
@@ -165,7 +168,7 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 
 - **FR-001**: The Mac app MUST let a person sign in with the same email and password as iPhone and web, and sign out. Sign-in is the only Mac action that needs a connection.
 - **FR-002**: Without signing in, the Mac app MUST keep working fully on this Mac, as today. Nothing is sent anywhere.
-- **FR-003**: On the first sign-in on a Mac that has local data, the System MUST add every local task, project, tag, subtask and comment to the account. Projects and tags with the same name as an existing account record MUST become that record, and tasks MUST NOT be merged by title. Nothing is lost or duplicated by the merge.
+- **FR-003**: On the first sign-in on a Mac that has local data, the System MUST add every local task, project, tag, subtask and comment to the account. Projects and tags with the same name as an existing account record MUST become that record, and tasks MUST NOT be merged by title. Nothing is lost or duplicated by the merge. When both projects have a desired outcome, the account's is kept and the Mac's is shown in full as a sync issue, so the person can read and copy it before dismissing it.
 - **FR-004**: The Mac MUST refuse to sign in to a different account while it holds unsent changes or open sync issues for the current account (wording as on the iPhone). It MUST NOT send one account's data to another.
 - **FR-005**: The Mac MUST keep the session credential in the macOS Keychain, never in a plain file or app preferences. Signing out MUST remove the credential and end the server session when online, or queue the logout when offline.
 
@@ -222,19 +225,19 @@ Archiving a project hides it from active navigation but keeps its tasks attached
   - It MUST close with Esc or a click outside, MUST be fully keyboard-operable and MUST announce its content to VoiceOver.
 - **FR-017**: Routine sync MUST never show a modal dialog, alert, notification, sound or badge on any platform. The only sync dialogs allowed are the ones a person starts or a one-time notice:
   - sign-in;
-  - sign-out confirmation: "Sign out?" when nothing is unsent, because the account's data leaves this Mac, or the unsent-changes warning (FR-018);
+  - sign-out confirmation: "Sign out?" when nothing is unsent, because the account's data leaves this Mac, or the unsent-changes warning (FR-018), including its "Couldn't sign out" error;
   - account switch refusal (FR-004);
-  - the one-time upgrade notice (FR-022);
+  - the one-time upgrade notices (FR-022, FR-033);
   - the "already open" alert, shown only when a second copy cannot reach the running one (X-08).
 
   When signing in cancels a pending account deletion, the sign-in sheet says so before it closes, as the iPhone does. This is not a separate dialog.
-- **FR-018**: Signing out with unsent changes MUST warn with the count and offer two choices: keep the changes (cancel sign-out) or sign out and remove them from this Mac. This matches the iPhone.
+- **FR-018**: Signing out with unsent changes MUST warn with the count and offer two choices: keep the changes (cancel sign-out) or sign out and remove them from this Mac. This matches the iPhone. Open sync issues never reached the account either, so every sign-out confirmation MUST also name how many of them will be removed, on Mac and iPhone alike.
 - **FR-019**: On iPhone, the list-screen sync status MUST use the same states, the same wording (with "iPhone" for "Mac") and the same compact form as the Mac: words, a small activity indicator during sync, and failures only after 60 s. It MUST NOT use a dialog. The iPhone Settings Sync section and Sync issues screen stay as they are, with the same wording. The one exception is "Sync now": on both platforms it is never disabled by a running sync, and a press while one runs joins it or queues a single follow-up (single-flight).
 
 **Upgrade of the local Mac store**
 
 - **FR-020**: On first launch after the update, the Mac MUST carry every record of the existing local store into the new local workspace without loss: tasks, projects, tags, subtasks, comments, manual order, project desired outcomes, archive state, and the Mac's Waiting / Someday / Project review marks.
-- **FR-021**: The upgrade MUST keep the previous store file untouched until the new workspace has been written and verified. The previous file is then kept as a backup for at least 30 days, or until the person signs out, whichever is later.
+- **FR-021**: The upgrade MUST keep the previous store file untouched until the new workspace has been written and verified. The previous file is then kept as a backup for at least 30 days, or until the person signs out, whichever is later. If the person never signs out, the backup is kept.
 - **FR-022**: If the previous store cannot be read, the Mac MUST NOT overwrite or delete it. It MUST tell the person once in plain words where the old file is, and only then start with an empty workspace.
 - **FR-023**: The Mac's Waiting / Someday / Project review marks MUST stay on this Mac (not synced), keep working as today, and survive sign-in and sign-out, until weekly review (020) replaces them.
 
@@ -252,6 +255,7 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 - **FR-030**: Logs and metrics from the Mac, the iPhone and the server MUST carry only ids, counts, timings and error classes. They MUST never carry task, project or tag text, comments, desired outcomes or the person's email.
 - **FR-031**: Requests from the Mac MUST identify the client type and version, as the iPhone does, so that server-side failures can be attributed to Mac builds.
 - **FR-032**: So that SC-001 holds in every direction, the iPhone while it is in the foreground and the web while its tab is visible MUST also fetch changes made elsewhere at least every 60 s, with no action from the person. Neither shows anything for it beyond FR-012/FR-019 on the iPhone.
+- **FR-033**: The upgrade of FR-020 MUST happen at most once, into a new workspace that nothing else has written. A previous-version store that appears after the new workspace exists MUST NOT be imported into it, merged with it or written over it, and MUST NOT be renamed or deleted. The Mac MUST tell the person once, in plain words, where that file is.
 
 ### Key Entities
 
@@ -286,5 +290,6 @@ Archiving a project hides it from active navigation but keeps its tasks attached
 - No AI, paid provider or new consent is involved. Signing in is the person's explicit act to sync.
 - The Mac app stays a locally built app (no App Store, signing or notarisation work), as today.
 - The server stamps creation, completion and waiting-since times itself. After the Mac's first sign-in, tasks completed on the Mac before the upgrade show the upload day as their completion date in History, as the iPhone's account-less upload does today. Order, due dates and every other field are kept. Preserving original timestamps would need the server to accept client times, which is out of scope.
-- The pre-upgrade backup (FR-021) holds only the person's own pre-upgrade Mac data. It may outlive a sign-out because it was never account data; data retention documents it.
+- The pre-upgrade backup (FR-021) holds only the person's own pre-upgrade Mac data, a copy of which reaches the account at the first sign-in. It may outlive a sign-out, and without a sign-out it stays; data retention documents it, and the sign-out confirmation says until when it stays.
+- The upgrade carries every record a person can see. It does not carry deleted tags, the old store's internal retry receipts, or the time a comment was last edited: the comment's current text is carried. The import report counts what was skipped.
 - 020 PR-06 adds a sidebar row to the Mac app before this feature's Mac UI lands. The two are sequenced, not merged.

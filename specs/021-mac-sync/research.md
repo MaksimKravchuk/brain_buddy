@@ -159,20 +159,12 @@ spec or design left open, it says so.
      - the **X-05** alert is shown, with the "corrupt" or "newer version" copy;
      - only after "Continue" or "Show in Finder" does the empty workspace start;
      - the notice is recorded as seen in `mac-local.json`, and an interrupted notice is shown again at the next launch (FR-022).
-  3. **Build the document**: otherwise, build the account-less `StoreDocument` in memory. `base` is empty and `account` is nil. The data becomes **outbox operations**, as on the iPhone without an account (`docs/native-ios-app.md:85-90`): every legacy record becomes the `GTDCommand`s that create it, issued at its original instants and applied through `GTDReducer` in interactive mode in a valid order (contracts/mac-legacy-import.md §2), then compacted by `OutboxCompactor`.
-  4. **Write**: write `store.json` with `FileDocumentStore` (create, or replace a leftover from an interrupted import: the workspace has never opened on it, see below).
-  5. **Verify (FR-021)**: re-read `store.json`, replay it to a `GTDState`, and compare it to the legacy snapshot with the field mapping of contracts/mac-legacy-import.md §3. Every task, project, tag, subtask and comment, plus state, lists, order, dates, priority, membership, outcome and archive state, must match, with exact counts. On a mismatch, `store.json` is deleted, the legacy file stays untouched, and the X-05 "corrupt" path runs with the same copy. This never happens silently.
-  6. **Record and back up**: write the review marks to `mac-local.json` and record `legacyImport.state = completed` with the backup name. Only then rename `local-gtd.json` to `local-gtd.backup-<UTC yyyyMMdd'T'HHmmss'Z'>.json` in the same folder. Its content stays untouched.
-  7. **Backup retention**: at each launch and after each sign-out, the backup is deleted once **both** are true: 30 days have passed since the import, and a sign-out has happened since the import. FR-021 says "at least 30 days, or until the person signs out, whichever is later". Without a sign-out it is kept.
-  - **Idempotent re-runs** (state in `mac-local.json`):
-
-    | state found at launch | action |
-    |---|---|
-    | no legacy file, no record | nothing (fresh install) |
-    | legacy file, no `completed` record | (re)run the import; a leftover `store.json` from an interrupted run is replaced, because the workspace never opens before `completed` is recorded |
-    | `completed`, legacy file still at its original name (crash between record and rename) | rename only |
-    | `completed`, backup present | retention check only |
-    | `unreadable` recorded, notice seen | start normally; the legacy file is never touched again; a later build that can read it may import it only while `store.json` holds no data and no account |
+  3. **Build the document**: otherwise, build the account-less `StoreDocument` in memory. `base` is empty and `account` is nil. The data becomes **outbox operations**, as on the iPhone without an account (`docs/native-ios-app.md:85-90`): every legacy record becomes the `GTDCommand`s that create it, issued at its original instants and applied through `GTDReducer` in interactive mode in a valid order (contracts/mac-legacy-import.md §2). The import's outbox is **not** compacted: compaction would change `waitingSince`, `orderKey` and `editedAt`, which step 5 verifies (review c1, F38).
+  4. **Write** (review c1, blocking F02): record `legacyImport.state = inProgress` durably, then write the document to a staging file `store.import-<attemptID>.json` with `FileDocumentStore`. `store.json` is not written here.
+  5. **Verify (FR-021)**: re-read the staging file, replay it to a `GTDState`, and compare it to the legacy snapshot with the field mapping of contracts/mac-legacy-import.md §3. Every task, project, tag, subtask and comment, plus state, lists, order across projects, dates, priority, membership, outcome and archive state, must match, with exact counts. On a mismatch, the staging file is deleted, the legacy file stays untouched, and the X-05 "couldn't carry over" path runs (`verificationFailed`). This never happens silently.
+  6. **Record and back up**: write the review marks to `mac-local.json` and record `legacyImport.state = completed` with the legacy file's digest and the backup name. Only then move the staging file to `store.json` with an exclusive rename that fails if `store.json` exists, and then rename `local-gtd.json` to `local-gtd.backup-<UTC yyyyMMdd'T'HHmmss'Z'>.json` in the same folder. Its content stays untouched.
+  7. **Backup retention**: at each launch and after each sign-out, the backup is deleted once **both** are true: 30 days have passed since the import, and a sign-out has happened since the import. FR-021 says "at least 30 days, or until the person signs out, whichever is later". Without a sign-out it is kept (FR-021 as amended in review c1).
+  - **Re-runs and later files**: the state machine (`none`, `inProgress`, `completed`, `unreadable`, `laterFileKept`), its invariants and its launch decision table are in data-model E7.1, which is normative. Its core rule: the importer creates `store.json` only by the exclusive rename of its own verified staging file, so it never writes into or replaces a workspace in use, even when `mac-local.json` is lost; a `local-gtd.json` that appears after the workspace exists is kept untouched and surfaced once (FR-033). This replaces the earlier table, which re-ran the import whenever no `completed` record existed and replaced a leftover `store.json`; that could overwrite a used workspace when an older copy, a restore or a deleted sidecar brought the legacy file back (review c1, F02).
 
 - **Rationale**:
   - **Outbox as the data**: account-less data as outbox operations is exactly the iPhone model. First sign-in then uploads and merges by name with no Mac-specific code (FR-003, US4-3).
@@ -187,7 +179,7 @@ spec or design left open, it says so.
   - **After the first sign-in**: the pulled base replaces the local times, so the Mac's History shows the sign-in day as the completion day of tasks completed before it. Due dates, order and every other field are kept.
   - The iPhone's account-less upload has the same limit today.
   - Preserving the times would need client-supplied timestamps on the server, which intake §4 lists as out of scope ("changing … how the server stores tasks").
-  - This is recorded as an open question for the owner (plan "Open questions"); the default is to accept the limit.
+  - Resolved: the spec amendment `0b9fffe` records the limit in Assumptions (the owner delegated it), so it is no longer an open question.
 
 ## R6. Two processes and a single instance
 
@@ -196,7 +188,7 @@ spec or design left open, it says so.
   - **Single instance**: one Brain Buddy Mac process at a time, enforced in `macos/Sources/BrainBuddyMac/SingleInstanceGuard.swift`:
     1. At launch the app takes an exclusive, non-blocking `flock` on `~/Library/Application Support/BrainBuddyMac/.instance.lock` and holds it for the life of the process.
     2. If the lock is held, it looks for the other process with `NSRunningApplication.runningApplications(withBundleIdentifier:)` (bundle id `com.brainbuddy.mac.prototype`, `macos/AppInfo.plist`). If one is found, it activates that window and exits at once.
-    3. Otherwise (for example an unbundled `swift run` copy holds the lock) it shows one alert, "Brain Buddy is already open." / "Close the other copy of Brain Buddy, then open it again." with "Quit", and exits.
+    3. Otherwise (for example an unbundled `swift run` copy holds the lock) it shows design **X-08**: one standard alert, "Brain Buddy is already open." / "Switch to the open window to keep working.", default button "OK", and exits.
 - **Rationale**:
   - Two processes could share the document safely, but each would run its own `SyncEngine` over one outbox. Both would push the same operations; idempotency keys make that safe on the server, but the result is duplicated traffic and duplicated issues.
   - The spec allows "refuses to start" with the person told in plain words.
@@ -206,7 +198,7 @@ spec or design left open, it says so.
   - **Share safely, with one engine elected through the lock**: rejected. It needs leader hand-over on quit for no user benefit.
   - **`NSRunningApplication` only**: rejected. It misses unbundled copies and races at simultaneous launch.
   - **No guard, relying on the document lock**: rejected for the duplicate-engine reason above.
-- **Design gap**: the "already open" alert has no design id. It is a plain system alert with the copy above and is listed as design gap G-8 in the plan for the design owner to confirm.
+- **Design**: the alert is design X-08, added to design.md on 2026-10-06 from the plan's gap G-8 and cited by FR-017. Its signed-off copy and "OK" button above supersede the copy and "Quit" button this section first proposed (review c1, F08, F10, F35).
 
 ## R7. Status presentation: one description in the kit
 
@@ -221,12 +213,12 @@ spec or design left open, it says so.
     `Workspace` publishes it, built from `StoreDocument`, the engine status and the path monitor.
   - **`SyncStatusDescriber.describe(_:now:device:calendar:)`**: one function returning the line's words, tone (calm or attention), glyph, trailing action (sign in, retry, open issues or none), accessibility label and tooltip. It applies the precedence from design.md ("session ended → rejected changes → failing → offline → changes waiting → synced"), the 10 s waiting rule, the 60 s failing rule, FR-012's relative-time ladder and the "never negative" clock rule.
   - **`SyncActivityIndicator`**: a pure state machine fed `started(at:)` and `finished(at:)`. It answers `isVisible(at:)` and `nextChange(after:)`, with the 1 s show delay and the 0.5 s minimum.
-  - **`SyncTiming`**: the constants 1 s, 0.5 s, 10 s, 60 s, the ≤ 60 s refresh, the Mac 15 s tick and the 45 s pull age (R8).
+  - **`SyncTiming`**: the constants 1 s, 0.5 s, 10 s, 60 s, the ≤ 60 s refresh, the 15 s tick and the 30 s pull age (R8).
 
   The apps only render. The Mac renders in `SyncStatusLine.swift` and `SyncStatusPopover.swift` (X-01, X-02). The iPhone renders in `SyncStatusLabel.swift`, which keeps its name but delegates the words (M-01).
   - **Device noun**: `device: .mac | .iPhone` picks "Mac" or "iPhone" for the account-less line and the account-switch refusal. That refusal moves from the engine's hard-coded string (`SyncEngine.swift:195`) to the same copy catalogue.
-  - **Failing since**: the engine records `failingSince` (the first failure of the current continuous failure streak of a cycle blocked by the server: 5xx, 429, a redirect, an unreadable 2xx, or a timeout while the path monitor reports a network). It is persisted in `SyncMetadata` so a relaunch does not reset the 60 s clock, and cleared by the next successful cycle.
-  - **Engine status**: the engine's existing `.failing` (two failed cycles) stays for Settings detail and back-off only. The line uses `failingSince + 60 s` (FR-014).
+  - **Failing since**: the engine records `failingSince` (the first failure of the current continuous failure streak of a cycle blocked by the server: 5xx, 429, a redirect, an unreadable 2xx, or a timeout while the path monitor reports a network) and `lastFailedAttemptAt`. Both are persisted in `SyncMetadata` so a relaunch does not reset the 60 s clock, kept while offline, and cleared by the next successful cycle.
+  - **Engine status**: the engine's existing `.failing` (two failed cycles) stays for Settings detail and back-off only. The line shows "Couldn't sync" only once an attempt started at or after `failingSince + 60 s` has failed, and only while online; the engine schedules one attempt at exactly that instant (FR-014, SC-005; kit-commands §4; review c1, F13, F16).
 - **Rationale**:
   - FR-019 requires identical states and wording on both devices, and design.md "Notes for the plan" asks for the thresholds in shared code.
   - A pure function of a snapshot and `now` is deterministic under Swift Testing on Linux (`ios/AGENTS.md` "Tests").
@@ -246,20 +238,25 @@ spec or design left open, it says so.
     - `localChange` through the workspace's existing 2 s debounce;
     - `networkRestored` from `NWPathMonitor`;
     - `.manual` from "Sync now" / ⌘R;
-    - a new `.periodic` trigger fired by a 15 s timer while the app runs.
+    - a new `.periodic` trigger fired every 15 s while the app runs, by the kit's `PeriodicSyncTicker` (kit-commands §4; review c1, F18).
 
-    The Mac's `SyncConfiguration.pullInterval` is **45 s**. `.foreground`, `.manual` and `.networkRestored` request a pull regardless of age (the engine's existing `pullRequested`, `SyncEngine.swift:119-263`). On `NSApplication.willResignActive` and `willTerminate` it calls `Workspace.flush()`. A periodic cycle with nothing to push and a pull younger than 45 s does no network I/O.
-  - **iPhone**: the same `.periodic` tick runs while the scene is active (`ios/BrainBuddy/App/BrainBuddyApp.swift`), with pull age 45 s. Background behaviour is unchanged.
-  - **Web**: `useTaskList` and `useProjects` (`frontend/src/api/taskHooks.ts:35, 71`) get `refetchInterval: 45_000` with `refetchIntervalInBackground: false`. The detail query keeps its current focus refetch and autosave conflict handling.
+    The Mac's `SyncConfiguration.pullInterval` is **30 s** (review c1, F07, F17; first planned as 45 s). `.foreground`, `.manual` and `.networkRestored` request a pull regardless of age (the engine's existing `pullRequested`, `SyncEngine.swift:119-263`). On `NSApplication.willResignActive` and `willTerminate` it calls `Workspace.flush()`. `.periodic` never sets `pullRequested`: with nothing to push, a pull younger than 30 s and no retry pending it runs no cycle at all, so it emits no status change (review c1, F12).
+  - **iPhone**: the same `PeriodicSyncTicker` runs while the scene is active (`ios/BrainBuddy/App/BrainBuddyApp.swift` only toggles it), with pull age 30 s (FR-032). Background behaviour is unchanged.
+  - **Web** (FR-032; review c1, F05): `useTaskList`, `useProjects`, `useTags` and the open task's `useTaskDetail` (`frontend/src/api/taskHooks.ts:35, 62, 71, 78`) get `refetchInterval: 45_000` with `refetchIntervalInBackground: false`. The list response carries no subtasks or comments (only the detail route fills them, `backend/app/api/tasks.py:766`), and tags are a separate query, so all four are needed for SC-001's "all record types". The detail refetch goes through the panel's existing autosave conflict handling: a field being edited keeps its draft, and only untouched fields take the incoming value; scroll and selection are keyed by id and do not move.
 - **Rationale**:
   - SC-001 requires a change to show on the *other open* client within 60 s, in both directions, for Mac ↔ iPhone and Mac ↔ web.
   - The kit has no timer (it checks pull age only when a cycle runs), and the iPhone today pulls only on foreground and a 30-minute background refresh. The web never polls.
-  - A 15 s tick with a 45 s pull age bounds staleness at about 60 s (45 + 15), plus the sender's 2 s debounce. A 60 s age with a 60 s tick would allow about 120 s.
-  - At today's scale (tens of owners, hundreds of tasks; 020 plan "Scale/Scope") one full pull per client per 45 s is a few requests.
+  - **Worst case, Mac ↔ iPhone**: a tick pulls only when the last pull is at least 30 s old, and ticks come every 15 s, so the gap between two pulls is under 45 s plus one pull's duration. The sender pushes within its 2 s debounce. A change therefore shows within about 45 + 2 + one pull + request latency ≈ 50 s, under 60 s with margin. The first plan's 45 s age gave a 60 s gap and a worst case just over 60 s (review c1, F07, F17).
+  - **Worst case, Mac ↔ web**: the web refetches every 45 s while visible, and the Mac pulls as above; the sender's push lands within about 2 s. Both directions stay under 50 s.
+  - At today's scale (tens of owners, hundreds of tasks; 020 plan "Scale/Scope") one full pull per client per 30 s is a few requests.
+- **How SC-001 is measured** (review c1, F17): a check starts when the change is applied on the sending client and ends when the receiving client's state holds it. At logic level (`MacIPhoneConvergenceTests`), every scripted case must pass, not 95 %: each runs the worst tick phase (the change made just after the receiver's pull completed) with a non-zero pull duration (1.5 s on the fake transport). The 95 % allowance of SC-001 applies to host checks and the owner week only. Mac ↔ web is proven by composition, the Mac ↔ server logic test plus the web polling test, and by a Playwright check with a fake clock (`frontend/tests/e2e/cross-client-refresh.spec.ts`): a subtask, a comment and a tag rename made through the API while the page is open appear after at most 45 s of fake time.
 - **Alternatives considered**:
   - **A change feed or push channel**: rejected by intake §4 and spec Assumptions.
   - **Polling only while the Mac is frontmost**: rejected. US1-3 says "the open Mac", and SC-001 is measured with both open, not frontmost.
-  - **Leave the iPhone and web untouched**: rejected. SC-001 cannot then be met in the Mac → iPhone and Mac → web directions (spec inconsistency 2 in the plan).
+  - **Leave the iPhone and web untouched**: rejected. SC-001 cannot then be met in the Mac → iPhone and Mac → web directions (FR-032).
+  - **Relax US1-2 and US1-3 to "95 % of checks"**: rejected; tightening the pull age is cheap and keeps the acceptance scenarios literal.
+
+Spec Clarifications Q1 ("at least every 60 s … matches the iPhone's 60 s pull age") is not edited: its decision, at least once every 60 s, holds with margin, and "the iPhone's 60 s pull age" describes the kit default before 021, which callers that pass no interval keep.
 
 ## R9. Backend: ADR-0020 lossless archive, deployed in two steps
 
@@ -402,6 +399,7 @@ spec or design left open, it says so.
 - **Decision**:
   - **Store**: the Mac uses `KeychainSessionTokenStore(service: "app.brainbuddy.mac.session")`, a service of its own (`ios/BrainBuddyKit/Sources/BrainBuddyAPI/SessionTokenStore.swift:130`).
   - **Keychain flavour**: on macOS without `kSecUseDataProtectionKeychain`, the item lives in the login keychain. The data-protection keychain needs a signed application-identifier entitlement, which the ad-hoc-signed local build (`macos/build_app.sh`) does not have.
+  - **What that means at rest** (review c1, F25, F39): the store sets `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` on every add and update (`SessionTokenStore.swift:168, 224`). Apple documents that attribute for the data-protection keychain; on the file-based login keychain "this device only" does not hold, and the code path has never run on macOS. So PR-05 stops setting it on macOS and sets `kSecAttrSynchronizable = false` explicitly, and the disposition is stated honestly in data-model E9: protected by the login password and FileVault, **carried by Time Machine and Migration Assistant**, never in iCloud Keychain, removed on sign-out and the first 401, and a pending-logout copy kept until its logout is delivered. A macOS-lane test round-trips the store against the real login keychain (contracts/mac-app-host.md §8); a write failure is a sign-in error with a reference id, not a silent "Sign in again".
   - **Rebuild prompt**: after a rebuild changes the ad-hoc signature, macOS may ask once to allow access to the item. That is acceptable for a locally built app (spec Assumptions) and is recorded in `docs/native-macos-app.md`.
   - **Defaults**: the server address uses the iPhone's default and https rule. It is stored in `UserDefaults` key `BrainBuddyAPIURL` as today (ContentView l.18, 219) and edited under X-03 "Advanced".
   - **Sign-out**: sign-out and queued logout are the kit's (`SyncEngine.swift:217-233`, `SyncEngine+Session.swift:34-43`).
@@ -431,7 +429,8 @@ spec or design left open, it says so.
   - **Swift coverage scanning**: the Swift test trees (`ios/BrainBuddyKit/Tests`, `macos/Tests`) are scanned by `scripts/check_requirement_coverage.py` once 020 PR-01 lands. That slice adds `.swift` and both trees (in flight on `claude/020-pr-01-governance`). 021 depends on it rather than editing the guarded script a second time.
   - **Allure**: Allure taxonomy applies to pytest, Vitest and Playwright only. Swift Testing output is not in the Allure report (`ios/README.md` "Known gaps"; `docs/test-allure-taxonomy.md`).
   - **Convergence tests**: SC-001 and SC-002 are proven at logic level by two `Workspace`s, configured as Mac and iPhone clients, against one `BrainBuddyFakeServer` in `BrainBuddyWorkspaceTests`, on Linux. The fake server is not a product, so the Mac package cannot host this test. Both clients run the same kit code, so the logic test is exact for every rule except the Mac's AppKit glue, which the macOS lane tests separately.
-  - **Fake-server parity**: the fake server's archive, unarchive, outcome and listing behaviour is pinned to the backend by golden traces. `backend/tests/fixtures/project_archive_traces.json` is run by pytest against the real API and replayed against the fake server in `ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ProjectArchiveTraceReplayTests.swift`, the same technique as 020's traces (`specs/020-weekly-review/plan.md:787`).
+  - **Fake-server parity**: the fake server's archive, unarchive, outcome and listing behaviour is pinned to the backend by golden traces. `backend/tests/fixtures/project_archive_traces.json` is run by pytest against the real API and replayed against the fake server in `ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ProjectArchiveTraceReplayTests.swift`, the same technique as 020's traces (`specs/020-weekly-review/plan.md:787`). The kit copy first appears in PR-04, with a pytest that asserts byte equality of the two files; the landing path runs every stack, so drift on either side fails the landing (kit-commands §7; review c1, F21, F45, F61).
+  - **Swift ids before 020 PR-01** (review c1, F48): on this branch `scripts/check_requirement_coverage.py` scans only `.py`, `.ts`, `.tsx`, `.js` and `.jsx` under `backend/tests`, `frontend/tests` and `frontend/src`, and has no `--requirements` flag (l.54-63, 141). Until 020 PR-01 lands, each Swift slice (PR-04, PR-05, PR-07, PR-08, PR-09) records its coverage evidence as a requirement → test-name list in its PR body or landing record, produced by `grep -rn "021-\(FR\|SC\)-" <the slice's test files>`, beside the `swift test` output. The gate takes over once 020 PR-01 is in.
 - **Rationale**: the CLAUDE.md id rule; the Linux-first test rule of `ios/AGENTS.md`; and a parity mechanism that fails mechanically instead of by review.
 - **Alternatives considered**:
   - **Expose the fake server as a product for Mac tests**: rejected. It ships test code to app targets, and it is unnecessary given the above.
@@ -459,7 +458,8 @@ so this cross-feature rule is a delivery rule in plan.md, not a mechanical one.
   - **No content in logs**: the Mac target never logs or prints task, project or tag text, comments, outcomes or the email. Its only log points are an `os.Logger` (subsystem `com.brainbuddy.mac`) with the import counts, sync trigger names, cycle durations, error classes and reference ids.
   - **No egress before sign-in**: the kit sends nothing without an account (`SyncEngine.runCycle` guards on `account`).
   - **Voice stays local**: voice audio and transcripts never leave `VoiceCapture.swift`, which has no network path (`macos/README.md:128-131`).
-  - **Test**: a Mac test asserts that the legacy import's log line for a seeded sentinel title contains only counts.
+  - **Tests** (review c1, F24, F51): the import's log lines, driven through every path with a sentinel home folder, hold no sentinel title, no `/Users/`, no `local-gtd`, no backup or staging file name and no digest (mac-legacy-import §6); the sync category's lines hold no sentinel title, email or host; an account-less host with a counting transport sends no request; and the voice sources contain no network API (mac-app-host §8).
+  - **Evidence files**: manual records carry counts, durations and yes/no answers only, never paths, digests, titles or screenshots of a real account; a byte comparison is recorded as "bytes identical: yes/no" (PR-10 `evidence/README.md`).
 - **Rationale**: constitution I and IV; FR-029 and FR-030.
 
 ## R22. Agent context script
@@ -469,4 +469,4 @@ so this cross-feature rule is a delivery rule in plan.md, not a mechanical one.
   - `.specify/agent-commands/speckit-plan/SKILL.md` has no agent-context step.
   - `docs/spec-kit-workflow.md` records the `agent-context` extension as not installed because `CLAUDE.md` is hand-maintained.
   - `AGENTS.md:123-128` asks for pruning, not appending.
-  - The one line `AGENTS.md` should gain ("macOS app depends on BrainBuddyKit") is written by hand in PR-08.
+  - The one line `AGENTS.md` should gain ("macOS app depends on BrainBuddyKit") is written by hand in PR-09, the slice whose manifest owns `AGENTS.md` (review c1, F47).
