@@ -1,12 +1,13 @@
 # Modern authentication verification
 
-Status: implemented candidate under verification. This file records actual
-evidence, including failures. It does not certify launch or GDPR compliance.
+Status: local implementation input29411eb verified; release/feature acceptance incomplete. This file records actual evidence, including failures. It does not certify launch or GDPR compliance.
 
 ## Candidate and compatibility
 
-- Implementation branch: `feat/modern-auth`; current main
-  `21f08d26698a434f7b1d16b991b2b43d4e0ea0f2` integrated in `ce49b38`.
+- Implementation branch: `feat/modern-auth`; verified input
+  `29411eba1fa0f6f13e54ec55b29635b1169100ff`, integrated base
+  `143f1e813a466a7a000cd1f7e39bf4aae06c268d`. Earlier main
+  `21f08d26698a434f7b1d16b991b2b43d4e0ea0f2` was integrated in `ce49b38`.
   Concurrent main introduced `022-task-mcp`; this feature moved to
   `023-modern-auth` after checking all 113 local refs. Only its authored paths
   and qualified test labels changed; original reviewer outputs/digests remain
@@ -17,8 +18,10 @@ evidence, including failures. It does not certify launch or GDPR compliance.
   `backup/modern-auth-local-7dfc962`; no main or production ref was modified.
 - Mac PR [#265](https://github.com/MaksimKravchuk/brain_buddy/pull/265)
   inspected before implementation and rechecked at head
-  `10923345745dd38e6c176ea79e91bfff6c2a7885`: open, unmerged, planning changes
-  under `specs/021-mac-sync`. Existing password/me/logout wire contract,
+  `10923345745dd38e6c176ea79e91bfff6c2a7885` (historically open/unmerged).
+  Final recheck: same latest head `1e63e42acb3206980cc66b297eee315f1893dcb7`,
+  closed without a PR merge; its spec package is in integrated base143.
+  Planning changes remain under `specs/021-mac-sync`. Existing password/me/logout wire contract,
   default shared client identity and Mac Keychain namespace are preserved.
   Future remembered-email/outbox handling still belongs to 021.
 - The CI native lane now also builds/tests the Mac app with the same shared
@@ -273,3 +276,26 @@ storage failure before any credential submission with the outbox preserved,
 and cancellation while preparation waits. These new integrated native inputs
 require fresh Swift tests and candidate verification; the completed 630 run
 is historical evidence for its own SHA only.
+
+## Final integrated local verification at 29411eb
+
+Verified implementation input: `29411eba1fa0f6f13e54ec55b29635b1169100ff`; integrated main/base: `143f1e813a466a7a000cd1f7e39bf4aae06c268d`. The fresh complete `make verify-all` exited **0**. Only target ordering was supplied through `--eval`: browser first, then both unit suites. Every original target, recipe and artifact/coverage gate remained required. The actual explicit candidate field is294. Same-source pinned backend/frontend E2E images were reused after verifying production source equivalence; no fresh image build or image-label SHA is invented.
+
+- Backend: **4,324 passed**,1,179 warnings,1,325.76s; coverage **98.61% lines/95.86% branches** against unchanged98.47%/95.61%; taxonomy4,324.
+- Frontend: **1,726 passed/74 files**,425.30s; coverage **98.99% statements/97.83% branches/98.76% functions/99.51% lines**, above unchanged98.76%/97.77%/98.64%/98.84%; taxonomy1,726.
+- Browser: **65 legacy +14 modern passed**, one optional external-model skip, zero failures/flaky/retries. Freshness79 executed results, taxonomy80 and six required product stories passed.
+- Headed modern Chromium151 at1440×1000/390×851: ten real held-response interactions, **16.2ms maximum** pending feedback, single dispatch, disabled duplicate controls, visible keyboard focus,44 CSS-pixel controls, no horizontal overflow. Fourteen masked PNGs and14 Axe scans, zero reported violations; three account-surface scans each retain an incomplete rule. Actual two-screen visual inspection is bounded to these web viewports.
+- Legacy CRT: current294 identifier,120 samples,104.5ms aggregate p95,119/120 within200ms against unchanged required114; each operation p95≤134.6ms. This pass does not erase the earlier219.1ms failure or repair the independently reproduced baseline autosave P2.
+- Complete Swift package: framework summary **776 tests/74 suites passed in56.959s**, including all five modern workspace cases. One opt-in live-backend endpoint test/suite skipped. Actual older source:2pass/3fail/fourissues; actual final repair:all three regressions pass. All160 source/script hashes and11,984 official runtime regular-file hashes were verified after execution.
+
+The canonical native script is unchanged. Default official Swift-image container creation failed ENOSPC before execution. The green run used the script's supported `SWIFT_IMAGE` override: preserved official Swift6.2.4 compiler/runtime in the package bind mount and a compact original Ubuntu runtime image. The failed default/chroot-loader attempts and actual runtime/source provenance remain retained. This is local full-package proof, not Xcode, current public `ios-kit`/`ios-app`, Mac-device or physical-iOS evidence.
+
+[Actual aggregate](evidence/local-29411eb/aggregate-summary.json), [167-path source manifest](evidence/local-29411eb/source-manifest.json), [browser observation snapshot](evidence/local-29411eb/browser-observation.json), [native summary](evidence/local-29411eb/native-summary.json), [native source/input](evidence/local-29411eb/native-input.json). The browser snapshot honestly says aggregate was running at its earlier observation; the separate actual aggregate records the later completed result. Raw full log: `/tmp/modern-auth-023-verify-all-final-integrated-v8.log`, SHA256 `037c29cadf6ac486390664ace0e137daa399130508d2c378328e1967e5af5f81`. Native raw log SHA256 `9aed719e0f72c58170f1407959fdc17171e4ed0cfb6e0b65beecf1f4772377bc`. Archives remain `/tmp/modern-auth-v8-actual/` and `/tmp/modern-auth-native-weekly-review-*`.
+
+Mac PR265 was rechecked near19:39UTC: same head `1e63e42acb3206980cc66b297eee315f1893dcb7`, closed at2026-10-06T17:57:59Z, GitHub `merged=false`; the30-file spec package is already in integrated main143. Earlier open/unmerged observations remain historical. Mac implementation stays owned by the other chat; existing password/me/logout/default-client/Keychain contracts are preserved. PR270 remains open draft at4439c00.
+
+The validated [writer receipt](pre-freeze-writer-receipt.json) proves four local writer obligations for294. Correct path classification is **ASK** (process exit1 correctly refuses automatic promotion), not release authorization. Independent bounded static/native/browser reviews approve the inspected code/evidence with zero new findings; actual reviewer runtime-model identity remains unverifiable. Readiness/traceability is separate from formal grading.
+
+Required current public iOS lanes, physical-native interaction/provider flows, live configured OAuth/SMTP/private relay/notices, production disclosure inputs and release evidence remain unverified. Formal [acceptance](acceptance.md) is **not_run** under the skill's explicit unmet precondition; [report](report.md) records all remaining tasks. Final evidence-only documentation does not relabel tests or reviews as its later commit SHA, exact public CI or a deployed build.
+
+Current independent readiness: **19 covered/13 weak/1 missing**,not_ready/not_graded. [Byte-preserved audit](reviews/final-implementation/modern-auth-acceptance-readiness-29411eb.json) independently matched50 representative test references,4,324 backend/1,726 frontend/79 browser passes plus optional skip, current coverage and the local typed receipt. [Traceability](traceability.md) retains the reviewer's exact statements, statuses and limitations.

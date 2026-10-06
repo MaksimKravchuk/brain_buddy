@@ -81,7 +81,7 @@
 - [x] T040 Document Google/Apple/SMTP/free-quota/key rotation/migration/recovery setup in docs/modern-auth-operations.md, .env.example, docs/auth.md, docs/api-compatibility.md, docs/native-ios-app.md and ios/README.md. [023-FR-002/020/023/024/025]
 - [ ] T041 Measure actual web/native <=200 ms pending feedback, focus/duplicate submits, 44pt/mobile/keyboard/uncertain states and retain candidate-bound screenshots/measurements in specs/023-modern-auth/verification.md per quickstart.md. [023-FR-022, 023-SC-007]
 - [ ] T042 Run make verify-all, full 023 requirement coverage, native gates and meaningful negative suites; fix failures and retain actual fresh results in specs/023-modern-auth/verification.md. [023-SC-001–008]
-- [ ] T043 Produce typed writer receipt under specs/023-modern-auth/ for frozen implementation SHA, validate via scripts/validate_pre_freeze_receipt.py and obtain independent acceptance/code/QA review; no writer-certified independent PASS. [023-SC-008]
+- [x] T043 Produce typed writer receipt under specs/023-modern-auth/ for frozen implementation SHA, validate via scripts/validate_pre_freeze_receipt.py and obtain independent acceptance/code/QA review; no writer-certified independent PASS. [023-SC-008]
 - [ ] T044 Prepare focused single ASK PR with exact SHA, linked spec/design/reviews and current evidence; run /speckit-accept and /speckit-report into specs/023-modern-auth/acceptance.md and report.md. Distinguish remaining live setup/migration/native/production evidence; no ad-hoc merge/deploy. [023-SC-008]
 
 ## Pre-freeze evidence

@@ -1,0 +1,66 @@
+{
+  "artifact_type": "actual_local_canonical_aggregate_summary",
+  "implementation_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+  "integrated_base_sha": "143f1e813a466a7a000cd1f7e39bf4aae06c268d",
+  "aggregate_exit": 0,
+  "completed_observation_utc": "2026-10-06T19:43:23.591863+00:00",
+  "command": "make -j2 --eval='test-backend test-frontend: test-e2e' verify-all",
+  "execution_configuration": "Browser first; all original targets and gates retained. CI=1; explicit candidate294; pinned E2E images with verified unchanged backend/frontend production sources; headed Chromium151 for modern auth. Private Docker client config and local display supplied; no secret values recorded.",
+  "backend": {
+    "passed": 4324,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 1179,
+    "duration_seconds": 1325.76,
+    "coverage_line_percent": 98.61,
+    "coverage_branch_percent": 95.86,
+    "taxonomy_results": 4324
+  },
+  "frontend": {
+    "passed": 1726,
+    "failed": 0,
+    "files_passed": 74,
+    "duration_seconds": 425.3,
+    "coverage_statement_percent": 98.99,
+    "coverage_branch_percent": 97.83,
+    "coverage_function_percent": 98.76,
+    "coverage_line_percent": 99.51,
+    "taxonomy_results": 1726
+  },
+  "browser": {
+    "legacy_passed": 65,
+    "modern_passed": 14,
+    "optional_external_model_skipped": 1,
+    "failed": 0,
+    "flaky": 0,
+    "retries": 0,
+    "freshness_executed_results": 79,
+    "taxonomy_results": 80,
+    "required_product_stories": 6,
+    "pending_action_max_ms": 16.2,
+    "axe_reported_violations": 0,
+    "axe_scans": 14,
+    "axe_scans_with_incomplete_checks": 3,
+    "masked_screenshots": 14
+  },
+  "unchanged_coverage_floors": true,
+  "allure_counts": {
+    "backend-allure": {
+      "passed": 4324
+    },
+    "frontend-allure": {
+      "passed": 1726
+    },
+    "playwright-allure": {
+      "passed": 79,
+      "skipped": 1
+    }
+  },
+  "command_log": "/tmp/modern-auth-023-verify-all-final-integrated-v8.log",
+  "log_sha256": "037c29cadf6ac486390664ace0e137daa399130508d2c378328e1967e5af5f81",
+  "source_manifest": "/tmp/modern-auth-frozen-29411eb-v8.json",
+  "source_manifest_sha256": "d1a131a5bb5b42259bf5eeb1139455e2c1099e1e7b52dc9c64c41d1607b5c821",
+  "frozen_auth_paths_verified": 167,
+  "source_mismatches_after_run": [],
+  "scope": "Local canonical aggregate and independently inspected current browser evidence. Physical native, current published iOS app/kit CI, live configured providers, legal disclosures, release and production remain unverified. No formal feature acceptance or publication implied."
+}
