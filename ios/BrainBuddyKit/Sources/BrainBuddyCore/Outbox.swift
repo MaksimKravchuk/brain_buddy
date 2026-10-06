@@ -124,8 +124,11 @@ public struct SyncMetadata: Hashable, Sendable, Codable {
 /// The current state is derived: `OutboxReplayer.replay(outbox, onto: base)`.
 /// Without a linked account `base` stays empty and the (compacted) outbox is
 /// the user's data; linking an account uploads it.
+///
+/// Version 2 (spec 020) adds `base.review` and `local`; version-1 documents
+/// are migrated forward by `StoreDocumentCoding` without loss.
 public struct StoreDocument: Hashable, Sendable, Codable {
-    public static let currentVersion = 1
+    public static let currentVersion = 2
 
     public var version: Int
     /// Incremented on every write, by any process sharing the file.
@@ -135,11 +138,13 @@ public struct StoreDocument: Hashable, Sendable, Codable {
     public var issues: [SyncIssue]
     public var account: LinkedAccount?
     public var sync: SyncMetadata
+    /// Device-local review state; never synced (data-model E10).
+    public var local: LocalReviewState
 
     public init(
         version: Int = StoreDocument.currentVersion, generation: Int = 0, base: GTDState = .empty,
         outbox: [PendingOperation] = [], issues: [SyncIssue] = [], account: LinkedAccount? = nil,
-        sync: SyncMetadata = SyncMetadata()
+        sync: SyncMetadata = SyncMetadata(), local: LocalReviewState = .empty
     ) {
         self.version = version
         self.generation = generation
@@ -148,6 +153,29 @@ public struct StoreDocument: Hashable, Sendable, Codable {
         self.issues = issues
         self.account = account
         self.sync = sync
+        self.local = local
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case version, generation, base, outbox, issues, account, sync, local
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        generation = try values.decode(Int.self, forKey: .generation)
+        base = try values.decode(GTDState.self, forKey: .base)
+        outbox = try values.decode([PendingOperation].self, forKey: .outbox)
+        issues = try values.decode([SyncIssue].self, forKey: .issues)
+        account = try values.decodeIfPresent(LinkedAccount.self, forKey: .account)
+        sync = try values.decode(SyncMetadata.self, forKey: .sync)
+        local = try values.decodeIfPresent(LocalReviewState.self, forKey: .local) ?? .empty
+    }
+
+    /// What the UI shows: the outbox replayed onto the base, with the
+    /// account-less activation anchor (`local.activatedAt`).
+    public func replayed(with extra: [PendingOperation] = []) -> ReplayResult {
+        OutboxReplayer.replay(outbox + extra, onto: base, activatedAt: local.activatedAt)
     }
 }
 

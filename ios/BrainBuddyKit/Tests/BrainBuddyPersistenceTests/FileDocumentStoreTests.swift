@@ -161,13 +161,14 @@ import Musl
         let directory = try makeTemporaryDirectory()
         defer { removeTemporaryDirectory(directory) }
         let url = directory.appendingPathComponent("store.json")
-        let original = Data(#"{"version":2,"generation":7,"somethingNew":true}"#.utf8)
+        // Spec 020 made version 2 current; 3 is the newer one.
+        let original = Data(#"{"version":3,"generation":7,"somethingNew":true}"#.utf8)
         try original.write(to: url)
         let store = FileDocumentStore(fileURL: url)
 
-        await #expect(throws: DocumentStoreError.unsupportedVersion(2)) { try await store.load() }
-        await #expect(throws: DocumentStoreError.unsupportedVersion(2)) { try await store.generation() }
-        await #expect(throws: DocumentStoreError.unsupportedVersion(2)) { try await store.update { _ in } }
+        await #expect(throws: DocumentStoreError.unsupportedVersion(3)) { try await store.load() }
+        await #expect(throws: DocumentStoreError.unsupportedVersion(3)) { try await store.generation() }
+        await #expect(throws: DocumentStoreError.unsupportedVersion(3)) { try await store.update { _ in } }
         #expect(try Data(contentsOf: url) == original)
     }
 

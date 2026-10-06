@@ -180,13 +180,18 @@ public struct TaskDTO: Codable, Hashable, Sendable, Identifiable {
     public var revision: Int
     public var subtasks: [SubtaskDTO]
     public var comments: [CommentDTO]
+    /// Spec 020 (http §2): nil unless the task is in Next with a started clock.
+    public var formulation: TaskFormulationDTO?
+    /// Spec 020: set only by auto-park, while the task is in Someday.
+    public var parked: TaskParkDTO?
 
     public init(
         id: String, title: String, details: String? = nil, state: TaskState, projectID: String? = nil,
         tagIDs: [String] = [], dueDate: CalendarDay? = nil, priority: TaskPriority = .none,
         waitingFor: String? = nil, waitingSince: Date? = nil, orderKey: Int, sourceCaptureIDs: [String] = [],
         createdAt: Date, updatedAt: Date, completedAt: Date? = nil, cancelledAt: Date? = nil, revision: Int,
-        subtasks: [SubtaskDTO] = [], comments: [CommentDTO] = []
+        subtasks: [SubtaskDTO] = [], comments: [CommentDTO] = [], formulation: TaskFormulationDTO? = nil,
+        parked: TaskParkDTO? = nil
     ) {
         self.id = id
         self.title = title
@@ -207,10 +212,12 @@ public struct TaskDTO: Codable, Hashable, Sendable, Identifiable {
         self.revision = revision
         self.subtasks = subtasks
         self.comments = comments
+        self.formulation = formulation
+        self.parked = parked
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, details, state, priority, revision, subtasks, comments
+        case id, title, details, state, priority, revision, subtasks, comments, formulation, parked
         case projectID = "project_id"
         case tagIDs = "tag_ids"
         case dueDate = "due_date"
@@ -245,6 +252,77 @@ public struct TaskDTO: Codable, Hashable, Sendable, Identifiable {
         revision = try values.decode(Int.self, forKey: .revision)
         subtasks = try values.decodeIfPresent([SubtaskDTO].self, forKey: .subtasks) ?? []
         comments = try values.decodeIfPresent([CommentDTO].self, forKey: .comments) ?? []
+        formulation = try values.decodeIfPresent(TaskFormulationDTO.self, forKey: .formulation)
+        parked = try values.decodeIfPresent(TaskParkDTO.self, forKey: .parked)
+    }
+}
+
+/// `TaskFormulationResponse` (spec 020, http §2). The derived instants are
+/// advisory for display and null while the owner is not activated.
+public struct TaskFormulationDTO: Codable, Hashable, Sendable {
+    public var id: String
+    public var startedAt: Date
+    public var extendedAt: Date?
+    public var extensionReason: String?
+    public var parkFloorAt: Date?
+    public var consecutiveStalled: Int
+    public var ageingAt: Date?
+    public var askAt: Date?
+    public var parkDueAt: Date?
+    public var pausedUntil: Date?
+
+    public init(
+        id: String, startedAt: Date, extendedAt: Date? = nil, extensionReason: String? = nil, parkFloorAt: Date? = nil,
+        consecutiveStalled: Int = 0, ageingAt: Date? = nil, askAt: Date? = nil, parkDueAt: Date? = nil,
+        pausedUntil: Date? = nil
+    ) {
+        self.id = id
+        self.startedAt = startedAt
+        self.extendedAt = extendedAt
+        self.extensionReason = extensionReason
+        self.parkFloorAt = parkFloorAt
+        self.consecutiveStalled = consecutiveStalled
+        self.ageingAt = ageingAt
+        self.askAt = askAt
+        self.parkDueAt = parkDueAt
+        self.pausedUntil = pausedUntil
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case startedAt = "started_at"
+        case extendedAt = "extended_at"
+        case extensionReason = "extension_reason"
+        case parkFloorAt = "park_floor_at"
+        case consecutiveStalled = "consecutive_stalled"
+        case ageingAt = "ageing_at"
+        case askAt = "ask_at"
+        case parkDueAt = "park_due_at"
+        case pausedUntil = "paused_until"
+    }
+
+    /// The clock fields as the device stores them.
+    public var clock: FormulationClock {
+        FormulationClock(
+            id: FormulationID(id), startedAt: startedAt, extendedAt: extendedAt, extensionReason: extensionReason,
+            parkFloorAt: parkFloorAt
+        )
+    }
+}
+
+/// `TaskParkResponse`: `clock_before` stays on the server.
+public struct TaskParkDTO: Codable, Hashable, Sendable {
+    public var at: Date
+    public var formulationID: String
+
+    public init(at: Date, formulationID: String) {
+        self.at = at
+        self.formulationID = formulationID
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case at
+        case formulationID = "formulation_id"
     }
 }
 

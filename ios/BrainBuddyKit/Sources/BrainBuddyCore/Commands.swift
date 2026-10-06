@@ -72,6 +72,18 @@ public enum GTDCommand: Hashable, Sendable, Codable {
     case transitionSubtask(TransitionSubtask)
     case createComment(CreateComment)
     case updateComment(UpdateComment)
+    /// `POST /tasks/{id}/decisions` (spec 020, contracts/ios-commands.md §2).
+    case decideTask(DecideTask)
+    /// `POST /review/decisions/{id}/undo`.
+    case undoDecision(DecisionID)
+    /// `POST /tasks/{id}/auto-park`.
+    case autoParkTask(AutoParkTask)
+    /// `POST /review/bulk-releases`.
+    case bulkRelease(BulkRelease)
+    /// `POST /review/bulk-releases/{id}/undo`.
+    case undoBulkRelease(BulkID)
+    /// One request per case; mutates `GTDState.review` only.
+    case review(ReviewCommand)
 
     public struct CreateProject: Hashable, Sendable, Codable {
         public var projectID: ProjectID
@@ -124,10 +136,12 @@ public enum GTDCommand: Hashable, Sendable, Codable {
         public var priority: TaskPriority
         public var projectID: ProjectID?
         public var tagIDs: [TagID]
+        /// The formulation a creation in Next starts (`new_formulation_id`).
+        public var newFormulationID: FormulationID?
         public init(
             taskID: TaskID, title: String, details: String? = nil, list: OpenList,
             waitingFor: String? = nil, dueDate: CalendarDay? = nil, priority: TaskPriority = .none,
-            projectID: ProjectID? = nil, tagIDs: [TagID] = []
+            projectID: ProjectID? = nil, tagIDs: [TagID] = [], newFormulationID: FormulationID? = nil
         ) {
             self.taskID = taskID
             self.title = title
@@ -138,15 +152,19 @@ public enum GTDCommand: Hashable, Sendable, Codable {
             self.priority = priority
             self.projectID = projectID
             self.tagIDs = tagIDs
+            self.newFormulationID = newFormulationID
         }
     }
 
     public struct UpdateTask: Hashable, Sendable, Codable {
         public var taskID: TaskID
         public var changes: TaskChanges
-        public init(taskID: TaskID, changes: TaskChanges) {
+        /// The formulation a substantive title change in Next starts.
+        public var newFormulationID: FormulationID?
+        public init(taskID: TaskID, changes: TaskChanges, newFormulationID: FormulationID? = nil) {
             self.taskID = taskID
             self.changes = changes
+            self.newFormulationID = newFormulationID
         }
     }
 
@@ -157,11 +175,102 @@ public enum GTDCommand: Hashable, Sendable, Codable {
         public var action: TaskTransitionAction
         public var toList: OpenList?
         public var waitingFor: String?
-        public init(taskID: TaskID, action: TaskTransitionAction, toList: OpenList? = nil, waitingFor: String? = nil) {
+        /// The formulation a move or reopen into Next starts.
+        public var newFormulationID: FormulationID?
+        public init(
+            taskID: TaskID, action: TaskTransitionAction, toList: OpenList? = nil, waitingFor: String? = nil,
+            newFormulationID: FormulationID? = nil
+        ) {
             self.taskID = taskID
             self.action = action
             self.toList = toList
             self.waitingFor = waitingFor
+            self.newFormulationID = newFormulationID
+        }
+    }
+
+    /// A decision on one task (contracts/http.md §3). Carries every client id
+    /// it creates: the decision, a new formulation, a follow-up task.
+    public struct DecideTask: Hashable, Sendable, Codable {
+        public var decisionID: DecisionID
+        public var taskID: TaskID
+        public var type: DecisionType
+        /// The formulation decided on (required for the Next-only types).
+        public var formulationID: FormulationID?
+        public var newFormulationID: FormulationID?
+        public var stallReason: StallReason?
+        public var title: String?
+        public var waitingFor: String?
+        /// `extend` only: why the wording still fits.
+        public var reason: String?
+        public var sessionID: ReviewSessionID?
+        public var aiUse: AIUse
+        public var navigatorRequestID: String?
+        /// `follow_up`: the client id of the task it creates (`task_<uuid>`).
+        public var followUpTaskID: TaskID?
+        /// False once the undo snapshot was dropped by local retention (7 days).
+        public var undoRetained: Bool
+
+        public init(
+            decisionID: DecisionID, taskID: TaskID, type: DecisionType, formulationID: FormulationID? = nil,
+            newFormulationID: FormulationID? = nil, stallReason: StallReason? = nil, title: String? = nil,
+            waitingFor: String? = nil, reason: String? = nil, sessionID: ReviewSessionID? = nil, aiUse: AIUse = .none,
+            navigatorRequestID: String? = nil, followUpTaskID: TaskID? = nil, undoRetained: Bool = true
+        ) {
+            self.decisionID = decisionID
+            self.taskID = taskID
+            self.type = type
+            self.formulationID = formulationID
+            self.newFormulationID = newFormulationID
+            self.stallReason = stallReason
+            self.title = title
+            self.waitingFor = waitingFor
+            self.reason = reason
+            self.sessionID = sessionID
+            self.aiUse = aiUse
+            self.navigatorRequestID = navigatorRequestID
+            self.followUpTaskID = followUpTaskID
+            self.undoRetained = undoRetained
+        }
+    }
+
+    /// A park the device observed. `observedAt` is the instant it evaluated
+    /// the task as `park_due` (signed in: its clock plus the last observed
+    /// server offset). `optimistic` is false when the device was online: the
+    /// task then parks on the device only once the server answers
+    /// `applied: true` (contracts/ios-commands.md §5).
+    public struct AutoParkTask: Hashable, Sendable, Codable {
+        public var taskID: TaskID
+        public var formulationID: FormulationID
+        public var observedAt: Date?
+        public var optimistic: Bool
+
+        public init(taskID: TaskID, formulationID: FormulationID, observedAt: Date? = nil, optimistic: Bool = true) {
+            self.taskID = taskID
+            self.formulationID = formulationID
+            self.observedAt = observedAt
+            self.optimistic = optimistic
+        }
+    }
+
+    /// A person's release of several tasks to Someday (FR-017 restart,
+    /// FR-030 Inbox remainder); the server decides eligibility per task.
+    public struct BulkRelease: Hashable, Sendable, Codable {
+        public var bulkID: BulkID
+        public var kind: BulkReleaseKindCode
+        public var sessionID: ReviewSessionID?
+        public var taskIDs: [TaskID]
+        public var undoRetained: Bool
+
+        public init(
+            bulkID: BulkID, kind: BulkReleaseKindCode, sessionID: ReviewSessionID? = nil, taskIDs: [TaskID],
+            undoRetained: Bool = true
+        ) {
+            self.bulkID = bulkID
+            self.kind = kind
+            self.sessionID = sessionID
+            self.taskIDs = taskIDs
+            self.undoRetained = undoRetained
         }
     }
 
@@ -221,6 +330,113 @@ public enum GTDCommand: Hashable, Sendable, Codable {
     }
 }
 
+/// Review commands (contracts/ios-commands.md §2): each maps to one request
+/// and mutates `GTDState.review` only.
+public enum ReviewCommand: Hashable, Sendable, Codable {
+    /// `POST /review/explainer/acknowledge` with the device zone (FR-051).
+    /// It writes only the activation instant; task clocks change in the
+    /// post-replay activation step (`ReviewActivation`).
+    case acknowledgeExplainer(timeZone: String?)
+    /// `PUT /review/settings`: only the fields this change sets.
+    case updateSettings(ReviewSettingsChange)
+    /// `POST /review/parks/acknowledge`.
+    case acknowledgeParks([ParkAck])
+    /// `POST /review/sessions` with `id` and `replace_open: true`.
+    case startSession(StartSession)
+    /// `PATCH /review/sessions/{id}` with `progress_id`.
+    case progressSession(SessionProgress)
+    /// `POST /review/sessions/{id}/finish` (only Done on the summary).
+    case finishSession(FinishSession)
+    /// `POST /review/navigator/consent`.
+    case grantNavigatorConsent(provider: String, consentTextVersion: Int)
+    /// `DELETE /review/navigator/consent`.
+    case revokeNavigatorConsent(provider: String)
+}
+
+/// The fields of `PUT /review/settings` a change sets; nil leaves a field alone.
+public struct ReviewSettingsChange: Hashable, Sendable, Codable {
+    public var thresholdDays: Int?
+    public var reviewWeekday: Int?
+    public var reviewTime: String?
+    public var timeZone: String?
+    public var onboarded: Bool
+
+    public init(
+        thresholdDays: Int? = nil, reviewWeekday: Int? = nil, reviewTime: String? = nil, timeZone: String? = nil,
+        onboarded: Bool = false
+    ) {
+        self.thresholdDays = thresholdDays
+        self.reviewWeekday = reviewWeekday
+        self.reviewTime = reviewTime
+        self.timeZone = timeZone
+        self.onboarded = onboarded
+    }
+
+    public var isEmpty: Bool {
+        thresholdDays == nil && reviewWeekday == nil && reviewTime == nil && timeZone == nil && !onboarded
+    }
+}
+
+public struct StartSession: Hashable, Sendable, Codable {
+    public var sessionID: ReviewSessionID
+    public var mode: ReviewMode
+    public var entry: ReviewEntry
+    public var origin: ReviewOrigin
+    public var skipSteps: [ReviewStep]
+
+    public init(
+        sessionID: ReviewSessionID, mode: ReviewMode, entry: ReviewEntry, origin: ReviewOrigin = .ios,
+        skipSteps: [ReviewStep] = []
+    ) {
+        self.sessionID = sessionID
+        self.mode = mode
+        self.entry = entry
+        self.origin = origin
+        self.skipSteps = skipSteps
+    }
+}
+
+/// One progress change, replay-safe by `progressID` at any age (http §6).
+public struct SessionProgress: Hashable, Sendable, Codable {
+    public var sessionID: ReviewSessionID
+    public var progressID: ProgressID
+    public var currentStep: ReviewStep?
+    public var step: ReviewStep?
+    public var stepStatus: StepStatus?
+    public var activeStep: ReviewStep?
+    public var activeSeconds: Int?
+    public var setAsideTaskID: TaskID?
+    public var inboxProcessedDelta: Int?
+    public var snapshotDecisionQueue: Bool
+
+    public init(
+        sessionID: ReviewSessionID, progressID: ProgressID, currentStep: ReviewStep? = nil, step: ReviewStep? = nil,
+        stepStatus: StepStatus? = nil, activeStep: ReviewStep? = nil, activeSeconds: Int? = nil,
+        setAsideTaskID: TaskID? = nil, inboxProcessedDelta: Int? = nil, snapshotDecisionQueue: Bool = false
+    ) {
+        self.sessionID = sessionID
+        self.progressID = progressID
+        self.currentStep = currentStep
+        self.step = step
+        self.stepStatus = stepStatus
+        self.activeStep = activeStep
+        self.activeSeconds = activeSeconds
+        self.setAsideTaskID = setAsideTaskID
+        self.inboxProcessedDelta = inboxProcessedDelta
+        self.snapshotDecisionQueue = snapshotDecisionQueue
+    }
+}
+
+public struct FinishSession: Hashable, Sendable, Codable {
+    public var sessionID: ReviewSessionID
+    public var clearStart: ClearStart?
+
+    public init(sessionID: ReviewSessionID, clearStart: ClearStart? = nil) {
+        self.sessionID = sessionID
+        self.clearStart = clearStart
+    }
+}
+
 /// Every rule the reducer enforces. `message` is user-facing copy: calm,
 /// sentence case, English, and specific about the reason.
 public enum GTDValidationError: Error, Hashable, Sendable, Codable {
@@ -257,6 +473,16 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
     case priorityRequired
     case projectAlreadyArchived
     case tagAlreadyDeleted
+    // Spec 020 (contracts/ios-commands.md §2).
+    case decisionNotAllowed
+    case extensionAlreadyUsed
+    case extensionNotDue
+    case formulationChanged
+    case undoUnavailable
+    case projectArchived
+    case extensionReasonRequired
+    case extensionReasonTooLong
+    case reviewNotFound
 
     public var message: String {
         switch self {
@@ -292,6 +518,15 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
         case .priorityRequired: "Choose a priority, or No priority."
         case .projectAlreadyArchived: "This project is already archived."
         case .tagAlreadyDeleted: "This tag was already deleted."
+        case .decisionNotAllowed: "This decision isn't available for this task's current list. Nothing was changed."
+        case .extensionAlreadyUsed: "You've already kept this wording 7 more days once."
+        case .extensionNotDue: "This wording can be kept 7 more days once it asks for a decision."
+        case .formulationChanged: "This task changed on another device, so nothing was applied."
+        case .undoUnavailable: "Couldn't undo: the task changed since."
+        case .projectArchived: "Restore this archived project first."
+        case .extensionReasonRequired: "Add a reason to continue."
+        case .extensionReasonTooLong: "Keep the reason under \(GTDLimits.title) characters."
+        case .reviewNotFound: "This review is no longer on this device."
         }
     }
 }

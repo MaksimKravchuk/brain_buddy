@@ -15,6 +15,31 @@ struct CompactionPropertyTests {
 
     @Test("Compacted outboxes replay to the sequential state", arguments: seeds)
     func replayEquivalence(seed: UInt64) throws {
+        try run(seed: seed, clockAware: false)
+    }
+
+    /// Spec 020: once the review is exposed the compactor is clock-aware, and
+    /// then the formulation clock fields match too (020-FR-001, T051).
+    @Test("020-FR-001 clock-aware compacted outboxes replay to the sequential state, clocks included", arguments: seeds.prefix(300))
+    func clockAwareReplayEquivalence(seed: UInt64) throws {
+        try run(seed: seed, clockAware: true)
+    }
+
+    /// Before exposure the compactor folds as it always did; the clock fields
+    /// it shifts are a local projection that activation clamps and the server
+    /// recomputes, so they count as server-assigned there.
+    private func normalized(_ state: GTDState, clockAware: Bool) -> GTDState {
+        var copy = state.ignoringServerAssignedFields
+        guard !clockAware else { return copy }
+        for id in copy.tasks.keys {
+            copy.tasks[id]!.formulation = nil
+            copy.tasks[id]!.consecutiveStalledFormulations = 0
+            copy.tasks[id]!.parked = nil
+        }
+        return copy
+    }
+
+    private func run(seed: UInt64, clockAware: Bool) throws {
         var generator = CommandGenerator(seed: seed)
         // Even seeds start with no account (the outbox is all the data), odd
         // ones from server-confirmed records.
@@ -28,7 +53,9 @@ struct CompactionPropertyTests {
             guard (try? GTDReducer.apply(command, at: date, to: &sequential)) != nil else { continue }
             accepted += 1
             let before = outbox
-            outbox = OutboxCompactor.appending(PendingOperation(command: command, issuedAt: date), to: outbox)
+            outbox = OutboxCompactor.appending(
+                PendingOperation(command: command, issuedAt: date), to: outbox, clockAware: clockAware
+            )
             #expect(
                 outbox.filter(\.hasBeenSent) == before.filter(\.hasBeenSent),
                 "seed \(seed), step \(step): sent operations must not change"
@@ -37,10 +64,10 @@ struct CompactionPropertyTests {
             let replayed = OutboxReplayer.replay(outbox, onto: base)
             #expect(replayed.rejected.isEmpty, "seed \(seed), step \(step): \(replayed.rejected) after \(command)")
             #expect(
-                replayed.state.ignoringServerAssignedFields == sequential.ignoringServerAssignedFields,
+                normalized(replayed.state, clockAware: clockAware) == normalized(sequential, clockAware: clockAware),
                 "seed \(seed), step \(step): replay diverged after \(command)"
             )
-            if replayed.state.ignoringServerAssignedFields != sequential.ignoringServerAssignedFields
+            if normalized(replayed.state, clockAware: clockAware) != normalized(sequential, clockAware: clockAware)
                 || !replayed.rejected.isEmpty
             {
                 return

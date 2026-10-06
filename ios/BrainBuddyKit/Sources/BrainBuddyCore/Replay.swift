@@ -44,7 +44,23 @@ public enum OutboxReplayer {
     ///   operations that depend on it are rejected in turn (a subtask of a
     ///   task that was never created) or lose the reference (a task keeps its
     ///   place without a project that was never created).
-    public static func replay(_ outbox: [PendingOperation], onto base: GTDState) -> ReplayResult {
+    ///
+    /// After the last operation the post-replay activation step runs
+    /// (`ReviewActivation`, spec 020): keyed on the activation instant the
+    /// state holds, or `activatedAt` (the account-less anchor) when it holds
+    /// none, so the same inputs always give the same clocks.
+    public static func replay(
+        _ outbox: [PendingOperation], onto base: GTDState, activatedAt fallback: Date? = nil
+    ) -> ReplayResult {
+        var result = replayOperations(outbox, onto: base)
+        ReviewActivation.apply(
+            to: &result.state, activatedAt: result.state.review.settings.activatedAt ?? fallback,
+            startsMissingClocks: result.state.review.server == nil
+        )
+        return result
+    }
+
+    private static func replayOperations(_ outbox: [PendingOperation], onto base: GTDState) -> ReplayResult {
         var state = base
         var pending = outbox
         var kept: [PendingOperation] = []
@@ -197,7 +213,8 @@ extension GTDCommand {
             if case .set(let id) = update.changes.projectID { update.changes.projectID = .set(swap(id)) }
             return .updateTask(update)
         case .createTag, .renameTag, .deleteTag, .transitionTask, .createSubtask, .updateSubtask,
-            .transitionSubtask, .createComment, .updateComment:
+            .transitionSubtask, .createComment, .updateComment, .decideTask, .undoDecision, .autoParkTask,
+            .bulkRelease, .undoBulkRelease, .review:
             return self
         }
     }
@@ -227,7 +244,8 @@ extension GTDCommand {
             if case .set(let ids) = update.changes.tagIDs { update.changes.tagIDs = .set(swap(ids)) }
             return .updateTask(update)
         case .createProject, .updateProject, .archiveProject, .transitionTask, .createSubtask,
-            .updateSubtask, .transitionSubtask, .createComment, .updateComment:
+            .updateSubtask, .transitionSubtask, .createComment, .updateComment, .decideTask, .undoDecision,
+            .autoParkTask, .bulkRelease, .undoBulkRelease, .review:
             return self
         }
     }

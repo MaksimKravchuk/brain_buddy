@@ -16,9 +16,10 @@ extension ServerState {
             request.body,
             allowing: [
                 "title", "details", "state", "project_id", "tag_ids", "due_date", "priority", "waiting_for",
-                "source_capture_ids",
+                "source_capture_ids", "new_formulation_id",
             ]
         )
+        let newFormulationID = try body.clientID("new_formulation_id", prefix: "form")
         let title = try body.string("title", required: true, min: 1, max: GTDLimits.title) ?? ""
         let details = try body.string("details", max: GTDLimits.details)
         let state = try body.value("state", as: TaskState.self, allowed: Self.openStates) ?? .inbox
@@ -40,11 +41,15 @@ extension ServerState {
         guard sourceCaptures.isEmpty else {
             throw .rejected("source_capture_ids require owner-scoped Capture validation.")
         }
-        let task = TaskRow(
+        var task = TaskRow(
             id: mint("task"), title: title, details: details, state: state, projectID: projectID, tagIDs: tagIDs,
             dueDate: dueDate, priority: priority, waitingFor: note, waitingSince: note == nil ? nil : now,
             orderKey: data.nextOrderKey(state), createdAt: now, updatedAt: now, revision: 1
         )
+        if state == .next {
+            let id = newFormulationID ?? ClientID.derived("form", from: "\(task.id)|1")
+            task.formulation = FormulationClock(id: FormulationID(id), startedAt: now)
+        }
         data.remember(key: key, command: command, fingerprint: fingerprint, result: .task(task), now: now)
         data.tasks[task.id] = task
         commit(data, owner: owner)
@@ -59,8 +64,10 @@ extension ServerState {
             request.body,
             allowing: [
                 "title", "details", "project_id", "tag_ids", "due_date", "priority", "waiting_for", "expected_revision",
+                "new_formulation_id",
             ]
         )
+        let newFormulationID = try body.clientID("new_formulation_id", prefix: "form")
         let title = try body.string("title", min: 1, max: GTDLimits.title)
         let details = try body.string("details", max: GTDLimits.details)
         let projectID = try body.string("project_id")
@@ -77,6 +84,7 @@ extension ServerState {
             return .json(200, stored.dto())
         }
         var task = try data.task(id)
+        let old = task
         guard task.revision == expected else { throw .stale("Task", id) }
         if body.has("title"), title == nil { throw .rejected("Task title cannot be null.") }
         if body.has("priority"), priority == nil { throw .rejected("Task priority cannot be null.") }
@@ -91,6 +99,7 @@ extension ServerState {
         if body.has("details") { task.details = details }
         if body.has("due_date") { task.dueDate = dueDate }
         if let priority { task.priority = priority }
+        data.maintainClock(of: &task, from: old, newFormulationID: newFormulationID, now: now)
         task.updatedAt = now
         task.revision += 1
         data.remember(key: key, command: command, fingerprint: fingerprint, result: .task(task), now: now)
@@ -105,7 +114,10 @@ extension ServerState {
     mutating func transitionTask(_ id: String, _ request: HTTPRequest, owner: String, now: Date) throws(FakeHTTPError)
         -> Reply
     {
-        let body = try RequestBody(request.body, allowing: ["action", "to_state", "waiting_for", "expected_revision"])
+        let body = try RequestBody(
+            request.body, allowing: ["action", "to_state", "waiting_for", "expected_revision", "new_formulation_id"]
+        )
+        let newFormulationID = try body.clientID("new_formulation_id", prefix: "form")
         guard let action = try body.value("action", as: TaskTransitionAction.self) else {
             throw .validation(["body", "action"], "Field required", type: "missing")
         }
@@ -120,6 +132,7 @@ extension ServerState {
             return .json(200, stored.dto())
         }
         var task = try data.task(id)
+        let old = task
         guard task.revision == expected else { throw .stale("Task", id) }
         switch action {
         case .complete, .cancel:
@@ -149,6 +162,7 @@ extension ServerState {
             task.waitingFor = note
             task.waitingSince = note == nil ? nil : now
         }
+        data.maintainClock(of: &task, from: old, newFormulationID: newFormulationID, now: now)
         task.updatedAt = now
         task.revision += 1
         data.remember(key: key, command: command, fingerprint: fingerprint, result: .task(task), now: now)

@@ -1,0 +1,235 @@
+import BrainBuddyCore
+import Foundation
+import Testing
+
+/// Review queries (contracts/ios-commands.md §6; tasks.md T053, T133) and the
+/// shared review-flow vectors they answer (`review_flow_vectors.json`).
+@Suite("GTDQueries: weekly review (spec 020)")
+struct QueriesReviewTests {
+    static let flow = ReviewVectors.flow
+
+    /// A task from a flow vector's task row.
+    static func task(_ raw: VectorValue) -> TaskRecord {
+        let id = TaskID(raw["id"]?.string ?? "")
+        let state = raw["state"]?.string.flatMap(TaskState.init(rawValue:)) ?? .next
+        let updated = ReviewVectors.instant(raw["updated_at"]) ?? Review.instant("2026-01-01T00:00:00Z")
+        var task = TaskRecord(
+            id: id, serverID: id.rawValue, serverRevision: raw["revision"]?.int ?? 1, title: id.rawValue, state: state,
+            waitingSince: ReviewVectors.instant(raw["waiting_since"]), completedAt: ReviewVectors.instant(raw["completed_at"]),
+            orderKey: 0, createdAt: updated, updatedAt: updated
+        )
+        if let parkedAt = ReviewVectors.instant(raw["parked_at"]) {
+            task.parked = ParkMarker(at: parkedAt, formulationID: "form_parked")
+        }
+        return task
+    }
+
+    static func receipt(_ raw: VectorValue) -> ReviewReceipt {
+        ReviewReceipt(
+            taskID: TaskID(raw["task_id"]?.string ?? ""), kind: raw["kind"]?.string.flatMap(ReceiptKind.init(rawValue:)) ?? .waiting,
+            reviewedAt: ReviewVectors.instant(raw["reviewed_at"]) ?? .distantPast,
+            hiddenUntil: ReviewVectors.instant(raw["hidden_until"]) ?? .distantPast,
+            source: raw["source"]?.string.flatMap(ReceiptSource.init(rawValue:)) ?? .keep, taskRevision: raw["task_revision"]?.int
+        )
+    }
+
+    static func ids(_ value: VectorValue?) -> [TaskID] { value?.array.compactMap(\.string).map { TaskID($0) } ?? [] }
+
+    // MARK: - Flow vectors
+
+    @Test("020-FR-028 quick and full reviews have their fixed step order", arguments: ReviewVectors.section(flow, "steps"))
+    func steps(_ vector: Vector) throws {
+        let mode = try #require(vector["mode"]?.string.flatMap(ReviewMode.init(rawValue:)))
+        #expect(mode.steps.map(\.rawValue) == vector["expect"]?.array.compactMap(\.string))
+    }
+
+    @Test("020-FR-028 wins are the tasks completed in the last 7 days", arguments: ReviewVectors.section(flow, "wins"))
+    func wins(_ vector: Vector) throws {
+        let now = try #require(ReviewVectors.instant(vector["now"]))
+        let tasks = (vector["tasks"]?.array ?? []).map(Self.task)
+        #expect(ReviewRules.wins(tasks, now: now).map(\.id) == Self.ids(vector["expect"]))
+    }
+
+    @Test("020-FR-031 the capacity mirror, with nothing but the Next count before 4 weeks", arguments: ReviewVectors.section(flow, "capacity"))
+    func capacity(_ vector: Vector) throws {
+        let mirror = CapacityMirror.compute(
+            nextCount: vector["next_count"]?.int ?? 0,
+            completedAt: (vector["completed_at"]?.array ?? []).compactMap { ReviewVectors.instant($0) },
+            now: try #require(ReviewVectors.instant(vector["now"]))
+        )
+        let expect = try #require(vector["expect"])
+        #expect(mirror.nextCount == expect["next_count"]?.int)
+        #expect(mirror.weeksOfHistory == expect["weeks_of_history"]?.int)
+        #expect(mirror.weeklyAverage4w == expect["weekly_average_4w"]?.double)
+        #expect(mirror.impliedWeeks == expect["implied_weeks"]?.double)
+    }
+
+    @Test("020-FR-032 Waiting older than 7 days, unhidden, oldest first", arguments: ReviewVectors.section(flow, "waiting_queue"))
+    func waitingQueue(_ vector: Vector) throws {
+        let queue = ReviewRules.waitingQueue(
+            (vector["tasks"]?.array ?? []).map(Self.task), receipts: (vector["receipts"]?.array ?? []).map(Self.receipt),
+            now: try #require(ReviewVectors.instant(vector["now"]))
+        )
+        #expect(queue.map(\.id) == Self.ids(vector["expect"]))
+    }
+
+    @Test("020-FR-032 at most 7 Someday tasks, never reviewed first", arguments: ReviewVectors.section(flow, "someday_queue"))
+    func somedayQueue(_ vector: Vector) throws {
+        let queue = ReviewRules.somedayQueue(
+            (vector["tasks"]?.array ?? []).map(Self.task), receipts: (vector["receipts"]?.array ?? []).map(Self.receipt),
+            now: try #require(ReviewVectors.instant(vector["now"])), limit: vector["limit"]?.int ?? 7
+        )
+        #expect(queue.eligibleTotal == vector["expect"]?["eligible_total"]?.int)
+        #expect(queue.shown.map(\.id) == Self.ids(vector["expect"]?["shown"]))
+    }
+
+    @Test("020-FR-017 restart mode: 21 days from the last counted review, or from onboarding", arguments: ReviewVectors.section(flow, "restart"))
+    func restart(_ vector: Vector) throws {
+        let restart = ReviewRules.restartMode(
+            onboardedAt: ReviewVectors.instant(vector["onboarded_at"]),
+            lastCountedReviewAt: ReviewVectors.instant(vector["last_counted_review_at"]),
+            now: try #require(ReviewVectors.instant(vector["now"]))
+        )
+        #expect(restart == vector["expect"]?.bool)
+    }
+
+    @Test("020-FR-029 Done → completed or completed_empty; replaced or idle → partial or abandoned", arguments: ReviewVectors.section(flow, "session_status"))
+    func sessionStatus(_ vector: Vector) throws {
+        let end = try #require(vector["end"]?.string.flatMap(SessionEnd.init(rawValue:)))
+        let status = ReviewSessionStatus.ended(by: end, qualifyingActivity: vector["qualifying_activity"]?.bool ?? false)
+        #expect(status.rawValue == vector["expect"]?.string)
+    }
+
+    @Test("020-FR-029 a review idle for 7 days is closed", arguments: ReviewVectors.section(flow, "idle_close"))
+    func idleClose(_ vector: Vector) throws {
+        let due = ReviewSession.isIdleCloseDue(
+            lastActivityAt: try #require(ReviewVectors.instant(vector["last_activity_at"])),
+            now: try #require(ReviewVectors.instant(vector["now"]))
+        )
+        #expect(due == vector["expect"]?.bool)
+    }
+
+    @Test("020-FR-029 qualifying activity: a decision, or a non-summary step finished with nothing to decide", arguments: ReviewVectors.section(flow, "qualifying_activity"))
+    func qualifyingActivity(_ vector: Vector) {
+        let empty = Set(
+            (vector["steps"]?.object ?? [:]).compactMap { code, step -> ReviewStep? in
+                guard step["status"]?.string == "finished", step["finished_empty"]?.bool == true else { return nil }
+                return ReviewStep(rawValue: code)
+            }
+        )
+        #expect(ReviewSession.qualifies(itemDecisions: vector["item_decisions"]?.int ?? 0, finishedEmptySteps: empty) == vector["expect"]?.bool)
+    }
+
+    @Test("020-FR-029 counted reviews: completed, partial, and open once it qualifies", arguments: ReviewVectors.section(flow, "counted_review"))
+    func countedReview(_ vector: Vector) throws {
+        let status = try #require(vector["status"]?.string.flatMap(ReviewSessionStatus.init(rawValue:)))
+        #expect(status.isCounted(qualifyingActivity: vector["qualifying_activity"]?.bool ?? false) == vector["expect"]?.bool)
+    }
+
+    @Test("020-FR-038 the regularity instant comes from counted reviews only", arguments: ReviewVectors.section(flow, "regularity"))
+    func regularity(_ vector: Vector) throws {
+        let sessions = (vector["sessions"]?.array ?? []).enumerated().map { index, raw in
+            ReviewSession(
+                id: Review.session(index + 1), mode: .quick, entry: .list, origin: .ios,
+                status: raw["status"]?.string.flatMap(ReviewSessionStatus.init(rawValue:)) ?? .open,
+                startedAt: ReviewVectors.instant(raw["last_activity_at"]) ?? .distantPast,
+                lastActivityAt: ReviewVectors.instant(raw["last_activity_at"]), endedAt: ReviewVectors.instant(raw["ended_at"]),
+                qualifyingActivity: raw["qualifying_activity"]?.bool ?? false
+            )
+        }
+        #expect(ReviewVectors.iso(ReviewSession.lastCountedReviewAt(sessions)) == vector["expect"])
+    }
+
+    @Test("020-FR-004 020-FR-047 the decision queue: the aggregate, earliest-asking first", arguments: ReviewVectors.section(flow, "decision_queue"))
+    func decisionQueueVector(_ vector: Vector) throws {
+        let raw = try #require(vector["settings"])
+        let settings = ReviewSettings(
+            thresholdDays: raw["threshold_days"]?.int ?? 14, timeZone: raw["time_zone"]?.string ?? "UTC",
+            activatedAt: ReviewVectors.instant(raw["activated_at"]), ownerParkFloorAt: ReviewVectors.instant(raw["owner_park_floor_at"])
+        )
+        var state = Review.state([], settings: settings)
+        for row in vector["tasks"]?.array ?? [] {
+            let id = TaskID(row["id"]?.string ?? "")
+            let clocked = try FormulationTests.clock(row, taskID: id.rawValue)
+            var task = Review.task(id, title: id.rawValue, state: clocked.state ?? .next)
+            task.clocked = clocked
+            state.tasks[id] = task
+        }
+        let now = try #require(ReviewVectors.instant(vector["now"]))
+        #expect(GTDQueries.decisionQueue(in: state, now: now).map(\.id) == Self.ids(vector["expect"]))
+        #expect(GTDQueries.askCount(in: state, now: now) == Self.ids(vector["expect"]).count)
+    }
+
+    // MARK: - Queries over GTDState
+
+    @Test("020-FR-004 formulationClass and askCount use the owner's stored zone unless told otherwise")
+    func formulationClassUsesTheStoredZone() {
+        // Due 16 Oct: the clock starts at local midnight in the zone that classifies.
+        let due = CalendarDay(year: 2026, month: 10, day: 16)!
+        let task = Review.nextTask("t1", started: Review.instant("2026-09-01T09:00:00Z"), due: due)
+        let settings = Review.settings(zone: "Pacific/Honolulu")
+        let justAfterBerlinMidnight = Review.instant("2026-10-15T22:30:00Z")
+        #expect(GTDQueries.formulationClass(of: task, now: justAfterBerlinMidnight, settings: settings) == .paused)
+        #expect(GTDQueries.formulationClass(of: task, now: justAfterBerlinMidnight, settings: settings, timeZone: "Europe/Berlin") == .fresh)
+    }
+
+    @Test("020-FR-028 wins, capacity, Waiting and Someday due, projects without a next action and restart candidates over a state")
+    func stateQueries() {
+        let now = Review.now
+        var state = Review.state([
+            Review.nextTask("n1", started: now.addingTimeInterval(-40 * Review.day), project: "p1"),
+            Review.task("c1", title: "Done", state: .completed), Review.task("w1", title: "Drill", state: .waiting),
+            Review.task("s1", title: "Bed", state: .someday), Review.task("p2task", title: "Plan", state: .waiting),
+        ])
+        state.tasks["c1"]?.completedAt = now.addingTimeInterval(-Review.day)
+        state.tasks["w1"]?.waitingSince = now.addingTimeInterval(-8 * Review.day)
+        state.tasks["p2task"]?.projectID = "p2"
+        state.projects["p1"] = ProjectRecord(id: "p1", name: "Flat", createdAt: now)
+        state.projects["p2"] = ProjectRecord(id: "p2", name: "Garden", createdAt: now)
+        state.review.settings.activatedAt = Review.instant("2026-08-01T00:00:00Z")
+        #expect(GTDQueries.wins(in: state, now: now).map(\.id) == ["c1"])
+        #expect(GTDQueries.capacityMirror(in: state, now: now).nextCount == 1)
+        #expect(GTDQueries.capacityMirror(in: state, now: now).weeklyAverage4w == nil, "fewer than 4 weeks of history")
+        #expect(GTDQueries.waitingDue(in: state, now: now).map(\.id) == ["w1"], "no waiting_since: not due")
+        #expect(GTDQueries.somedayDue(in: state, now: now).shown.map(\.id) == ["s1"])
+        #expect(GTDQueries.projectsNeedingNextAction(in: state).map(\.project.id) == ["p2"])
+        #expect(GTDQueries.restartCandidates(in: state, now: now).map(\.id) == ["n1"])
+    }
+
+    @Test("020-FR-028 dates ahead: 14 local days from today, within a day in manual order (orderKey, then id)")
+    func datesAhead() {
+        let today = CalendarDay(year: 2026, month: 10, day: 9)!
+        var b = Review.task("b", title: "B", state: .next, orderKey: 1)
+        b.dueDate = today.adding(days: 2)
+        var a = Review.task("a", title: "A", state: .waiting, orderKey: 1)
+        a.dueDate = today.adding(days: 2)
+        var first = Review.task("z", title: "Z", state: .next, orderKey: 0)
+        first.dueDate = today.adding(days: 2)
+        var edge = Review.task("edge", title: "Edge", state: .next)
+        edge.dueDate = today.adding(days: 13)
+        var outside = Review.task("out", title: "Out", state: .next)
+        outside.dueDate = today.adding(days: 14)
+        var past = Review.task("past", title: "Past", state: .next)
+        past.dueDate = today.adding(days: -1)
+        let days = GTDQueries.datesAhead(in: Review.state([a, b, first, edge, outside, past]), today: today)
+        #expect(days.map(\.day) == [today.adding(days: 2), today.adding(days: 13)])
+        #expect(days.first?.tasks.map(\.id) == ["z", "a", "b"])
+    }
+
+    @Test("020-FR-038 the last counted review is the latest counted session, or the server's later one")
+    func lastCountedReview() {
+        var state = Review.state([])
+        let ended = Review.instant("2026-09-30T15:40:00Z")
+        state.review.sessions[Review.session(1)] = ReviewSession(
+            id: Review.session(1), mode: .quick, entry: .list, origin: .ios, status: .completed, startedAt: ended,
+            endedAt: ended, qualifyingActivity: true
+        )
+        state.review.sessions[Review.session(2)] = ReviewSession(
+            id: Review.session(2), mode: .quick, entry: .list, origin: .ios, status: .completedEmpty,
+            startedAt: Review.now, endedAt: Review.now
+        )
+        #expect(GTDQueries.lastCountedReview(in: state) == ended, "completed_empty never counts")
+        state.review.server = ReviewServerFacts(exposed: true, lastCountedReviewAt: Review.instant("2026-10-02T10:00:00Z"))
+        #expect(GTDQueries.lastCountedReview(in: state) == Review.instant("2026-10-02T10:00:00Z"))
+    }
+}

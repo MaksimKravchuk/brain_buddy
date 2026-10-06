@@ -134,10 +134,17 @@ final class AppDevice {
         await workspace.flush()
     }
 
-    /// Requests that got an error answer (none when the server accepted everything).
+    /// Requests that got an error answer (none when the server accepted
+    /// everything). A gated review read answered `404 weekly_review_disabled`
+    /// is the flag being off (spec 020, http "Gate"), not a rejection.
     var rejectedRequests: [String] {
         transport.exchanges.compactMap { exchange in
             guard let status = exchange.statusCode, status >= 400 else { return nil }
+            if status == 404, let body = exchange.response?.body,
+                String(decoding: body, as: UTF8.self).contains("\"weekly_review_disabled\"")
+            {
+                return nil
+            }
             return "\(exchange.request.method.rawValue) \(exchange.request.url.path) → \(status)"
         }
     }
