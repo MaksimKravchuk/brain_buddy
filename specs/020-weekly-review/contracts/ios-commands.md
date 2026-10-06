@@ -20,8 +20,9 @@ public var consecutiveStalledFormulations: Int // default 0
 public var parked: ParkMarker?                 // only while .someday
 
 public struct FormulationClock: Hashable, Sendable, Codable {
-    public var id: FormulationID          // minted by the reducer ("form_<UUID>") and sent as
-                                          // `new_formulation_id`; the server adopts it (http §1)
+    public var id: FormulationID          // minted in the command ("form_<lowercased UUID>") and
+                                          // sent as `new_formulation_id`; the server adopts it
+                                          // (http §1, id shapes in http "Client-supplied ids")
     public var startedAt: Date
     public var extendedAt: Date?
     public var extensionReason: String?
@@ -55,14 +56,22 @@ client id it creates.
 | `undoBulkRelease(BulkID)` | — | `POST /review/bulk-releases/{id}/undo` | restores tasks whose state is unchanged, clock included |
 | `review(ReviewCommand)` | see below | one request per case | mutates `GTDState.review` only |
 
-`ReviewCommand`: `acknowledgeExplainer` → `POST /review/explainer/acknowledge`
-(FR-051; reducer sets the local activation and runs the activation step of §3 when not
-yet activated); `updateSettings(ReviewSettingsChange)` → `PUT /review/settings`;
+Every client id a command carries is `<prefix>_<lowercased UUID>` (`review_`,
+`decision_`, `bulk_`, `form_`, `task_`), the shape the server validates (http
+"Client-supplied ids").
+
+`ReviewCommand`: `acknowledgeExplainer(timeZone)` → `POST /review/explainer/acknowledge`
+with the device zone (FR-051; the command writes only the activation instant in
+`review.settings` — `local.activatedAt` when account-less — and nothing on any task; the
+task clocks change only through the deterministic post-replay activation step of §3,
+which runs because an activation instant is now known, so `review(…)` still mutates
+`GTDState.review` only); `updateSettings(ReviewSettingsChange)` → `PUT /review/settings`;
 `acknowledgeParks([ParkAck])` → `POST /review/parks/acknowledge`;
 `startSession(StartSession)` (carries the client `sessionID`) → `POST /review/sessions`
 with `id` and `replace_open: true`;
 `progressSession(SessionProgress)` → `PATCH /review/sessions/{id}`;
-`finishSession(FinishSession)` → `POST /review/sessions/{id}/finish`;
+`finishSession(FinishSession)` → `POST /review/sessions/{id}/finish` (only Done on the
+summary; leaving sends nothing but progress, FR-029);
 `grantNavigatorConsent(provider)` / `revokeNavigatorConsent(provider)` →
 `POST` / `DELETE /review/navigator/consent`.
 
@@ -131,11 +140,20 @@ early.
   never modified (existing rule).
 - **409 stale on `decideTask`**: the existing refetch path (`SyncEngine+Push.swift`
   `handleFailure`/`refetch`) runs; after the refetched task is upserted, replay
-  re-evaluates the decision. If the task's formulation changed, the operation is set
-  aside as a `SyncIssue` with the M-03 error copy ("couldn't be saved to your account.
-  The task is still in Next.") and its reference id. The server's auto-park yield
-  rule (http §3) means a decision made offline before a server park is normally
-  accepted rather than stale.
+  re-evaluates the decision. When the refetched task is parked for the decision's
+  `formulationID` and the decision was made before `parked.at`, the decision is resent
+  as is: the server's yield rule (http §3) accepts any `expected_revision` from
+  `parked.from_revision` up to the current revision, so earlier queued plain edits
+  replayed onto the parked task do not defeat it (a `ReviewSyncTests` case: offline
+  notes edit, then offline card decision, server park between them → notes kept,
+  decision applied with `yielded_auto_park: true`, zero sync issues). Only if the
+  formulation itself changed is the operation set aside as a `SyncIssue` with its
+  reference id and copy that names the task's **current** list from the refetched
+  task, never an assumed one: "Your decision "Move to Waiting for" on "<title>"
+  couldn't be saved to your account. It's in <current list> now." When that list is
+  Someday because of an auto-park, the copy says "It moved to Someday / maybe
+  automatically before your decision synced" and the task is listed on "While you
+  were away" (design M-03 error rows).
 - **`autoParkTask` returns `applied: false`**: acknowledged like a success; the
   pulled server task wins. `LocalReviewState.issuedAutoParks[taskID] = formulationID`
   prevents re-issuing for the same formulation, so a device whose clock runs ahead
@@ -156,7 +174,19 @@ early.
   | `grant/revokeNavigatorConsent` | idempotent | revoke blocks locally at once |
 
   `decideTask` naming a session the server does not know is recorded without a session
-  (http §3), so no decision is lost (SC-007). `ReviewSyncTests` cover: two devices start
+  (http §3), so no decision is lost (SC-007).
+
+- **Feature turned off on the server** (rollback, cohort removal): every write a
+  review command or `decideTask` / `undoDecision` / `autoParkTask` / `bulkRelease` /
+  `undoBulkRelease` sends is accepted with the flag off (http "Gate"), so the outbox
+  drains normally and nothing is set aside or reverted; `autoParkTask` gets
+  `applied: false`. Defence in depth for the gated reads: a `404` whose
+  `detail.reason` is `weekly_review_disabled` maps to a new `APIError.Kind`
+  `.featureDisabled`, which `handleFailure` treats like `.rateLimited` (keep the
+  operation and its key, back off, never set aside), and the workspace then hides the
+  review UI (`MeDTO.featureFlags`) while keeping local review state. `ReviewSyncTests`:
+  flag turned off with 3 queued review commands → 0 set-asides, 0 reverted decisions;
+  flag back on → everything already applied. `ReviewSyncTests` cover: two devices start
   a review offline, both sync, 0 decisions lost; a settings edit queued while another
   device changed settings; a queued edit survives activation (activation does not bump
   `revision`, formulation-clock §2).
@@ -172,9 +202,14 @@ and performs one `autoParkTask` per task via the private `perform(_:)`.
 - Nothing parks before activation (FR-051): `dueAutoParks` is empty while no
   activation instant is known.
 - Account-less: the park is final locally (FR-014).
-- Signed in: the park is optimistic; the server decides (`applied`), and pull
-  reconciles. Two devices parking the same formulation both get 200 and one server
-  park (US2-6).
+- Signed in: `dueAutoParks` evaluates with `now + local.serverClockOffset` (the last
+  observed `server_now − device time`, http §5), so a device clock that runs ahead or
+  behind sees the server's due instant. **Online**, the device sends `autoParkTask`
+  and applies the park locally only after `applied: true` (no M-09, no "Return to
+  Next" on a task the server still holds in Next). **Offline**, the park stays
+  optimistic, as designed, and pull reconciles. Two devices parking the same
+  formulation both get 200 and one server park (US2-6). `ReviewSyncTests`: device
+  clock 2 days ahead, online → no local park, no M-09 entry, no Return on a Next task.
 - **Device-side safety valve** (no remote kill switch exists for account-less parks):
   one call applies at most 10 parks; when more are due, the rest wait until M-09 for
   the applied ones has been continued or closed, then the next call applies the next
@@ -221,6 +256,28 @@ Pure Core functions for behaviour that otherwise lives only in app or widget tar
   non-AI parts) behind injected `ModelDownloader` and `StorageProbe` protocols.
 - `MarkerStyle.for(_ class:)` — the marker's text, icon and colour role, with a test
   that no age class maps to an error role (FR-004, FR-038).
+- `ReviewCopy` — the catalog of every review-surface string the app and widget show
+  (restart, summary, notification title and body, widget chip text and its VoiceOver
+  label, M-02 "This wording" lines, While you were away, explainer). Views read their
+  copy from it, and a Linux test checks every entry against the same banned-term list
+  as the web string guard ("overdue" and streak wording, US5-6 / FR-004 / FR-038).
+- `StallReasonRecommendation.decision(for:)` — the reason → recommended decision table
+  of design M-03 (unclear → reformulate; too big, missing information, unpleasant / no
+  energy → find a first step; waiting on someone → Waiting for; no longer matters →
+  cancel), checked against the `stall_recommendation` section of
+  `review_flow_vectors.json` (FR-007, US1-6); the web constant is checked against the
+  same section.
+- `ActiveTimeAccumulator` — the SC-004 active-time rule of data-model E3 with an
+  injected clock (gap > 2 min counts 0, background never counts, per-step attribution,
+  resume after leaving), checked against the `active_time` vectors.
+- `UndoWindowPolicy.duration(voiceOver:switchControl:)` — about 5 s, at least 10 s when
+  VoiceOver or Switch Control runs (FR-048, design "Undo (iOS)").
+- `WhileAwayPresentation.shouldShowAtAppOpen(lastShownDay:today:hasUnseen:)` — the
+  once-per-calendar-day rule of FR-015 (always shown as the first review screen
+  regardless), with `local.wywaLastShownDay`.
+- `NavigatorProposalFilter.dropDuplicates(_:projectOpenTitles:)` — drops a proposal
+  whose `FormulationKey` equals that of any open task of the project in the local
+  store, not only the 20 titles sent (FR-019; contracts/navigator.md §2 rule 5).
 
 ## 7. Persistence (`StoreDocument` v2)
 
@@ -253,4 +310,6 @@ Because account-less parks have no server and no remote kill switch,
 `BBWeeklyReviewLocal` is `NO` in the Release configuration (TestFlight and App Store)
 until the synced path has run clean for at least one full threshold cycle (T + 7 days)
 for the owner; it is `YES` only in Debug until then. Turning it on for Release is a
-recorded owner decision at PR-14.
+recorded owner decision at PR-14. The spec records this staged exposure (edge case
+"Account-less iOS use", FR-042): until then account-less acceptance runs in Debug
+builds and package tests, and Release account-less builds keep the `DeferredRow`.

@@ -60,13 +60,19 @@ below. `create_native_inbox_task` creates Inbox tasks and never starts a clock.
 **Response** (`backend/app/schemas/tasks.py` `TaskResponse`): adds
 `formulation: TaskFormulationResponse | null` and `parked: TaskParkResponse | null`
 (shapes in `contracts/http.md` §2). `TaskFormulationResponse` also carries the
-server-derived `ask_at`, `park_due_at` and `paused_until` computed with the owner's
-current settings, so the web classifies with its own clock without re-implementing
-the instant arithmetic.
+server-derived `ageing_at`, `ask_at`, `park_due_at` and `paused_until` computed with the
+owner's current settings, so the web classifies with its own clock without
+re-implementing the instant arithmetic. Where they are computed (pure
+`formulation.derive_instants`, one settings read per request in
+`TaskService.formulation_views`, the shared public mapper in
+`backend/app/api/task_mapping.py`): contracts/http.md §2.
 
 **Migration / compatibility**: additive. Old code reading new payloads ignores the
-fields (`extra="ignore"`); old code re-saving a task drops them, which the auto-park
-sweep repairs (formulation-clock §3). No backfill runs at deploy; the per-owner
+fields (`extra="ignore"`, `backend/app/schemas/common.py:20`); old code re-saving a
+task drops them. The sweep repairs a dropped clock on a Next task
+(formulation-clock §3). A dropped `parked` on a Someday task is not repaired: the park
+stays recorded in E6 (written at park time), but the task no longer shows on "While
+you were away" (contracts/http.md §8 "Park marker"). No backfill runs at deploy; the per-owner
 activation transition (E2) runs once, when the owner first acknowledges the
 explainer.
 
@@ -84,7 +90,7 @@ One row per owner. Columns: `owner_id PK`, `revision`, `payload` (JSON).
 | `owner_park_floor_at` | datetime \| null | null | `threshold_changed_at + 7 d` on every change (FR-039) |
 | `review_weekday` | 1..7 (ISO, Monday = 1) | 5 (Friday) | |
 | `review_time` | `HH:MM` | `16:00` | local wall time |
-| `time_zone` | IANA name | `UTC` until a client sends one | validated with `zoneinfo`; clients send the device zone on onboarding and when it changes (US5-5) |
+| `time_zone` | IANA name | `UTC` until a client sends one | validated with `zoneinfo`; clients send the device zone with the explainer acknowledgement (activation, http §5), on onboarding, and whenever the device zone differs from the pulled one (US5-5) |
 | `revision` | int ≥ 1 | 1 | optimistic concurrency for PUT |
 
 ## E3. Review session — table `review_sessions`
@@ -102,7 +108,7 @@ PK `(owner_id, id)`; index `(owner_id, status, started_at)`.
 | `origin` | `ios \| web \| macos` | shown on the resume card (M-11) |
 | `current_step` | step code | resume point (US4-7); last writer wins (http §6) |
 | `steps` | map step code → `pending \| finished \| skipped`, plus `finished_empty: bool` | merged monotonically (`finished` > `skipped` > `pending`) |
-| `active_seconds_by_step` | map step code → int seconds | SC-004: clients add the seconds a step was on screen and in use, counting a gap of more than 2 minutes without interaction as 0, and never counting time in the background; the server adds the reported deltas. Content-free |
+| `active_seconds_by_step` | map step code → int seconds | SC-004: clients add the seconds a step was on screen and in use, counting a gap of more than 2 minutes without interaction as 0, and never counting time in the background; the server adds the reported deltas. Content-free. The client rule is one pure accumulator per client with an injected clock (Core `ActiveTimeAccumulator`, web `features/review/activeTime.ts`), checked against the `active_time` section of `review_flow_vectors.json` (plan Test strategy) |
 | `decision_queue` | list of task ids, in formulation-clock §5 queue order | snapshot of the `asks_for_decision` aggregate taken when the decision step first opens; ids only (edge case "threshold changed during an open review") |
 | `set_aside_task_ids` | list of task ids | "Not now" (FR-050); non-empty excludes the session from SC-002 |
 | `counts` | `{done, reformulated, first_step, waiting, someday, cancelled, extended, inbox_processed, kept, moved_to_next}` | the ten FR-033 counters; maintained from E4 `review_counts_as` inside the same transaction; `inbox_processed` from progress deltas (an Inbox Undo sends −1) |
@@ -116,26 +122,32 @@ someday, dates, summary`. Quick = `wins, inbox, decisions, summary` (FR-028).
 **Status transitions** (FR-029, owner decision 2026-10-06)
 
 ```
-open --finish(completed)--> completed          if qualifying_activity
-open --finish(completed)--> completed_empty    otherwise ("Review done" is still shown)
-open --finish(left)--> partial                 if qualifying_activity
-open --finish(left)--> abandoned               otherwise
-open --another session started (replace_open)--> partial | abandoned (same rule)
-open --no activity for 7 days (sweep)--> partial | abandoned (same rule)
+open --finish (Done on the summary)--> completed        if qualifying_activity
+open --finish (Done on the summary)--> completed_empty  otherwise ("Review done" is still shown)
+open --another session started (replace_open)--> partial if qualifying_activity, else abandoned
+open --no activity for 7 days (sweep)--> partial if qualifying_activity, else abandoned
 ```
 
-"Leave for now" (M-13) does **not** finish a session; it stays `open` and resumable
-on any device. **Counted reviews** are `completed` and `partial` (and an `open`
-session once it has qualifying activity). **Regularity instant**
+There is no "left" transition: "Leave for now" (M-13), closing the app or the tab
+only pause a session; it stays `open` and resumable on any device (FR-029, US4-8,
+US4-8a). **Counted reviews** are `completed` and `partial`, and an `open` session once
+it has qualifying activity. **Regularity instant**
 `last_counted_review_at` = latest of `completed.ended_at`, `partial.last_activity_at`,
 and `open.last_activity_at` where `qualifying_activity`; `completed_empty` and
-`abandoned` sessions never contribute. It drives restart mode (≥ 21 days, FR-017), the
-notification skip (preceding 6 days, FR-036), "Last review: N days ago" (FR-038) and
-the SC-001 weekly read-out.
+`abandoned` sessions never contribute. It drives restart mode (FR-017:
+`onboarded_at` set and `now - coalesce(last_counted_review_at, onboarded_at) ≥ 21 d`,
+so a never-reviewed person counts from onboarding and a not-yet-onboarded person gets
+onboarding first), the notification skip (preceding 6 days, FR-036), "Last review: N
+days ago" (FR-038) and the SC-001 weekly read-out.
+
+**Wire subset**: `SessionResponse` carries every field above except
+`set_aside_task_ids` (sent as `set_aside_count`), `decision_queue` (served through the
+`decisions` queue) and the per-step `finished_empty` flags; the exact list is in
+contracts/http.md §6.
 
 ## E4. Review decision — table `review_decisions`
 
-Columns: `owner_id`, `id` (`decision_…`, client-supplied when made on iOS), `task_id`,
+Columns: `owner_id`, `id` (`decision_<uuid>` when client-supplied on iOS, else server-minted; the id shapes are in http "Client-supplied ids"), `task_id`,
 `session_id?`, `decided_at`, `payload`; PK `(owner_id, id)`; index
 `(owner_id, task_id)`, `(owner_id, session_id)`. `session_id` is null when the
 decision was made outside a review or named a session the server does not know
@@ -147,7 +159,7 @@ decision was made outside a review or named a session the server does not know
 | `stall_reason` | `unclear \| too_big \| missing_info \| waiting_on_someone \| no_energy \| no_longer_matters \| null` | FR-007 |
 | `substantive` | bool \| null | for `reformulate`: false when only a cosmetic edit was saved ("Save anyway") |
 | `ai_use` | `none \| as_is \| edited \| not_used` | FR-026; `not_used` = proposals shown, own text saved |
-| `navigator_request_id` | str \| null | correlates with navigator usage (E9), never with text |
+| `navigator_request_id` | str (exactly the 36-character UUID the server returned as `request_id`) \| null | correlates with navigator usage (E9), never with text; any other value is 422 (http "Client-supplied ids") |
 | `formulation_id` | str \| null | the formulation decided on |
 | `task_revision_before`, `task_revision_after` | int | Undo precondition |
 | `reason_text` | str (1..500) \| null | only for `extend`: the "keep 7 more days" reason, kept as decision history (FR-043, intake "decisions and reasons stored"); content-bearing; exported in `review/decisions.json`, purged with the account, never logged |
@@ -189,13 +201,20 @@ Otherwise 409 `undo_unavailable` and nothing changes.
 Columns: `owner_id`, `task_id`, `kind` (`waiting \| someday`), `payload`;
 PK `(owner_id, task_id, kind)` (one current receipt per task and kind).
 Payload: `task_revision`, `reviewed_at`, `hidden_until` (`+7 d` waiting, `+30 d`
-someday; FR-032), `decision_id`. A receipt hides the task from its step while
+someday; FR-032), `source` (`keep` for keep waiting / keep in Someday; `release` for a
+person's own release to Someday: decision `someday`, restart or Inbox-remainder bulk
+release, FR-032), and `decision_id` or `bulk_id`. A `release` receipt only hides the
+task from the Someday step; it is not counted as "Kept as is". Undo of the decision or
+of the bulk release deletes the receipt it wrote. A receipt hides the task from its step while
 `now < hidden_until` **and** `task.revision == task_revision` (macOS POC rule,
 `macos/Sources/BrainBuddyMac/LocalGTDStore.swift` `waitingReviewDue`).
 
 ## E6. Park acknowledgement — table `review_park_acks`
 
-PK `(owner_id, task_id, formulation_id)`; payload `seen_at?`, `returned_at?`.
+PK `(owner_id, task_id, formulation_id)`; payload `parked_at`, `from_revision`,
+`source` (`sweep | device`), `seen_at?`, `returned_at?`. The row is written **at park
+time**, in the same transaction as the park, so the park stays in the export and the
+metrics even if old code later drops `TaskDocument.parked` (http §8).
 "Unseen parks" = tasks with `parked` set and no `seen_at` for `parked.formulation_id`.
 Kept out of the task so marking parks seen never bumps a task revision (no stale
 conflicts with pending edits on other devices). When a parked task is moved back to
@@ -231,9 +250,14 @@ the previous grant is kept in `history[]` for audit; content-free).
 
 ## E9. Navigator usage — table `navigator_usage`
 
-PK `(owner_id, day)` (UTC date); payload `calls`, `estimated_cost_usd`. Admission
-control for the per-owner daily cap. Content-free. Rows older than 35 days are deleted
-by the retention part of the sweep, whatever the flag state (http §9).
+PK `(owner_id, day)` (UTC date); payload `calls`, `estimated_cost_usd`,
+`reserved_cost_usd` (admission reservations not yet settled, http §7 "Cost admission
+and the task lock"), `shown` (requests that returned at least one proposal). Admission
+control for the per-owner daily cap, and the server-visible denominator of the SC-005
+real-use acceptance rate (plan Test strategy, read-out). Content-free. Rows older than
+35 days are deleted by the retention part of the sweep, whatever the flag state
+(http §9); the post-release read-out is therefore run and recorded weekly (plan
+"Post-release acceptance").
 
 ## E10. Device-local records (iOS / macOS; not on the server)
 
@@ -247,9 +271,12 @@ by the retention part of the sweep, whatever the flag state (http §9).
   (signed-in: suppresses the explainer until the pulled `activated_at` arrives),
   `issuedAutoParks: [taskID: formulationID]` (R9 loop guard), navigator preference
   `fallbackChoice: ask | downloaded | cloud`, downloaded-model status
-  (`notDownloaded | downloading(bytes) | installed(version, bytes)`), last
+  (`notDownloaded | downloading(bytes) | interrupted(bytes, reason) | installed(version, bytes)`), last
   notification scheduled instant, `formDrafts` (FR-052; never synced, removed on
-  save/discard/formulation change/sign-out or after 7 days).
+  save/discard/formulation change/sign-out or after 7 days), `wywaLastShownDay` (the
+  local calendar day "While you were away" was last shown at app open, for the
+  once-per-day rule of FR-015), `serverClockOffset` (last observed `server_now` minus
+  device time, signed in only; ios-commands §5).
 
 Device-local retention mirrors the server (contracts/ios-commands.md §5
 `runLocalReviewMaintenance`): local decision undo snapshots and bulk-release clock
@@ -272,6 +299,10 @@ the existing task-detail and CRT drafts, `frontend/src/features/tasks/taskDetail
 sign-out or account switch, and by a startup/focus sweep after 7 days. Never sent or
 logged. `docs/data-retention.md` gets a row in PR-02.
 
+The web also keeps `bb.reviewWywaLastShown.v1.<origin>.<account>` (a local calendar
+day, no content) for the once-per-day rule of the While-you-were-away dialog (FR-015),
+removed on sign-out.
+
 ## Export and purge (FR-043)
 
 | record | export file in the account ZIP | purge |
@@ -285,6 +316,11 @@ logged. `docs/data-retention.md` gets a row in PR-02.
 | E7 (including any `clock_before` still retained) | `review/bulk_releases.json` | same |
 | E8 | `review/navigator_consents.json` | same |
 | E9 | excluded (operational cost counters), listed in `export_manifest.json` `excluded` | same |
+| navigator cloud input (title, notes, stall reason, project name, sibling titles) as received by the cloud provider | not exportable (held by the provider, not by Brain Buddy) | **not reachable by account purge**: the provider processes it under its data-processing terms and keeps it per its own policy (the privacy policy already states 30 days for OpenAI API data, `frontend/src/pages/PrivacyPolicyPage.tsx:176-181`). This is the one copy of this feature's content that survives purge by design; PR-07 states it in `docs/data-retention.md` and the privacy policy, and the consent copy (M-07, D-02) may say so in one line |
+
+`review_settings` holds the review day, time and **IANA time zone** (coarse location)
+for the account's life; the PR-02 privacy-policy wording for review settings names all
+three explicitly.
 
 `TaskRepository.delete_all_for_owner` (`backend/app/modules/tasks/repository.py:644`)
 deletes the review tables first, inside its existing lock, so the account purge order

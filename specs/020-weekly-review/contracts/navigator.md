@@ -56,8 +56,9 @@ consent screen lists. The backend accepts exactly this set
 NavigatorOutput = proposals: [string] (1..3)  |  clarifying_question: string
 ```
 
-Post-validation, identical on device and server (`NavigatorOutputValidator` in
-Core; `validate_navigator_output` in `backend/app/modules/tasks/navigator.py`):
+Post-validation, rules 1–4 identical on device and server (`NavigatorOutputValidator`
+in Core; `validate_navigator_output` in `backend/app/modules/tasks/navigator.py`);
+rule 5 runs on every client after them:
 
 1. Trim; drop empty, multi-line, > 200 chars, or containing Smart Add tokens (`#`,
    `@`-prefixed tag syntax, `!` priority markers) the task parser would interpret.
@@ -71,7 +72,18 @@ Core; `validate_navigator_output` in `backend/app/modules/tasks/navigator.py`):
 4. If ≥ 1 proposal survives → return them (M-05 "partial failure": fewer than 3 shown,
    no message). If none survive and the model returned a clarifying question that
    passes rule 3 → return the question. Otherwise → `malformed` (M-05 error,
-   M-07 malformed).
+   M-07 malformed). For `kind: project_next_action` a clarifying question is allowed
+   too; its answer field is the next action itself (FR-021, design M-08 "model
+   question"): confirming creates that task, nothing is appended anywhere and the
+   navigator does not run again.
+5. **Client-side completion of "no duplicates"** (FR-019): the request carries at most
+   20 sibling titles, so after rules 1–4 every client drops any proposal whose
+   `formulation_key` equals that of **any** open task of the project it holds — iOS
+   from the local store (`NavigatorProposalFilter`, Core), the web from the project's
+   open tasks it already loads with `GET /tasks?project_id=…` to build the input
+   (all pages, not only the 20 sent). If that leaves none, the client shows the
+   M-05 / M-07 "No useful suggestion this time" state. Shared vector: a project with 25
+   open tasks where the only proposal duplicates the 21st (not sent) title → filtered.
 
 ## 3. Prompt (versioned `navigator-prompt/v1`)
 
@@ -120,8 +132,9 @@ actions for this project."
   @Guide(.maximumCount(3)) steps: [String]; question: String? }`. Instructions begin
   "The person's locale is <id>." and "You MUST respond in <language>." (Apple's
   documented pinning phrase); §2 validation still runs because pinning is not reliable.
-- Cloud (OpenAI chat completions, the same adapter style as
-  `backend/app/ai/title_completion.py`): JSON schema response format
+- Cloud (OpenAI chat completions, adapter `backend/app/ai/review_navigator.py` beside
+  `backend/app/ai/title_completion.py`, injected through the `NavigatorProvider` port of
+  `backend/app/modules/tasks/navigator.py`, contracts/http.md §7): JSON schema response format
   `{"proposals": string[≤3], "clarifying_question": string | null}`; `max_tokens` from
   `BRAIN_BUDDY_REVIEW_NAVIGATOR_MAX_OUTPUT_TOKENS` (default 300); temperature 0.4.
 - Downloaded on-device model (PR-09, iOS/macOS 27+): the same `@Generable` reply through
@@ -202,8 +215,16 @@ quantized artifact on a Mac plus ~10 spot checks on an iPhone. Owner blind gradi
 (accept / edit / reject); gate ≥ 50 % accepted overall **and** in the Russian subset, 0
 confirmed invented facts. Only fixtures, recorded synthetic outputs and aggregate scores
 are committed (`specs/020-weekly-review/evidence/`).
-The owner's real-task acceptance rate is measured from `review_decisions.ai_use`
-counts (ids and codes only), never from text.
+**Real-use acceptance rate** (SC-005 first half), ids and codes only, never text:
+numerator = decisions whose `navigator_request_id` names a server request and whose
+`ai_use` is `as_is` or `edited`; denominator = server requests that showed at least one
+proposal (`navigator_usage.shown`). Requests that ended with Stop, "None of these",
+Close or another decision therefore stay in the denominator. On-device suggestions
+(Apple or downloaded model) never reach the server, so they are **not** in this rate;
+for them SC-005 rests on the evaluation-set gate above, and the read-out reports the
+`ai_use` share of decisions without a server request id separately, labelled as an
+upper bound (it has no denominator of shown proposals). The read-out test covers a
+shown-then-abandoned request.
 
 ## 6. Privacy and logging
 
@@ -215,4 +236,10 @@ counts (ids and codes only), never from text.
 - Provider configuration: see contracts/http.md §7 "Provider configuration" (startup
   raises when `openai` is configured without its key).
 - Neither input nor output text is persisted server-side. `review_decisions` stores
-  only `ai_use` and `navigator_request_id`.
+  only `ai_use` and `navigator_request_id`. The suggestions endpoint takes no
+  Idempotency-Key and writes no idempotency record or `task-commands/` mirror entry
+  (contracts/http.md §7); its only writes are the content-free `navigator_usage`
+  counters.
+- The cloud provider keeps what it received under its own retention (30 days for
+  OpenAI API data); account purge cannot reach that copy (data-model "Export and
+  purge").

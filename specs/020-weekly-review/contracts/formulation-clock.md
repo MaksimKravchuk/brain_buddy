@@ -78,8 +78,8 @@ row of §3 is part of a normal task write and bumps `revision`.
 | task leaves Next (any destination, any actor) | close current formulation (§4); all formulation fields `null` except `consecutive_stalled_formulations` |
 | decision `extend` | `formulation_extended_at = now`, reason stored; allowed only when the task is still in Next, its class is `asks`, `moves_tomorrow` or `park_due` (the park is due but not yet applied, FR-009, FR-013), and no extension exists |
 | auto-park | as "leaves Next" to Someday, plus `parked = {at: now, formulation_id, from_revision, clock_before}` where `clock_before` is captured before closing |
-| person release to Someday: decision `someday`, restart bulk release (FR-017) | as "leaves Next"; `parked` stays `null`. A bulk release stores each task's pre-release clock (the `clock_before` shape, plus `consecutive_stalled_formulations` before closing) in its bulk-release record (data-model E7) |
-| Inbox-remainder release (FR-030) | an Inbox task moves to Someday; Inbox tasks have no clock, so nothing changes on the clock; `parked` stays `null`; the bulk-release record stores the previous state `inbox` |
+| person release to Someday: decision `someday`, restart bulk release (FR-017) | as "leaves Next"; `parked` stays `null`. A bulk release stores each task's pre-release clock (the `clock_before` shape, plus `consecutive_stalled_formulations` before closing) in its bulk-release record (data-model E7). Every person release also writes a Someday receipt (`source: release`, data-model E5), so the task stays out of the Someday step for 30 days (FR-032); that is not a clock change |
+| Inbox-remainder release (FR-030) | an Inbox task moves to Someday; Inbox tasks have no clock, so nothing changes on the clock; `parked` stays `null`; the bulk-release record stores the previous state `inbox`; a Someday receipt is written as for any person release |
 | undo of a bulk release (per task still at `revision_after`) | the task returns to its previous list; a task returning to Next gets its stored clock back exactly (same `formulation_id`, `started_at`, extension, floor, stalled count); no new formulation starts |
 | decision undo (FR-048) | the task is restored field-for-field from the decision's snapshot, clock included; no new formulation starts |
 | auto-park yield reversal (http §3) | the park is reversed by restoring `clock_before` exactly (same `formulation_id`, stalled count restored to `stalled_before`, so the formulation is not closed twice) and `parked = null`; then the yielding decision applies normally |
@@ -89,8 +89,13 @@ row of §3 is part of a normal task write and bumps `revision`.
 | the sweep runs for an owner after a gap of ≥ 24 h since its last effective run for that owner (flag off then on, outage) | `owner_park_floor_at = max(existing, now + 7 d)`, so a visible "moves to Someday tomorrow" marker precedes every park that the gap made due (SC-006) |
 | owner `time_zone` changes | every Next task with a due date: `formulation_park_floor_at = max(existing, now + 7 d)` (the FR-046 floor), because `due_start` moves with the zone |
 
-**Closing a formulation** (§4): if `now >= ask_at` at that moment, then
-`consecutive_stalled_formulations += 1`, else `consecutive_stalled_formulations = 0`.
+**Closing a formulation** (§4): the formulation **reached "asks for a decision"**
+(FR-005) iff `formulation_extended_at` is set (an extension is only allowed once the
+formulation asks, so an extended formulation has asked even if it closes before its
+extended `ask_at`) **or** `now >= ask_at` at that moment. If it reached it,
+`consecutive_stalled_formulations += 1`, else `consecutive_stalled_formulations = 0`
+(spec FR-005). So extending on day 18 and reformulating on day 20, before the
+extended `ask_at` of day 25, still counts the closed formulation as stalled.
 
 **Where clocks start on the server**: a formulation started by a request starts at the
 instant the server applies it. A task created or moved offline on iOS therefore gets
@@ -138,7 +143,8 @@ owner (`activated_at` set); every other task is `none`.
 `moves_tomorrow`, `park_due`}. This one set is what the spec means by "tasks that ask
 for a decision" wherever they are counted or listed (FR-004): the review decision
 queue, the widget `askCount`, `GET /review/state` `counts.asks_for_decision`, the
-summary and SC-002. **Queue order** ("oldest first"): ascending `ask_at`, then
+summary and SC-002. **Queue order** ("earliest-asking first", the wording used in
+spec US4-3 and design M-16): ascending `ask_at`, then
 ascending `formulation_started_at`, then task id. An extended or due-date-paused task
 therefore sorts by when it actually started asking, not by its original start.
 
@@ -164,7 +170,12 @@ and `frontend/src/features/review/__tests__/review_formulation_vectors.json`.
 
 - **Who lands the copies**: slice PR-02 writes the canonical file **and** both copies
   (the only `ios/` and `frontend/` files PR-02 writes), so the drift guard is live
-  from the first slice. PR-03 and PR-05 only read their copy.
+  from the first slice. PR-03 and PR-05 only read their copy. PR-02 also executes
+  every section of `review_flow_vectors.json` once, against the pure rule module
+  `backend/app/modules/tasks/review_rules.py` (wins window, capacity, queue membership
+  and order, session status, regularity and restart anchor, notification skip,
+  stall-reason recommendation, active-time accumulation), so no consumer lane relies
+  on a vector that has never run; PR-11 builds the flow service on those functions.
 - **Drift guard**: `backend/tests/test_review_formulation_vectors.py` fails if either
   copy is missing or differs. Because CI path filtering can skip the backend lane on
   an `ios/`-only or `frontend/`-only change, PR-14 also adds the same byte comparison
@@ -222,7 +233,7 @@ and `frontend/src/features/review/__tests__/review_formulation_vectors.json`.
 §2 clock field, `due_date` and `parked`; `settings` holds the owner inputs including
 `activated_at`; `event.type` ∈ `create_in_next | update_title | update_due_date |
 update_other | transition{to} | decide{decision_type, …} | undo_decision |
-auto_park | yield_reversal | bulk_release | undo_bulk_release | activate{at} |
+auto_park | yield_reversal | bulk_release | undo_bulk_release | activate{at, time_zone?} |
 repair | sweep_gap | threshold_change{to} | time_zone_change{to}`; events that start a
 formulation carry `new_formulation_id` so ids are deterministic; `expect` lists every
 field that must hold afterwards (fields not listed must equal `before`), including
@@ -235,5 +246,16 @@ for `due_start`; due date today/tomorrow/yesterday; extension at T, T + 3, T + 6
 change, due-date change, sweep gap, time-zone change); not activated → `none`;
 activation clamp and null-clock start; the third-stall count across leave and return;
 yield reversal followed by `extend`, and by `reformulate` (stalled count incremented
-once, not twice); bulk-release undo restores the clock exactly; queue order with an
-extended and a due-paused task.
+once, not twice); `extend` followed by a substantive `reformulate` before the extended
+`ask_at` (stalled count incremented, FR-005); park → yield + cosmetic `reformulate`
+("Save anyway") → the next sweep parks again (new `from_revision`, so a new
+auto-park key, contracts/http.md §4); park → yield + decision + `undo_decision` → the
+next sweep parks again; bulk-release undo restores the clock exactly; queue order with
+an extended and a due-paused task; activation with `time_zone: "Pacific/Honolulu"` and
+a due date today (`due_start` in that zone, not UTC).
+
+**Changing a vector after PR-02**: the canonical file and both copies are edited in the
+same commit by one slice whose `depends_on` includes every slice that already consumes
+that vector file (so the change cannot race an independent consumer); the drift guard
+fails otherwise. The same rule applies to `review_flow_vectors.json` and the golden
+wire and trace fixtures (plan Test strategy).
