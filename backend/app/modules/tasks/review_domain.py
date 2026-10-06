@@ -86,6 +86,7 @@ REVIEW_COMMAND_PREFIXES: tuple[str, ...] = (
     "review_session:",
     "review_settings:",
     "explainer_ack:",
+    "park_ack:",
 )
 """Idempotency command prefixes owned by ``ReviewService`` (http §9, R7).
 
@@ -282,6 +283,25 @@ class AutoParkResultDocument(StorageBaseModel):
     ack: ReviewParkAckDocument | None = None
 
 
+class ParkAckKeyDocument(StorageBaseModel):
+    """One ``review_park_acks`` key (ids only)."""
+
+    task_id: str
+    formulation_id: str
+
+
+class ParkAcknowledgeResultDocument(StorageBaseModel):
+    """One park acknowledgement (http §5): the idempotency record body.
+
+    ``marked`` lists the rows this request moved from unseen to seen at
+    ``seen_at``; the ``park_ack:`` reconciler re-applies exactly those. Ids
+    only: the request carries no content.
+    """
+
+    seen_at: datetime
+    marked: list[ParkAckKeyDocument] = Field(default_factory=list)
+
+
 # ------------------------------------------------------------------- E7
 class ReleasedClockDocument(StorageBaseModel):
     formulation_id: str
@@ -466,6 +486,8 @@ __all__ = [
     "FormulationView",
     "NavigatorConsentDocument",
     "NavigatorUsageDocument",
+    "ParkAckKeyDocument",
+    "ParkAcknowledgeResultDocument",
     "ReleasedClockDocument",
     "ReviewBulkReleaseDocument",
     "ReviewDecisionDocument",

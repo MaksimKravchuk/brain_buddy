@@ -48,11 +48,19 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             AI validation history, tasks, projects, tags, subtasks, and comments.
           </p>
           <p>
-            <strong>Weekly review:</strong> if the weekly review is switched on for you, your review
-            settings (review day, time and time zone, and how many days a task may keep its wording)
-            and your review records: the decisions you make on tasks, including any reason you give
-            for keeping a task 7 more days, reviews you run, and which automatically parked tasks you
-            have seen or brought back.
+            <strong>Weekly review and task timing:</strong> for every account, whether or not the
+            weekly review is switched on for you, each task in your Next list carries timing data:
+            when its current wording started, when you chose to keep it 7 more days and your reason,
+            the moment before which it will not move to Someday, how many times in a row its wording
+            stalled, and, for a task moved to Someday automatically, when that happened. We also
+            keep your review settings (review day, time and time zone, and how many days a task may
+            keep its wording), the moment you first acknowledged the weekly review's explanation
+            of automatic parking, and your review records: the decisions you make on tasks,
+            including the stall-reason code you pick (for example, too big) and any reason
+            you give for keeping a task 7 more days, reviews you run, and which automatically parked
+            tasks you have seen or brought back. Decisions, settings and that acknowledgement are
+            accepted from your devices even while the weekly review is switched off for you, so
+            work queued on a device is never lost.
           </p>
           <p>
             <strong>Voice brain dumps:</strong> if you use voice capture, the audio you record,

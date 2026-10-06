@@ -47,6 +47,8 @@ from .review_domain import (
     DecisionResultDocument,
     DecisionUndoDocument,
     FormulationView,
+    ParkAckKeyDocument,
+    ParkAcknowledgeResultDocument,
     ReviewDecisionDocument,
     ReviewParkAckDocument,
     ReviewReceiptDocument,
@@ -533,6 +535,10 @@ class ReviewService:
             self.tasks._note_park_return(
                 previous, result.task, owner_id=owner_id, now=result.decision.decided_at
             )
+        decision = result.decision
+        if decision.yielded_auto_park and decision.formulation_id is not None:
+            # A yield reverses the park itself; it is not a return (E6).
+            self._set_park_returned(owner_id, decision.task_id, decision.formulation_id)
         if result.created_task is not None:
             self.task_repo.create(result.created_task)
         if result.receipt is not None:
@@ -630,7 +636,8 @@ class ReviewService:
         if not available or undo is None:
             raise self._refuse("review_undo", owner_id, task.id, "undo_unavailable")
         now = self.clock()
-        restored = undo.task_before.model_copy(
+        restored = self._restored_task(undo.task_before, task, owner_id=owner_id)
+        restored = restored.model_copy(
             update={"revision": task.revision + 1, "updated_at": now}
         )
         result = UndoResultDocument(
@@ -663,13 +670,76 @@ class ReviewService:
     def _created_task_unchanged(
         self, owner_id: str, undo: DecisionUndoDocument
     ) -> bool:
+        """The follow-up is still exactly as the decision created it (E4).
+
+        Its revision is unchanged **and** it holds no tag link, subtask or
+        comment: adding a subtask or comment does not bump the revision, and
+        deleting the task would cascade-delete that row.
+        """
+
         if undo.created_task_id is None:
             return True
         try:
             created = self.tasks.get_task(undo.created_task_id, owner_id=owner_id)
         except NotFoundError:
             return True
-        return created.revision == undo.created_task_revision
+        return (
+            created.revision == undo.created_task_revision
+            and not self.task_repo.task_has_child_rows(owner_id, created.id)
+        )
+
+    def _restored_task(
+        self, snapshot: TaskDocument, current: TaskDocument, *, owner_id: str
+    ) -> TaskDocument:
+        """formulation-clock §3 "decision undo": the snapshot, floors kept.
+
+        The time-zone floor and the activation clamp are clock bookkeeping
+        written without a revision bump, so they can land after the decision
+        and still leave its Undo available. A task restored into Next keeps
+        ``max(snapshot floor, current floor)``, and a restored formulation that
+        started before ``activated_at`` gets the activation clamp.
+        """
+
+        if snapshot.state != "next":
+            return snapshot
+        restored = snapshot
+        floors = [
+            floor
+            for floor in (
+                snapshot.formulation_park_floor_at,
+                current.formulation_park_floor_at if current.state == "next" else None,
+            )
+            if floor is not None
+        ]
+        if floors:
+            restored = restored.model_copy(
+                update={"formulation_park_floor_at": max(floors)}
+            )
+        activated_at = self.settings_for(owner_id).activated_at
+        started = restored.formulation_started_at
+        if activated_at is not None and started is not None and started < activated_at:
+            clock = formulation.activate_clock(
+                task_clock(restored),
+                activated_at=activated_at,
+                formulation_id=generate_id("form"),
+            )
+            restored = with_clock(restored, clock)
+        return restored
+
+    def _set_park_returned(
+        self,
+        owner_id: str,
+        task_id: str,
+        formulation_id: str,
+        returned_at: datetime | None = None,
+    ) -> None:
+        """Set one park row's ``returned_at`` (data-model E6); a missing row stays."""
+
+        ack = self.task_repo.get_park_ack(owner_id, task_id, formulation_id)
+        if ack is not None and ack.returned_at != returned_at:
+            self.task_repo.save_park_ack(
+                ack.model_copy(update={"returned_at": returned_at})
+            )
 
     def _write_undo(
         self,
@@ -679,6 +749,11 @@ class ReviewService:
         owner_id: str,
     ) -> None:
         self.task_repo.save(result.task)
+        parked = result.task.parked
+        if result.task.state == "someday" and parked is not None:
+            # Back in its park (e.g. Undo of return_to_next): the row reads as
+            # it did while the task was parked, not returned (E6).
+            self._set_park_returned(owner_id, result.task.id, parked.formulation_id)
         if result.deleted_task_id is not None:
             self.task_repo.delete_task_record(owner_id, result.deleted_task_id)
         undo = decision.undo
@@ -848,7 +923,9 @@ class ReviewService:
         the flag is effective (``exposed``), the owner is activated, the task is
         in Next on the named formulation and classifies ``park_due``. Anything
         else is ``applied: false``, a success; a second park of the same
-        formulation is therefore a no-op by state (FR-013).
+        formulation is therefore a no-op by state (FR-013). For an exposed,
+        activated owner the sweep-gap bookkeeping runs first, exactly as in
+        the sweep, so a device park never skips the gap floor (SC-006).
         """
 
         command = f"auto-park:{task_id}"
@@ -860,6 +937,8 @@ class ReviewService:
             return AutoParkResultDocument.model_validate(record.response_body)
         task = self.tasks.get_task(task_id, owner_id=owner_id)
         result: AutoParkResultDocument | None = None
+        if exposed and self.settings_for(owner_id).activated_at is not None:
+            self._note_effective_sweep(owner_id, self.clock())
         if exposed and task.formulation_id == payload.formulation_id:
             result = self._parked(task, owner_id=owner_id, source="device")
         if result is None:
@@ -917,34 +996,75 @@ class ReviewService:
             self.task_repo.save(result.task)
             self.task_repo.save_park_ack(result.ack)
 
+    @serialized_write
     def acknowledge_parks(
-        self, payload: ParkAcknowledgeRequest, *, owner_id: str
+        self,
+        payload: ParkAcknowledgeRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
     ) -> None:
         """``POST /review/parks/acknowledge`` (http §5, FR-015).
 
-        Idempotent by state: an acknowledged park stays acknowledged. Unknown and
+        Idempotent by state (an acknowledged park stays acknowledged) and by
+        the stored Idempotency-Key record (http "Mutations"): the same key and
+        body replay, another body is ``idempotency_conflict``. Unknown and
         foreign ids are ignored identically (no existence oracle), and marking
         a park seen never bumps a task revision (data-model E6).
         """
 
-        with self.task_repo.command_lock(owner_id):
-            now = self.clock()
-            marked = 0
-            for item in payload.items:
-                ack = self.task_repo.get_park_ack(
-                    owner_id, item.task_id, item.formulation_id
+        command = f"park_ack:{owner_id}"
+        request_hash = request_fingerprint(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id, key=idempotency_key, command=command, hash_=request_hash
+        )
+        if record is not None:
+            return
+        keys = {(item.task_id, item.formulation_id): None for item in payload.items}
+        marked = []
+        for task_id, formulation_id in keys:
+            ack = self.task_repo.get_park_ack(owner_id, task_id, formulation_id)
+            if ack is not None and ack.seen_at is None:
+                marked.append(
+                    ParkAckKeyDocument(task_id=task_id, formulation_id=formulation_id)
                 )
-                if ack is not None and ack.seen_at is None:
-                    self.task_repo.save_park_ack(
-                        ack.model_copy(update={"seen_at": now})
-                    )
-                    marked += 1
+        result = ParkAcknowledgeResultDocument(seen_at=self.clock(), marked=marked)
+        self._store(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=owner_id,
+            response=result,
+        )
+        self._write_parks_seen(result, owner_id=owner_id)
         logger.info(
             "review_parks_acknowledged owner_id=%s items=%d marked=%d",
             owner_id,
             len(payload.items),
-            marked,
+            len(marked),
         )
+
+    def _write_parks_seen(
+        self, result: ParkAcknowledgeResultDocument, *, owner_id: str
+    ) -> None:
+        """Mark the recorded rows seen; also the ``park_ack:`` reconciler.
+
+        Only a row still unseen and parked no later than ``seen_at`` is
+        marked: a repeat park upserted after the acknowledgement (E6 resets
+        ``seen_at``) is a park the person has not seen, so a replay leaves it.
+        """
+
+        for key in result.marked:
+            ack = self.task_repo.get_park_ack(owner_id, key.task_id, key.formulation_id)
+            if (
+                ack is not None
+                and ack.seen_at is None
+                and ack.parked_at <= result.seen_at
+            ):
+                self.task_repo.save_park_ack(
+                    ack.model_copy(update={"seen_at": result.seen_at})
+                )
 
     # ---------------------------------------------------------------- sweep
     def run_maintenance_sweep(self) -> ReviewSweepResult:
@@ -1063,18 +1183,31 @@ class ReviewService:
             parked += owner_parked
         return owners, parked, repaired, gaps
 
+    def _note_effective_sweep(self, owner_id: str, now: datetime) -> bool:
+        """Record an effective exposure evaluation; floor parks after a gap.
+
+        The one sweep-gap rule (formulation-clock §3, SC-006), shared by the
+        sweep and the device auto-park; the caller holds the owner lock. A gap
+        of 24 h or more since ``last_effective_sweep_at`` raises
+        ``owner_park_floor_at`` to ``max(existing, now + 7 d)``; either way
+        ``last_effective_sweep_at`` becomes ``now``. Bookkeeping, not a
+        settings change: ``revision`` stays. Returns whether there was a gap.
+        """
+
+        current = self.settings_for(owner_id)
+        last = current.last_effective_sweep_at
+        gap = last is None or now - last >= SWEEP_GAP
+        update: dict[str, Any] = {"last_effective_sweep_at": now}
+        if gap:
+            floored = formulation.apply_sweep_gap(current.clock_settings(), now=now)
+            update["owner_park_floor_at"] = floored.owner_park_floor_at
+        self.task_repo.save_review_settings(current.model_copy(update=update))
+        return gap
+
     def _expose_owner(self, owner_id: str, now: datetime) -> tuple[int, int, int]:
         candidates = self.task_repo.list_next_tasks(owner_id)
         with self.task_repo.command_lock(owner_id):
-            current = self.settings_for(owner_id)
-            last = current.last_effective_sweep_at
-            gap = last is None or now - last >= SWEEP_GAP
-            update: dict[str, Any] = {"last_effective_sweep_at": now}
-            if gap:
-                floored = formulation.apply_sweep_gap(current.clock_settings(), now=now)
-                update["owner_park_floor_at"] = floored.owner_park_floor_at
-            # Bookkeeping, not a settings change: ``revision`` stays.
-            self.task_repo.save_review_settings(current.model_copy(update=update))
+            gap = self._note_effective_sweep(owner_id, now)
         clock_settings = self.settings_for(owner_id).clock_settings()
         due = [
             task.id
@@ -1220,6 +1353,11 @@ class ReviewService:
             stored = ReviewSettingsDocument.model_validate(record.response_body)
             if self.settings_for(owner_id).revision < stored.revision:
                 self.task_repo.save_review_settings(stored)
+        elif command.startswith("park_ack:"):
+            self._write_parks_seen(
+                ParkAcknowledgeResultDocument.model_validate(record.response_body),
+                owner_id=owner_id,
+            )
         # ``bulk_release:``, ``undo_bulk_release:`` and ``review_session:``
         # belong to the review flow (slice PR-11); until it lands no such
         # record is written, and a stray one is left alone.
@@ -1308,6 +1446,9 @@ class ReviewService:
         settings = self.settings_for(owner_id)
         clock_settings = settings.clock_settings()
         tasks = self.task_repo.list_for_owner(owner_id=owner_id)
+        # A receipt hides its task only while the task is still at the revision
+        # it was written for (data-model E5); a changed task is listed again.
+        revisions = {task.id: task.revision for task in tasks}
         asks = moves_tomorrow = 0
         for task in tasks:
             klass = formulation.classify(task_clock(task), clock_settings, now)
@@ -1347,6 +1488,7 @@ class ReviewService:
                 receipt
                 for receipt in self.task_repo.list_review_receipts(owner_id)
                 if now < receipt.hidden_until
+                and revisions.get(receipt.task_id) == receipt.task_revision
             ],
             server_now=now,
         )

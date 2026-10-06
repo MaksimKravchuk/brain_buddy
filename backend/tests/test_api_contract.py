@@ -412,7 +412,7 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/tasks/{task_id}/auto-park", "post"): {"400", "401", "404", "409", "422"},
         ("/api/review/settings", "put"): {"400", "401", "409", "422"},
         ("/api/review/explainer/acknowledge", "post"): {"400", "401", "409", "422"},
-        ("/api/review/parks/acknowledge", "post"): {"400", "401", "422"},
+        ("/api/review/parks/acknowledge", "post"): {"400", "401", "409", "422"},
         ("/api/review/state", "get"): {"401", "404"},
     }
     discovered_operations = {

@@ -82,6 +82,25 @@ describe("PrivacyPolicyPage", () => {
     expect(retention).toHaveTextContent(/undo copies.*7 days/i);
   });
 
+  it("020-FR-043 020-FR-044: names the task timing data kept for every account, flag on or off", () => {
+    renderPolicy();
+    const collected = screen.getByRole("heading", { name: /what we collect/i }).closest("section");
+
+    // Clock fields are written on every user's Next tasks whatever the flag
+    // state, and decisions, settings and the explainer acknowledgement are
+    // accepted with the flag off, so the disclosure is not conditional on it.
+    expect(collected).not.toHaveTextContent(/if the weekly review is switched on for you/i);
+    expect(collected).toHaveTextContent(/for every account, whether or not the\s+weekly review is switched on/i);
+    expect(collected).toHaveTextContent(/when its current wording started/i);
+    expect(collected).toHaveTextContent(/keep it 7 more days and your reason/i);
+    expect(collected).toHaveTextContent(/the moment before which it will not move to Someday/i);
+    expect(collected).toHaveTextContent(/how many times in a row its wording\s+stalled/i);
+    expect(collected).toHaveTextContent(/moved to Someday automatically, when that happened/i);
+    expect(collected).toHaveTextContent(/first acknowledged the weekly review's explanation/i);
+    expect(collected).toHaveTextContent(/stall-reason code you pick/i);
+    expect(collected).toHaveTextContent(/accepted from your devices even while the weekly review is switched off/i);
+  });
+
   it("012-FR-007: names OpenAI's title-suggestion processing purpose", () => {
     renderPolicy();
 

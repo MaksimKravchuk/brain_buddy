@@ -750,6 +750,105 @@ def test_020_FR_048_undo_after_the_follow_up_changed_is_unavailable(
     assert len(api.decisions()) == 1
 
 
+@pytest.mark.parametrize(
+    ("child", "path", "body"),
+    [
+        ("subtask", "subtasks", {"title": "Find Ann's number"}),
+        ("comment", "comments", {"body": "Ann prefers mornings"}),
+    ],
+)
+def test_020_FR_048_undo_of_a_follow_up_that_gained_a_child_row_is_unavailable(
+    api: ReviewApi, child: str, path: str, body: dict[str, str]
+) -> None:
+    """A subtask or comment added to the follow-up is never cascade-deleted.
+
+    Neither bumps the follow-up's revision, so the revision guard alone would
+    let Undo delete the task and, by ``ON DELETE CASCADE``, the person's row.
+    """
+
+    result = api.decide(_waiting(api), "follow_up", title="Call Ann")
+    created = result["created_task"]
+    with allure.step(f"Add a {child} to the follow-up task"):
+        added = api.client.post(
+            f"/api/tasks/{created['id']}/{path}", json=body, headers=api.key()
+        )
+    assert added.status_code in (200, 201), added.text
+    assert api.task(created["id"])["revision"] == created["revision"]
+
+    with allure.step("Undo the follow-up decision"):
+        response = api.undo_raw(result["decision"]["id"], result["task"]["revision"])
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {"reason": "undo_unavailable"}
+    assert len(api.task(created["id"])[path]) == 1
+    assert [d.id for d in api.decisions()] == [result["decision"]["id"]]
+
+
+def test_020_FR_046_020_FR_048_undo_keeps_a_time_zone_floor_written_after_it(
+    api: ReviewApi,
+) -> None:
+    """extend, then a zone change floors the task, then Undo: the floor stays.
+
+    The FR-046 floor is clock bookkeeping without a revision bump, so the Undo
+    is still available; restoring the snapshot's older clock must not drop it.
+    """
+
+    task = _asking(api, due_date="2026-01-05")
+    decided = api.decide(task, "extend", reason="Quote due Friday")
+    settings = api.container.task_repo.get_review_settings(api.owner_id)
+    assert settings is not None
+    with allure.step("Change the stored time zone: the due-dated task is floored"):
+        put = api.client.put(
+            "/api/review/settings",
+            json={"time_zone": "Asia/Tokyo", "expected_revision": settings.revision},
+            headers=api.key(),
+        )
+    assert put.status_code == 200, put.text
+    floor = api.clock() + 7 * DAY
+    assert api.stored(task["id"]).formulation_park_floor_at == floor
+
+    api.clock.advance(hours=1)
+    with allure.step("Undo the extension"):
+        undone = api.undo_raw(decided["decision"]["id"], decided["task"]["revision"])
+    assert undone.status_code == 200, undone.text
+    restored = api.stored(task["id"])
+    assert restored.formulation_extended_at is None
+    assert restored.formulation_id == task["formulation"]["id"]
+    assert restored.formulation_park_floor_at == floor
+    assert norm(undone.json()["task"]["formulation"]["park_floor_at"]) == iso(floor)
+    assert norm(undone.json()["task"]["formulation"]["park_due_at"]) == iso(floor)
+
+
+def test_020_FR_016_020_FR_048_undo_into_next_after_activation_is_clamped(
+    api_client: TestClient, frozen_clock: FrozenClock
+) -> None:
+    """A decision made before activation, undone after it, gets the clamp.
+
+    The task was out of Next when the activation clamp ran; restoring its
+    pre-activation clock would let it ask and park inside the 14-day grace.
+    """
+
+    api = ReviewApi(api_client, frozen_clock)
+    task = api.create(state="next")
+    api.clock.advance(days=20)
+    decided = api.decide(api.task(task["id"]), "someday")
+    with allure.step("Acknowledge the explainer: the owner is activated now"):
+        acked = api.client.post(
+            "/api/review/explainer/acknowledge", json={}, headers=api.key()
+        )
+    assert acked.status_code == 200, acked.text
+    activated = api.clock()
+
+    with allure.step("Undo the pre-activation decision"):
+        undone = api.undo_raw(decided["decision"]["id"], decided["task"]["revision"])
+    assert undone.status_code == 200, undone.text
+    restored = api.stored(task["id"])
+    assert restored.state == "next"
+    assert restored.formulation_id == task["formulation"]["id"]
+    assert restored.formulation_started_at == activated
+    assert restored.formulation_park_floor_at == activated + 14 * DAY
+    assert restored.revision == decided["task"]["revision"] + 1
+
+
 def test_020_FR_048_undo_after_the_task_changed_or_the_snapshot_was_purged(
     api: ReviewApi,
 ) -> None:
@@ -837,6 +936,7 @@ def test_020_FR_011_a_lost_decision_write_is_repaired_by_its_replay(
         "review_session:user_x",
         "review_settings:user_x",
         "explainer_ack:user_x",
+        "park_ack:user_x",
     ],
 )
 def test_020_FR_011_task_reconciliation_never_misreads_a_review_record(

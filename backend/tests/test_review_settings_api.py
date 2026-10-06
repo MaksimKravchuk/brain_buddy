@@ -329,6 +329,24 @@ def test_020_FR_051_state_reports_activation_grace_receipts_and_server_now(
     assert new_id("x")
 
 
+def test_020_FR_032_a_receipt_for_a_task_changed_since_is_not_returned(
+    api: ReviewApi,
+) -> None:
+    """data-model E5: a receipt hides its task only at ``task_revision``."""
+
+    waiting = api.create("Quote", state="waiting", waiting_for="Ann")
+    kept = api.create("Invoice", state="waiting", waiting_for="Bob")
+    body = api.decide(waiting, "keep_waiting")
+    api.decide(kept, "keep_waiting")
+    with allure.step("Edit one kept task: its revision moves past the receipt"):
+        api.patch(body["task"], details="Ann called back")
+    receipts = _state(api)["receipts"]
+    assert [r["task_id"] for r in receipts] == [kept["id"]]
+    assert receipts[0]["task_revision"] == api.task(kept["id"])["revision"]
+    stored = api.container.task_repo.list_review_receipts(api.owner_id)
+    assert {r.task_id for r in stored} == {waiting["id"], kept["id"]}
+
+
 def test_020_FR_051_an_owner_never_activated_sees_no_markers(
     api_client: TestClient, frozen_clock: FrozenClock
 ) -> None:

@@ -310,7 +310,7 @@ def auto_park_task(
 @router.post(
     "/review/parks/acknowledge",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=error_responses(400, 401, 422),
+    responses=error_responses(400, 401, 409, 422),
 )
 def acknowledge_parks(
     payload: ParkAcknowledgeRequest,
@@ -320,8 +320,11 @@ def acknowledge_parks(
 ) -> None:
     """Mark parks seen ("Continue" on While you were away, FR-015); not gated."""
 
-    require_idempotency_key(idempotency_key)
-    review_service.acknowledge_parks(payload, owner_id=current_user.id)
+    review_service.acknowledge_parks(
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=require_idempotency_key(idempotency_key),
+    )
 
 
 @router.put(

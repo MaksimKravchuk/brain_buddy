@@ -40,6 +40,9 @@ _Model = TypeVar("_Model", bound=BaseModel)
 
 REVIEW_LEDGER_ID = "review-v1"
 
+_TASK_CHILD_TABLES: tuple[str, ...] = ("task_tags", "subtasks", "comments")
+"""Every table whose rows ``ON DELETE CASCADE`` with their task."""
+
 _REVIEW_SCHEMA = """
 CREATE TABLE IF NOT EXISTS review_settings (
     owner_id TEXT NOT NULL PRIMARY KEY,
@@ -513,11 +516,36 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
             ).fetchall()
         return [TaskDocument.model_validate(json.loads(row["payload"])) for row in rows]
 
+    def task_has_child_rows(self, owner_id: str, task_id: str) -> bool:
+        """Whether the task holds a row ``delete_task_record`` would cascade.
+
+        Tag links, subtasks and comments are the tables with ``ON DELETE
+        CASCADE`` on ``tasks``. Adding a subtask or a comment does not bump the
+        task's revision, so the Undo of a follow-up checks this as well
+        (data-model E4): a person's row is never deleted by an Undo.
+        """
+
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Task", owner_id),
+        ):
+            for table in _TASK_CHILD_TABLES:
+                # `table` comes from the literal tuple above; the ids are bound.
+                row = conn.execute(
+                    f"SELECT 1 FROM {table} "  # noqa: S608
+                    "WHERE owner_id = ? AND task_id = ? LIMIT 1",
+                    (owner_id, task_id),
+                ).fetchone()
+                if row is not None:
+                    return True
+        return False
+
     def delete_task_record(self, owner_id: str, task_id: str) -> None:
         """Remove a task created by a decision that is being undone (FR-048).
 
         Its tag links, subtasks and comments go with it (``ON DELETE CASCADE``),
-        and so does its JSON mirror.
+        and so does its JSON mirror. Callers check ``task_has_child_rows``
+        first: only a task with none of those rows is ever deleted this way.
         """
 
         self._review_execute(

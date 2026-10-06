@@ -289,6 +289,7 @@ Errors:
 | 400 | `decision_not_allowed` | type not allowed for the task's state | "This decision isn't available for this task's current list. Nothing was changed." + Ref (M-03 / D-02 "decision not allowed") |
 | 400 | `extension_already_used` / `extension_not_due` | FR-009 | card hides the option; server is the backstop |
 | 400 | `project_archived` | `follow_up`/`return_to_next` into an archived project | M-18 archived, M-09 partial |
+| 400 | `details_too_long` | `first_step` when `"Was: <old title>\n\n<old details>"` would exceed 20 000 characters; nothing changes | |
 | 404 | `{resource, id}` | task not found or not owned (path id) | |
 | 409 | `id_conflict` | a supplied client id is already used by a record that does not match this request ("Retry after the idempotency retention": a matching record answers 200 as already applied, checked before the revision and eligibility rows above) | iOS sets aside with Ref (cannot happen with UUIDs in practice) |
 | 422 | (validation) | missing/oversized fields | |
@@ -321,8 +322,11 @@ Body `{"expected_task_revision": 8}`. Response `{"task": TaskResponse,
 "undone_decision_id": "decision_…", "deleted_task_id": null, "session_counts": {…}}`.
 409 `{"reason": "undo_unavailable"}` when the task changed since the decision, when a
 follow-up task created by the decision changed since it was created (its revision is
-stored on the decision, data-model E4), or when the undo snapshot was already purged
-(7 days). Clients show "Couldn't undo: "<title>" changed on another device. It's in
+stored on the decision, data-model E4) or holds a tag link, subtask or comment (adding
+a subtask or comment does not bump its revision, and deleting the task would
+cascade-delete them), or when the undo snapshot was already purged (7 days). A
+restored task keeps clock bookkeeping written since the decision (formulation-clock §3
+"decision undo"). Clients show "Couldn't undo: "<title>" changed on another device. It's in
 <list> now." + Ref (design "Undo didn't apply" states). 404 when not owned or already
 undone; a retried undo whose first delivery was applied therefore gets 404, which the
 device treats as success (the undo's goal, the decision being absent, holds;
@@ -337,6 +341,11 @@ The server re-evaluates with its own clock and settings under the owner lock and
 **iff** the flag is effective for the owner (otherwise `applied: false`, see "Gate"),
 the owner is activated, the task is in Next, its classification is `park_due`,
 and it is not already parked for its current formulation. Response `{"applied": bool, "task": TaskResponse}`.
+For an owner that is activated and has the flag effective, the request first applies the
+sweep's gap bookkeeping under the same lock (§9: the sweep-gap floor when
+`last_effective_sweep_at` is ≥ 24 h old, then `last_effective_sweep_at = now`), so a
+device park after a gap meets the same floor and the same visible marker as a sweep park
+(SC-006).
 `applied: false` is a success, never a conflict (FR-013, US2-6). No
 `expected_revision` is taken. FR-013's "applying it twice has no effect" is a **state**
 rule (re-checked under the lock), not an idempotency-record rule.
@@ -378,7 +387,10 @@ writes the stored Someday snapshot over a restored task).
 }
 ```
 
-`server_now` lets clients detect clock skew (R9). `explainer_seen` is
+`receipts` lists only the receipts that still hide their task (data-model E5):
+`now < hidden_until` **and** `task_revision` equal to the task's current revision; a
+receipt for a task changed since it was written is not returned. `server_now` lets
+clients detect clock skew (R9). `explainer_seen` is
 `activated_at != null`; while it is false clients show the explainer (M-26 / D-05)
 at app or web open and no markers. `grace_until` = `activated_at + 14 d` (copy in
 M-26, D-05 and M-12). `counts.asks_for_decision` is the aggregate of
@@ -423,7 +435,9 @@ Body `{"time_zone"?: IANA name}`. Idempotent and first-wins: when `activated_at`
 null it is set to the server's `now` and the activation transition of
 formulation-clock §3 runs under the owner lock in the same transaction; when it is
 already set nothing changes. Either way the response is the current
-`GET /review/state` body. Clients call it when the person dismisses the explainer and
+`GET /review/state` body. The activating acknowledgement increments `revision`; a later
+one does not; sweep bookkeeping (`last_effective_sweep_at`, gap `owner_park_floor_at`)
+never does. Clients call it when the person dismisses the explainer and
 send the device's zone with it, so due-dated tasks are classified in the person's zone
 from activation on rather than in `UTC` until onboarding (weeks later). The supplied
 zone is stored by the activating acknowledgement only (400 `invalid_time_zone` for a
@@ -461,8 +475,10 @@ likewise sets no `owner_park_floor_at`.
 ### `POST /review/parks/acknowledge` → 204
 
 Body `{"items": [{"task_id": "…", "formulation_id": "…"}]}` (≤ 200). Idempotent;
-unknown or foreign ids are ignored (no existence leak). Closing M-09 / the web dialog
-without "Continue" sends nothing (the parks stay unseen).
+unknown or foreign ids are ignored (no existence leak). The Idempotency-Key is stored
+like every other mutation's ("Mutations", prefix `park_ack:`, §9): the same key and body
+replay (204), the same key with another body is 409 `idempotency_conflict`. Closing
+M-09 / the web dialog without "Continue" sends nothing (the parks stay unseen).
 
 ## 6. Sessions and queues (increment 3)
 
@@ -747,7 +763,8 @@ containing a sentinel string and asserts the sentinel is in no captured record.
 
 **Idempotency command prefixes** (one spelling everywhere, research R7):
 `decide_task:`, `undo_decision:`, `auto-park:`, `bulk_release:`, `undo_bulk_release:`,
-`review_session:`, `review_settings:`, `explainer_ack:`. They are registered in
+`review_session:`, `review_settings:`, `explainer_ack:`, `park_ack:`. They are
+registered in
 `ReviewService`'s own `_apply_idempotent_record`, each with its own result
 reconstructor, not in `TaskService._apply_idempotent_record` (`service.py:1142`), whose
 default branch validates the stored response as a `TaskDocument`. The existing

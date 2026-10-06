@@ -546,8 +546,15 @@ def test_020_FR_014_a_failing_review_sweep_never_stops_the_privacy_sweep(
 
 # ===================================================================== T081
 def _due(api: ReviewApi, title: str = "Call Bob") -> dict[str, Any]:
+    """A task 21 days into a 14-day threshold, the sweep loop having kept running.
+
+    Without ``keep_alive`` the jump is a sweep gap, and a device park would
+    meet the gap floor first (SC-006), as the gap tests below show.
+    """
+
     task = api.create(title, state="next")
     api.clock.advance(days=21)
+    keep_alive(api.container)
     return api.task(task["id"])
 
 
@@ -599,6 +606,59 @@ def test_020_FR_013_device_park_is_applied_false_unless_the_server_agrees(
     assert off.status_code == 200
     assert off.json() == {"applied": False, "task": api.task(due["id"])}
     assert api.stored(due["id"]).state == "next"
+
+
+def test_020_SC_006_a_device_park_after_a_sweep_gap_applies_the_gap_floor_first(
+    api: ReviewApi,
+) -> None:
+    """Flag off for 5 days, then a device park lands before the first sweep.
+
+    The device path applies the same sweep-gap floor under the owner lock as
+    the sweep does, so the park waits behind a visible "moves to Someday
+    tomorrow" marker instead of landing at once (SC-006).
+    """
+
+    now = api.clock()
+    api.activate_at(now - 60 * DAY, last_effective_sweep_at=now - 5 * DAY)
+    task = seed_old_next_task(api, age=40 * DAY)
+    with allure.step("Device asks to park a task the gap made due"):
+        response = api.client.post(
+            f"/api/tasks/{task.id}/auto-park",
+            json={"formulation_id": task.formulation_id},
+            headers=api.key(),
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()["applied"] is False
+    assert response.json()["task"]["state"] == "next"
+    assert norm(response.json()["task"]["formulation"]["park_due_at"]) == iso(
+        now + 7 * DAY
+    )
+    settings = api.container.review_service.settings_for(api.owner_id)
+    assert settings.owner_park_floor_at == now + 7 * DAY
+    assert settings.last_effective_sweep_at == now
+    assert settings.revision == 1
+
+    with allure.step("The next sweep finds no gap and parks nothing yet"):
+        api.clock.advance(minutes=1)
+        result = app_main._run_review_maintenance_sweep(api.container)
+    assert (result.gap_floors, result.parked) == (0, 0)
+    assert api.container.review_service.settings_for(
+        api.owner_id
+    ).owner_park_floor_at == (now + 7 * DAY)
+
+
+def test_020_SC_006_a_device_park_without_a_gap_leaves_the_owner_floor_alone(
+    api: ReviewApi,
+) -> None:
+    """A sweep ran a minute ago: no floor, the due task parks at once."""
+
+    _activated(api)
+    task = _due(api)
+    keep_alive(api.container)
+    assert _device_park(api, task).json()["applied"] is True
+    settings = api.container.review_service.settings_for(api.owner_id)
+    assert settings.owner_park_floor_at is None
+    assert settings.last_effective_sweep_at == api.clock()
 
 
 def _park_with_sweep(api: ReviewApi) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -804,6 +864,122 @@ def test_020_FR_015_acknowledgement_is_at_most_200_items_and_works_flag_off(
     assert ok.status_code == 204
 
 
+def _ack_body(*items: tuple[str, str]) -> dict[str, Any]:
+    return {
+        "items": [
+            {"task_id": task_id, "formulation_id": formulation_id}
+            for task_id, formulation_id in items
+        ]
+    }
+
+
+def test_020_FR_015_park_acknowledgement_same_key_replays_another_body_conflicts(
+    api: ReviewApi,
+) -> None:
+    """http "Mutations": the Idempotency-Key is stored like every other write."""
+
+    headers = api.key()
+    first_body = _ack_body(("task_aaaaaaaaaaaa", "form_aaaaaaaaaaaa"))
+    first = api.client.post(
+        "/api/review/parks/acknowledge", json=first_body, headers=headers
+    )
+    replay = api.client.post(
+        "/api/review/parks/acknowledge", json=first_body, headers=headers
+    )
+    assert (first.status_code, replay.status_code) == (204, 204)
+    assert replay.content == b""
+    with allure.step("Reuse the key with another body"):
+        other = api.client.post(
+            "/api/review/parks/acknowledge",
+            json=_ack_body(("task_bbbbbbbbbbbb", "form_bbbbbbbbbbbb")),
+            headers=headers,
+        )
+    assert other.status_code == 409, other.text
+    assert other.json()["detail"] == {"reason": "idempotency_conflict"}
+
+
+def test_020_FR_015_a_lost_park_acknowledgement_write_is_repaired_by_its_replay(
+    api: ReviewApi,
+) -> None:
+    """The ``park_ack:`` reconciler re-marks what the stored record marked."""
+
+    _activated(api)
+    task = _due(api)
+    sweep(api.container)
+    body = _ack_body((task["id"], task["formulation"]["id"]))
+    headers = api.key()
+    acked_at = api.clock()
+    first = api.client.post("/api/review/parks/acknowledge", json=body, headers=headers)
+    assert first.status_code == 204
+    repo = api.container.task_repo
+    ack = repo.get_park_ack(api.owner_id, task["id"], task["formulation"]["id"])
+    assert ack is not None and ack.seen_at == acked_at
+    repo.save_park_ack(ack.model_copy(update={"seen_at": None}))
+
+    api.clock.advance(minutes=5)
+    with allure.step("Replay the key after the write was lost"):
+        replay = api.client.post(
+            "/api/review/parks/acknowledge", json=body, headers=headers
+        )
+    assert replay.status_code == 204
+    repaired = repo.get_park_ack(api.owner_id, task["id"], task["formulation"]["id"])
+    assert repaired is not None and repaired.seen_at == acked_at
+    assert state(api)["unseen_parks"] == []
+
+
+def test_020_FR_015_a_yield_reversal_is_not_a_return(api: ReviewApi) -> None:
+    """data-model E6: the yield reverses the park; ``returned_at`` is null."""
+
+    before, parked = _park_with_sweep(api)
+    repo = api.container.task_repo
+    form = before["formulation"]["id"]
+    ack = repo.get_park_ack(api.owner_id, before["id"], form)
+    assert ack is not None
+    # A row that drifted (e.g. an older build's return) must not survive the yield.
+    repo.save_park_ack(ack.model_copy(update={"returned_at": api.clock()}))
+    with allure.step("An offline extend made before the park yields"):
+        result = api.decide(
+            before, "extend", reason="Away", client_decided_at=iso(before["decided_at"])
+        )
+    assert result["decision"]["yielded_auto_park"] is True
+    after = repo.get_park_ack(api.owner_id, before["id"], form)
+    assert after is not None
+    assert after.returned_at is None
+    assert (after.parked_at, after.from_revision, after.source) == (
+        ack.parked_at,
+        ack.from_revision,
+        ack.source,
+    )
+
+
+def test_020_FR_015_020_FR_048_undo_of_a_return_restores_the_park_row(
+    api: ReviewApi,
+) -> None:
+    """Undo of ``return_to_next`` from a park puts ``returned_at`` back to null."""
+
+    _activated(api)
+    task = _due(api)
+    sweep(api.container)
+    parked = api.task(task["id"])
+    repo = api.container.task_repo
+    form = task["formulation"]["id"]
+    result = api.decide(parked, "return_to_next", title=parked["title"])
+    returned = repo.get_park_ack(api.owner_id, task["id"], form)
+    assert returned is not None and returned.returned_at == api.clock()
+
+    api.clock.advance(minutes=2)
+    with allure.step("Undo the return"):
+        undone = api.undo_raw(result["decision"]["id"], result["task"]["revision"])
+    assert undone.status_code == 200, undone.text
+    assert undone.json()["task"]["state"] == "someday"
+    assert undone.json()["task"]["parked"]["formulation_id"] == form
+    restored = repo.get_park_ack(api.owner_id, task["id"], form)
+    assert restored is not None
+    assert restored.returned_at is None
+    assert restored.parked_at == returned.parked_at
+    assert [p["task_id"] for p in state(api)["unseen_parks"]] == [task["id"]]
+
+
 def test_020_FR_015_returning_a_parked_task_starts_a_formulation_and_records_it(
     api: ReviewApi,
 ) -> None:
@@ -839,6 +1015,31 @@ def test_020_FR_015_return_to_next_decision_on_a_parked_task_records_the_return(
         api.owner_id, task["id"], task["formulation"]["id"]
     )
     assert ack is not None and ack.returned_at == api.clock()
+
+
+def test_020_FR_015_a_return_without_its_park_row_writes_none_and_warns(
+    api: ReviewApi, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No made-up ``source``: the missing row stays missing, the log is ids only."""
+
+    _activated(api)
+    task = _due(api, title="SENTINEL-RETURN-TITLE")
+    sweep(api.container)
+    repo = api.container.task_repo
+    with repo.command_lock(api.owner_id):
+        repo._thread_state.conn.execute(  # type: ignore[attr-defined]
+            "DELETE FROM review_park_acks WHERE owner_id = ?", (api.owner_id,)
+        )
+    with caplog.at_level(logging.WARNING, logger="app.modules.tasks"):
+        returned = api.move(api.task(task["id"]), "next")
+    assert returned["state"] == "next"
+    assert repo.list_park_acks(api.owner_id) == []
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == [
+        f"review_park_return_unrecorded owner_id={api.owner_id} "
+        f"task_id={task['id']} formulation_id={task['formulation']['id']}"
+    ]
+    assert "SENTINEL-RETURN-TITLE" not in caplog.text
 
 
 def test_020_SC_006_a_parked_task_returns_in_one_action(api: ReviewApi) -> None:

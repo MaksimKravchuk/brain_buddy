@@ -194,6 +194,153 @@ def test_020_FR_044_review_commands_and_sweep_log_no_content_or_stall_reason(
     _assert_clean(caplog)
 
 
+def _decide(
+    client: TestClient, task: dict[str, Any], headers: dict[str, str], **body: Any
+) -> Any:
+    payload: dict[str, Any] = {"expected_revision": task["revision"], **body}
+    formulation = task.get("formulation")
+    if formulation is not None:
+        payload.setdefault("formulation_id", formulation["id"])
+    return client.post(
+        f"/api/tasks/{task['id']}/decisions", json=payload, headers=headers
+    )
+
+
+def test_020_FR_044_every_decision_type_and_refusal_logs_no_content(
+    api_client: TestClient,
+    frozen_clock: FrozenClock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """first_step, reformulate, follow_up, return_to_next, keep_*, id_conflict, 422.
+
+    Each carries sentinel text in its title, notes, waiting-for or reason and
+    a stall reason; refusals (an id already used, an oversized reason or
+    title) are logged as codes only.
+    """
+
+    keys = _Keys()
+    container = _container(api_client)
+    container.feature_flag_service.set_mode(
+        "weekly_review", "on", operator_id="test-operator"
+    )
+    caplog.set_level(logging.DEBUG)
+
+    def create(n: int, **body: Any) -> dict[str, Any]:
+        return _ok(
+            api_client.post(
+                "/api/tasks",
+                json={"title": f"{TITLE} {n}", "details": NOTES, **body},
+                headers=keys(),
+            ),
+            201,
+        )
+
+    with allure.step("Activate and create Next, Waiting and Someday tasks"):
+        _ok(
+            api_client.post(
+                "/api/review/explainer/acknowledge", json={}, headers=keys()
+            )
+        )
+        next_tasks = [create(n, state="next") for n in range(2)]
+        waiting = [
+            create(10 + n, state="waiting", waiting_for=WAITING_FOR) for n in range(3)
+        ]
+        someday = create(20, state="someday")
+        frozen_clock.advance(days=15)
+        next_tasks = [
+            _ok(api_client.get(f"/api/tasks/{task['id']}")) for task in next_tasks
+        ]
+
+    with allure.step("first_step and reformulate carry sentinel titles"):
+        _ok(
+            _decide(
+                api_client,
+                next_tasks[0],
+                keys(),
+                type="first_step",
+                title=f"{TITLE} first step",
+                stall_reason="too_big",
+            )
+        )
+        _ok(
+            _decide(
+                api_client,
+                next_tasks[1],
+                keys(),
+                type="reformulate",
+                title=f"{TITLE} reworded entirely",
+                stall_reason="unclear",
+            )
+        )
+
+    with allure.step("follow_up, return_to_next, keep_waiting and keep_someday"):
+        follow_up_id = "task_00000000-0000-4000-8000-000000000001"
+        _ok(
+            _decide(
+                api_client,
+                waiting[0],
+                keys(),
+                type="follow_up",
+                title=f"{TITLE} follow up",
+                follow_up_task_id=follow_up_id,
+                stall_reason="waiting_on_someone",
+            )
+        )
+        _ok(
+            _decide(
+                api_client,
+                waiting[1],
+                keys(),
+                type="return_to_next",
+                title=f"{TITLE} back to next",
+                stall_reason="missing_info",
+            )
+        )
+        _ok(_decide(api_client, waiting[2], keys(), type="keep_waiting"))
+        _ok(
+            _decide(
+                api_client,
+                someday,
+                keys(),
+                type="keep_someday",
+                stall_reason="no_longer_matters",
+            )
+        )
+
+    with allure.step("id_conflict and 422 refusals"):
+        conflict = _decide(
+            api_client,
+            _ok(api_client.get(f"/api/tasks/{waiting[2]['id']}")),
+            keys(),
+            type="follow_up",
+            title=f"{TITLE} again",
+            follow_up_task_id=follow_up_id,
+            stall_reason="no_energy",
+        )
+        assert conflict.status_code == 409, conflict.text
+        assert conflict.json()["detail"] == {"reason": "id_conflict"}
+        long_reason = _decide(
+            api_client,
+            next_tasks[1],
+            keys(),
+            type="extend",
+            reason=REASON * 30,
+            stall_reason="too_big",
+        )
+        assert long_reason.status_code == 422
+        long_title = _decide(
+            api_client,
+            next_tasks[1],
+            keys(),
+            type="reformulate",
+            title=TITLE * 40,
+            stall_reason="unclear",
+        )
+        assert long_title.status_code == 422
+
+    _assert_clean(caplog)
+
+
 def test_020_FR_044_sweep_over_an_invalid_payload_logs_only_the_exception_type(
     api_client: TestClient,
     frozen_clock: FrozenClock,

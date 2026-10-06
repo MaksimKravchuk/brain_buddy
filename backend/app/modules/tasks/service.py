@@ -59,7 +59,6 @@ from .repository import (
 from .review_domain import (
     REVIEW_COMMAND_PREFIXES,
     FormulationView,
-    ReviewParkAckDocument,
     ReviewSettingsDocument,
     formulation_view,
     task_clock,
@@ -901,8 +900,8 @@ class TaskService:
 
         Same transaction as the move (data-model E6), so "share of parks later
         returned" is derivable from stored ids and instants. The row is written
-        at park time; should old code have lost it, it is recreated from the
-        task's park marker (source unknown, recorded as the sweep's).
+        at park time. Should it be missing, nothing is written: its ``source``
+        is unknown and is never made up. The warning carries ids only.
         """
 
         parked = before.parked
@@ -910,14 +909,14 @@ class TaskService:
             return
         ack = self.task_repo.get_park_ack(owner_id, before.id, parked.formulation_id)
         if ack is None:
-            ack = ReviewParkAckDocument(
-                owner_id=owner_id,
-                task_id=before.id,
-                formulation_id=parked.formulation_id,
-                parked_at=parked.at,
-                from_revision=parked.from_revision,
-                source="sweep",
+            review_logger.warning(
+                "review_park_return_unrecorded owner_id=%s task_id=%s "
+                "formulation_id=%s",
+                owner_id,
+                before.id,
+                parked.formulation_id,
             )
+            return
         self.task_repo.save_park_ack(ack.model_copy(update={"returned_at": now}))
 
     def _started_if_next(
