@@ -583,6 +583,9 @@ the review onboarding (M-12). It ships in increment 1 with auto-park.
 | narrow (390 px) | viewport ≤ 390 px | The dialog becomes a full-height sheet; decisions stack full width; the same focus rules | as default | FR-040 |
 | loading (saving) | decision clicked | Pending on the chosen row only; others disabled | "Saving…" | FR-011 |
 | cloud consent | first Suggest | Consent dialog; focus starts on "Not now" | as M-07 | FR-024 |
+| loading (suggesting) | Suggest with consent | Placeholder lines in the navigator area with a "Stop" button (focus moves to "Stop"); the decisions and form stay usable; nothing is written | "Asking OpenAI…" · "Stop" | FR-019, FR-020 |
+| suggestion stopped | "Stop" while "Asking OpenAI…" | The request is aborted in the browser (the fetch is cancelled); the form field and the task are unchanged; a quiet line replaces the placeholder; focus to "Suggest again" | "Suggestion stopped." · "Suggest again" | FR-020 |
+| interrupted (suggesting) | the dialog closed (Close, Esc, Back) or the tab reloaded while "Asking OpenAI…"; or the connection dropped mid-request | Closing or reloading aborts the request quietly and applies nothing; when the dialog reopens for the same task the form shows its earlier state (typed text from the draft) with "Suggestion stopped." · "Suggest again"; a dropped connection shows the timeout copy with Ref | "Suggestion stopped." · "Suggest again" / as M-07 timeout | FR-020, FR-025, FR-045 |
 | proposals (cloud) | allowed | M-05 layout with provider line; Save first step | "Suggested by OpenAI from this task's details." | FR-019, FR-020 |
 | error: provider timeout / malformed | provider fails | Banner, Ref, Try again | as M-07 | FR-025, FR-045 |
 | error: cost cap | cap reached | Banner, Ref, no retry | as M-07 | FR-025, FR-045 |
@@ -992,6 +995,13 @@ Owner decisions taken when the task list was approved (spec Clarifications "Sess
 - **Dynamic Type up to AX5** (ux-a11y checklist CHK008): "Mobile viability" now covers
   every iOS screen; M-22 has a new "accessibility text size" state with a one-column
   grid and a scrolling step bar (mockup `M-22-review-summary.html`, new frame).
+
+## Amendments 2026-10-06 (after /speckit-analyze)
+
+- **Web navigator Stop** (finding G2): D-02 gains the "loading (suggesting)",
+  "suggestion stopped" and "interrupted (suggesting)" rows, the web counterparts of
+  M-05 / M-07 "loading" and "interrupted" (state rows only; the mockup
+  `D-02-decision-dialog.html` is unchanged). No new requirement.
 
 ## Notes for the plan
 
