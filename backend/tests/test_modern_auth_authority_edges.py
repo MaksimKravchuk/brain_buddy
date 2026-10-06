@@ -898,7 +898,7 @@ def test_023_FR_007_unlink_revokes_only_originating_provider_sessions_and_report
     assert service.auth.get_user_for_token(first) is None
     assert service.auth.get_user_for_token(second) is None
     assert session_user(service, independent).id == user.id
-    assert authority_counts(service) == (1, 1, 1)
+    assert authority_counts(service) == (1, 0, 1)
     before = authority_counts(service)
     with pytest.raises(ModernAuthError):
         service.unlink("google", payload, raw_token=acting)
@@ -908,7 +908,7 @@ def test_023_FR_007_unlink_revokes_only_originating_provider_sessions_and_report
 def test_023_FR_004_old_provider_handoff_cannot_cross_unlink_and_new_authorization_generation(
     modern: Modern,
 ) -> None:
-    """A staged old provider assertion stays invalid after unlink and a fresh explicit provider login."""
+    """Old and fresh public provider assertions cannot restore explicitly removed authority."""
     service = modern[0]
     user, token = provider_owner(modern)
     stale = handoff(service, start_provider(service))
@@ -919,12 +919,14 @@ def test_023_FR_004_old_provider_handoff_cannot_cross_unlink_and_new_authorizati
         raw_token=token,
     )
     fresh = service.complete_provider(handoff(service, start_provider(service)))
-    assert fresh.payload.status == "signed_in" and fresh.raw_token
+    assert (
+        fresh.payload.status == "existing_account_required" and fresh.raw_token is None
+    )
     before = authority_counts(service)
     with pytest.raises(ModernAuthError):
         service.complete_provider(stale)
     assert authority_counts(service) == before
-    assert session_user(service, fresh.raw_token).id == user.id
+    assert current_user(service, user.id).id == user.id
 
 
 @pytest.mark.parametrize("action", ["password", "export", "delete"])

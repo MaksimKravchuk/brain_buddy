@@ -851,22 +851,23 @@ def test_023_FR_006_FR_017_provider_start_rejects_unusable_protected_intent(
     assert not rows(service, "SELECT * FROM auth_attempts")
 
 
-def test_023_FR_006_explicit_relink_reactivates_only_the_same_disabled_binding(
+def test_023_FR_006_explicit_relink_creates_new_removed_identity_authority(
     modern: Modern,
 ) -> None:
-    """A fresh confirmed link reactivates the original disabled identity without creating a session or changing account email."""
+    """A fresh confirmed link creates new identity authority without changing account email or issuing a session."""
     service = modern[0]
     user, provider_token = provider_owner(modern)
     pending, code = delivered(modern, user.email)
     token = finish_email(service, pending, code).raw_token
     assert token
+    prior = rows(service, "SELECT * FROM auth_identity_bindings")[0]
     unlink = provider_proof(service, user, provider_token, "unlink:google")
     service.unlink(
         "google",
         AccountActionRequest(recent_proof=unlink, expected_account_id=user.id),
         raw_token=provider_token,
     )
-    prior = rows(service, "SELECT * FROM auth_identity_bindings")[0]
+    assert not rows(service, "SELECT * FROM auth_identity_bindings")
     linked = start_provider(
         service,
         purpose="link",
@@ -878,8 +879,8 @@ def test_023_FR_006_explicit_relink_reactivates_only_the_same_disabled_binding(
     result = service.complete_provider(handoff(service, linked), raw_token=token)
     current = rows(service, "SELECT * FROM auth_identity_bindings")[0]
     assert result.payload.status == "linked" and result.raw_token is None
-    assert current["id"] == prior["id"] and current["state"] == "active"
-    assert current["generation"] == prior["generation"] + 1
+    assert current["id"] != prior["id"] and current["state"] == "active"
+    assert current["generation"] == 1
     assert authority_counts(service) == (1, 1, 1)
     assert session_user(service, token).email == user.email
 
@@ -910,7 +911,7 @@ def test_023_FR_006_link_cannot_replace_an_existing_provider_subject(
     assert authority_counts(service) == (1, 1, 1)
 
 
-def test_023_FR_006_stale_explicit_link_cannot_restore_a_later_disabled_generation(
+def test_023_FR_006_stale_explicit_link_cannot_cross_removal_and_reconnection(
     modern: Modern,
 ) -> None:
     """An older staged explicit link cannot undo a later authorization and unlink generation."""
@@ -937,6 +938,22 @@ def test_023_FR_006_stale_explicit_link_cannot_restore_a_later_disabled_generati
         AccountActionRequest(recent_proof=proof, expected_account_id=user.id),
         raw_token=original_token,
     )
+    with pytest.raises(ModernAuthError):
+        service.complete_provider(stale, raw_token=independent)
+    linked = start_provider(
+        service,
+        purpose="link",
+        user=user,
+        token=independent,
+        action="link:google",
+        proof=email_proof(modern, user, independent, "link:google"),
+    )
+    assert (
+        service.complete_provider(
+            handoff(service, linked), raw_token=independent
+        ).payload.status
+        == "linked"
+    )
     fresh = service.complete_provider(handoff(service, start_provider(service)))
     assert fresh.raw_token
     proof = provider_proof(service, user, fresh.raw_token, "unlink:google")
@@ -949,9 +966,7 @@ def test_023_FR_006_stale_explicit_link_cannot_restore_a_later_disabled_generati
     with pytest.raises(ModernAuthError):
         service.complete_provider(stale, raw_token=independent)
     assert authority_counts(service) == before
-    assert rows(service, "SELECT state,generation FROM auth_identity_bindings")[0][
-        :
-    ] == ("disabled", 2)
+    assert not rows(service, "SELECT * FROM auth_identity_bindings")
 
 
 @pytest.mark.parametrize("changed", ["state", "generation"])
@@ -1273,6 +1288,9 @@ def test_023_FR_025_active_cleanup_lease_blocks_native_grant_replacement_until_a
     """A leased remote cleanup prevents a new native grant from racing the old generation's revocation."""
     service, _, _, provider, clock = apple_runtime
     user, token = native_owner(apple_runtime)
+    pending, code = delivered(cast(Modern, apple_runtime), user.email)
+    independent = finish_email(service, pending, code).raw_token
+    assert independent
     proof = native_proof(service, user, token, "unlink:apple")
     service.unlink(
         "apple",
@@ -1288,24 +1306,41 @@ def test_023_FR_025_active_cleanup_lease_blocks_native_grant_replacement_until_a
     monkeypatch.setattr(provider, "revoke_apple", revoke)
     clock.now += timedelta(seconds=2)
     provider.identity = replace(provider.identity, issued_at=int(clock().timestamp()))
-    _, payload = native_start(service)
+    _, payload = native_start(
+        service,
+        purpose="link",
+        user=user,
+        token=independent,
+        action="link:apple",
+        proof=email_proof(cast(Modern, apple_runtime), user, independent, "link:apple"),
+    )
     with ThreadPoolExecutor(max_workers=1) as executor:
         cleanup = executor.submit(service.dispatch_one)
         assert revoking.wait(timeout=5)
         try:
             with pytest.raises(ModernAuthError) as failure:
-                service.complete_native_apple(payload)
+                service.complete_native_apple(payload, raw_token=independent)
             assert (failure.value.code, failure.value.status_code) == ("conflict", 409)
-            assert authority_counts(service) == (1, 1, 0)
+            assert authority_counts(service) == (1, 1, 1)
             assert (
                 rows(service, "SELECT state FROM auth_identity_bindings")[0][0]
-                == "disabled"
+                == "unlinked"
             )
         finally:
             release.set()
         assert cleanup.result(timeout=5)
-    _, retried = native_start(service)
-    assert service.complete_native_apple(retried).payload.status == "signed_in"
+    _, retried = native_start(
+        service,
+        purpose="link",
+        user=user,
+        token=independent,
+        action="link:apple",
+        proof=email_proof(cast(Modern, apple_runtime), user, independent, "link:apple"),
+    )
+    assert (
+        service.complete_native_apple(retried, raw_token=independent).payload.status
+        == "linked"
+    )
 
 
 def test_023_FR_025_apple_notification_requires_an_available_lifecycle_service(

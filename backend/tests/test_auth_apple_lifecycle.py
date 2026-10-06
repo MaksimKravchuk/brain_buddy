@@ -408,12 +408,17 @@ def test_022_fr025_deadline_erases_secret_but_keeps_inflight_lease(fixture):
         service.schedule_cleanup(connection, "binding", "unlink")
         connection.execute(
             "UPDATE auth_apple_cleanup_jobs SET expires_at=?",
-            ((NOW + timedelta(seconds=5)).isoformat(),),
+            ((NOW + timedelta(seconds=60)).isoformat(),),
         )
 
     observed = []
 
     def after_deadline():
+        with store.transaction() as connection:
+            connection.execute(
+                "UPDATE auth_apple_cleanup_jobs SET expires_at=?",
+                ((NOW + timedelta(seconds=5)).isoformat(),),
+            )
         clock[0] += timedelta(seconds=6)
         dispatched = service.dispatch_one()
         job = _rows(store, "auth_apple_cleanup_jobs")[0]
