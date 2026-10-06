@@ -88,7 +88,7 @@ Focus policy: B02 focuses the labelled code input on entry. B03 preserves the in
 
 Concrete recovery copy: B06 Connection declined. Run bb auth login to start again. B08 CLI connections are unavailable for this account. B09 lookup: Could not check this code. Retry. B09 decision: Your decision could not be confirmed. Retry the same choice or check your terminal. Include a safe reference when available; never show success before confirmed approval. No background auto-approval/polling.
 
-Clear code fragment from history after reading; never send it in query URLs/analytics. JSON POST lookup keeps codes out of access-log URLs. Identity from /auth/me, deliberate approval only. Stack at390px, no horizontal scroll, accessible labels/visible focus/≥44px controls; screenshots/keyboard/axe checks required. Static preview illustrates B04/B05/B07; tests cover all states.
+Read and validate the code fragment before any authentication redirect, then clear history immediately; never send it in query URLs/analytics. Retain only normalized short user code and <=600s deadline in tab-scoped sessionStorage through password/email/Google/Apple return to allowlisted /cli/authorize. No private device proof enters browser storage. Terminal outcome/expiry/cancel clears retained state; unavailable/stale storage falls back to B02 manual entry. JSON POST lookup keeps codes out of access-log URLs. Identity from /auth/me, deliberate approval only. Stack at390px, no horizontal scroll, accessible labels/visible focus/≥44px controls; screenshots/keyboard/axe checks required. Static preview illustrates B04/B05/B07; tests cover all states.
 
 ## Affordance → requirement map
 

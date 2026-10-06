@@ -6,20 +6,18 @@ Task, Project, Tag and CRT tree remain owned by their current repositories. bb p
 
 ## DeviceAuthorization (Identity)
 
-One atomic JSON record at data/device_authorizations/{device_code_hash}.json:
+One bounded device_authorizations table in Identity auth.sqlite3, using the existing AuthStore transaction and an additive validated schema migration. No JSON grants or second authentication authority. Existing Identity epoch/import remain owned by modern-auth.
 
-- device_code_hash: SHA-256 of a random 256-bit private proof; filename is validated lowercase hex.
-- user_code_hash: SHA-256 of normalized eight-character unambiguous Base32 code; uniqueness among live records checked under authorization guard. Raw codes are never persisted.
-- created_at, expires_at: UTC; fixed ten-minute lifetime, never extended by polling.
-- state: pending, approved, denied or consumed. Expired is derived from expires_at and takes precedence.
-- next_poll_at, poll_interval_seconds: five-second initial interval; early polling adds five seconds and moves the deadline.
-- approved_user_id and approver_session_hash: only for approved/consumed/denied account decisions. No email, provider token, IP or arbitrary device name is persisted.
+- device_code_hash PRIMARY KEY: SHA-256 of random256-bit private proof; user_code_hash UNIQUE: normalized eight-character unambiguous Base32 code hash. Never persist raw codes.
+- created_at/expires_at/next_poll_at/poll_interval_seconds; indexed expiry, fixed600s lifetime and initial5s poll interval.
+- state constrained to pending/approved/denied/consumed; expiry always takes precedence.
+- user_id/source_session_hash/auth_version/auth_method/provider_binding_id/provider_generation captured on the first decision. Foreign keys bind immutable owner, exact source session and applicable provider binding with delete cascades. Pending rows have no owner/provenance. No email/IP/device name/provider secret.
 
-Transitions: pending → approved/denied on the first authenticated browser decision; approved → consumed before session issuance. Terminal decisions cannot be changed. Only a fresh approving session for the same active non-deleting account may exchange approved. Source revoke, account marker, flag OFF or expiry prevents exchange. Consumed replay never returns or mints a secret. All states become unusable after ten minutes and are physically removed by the next existing privacy sweep (default60s, configured1–3600s) or startup after downtime; admission is capped at 1,024 live records. Unknown private codes allocate no record/counter.
+Transitions: pending → approved/denied; approved → consumed in the same transaction as the distinct CLI session insertion. Fresh source-session/account/version/provider-generation checks, conditional consumption, mint and final checks commit together. Rollback leaves no session and no consumed grant; a committed lost response cannot replay or recover a secret. The resulting CLI session inherits source method/binding and current auth_version, so provider unlink/revocation and bulk credential changes apply. Ordinary source logout prevents unconsumed issuance; already issued separate sessions follow existing authority revocation rules.
 
-Corrupt records fail closed and are deleted under the guard without payload logging; no persistent quarantine is created. They count against admission until safely removed. Atomic-write failures propagate with correlation information. The lock file remains stable across pruning.
+SQL constraints and BEGIN IMMEDIATE cover independent connections/processes. A bounded startup/periodic sweep physically removes every expired grant (max1024) by the next sweep even with cli_auth OFF; startup handles downtime, admission also prunes. Source/owner/provider erase cascades grants, and hard account purge invokes explicit cleanup after existing flag scrub. Invalid schema/rows fail closed with coarse logs, never quarantine. Unknown proofs allocate nothing. Device proof/provenance data is excluded from export as transient authorization security material, explicitly named in manifest/docs. Local CLI files are outside server export.
 
-Device grants and their verifiers are excluded from server account exports as transient authorization security material, explicitly named in the export manifest/docs/data-retention.md. Local CLI store/configuration bytes are outside server export and cleared by the owner locally.
+Browser-only return state contains the normalized short user code and <=600s deadline in tab-scoped sessionStorage after immediate fragment removal. It contains no private device proof/session/provider token or account content. Terminal outcome/expiry/cancel erases it; missing or blocked storage means manual entry. The server remains the approval authority.
 
 ## CLI connection metadata
 

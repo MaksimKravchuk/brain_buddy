@@ -8,8 +8,8 @@ Version tag bb-v0.1.0, future bb-vVERSION.
 |---|---|---|
 | x86_64-unknown-linux-gnu | bb-VERSION-x86_64-unknown-linux-gnu.tar.gz | glibc≥2.35 |
 | aarch64-unknown-linux-gnu | bb-VERSION-aarch64-unknown-linux-gnu.tar.gz | glibc≥2.35 |
-| x86_64-apple-darwin | bb-VERSION-x86_64-apple-darwin.tar.gz | Native tested/link-target floor documented before publish |
-| aarch64-apple-darwin | bb-VERSION-aarch64-apple-darwin.tar.gz | Native tested/link-target floor documented before publish |
+| x86_64-apple-darwin | bb-VERSION-x86_64-apple-darwin.tar.gz | macOS15+; native link/run and released-install evidence at15 required for this architecture |
+| aarch64-apple-darwin | bb-VERSION-aarch64-apple-darwin.tar.gz | macOS15+; native link/run and released-install evidence at15 required for this architecture |
 | x86_64-pc-windows-msvc | bb-VERSION-x86_64-pc-windows-msvc.zip | Windows10/11 x64 |
 
 Archives contain only bb/bb.exe, no absolute/nested/unsafe paths. Five native build/test jobs plus aggregation required in Full CI; skip/failure blocks. contents:read only, no landing/production environment/write token. Pin toolchain/actions/lockfile. Execute version/help/discovery and native credential/installer checks, not compilation alone.
@@ -34,4 +34,4 @@ Checksum verifies corruption; HTTPS/GitHub installer execution trusts release au
 
 Candidate jobs upload build artifacts only. Explicit helper verifies exact-source CI/review/QA/artifact identity and recorded owner-approved release metadata, publishes as approved actor outside workflows, never alters main/rulesets/deploys Fly. Credentials never enter logs/source/candidate jobs.
 
-ADR-0008 ASK landing needs recorded exact-SHA decision/audited intervention; normal main-triggered deploy verifies same SHA. Configure trusted frontend verification origin; prove OFF rollback/intended cohort exposure/device journey/cleanup. Publish fixed binaries/installers and run actual Unix/Windows downloads/version smoke. Missing native/release/production evidence means unfinished feature.
+ADR-0008 ASK landing needs recorded exact-SHA decision/audited intervention; normal main-triggered deploy verifies same SHA. Configure trusted frontend verification origin; prove OFF rollback/intended cohort exposure/device journey/cleanup. Publish fixed binaries/installers and run actual Linux/macOS15-both-architectures/Windows downloads/version smoke. Missing native/release/production evidence means unfinished feature.

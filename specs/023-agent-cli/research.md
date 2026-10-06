@@ -18,19 +18,19 @@ Verified upstream: https://docs.rs/reqwest/0.12.28/reqwest/blocking/struct.Clien
 
 **Rationale:** backend/app/api/auth.py already sets an opaque session cookie; backend/app/services/auth_service.py mints and hashes sessions; authenticated member endpoints already consume them. The CLI can receive its own distinct session via Set-Cookie. The web retains its existing session. Browser approval naturally uses the configured shared login methods and works when the CLI runs over SSH.
 
-**Alternatives:** asking for passwords defeats the requested UX; copying browser cookies exposes a human session; localhost-only callbacks fail headless use; refresh tokens/JWTs introduce another credential lifecycle. No published shared-provider contract was found in fetched branches/PRs; unpushed parallel work may exist. Recheck it before candidate freeze and resolve code conflicts without duplicating Identity ownership.
+**Alternatives:** asking for passwords defeats the requested UX; copying browser cookies exposes a human session; localhost-only callbacks fail headless use; refresh tokens/JWTs introduce another credential lifecycle. Published origin/feat/modern-auth@bc7fc72 introduces Google/Apple/email web login and accepted ADR-0028 single SQLite Identity, while retaining cookie/Me contracts. It has no device endpoints. This dependency is not yet claimed landed; read its concrete authority and return seams before backend implementation.
 
 Verified model: https://www.rfc-editor.org/rfc/rfc8628#section-3.5. Pending continues, slow_down adds five seconds permanently, expiry/denial stops. Timeout slows polling. No embedded client secret.
 
 ## Grant durability and revocation races
 
-**Decision:** bounded JSON records beside existing sessions, serialized by an Identity authorization guard: process RLock plus reentrant, stable-file advisory flock. No per-account lock registry. Session mutation methods and CLI grant approval/exchange/purge use the same guard. Keep task/tree request handlers outside it.
+**Decision:** extend the published modern-auth AuthStore with a bounded device table; source validation, conditional grant consumption and distinct session insertion share one SQLite transaction. Inherit auth_version and provider method/binding; capture/recheck provider generation. No filesystem authorization lock or JSON grant store.
 
-**Rationale:** sessions are already JSON, no shared authorization lock exists, and maintenance purge can run in another process. backend/Dockerfile configures uvicorn without multiple workers; Fly mounts a local volume. A file lock covers cooperating processes on that same data root. It does not create cross-machine shared persistence or claim high availability. backend/app/repositories/crt_command.py demonstrates the flock pattern; Identity must own its own lock rather than importing Thinking repositories.
+**Rationale:** accepted ADR-0028 and AuthStore.transaction at bc7fc72 make auth.sqlite3 the sole account/session/proof authority with BEGIN IMMEDIATE, indexed constraints and foreign keys. Existing nested session facade writes reuse the same connection. Cross-process races therefore belong to the existing transaction, not an unrelated lock. Rollback reverses both consumption and session insertion; response loss after commit requires new login and never reissues.
 
-**Alternatives:** process-only memory loses grants on restart and races with maintenance. SQLite grants still need a cross-store lock to cover session files. Moving all Identity persistence to SQLite is a separate migration, unnecessary here.
+**Alternatives:** a JSON sidecar contradicts the published single authority and requires cross-store recovery. Process-only memory loses grants on restart. A new Identity migration duplicates parallel work. CLI release depends on that feature's completed SQLite import and compatible rollback baseline, and then establishes its own flag/grant-compatible floor. Main21f08d2 supplies six required runtime flags, including task_mcp; cli_auth is optional seventh.
 
-Consume a grant durably before minting; a crash/lost response requires a new login, never another session from replay. Revalidate the source session and active account under the guard before and after issuance. Deletion markers always reject exchange; no implicit deletion cancellation. Hard purge removes account-linked grants.
+Verified source seams: backend/app/repositories/{auth_store,session,auth_metadata}.py, services/auth_service.py and accepted modern-identity ADR at origin/feat/modern-auth@bc7fc72. Test conditional consume/insert atomicity, rollback, independent processes, restart and provider/version/logout/purge races; no product execution is claimed by source inspection.
 
 ## Protected credentials and prompt-free commands
 

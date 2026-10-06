@@ -26,13 +26,13 @@ Help/version human text offline. bb commands returns local names/descriptions; b
 | api METHOD PATH | Explicit deployed member JSON, supplied query/body/revision/key |
 | auth login/status/logout | Specialized device-auth.md |
 
-Generic api GET/POST/PUT/PATCH/DELETE paths stay under api_prefix. Repeatable --query KEY=VALUE URL-encoded. Reject absolute URLs,//, userinfo, fragments, dot segments/backslashes/encoded separators/traversal/prefix escape. No arbitrary headers/cookies/redirects/binary upload or download. /auth/device/* reserved for specialized auth. Generic semantics remain server-owned; named shortcuts validate syntax. 204→data:null, unsupported media fails. Generic body full bounded JSON unless --fields selected; named-task projection only for task commands.
+Generic api GET/POST/PUT/PATCH/DELETE paths stay under api_prefix and an explicit member-business root allowlist: tasks, projects, tags, trees, crt, brain-dump-operations, brain-dump-providers, agent-connections, agent-runs, agent-run-summaries. Match complete path segments. Public/auth/account/admin/a2a/mcp/health/schema routes are excluded locally; account credential/export/deletion/provider operations remain their specialized shared-auth/web journeys, and status/logout use bb auth. New business roots require an explicit client contract update. Repeatable --query KEY=VALUE URL-encoded. Reject absolute URLs,//, userinfo, fragments, dot segments/backslashes/encoded separators/traversal/prefix escape. No arbitrary headers/cookies/redirects/binary upload or download. All /auth and /account routes are reserved for specialized authentication/account flows, including logout; generic dispatch cannot bypass local credential lifecycle. Generic semantics remain server-owned; named shortcuts validate syntax. 204→data:null, unsupported media fails. Generic responses use full bounded JSON. --fields is allowed only on generic GET; generic writes reject it before credentials/network because unknown response fields cannot be validated locally. Named schemas validate selectors before dispatch, including writes/empty lists. No implicit schema request. Confirmed2xx write followed by protocol/size/response-processing failure reports mutation_confirmed:true and delivery_unknown:false with safe status/key; callers must inspect before retry.
 
 ## Output
 
 Success stdout exactly one compact JSON+newline; no routine stderr/color/spinner. Explicit login waiting/installer progress human stderr. Failure one structured JSON error stderr, no success stdout; help/version exit0 human text, parse errors JSON.
 
-Default task fields id,title,state,revision,priority,due_date,project_id,tag_ids. --fields comma-separated documented dotted fields; preserve id/revision when present and page metadata. Malformed/unknown selectors fail (known named schema validates empty lists). --fields and --full exclusive. --full all bounded task fields. No expression language.
+Default task fields id,title,state,revision,priority,due_date,project_id,tag_ids. --fields comma-separated documented dotted fields; preserve id/revision when present and page metadata. Malformed/unknown selectors fail; known named schemas validate before dispatch including empty lists, generic GET validates against its received data, and generic writes reject --fields before dispatch. --fields and --full exclusive. --full all bounded task fields. No expression language.
 
 Task list existing items→data, page:{has_more,next_cursor}; counts_by_state only --full. limit default20/max200, server cursor opaque/preserved and never followed. Unpaginated project/tag/tree arrays truncated locally report page:{has_more:false,next_cursor:null,truncated:true}, clearly local with no continuation claim. All list modes honor limit. Body>8MiB fails without partial JSON.
 
@@ -40,7 +40,7 @@ Synthetic example: {"data":[{"id":"fixture-task","title":"Draft outline","state"
 
 ## Error/exit contract
 
-{error:{code,message,http_status?,detail?,reference_id?,retry_after_seconds?,delivery_unknown?,idempotency_key?}}. Detail retains safe conflict reason/revisions/validation field/type; removes input/ctx/password/token/cookie/provider-secret fields. Redact exact active credential/known request secrets, no raw HTML/headers/reqwest Debug. Bound error16KiB; correlation from X-Correlation-ID or reference_id. Retry-After numeric seconds or bounded HTTP-date.
+{error:{code,message,http_status?,detail?,reference_id?,retry_after_seconds?,delivery_unknown?,mutation_confirmed?,idempotency_key?}}. Detail retains safe conflict reason/revisions/validation field/type; removes input/ctx/password/token/cookie/provider-secret fields. Redact exact active credential/known request secrets, no raw HTML/headers/reqwest Debug. Bound error16KiB; correlation from X-Correlation-ID or reference_id. Retry-After numeric seconds or bounded HTTP-date.
 
 | Exit | Meaning |
 |---|---|

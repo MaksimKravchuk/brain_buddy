@@ -1,0 +1,32 @@
+{
+  "role": "testability-evidence",
+  "verdict": "pass",
+  "summary": "Bounded correction verification passes for artifact digest c5778eef47ef975a22cdd239ad289973151f6a9b07d422ecbf3269bd4a9e8ddd. The original CI traceability finding is resolved: plan.md and T002 now require cli/tests .rs scanning with unit tests, an unfiltered feature-023 invocation in Makefile check-specs, a matching gate-integrity invariant/test, and deliberate hash regeneration without changing existing coverage floors or Allure rules. The modern-auth supplement is also resolved: the plan replaces JSON/flock/fsync evidence with shared AuthStore/auth.sqlite3 consume-and-mint atomicity, rollback, independent-connection/process, restart, termination, auth_version, provider-lineage, source/provider/bulk-revoke, and purge-race tests. Rollout now requires the modern-auth release/import and a verified SQLite-capable predecessor before establishing the separate CLI-compatible rollback floor. This scoped verdict closes only those recorded planning findings. Native builds, native credential checks, installers, publication, production journeys, and exact-SHA release evidence remain planned and unpassed. No oracle, adapter, independent-provider, native-execution, or release-execution claim is made; campaign provenance remains honestly correlated and unverified.",
+  "reviewed_files": [
+    "specs/023-agent-cli/plan.md",
+    "specs/023-agent-cli/tasks.md",
+    "specs/023-agent-cli/research.md",
+    "specs/023-agent-cli/data-model.md",
+    "specs/023-agent-cli/quickstart.md",
+    "specs/023-agent-cli/contracts/device-auth.md",
+    "specs/023-agent-cli/contracts/rollout.md",
+    "specs/023-agent-cli/contracts/distribution.md",
+    "docs/decisions/0029-runtime-managed-cli-authentication.md",
+    "scripts/check_requirement_coverage.py",
+    "scripts/test_check_requirement_coverage.py",
+    "scripts/check_gate_integrity.py",
+    "scripts/test_check_gate_integrity.py",
+    "Makefile",
+    ".specify/gate-integrity.json",
+    "origin/feat/modern-auth@bc7fc72:docs/decisions/0028-modern-identity-authority.md",
+    "origin/feat/modern-auth@bc7fc72:backend/app/repositories/auth_store.py",
+    "origin/feat/modern-auth@bc7fc72:backend/app/repositories/session.py",
+    "origin/feat/modern-auth@bc7fc72:backend/app/schemas/auth.py",
+    "origin/feat/modern-auth@bc7fc72:backend/app/services/auth_service.py",
+    "origin/feat/modern-auth@bc7fc72:backend/tests/test_auth_store.py",
+    "origin/feat/modern-auth@bc7fc72:backend/tests/test_modern_auth_authority_edges.py",
+    "origin/feat/modern-auth@bc7fc72:backend/tests/test_modern_auth_authority_remaining.py"
+  ],
+  "findings": [],
+  "product_decisions": []
+}

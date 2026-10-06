@@ -1,11 +1,11 @@
 # CLI authentication integration notes
 
 Status: owner-approved browser/headless UX; proposed technical contract under planning review, not implemented. The authoritative proposed interface is contracts/device-auth.md.
-Inspected on 2026-10-06 at main commit afaa820ae8f5edcac99764c386ed748d6dca037c.
+Inspected2026-10-06: main21f08d26698a434f7b1d16b991b2b43d4e0ea0f2 and published origin/feat/modern-auth@bc7fc72c35b7bf794eff912c07bdd38a1d1f0816.
 
 ## What is observed
 
-The current backend has POST /api/auth/login accepting email/password and setting a brainbuddy_session cookie, POST /api/auth/logout revoking the supplied session, and GET /api/auth/me reporting identity. It has no inspected CLI device-authorization or provider-login endpoint. Searches of fetched remote branch names, commit messages and published PRs did not identify the parallel Google/Apple login contract. This does not establish that the parallel session has no work; its artifacts may be unpushed.
+Main retains opaque-cookie login/logout/me and now includes task_mcp, giving six required runtime flags. The published modern-auth branch adds Google/Apple/email shared web/iOS login and accepted ADR-0028 transactional auth.sqlite3 authority; existing cookie/Me wire remains compatible. No inspected branch supplies device endpoints. The branch is not claimed landed or deployed. Its authFlow.safeAuthDestination currently rejects /cli/authorize, and ProtectedRoute/LoginPage omit fragments; CLI captures the short code before redirect and adds only the exact approval destination to the shared allowlist. Device rows/issuance use AuthStore, preserving source version/provider lineage. No JSON sidecar or duplicate shared Identity implementation.
 
 ## Recommended owner journey
 
@@ -31,7 +31,7 @@ This feature supplies the following additive capabilities through the existing I
 - An authenticated authorization boundary for CLI access. Existing owner scoping, operator rules, flags and external-processing consent remain enforced; this document does not invent restricted scopes the server cannot enforce.
 - Capability-unavailable behavior for older servers. The CLI must not silently fall back to asking for a provider password or exporting browser cookies.
 
-No messages were sent to another session. The CLI does not depend on unpublished provider code: its approval page delegates sign-in to the existing shared login route, which can gain configured providers independently. Published shared-auth source artifacts still need to be read before candidate freeze.
+No messages were sent to another session. The source contract is now published and inspected. Backend integration requires the landed modern-auth authority; the CLI release additionally requires its completed import and SQLite-capable rollback baseline. Provider configuration and real-provider smoke remain owned by that feature. No unreviewed auth branch is silently merged into the CLI delivery candidate.
 
 ## Credential storage and recovery requirements
 
