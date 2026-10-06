@@ -257,6 +257,21 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
             (owner_id,),
         )
 
+    def list_open_review_sessions(self, owner_id: str) -> list[ReviewSessionDocument]:
+        """The owner's open runs, oldest first (index ``owner, status, started``).
+
+        Spec 020 PR-11: ``replace_open`` and the 7-day idle close read only
+        these; normally there is at most one.
+        """
+
+        return self._review_all(
+            ReviewSessionDocument,
+            "Review session",
+            "SELECT payload FROM review_sessions WHERE owner_id = ? "
+            "AND status = 'open' ORDER BY started_at, id",
+            (owner_id,),
+        )
+
     # ------------------------------------------------------------ E4
     def get_review_decision(
         self, owner_id: str, decision_id: str

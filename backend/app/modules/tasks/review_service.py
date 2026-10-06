@@ -23,9 +23,10 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 
 from app.exceptions import ConflictError, IdempotencyConflictError, NotFoundError
+from app.schemas.common import StorageBaseModel
 from app.schemas.review import (
     AutoParkRequest,
     DecisionRequest,
@@ -49,6 +50,7 @@ from .review_domain import (
     FormulationView,
     ParkAckKeyDocument,
     ParkAcknowledgeResultDocument,
+    ReviewBulkReleaseDocument,
     ReviewDecisionDocument,
     ReviewParkAckDocument,
     ReviewReceiptDocument,
@@ -62,6 +64,39 @@ from .review_domain import (
 from .service import TaskService, serialized_write
 
 logger = logging.getLogger("app.modules.tasks.review")
+
+
+# ------------------------------------------------- review-flow result records
+# Slice PR-11: the bodies the ``review_session:``, ``bulk_release:`` and
+# ``undo_bulk_release:`` idempotency records keep. They live here, beside their
+# reconcilers, because ``review_flow`` sits above this module (import-linter).
+class SessionResultDocument(StorageBaseModel):
+    """One run command's outcome (http §6): the run, and any run it replaced."""
+
+    session: ReviewSessionDocument
+    replaced: list[ReviewSessionDocument] = Field(default_factory=list)
+
+
+class BulkReleaseResultDocument(StorageBaseModel):
+    """One bulk release (data-model E7) with the tasks and receipts it wrote."""
+
+    release: ReviewBulkReleaseDocument
+    tasks: list[TaskDocument] = Field(default_factory=list)
+    receipts: list[ReviewReceiptDocument] = Field(default_factory=list)
+
+
+class BulkUndoResultDocument(StorageBaseModel):
+    """One bulk-release Undo: the record as undone and the restored tasks."""
+
+    release: ReviewBulkReleaseDocument
+    tasks: list[TaskDocument] = Field(default_factory=list)
+
+
+_FLOW_RESULTS: dict[str, type[StorageBaseModel]] = {
+    "review_session:": SessionResultDocument,
+    "bulk_release:": BulkReleaseResultDocument,
+    "undo_bulk_release:": BulkUndoResultDocument,
+}
 
 ACTIVATION_GRACE = formulation.ACTIVATION_GRACE
 WAITING_RECEIPT = timedelta(days=7)
@@ -1368,9 +1403,99 @@ class ReviewService:
                 ParkAcknowledgeResultDocument.model_validate(record.response_body),
                 owner_id=owner_id,
             )
-        # ``bulk_release:``, ``undo_bulk_release:`` and ``review_session:``
-        # belong to the review flow (slice PR-11); until it lands no such
-        # record is written, and a stray one is left alone.
+        else:
+            self._apply_flow_record(record, owner_id=owner_id)
+
+    def _apply_flow_record(self, record: IdempotencyRecord, *, owner_id: str) -> None:
+        """The review-flow reconcilers (slice PR-11): runs and bulk releases.
+
+        A body that does not read as its result document (a stray record) is
+        left alone and logged by type only, never by its text.
+        """
+
+        prefix = next((p for p in _FLOW_RESULTS if record.command.startswith(p)), None)
+        if prefix is None:
+            return
+        try:
+            result = _FLOW_RESULTS[prefix].model_validate(record.response_body)
+        except ValidationError as exc:
+            logger.warning(
+                "review_reconcile_skipped owner_id=%s command=%s error=%s",
+                owner_id,
+                prefix.rstrip(":"),
+                type(exc).__name__,
+            )
+            return
+        if isinstance(result, SessionResultDocument):
+            self.write_sessions(result, owner_id=owner_id)
+        elif isinstance(result, BulkReleaseResultDocument):
+            self.write_bulk_release(result, owner_id=owner_id)
+        elif isinstance(result, BulkUndoResultDocument):
+            self.write_bulk_undo(result, owner_id=owner_id)
+
+    # ------------------------------------------------------- review-flow writes
+    def write_sessions(self, result: SessionResultDocument, *, owner_id: str) -> None:
+        """Persist a run command's sessions; also the ``review_session:`` repair.
+
+        A stored session at the same or a later revision already holds this
+        write (or a later one), so it is never overwritten.
+        """
+
+        for session in (*result.replaced, result.session):
+            current = self.task_repo.get_review_session(owner_id, session.id)
+            if current is None or current.revision < session.revision:
+                self.task_repo.save_review_session(session)
+
+    def write_bulk_release(
+        self, result: BulkReleaseResultDocument, *, owner_id: str
+    ) -> None:
+        """Persist a bulk release; also the ``bulk_release:`` repair.
+
+        Applied only while its record row is absent, and per task only while
+        the task is still at the revision the release was applied from.
+        """
+
+        release = result.release
+        if self.task_repo.get_bulk_release(owner_id, release.id) is not None:
+            return
+        written: set[str] = set()
+        for task in result.tasks:
+            current = self._task_or_none(owner_id, task.id)
+            if current is not None and current.revision == task.revision - 1:
+                self.task_repo.save(task)
+                written.add(task.id)
+        for receipt in result.receipts:
+            if receipt.task_id in written:
+                self.task_repo.save_review_receipt(receipt)
+        self.task_repo.save_bulk_release(release)
+
+    def write_bulk_undo(self, result: BulkUndoResultDocument, *, owner_id: str) -> None:
+        """Persist a bulk-release Undo; also the ``undo_bulk_release:`` repair.
+
+        Applied only while the stored release is not yet undone; each task only
+        while it is still at the revision the Undo restored it from. The
+        release receipt is deleted only when this release wrote it (E5).
+        """
+
+        release = result.release
+        current_release = self.task_repo.get_bulk_release(owner_id, release.id)
+        if current_release is None or current_release.undone_at is not None:
+            return
+        for task in result.tasks:
+            current = self._task_or_none(owner_id, task.id)
+            if current is None or current.revision != task.revision - 1:
+                continue
+            self.task_repo.save(task)
+            receipt = self.task_repo.get_review_receipt(owner_id, task.id, "someday")
+            if receipt is not None and receipt.bulk_id == release.id:
+                self.task_repo.delete_review_receipt(owner_id, task.id, "someday")
+        self.task_repo.save_bulk_release(release)
+
+    def _task_or_none(self, owner_id: str, task_id: str) -> TaskDocument | None:
+        try:
+            return self.tasks.get_task(task_id, owner_id=owner_id)
+        except NotFoundError:
+            return None
 
     def _repair_decision(
         self, result: DecisionResultDocument, *, owner_id: str
