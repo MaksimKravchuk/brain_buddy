@@ -330,9 +330,11 @@ cascade-delete them), or when the undo snapshot was already purged (7 days). A
 restored task keeps clock bookkeeping written since the decision (formulation-clock §3
 "decision undo"). Clients show "Couldn't undo: "<title>" changed on another device. It's in
 <list> now." + Ref (design "Undo didn't apply" states). 404 when not owned or already
-undone; a retried undo whose first delivery was applied therefore gets 404, which the
-device treats as success (the undo's goal, the decision being absent, holds;
-ios-commands §4).
+undone, with `detail` `{"resource": "Review decision", "id": "<decision id>"}`; a retried
+undo whose first delivery was applied therefore gets 404, which the device treats as
+success (the undo's goal, the decision being absent, holds; ios-commands §4). The device
+counts a 404 as that success when its `resource` names a decision (case-insensitive
+"decision") and its `id` is the decision's or absent.
 
 ## 4. Auto-park
 

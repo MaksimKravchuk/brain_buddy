@@ -280,7 +280,7 @@ weeks only with ≥ 4 full weeks of history and ≥ 1 completion, else `nil`, FR
 http §6), `projectsNeedingNextAction(in:)` (reuses `ProjectSummary.needsNextAction`,
 `Queries.swift:183`), `datesAhead(in:today:days: 14)`,
 `lastCountedReview(in:)` (completed and partial only), `askCount(in:now:timeZone:)`
-(widget; the same aggregate as `decisionQueue`), `explainerNeeded(in:)` (FR-051).
+(widget; the same aggregate as `decisionQueue`), `explainerNeeded(in:local:)` (FR-051).
 The state-taking queries read the settings from the state; `timeZone:` (nil = the
 stored zone) selects the classification zone of the table below.
 **Which zone, for what** (a signed-in device may sit in a zone other than the stored
