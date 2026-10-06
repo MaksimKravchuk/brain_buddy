@@ -137,6 +137,142 @@ fn headless_login_persists_without_disclosing_proofs_024_fr_007_024_fr_013_024_s
 
 #[cfg(unix)]
 #[test]
+fn reflected_device_proof_is_rejected_and_candidate_revoked_024_fr_007_024_fr_013() {
+    for field in ["id", "email", "display_name"] {
+        let dir = config_dir();
+        let mut response = issued();
+        response["account"][field] = start()["device_code"].clone();
+        let (result, captured) = common::sequence(
+            &["auth", "login", "--no-browser", "--store", "file"],
+            dir.path(),
+            vec![
+                (200, String::new(), start()),
+                (200, cookie(), response),
+                (204, String::new(), Value::Null),
+            ],
+        );
+        assert!(!result.status.success(), "Reflected {field} accepted");
+        for output in [&result.stdout, &result.stderr] {
+            assert!(!String::from_utf8_lossy(output).contains("private-device-proof-sentinel"));
+            assert!(!String::from_utf8_lossy(output).contains("new-session-secret-sentinel"));
+        }
+        assert!(!dir.path().join("config.json").exists());
+        assert_eq!(captured.len(), 3);
+        assert!(captured[2].headers.starts_with("POST /api/auth/logout "));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_logout_removal_retains_locator_for_retry_024_fr_007_024_fr_014() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = config_dir();
+    let path = dir.path().to_owned();
+    let (results, _) = common::sessions_with_hook(
+        &[
+            &["auth", "login", "--no-browser", "--store", "file"],
+            &["auth", "logout"],
+        ],
+        dir.path(),
+        vec![
+            (200, String::new(), start()),
+            (200, cookie(), issued()),
+            (204, String::new(), Value::Null),
+        ],
+        move |index| {
+            if index == 2 {
+                let config: Value =
+                    serde_json::from_slice(&std::fs::read(path.join("config.json")).unwrap())
+                        .unwrap();
+                let connection = config["connections"]
+                    .as_object()
+                    .unwrap()
+                    .values()
+                    .next()
+                    .unwrap();
+                let file = path.join(format!(
+                    "{}.credential",
+                    connection["locator"].as_str().unwrap()
+                ));
+                std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o400)).unwrap();
+            }
+        },
+    );
+    assert!(results[0].status.success());
+    assert_eq!(results[1].status.code(), Some(10));
+    let config: Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("config.json")).unwrap()).unwrap();
+    let connections = config["connections"].as_object().unwrap();
+    assert_eq!(
+        connections.len(),
+        1,
+        "Failed deletion must retain its locator"
+    );
+    let connection = connections.values().next().unwrap();
+    let file = dir.path().join(format!(
+        "{}.credential",
+        connection["locator"].as_str().unwrap()
+    ));
+    assert!(file.exists());
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    // The fixture server is now closed: retry must still clear local state and
+    // honestly report that remote revocation could not be confirmed this time.
+    let result = Command::new(common::binary())
+        .args(["auth", "logout"])
+        .env("BB_CONFIG_DIR", dir.path())
+        .env_remove("BB_SESSION_TOKEN")
+        .env_remove("BB_SERVER")
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("\"local_cleared\":true"));
+    assert!(!file.exists());
+    let config: Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("config.json")).unwrap()).unwrap();
+    assert!(config["connections"].as_object().unwrap().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn logout_recovers_metadata_after_credential_is_already_gone_024_fr_007_024_fr_014() {
+    let dir = config_dir();
+    let (result, _) = common::sequence(
+        &["auth", "login", "--no-browser", "--store", "file"],
+        dir.path(),
+        vec![(200, String::new(), start()), (200, cookie(), issued())],
+    );
+    assert!(result.status.success());
+    let config: Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("config.json")).unwrap()).unwrap();
+    let connection = config["connections"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap();
+    std::fs::remove_file(dir.path().join(format!(
+        "{}.credential",
+        connection["locator"].as_str().unwrap()
+    )))
+    .unwrap();
+    let result = Command::new(common::binary())
+        .args(["auth", "logout"])
+        .env("BB_CONFIG_DIR", dir.path())
+        .env_remove("BB_SESSION_TOKEN")
+        .env_remove("BB_SERVER")
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    let error: Value = serde_json::from_slice(&result.stderr).unwrap();
+    assert_eq!(error["error"]["detail"]["local_cleared"], true);
+    assert_eq!(error["error"]["detail"]["server_revoked"], false);
+    let config: Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("config.json")).unwrap()).unwrap();
+    assert!(config["connections"].as_object().unwrap().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
 fn denied_login_preserves_existing_connection_024_fr_013_024_fr_014() {
     let dir = config_dir();
     let (result, _) = common::sequence(

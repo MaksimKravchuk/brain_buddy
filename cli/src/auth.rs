@@ -41,7 +41,7 @@ fn expired() -> Error {
         11,
     )
 }
-fn account(value: &Value, secret: Option<&str>) -> Result<Value> {
+fn account(value: &Value, secrets: &[&str]) -> Result<Value> {
     let id = value
         .get("id")
         .and_then(Value::as_str)
@@ -56,7 +56,10 @@ fn account(value: &Value, secret: Option<&str>) -> Result<Value> {
             result[name] = value.clone();
         }
     }
-    if secret.is_some_and(|s| result.to_string().contains(s)) {
+    if secrets
+        .iter()
+        .any(|secret| result.to_string().contains(secret))
+    {
         return Err(Error::protocol());
     }
     Ok(result)
@@ -89,7 +92,7 @@ pub fn run(cli: &Cli, action: &AuthAction) -> Result<Value> {
                 Some(&credential),
             )?;
             Ok(
-                json!({"data":{"server":config.server,"api_prefix":config.api_prefix,"account":account(&reply.value,Some(&credential.token))?,"authenticated":true,"source":if credential.external {"environment"}else{config.connection.as_ref().map(|c|c.store.as_str()).unwrap_or("unknown")},"expires_at":if credential.external {None}else{config.connection.as_ref().map(|c|c.expires_at.as_str())}}}),
+                json!({"data":{"server":config.server,"api_prefix":config.api_prefix,"account":account(&reply.value,&[&credential.token])?,"authenticated":true,"source":if credential.external {"environment"}else{config.connection.as_ref().map(|c|c.store.as_str()).unwrap_or("unknown")},"expires_at":if credential.external {None}else{config.connection.as_ref().map(|c|c.expires_at.as_str())}}}),
             )
         }
         AuthAction::Logout => logout(&mut config, &client),
@@ -327,7 +330,7 @@ fn login(
     let save = (|| {
         let identity = account(
             reply.value.get("account").ok_or_else(Error::protocol)?,
-            Some(&credential.token),
+            &[&credential.token, &proof],
         )?;
         let id = identity["id"].as_str().ok_or_else(Error::protocol)?;
         if previous.as_ref().is_some_and(|c| c.account_id != id) && !args.replace {
@@ -420,33 +423,46 @@ fn login(
 }
 
 fn logout(config: &mut Config, client: &reqwest::blocking::Client) -> Result<Value> {
-    let credential = credential::load(config)?;
-    let remote = request::send(
-        client,
-        config,
-        &operation("POST", "/auth/logout", None),
-        Some(&credential),
-    );
-    let mut local_cleared = false;
-    if !credential.external {
-        let connection = config.connection.clone().ok_or_else(Error::auth)?;
-        if let Err(mut error) = config.save(None) {
-            let local_cleared = config.connection.is_none()
-                && credential::remove(config, &connection.store, &connection.locator).is_ok();
-            error.detail = Some(Box::new(
-                json!({"local_cleared":local_cleared,"connection_metadata_cleared":config.connection.is_none(),"server_revoked":remote.is_ok(),"cleanup_uncertain":!local_cleared || remote.is_err(),"durability_uncertain":config.connection.is_none()}),
-            ));
-            return Err(error);
+    let (credential, remote) = match credential::load(config) {
+        Ok(credential) => {
+            let remote = request::send(
+                client,
+                config,
+                &operation("POST", "/auth/logout", None),
+                Some(&credential),
+            );
+            (Some(credential), remote)
         }
+        // A prior logout may have removed the secret but failed to commit
+        // metadata. Idempotent removal verifies the store before clearing it.
+        Err(error)
+            if config.connection.is_some() && std::env::var_os("BB_SESSION_TOKEN").is_none() =>
+        {
+            (None, Err(error))
+        }
+        Err(error) => return Err(error),
+    };
+    let external = credential.as_ref().is_some_and(|value| value.external);
+    let mut local_cleared = false;
+    if !external {
+        let connection = config.connection.clone().ok_or_else(Error::auth)?;
+        // Retain the locator until deletion succeeds so a repaired store can
+        // be cleaned up by a later process.
         if let Err(mut error) = credential::remove(config, &connection.store, &connection.locator) {
             error.detail = Some(Box::new(
-                json!({"local_cleared":false,"connection_metadata_cleared":true,"server_revoked":remote.is_ok(),"cleanup_uncertain":true}),
+                json!({"local_cleared":false,"connection_metadata_cleared":false,"server_revoked":remote.is_ok(),"cleanup_uncertain":true}),
             ));
             return Err(error);
         }
         local_cleared = true;
+        if let Err(mut error) = config.save(None) {
+            error.detail = Some(Box::new(
+                json!({"local_cleared":true,"connection_metadata_cleared":config.connection.is_none(),"server_revoked":remote.is_ok(),"cleanup_uncertain":true,"durability_uncertain":config.connection.is_none()}),
+            ));
+            return Err(error);
+        }
     }
-    let data = json!({"local_cleared":local_cleared,"server_revoked":remote.is_ok(),"source":if credential.external {"environment"}else{"saved"}});
+    let data = json!({"local_cleared":local_cleared,"connection_metadata_cleared":!external && config.connection.is_none(),"server_revoked":remote.is_ok(),"cleanup_uncertain":remote.is_err(),"source":if external {"environment"}else{"saved"}});
     match remote {
         Ok(_) => Ok(json!({"data":data})),
         Err(mut error) => {

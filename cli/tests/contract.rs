@@ -138,3 +138,54 @@ fn unknown_selector_is_rejected_even_in_preview_024_fr_003_024_fr_004() {
     let result = bb(&["task", "list", "--fields", "unknown", "--dry-run"], None);
     assert_eq!(result.status.code(), Some(2));
 }
+
+#[test]
+fn preview_revision_metadata_never_reflects_non_numeric_payload_024_fr_004_024_fr_007() {
+    for revision in [
+        serde_json::json!("private-sentinel"),
+        serde_json::json!({"value": "private-sentinel"}),
+        serde_json::json!(["private-sentinel"]),
+        serde_json::json!(true),
+        serde_json::json!(-1),
+    ] {
+        let body =
+            serde_json::json!({"title":"safe fixture", "expected_revision":revision}).to_string();
+        for args in [
+            vec![
+                "task",
+                "add",
+                "--key",
+                "preview-only",
+                "--json",
+                "@-",
+                "--dry-run",
+            ],
+            vec!["api", "POST", "/tasks", "--json", "@-", "--dry-run"],
+        ] {
+            let result = bb(&args, Some(body.as_bytes()));
+            assert!(result.status.success(), "{result:?}");
+            let text = String::from_utf8(result.stdout).unwrap();
+            assert!(!text.contains("private-sentinel"));
+            let output: Value = serde_json::from_str(&text).unwrap();
+            assert!(output["data"]["revision"].is_null());
+        }
+    }
+    let result = bb(
+        &[
+            "task",
+            "update",
+            "fixture",
+            "--revision",
+            "4",
+            "--title",
+            "private-sentinel",
+            "--key",
+            "preview-only",
+            "--dry-run",
+        ],
+        None,
+    );
+    assert!(result.status.success());
+    let output: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(output["data"]["revision"], 4);
+}

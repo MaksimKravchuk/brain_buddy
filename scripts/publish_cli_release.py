@@ -31,6 +31,32 @@ def gh(*arguments):
 
 def api(path):return json.loads(gh('api',path))
 
+def validate_tag(tag,sha,required=False):
+    refs=api(f'repos/{REPOSITORY}/git/matching-refs/tags/{tag}')
+    matches=[ref for ref in refs if ref.get('ref')==f'refs/tags/{tag}']
+    if not matches:
+        if required:raise ValueError('Release tag is missing')
+        return False
+    if len(matches)!=1:raise ValueError('Release tag is ambiguous')
+    target=matches[0]['object'];seen=set()
+    for _ in range(8):
+        if target.get('type')=='commit':
+            if target.get('sha')!=sha:raise ValueError('Release tag differs from approved source')
+            return True
+        if target.get('type')!='tag' or target.get('sha') in seen:raise ValueError('Release tag does not resolve to a commit')
+        seen.add(target['sha']);target=api(f"repos/{REPOSITORY}/git/tags/{target['sha']}")['object']
+    raise ValueError('Release tag nesting exceeds the bounded lookup')
+
+def publish(tag,sha,version,bundle,names):
+    if not validate_tag(tag,sha):
+        # Create only a missing ref: an intervening creation fails closed.
+        gh('api',f'repos/{REPOSITORY}/git/refs','--method','POST','-f',f'ref=refs/tags/{tag}','-f',f'sha={sha}')
+    validate_tag(tag,sha,required=True)
+    gh('release','create',tag,*[str(bundle/name) for name in sorted(names)],'--repo',REPOSITORY,'--verify-tag','--target',sha,'--title',f'BrainBuddy CLI {version}','--notes',f'Native BrainBuddy CLI. Source: {sha}. Toolchain: 1.99.0. See cli/README.md for platform, authorization and recovery details.','--draft')
+    if api(f'repos/{REPOSITORY}/git/ref/heads/main')['object']['sha']!=sha:raise ValueError('Main changed during staging; release remains a draft')
+    validate_tag(tag,sha,required=True)
+    gh('release','edit',tag,'--repo',REPOSITORY,'--draft=false')
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bundle',type=Path,required=True);parser.add_argument('--approval',type=Path,required=True);parser.add_argument('--review',type=Path,required=True);parser.add_argument('--qa',type=Path,required=True);parser.add_argument('--ci-run',type=int,required=True);parser.add_argument('--deploy-run',type=int,required=True);parser.add_argument('--publish',action='store_true');args=parser.parse_args()
@@ -66,9 +92,7 @@ def main():
     result={'source_sha':sha,'version':version,'actor':actor,'ci_run':args.ci_run,'deploy_run':args.deploy_run,'assets':assets,'published':False}
     if args.publish:
         tag=f'bb-v{version}'
-        gh('release','create',tag,*[str(args.bundle/name) for name in sorted(names)],'--repo',REPOSITORY,'--target',sha,'--title',f'BrainBuddy CLI {version}','--notes',f'Native BrainBuddy CLI. Source: {sha}. Toolchain: 1.99.0. See cli/README.md for platform, authorization and recovery details.','--draft')
-        if api(f'repos/{REPOSITORY}/git/ref/heads/main')['object']['sha']!=sha:raise ValueError('Main changed during staging; release remains a draft')
-        gh('release','edit',tag,'--repo',REPOSITORY,'--draft=false');result['published']=True
+        publish(tag,sha,version,args.bundle,names);result['published']=True
         result['release_url']=f'https://github.com/{REPOSITORY}/releases/tag/{tag}'
     print(json.dumps(result,separators=(',',':')))
 

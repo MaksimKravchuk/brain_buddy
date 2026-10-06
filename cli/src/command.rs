@@ -759,7 +759,13 @@ pub fn preview(r: &Request) -> Value {
                 .collect()
         })
         .unwrap_or_default();
-    json!({"data":{"method":r.method,"path":r.path,"query_keys":r.query.iter().map(|(k,_)|k).collect::<Vec<_>>(),"body_fields":fields,"revision":r.body.as_ref().and_then(|b|b.get("expected_revision")),"idempotency_key":r.key}})
+    let revision = r
+        .body
+        .as_ref()
+        .and_then(|b| b.get("expected_revision"))
+        .and_then(Value::as_u64)
+        .filter(|value| *value > 0);
+    json!({"data":{"method":r.method,"path":r.path,"query_keys":r.query.iter().map(|(k,_)|k).collect::<Vec<_>>(),"body_fields":fields,"revision":revision,"idempotency_key":r.key}})
 }
 
 pub fn discover(scope: &[String]) -> Result<Value> {
