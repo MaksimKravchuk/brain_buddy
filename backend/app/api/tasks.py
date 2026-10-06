@@ -34,12 +34,14 @@ from app.modules.tasks.autocomplete import (
     TaskTitleAutocompleteService,
 )
 from app.modules.tasks.domain import (
+    FormulationSettingsDocument,
     ProjectDocument,
     SmartAddTaskResultDocument,
     TagDocument,
     TaskDocument,
 )
 from app.modules.tasks.review_domain import FormulationView
+from app.modules.tasks.service import TaskCommandResult
 from app.schemas.auth import User
 from app.schemas.tasks import (
     BrainDumpActionReceiptResponse,
@@ -901,10 +903,10 @@ def update_task(
     current_user: User = Depends(get_current_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
-    return _with_formulation(
+    return _command_response(
         task_service,
         current_user.id,
-        task_service.update_task(
+        task_service.update_task_result(
             task_id,
             payload,
             owner_id=current_user.id,
@@ -925,10 +927,10 @@ def transition_task(
     current_user: User = Depends(get_current_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
-    return _with_formulation(
+    return _command_response(
         task_service,
         current_user.id,
-        task_service.transition_task(
+        task_service.transition_task_result(
             task_id,
             payload,
             owner_id=current_user.id,
@@ -949,10 +951,10 @@ def create_task(
     current_user: User = Depends(get_current_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> TaskResponse:
-    return _with_formulation(
+    return _command_response(
         task_service,
         current_user.id,
-        task_service.create_task(
+        task_service.create_task_result(
             payload,
             owner_id=current_user.id,
             idempotency_key=_require_idempotency_key(idempotency_key),
@@ -1202,9 +1204,28 @@ def _formulation(
 
 
 def _with_formulation(
-    task_service: TaskService, owner_id: str, task: TaskDocument
+    task_service: TaskService,
+    owner_id: str,
+    task: TaskDocument,
+    settings: FormulationSettingsDocument | None,
 ) -> TaskResponse:
-    return _to_response(task, formulation=_formulation(task_service, owner_id, task))
+    """A command's task with the projection its stored result was made with.
+
+    ``settings`` is the idempotency record's snapshot, so a same-key replay
+    returns the original ``formulation`` (http "Mutations"); ``None`` (a
+    record from before the snapshot) projects with the live settings.
+    """
+
+    views = task_service.formulation_views(owner_id, [task], settings=settings)
+    return _to_response(task, formulation=views.get(task.id))
+
+
+def _command_response(
+    task_service: TaskService, owner_id: str, result: TaskCommandResult
+) -> TaskResponse:
+    return _with_formulation(
+        task_service, owner_id, result.task, result.formulation_settings
+    )
 
 
 def _to_smart_add_response(
@@ -1214,7 +1235,9 @@ def _to_smart_add_response(
     owner_id: str,
 ) -> SmartAddTaskResponse:
     return SmartAddTaskResponse(
-        task=_with_formulation(task_service, owner_id, result.task),
+        task=_with_formulation(
+            task_service, owner_id, result.task, result.formulation_settings
+        ),
         project=(
             _to_project_response(
                 result.project, task_service=task_service, owner_id=owner_id

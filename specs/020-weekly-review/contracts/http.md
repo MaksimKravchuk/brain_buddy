@@ -192,7 +192,9 @@ an extension reason); this applies to routes and to the sweep (§9).
 
 `formulation` is `null` unless the task is in Next with a started clock. `ageing_at`,
 `ask_at`, `park_due_at`, `paused_until` are derived with the owner's settings at
-response time and are **advisory for display**; clients never send them back. They are
+response time and are **advisory for display**; clients never send them back. A
+same-key replay ("Mutations") returns them as the original response derived them: the
+idempotency record keeps the settings that response used. They are
 `null` while the owner is not activated (formulation-clock §2), so no client shows a
 marker before the explainer was seen. The web classifies with
 `classifyFromInstants(now, instants)` and needs no other rule. `parked` is set only by

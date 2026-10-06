@@ -20,7 +20,12 @@ from app.exceptions import BrainBuddyError
 from app.schemas.common import StorageBaseModel
 
 from . import formulation
-from .domain import ClockBeforeDocument, TaskDocument, TaskParkDocument
+from .domain import (
+    ClockBeforeDocument,
+    FormulationSettingsDocument,
+    TaskDocument,
+    TaskParkDocument,
+)
 
 ThresholdDays = Literal[7, 14, 21, 28]
 DecisionType = Literal[
@@ -227,13 +232,20 @@ class ReviewDecisionDocument(StorageBaseModel):
 
 
 class DecisionResultDocument(StorageBaseModel):
-    """One decision's outcome: the idempotency record body and the response."""
+    """One decision's outcome: the idempotency record body and the response.
+
+    ``formulation_settings`` is the snapshot both tasks' ``formulation`` is
+    projected with, so a replay is the original response (http "Mutations");
+    ``None`` (an older record, or the matching-record replay built from the
+    task as it now is) projects with the live settings.
+    """
 
     decision: ReviewDecisionDocument
     task: TaskDocument
     created_task: TaskDocument | None = None
     receipt: ReviewReceiptDocument | None = None
     session_counts: SessionCountsDocument | None = None
+    formulation_settings: FormulationSettingsDocument | None = None
 
 
 class UndoResultDocument(StorageBaseModel):
@@ -243,6 +255,7 @@ class UndoResultDocument(StorageBaseModel):
     undone_decision_id: str
     deleted_task_id: str | None = None
     session_counts: SessionCountsDocument | None = None
+    formulation_settings: FormulationSettingsDocument | None = None
 
 
 # ------------------------------------------------------------------- E5
@@ -281,6 +294,7 @@ class AutoParkResultDocument(StorageBaseModel):
     task: TaskDocument
     from_revision: int | None = None
     ack: ReviewParkAckDocument | None = None
+    formulation_settings: FormulationSettingsDocument | None = None
 
 
 class ParkAckKeyDocument(StorageBaseModel):

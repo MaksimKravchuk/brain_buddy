@@ -8,6 +8,7 @@ import json
 import logging
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar, cast
 
@@ -41,6 +42,7 @@ from app.utils.time import utcnow
 
 from . import formulation
 from .domain import (
+    FormulationSettingsDocument,
     IdempotencyRecord,
     ProjectDocument,
     SmartAddCreatedDocument,
@@ -73,6 +75,31 @@ _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
 
 _P = ParamSpec("_P")
 _Result = TypeVar("_Result")
+
+FORMULATION_SETTINGS_FIELD = "formulation_settings"
+"""Key of the settings snapshot inside a stored ``TaskDocument`` response body."""
+
+
+@dataclass(frozen=True, slots=True)
+class TaskCommandResult:
+    """A task command's document and the settings its response projects with.
+
+    ``formulation_settings`` is the snapshot the idempotency record keeps
+    (spec 020, http "Mutations"); ``None`` for a record written before it,
+    which then projects with the live settings.
+    """
+
+    task: TaskDocument
+    formulation_settings: FormulationSettingsDocument | None
+
+
+def _stored_formulation_settings(
+    record: IdempotencyRecord,
+) -> FormulationSettingsDocument | None:
+    stored = record.response_body.get(FORMULATION_SETTINGS_FIELD)
+    if stored is None:
+        return None
+    return FormulationSettingsDocument.model_validate(stored)
 
 
 class SerializedWriter(Protocol):
@@ -241,7 +268,6 @@ class TaskService:
         self.task_repo.create_tag(tag)
         return tag
 
-    @_serialized_write
     def create_task(
         self,
         payload: TaskCreateRequest,
@@ -249,6 +275,20 @@ class TaskService:
         owner_id: str,
         idempotency_key: str,
     ) -> TaskDocument:
+        return self.create_task_result(
+            payload, owner_id=owner_id, idempotency_key=idempotency_key
+        ).task
+
+    @_serialized_write
+    def create_task_result(
+        self,
+        payload: TaskCreateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TaskCommandResult:
+        """``POST /tasks`` with the settings snapshot its response projects with."""
+
         command = "create_task"
         request_hash = self._request_hash(command, payload)
         record = self._idempotency_record(
@@ -258,7 +298,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self._task_result(record, owner_id=owner_id)
+            return self._task_command_result(record, owner_id=owner_id)
 
         self._assert_active_references(
             owner_id=owner_id,
@@ -291,6 +331,7 @@ class TaskService:
             updated_at=now,
         )
         task = self._started_if_next(task, payload.new_formulation_id, now=now)
+        snapshot = self.formulation_settings(owner_id)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -298,9 +339,10 @@ class TaskService:
             request_hash=request_hash,
             resource_id=task.id,
             response=task,
+            formulation_settings=snapshot,
         )
         self.task_repo.create(task)
-        return task
+        return TaskCommandResult(task, snapshot)
 
     @_serialized_write
     def create_native_inbox_task(
@@ -419,6 +461,7 @@ class TaskService:
                 project_id=created_project_id,
                 tag_ids=created_tag_ids,
             ),
+            formulation_settings=self.formulation_settings(owner_id),
         )
         self._store_idempotency(
             owner_id=owner_id,
@@ -686,7 +729,6 @@ class TaskService:
             ),
         )
 
-    @_serialized_write
     def update_task(
         self,
         task_id: str,
@@ -695,6 +737,21 @@ class TaskService:
         owner_id: str,
         idempotency_key: str,
     ) -> TaskDocument:
+        return self.update_task_result(
+            task_id, payload, owner_id=owner_id, idempotency_key=idempotency_key
+        ).task
+
+    @_serialized_write
+    def update_task_result(
+        self,
+        task_id: str,
+        payload: TaskUpdateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TaskCommandResult:
+        """``PATCH /tasks/{id}`` with the settings snapshot of its response."""
+
         command = f"update_task:{task_id}"
         request_hash = self._request_hash(command, payload)
         record = self._idempotency_record(
@@ -704,7 +761,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self._task_result(record, owner_id=owner_id)
+            return self._task_command_result(record, owner_id=owner_id)
 
         task = self.get_task(task_id, owner_id=owner_id)
         self._assert_current(task, payload.expected_revision)
@@ -748,6 +805,7 @@ class TaskService:
             now=now,
             new_formulation_id=payload.new_formulation_id,
         )
+        snapshot = self.formulation_settings(owner_id)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -755,11 +813,11 @@ class TaskService:
             request_hash=request_hash,
             resource_id=updated.id,
             response=updated,
+            formulation_settings=snapshot,
         )
         self.task_repo.save(updated)
-        return updated
+        return TaskCommandResult(updated, snapshot)
 
-    @_serialized_write
     def transition_task(
         self,
         task_id: str,
@@ -768,6 +826,21 @@ class TaskService:
         owner_id: str,
         idempotency_key: str,
     ) -> TaskDocument:
+        return self.transition_task_result(
+            task_id, payload, owner_id=owner_id, idempotency_key=idempotency_key
+        ).task
+
+    @_serialized_write
+    def transition_task_result(
+        self,
+        task_id: str,
+        payload: TaskTransitionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> TaskCommandResult:
+        """``POST /tasks/{id}/transitions`` with its response's settings snapshot."""
+
         command = f"transition_task:{task_id}"
         request_hash = self._request_hash(command, payload)
         record = self._idempotency_record(
@@ -777,7 +850,7 @@ class TaskService:
             request_hash=request_hash,
         )
         if record is not None:
-            return self._task_result(record, owner_id=owner_id)
+            return self._task_command_result(record, owner_id=owner_id)
 
         task = self.get_task(task_id, owner_id=owner_id)
         self._assert_current(task, payload.expected_revision)
@@ -791,6 +864,7 @@ class TaskService:
             owner_id=owner_id,
             now=now,
         )
+        snapshot = self.formulation_settings(owner_id)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -798,10 +872,11 @@ class TaskService:
             request_hash=request_hash,
             resource_id=updated.id,
             response=updated,
+            formulation_settings=snapshot,
         )
         self.task_repo.save(updated)
         self._note_park_return(task, updated, owner_id=owner_id, now=now)
-        return updated
+        return TaskCommandResult(updated, snapshot)
 
     def _transitioned(
         self,
@@ -982,15 +1057,32 @@ class TaskService:
         settings = stored or ReviewSettingsDocument(owner_id=owner_id)
         return settings.clock_settings()
 
-    def formulation_views(
-        self, owner_id: str, tasks: Iterable[TaskDocument]
-    ) -> dict[str, FormulationView]:
-        """``TaskResponse.formulation`` per task, one settings read (http §2)."""
+    def formulation_settings(self, owner_id: str) -> FormulationSettingsDocument:
+        """The snapshot a command's idempotency record keeps (http "Mutations")."""
 
-        settings = self.clock_settings(owner_id)
+        return FormulationSettingsDocument.of(self.clock_settings(owner_id))
+
+    def formulation_views(
+        self,
+        owner_id: str,
+        tasks: Iterable[TaskDocument],
+        *,
+        settings: FormulationSettingsDocument | None = None,
+    ) -> dict[str, FormulationView]:
+        """``TaskResponse.formulation`` per task, one settings read (http §2).
+
+        ``settings`` is a stored response's snapshot: a replay projects with
+        it, so it returns the original response; without one, live settings.
+        """
+
+        clock_settings = (
+            self.clock_settings(owner_id)
+            if settings is None
+            else settings.clock_settings()
+        )
         views: dict[str, FormulationView] = {}
         for task in tasks:
-            view = formulation_view(task, settings)
+            view = formulation_view(task, clock_settings)
             if view is not None:
                 views[task.id] = view
         return views
@@ -1405,7 +1497,21 @@ class TaskService:
         request_hash: str,
         resource_id: str,
         response: BaseModel,
+        formulation_settings: FormulationSettingsDocument | None = None,
     ) -> None:
+        """Persist one command's result; also its response's settings snapshot.
+
+        ``formulation_settings`` is for a bare ``TaskDocument`` body: it rides
+        beside the task's fields under ``FORMULATION_SETTINGS_FIELD``, which
+        ``TaskDocument`` ignores on load, so the reconciler and older code read
+        the body unchanged. Composite results carry it as their own field.
+        """
+
+        body = response.model_dump(mode="json")
+        if formulation_settings is not None:
+            body[FORMULATION_SETTINGS_FIELD] = formulation_settings.model_dump(
+                mode="json"
+            )
         self.task_repo.save_idempotency(
             owner_id=owner_id,
             record=IdempotencyRecord(
@@ -1413,7 +1519,7 @@ class TaskService:
                 command=command,
                 request_hash=request_hash,
                 resource_id=resource_id,
-                response_body=response.model_dump(mode="json"),
+                response_body=body,
                 created_at=self.clock(),
             ),
         )
@@ -1489,6 +1595,16 @@ class TaskService:
         if current.revision < task.revision:
             self.task_repo.save(task)
         return task
+
+    def _task_command_result(
+        self, record: IdempotencyRecord, *, owner_id: str
+    ) -> TaskCommandResult:
+        """A replay: the stored task and the settings its first response used."""
+
+        return TaskCommandResult(
+            self._task_result(record, owner_id=owner_id),
+            _stored_formulation_settings(record),
+        )
 
     def _subtask_result(
         self, record: IdempotencyRecord, *, owner_id: str, task_id: str

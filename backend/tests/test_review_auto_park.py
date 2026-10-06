@@ -1165,6 +1165,34 @@ def test_020_FR_013_device_park_replays_and_a_lost_park_write_repairs(
     assert again.json()["applied"] is False
 
 
+def test_020_FR_013_a_device_park_replay_returns_the_original_formulation_projection(
+    api: ReviewApi,
+) -> None:
+    """``applied: false`` keeps the task in Next; its replay is the first answer.
+
+    A threshold change between the two would otherwise re-project the stored
+    task with the live settings (http "Mutations": the original response).
+    """
+
+    _activated(api)
+    task = api.create(state="next")
+    headers = api.key()
+    body = {"formulation_id": task["formulation"]["id"]}
+    path = f"/api/tasks/{task['id']}/auto-park"
+    with allure.step("Report a park the server does not agree with yet"):
+        first = api.client.post(path, json=body, headers=headers)
+    assert first.status_code == 200, first.text
+    assert first.json()["applied"] is False
+    with allure.step("Raise the threshold to 28 days"):
+        api.put_settings(threshold_days=28)
+    assert api.task(task["id"])["formulation"] != first.json()["task"]["formulation"]
+
+    with allure.step("Replay the same Idempotency-Key and body"):
+        replay = api.client.post(path, json=body, headers=headers)
+    assert replay.status_code == 200, replay.text
+    assert replay.content == first.content
+
+
 def test_020_FR_016_activation_leaves_an_already_clamped_clock_alone(
     api: ReviewApi,
 ) -> None:

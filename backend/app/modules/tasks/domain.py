@@ -9,6 +9,8 @@ from pydantic import Field, model_validator
 
 from app.schemas.common import StorageBaseModel
 
+from . import formulation
+
 TaskState = Literal["inbox", "next", "waiting", "someday", "completed", "cancelled"]
 TaskPriority = Literal["none", "low", "medium", "high"]
 # "archived" is a legacy-only stored value; the SQLite migration rewrites it to
@@ -148,6 +150,41 @@ class TaskDocument(StorageBaseModel):
         return data
 
 
+class FormulationSettingsDocument(StorageBaseModel):
+    """The owner clock settings one stored response was projected with.
+
+    Spec 020 (contracts/http.md §2, "Mutations"): the derived instants of
+    ``TaskResponse.formulation`` depend on these values, and a same-key replay
+    returns the original response. An idempotency record therefore keeps them
+    and a replay projects with them, not with the live settings. A record
+    written before this snapshot existed has none and projects live.
+    """
+
+    threshold_days: int
+    time_zone: str
+    owner_park_floor_at: datetime | None = None
+    activated_at: datetime | None = None
+
+    @classmethod
+    def of(
+        cls, settings: formulation.OwnerClockSettings
+    ) -> FormulationSettingsDocument:
+        return cls(
+            threshold_days=settings.threshold_days,
+            time_zone=settings.time_zone,
+            owner_park_floor_at=settings.owner_park_floor_at,
+            activated_at=settings.activated_at,
+        )
+
+    def clock_settings(self) -> formulation.OwnerClockSettings:
+        return formulation.OwnerClockSettings(
+            threshold_days=self.threshold_days,
+            time_zone=self.time_zone,
+            owner_park_floor_at=self.owner_park_floor_at,
+            activated_at=self.activated_at,
+        )
+
+
 class SmartAddCreatedDocument(StorageBaseModel):
     """Classification records created by one Smart Add command."""
 
@@ -162,3 +199,4 @@ class SmartAddTaskResultDocument(StorageBaseModel):
     project: ProjectDocument | None = None
     tags: list[TagDocument] = Field(default_factory=list)
     created: SmartAddCreatedDocument = Field(default_factory=SmartAddCreatedDocument)
+    formulation_settings: FormulationSettingsDocument | None = None

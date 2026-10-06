@@ -38,7 +38,7 @@ from app.utils.idempotency import request_fingerprint
 from app.utils.identifiers import generate_id
 
 from . import formulation, review_rules
-from .domain import IdempotencyRecord, TaskDocument
+from .domain import FormulationSettingsDocument, IdempotencyRecord, TaskDocument
 from .repository import TaskRepository
 from .review_domain import (
     REVIEW_COMMAND_PREFIXES,
@@ -203,9 +203,13 @@ class ReviewService:
         return self.tasks.task_repo
 
     def formulation_views(
-        self, owner_id: str, tasks: list[TaskDocument]
+        self,
+        owner_id: str,
+        tasks: list[TaskDocument],
+        *,
+        settings: FormulationSettingsDocument | None = None,
     ) -> dict[str, FormulationView]:
-        return self.tasks.formulation_views(owner_id, tasks)
+        return self.tasks.formulation_views(owner_id, tasks, settings=settings)
 
     # ------------------------------------------------------------ decisions
     @serialized_write
@@ -421,6 +425,7 @@ class ReviewService:
             created_task=created,
             receipt=receipt,
             session_counts=self._counted_session_counts(owner_id, decision, delta=1),
+            formulation_settings=FormulationSettingsDocument.of(settings),
         )
 
     def _transition(  # noqa: PLR0913 - mirrors the transition request
@@ -645,6 +650,7 @@ class ReviewService:
             undone_decision_id=decision.id,
             deleted_task_id=undo.created_task_id,
             session_counts=self._counted_session_counts(owner_id, decision, delta=-1),
+            formulation_settings=self.tasks.formulation_settings(owner_id),
         )
         self.tasks._store_idempotency(
             owner_id=owner_id,
@@ -943,6 +949,10 @@ class ReviewService:
             result = self._parked(task, owner_id=owner_id, source="device")
         if result is None:
             result = AutoParkResultDocument(applied=False, task=task)
+        # After the sweep-gap bookkeeping above, which can raise the owner floor.
+        result = result.model_copy(
+            update={"formulation_settings": self.tasks.formulation_settings(owner_id)}
+        )
         self._store(
             owner_id=owner_id,
             key=idempotency_key,

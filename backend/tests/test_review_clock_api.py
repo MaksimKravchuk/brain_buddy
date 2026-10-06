@@ -19,8 +19,13 @@ from fastapi.testclient import TestClient
 from pydantic import Field
 
 from app.container import Container
+from app.modules.tasks import formulation as rules
 from app.modules.tasks import review_domain as rd
-from app.modules.tasks.domain import ClockBeforeDocument, TaskParkDocument
+from app.modules.tasks.domain import (
+    ClockBeforeDocument,
+    FormulationSettingsDocument,
+    TaskParkDocument,
+)
 from app.schemas.common import StrictBaseModel
 from app.schemas.tasks import TaskCreateRequest
 from app.utils.idempotency import request_fingerprint
@@ -436,6 +441,128 @@ def test_020_FR_001_old_clients_keep_their_replay_fingerprint(
     ) != request_fingerprint(
         "create_task", _LegacyTaskCreateRequest.model_validate(body)
     )
+
+
+def _task_command(
+    client: TestClient, keys: _Keys, route: str
+) -> tuple[str, str, dict[str, Any]]:
+    """One task command whose response projects a Next task's formulation."""
+
+    if route == "create":
+        return "POST", "/api/tasks", {"title": "Call Bob", "state": "next"}
+    if route == "smart_add":
+        return "POST", "/api/tasks/smart-add", {"title": "Call Bob", "state": "next"}
+    if route == "patch":
+        task = _create(client, keys, state="next")
+        return (
+            "PATCH",
+            f"/api/tasks/{task['id']}",
+            {"expected_revision": task["revision"], "details": "Ask about Friday"},
+        )
+    task = _create(client, keys)
+    return (
+        "POST",
+        f"/api/tasks/{task['id']}/transitions",
+        {"expected_revision": task["revision"], "action": "move", "to_state": "next"},
+    )
+
+
+def _put_threshold(client: TestClient, keys: _Keys, days: int) -> None:
+    owner_id = client.get("/api/auth/me").json()["id"]
+    stored = _container(client).task_repo.get_review_settings(owner_id)
+    assert stored is not None
+    response = client.put(
+        "/api/review/settings",
+        json={"threshold_days": days, "expected_revision": stored.revision},
+        headers=keys(),
+    )
+    assert response.status_code == 200, response.text
+
+
+def _response_task(route: str, body: dict[str, Any]) -> dict[str, Any]:
+    task: dict[str, Any] = body["task"] if route == "smart_add" else body
+    return task
+
+
+@pytest.mark.parametrize("route", ["create", "smart_add", "patch", "transition"])
+def test_020_FR_004_020_FR_011_a_task_command_replay_returns_the_original_projection(
+    api_client: TestClient, frozen_clock: FrozenClock, keys: _Keys, route: str
+) -> None:
+    """Same key and body after a threshold change: the original ``formulation``.
+
+    The derived instants depend on the owner's settings (http §2); a replay
+    returns the original response (http "Mutations"), not a re-projection of
+    the stored task with the live settings.
+    """
+
+    _activate(api_client, frozen_clock() - 30 * DAY)
+    method, path, body = _task_command(api_client, keys, route)
+    headers = keys()
+    with allure.step(f"Send the {route} command"):
+        first = api_client.request(method, path, json=body, headers=headers)
+    assert first.status_code in (200, 201), first.text
+    original = _response_task(route, first.json())
+    assert original["formulation"]["ask_at"] is not None
+    with allure.step("Raise the threshold to 28 days"):
+        _put_threshold(api_client, keys, 28)
+    live = api_client.get(f"/api/tasks/{original['id']}").json()
+    assert live["formulation"] != original["formulation"]
+
+    with allure.step("Replay the same Idempotency-Key and body"):
+        replay = api_client.request(method, path, json=body, headers=headers)
+    assert replay.status_code == first.status_code, replay.text
+    assert _response_task(route, replay.json()) == original
+    if route != "smart_add":
+        assert replay.content == first.content
+
+
+def test_020_FR_011_a_task_record_without_a_settings_snapshot_projects_live(
+    api_client: TestClient, frozen_clock: FrozenClock, keys: _Keys
+) -> None:
+    """A ``create_task`` record stored before the snapshot still replays."""
+
+    _activate(api_client, frozen_clock() - 30 * DAY)
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    repo = _container(api_client).task_repo
+    headers = keys()
+    body = {"title": "Call Bob", "state": "next"}
+    first = api_client.post("/api/tasks", json=body, headers=headers)
+    assert first.status_code == 201, first.text
+    with allure.step("Drop the snapshot, as a record written before it was added"):
+        record = repo.get_idempotency(owner_id=owner_id, key=headers["Idempotency-Key"])
+        assert record is not None
+        stored = dict(record.response_body)
+        assert stored.pop("formulation_settings") is not None
+        with repo.command_lock(owner_id):
+            repo.save_idempotency(
+                owner_id=owner_id,
+                record=record.model_copy(update={"response_body": stored}),
+            )
+    _put_threshold(api_client, keys, 28)
+
+    replay = api_client.post("/api/tasks", json=body, headers=headers)
+    assert replay.status_code == 201, replay.text
+    live = api_client.get(f"/api/tasks/{first.json()['id']}").json()
+    assert replay.json()["formulation"] == live["formulation"]
+    assert replay.json()["formulation"] != first.json()["formulation"]
+    assert {**replay.json(), "formulation": None} == {
+        **first.json(),
+        "formulation": None,
+    }
+
+
+def test_020_FR_011_the_stored_settings_snapshot_keeps_every_clock_input() -> None:
+    """Threshold, zone, owner floor and activation survive the stored JSON."""
+
+    settings = rules.OwnerClockSettings(
+        threshold_days=21,
+        time_zone="Asia/Tokyo",
+        owner_park_floor_at=datetime(2026, 10, 9, 8, 0, tzinfo=UTC),
+        activated_at=datetime(2026, 9, 1, 12, 30, tzinfo=UTC),
+    )
+    stored = FormulationSettingsDocument.of(settings).model_dump(mode="json")
+    loaded = FormulationSettingsDocument.model_validate(stored)
+    assert loaded.clock_settings() == settings
 
 
 def test_020_FR_004_both_routers_share_the_public_task_mapper() -> None:

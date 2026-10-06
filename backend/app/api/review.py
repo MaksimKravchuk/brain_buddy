@@ -22,7 +22,7 @@ from app.api.dependencies import (
 from app.api.middleware import CORRELATION_HEADER
 from app.api.task_mapping import task_response
 from app.exceptions import ValidationFailure
-from app.modules.tasks.domain import TaskDocument
+from app.modules.tasks.domain import FormulationSettingsDocument, TaskDocument
 from app.modules.tasks.review_domain import (
     DecisionResultDocument,
     ReviewReceiptDocument,
@@ -179,12 +179,19 @@ def require_idempotency_key(idempotency_key: str | None) -> str:
 
 
 def tasks_with_formulation(
-    review_service: ReviewService, owner_id: str, *tasks: TaskDocument | None
+    review_service: ReviewService,
+    owner_id: str,
+    settings: FormulationSettingsDocument | None,
+    *tasks: TaskDocument | None,
 ) -> list[TaskResponse | None]:
-    """Map tasks with one settings read for all of them (http §2)."""
+    """Map tasks with one settings read for all of them (http §2).
+
+    ``settings`` is the stored result's snapshot, so a same-key replay returns
+    the original projection (http "Mutations"); ``None`` reads live settings.
+    """
 
     present = [task for task in tasks if task is not None]
-    views = review_service.formulation_views(owner_id, present)
+    views = review_service.formulation_views(owner_id, present, settings=settings)
     return [
         None if task is None else task_response(task, formulation=views.get(task.id))
         for task in tasks
@@ -196,7 +203,11 @@ def decision_response(
 ) -> DecisionResponse:
     decision = result.decision
     task, created = tasks_with_formulation(
-        review_service, owner_id, result.task, result.created_task
+        review_service,
+        owner_id,
+        result.formulation_settings,
+        result.task,
+        result.created_task,
     )
     assert task is not None
     return DecisionResponse(
@@ -266,7 +277,9 @@ def undo_decision(
         owner_id=current_user.id,
         idempotency_key=require_idempotency_key(idempotency_key),
     )
-    (task,) = tasks_with_formulation(review_service, current_user.id, result.task)
+    (task,) = tasks_with_formulation(
+        review_service, current_user.id, result.formulation_settings, result.task
+    )
     assert task is not None
     return UndoDecisionResponse(
         task=task,
@@ -302,7 +315,9 @@ def auto_park_task(
         idempotency_key=require_idempotency_key(idempotency_key),
         exposed=weekly_review_enabled(current_user, feature_flags),
     )
-    (task,) = tasks_with_formulation(review_service, current_user.id, result.task)
+    (task,) = tasks_with_formulation(
+        review_service, current_user.id, result.formulation_settings, result.task
+    )
     assert task is not None
     return AutoParkResponse(applied=result.applied, task=task)
 

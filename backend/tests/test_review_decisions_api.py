@@ -166,6 +166,37 @@ class ReviewApi:
         self.container.task_repo.save_review_session(session)
         return session
 
+    def put_settings(self, **fields: Any) -> dict[str, Any]:
+        """``PUT /review/settings`` at the stored revision (http §5)."""
+
+        stored = self.container.task_repo.get_review_settings(self.owner_id)
+        revision = 1 if stored is None else stored.revision
+        response = self.client.put(
+            "/api/review/settings",
+            json={"expected_revision": revision, **fields},
+            headers=self.key(),
+        )
+        assert response.status_code == 200, response.text
+        body: dict[str, Any] = response.json()
+        return body
+
+    def strip_formulation_settings(self, headers: dict[str, str]) -> None:
+        """Rewrite one stored record as written before its settings snapshot."""
+
+        repo = self.container.task_repo
+        record = repo.get_idempotency(
+            owner_id=self.owner_id, key=headers["Idempotency-Key"]
+        )
+        assert record is not None
+        assert "formulation_settings" in record.response_body
+        body = dict(record.response_body)
+        del body["formulation_settings"]
+        with repo.command_lock(self.owner_id):
+            repo.save_idempotency(
+                owner_id=self.owner_id,
+                record=record.model_copy(update={"response_body": body}),
+            )
+
     def decisions(self) -> list[rd.ReviewDecisionDocument]:
         return self.container.task_repo.list_review_decisions(self.owner_id)
 
@@ -537,6 +568,96 @@ def test_020_FR_011_same_key_replays_and_another_body_conflicts(api: ReviewApi) 
     assert other.json()["detail"] == {"reason": "idempotency_conflict"}
 
 
+def _change_projection_input(api: ReviewApi, change: str) -> None:
+    """Change one owner input of ``TaskResponse.formulation`` (http §2)."""
+
+    if change == "activation":
+        response = api.client.post(
+            "/api/review/explainer/acknowledge", json={}, headers=api.key()
+        )
+        assert response.status_code == 200, response.text
+    elif change == "threshold":
+        api.put_settings(threshold_days=28)
+    else:
+        api.put_settings(time_zone="Asia/Tokyo")
+
+
+@pytest.mark.parametrize("change", ["threshold", "time_zone", "activation"])
+def test_020_FR_011_a_decision_replay_returns_the_original_formulation_projection(
+    api_client: TestClient, frozen_clock: FrozenClock, change: str
+) -> None:
+    """Same key and body after a settings change: the first response, byte for byte.
+
+    The derived instants of ``TaskResponse.formulation`` depend on the owner's
+    threshold, time zone and activation (http §2). A replay returns the
+    original response (http "Mutations"), so it must not re-project the
+    stored task with the live settings.
+    """
+
+    api = ReviewApi(api_client, frozen_clock)
+    if change != "activation":
+        api.activate_at(frozen_clock() - 30 * DAY)
+    due = (frozen_clock() + 10 * DAY).date().isoformat()
+    task = api.create(state="next", due_date=due)
+    headers = api.key()
+    title = "Measure the bathroom wall"
+    with allure.step("Reformulate the due-dated Next task"):
+        first = api.decide_raw(task, "reformulate", headers=headers, title=title)
+    assert first.status_code == 200, first.text
+    with allure.step(f"Change the owner's {change}"):
+        _change_projection_input(api, change)
+    live = api.task(task["id"])["formulation"]
+    assert live != first.json()["task"]["formulation"]
+
+    with allure.step("Replay the same Idempotency-Key and body"):
+        replay = api.decide_raw(task, "reformulate", headers=headers, title=title)
+    assert replay.status_code == 200, replay.text
+    assert replay.content == first.content
+
+
+def test_020_FR_011_a_follow_up_replay_returns_the_original_created_task_projection(
+    api: ReviewApi,
+) -> None:
+    """The created follow-up's projection is the original one on a replay too."""
+
+    task = _waiting(api)
+    headers = api.key()
+    body = {"title": "Call Ann about the quote"}
+    first = api.decide_raw(task, "follow_up", headers=headers, **body)
+    assert first.status_code == 200, first.text
+    created = first.json()["created_task"]
+    assert created["formulation"]["ask_at"] is not None
+    with allure.step("Raise the threshold to 28 days"):
+        api.put_settings(threshold_days=28)
+    assert api.task(created["id"])["formulation"] != created["formulation"]
+
+    replay = api.decide_raw(task, "follow_up", headers=headers, **body)
+    assert replay.status_code == 200, replay.text
+    assert replay.content == first.content
+
+
+def test_020_FR_011_a_replay_of_a_record_without_a_settings_snapshot_projects_live(
+    api: ReviewApi,
+) -> None:
+    """A record stored before the snapshot existed still replays (live projection)."""
+
+    task = _asking(api)
+    headers = api.key()
+    body = {"reason": "Quote due Friday"}
+    first = api.decide_raw(task, "extend", headers=headers, **body)
+    assert first.status_code == 200, first.text
+    with allure.step("Drop the snapshot, as a record written before it was added"):
+        api.strip_formulation_settings(headers)
+    api.put_settings(threshold_days=28)
+
+    replay = api.decide_raw(task, "extend", headers=headers, **body)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["decision"] == first.json()["decision"]
+    assert replay.json()["task"]["revision"] == first.json()["task"]["revision"]
+    assert replay.json()["task"]["formulation"] == api.task(task["id"])["formulation"]
+    assert replay.json()["task"]["formulation"] != first.json()["task"]["formulation"]
+
+
 def test_020_FR_011_missing_idempotency_key_is_400(api: ReviewApi) -> None:
     task = _asking(api)
     response = api.client.post(
@@ -892,6 +1013,29 @@ def test_020_FR_048_undo_is_404_when_already_undone_or_not_owned(
     assert late.json()["detail"]["resource"] == "Review decision"
     assert api.task(task["id"])["revision"] == revision
     assert api.undo_raw(new_id("decision"), 1).status_code == 404
+
+
+def test_020_FR_011_020_FR_048_an_undo_replay_returns_the_original_projection(
+    api: ReviewApi,
+) -> None:
+    """An undo back into Next, replayed after a threshold change: byte for byte."""
+
+    task = _asking(api)
+    decided = api.decide(task, "someday")
+    headers = api.key()
+    revision = decided["task"]["revision"]
+    with allure.step("Undo the Someday decision: the task is back in Next"):
+        first = api.undo_raw(decided["decision"]["id"], revision, headers)
+    assert first.status_code == 200, first.text
+    assert first.json()["task"]["formulation"]["ask_at"] is not None
+    with allure.step("Raise the threshold to 28 days"):
+        api.put_settings(threshold_days=28)
+    assert api.task(task["id"])["formulation"] != first.json()["task"]["formulation"]
+
+    with allure.step("Replay the same Idempotency-Key and body"):
+        replay = api.undo_raw(decided["decision"]["id"], revision, headers)
+    assert replay.status_code == 200, replay.text
+    assert replay.content == first.content
 
 
 def test_020_FR_048_undo_is_accepted_with_the_flag_off(api: ReviewApi) -> None:
