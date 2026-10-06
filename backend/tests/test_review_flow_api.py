@@ -423,6 +423,47 @@ def test_020_FR_029_020_SC_004_progress_merges_monotonically_without_conflict(
     assert merged["status"] == "open"
 
 
+def test_020_FR_050_not_now_sets_a_card_aside_and_leaves_it_asking(
+    second_api_client: tuple[TestClient, TestClient], frozen_clock: FrozenClock
+) -> None:
+    """ "Not now" is progress, not a decision: the task keeps asking, unchanged.
+
+    A set-aside id that is not an open task of the owner is ignored, and an
+    unknown and a foreign id give the same answer (http §6, "Ownership").
+    """
+
+    first, second = second_api_client
+    flow = FlowApi(first, frozen_clock)
+    other = FlowApi(second, frozen_clock)
+    flow.activate_at(frozen_clock() - 30 * DAY)
+    flow.flag("on")
+    asking = _asking_seeds(flow)
+    sid = flow.start()["id"]
+    flow.progress(sid, snapshot_decision_queue=True, current_step="decisions")
+    card = flow.task(asking[0].id)
+    with allure.step("Not now on the first card"):
+        merged = flow.progress(sid, set_aside_task_id=card["id"])
+    assert merged["set_aside_count"] == 1
+    assert sum(merged["counts"].values()) == 0
+    assert flow.decisions() == []
+    after = flow.task(card["id"])
+    assert after["revision"] == card["revision"]
+    assert after["formulation"] == card["formulation"]
+    assert card["id"] in flow.ids(flow.queue("decisions"))
+    assert flow.ids(flow.queue("decisions", sid))[0] == card["id"]
+
+    with allure.step("Another owner names a foreign and an unknown task"):
+        foreign_run = other.start()["id"]
+        foreign = other.progress_raw(foreign_run, set_aside_task_id=card["id"])
+        unknown_run = other.start(replace_open=True)["id"]
+        unknown = other.progress_raw(unknown_run, set_aside_task_id="task_0123456789ab")
+    assert foreign.status_code == unknown.status_code == 200
+    assert foreign.json()["set_aside_count"] == unknown.json()["set_aside_count"] == 0
+    assert _without_reference(foreign, foreign_run) == _without_reference(
+        unknown, unknown_run
+    )
+
+
 def test_020_FR_029_progress_without_a_progress_id_is_422(flow: FlowApi) -> None:
     session = flow.start()
     response = flow.client.patch(
