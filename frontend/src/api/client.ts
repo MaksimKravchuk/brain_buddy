@@ -607,12 +607,12 @@ export const apiClient = {
     return request<AccountResponse>("/account/email", { method: "POST", body: payload });
   },
 
-  changePassword(payload: PasswordChangePayload) {
-    return request<void>("/account/password", { method: "POST", body: payload });
+  changePassword(payload: PasswordChangePayload, expectedOwner?: string) {
+    return request<void>("/account/password", { method: "POST", body: payload, headers: expectedOwner ? { "X-BrainBuddy-Expected-Owner": expectedOwner } : undefined });
   },
 
-  requestAccountDeletion(payload: AccountDeletePayload) {
-    return request<AccountDeleteResponse>("/account/delete", { method: "POST", body: payload });
+  requestAccountDeletion(payload: AccountDeletePayload, expectedOwner?: string) {
+    return request<AccountDeleteResponse>("/account/delete", { method: "POST", body: payload, headers: expectedOwner ? { "X-BrainBuddy-Expected-Owner": expectedOwner } : undefined });
   },
 
   // Minimum admin portal (009): exact account lookup and session revoke,

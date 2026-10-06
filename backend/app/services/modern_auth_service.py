@@ -18,7 +18,10 @@ from pydantic import SecretStr
 
 from app.core.config import ModernAuthSettings
 from app.exceptions import ConflictError, ValidationFailure
-from app.repositories.auth_metadata import AuthMetadataRepository
+from app.repositories.auth_metadata import (
+    AuthMetadataRepository,
+    erase_settled_apple_unlinks,
+)
 from app.schemas.auth import MeResponse, User
 from app.schemas.modern_auth import (
     AccountActionRequest,
@@ -150,7 +153,13 @@ class ModernAuthService:
                 else self.settings.apple_native_available
             ),
             email=self.settings.email_available,
-            web_account_origin=self.settings.public_origin or None,
+            web_account_origin=(
+                self.settings.public_origin
+                if self.settings.crypto_ready
+                and self.settings.api_origin
+                and self.settings.public_origin
+                else None
+            ),
         )
 
     def _mail(self) -> AuthMailService:
@@ -917,6 +926,9 @@ class ModernAuthService:
                 or binding["generation"] != claims["generation"]
             ):
                 raise ModernAuthError()
+            if binding["state"] == "unlinked":
+                self._consume_attempt(connection, row["id"])
+                return AuthResult(ExistingAccountRequiredResult())
             owner = self.auth.user_repo.get_by_id(binding["user_id"])
         elif (
             binding is not None
@@ -1430,16 +1442,34 @@ class ModernAuthService:
             )
             if provider == "apple":
                 self._apple().schedule_cleanup(connection, binding["id"], "unlink")
-            connection.execute(
-                "UPDATE auth_identity_bindings SET state='disabled',updated_at=? WHERE id=?",
-                (self.clock().isoformat(), binding["id"]),
-            )
+                deadline = self.clock() + timedelta(hours=24)
+                job_deadline = connection.execute(
+                    "SELECT min(expires_at) FROM auth_apple_cleanup_jobs WHERE binding_id=?",
+                    (binding["id"],),
+                ).fetchone()[0]
+                if job_deadline is not None:
+                    deadline = min(deadline, from_isoformat(job_deadline))
+                connection.execute(
+                    "UPDATE auth_identity_bindings SET state='unlinked',updated_at=?,email=NULL,email_verified=0,is_private_email=0,payload_json=? WHERE id=?",
+                    (
+                        self.clock().isoformat(),
+                        json.dumps({"unlinked_expires_at": deadline.isoformat()}),
+                        binding["id"],
+                    ),
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM auth_identity_bindings WHERE id=?", (binding["id"],)
+                )
             connection.execute(
                 "DELETE FROM sessions WHERE provider_binding_id=?", (binding["id"],)
             )
+            connection.execute("DELETE FROM auth_proofs WHERE user_id=?", (user.id,))
             connection.execute(
-                "DELETE FROM auth_proofs WHERE provider_binding_id=?", (binding["id"],)
+                "DELETE FROM auth_attempts WHERE user_id=? AND provider=?",
+                (user.id, provider),
             )
+            erase_settled_apple_unlinks(connection, now=self.clock())
             # Compute safe remaining methods before clearing the originating session.
             remaining = current.model_copy(
                 update={
@@ -1455,7 +1485,9 @@ class ModernAuthService:
                     ]
                 }
             )
-            return UnlinkResponse(methods=remaining, signed_out=signed_out)
+            response = UnlinkResponse(methods=remaining, signed_out=signed_out)
+        self.store.checkpoint()
+        return response
 
     def _finish_provider_action(
         self,
@@ -1531,8 +1563,14 @@ class ModernAuthService:
             if binding["generation"] != claims["generation"]:
                 raise ModernAuthError()
             connection.execute(
-                "UPDATE auth_identity_bindings SET state='active',generation=generation+1,updated_at=? WHERE id=?",
-                (self.clock().isoformat(), binding["id"]),
+                "UPDATE auth_identity_bindings SET state='active',generation=generation+1,updated_at=?,email=?,email_verified=?,is_private_email=? WHERE id=?",
+                (
+                    self.clock().isoformat(),
+                    identity.email,
+                    int(identity.email_authoritative),
+                    int(identity.is_private_email),
+                    binding["id"],
+                ),
             )
         linked_binding = connection.execute(
             "SELECT id FROM auth_identity_bindings WHERE user_id=? AND provider=?",
@@ -1677,6 +1715,11 @@ class ModernAuthService:
     def dispatch_one(self) -> bool:
         delivered = self.mail.dispatch_one() if self.mail else False
         revoked = self.apple.dispatch_one() if self.apple else False
+        self.cleanup_expired_metadata()
+        return delivered or revoked
+
+    def cleanup_expired_metadata(self) -> None:
+        """Run local expiry independently of cryptographic keys and provider delivery."""
         with self.store.transaction() as connection:
             connection.execute(
                 "UPDATE auth_attempts SET status='failed',sealed_payload=NULL,key_id=NULL,lease_id=NULL,lease_expires_at=NULL WHERE status='exchanging' AND lease_expires_at<=?",
@@ -1685,7 +1728,6 @@ class ModernAuthService:
         AuthMetadataRepository(self.store.root, self.store).cleanup_expired(
             now=self.clock(), limit=100
         )
-        return delivered or revoked
 
     def _reserve_provider_start(
         self, connection: sqlite3.Connection, client: str, network: str

@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { arch, cpus, platform, release } from "node:os";
 import { promisify } from "node:util";
 
 import AxeBuilder from "@axe-core/playwright";
-import type { Page, Route } from "@playwright/test";
+import type { Browser, Locator, Page, Route, TestInfo } from "@playwright/test";
 import { attachment, epic, feature, story } from "allure-js-commons";
 
 import { expect, test } from "./allure.fixtures";
@@ -20,11 +21,67 @@ const execFileAsync = promisify(execFile);
 test.use({
   baseURL: origin,
   ignoreHTTPSErrors: true,
+  viewport: { width: 1440, height: 1000 },
+  contextOptions: { reducedMotion: "no-preference" },
   launchOptions: {
     ...(process.env.BRAIN_BUDDY_MODERN_E2E_CHROMIUM ? { executablePath: process.env.BRAIN_BUDDY_MODERN_E2E_CHROMIUM } : {}),
     args: [`--host-resolver-rules=MAP ${new URL(origin).hostname} 127.0.0.1`]
   }
 });
+
+for (const provider of ["google", "apple"] as const) {
+  const label = provider === "google" ? "Google" : "Apple";
+  test(`023-FR-007 023-FR-018 023-SC-003 Remove ${label} ends public provider authority until the same owner explicitly reconnects`, async ({ page }) => {
+    test.setTimeout(60_000);
+    const email = provider === "google" ? "removed-google-modern-e2e@gmail.com" : "removed-apple-modern-e2e@privaterelay.appleid.com";
+    const subject = `removed-${provider}-subject`;
+    const finish = () => provider === "google" ? finishGoogle(page) : finishApple(page);
+    if (provider === "google") await fakeGoogle(page, email, subject);
+    else await fakeApple(page, email, subject);
+    await test.step("create one provider owner and establish its remaining password through fresh provider confirmation", async () => {
+      await page.goto("/login");
+      await page.getByRole("button", { name: `Sign in with ${label}`, exact: true }).click();
+      await finish();
+      await expect(page.getByRole("heading", { name: "Next actions", exact: true })).toBeVisible();
+      await prepareProviderPassword(page, provider, password);
+      await page.getByRole("button", { name: "Confirm and save", exact: true }).click();
+      await expect(page.getByRole("status")).toContainText("Password saved");
+    });
+    const owner = (await api<Me>(page, "/auth/me")).body;
+    const task = await api<{ id: string }>(page, "/tasks", { title: `Preserve removed ${label} owner's task`, state: "inbox" });
+    expect(task.status).toBe(201);
+    await test.step("Remove commits, revokes the originating session, and prevents public restoration", async () => {
+      await page.goto("/settings/account");
+      await page.getByRole("button", { name: `Remove ${label}`, exact: true }).click();
+      await page.getByRole("button", { name: "Confirm removal", exact: true }).click();
+      await page.getByLabel("Current password").fill(password);
+      const unlinked = page.waitForResponse(response => new URL(response.url()).pathname === `/api/account/auth-methods/${provider}/unlink`);
+      await page.getByRole("button", { name: "Confirm", exact: true }).click();
+      expect((await unlinked).status()).toBe(200);
+      await expect(page).toHaveURL(/\/login$/);
+      expect((await api(page, "/auth/me")).status).toBe(401);
+      const completed = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/providers/complete");
+      await page.getByRole("button", { name: `Sign in with ${label}`, exact: true }).click();
+      await finish();
+      expect((await completed).status()).toBe(200);
+      expect((await api(page, "/auth/me")).status).toBe(401);
+      await expect(page.getByRole("alert")).toContainText("Connect to your existing account");
+    });
+    await test.step("remaining password access retains the owner and permits an explicit fresh provider link", async () => {
+      await passwordLogin(page, email);
+      expect((await api<Me>(page, "/auth/me")).body.id).toBe(owner.id);
+      await page.goto("/settings/account");
+      await page.getByRole("button", { name: new RegExp(`^(Connect|Reconnect) ${label}$`) }).click();
+      await page.getByLabel("Current password").fill(password);
+      await page.getByRole("button", { name: "Confirm", exact: true }).click();
+      await finish();
+      await expect(page.getByRole("button", { name: `Remove ${label}`, exact: true })).toBeVisible();
+      expect((await api<Me>(page, "/auth/me")).body.id).toBe(owner.id);
+      expect((await api<{ title: string }>(page, `/tasks/${task.body.id}`)).body.title).toBe(`Preserve removed ${label} owner's task`);
+      expect((await api<AccountMethods>(page, "/account/auth-methods")).body.methods.some(method => method.method === provider && method.usable)).toBe(true);
+    });
+  });
+}
 
 interface Me { id: string; email: string }
 interface AccountMethods { account_id: string; has_password: boolean; email_verified: boolean; methods: Array<{ method: string; usable: boolean }> }
@@ -200,20 +257,132 @@ async function signOut(page: Page, email: string): Promise<void> {
   expect((await api(page, "/auth/me")).status).toBe(401);
 }
 
-async function accessible(page: Page): Promise<void> {
+async function prepareProviderPassword(page: Page, provider: "google" | "apple", value: string): Promise<void> {
+  await page.goto("/settings/account");
+  await page.getByRole("button", { name: "Add password", exact: true }).click();
+  await page.getByLabel("New password", { exact: true }).fill(value);
+  await page.getByLabel("Repeat password", { exact: true }).fill(value);
+  await page.getByRole("button", { name: "Confirm and save", exact: true }).click();
+  await page.getByRole("button", { name: `Confirm with ${provider === "google" ? "Google" : "Apple"}`, exact: true }).click();
+  if (provider === "google") await finishGoogle(page);
+  else await finishApple(page);
+  await expect(page.getByRole("button", { name: "Add password", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Add password", exact: true }).click();
+  await page.getByLabel("New password", { exact: true }).fill(value);
+  await page.getByLabel("Repeat password", { exact: true }).fill(value);
+}
+
+async function accessible(page: Page, surface = "Authentication"): Promise<void> {
   const result = await new AxeBuilder({ page }).analyze();
   await attachment("Accessibility scan summary", JSON.stringify({
     pathname: new URL(page.url()).pathname,
+    surface,
     engine: result.testEngine,
     violations: result.violations.map(({ id, impact }) => ({ id, impact })),
     passed_rules: result.passes.length,
     incomplete_rules: result.incomplete.length,
     inapplicable_rules: result.inapplicable.length
   }), "application/json");
-  await attachment("Authentication screen (inputs masked)", await page.screenshot({
+  await attachment(`${surface} screen (inputs masked)`, await page.screenshot({
     fullPage: true, mask: [page.locator("input")]
   }), "image/png");
   expect(result.violations.filter(violation => violation.impact === "serious" || violation.impact === "critical")).toEqual([]);
+}
+
+interface FeedbackFrame { elapsed_ms: number; busy: boolean; disabled: boolean; visible: boolean; width: number; height: number }
+
+async function pendingFeedback(page: Page, browser: Browser, testInfo: TestInfo, action: string, path: string, trigger: Locator, submit: Locator, status: number): Promise<void> {
+  const marker = action.replace(/[^a-zA-Z0-9]/g, "-");
+  const pattern = `**/api${path}`;
+  let dispatches = 0;
+  let realStatus: number | undefined;
+  let releaseResponse: () => void = () => undefined;
+  const pending = new Promise<void>(resolve => { releaseResponse = resolve; });
+  const handler = async (route: Route) => {
+    dispatches += 1;
+    const response = await realResponse(route);
+    realStatus = response.status();
+    await pending;
+    await route.fulfill({ response });
+  };
+  await expect(submit).toBeEnabled();
+  await submit.scrollIntoViewIfNeeded();
+  await submit.evaluate((element, marker) => element.setAttribute("data-modern-e2e-submit", marker), marker);
+  await trigger.evaluate((element, marker) => element.setAttribute("data-modern-e2e-trigger", marker), marker);
+  const markedTrigger = page.locator(`[data-modern-e2e-trigger="${marker}"]`);
+  await trigger.focus();
+  await page.route(pattern, handler);
+  const completed = page.waitForResponse(response => new URL(response.url()).pathname === `/api${path}`, { timeout: 90_000 });
+  // Observe an early rejection while held; awaiting the original in finally
+  // still enforces response completion and preserves the failing assertion.
+  void completed.catch(() => undefined);
+  try {
+    await page.evaluate(marker => {
+      const state = window as Window & { modernPendingFeedback?: FeedbackFrame };
+      delete state.modernPendingFeedback;
+      document.addEventListener("keydown", event => {
+        if (event.key !== "Enter") return;
+        const started = performance.now();
+        const frame = () => {
+          const button = document.querySelector<HTMLButtonElement>(`[data-modern-e2e-submit="${marker}"]`);
+          if (!button) return;
+          const bounds = button.getBoundingClientRect();
+          const style = getComputedStyle(button);
+          const visible = bounds.width > 0 && bounds.height > 0 && bounds.x >= 0 && bounds.y >= 0 && bounds.right <= innerWidth && bounds.bottom <= innerHeight && style.visibility === "visible" && style.display !== "none";
+          const busy = button.closest("[aria-busy]")?.getAttribute("aria-busy") === "true" || /Please wait|Checking/.test(button.textContent ?? "");
+          if (visible && busy && button.disabled) state.modernPendingFeedback = { elapsed_ms: performance.now() - started, busy, disabled: button.disabled, visible, width: bounds.width, height: bounds.height };
+          else if (performance.now() - started < 2000) requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+      }, { once: true, capture: true });
+    }, marker);
+    await page.keyboard.press("Enter");
+    await expect.poll(() => page.evaluate(() => (window as Window & { modernPendingFeedback?: FeedbackFrame }).modernPendingFeedback)).toBeDefined();
+    const measured = await page.evaluate(() => (window as Window & { modernPendingFeedback?: FeedbackFrame }).modernPendingFeedback!);
+    expect(measured.elapsed_ms).toBeLessThanOrEqual(200);
+    expect(measured.busy && measured.disabled && measured.visible).toBe(true);
+    expect(measured.height).toBeGreaterThanOrEqual(44);
+    expect(measured.width).toBeGreaterThanOrEqual(44);
+    await expect.poll(() => realStatus).toBe(status);
+    await expect.poll(() => dispatches).toBe(1);
+    await page.keyboard.press("Enter");
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+    expect(dispatches).toBe(1);
+    if (await markedTrigger.evaluate(element => element instanceof HTMLInputElement)) await expect(markedTrigger).toBeFocused();
+    await page.keyboard.press("Tab");
+    const preferences = await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      const bounds = active?.getBoundingClientRect();
+      return {
+        headless: /HeadlessChrome/.test(navigator.userAgent),
+        reduced_motion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+        visibility: document.visibilityState,
+        focus_reachable: Boolean(active && active !== document.body && !active.matches(":disabled") && bounds && bounds.width > 0 && bounds.height > 0),
+        focus_outline_px: active ? Number.parseFloat(getComputedStyle(active).outlineWidth) : 0,
+        focus_visible: Boolean(active?.matches(":focus-visible") && (Number.parseFloat(getComputedStyle(active).outlineWidth) > 0 || getComputedStyle(active).boxShadow !== "none")),
+        device_pixel_ratio: devicePixelRatio,
+        horizontal_overflow: document.documentElement.scrollWidth > innerWidth,
+        viewport: { width: innerWidth, height: innerHeight }
+      };
+    });
+    expect(preferences.focus_reachable).toBe(true);
+    expect(preferences.focus_visible).toBe(true);
+    expect(preferences.horizontal_overflow).toBe(false);
+    expect(preferences.visibility).toBe("visible");
+    if (process.env.BRAIN_BUDDY_MODERN_E2E_HEADED === "1") expect(preferences.headless).toBe(false);
+    const candidate = (await execFileAsync("git", ["rev-parse", "HEAD"])).stdout.trim();
+    await attachment(`${action} feedback measurement`, JSON.stringify({
+      candidate_sha: candidate, browser: browser.version(), os: `${platform()} ${release()} ${arch()}`,
+      cpu: cpus()[0]?.model ?? "unavailable", cpu_throttle: "none", action,
+      completion: "held real API response", real_status: realStatus, dispatches,
+      ...measured, ...preferences, reference: "1440x1000 and 390x851; physical iOS evidence remains separate"
+    }), "application/json");
+    await accessible(page, `${action} pending ${testInfo.title}`);
+  } finally {
+    releaseResponse();
+    await completed;
+    await page.unroute(pattern, handler);
+  }
 }
 
 test.beforeAll(() => {
@@ -652,7 +821,7 @@ test("023-SC-007 023-FR-016 023-FR-022 keyboard submission paints disabled busy 
       expect(dispatches).toBe(1);
       await expect(page.getByLabel("Email address", { exact: true })).toBeFocused();
       await attachment("Browser feedback measurement", JSON.stringify({
-        browser: browser.version(), headless: testInfo.project.use.headless ?? true,
+        browser: browser.version(), headless: process.env.BRAIN_BUDDY_MODERN_E2E_HEADED !== "1" && (testInfo.project.use.headless ?? true),
         viewport: page.viewportSize(), action: "keyboard Enter", completion: "held real API response",
         elapsed_ms: measured.elapsed, busy: measured.busy, disabled: measured.disabled, dispatches,
         reference_limit: "200ms; headed reference and physical iOS evidence remain separate acceptance requirements"
@@ -667,3 +836,60 @@ test("023-SC-007 023-FR-016 023-FR-022 keyboard submission paints disabled busy 
     });
   } finally { release(); }
 });
+
+for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 851 }]) {
+  test.describe(`documented feedback reference ${viewport.width}x${viewport.height}`, () => {
+    test.use({ viewport });
+    test("023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access", async ({ page, browser }, testInfo) => {
+      test.setTimeout(120_000);
+      const email = `timing-mail-${viewport.width}@example.com`;
+      const googleEmail = `timing-mutation-${viewport.width}@gmail.com`;
+      const nextPassword = "Timing-safe-password-123";
+      const recoveredPassword = "Timing-recovered-password-456";
+      await test.step("email request and verification show first-frame feedback while their real responses are held", async () => {
+        await page.goto("/login");
+        await page.getByLabel("Email address", { exact: true }).fill(email);
+        await pendingFeedback(page, browser, testInfo, "Email request", "/auth/email/request",
+          page.getByLabel("Email address", { exact: true }), page.getByRole("button", { name: "Continue with email", exact: true }), 202);
+        await expect(page.getByLabel("Email code")).toBeFocused();
+        await page.getByLabel("Email code").fill(await readCode(email, "login"));
+        await pendingFeedback(page, browser, testInfo, "Email verification", "/auth/email/verify",
+          page.getByLabel("Email code"), page.getByRole("button", { name: "Verify and continue", exact: true }), 200);
+        await expect(page.getByRole("heading", { name: "Next actions", exact: true })).toBeVisible();
+        await signOut(page, email);
+      });
+      await test.step("provider start paints disabled feedback before navigating to its actual synthetic provider boundary", async () => {
+        await fakeGoogle(page, googleEmail, `timing-subject-${viewport.width}`);
+        const start = page.getByRole("button", { name: "Sign in with Google", exact: true });
+        await pendingFeedback(page, browser, testInfo, "Provider start", "/auth/providers/google/start", start, start, 200);
+        await finishGoogle(page);
+        await expect(page.getByRole("heading", { name: "Next actions", exact: true })).toBeVisible();
+      });
+      const owner = (await api<Me>(page, "/auth/me")).body;
+      await test.step("a fresh provider confirmation authorizes a separately measured account mutation", async () => {
+        await prepareProviderPassword(page, "google", nextPassword);
+        await pendingFeedback(page, browser, testInfo, "Account password mutation", "/account/auth-password",
+          page.getByLabel("Repeat password", { exact: true }), page.getByRole("button", { name: "Confirm and save", exact: true }), 204);
+        await expect(page.getByRole("status")).toContainText("Password saved");
+        expect((await api<Me>(page, "/auth/me")).body.id).toBe(owner.id);
+        expect((await api<AccountMethods>(page, "/account/auth-methods")).body.has_password).toBe(true);
+        await signOut(page, googleEmail);
+      });
+      await test.step("recovery save holds the actual reset response without auto-login and preserves reachable focus", async () => {
+        await page.getByRole("button", { name: "Use your password", exact: true }).click();
+        await page.getByRole("button", { name: "Forgot password?", exact: true }).click();
+        await page.getByLabel("Email address", { exact: true }).fill(googleEmail);
+        await page.getByRole("button", { name: "Send a recovery code", exact: true }).click();
+        await enterCode(page, googleEmail, "recover");
+        await page.getByLabel("New password", { exact: true }).fill(recoveredPassword);
+        await page.getByLabel("Repeat password", { exact: true }).fill(recoveredPassword);
+        await pendingFeedback(page, browser, testInfo, "Recovery password save", "/auth/recovery/reset",
+          page.getByLabel("Repeat password", { exact: true }), page.getByRole("button", { name: "Save password", exact: true }), 204);
+        await expect(page.getByRole("status")).toContainText("Password reset");
+        expect((await api(page, "/auth/me")).status).toBe(401);
+        await passwordLogin(page, googleEmail, recoveredPassword);
+        expect((await api<Me>(page, "/auth/me")).body.id).toBe(owner.id);
+      });
+    });
+  });
+}

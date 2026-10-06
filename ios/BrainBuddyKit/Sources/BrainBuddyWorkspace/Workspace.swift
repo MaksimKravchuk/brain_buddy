@@ -407,10 +407,8 @@ public final class Workspace {
         guard let sync, nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "Start a fresh sign-in. Your local tasks are kept.", referenceID: nil) }
         await flush()
         guard nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil) }
-        if account == nil {
-            try await convertLocalAutoParksForLinking()
-            guard nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil) }
-        }
+        if account == nil { try await convertLocalAutoParksForLinking() }
+        guard nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil) }
         isSigningIn = true
         do {
             let outcome = try await sync.completeSignIn(attempt, credential: credential)

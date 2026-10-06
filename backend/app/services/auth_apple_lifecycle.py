@@ -13,6 +13,7 @@ from typing import Any, Protocol, cast
 
 from pydantic import SecretStr
 
+from app.repositories.auth_metadata import erase_settled_apple_unlinks
 from app.repositories.auth_store import AuthStore
 from app.services.auth_provider_service import (
     AppleNotification,
@@ -216,6 +217,7 @@ class AuthAppleLifecycle:
         )
         metadata["apple_consent_issued_at"] = identity.issued_at
         metadata.pop("apple_confirmation_required", None)
+        metadata.pop("unlinked_expires_at", None)
         connection.execute(
             "UPDATE auth_identity_bindings SET payload_json=? WHERE id=?",
             (json.dumps(metadata), binding_id),
@@ -290,6 +292,7 @@ class AuthAppleLifecycle:
     def _lease(self) -> tuple[sqlite3.Row, dict[str, str], str] | None:
         with self.store.transaction() as connection:
             now = self._now()
+            erase_settled_apple_unlinks(connection, now=now)
             jobs = connection.execute(
                 "SELECT * FROM auth_apple_cleanup_jobs WHERE status IN ('pending','leased') ORDER BY created_at,id LIMIT 100"
             ).fetchall()
@@ -306,7 +309,10 @@ class AuthAppleLifecycle:
                     continue
                 binding = self._binding(connection, job["binding_id"])
                 generation = json.loads(job["payload_json"]).get("binding_generation")
-                if from_isoformat(job["expires_at"]) <= now or job["attempts"] >= 5:
+                if (
+                    from_isoformat(job["expires_at"]) < now + _LEASE
+                    or job["attempts"] >= 5
+                ):
                     self._retire(connection, job["id"], "failed")
                     continue
                 if generation != binding["generation"]:
@@ -328,6 +334,7 @@ class AuthAppleLifecycle:
                     (lease_id, self._stamp(now + _LEASE), job["id"]),
                 )
                 return job, payload, lease_id
+            erase_settled_apple_unlinks(connection, now=now)
         self.store.checkpoint()
         return None
 
@@ -392,6 +399,7 @@ class AuthAppleLifecycle:
                     "UPDATE auth_apple_cleanup_jobs SET status='pending',lease_id=NULL,lease_expires_at=NULL,next_attempt_at=? WHERE id=? AND lease_id=?",
                     (self._stamp(retry), current["id"], lease_id),
                 )
+            erase_settled_apple_unlinks(connection, now=now)
         self.store.checkpoint()
         return True
 
@@ -471,7 +479,7 @@ class AuthAppleLifecycle:
                     self._stamp(now + _RECEIPTS),
                 ),
             )
-            if binding is None:
+            if binding is None or binding["state"] == "unlinked":
                 return
             metadata = json.loads(binding["payload_json"])
             consent_at = metadata.get(

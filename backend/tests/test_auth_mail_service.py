@@ -23,6 +23,7 @@ from app.services.auth_mail_service import (
     AuthMailService,
 )
 from app.services.auth_secret_box import AuthSecretBox
+from tests.auth_process_bootstrap import isolate_app_bootstrap
 
 pytestmark = [
     pytest.mark.allure_label("Authentication & Access", label_type="epic"),
@@ -406,7 +407,10 @@ def test_023_FR_009_distinct_processes_preserve_shared_budget_limit(
     """Separate processes sharing one volume cannot each spend a full client budget."""
     service(tmp_path, Clock())
     with ProcessPoolExecutor(
-        max_workers=2, mp_context=multiprocessing.get_context("spawn")
+        max_workers=2,
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=isolate_app_bootstrap,
+        initargs=(str(tmp_path / "worker-apps"),),
     ) as pool:
         admitted = list(
             pool.map(

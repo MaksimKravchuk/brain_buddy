@@ -59,7 +59,7 @@ test("013-FR-002 013-FR-003 013-FR-004 013-FR-009 013-FR-010 013-FR-012 013-FR-0
 
   await test.step("authenticate the configured synthetic operator", async () => {
     await page.goto("/login");
-    await page.getByRole("button", { name: "Use your password" }).click();
+    await page.getByRole("button", { name: "Use your password", exact: true }).click();
     await page.getByLabel("Email").fill(operatorEmail);
     await page.getByLabel("Password").fill(operatorPassword);
     await page.getByRole("button", { name: "Sign in" }).click();
@@ -88,7 +88,7 @@ test("013-FR-002 013-FR-003 013-FR-004 013-FR-009 013-FR-010 013-FR-012 013-FR-0
     await expect(page.getByText("Synthetic Admin Member Renamed")).toBeVisible();
 
     await targetPage.goto("/login");
-    await targetPage.getByRole("button", { name: "Use your password" }).click();
+    await targetPage.getByRole("button", { name: "Use your password", exact: true }).click();
     await targetPage.getByLabel("Email").fill(memberEmail);
     await targetPage.getByLabel("Password").fill(memberPassword);
     await targetPage.getByRole("button", { name: "Sign in" }).click();
@@ -139,7 +139,7 @@ test("013-FR-002 013-FR-003 013-FR-004 013-FR-009 013-FR-010 013-FR-012 013-FR-0
       throw new Error("target-owned task row remained after account deletion");
     }
     await targetPage.goto("/login");
-    await targetPage.getByRole("button", { name: "Use your password" }).click();
+    await targetPage.getByRole("button", { name: "Use your password", exact: true }).click();
     await targetPage.getByLabel("Email").fill(memberEmail);
     await targetPage.getByLabel("Password").fill(memberPassword);
     await targetPage.getByRole("button", { name: "Sign in" }).click();

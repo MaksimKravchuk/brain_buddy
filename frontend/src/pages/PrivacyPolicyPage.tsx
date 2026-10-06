@@ -115,9 +115,10 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             Abuse-prevention fingerprints are retained for at most 24 hours.
           </p>
           <p>
-            Connected identity metadata remains until you disconnect that method or your
-            account is purged. For Apple, we retain only the protected credential needed for
-            revocation while the connection is active. Disconnection or deletion triggers at
+            Disconnecting a method ends its sign-in authority and removes its profile
+            metadata. For Apple, we retain only the connection identifier and protected
+            credential needed for revocation until cleanup finishes or expires. While the
+            connection is active, we keep the minimum revocation credential. Disconnection or deletion triggers at
             most five revocation attempts within 24 hours, capped by the account purge deadline;
             the credential is then erased even if Apple is unavailable. Verified Apple
             notification replay records contain fingerprints, not the original notification,

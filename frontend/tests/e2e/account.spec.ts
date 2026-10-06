@@ -53,7 +53,7 @@ test.describe("account & data rights acceptance", () => {
     });
 
     await test.step("sign back in with the rotated password", async () => {
-      await page.getByRole("button", { name: "Use your password" }).click();
+      await page.getByRole("button", { name: "Use your password", exact: true }).click();
       await page.getByLabel("Email").fill(email);
       await page.getByLabel("Password").fill(newPassword);
       await page.getByRole("button", { name: "Sign in" }).click();
@@ -146,7 +146,7 @@ test.describe("account & data rights acceptance", () => {
     });
 
     await test.step("logging back in cancels the deletion", async () => {
-      await page.getByRole("button", { name: "Use your password" }).click();
+      await page.getByRole("button", { name: "Use your password", exact: true }).click();
       await page.getByLabel("Email").fill(email);
       await page.getByLabel("Password").fill(password);
       await page.getByRole("button", { name: "Sign in" }).click();

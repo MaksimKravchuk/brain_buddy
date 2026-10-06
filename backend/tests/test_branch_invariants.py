@@ -463,7 +463,6 @@ def test_voice_sweep_thread_wakes_immediately_and_stops_cleanly(container) -> No
     untracked fire-and-forget task) and stops promptly once signalled."""
 
     import threading
-    import time
 
     iterations = threading.Event()
     original_recover = container.voice_brain_dump_service.recover_due_provider_leases
@@ -482,17 +481,23 @@ def test_voice_sweep_thread_wakes_immediately_and_stops_cleanly(container) -> No
 
     original_interval = main_module._VOICE_SWEEP_INTERVAL_SECONDS
     main_module._VOICE_SWEEP_INTERVAL_SECONDS = 60
+    thread = None
     try:
         thread = _start_voice_sweep_thread(container, stop_event, wake_event)
         assert thread.is_alive()
         wake_event.set()
         assert iterations.wait(timeout=2), "durable runner wake never ran an iteration"
         stop_event.set()
+        # Match application shutdown: stopping also wakes the idle interval.
+        wake_event.set()
         thread.join(timeout=2)
         assert not thread.is_alive()
     finally:
+        stop_event.set()
+        wake_event.set()
+        if thread is not None:
+            thread.join(timeout=2)
         main_module._VOICE_SWEEP_INTERVAL_SECONDS = original_interval
-        time.sleep(0)
 
 
 def test_voice_sweep_logs_completed_recovery_and_retention_work(

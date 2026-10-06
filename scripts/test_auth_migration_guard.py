@@ -68,6 +68,7 @@ class AuthMigrationGuardTests(unittest.TestCase):
                     "import_committed": True,
                     "cleanup_complete": True,
                     "image_schema_epoch": 1,
+                    "legacy_auth_present": False,
                 },
             )
             self.assertNotIn("private", json.dumps(report))
@@ -127,6 +128,7 @@ class AuthMigrationGuardTests(unittest.TestCase):
             "import_committed": False,
             "cleanup_complete": True,
             "image_schema_epoch": 0,
+            "legacy_auth_present": False,
         }
         after = dict(before, schema_epoch=1, import_committed=True)
         with tempfile.TemporaryDirectory() as root:
@@ -173,6 +175,63 @@ class AuthMigrationGuardTests(unittest.TestCase):
                 guard, "_fly", side_effect=guard.GuardError("Unavailable")
             ), self.assertRaises(guard.GuardError):
                 guard.check("brainbuddy-backend", evidence)
+
+    def test_023_SC_002_probe_reports_legacy_presence_without_reading_accounts(self):
+        guard = self._module()
+        with tempfile.TemporaryDirectory() as root:
+            data = Path(root)
+            image = data / "marker.py"
+            image.write_text("AUTH_SCHEMA_EPOCH = 1\n")
+            self.assertFalse(guard.probe_storage(data, image)["legacy_auth_present"])
+            users = data / "users"
+            users.mkdir()
+            account = users / "account.json"
+            account.write_text("private malformed account contents")
+            report = guard.probe_storage(data, image)
+            self.assertTrue(report["legacy_auth_present"])
+            self.assertNotIn("private", json.dumps(report))
+            self.assertEqual(account.read_text(), "private malformed account contents")
+
+    def test_023_SC_002_forward_blocks_legacy_before_any_image_mutation(self):
+        guard = self._module()
+        image = "registry.fly.io/brainbuddy-backend@sha256:" + "a" * 64
+        machine = {"id": "0123456789abcd", "config": {"image": image}}
+        for epoch, legacy, complete, permitted in (
+            (0, True, True, False),
+            (0, False, True, True),
+            (1, False, False, False),
+            (1, False, True, True),
+        ):
+            with self.subTest(epoch=epoch, legacy=legacy, complete=complete):
+                report = {
+                    "schema_epoch": epoch,
+                    "import_committed": epoch == 1,
+                    "cleanup_complete": complete,
+                    "image_schema_epoch": 0,
+                    "legacy_auth_present": legacy,
+                }
+                with tempfile.TemporaryDirectory() as root:
+                    evidence = Path(root) / "capture.json"
+                    evidence.write_text(
+                        json.dumps(
+                            {
+                                "version": 1,
+                                "app": "brainbuddy-backend",
+                                "image": image,
+                                "image_schema_epoch": 0,
+                            }
+                        )
+                    )
+                    with patch.object(guard, "_fly", side_effect=[[machine], report]):
+                        if permitted:
+                            guard.check("brainbuddy-backend", evidence, forward=True)
+                        else:
+                            with self.assertRaisesRegex(
+                                guard.GuardError, "migration must finish"
+                            ):
+                                guard.check(
+                                    "brainbuddy-backend", evidence, forward=True
+                                )
 
 
 if __name__ == "__main__":

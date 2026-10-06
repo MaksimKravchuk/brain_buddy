@@ -52,12 +52,17 @@ def probe_storage(data: Path, source: Path) -> dict[str, Any]:
     try:
         capability = image_schema_epoch(source)
         database = data / "auth.sqlite3"
+        legacy_present = any(
+            directory.exists() and any(directory.iterdir())
+            for directory in (data / "users", data / "sessions")
+        )
         if not database.exists():
             return {
                 "schema_epoch": 0,
                 "import_committed": False,
                 "cleanup_complete": True,
                 "image_schema_epoch": capability,
+                "legacy_auth_present": legacy_present,
             }
         connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
         try:
@@ -81,6 +86,7 @@ def probe_storage(data: Path, source: Path) -> dict[str, Any]:
             "import_committed": bool(rows[0][1]),
             "cleanup_complete": bool(rows[0][2]),
             "image_schema_epoch": capability,
+            "legacy_auth_present": legacy_present,
         }
     except (OSError, sqlite3.Error) as error:
         raise GuardError("Unverified Identity migration state.") from error
@@ -168,6 +174,7 @@ def _reports(app: str, *, expected_image: str | None = None) -> list[dict[str, A
                 "import_committed",
                 "cleanup_complete",
                 "image_schema_epoch",
+                "legacy_auth_present",
             }
             or type(report["schema_epoch"]) is not int
             or report["schema_epoch"] < 0
@@ -175,6 +182,7 @@ def _reports(app: str, *, expected_image: str | None = None) -> list[dict[str, A
             or report["image_schema_epoch"] < 0
             or type(report["import_committed"]) is not bool
             or type(report["cleanup_complete"]) is not bool
+            or type(report["legacy_auth_present"]) is not bool
         ):
             raise GuardError("Unverified Identity migration state.")
         reports.append(report)
@@ -220,6 +228,20 @@ def check(app: str, captured: Path, *, forward: bool = False) -> None:
         if forward
         else record["image_schema_epoch"]
     )
+    if (
+        forward
+        and target_epoch >= 1
+        and any(
+            (row["schema_epoch"] == 0 and row["legacy_auth_present"])
+            or not row["cleanup_complete"]
+            for row in reports
+        )
+    ):
+        raise GuardError(
+            "Explicit authentication migration must finish before deployment. "
+            "Keep the existing release running until the stopped-writer "
+            "maintenance window; do not replace its image or stage secrets."
+        )
     if not restore_allowed(epoch, target_epoch):
         raise GuardError(
             "Identity storage requires a compatible image. Preserve the volume; "

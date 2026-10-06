@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,36 @@ _OWNED_TABLES = (
     "auth_apple_grants",
     "auth_identity_bindings",
 )
+
+
+def erase_settled_apple_unlinks(
+    connection: sqlite3.Connection, *, now: datetime, limit: int = 100
+) -> int:
+    """Erase bounded cleanup-only mappings after work settles, never across a live lease."""
+    rows = connection.execute(
+        "SELECT b.id,b.namespace,b.subject FROM auth_identity_bindings b "
+        "WHERE b.provider='apple' AND b.state='unlinked' "
+        "AND NOT EXISTS (SELECT 1 FROM auth_apple_cleanup_jobs j WHERE j.binding_id=b.id "
+        "AND j.status='leased' AND (j.lease_expires_at IS NULL OR julianday(j.lease_expires_at)>julianday(?))) "
+        "AND (julianday(json_extract(b.payload_json,'$.unlinked_expires_at'))<=julianday(?) "
+        "OR NOT EXISTS (SELECT 1 FROM auth_apple_cleanup_jobs j WHERE j.binding_id=b.id "
+        "AND j.status IN ('pending','leased') AND j.sealed_payload IS NOT NULL AND j.attempts<5 "
+        "AND julianday(j.expires_at)>julianday(?))) ORDER BY b.updated_at,b.id LIMIT ?",
+        (now.isoformat(), now.isoformat(), now.isoformat(), limit),
+    ).fetchall()
+    for row in rows:
+        fingerprint = hashlib.sha256(
+            f"{row['namespace']}\0{row['subject']}".encode()
+        ).hexdigest()
+        connection.execute(
+            "DELETE FROM auth_apple_notification_receipts WHERE namespace=? AND subject_fingerprint=?",
+            (row["namespace"], fingerprint),
+        )
+        connection.execute(
+            "DELETE FROM auth_identity_bindings WHERE id=? AND state='unlinked'",
+            (row["id"],),
+        )
+    return len(rows)
 
 
 class AuthMetadataRepository:
@@ -80,9 +111,13 @@ class AuthMetadataRepository:
                     f"(SELECT rowid FROM {table} WHERE expires_at<=? ORDER BY expires_at LIMIT ?)",
                     (now.isoformat(), remaining),
                 ).rowcount
+            if removed < limit:
+                removed += erase_settled_apple_unlinks(
+                    connection, now=now, limit=limit - removed
+                )
         if removed:
             self.store.checkpoint()
         return removed
 
 
-__all__ = ["AuthMetadataRepository"]
+__all__ = ["AuthMetadataRepository", "erase_settled_apple_unlinks"]

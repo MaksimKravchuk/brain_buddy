@@ -211,7 +211,8 @@ describe("PrivacyPolicyPage", () => {
     expect(retention).toHaveTextContent(/recent-confirmation proofs.*5 minutes.*callback handoffs.*60 seconds/i);
     expect(retention).toHaveTextContent(/encrypted delivery payload.*sent.*fails.*expires/i);
     expect(retention).toHaveTextContent(/abuse-prevention fingerprints.*24 hours/i);
-    expect(retention).toHaveTextContent(/connected identity metadata.*disconnect.*account.*purged/i);
+    expect(retention).toHaveTextContent(/disconnecting a method ends its sign-in authority.*removes its profile metadata/i);
+    expect(retention).toHaveTextContent(/Apple.*connection identifier.*cleanup finishes or expires/i);
     expect(retention).toHaveTextContent(/Apple.*revocation.*24 hours.*purge deadline/i);
     expect(retention).toHaveTextContent(/verified Apple notification.*8 days/i);
     expect(rights).toHaveTextContent(/linked-method.*verification metadata.*provider identifiers/i);

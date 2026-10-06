@@ -920,14 +920,19 @@ describe("CrtWorkspace tree lifecycle", () => {
     fireEvent.keyDown(label, { key: "Enter" });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); await Promise.resolve(); await Promise.resolve(); });
 
+    // Conflict recovery includes asynchronous local persistence. Keep its
+    // timers real and wait for the observed refetch/save rather than assuming
+    // both have completed after one debounce advancement.
+    vi.useRealTimers();
     expect(screen.getByText(/server changed this tree/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Root cause: Local copy" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh server copy" }));
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await waitFor(() => expect(crtApi.getCrtTree).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("button", { name: "Root cause: Local copy" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save local changes" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Save local changes" }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    const saveLocal = await screen.findByRole("button", { name: "Save local changes" });
+    expect(saveLocal).toBeInTheDocument();
+    fireEvent.click(saveLocal);
+    await waitFor(() => expect(updateTree).toHaveBeenCalledTimes(2));
     expect(updateTree.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ expected_revision: 2 }));
   });
   it("surfaces a retryable conflict refresh failure with its support reference", async () => {

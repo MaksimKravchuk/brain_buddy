@@ -59,7 +59,8 @@ export async function mintInvite(): Promise<string> {
 }
 
 export async function signupThroughUi(page: Page, email: string, inviteCode: string): Promise<void> {
-  await page.goto("/signup?invite=1");
+  await page.goto("/signup");
+  await page.getByRole("button", { name: "Use a password and invite code", exact: true }).click();
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByLabel("Invite code").fill(inviteCode);
@@ -78,8 +79,8 @@ export async function createUserViaApi(request: APIRequestContext, testInfo: Tes
 }
 
 export async function loginThroughUi(page: Page, email: string, loginPassword = password): Promise<void> {
-  await page.goto("/login");
-  await page.getByRole("button", { name: "Use your password" }).click();
+  if (new URL(page.url()).pathname !== "/login") await page.goto("/login");
+  await page.getByRole("button", { name: "Use your password", exact: true }).click();
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(loginPassword);
   await page.getByRole("button", { name: "Sign in" }).click();

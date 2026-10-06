@@ -9,6 +9,7 @@ import { Overlay, OverlayHeader } from "../../components/ui/Overlay";
 import { useAuthStore } from "../../stores/authStore";
 import { AuthField, CodeStep, authButtonClass } from "./AuthControls";
 import { ConfirmAccount } from "./ConfirmAccount";
+import { LegacyAccountActions } from "../account/LegacyAccountActions";
 import { assertActingOwner, createClientProof, startBrowserProvider, takeConfirmation } from "./authFlow";
 
 export function AccountSecurity({ directDelete = false, onUpdated }: { directDelete?: boolean; onUpdated?: () => void }): React.JSX.Element {
@@ -24,12 +25,20 @@ export function AccountSecurity({ directDelete = false, onUpdated }: { directDel
   const close = () => { setAction(null); opener.current?.focus(); };
   const load = async () => {
     setLoadError(false);
-    try { assertActingOwner(owner); const next = await modernAuthApi.accountMethods(); assertActingOwner(owner); if (next.account_id !== owner) throw new Error("Wrong account"); setMethods(next); }
+    try { assertActingOwner(owner); const [next, available] = await Promise.all([modernAuthApi.accountMethods(), modernAuthApi.methods()]); assertActingOwner(owner); if (next.account_id !== owner) throw new Error("Wrong account"); setMethods(next); setAvailability(available); }
     catch { setMethods(null); setLoadError(true); }
   };
-  useEffect(() => { let active = true; void modernAuthApi.accountMethods().then(next => { if (active && next.account_id === owner && useAuthStore.getState().user?.id === owner) setMethods(next); else if (active) setLoadError(true); }).catch(() => { if (active) setLoadError(true); }); void modernAuthApi.methods().then(next => { if (active) setAvailability(next); }).catch(() => { /* existing connected metadata remains authoritative */ }); return () => { active = false; }; }, [owner]);
+  useEffect(() => { let active = true; void modernAuthApi.accountMethods().then(next => { if (active && next.account_id === owner && useAuthStore.getState().user?.id === owner) setMethods(next); else if (active) setLoadError(true); }).catch(() => { if (active) setLoadError(true); }); void modernAuthApi.methods().then(next => { if (active) setAvailability(next); }).catch(() => { if (active) setLoadError(true); }); return () => { active = false; }; }, [owner]);
   const changed = async (message: string) => { close(); setNotice(message); await load(); onUpdated?.(); };
   if (!owner || currentOwner !== owner) return <p role="alert">Use the account linked to this action. Sign in again before continuing.</p>;
+  if (!loadError && methods?.has_password && availability?.web_account_origin === null && !availability.google && !availability.apple && !availability.email) return <>
+    <SectionCard title="Account security" description="Your password and data controls remain available.">
+      <p>You currently sign in as {methods.email}. <strong>{methods.email_verified ? "Verified" : "Unverified"}</strong></p>
+      <h3 className="mt-3 font-semibold">Ways to sign in</h3>
+      <ul>{methods.methods.map(method => <li key={method.method}>{({ password: "Password", email: "Email codes", google: "Google", apple: "Apple" })[method.method]}: {method.usable ? "Ready" : "Currently unavailable"}</li>)}</ul>
+    </SectionCard>
+    <LegacyAccountActions owner={owner} directDelete={directDelete} />
+  </>;
   return <>
     <SectionCard title="Account security" description="Choose how you sign in. Your current email stays in use until both ownership and the new address are confirmed.">
       {notice ? <p role="status" className="mb-4 text-sm text-emerald-800">{notice}</p> : null}
@@ -42,8 +51,8 @@ export function AccountSecurity({ directDelete = false, onUpdated }: { directDel
         <p className="text-sm text-slate-600">Email codes: {methods.email_verified && methods.email_delivery === "available" ? "Ready" : "Verify your email or use another connected method"}</p>
       </div>}
     </SectionCard>
-    <SectionCard title="Your data" description="Export a safe copy of your account data, or request deletion after the existing 14-day grace period."><div className="flex flex-wrap gap-3"><Button className={authButtonClass} disabled={!methods} onClick={() => choose("export")}>Export</Button><Button variant="danger" className={authButtonClass} disabled={!methods} onClick={() => choose("delete")}>Delete account…</Button></div></SectionCard>
-    {methods && action ? <AccountActionDialog key={action} action={action} owner={owner} methods={methods} availability={availability} onClose={close} onChanged={changed} onRefresh={async () => { close(); await load(); onUpdated?.(); }} /> : null}
+    <SectionCard title="Your data" description="Export a safe copy of your account data, or request deletion after the existing 14-day grace period."><div className="flex flex-wrap gap-3"><Button className={authButtonClass} disabled={!methods || !availability} onClick={() => choose("export")}>Export</Button><Button variant="danger" className={authButtonClass} disabled={!methods || !availability} onClick={() => choose("delete")}>Delete account…</Button></div></SectionCard>
+    {methods && availability && action ? <AccountActionDialog key={action} action={action} owner={owner} methods={methods} availability={availability} onClose={close} onChanged={changed} onRefresh={async () => { close(); await load(); onUpdated?.(); }} /> : null}
   </>;
 }
 
