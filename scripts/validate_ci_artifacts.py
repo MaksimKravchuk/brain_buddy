@@ -253,6 +253,9 @@ E2E_CI_REQUIREMENTS = (
 PATH_FILTER_REQUIREMENTS = (
     ("changed-stacks job", "  changes:"),
     ("changed-stacks outputs", "backend: ${{ steps.decide.outputs.backend }}"),
+    # An undeclared job output reads as an empty string, so a lane bound to it
+    # would skip every step and still report success having built nothing.
+    ("changed-stacks macos output", "macos: ${{ steps.decide.outputs.macos }}"),
     ("step-level path guard", "if: env.RUN == 'true'"),
     ("full-CI gate covers the filter job", "      - changes\n"),
 )
@@ -604,6 +607,7 @@ def _path_filter_errors(workflow_text: str) -> list[str]:
         "frontend",
         "ios-kit",
         "ios-app",
+        "macos-app",
         "docker",
         "mutation-base",
         "mutation-head",
@@ -633,6 +637,69 @@ def _path_filter_errors(workflow_text: str) -> list[str]:
                 "job-level 'if'; path filtering must gate steps so the job "
                 "still reports success rather than skipped"
             )
+    return errors
+
+
+# Lanes whose RUN gate must read one named changed-stack output, and whose every
+# step but the checkout must carry that gate. Bound to the wrong output, a
+# change confined to the lane's own tree skips every step and the lane reports
+# success having built nothing; an ungated step runs on the Linux no-op path and
+# fails the lane for a change that never touched it. The Mac lane is listed
+# because both of those are one-word slips there: it sits beside two `ios`
+# lanes it was modelled on (021-mac-sync research R3).
+STEP_GATED_LANES = {"macos-app": "macos"}
+
+
+def _job_steps(block: str) -> list[tuple[str, str | None, str | None]]:
+    """Each step of one job as (label, its ``uses``, its ``if``), in order."""
+
+    steps = re.search(
+        r"^    steps:\n(?P<body>.*)", block, flags=re.MULTILINE | re.DOTALL
+    )
+    if not steps:
+        return []
+    parsed: list[tuple[str, str | None, str | None]] = []
+    chunks = re.split(r"^      - ", steps.group("body"), flags=re.MULTILINE)[1:]
+    for chunk in chunks:
+        # The split consumed the first key's indentation; restore it so every
+        # key of the step is matched at the same column.
+        text = "        " + chunk
+        values: dict[str, str | None] = {}
+        for key in ("name", "uses", "if"):
+            match = re.search(
+                rf"^        {key}:[ \t]*(.+?)[ \t]*$", text, flags=re.MULTILINE
+            )
+            values[key] = match.group(1) if match else None
+        label = values["name"] or values["uses"] or "unnamed step"
+        parsed.append((label, values["uses"], values["if"]))
+    return parsed
+
+
+def _step_gate_errors(workflow_text: str) -> list[str]:
+    errors: list[str] = []
+    for job, output in STEP_GATED_LANES.items():
+        block = _job_block(workflow_text, job)
+        if block is None:
+            # Reported once, as a missing job, by the path-filter check.
+            continue
+        binding = f"RUN: ${{{{ needs.changes.outputs.{output} }}}}"
+        declared = re.search(
+            rf"^      {re.escape(binding)}[ \t]*$", block, flags=re.MULTILINE
+        )
+        if not declared:
+            errors.append(
+                f"{job} job must gate its steps on needs.changes.outputs.{output}: "
+                f"expected the job env to declare {binding}"
+            )
+        for label, uses, condition in _job_steps(block):
+            if uses and uses.startswith("actions/checkout@"):
+                continue
+            if condition is None or "env.RUN == 'true'" not in condition:
+                errors.append(
+                    f"{job} step {label!r} is not gated on env.RUN == 'true'; on a "
+                    "change that does not touch this lane it would run on the Linux "
+                    "no-op runner"
+                )
     return errors
 
 
@@ -709,6 +776,10 @@ LANE_DEPENDENCY_LIMITS = {
     # Linux and the app on macOS read only the changed-stack decision.
     "ios-kit": {"changes"},
     "ios-app": {"changes"},
+    # The Mac app lane (021-mac-sync research R3) is the same kind of lane: it
+    # reads only the changed-stack decision, and waiting on ios-app would
+    # serialise two macOS runners for a result neither consumes.
+    "macos-app": {"changes"},
     # The whole-stack lane. It consumes nothing the service lanes produce, but
     # it may wait for them so a failing linter or unit test stops the run before
     # anything pays to boot the stack. It may wait for NOTHING ELSE: not the
@@ -940,6 +1011,7 @@ def validate_workflow(
         errors.extend(_missing_allure_aggregation_errors(workflow_text))
         errors.extend(_undiscoverable_allure_producer_errors(workflow_text))
         errors.extend(_path_filter_errors(workflow_text))
+        errors.extend(_step_gate_errors(workflow_text))
         errors.extend(_job_graph_errors(workflow_text))
         errors.extend(_mutation_gate_errors(workflow_text))
         errors.extend(_quality_gate_errors(workflow_text))

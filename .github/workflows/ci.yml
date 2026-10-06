@@ -122,6 +122,7 @@ jobs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
       ios: ${{ steps.decide.outputs.ios }}
+      macos: ${{ steps.decide.outputs.macos }}
       floor-backend: ${{ steps.decide.outputs.floor-backend }}
       floor-frontend: ${{ steps.decide.outputs.floor-frontend }}
       mutation: ${{ steps.mutation_scope.outputs.mutation }}
@@ -150,6 +151,7 @@ jobs:
           backend=true
           frontend=true
           ios=true
+          macos=true
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base='${{ github.event.pull_request.base.sha }}'
@@ -177,6 +179,12 @@ jobs:
                 # or read by its tests. Its sync tests run against the Swift
                 # fake server in ios/, so a backend change is not an input.
                 printf '%s\n' "${changed}" | grep -q '^ios/' || ios=false
+                # The Mac app builds from macos/ and, from 021-mac-sync on,
+                # links the shared kit in ios/BrainBuddyKit/, so a kit change
+                # rebuilds and retests the Mac too. The rest of ios/ (the
+                # iPhone app, its widgets, the XcodeGen project) is not an
+                # input to the Mac and leaves this lane idle.
+                printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit)/' || macos=false
               fi
             else
               echo "could not read the diff against ${base}; exercising every stack"
@@ -205,8 +213,9 @@ jobs:
             echo "backend=${backend}"
             echo "frontend=${frontend}"
             echo "ios=${ios}"
+            echo "macos=${macos}"
           } >> "$GITHUB_OUTPUT"
-          echo "backend=${backend} frontend=${frontend} ios=${ios}"
+          echo "backend=${backend} frontend=${frontend} ios=${ios} macos=${macos}"
 
       # The mutation gate's scope is computed separately and far more narrowly
       # than the stack filter above: ADR-0004 requirement 1 runs it only over
@@ -622,6 +631,73 @@ jobs:
           path: |
             ${{ runner.temp }}/xcodebuild.log
             ${{ runner.temp }}/BrainBuddy.xcresult
+          if-no-files-found: ignore
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+  # The native Mac app (macos/, 021-mac-sync research R3), a service lane of
+  # the same kind as ios-app and here for the same reason: a trunk candidate
+  # lands on the `Full CI` verdict alone, so a Mac check anywhere else would be
+  # advisory. Before this lane a change confined to macos/ turned every stack
+  # off and landed on a green Full CI that never compiled it.
+  #
+  # It builds and tests the Swift package in macos/ with the runner's Xcode 26
+  # toolchain. It does not run build_app.sh: the Whisper model assets that
+  # script bundles are not in the repository, and the tests do not need the
+  # .app. Its results are XCTest output, not Allure, so nothing here feeds the
+  # aggregate report; allure-report still waits for it so the report closes a
+  # finished run. With nothing Mac-relevant to check it runs its no-op on Linux
+  # instead of queueing for a macOS runner, and still reports success.
+  macos-app:
+    name: Mac app on macOS (Xcode 26)
+    runs-on: ${{ needs.changes.outputs.macos == 'true' && 'macos-26' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    needs: changes
+    env:
+      RUN: ${{ needs.changes.outputs.macos }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Select the newest Xcode 26
+        if: env.RUN == 'true'
+        run: bash ios/scripts/select-xcode.sh
+
+      - name: Show the toolchain
+        if: env.RUN == 'true'
+        run: swift --version
+
+      # --only-use-versions-from-resolved-file builds exactly what
+      # macos/Package.resolved pins and fails on a stale pin file, instead of
+      # resolving afresh from the network and testing dependency versions
+      # nobody reviewed. Spelled out on purpose: SwiftPM's shorter alias for
+      # the same option looks like a force push to the trunk-delivery contract
+      # (scripts/validate_trunk_delivery.py), which rejects that anywhere in
+      # CI. The raw logs are kept for the failure artifact.
+      - name: Build the package
+        if: env.RUN == 'true'
+        working-directory: macos
+        run: |
+          swift build --only-use-versions-from-resolved-file 2>&1 \
+            | tee "${RUNNER_TEMP}/macos-swift-build.log"
+
+      - name: Test the package
+        if: env.RUN == 'true'
+        working-directory: macos
+        run: |
+          swift test --only-use-versions-from-resolved-file --parallel 2>&1 \
+            | tee "${RUNNER_TEMP}/macos-swift-test.log"
+
+      - name: Upload build logs
+        if: failure() && env.RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-app-logs-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/macos-swift-build.log
+            ${{ runner.temp }}/macos-swift-test.log
           if-no-files-found: ignore
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
@@ -1182,6 +1258,7 @@ jobs:
       - frontend
       - ios-kit
       - ios-app
+      - macos-app
       - mutation-base
       - mutation-head
       - mutation-gate
@@ -1379,6 +1456,7 @@ jobs:
       - frontend
       - ios-kit
       - ios-app
+      - macos-app
       - mutation-base
       - mutation-head
       - mutation-gate

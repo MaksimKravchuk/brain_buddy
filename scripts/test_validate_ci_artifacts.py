@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import subprocess
 import sys
 import tempfile
@@ -960,6 +961,7 @@ jobs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
       ios: ${{ steps.decide.outputs.ios }}
+      macos: ${{ steps.decide.outputs.macos }}
     steps:
       - id: decide
         run: echo decide
@@ -986,6 +988,17 @@ jobs:
       - name: Build app and widgets for the iOS Simulator
         if: env.RUN == 'true'
         run: xcodebuild build
+  macos-app:
+    needs: changes
+    env:
+      RUN: ${{ needs.changes.outputs.macos }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Test the package
+        if: env.RUN == 'true'
+        working-directory: macos
+        run: swift test --parallel
   mutation-base:
     name: Backend mutation base measurement
     env:
@@ -1038,6 +1051,7 @@ jobs:
       - backend
       - ios-kit
       - ios-app
+      - macos-app
       - frontend
       - e2e
       - docker
@@ -1099,6 +1113,7 @@ jobs:
       - backend
       - ios-kit
       - ios-app
+      - macos-app
       - frontend
       - e2e
       - docker
@@ -1849,6 +1864,186 @@ jobs:
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("allure-report does not wait for every other job", completed.stderr)
         self.assertIn("mutation-gate", completed.stderr)
+
+
+class MacosAppLaneTests(unittest.TestCase):
+    """The Mac app lane (021-mac-sync PR-01, research R3).
+
+    Every malformed fixture is the repository workflow with one edit, so the
+    complete fixture is the file CI actually runs. Each edit is asserted to
+    have applied: a replacement that silently matched nothing would leave the
+    conformant workflow in place and the rejection would never be exercised.
+    """
+
+    LANE_HEADER = "  macos-app:\n    name: Mac app on macOS (Xcode 26)\n"
+
+    def setUp(self) -> None:
+        self.workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+
+    def validate(self, text: str) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            workflow = Path(tmp) / "ci.yml"
+            workflow.write_text(text, encoding="utf-8")
+            return subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "workflow",
+                    "--ci",
+                    str(workflow),
+                    "--frontend-vite-config",
+                    str(REPO_ROOT / "frontend" / "vite.config.ts"),
+                ],
+                cwd=REPO_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+    def edit_job(self, job: str, old: str, new: str) -> str:
+        """Replace ``old`` once, inside one top-level job only."""
+
+        match = re.search(
+            rf"^  {re.escape(job)}:\n.*?(?=^  [a-z0-9-]+:\n|\Z)",
+            self.workflow,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(match, f"the workflow has no {job} job")
+        assert match is not None
+        block = match.group(0)
+        self.assertIn(old, block, f"fixture edit did not apply to {job}")
+        edited = block.replace(old, new, 1)
+        return self.workflow[: match.start()] + edited + self.workflow[match.end() :]
+
+    def test_the_repository_workflow_carries_a_conformant_macos_lane(self) -> None:
+        self.assertIn(self.LANE_HEADER, self.workflow)
+
+        completed = self.validate(self.workflow)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_a_workflow_without_the_macos_lane_is_rejected(self) -> None:
+        # Without the lane every Mac slice lands on a green Full CI that never
+        # compiled macos/: a change confined to macos/ turns every stack off.
+        without = re.sub(
+            r"^  macos-app:\n.*?(?=^  [a-z0-9-]+:\n)",
+            "",
+            self.workflow,
+            count=1,
+            flags=re.MULTILINE | re.DOTALL,
+        ).replace("      - macos-app\n", "")
+        self.assertNotIn("macos-app", without, "fixture edit did not apply")
+
+        completed = self.validate(without)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("missing macos-app job", completed.stderr)
+
+    def test_a_macos_lane_skipped_by_a_job_level_if_is_rejected(self) -> None:
+        # Skipped is a Full CI failure by design (ADR-0008); the lane must run
+        # on Linux as a no-op and gate its steps instead.
+        skippable = self.edit_job(
+            "macos-app",
+            self.LANE_HEADER,
+            self.LANE_HEADER + "    if: needs.changes.outputs.macos == 'true'\n",
+        )
+
+        completed = self.validate(skippable)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "macos-app job gates itself on the changed-stack filter", completed.stderr
+        )
+
+    def test_a_macos_lane_queued_behind_another_job_is_rejected(self) -> None:
+        # It reads only the changed-stack decision. Waiting on ios-app would
+        # serialise two macOS runners for a result neither consumes.
+        queued = self.edit_job(
+            "macos-app",
+            "    needs: changes\n",
+            "    needs:\n      - changes\n      - ios-app\n",
+        )
+
+        completed = self.validate(queued)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "macos-app job declares needs it does not consume", completed.stderr
+        )
+        self.assertIn("ios-app", completed.stderr)
+
+    def test_a_macos_lane_absent_from_full_ci_is_rejected(self) -> None:
+        # With a flat graph full-ci is the only thing that makes a job required.
+        unrequired = self.edit_job("full-ci", "      - macos-app\n", "")
+
+        completed = self.validate(unrequired)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("full-ci does not require every job", completed.stderr)
+        self.assertIn("macos-app", completed.stderr)
+
+    def test_a_macos_lane_absent_from_the_allure_report_is_rejected(self) -> None:
+        # The report is the run's closing artifact: a macOS build that can
+        # still be running when it publishes makes the link describe an
+        # unfinished run.
+        racing = self.edit_job("allure-report", "      - macos-app\n", "")
+
+        completed = self.validate(racing)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "allure-report does not wait for every other job", completed.stderr
+        )
+        self.assertIn("macos-app", completed.stderr)
+
+    def test_a_changes_job_without_the_macos_output_is_rejected(self) -> None:
+        # An undeclared output reads as an empty string, so RUN would never be
+        # 'true': every step skips and the lane reports success having built
+        # nothing.
+        blind = self.edit_job(
+            "changes", "      macos: ${{ steps.decide.outputs.macos }}\n", ""
+        )
+
+        completed = self.validate(blind)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("changed-stacks macos output", completed.stderr)
+
+    def test_a_macos_lane_gated_on_another_stack_is_rejected(self) -> None:
+        # Bound to the iOS decision, a change confined to macos/ would skip
+        # every step and still report success.
+        misbound = self.edit_job(
+            "macos-app",
+            "      RUN: ${{ needs.changes.outputs.macos }}\n",
+            "      RUN: ${{ needs.changes.outputs.ios }}\n",
+        )
+
+        completed = self.validate(misbound)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "macos-app job must gate its steps on needs.changes.outputs.macos",
+            completed.stderr,
+        )
+
+    def test_an_ungated_macos_lane_step_is_rejected(self) -> None:
+        # On the Linux no-op path an ungated swift step would fail the lane for
+        # a change that never touched the Mac.
+        ungated = self.edit_job(
+            "macos-app",
+            "      - name: Test the package\n        if: env.RUN == 'true'\n",
+            "      - name: Test the package\n",
+        )
+
+        completed = self.validate(ungated)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "macos-app step 'Test the package' is not gated on env.RUN",
+            completed.stderr,
+        )
 
 
 class CoverageSuppressionTests(unittest.TestCase):
