@@ -81,7 +81,7 @@ row of §3 is part of a normal task write and bumps `revision`.
 | person release to Someday: decision `someday`, restart bulk release (FR-017) | as "leaves Next"; `parked` stays `null`. A bulk release stores each task's pre-release clock (the `clock_before` shape, plus `consecutive_stalled_formulations` before closing) in its bulk-release record (data-model E7). Every person release also writes a Someday receipt (`source: release`, data-model E5), so the task stays out of the Someday step for 30 days (FR-032); that is not a clock change |
 | Inbox-remainder release (FR-030) | an Inbox task moves to Someday; Inbox tasks have no clock, so nothing changes on the clock; `parked` stays `null`; the bulk-release record stores the previous state `inbox`; a Someday receipt is written as for any person release |
 | undo of a bulk release (per task still at `revision_after`) | the task returns to its previous list; a task returning to Next gets its stored clock back exactly (same `formulation_id`, `started_at`, extension, floor, stalled count); no new formulation starts |
-| decision undo (FR-048) | the task is restored field-for-field from the decision's snapshot, clock included; no new formulation starts |
+| decision undo (FR-048) | the task is restored field-for-field from the decision's snapshot, clock included; no new formulation starts. When the decision yielded an auto-park, the snapshot is taken **after** the yield reversal, so Undo restores the task in Next with the restored clock and `parked = null`, and the next sweep may park it again (vectors T-044 – T-046) |
 | auto-park yield reversal (http §3) | the park is reversed by restoring `clock_before` exactly (same `formulation_id`, stalled count restored to `stalled_before`, so the formulation is not closed twice) and `parked = null`; then the yielding decision applies normally |
 | task leaves Someday, or is completed/cancelled from Someday | `parked = null` |
 | activation for an owner (FR-016, FR-051): `activated_at` is set | every task in Next: if `formulation_started_at` is `null`, start a formulation at `activated_at`; otherwise `formulation_started_at = max(formulation_started_at, activated_at)` (same `formulation_id`, the **activation clamp**); in all cases `formulation_park_floor_at = max(existing, activated_at + 14 d)`. So nothing asks before `activated_at + T` and nothing parks before `activated_at + 14 d` |
@@ -118,7 +118,13 @@ park_due_at = max(ask_at + 7 days,
                   formulation_park_floor_at or -inf,
                   owner_park_floor_at or -inf)
 tomorrow_at = park_due_at - 24 hours
+paused_until = due_start if due_date is set and due_start > formulation_started_at
+               else null
 ```
+
+`paused_until` is reported as is, even once it is in the past. The class is `paused` iff
+`paused_until` is set and `now < paused_until` (§5 row 1). A due date on or before the
+formulation's start never pauses it (vectors C-061, C-062).
 
 "days" are exact 86 400-second spans in UTC; only `due_start` uses the local
 calendar. With no extension and no floors this gives ask at T and park at T + 7
@@ -132,7 +138,7 @@ owner (`activated_at` set); every other task is `none`.
 
 | order | condition | class | list marker | detail marker |
 |---|---|---|---|---|
-| 1 | due date set and `now < due_start` | `paused` | none | "Paused until the due date" |
+| 1 | `paused_until` set and `now < paused_until` (§4) | `paused` | none | "Paused until the due date" |
 | 2 | `now >= park_due_at` | `park_due` | "Moves to Someday tomorrow" (until applied) | same |
 | 3 | `now >= tomorrow_at` | `moves_tomorrow` | "Moves to Someday tomorrow" | same |
 | 4 | `now >= ask_at` | `asks` | "Asks for a decision" | same |

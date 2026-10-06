@@ -31,7 +31,10 @@ in Core (`NavigatorInputBuilder`), in `navigatorInput.ts` and in `navigator.py`
 With `NOTES_BUDGET_CHARS = 6 000` (a constant, not per model): if the notes have at
 most that many characters (Unicode scalars) they are unchanged; otherwise the first
 lines up to 2 000 characters and the most recent (last) lines up to 4 000 characters
-are kept, whole lines only, joined by one line `…`, and `truncated = true`. Title,
+are kept, whole lines only, joined by one line `…`, and `truncated = true`. The
+joining `…` line and its two line breaks come on top of the budget, so a reduced note
+is at most 6 003 scalars, and that is the request limit for `task.notes` (http §7,
+`NAVIGATOR_NOTES_MAX_CHARS`). Title,
 stall reason, project name and sibling titles are never dropped. The budget is chosen so
 the reduced input, with instructions and siblings, fits the smallest supported window
 (Apple's 4,096 tokens on iOS 26.x, `research-on-device-model.md` §1) at the
