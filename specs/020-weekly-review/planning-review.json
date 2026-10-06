@@ -63,6 +63,20 @@
       },
       "resolution": "All 4 advisory wording-drift findings fixed in the commit that records this entry: the notification skip rule and restart trigger say 'counted review (FR-029)' everywhere (design.md, M-10, M-24, adr-draft.md); D-02 'interrupted (suggesting)' puts the FR-052 confirmation first and, after a reload, reopens the draft with the ordinary Suggest control; the design sign-off states the FR-048 Undo durations; the plan's PR-04 paths list its two BrainBuddyKit files.",
       "artifacts_digest_after_fixes": "676dc4ac8afa3b937760f6ecb88e4c14bfe6e2884d6c8932d6868801fce970f3"
+    },
+    "post_acceptance_review_3": {
+      "reason": "Compensating measure 5: contract clarifications from the PR-02 implementation review (commit ae1656d) were reviewed instead of relying on the acceptance.",
+      "reviewed_range": "c1576c6..ae1656d (contracts/formulation-clock.md, contracts/http.md, contracts/navigator.md, tasks.md test command)",
+      "reviewer": "claude-fable-5-1 via headless Claude Code, read-only tools (Read, Grep, Glob)",
+      "date": "2026-10-06",
+      "verdict": "pass",
+      "findings": {
+        "blocking": 0,
+        "important": 0,
+        "advisory": 4
+      },
+      "resolution": "All 4 advisories fixed in the commit that records this entry: reduce_notes separator fixed to U+000A U+2026 U+000A with CR dropped (navigator §1); dates meta orders task_ids within a day and accepts a one-day edge difference on devices in another zone (http §6); the DST gap/fold rule binds every slot evaluator, the web reviewSlot.ts included (http §5); a repeat park of the same formulation resets seen_at and returned_at (data-model E6).",
+      "artifacts_digest_after_fixes": "6e521feaf7b1a8e4517ff315b11323dd2265913546b375ff6b6fabe83f5147c7"
     }
   }
 }

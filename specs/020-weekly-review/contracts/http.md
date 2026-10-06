@@ -399,7 +399,10 @@ slot that has a counted review in the preceding 6 days, FR-036) evaluated in the
 `slot − 6 d` skips that slot. In the example above, `server_now` is two minutes past
 Friday's 16:00 slot, so the next slot is a week later. A slot whose local time does not
 exist (DST gap) moves forward by the gap length, e.g. 02:30 → 03:30 local. In a repeated
-hour (fold), the first occurrence is used. Vectors NR-008 – NR-010 pin both cases. The slot itself is a local wall-clock day and time, and
+hour (fold), the first occurrence is used. Vectors NR-008 – NR-010 pin both cases.
+Every slot evaluator follows the same gap/fold rule: the server, iOS `ReviewReminderPlanner`
+and the web `reviewSlot.ts` (T172). The TypeScript slot tests run NR-001 – NR-010 from the
+shared flow vectors and must not rely on the engine's default local-time handling. The slot itself is a local wall-clock day and time, and
 **each client evaluates it in its own current zone** (targeted re-review 2026-10-06):
 the iOS notification is a local notification on that device and fires at the chosen
 day and time in the device's current zone, and iOS (M-22, M-25) and the web (D-03
@@ -469,7 +472,7 @@ without "Continue" sends nothing (the parks stay unseen).
 | GET | `/review/sessions/{id}` | — | session |
 | PATCH | `/review/sessions/{id}` | `{progress_id, current_step?, step?: {code, status}, active_seconds?: {code, seconds}, set_aside_task_id?, inbox_processed_delta?, snapshot_decision_queue?: true}` | merged session (rules below); no version conflict. `progress_id` (`progress_<uuid>`, minted by the client once per progress change, iOS and web alike, and reused unchanged on every retry of that change) is required (422 without it) |
 | POST | `/review/sessions/{id}/finish` | `{clear_start?: yes \| not_really}` | the person tapped Done on the summary: status `completed` or `completed_empty` per data-model E3. There is no "left" outcome: leaving only pauses a review (FR-029); it ends without Done only by replacement or the 7-day idle close. Idempotent: finishing an already finished session returns it unchanged (200) |
-| GET | `/review/queues/{step}` | query `session_id` | `{items: TaskResponse[], meta}`; `meta` per step: `wins` `{count}`; `rest_of_next` `{next_count, weekly_average_4w, weeks_of_history, implied_weeks}` (`weekly_average_4w` and `implied_weeks` are `null` when `weeks_of_history < 4` or there were no completions in them, FR-031); `someday` `{eligible_total, shown ≤ 7}`; `dates` `{days: [{day: YYYY-MM-DD, task_ids: [id]}]}`: one entry per local day, in the stored zone, from today to today + 13 that has at least one open task due, ascending; `items` holds those tasks in the same order; other steps' `meta` is `{}`. Unknown or foreign `session_id` → the same 404 ("Ownership") |
+| GET | `/review/queues/{step}` | query `session_id` | `{items: TaskResponse[], meta}`; `meta` per step: `wins` `{count}`; `rest_of_next` `{next_count, weekly_average_4w, weeks_of_history, implied_weeks}` (`weekly_average_4w` and `implied_weeks` are `null` when `weeks_of_history < 4` or there were no completions in them, FR-031); `someday` `{eligible_total, shown ≤ 7}`; `dates` `{days: [{day: YYYY-MM-DD, task_ids: [id]}]}`: one entry per local day, in the stored zone, from today to today + 13 that has at least one open task due, ascending; within a day `task_ids` follow the Next list's manual order (`order_key`, then `id`); `items` holds those tasks in the same order. A device in another zone computes its own window (ios-commands §6) and may differ by one day at either edge, which is accepted; other steps' `meta` is `{}`. Unknown or foreign `session_id` → the same 404 ("Ownership") |
 
 **Session progress is merged, not version-checked**, so two devices moving the same
 review never conflict: `step` statuses merge monotonically (`finished` > `skipped` >
