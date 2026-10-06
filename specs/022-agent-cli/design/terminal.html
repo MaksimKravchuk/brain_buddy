@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BrainBuddy CLI terminal design</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#334155;background:#f8fafc;color-scheme:light}
+body{max-width:960px;margin:40px auto;padding:0 20px 40px}h1{color:#0f172a}h2{margin-top:32px;font-size:20px}
+p{line-height:1.6}.meta{color:#64748b;font-size:14px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:20px;border:1px solid #e2e8f0;border-radius:12px;background:white;font:13px/1.65 ui-monospace,monospace}
+</style>
+<h1>BrainBuddy in your terminal</h1>
+<p class="meta">Proposed interface · D-01 and D-02 · synthetic data only · no published release yet</p>
+<p>One command per action. Compact JSON goes to stdout; structured errors go to stderr. No prompts during agent work.</p>
+<h2>D-01 · Capture, inspect, act</h2>
+<pre>$ bb commands task
+{"name":"task","commands":["add","list","get","update","transition"]}
+
+$ bb task add --title "Call the garage" --idempotency-key garage-1
+{"data":{"id":"task-demo","title":"Call the garage","state":"inbox","revision":1}}
+
+$ bb task list --query garage --limit 20 --fields id,title,state,revision
+{"data":[{"id":"task-demo","title":"Call the garage","state":"inbox","revision":1}],"page":{"has_more":false,"next_cursor":null}}
+
+$ bb task update task-demo --revision 1 --json @- --idempotency-key garage-2
+stdin: {"title":"Call the garage and book the repair"}
+{"data":{"id":"task-demo","title":"Call the garage and book the repair","state":"inbox","revision":2}}
+
+$ bb task transition task-demo complete --revision 2 --idempotency-key garage-3
+{"data":{"id":"task-demo","title":"Call the garage and book the repair","state":"completed","revision":3}}</pre>
+<h2>D-01 · Discover and preview</h2>
+<pre>$ bb schema POST /tasks
+Scoped request/response schema, including required fields and enums.
+
+$ bb api GET /auth/me --fields id,email
+{"data":{"id":"member-demo","email":"member@example.test"}}
+
+$ bb task add --title "Call the garage" --idempotency-key garage-1 --dry-run
+{"method":"POST","path":"/tasks","body":{"title":"Call the garage"},"idempotency_key":"garage-1"}
+
+$ bb task list --query no-match
+{"data":[],"page":{"has_more":false,"next_cursor":null}}</pre>
+<h2>D-01 · Recover deliberately</h2>
+<pre>Stale revision · stderr · nonzero exit
+{"error":{"code":"conflict","status":409,"message":"Revision conflict","reference_id":"demo-reference","detail":{"current_revision":3}}}
+
+Interrupted write · stderr · nonzero exit
+{"error":{"code":"transport","message":"Request failed; delivery is unknown","delivery_unknown":true,"idempotency_key":"garage-3"}}</pre>
+<p>Reread before retrying a stale edit. Recover uncertain delivery using the same key and identical input according to the server contract. Credentials never appear in output or previews.</p>
+<h2>D-02 · Install a native release</h2>
+<p>Final Unix and PowerShell one-command instructions download a versioned installer from this repository's CLI release. These are previews; no release is published yet.</p>
+<pre>Downloading bb 0.1.0 for your platform...
+Checksum verified.
+Installed bb 0.1.0.
+Add the displayed user-owned directory to PATH if needed.
+
+Corrupt archive: Checksum verification failed. Existing bb preserved.
+Unsupported machine: Unsupported platform. No files replaced.</pre>
+<p class="meta">Linux x86_64/arm64 · macOS x86_64/arm64 · Windows x86_64. No compiler or administrator rights required.</p>
+</html>
