@@ -15,6 +15,7 @@ import { Overlay, OverlayHeader } from "../../components/ui/Overlay";
 import { Feedback, Field, SectionCard } from "../../components/ui/SettingsSection";
 import { useAuthStore } from "../../stores/authStore";
 import { getErrorContext, getErrorMessage } from "../../utils/error";
+import { ReviewSettingsSection } from "../review/ReviewSettingsSection";
 
 const emptyCounts: TaskCounts = { inbox: 0, next: 0, waiting: 0, someday: 0 };
 
@@ -54,6 +55,8 @@ export function AccountSettingsPage(): React.JSX.Element {
         <ProfileSection />
         <EmailSection />
         <PasswordSection />
+        {/* Spec 020 D-04; renders nothing while weekly_review is off. */}
+        <ReviewSettingsSection />
         <DataSection />
         <DangerZone />
       </div>

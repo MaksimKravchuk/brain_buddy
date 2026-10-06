@@ -5,10 +5,21 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { apiClient } from "../../../api/client";
+import { reviewApi, type ReviewState } from "../../../api/review";
+import { loadReviewDraft, saveReviewDraft } from "../../../features/review/reviewFormDrafts";
+import { markWhileAwayShown, readWhileAwayLastShown, localDay } from "../../../features/review/wywaPresentation";
 import type { ProjectResponse, TagResponse, TaskCounts } from "../../../api/taskTypes";
 import { useAuthStore } from "../../../stores/authStore";
 import { AppShell } from "../AppShell";
 import { useShellToast } from "../shellToast";
+
+vi.mock("../../../api/review", async () => {
+  const actual = await vi.importActual<typeof import("../../../api/review")>("../../../api/review");
+  return {
+    ...actual,
+    reviewApi: { ...actual.reviewApi, getState: vi.fn(), acknowledgeExplainer: vi.fn(), acknowledgeParks: vi.fn(), updateSettings: vi.fn() }
+  };
+});
 
 const counts: TaskCounts = { inbox: 0, next: 6, waiting: 3, someday: 0 };
 
@@ -815,5 +826,216 @@ describe("AppShell deletion notice", () => {
     expect(
       screen.queryByText("Welcome back — your scheduled account deletion has been cancelled.")
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("020-FR-051 AppShell review dialogs at web open", () => {
+  const DAY = 86_400_000;
+  const iso = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+  const apiOrigin = "http://localhost:3000/api";
+  const baseState: ReviewState = {
+    settings: { threshold_days: 14, review_weekday: 5, review_time: "16:00", time_zone: "UTC", onboarded_at: null, activated_at: null, owner_park_floor_at: null, revision: 1 },
+    explainer_seen: false,
+    grace_until: null,
+    last_counted_review_at: null,
+    last_counted_review: null,
+    next_review_at: null,
+    restart_mode: false,
+    open_session: null,
+    unseen_parks: [],
+    counts: { asks_for_decision: 0, moves_tomorrow: 0 },
+    receipts: [],
+    server_now: iso(0)
+  };
+  const parkedAt = iso(-1 * DAY);
+  const seenWithParks: ReviewState = {
+    ...baseState,
+    explainer_seen: true,
+    grace_until: iso(13 * DAY),
+    settings: { ...baseState.settings, activated_at: iso(-1 * DAY), revision: 2 },
+    unseen_parks: [{ task_id: "task-pt", formulation_id: "form_pt", parked_at: parkedAt }]
+  };
+  const parkedTask = {
+    id: "task-pt",
+    title: "Learn basic Portuguese",
+    details: null,
+    state: "someday" as const,
+    project_id: null,
+    tag_ids: [],
+    due_date: null,
+    priority: "none" as const,
+    waiting_for: null,
+    waiting_since: null,
+    order_key: 1,
+    source_capture_ids: [],
+    created_at: iso(-40 * DAY),
+    updated_at: parkedAt,
+    completed_at: null,
+    cancelled_at: null,
+    revision: 4,
+    formulation: null,
+    parked: { at: parkedAt, formulation_id: "form_pt" }
+  };
+
+  /** Let the loaded review state render before asserting that nothing shows. */
+  const flush = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+
+  function signIn(id: string, flags: Record<string, boolean> = { weekly_review: true }) {
+    act(() => {
+      useAuthStore.setState({ user: { id, email: `${id}@example.test`, feature_flags: flags }, status: "authed" });
+    });
+  }
+
+  function renderWithHeading(headingTabIndex?: number) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/tasks/next"]}>
+          <AppShell counts={counts} projects={projects} tags={tags}>
+            <h1 tabIndex={headingTabIndex}>Next actions</h1>
+          </AppShell>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.spyOn(apiClient, "getTask").mockResolvedValue(parkedTask);
+    vi.spyOn(apiClient, "listProjects").mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.mocked(reviewApi.getState).mockReset();
+    vi.mocked(reviewApi.acknowledgeExplainer).mockReset();
+    vi.mocked(reviewApi.acknowledgeParks).mockReset();
+    window.localStorage.clear();
+  });
+
+  it("020-FR-042 with the flag off the shell asks the review nothing and keeps “Weekly review — Coming soon”", () => {
+    renderShell();
+
+    expect(screen.getByRole("button", { name: "Weekly review — Coming soon" })).toBeDisabled();
+    expect(reviewApi.getState).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("020-FR-042 with the flag on the entry stays “Coming soon” in this slice", async () => {
+    signIn("user-coming-soon");
+    vi.mocked(reviewApi.getState).mockResolvedValue({ ...seenWithParks, unseen_parks: [] });
+    renderShell();
+
+    await waitFor(() => expect(reviewApi.getState).toHaveBeenCalled());
+    await flush();
+    expect(screen.getByRole("button", { name: "Weekly review — Coming soon" })).toBeDisabled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("020-FR-051 020-FR-015 shows the explainer first, then While you were away, and focus returns to the main heading", async () => {
+    const user = userEvent.setup();
+    signIn("user-order");
+    vi.mocked(reviewApi.getState).mockResolvedValueOnce(baseState).mockResolvedValue(seenWithParks);
+    vi.mocked(reviewApi.acknowledgeExplainer).mockResolvedValueOnce(seenWithParks);
+    vi.mocked(reviewApi.acknowledgeParks).mockResolvedValueOnce(undefined);
+    renderWithHeading(-1);
+
+    expect(await screen.findByRole("dialog", { name: "How Next stays fresh" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "While you were away" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Got it" }));
+
+    const away = await screen.findByRole("dialog", { name: "While you were away" });
+    expect(screen.queryByRole("dialog", { name: "How Next stays fresh" })).not.toBeInTheDocument();
+    expect(await within(away).findByText("Learn basic Portuguese")).toBeInTheDocument();
+    expect(readWhileAwayLastShown({ apiOrigin, accountId: "user-order" })).toBe(localDay());
+
+    await user.click(within(away).getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("heading", { level: 1, name: "Next actions" })).toHaveFocus();
+  });
+
+  it("020-FR-015 Escape leaves the parks unseen, focuses the main heading and does not show again today", async () => {
+    const user = userEvent.setup();
+    signIn("user-esc");
+    vi.mocked(reviewApi.getState).mockResolvedValue(seenWithParks);
+    const first = renderWithHeading();
+
+    await screen.findByRole("dialog", { name: "While you were away" });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const heading = screen.getByRole("heading", { level: 1, name: "Next actions" });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute("tabindex", "-1");
+    expect(reviewApi.acknowledgeParks).not.toHaveBeenCalled();
+    first.unmount();
+
+    renderWithHeading();
+    await waitFor(() => expect(reviewApi.getState).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("020-FR-015 shows nothing when the parks were already shown today or there are none", async () => {
+    signIn("user-today");
+    markWhileAwayShown({ apiOrigin, accountId: "user-today" }, localDay());
+    vi.mocked(reviewApi.getState).mockResolvedValue(seenWithParks);
+    renderWithHeading();
+
+    await waitFor(() => expect(reviewApi.getState).toHaveBeenCalled());
+    await flush();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("020-FR-015 closing on a page without a main heading leaves focus where it is", async () => {
+    const user = userEvent.setup();
+    signIn("user-no-heading");
+    vi.mocked(reviewApi.getState).mockResolvedValue(seenWithParks);
+    renderShell();
+
+    await screen.findByRole("dialog", { name: "While you were away" });
+    await user.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(reviewApi.acknowledgeParks).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-051 an explainer closed offline stays away for the rest of this web open", async () => {
+    const user = userEvent.setup();
+    signIn("user-offline");
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    vi.mocked(reviewApi.getState).mockResolvedValue(baseState);
+    const first = renderWithHeading();
+
+    await screen.findByRole("dialog", { name: "How Next stays fresh" });
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(reviewApi.acknowledgeExplainer).not.toHaveBeenCalled();
+    first.unmount();
+    online.mockReturnValue(true);
+
+    renderWithHeading();
+    await waitFor(() => expect(reviewApi.getState).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("020-FR-052 sweeps expired and other-account drafts at open and on focus, and clears the account's keys on sign-out", async () => {
+    signIn("user-drafts");
+    vi.mocked(reviewApi.getState).mockResolvedValue({ ...seenWithParks, unseen_parks: [] });
+    const target = { kind: "task", taskId: "task-1", formulationId: "form_a" } as const;
+    saveReviewDraft({ apiOrigin, accountId: "someone-else" }, target, { form: "reformulate", text: "theirs" });
+    saveReviewDraft({ apiOrigin, accountId: "user-drafts" }, target, { form: "reformulate", text: "mine" });
+    renderShell();
+
+    await waitFor(() => expect(loadReviewDraft({ apiOrigin, accountId: "someone-else" }, target)).toBeNull());
+    expect(loadReviewDraft({ apiOrigin, accountId: "user-drafts" }, target)?.text).toBe("mine");
+
+    saveReviewDraft({ apiOrigin, accountId: "someone-else" }, target, { form: "reformulate", text: "again" });
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(loadReviewDraft({ apiOrigin, accountId: "someone-else" }, target)).toBeNull();
+
+    act(() => {
+      useAuthStore.setState({ user: null, status: "anon" });
+    });
+    expect(loadReviewDraft({ apiOrigin, accountId: "user-drafts" }, target)).toBeNull();
   });
 });

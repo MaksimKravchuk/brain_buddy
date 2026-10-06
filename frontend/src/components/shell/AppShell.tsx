@@ -27,6 +27,7 @@ import { Link, NavLink, useLocation, useNavigate, useNavigationType, useSearchPa
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
 import { hasFeatureFlag } from "../../api/auth";
 import { useAuthStore } from "../../stores/authStore";
+import { ReviewStartupDialogs } from "../../features/review/ReviewStartupDialogs";
 import {
   ACTION_TOAST_MS,
   isTextEntryTarget,
@@ -108,6 +109,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
   const toastIdRef = useRef(0);
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
+  const weeklyReviewEnabled = useAuthStore((state) => hasFeatureFlag(state.user, "weekly_review"));
   const closeDrawer = useCallback(() => {
     setIsDrawerOpen(false);
     navigationTriggerRef.current?.focus();
@@ -148,6 +150,8 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           <NavigationDrawer {...props} open={isDrawerOpen} onClose={closeDrawer} />
         </div>
         {panel}
+        {/* Spec 020: the explainer, then While you were away, only while the flag is on. */}
+        {weeklyReviewEnabled ? <ReviewStartupDialogs /> : null}
         {toast ? <ShellToastView key={toast.id} toast={toast} onDismiss={dismissToast} /> : null}
       </div>
     </ShellToastContext.Provider>
