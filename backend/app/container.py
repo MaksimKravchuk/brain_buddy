@@ -59,6 +59,7 @@ from app.services import (
     VersionService,
 )
 from app.services.auth_service import ACCOUNT_DELETION_GRACE
+from app.utils.time import utcnow
 from app.workflows.voice_brain_dump.adapters import (
     OpenAiAccurateStt,
     OpenAITextReconciler,
@@ -381,7 +382,9 @@ def build_container(config: AppConfig) -> Container:
             "openai": OpenAIValidationProvider(),
         },
     )
-    task_service = TaskService(task_repo)
+    # The task module's one time seam (spec 020, research R21); tests replace it
+    # through the ``frozen_clock`` fixture rather than patching ``utcnow``.
+    task_service = TaskService(task_repo, clock=utcnow)
     task_title_autocomplete_service = TaskTitleAutocompleteService(
         repository=task_repo,
         provider=build_title_completion_provider(

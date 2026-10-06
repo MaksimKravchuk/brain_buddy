@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 from pydantic_core import PydanticCustomError
 
 from .common import StrictBaseModel
@@ -216,6 +216,33 @@ class TaskCommentResponse(StrictBaseModel):
     revision: int
 
 
+class TaskFormulationResponse(StrictBaseModel):
+    """The formulation clock of a Next task (spec 020, contracts/http.md §2).
+
+    ``ageing_at``, ``ask_at``, ``park_due_at`` and ``paused_until`` are derived
+    with the owner's settings at response time, are advisory for display, and
+    are null while the owner is not activated.
+    """
+
+    id: str
+    started_at: AwareDatetime
+    extended_at: AwareDatetime | None
+    extension_reason: str | None
+    park_floor_at: AwareDatetime | None
+    consecutive_stalled: int = Field(ge=0)
+    ageing_at: AwareDatetime | None
+    ask_at: AwareDatetime | None
+    park_due_at: AwareDatetime | None
+    paused_until: AwareDatetime | None
+
+
+class TaskParkResponse(StrictBaseModel):
+    """Set only by auto-park; ``clock_before`` stays server-side (http §2)."""
+
+    at: AwareDatetime
+    formulation_id: str
+
+
 class TaskResponse(StrictBaseModel):
     """Public task projection returned by task endpoints."""
 
@@ -238,6 +265,10 @@ class TaskResponse(StrictBaseModel):
     revision: int
     subtasks: list[TaskSubtaskResponse] = Field(default_factory=list)
     comments: list[TaskCommentResponse] = Field(default_factory=list)
+    # Spec 020 (http §2): additive and nullable, so older clients ignore them.
+    # Always null until the behaviour slice maintains the clock.
+    formulation: TaskFormulationResponse | None = None
+    parked: TaskParkResponse | None = None
 
 
 class SmartAddTaskResponse(StrictBaseModel):

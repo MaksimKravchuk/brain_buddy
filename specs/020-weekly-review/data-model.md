@@ -217,6 +217,10 @@ PK `(owner_id, task_id, formulation_id)`; payload `parked_at`, `from_revision`,
 time**, in the same transaction as the park, so the park stays in the export and the
 metrics even if old code later drops `TaskDocument.parked` (http §8).
 "Unseen parks" = tasks with `parked` set and no `seen_at` for `parked.formulation_id`.
+A repeat park of the same formulation, e.g. after a decision was undone (formulation-clock
+§3, T-046), upserts the row with the new `parked_at`, `from_revision` and `source`, and
+**resets `seen_at` and `returned_at` to null**, so the task appears again in "While you
+were away".
 Kept out of the task so marking parks seen never bumps a task revision (no stale
 conflicts with pending edits on other devices). When a parked task is moved back to
 Next, the server upserts the row with `returned_at` in the same transaction, so the

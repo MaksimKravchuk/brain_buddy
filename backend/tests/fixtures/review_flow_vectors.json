@@ -1,0 +1,1342 @@
+{
+  "schema": "brainbuddy-review-flow-vectors/v1",
+  "format": "Canonical file (plan Test strategy; contracts/formulation-clock.md §6 change rule). Instants are UTC; 'days' are 86 400-second spans; calendar days are local dates. Every section runs against backend/app/modules/tasks/review_rules.py in PR-02. implied_weeks is next_count / weekly_average_4w as an IEEE double. active_time events: enter_step, interaction, background, foreground, leave, resume; a gap of more than 120 s between counted events adds 0. Edit the canonical file and both copies in one commit.",
+  "steps": [
+    {
+      "id": "ST-001",
+      "mode": "quick",
+      "expect": [
+        "wins",
+        "inbox",
+        "decisions",
+        "summary"
+      ]
+    },
+    {
+      "id": "ST-002",
+      "mode": "full",
+      "expect": [
+        "wins",
+        "mind_sweep",
+        "inbox",
+        "decisions",
+        "rest_of_next",
+        "waiting",
+        "projects",
+        "someday",
+        "dates",
+        "summary"
+      ]
+    }
+  ],
+  "wins": [
+    {
+      "id": "W-001",
+      "note": "completed in the last 7 days, most recent first; exactly 7 days ago is in, one second more is out; cancelled is not a win",
+      "now": "2026-10-09T14:02:00Z",
+      "tasks": [
+        {
+          "id": "task_w1",
+          "state": "completed",
+          "completed_at": "2026-10-02T14:02:00Z"
+        },
+        {
+          "id": "task_w2",
+          "state": "completed",
+          "completed_at": "2026-10-02T14:01:59Z"
+        },
+        {
+          "id": "task_w3",
+          "state": "completed",
+          "completed_at": "2026-10-09T09:00:00Z"
+        },
+        {
+          "id": "task_w4",
+          "state": "cancelled",
+          "completed_at": null
+        },
+        {
+          "id": "task_w5",
+          "state": "next",
+          "completed_at": null
+        },
+        {
+          "id": "task_w6",
+          "state": "completed",
+          "completed_at": "2026-10-05T10:00:00Z"
+        }
+      ],
+      "expect": [
+        "task_w3",
+        "task_w6",
+        "task_w1"
+      ]
+    },
+    {
+      "id": "W-002",
+      "note": "nothing completed: no wins",
+      "now": "2026-10-09T14:02:00Z",
+      "tasks": [
+        {
+          "id": "task_w1",
+          "state": "next",
+          "completed_at": null
+        }
+      ],
+      "expect": []
+    }
+  ],
+  "capacity": [
+    {
+      "id": "CAP-001",
+      "note": "41 in Next and 36 completions in the last 4 weeks: 9 a week, about 4.6 weeks of work (FR-031)",
+      "now": "2026-10-09T12:00:00Z",
+      "next_count": 41,
+      "completed_at": [
+        "2026-08-01T10:00:00Z",
+        "2026-08-20T10:00:00Z",
+        "2026-09-11T13:00:00Z",
+        "2026-09-12T07:00:00Z",
+        "2026-09-13T01:00:00Z",
+        "2026-09-13T19:00:00Z",
+        "2026-09-14T13:00:00Z",
+        "2026-09-15T07:00:00Z",
+        "2026-09-16T01:00:00Z",
+        "2026-09-16T19:00:00Z",
+        "2026-09-17T13:00:00Z",
+        "2026-09-18T07:00:00Z",
+        "2026-09-19T01:00:00Z",
+        "2026-09-19T19:00:00Z",
+        "2026-09-20T13:00:00Z",
+        "2026-09-21T07:00:00Z",
+        "2026-09-22T01:00:00Z",
+        "2026-09-22T19:00:00Z",
+        "2026-09-23T13:00:00Z",
+        "2026-09-24T07:00:00Z",
+        "2026-09-25T01:00:00Z",
+        "2026-09-25T19:00:00Z",
+        "2026-09-26T13:00:00Z",
+        "2026-09-27T07:00:00Z",
+        "2026-09-28T01:00:00Z",
+        "2026-09-28T19:00:00Z",
+        "2026-09-29T13:00:00Z",
+        "2026-09-30T07:00:00Z",
+        "2026-10-01T01:00:00Z",
+        "2026-10-01T19:00:00Z",
+        "2026-10-02T13:00:00Z",
+        "2026-10-03T07:00:00Z",
+        "2026-10-04T01:00:00Z",
+        "2026-10-04T19:00:00Z",
+        "2026-10-05T13:00:00Z",
+        "2026-10-06T07:00:00Z",
+        "2026-10-07T01:00:00Z",
+        "2026-10-07T19:00:00Z"
+      ],
+      "expect": {
+        "next_count": 41,
+        "weeks_of_history": 9,
+        "weekly_average_4w": 9.0,
+        "implied_weeks": 4.555555555555555
+      }
+    },
+    {
+      "id": "CAP-002",
+      "note": "fewer than 4 full weeks of history: Next count only",
+      "now": "2026-10-09T12:00:00Z",
+      "next_count": 12,
+      "completed_at": [
+        "2026-09-20T12:00:00Z",
+        "2026-10-01T09:00:00Z"
+      ],
+      "expect": {
+        "next_count": 12,
+        "weeks_of_history": 2,
+        "weekly_average_4w": null,
+        "implied_weeks": null
+      }
+    },
+    {
+      "id": "CAP-003",
+      "note": "exactly 4 full weeks since the first completion: the pace appears; the window includes its start",
+      "now": "2026-10-09T12:00:00Z",
+      "next_count": 10,
+      "completed_at": [
+        "2026-09-11T12:00:00Z",
+        "2026-09-20T12:00:00Z",
+        "2026-10-01T09:00:00Z",
+        "2026-10-09T12:00:00Z"
+      ],
+      "expect": {
+        "next_count": 10,
+        "weeks_of_history": 4,
+        "weekly_average_4w": 1.0,
+        "implied_weeks": 10.0
+      }
+    },
+    {
+      "id": "CAP-004",
+      "note": "one second short of 4 full weeks",
+      "now": "2026-10-09T12:00:00Z",
+      "next_count": 10,
+      "completed_at": [
+        "2026-09-11T12:00:01Z",
+        "2026-10-01T09:00:00Z"
+      ],
+      "expect": {
+        "next_count": 10,
+        "weeks_of_history": 3,
+        "weekly_average_4w": null,
+        "implied_weeks": null
+      }
+    },
+    {
+      "id": "CAP-005",
+      "note": "long history but no completion in the last 4 weeks: Next count only",
+      "now": "2026-10-09T12:00:00Z",
+      "next_count": 7,
+      "completed_at": [
+        "2026-06-01T10:00:00Z",
+        "2026-09-11T11:59:59Z"
+      ],
+      "expect": {
+        "next_count": 7,
+        "weeks_of_history": 18,
+        "weekly_average_4w": null,
+        "implied_weeks": null
+      }
+    },
+    {
+      "id": "CAP-006",
+      "note": "no completions at all",
+      "now": "2026-10-09T12:00:00Z",
+      "next_count": 3,
+      "completed_at": [],
+      "expect": {
+        "next_count": 3,
+        "weeks_of_history": 0,
+        "weekly_average_4w": null,
+        "implied_weeks": null
+      }
+    },
+    {
+      "id": "CAP-007",
+      "note": "empty Next with a pace: zero weeks of work",
+      "now": "2026-10-09T12:00:00Z",
+      "next_count": 0,
+      "completed_at": [
+        "2026-08-01T10:00:00Z",
+        "2026-10-01T09:00:00Z",
+        "2026-10-02T09:00:00Z"
+      ],
+      "expect": {
+        "next_count": 0,
+        "weeks_of_history": 9,
+        "weekly_average_4w": 0.5,
+        "implied_weeks": 0.0
+      }
+    }
+  ],
+  "waiting_queue": [
+    {
+      "id": "WQ-001",
+      "note": "Waiting older than 7 days (strictly), not hidden by a current receipt, oldest waiting_since first (FR-032)",
+      "now": "2026-10-09T14:02:00Z",
+      "tasks": [
+        {
+          "id": "task_a1",
+          "state": "waiting",
+          "revision": 2,
+          "waiting_since": "2026-10-01T10:00:00Z"
+        },
+        {
+          "id": "task_a2",
+          "state": "waiting",
+          "revision": 2,
+          "waiting_since": "2026-10-02T14:02:00Z"
+        },
+        {
+          "id": "task_a3",
+          "state": "waiting",
+          "revision": 2,
+          "waiting_since": "2026-10-02T14:01:59Z"
+        },
+        {
+          "id": "task_a4",
+          "state": "waiting",
+          "revision": 5,
+          "waiting_since": "2026-09-01T10:00:00Z"
+        },
+        {
+          "id": "task_a5",
+          "state": "waiting",
+          "revision": 6,
+          "waiting_since": "2026-09-05T10:00:00Z"
+        },
+        {
+          "id": "task_a6",
+          "state": "waiting",
+          "revision": 2,
+          "waiting_since": "2026-09-10T10:00:00Z"
+        },
+        {
+          "id": "task_a7",
+          "state": "next",
+          "revision": 2,
+          "waiting_since": null
+        }
+      ],
+      "receipts": [
+        {
+          "task_id": "task_a4",
+          "kind": "waiting",
+          "task_revision": 5,
+          "reviewed_at": "2026-10-05T10:00:00Z",
+          "hidden_until": "2026-10-12T10:00:00Z",
+          "source": "keep"
+        },
+        {
+          "task_id": "task_a5",
+          "kind": "waiting",
+          "task_revision": 5,
+          "reviewed_at": "2026-10-05T10:00:00Z",
+          "hidden_until": "2026-10-12T10:00:00Z",
+          "source": "keep"
+        },
+        {
+          "task_id": "task_a6",
+          "kind": "waiting",
+          "task_revision": 2,
+          "reviewed_at": "2026-10-02T14:02:00Z",
+          "hidden_until": "2026-10-09T14:02:00Z",
+          "source": "keep"
+        }
+      ],
+      "expect": [
+        "task_a5",
+        "task_a6",
+        "task_a1",
+        "task_a3"
+      ]
+    }
+  ],
+  "someday_queue": [
+    {
+      "id": "SQ-001",
+      "note": "never reviewed first (oldest updated_at, then id), then oldest receipt; current receipts hide (a person's release too); parks of the last 30 days are left out; at most 7 shown (FR-032)",
+      "now": "2026-10-09T14:02:00Z",
+      "limit": 7,
+      "tasks": [
+        {
+          "id": "task_s1",
+          "state": "someday",
+          "revision": 1,
+          "updated_at": "2026-06-01T10:00:00Z",
+          "parked_at": null
+        },
+        {
+          "id": "task_s2",
+          "state": "someday",
+          "revision": 1,
+          "updated_at": "2026-05-01T10:00:00Z",
+          "parked_at": null
+        },
+        {
+          "id": "task_s3",
+          "state": "someday",
+          "revision": 3,
+          "updated_at": "2026-08-01T10:00:00Z",
+          "parked_at": null
+        },
+        {
+          "id": "task_s4",
+          "state": "someday",
+          "revision": 3,
+          "updated_at": "2026-09-20T10:00:00Z",
+          "parked_at": null
+        },
+        {
+          "id": "task_s5",
+          "state": "someday",
+          "revision": 4,
+          "updated_at": "2026-09-25T10:00:00Z",
+          "parked_at": null
+        },
+        {
+          "id": "task_s6",
+          "state": "someday",
+          "revision": 1,
+          "updated_at": "2026-09-15T10:00:00Z",
+          "parked_at": "2026-09-15T10:00:00Z"
+        },
+        {
+          "id": "task_s7",
+          "state": "someday",
+          "revision": 1,
+          "updated_at": "2026-09-09T14:02:00Z",
+          "parked_at": "2026-09-09T14:02:00Z"
+        },
+        {
+          "id": "task_s8",
+          "state": "someday",
+          "revision": 2,
+          "updated_at": "2026-07-01T10:00:00Z",
+          "parked_at": null
+        },
+        {
+          "id": "task_s9",
+          "state": "someday",
+          "revision": 1,
+          "updated_at": "2026-05-01T10:00:00Z",
+          "parked_at": null
+        },
+        {
+          "id": "task_s10",
+          "state": "someday",
+          "revision": 1,
+          "updated_at": "2026-04-01T10:00:00Z",
+          "parked_at": null
+        },
+        {
+          "id": "task_s11",
+          "state": "someday",
+          "revision": 1,
+          "updated_at": "2026-04-02T10:00:00Z",
+          "parked_at": null
+        },
+        {
+          "id": "task_s12",
+          "state": "next",
+          "revision": 1,
+          "updated_at": "2026-01-01T10:00:00Z",
+          "parked_at": null
+        }
+      ],
+      "receipts": [
+        {
+          "task_id": "task_s3",
+          "kind": "someday",
+          "task_revision": 3,
+          "reviewed_at": "2026-08-01T10:00:00Z",
+          "hidden_until": "2026-08-31T10:00:00Z",
+          "source": "keep"
+        },
+        {
+          "task_id": "task_s4",
+          "kind": "someday",
+          "task_revision": 3,
+          "reviewed_at": "2026-09-20T10:00:00Z",
+          "hidden_until": "2026-10-20T10:00:00Z",
+          "source": "keep"
+        },
+        {
+          "task_id": "task_s5",
+          "kind": "someday",
+          "task_revision": 3,
+          "reviewed_at": "2026-09-20T10:00:00Z",
+          "hidden_until": "2026-10-20T10:00:00Z",
+          "source": "release"
+        },
+        {
+          "task_id": "task_s8",
+          "kind": "someday",
+          "task_revision": 2,
+          "reviewed_at": "2026-07-01T10:00:00Z",
+          "hidden_until": "2026-07-31T10:00:00Z",
+          "source": "keep"
+        }
+      ],
+      "expect": {
+        "eligible_total": 9,
+        "shown": [
+          "task_s10",
+          "task_s11",
+          "task_s2",
+          "task_s9",
+          "task_s1",
+          "task_s7",
+          "task_s8"
+        ]
+      }
+    },
+    {
+      "id": "SQ-002",
+      "note": "a person's release in the last 30 days stays out while the task is unchanged",
+      "now": "2026-10-09T14:02:00Z",
+      "limit": 7,
+      "tasks": [
+        {
+          "id": "task_r1",
+          "state": "someday",
+          "revision": 3,
+          "updated_at": "2026-09-20T10:00:00Z",
+          "parked_at": null
+        },
+        {
+          "id": "task_r2",
+          "state": "someday",
+          "revision": 1,
+          "updated_at": "2026-01-01T10:00:00Z",
+          "parked_at": null
+        }
+      ],
+      "receipts": [
+        {
+          "task_id": "task_r1",
+          "kind": "someday",
+          "task_revision": 3,
+          "reviewed_at": "2026-09-20T10:00:00Z",
+          "hidden_until": "2026-10-20T10:00:00Z",
+          "source": "release"
+        }
+      ],
+      "expect": {
+        "eligible_total": 1,
+        "shown": [
+          "task_r2"
+        ]
+      }
+    }
+  ],
+  "restart": [
+    {
+      "id": "R-001",
+      "note": "not onboarded: onboarding first, no restart",
+      "now": "2026-10-09T14:02:00Z",
+      "onboarded_at": null,
+      "last_counted_review_at": null,
+      "expect": false
+    },
+    {
+      "id": "R-002",
+      "note": "onboarded, never reviewed: 21 days from onboarding (FR-017)",
+      "now": "2026-10-09T14:02:00Z",
+      "onboarded_at": "2026-09-18T14:02:00Z",
+      "last_counted_review_at": null,
+      "expect": true
+    },
+    {
+      "id": "R-003",
+      "note": "one second short of 21 days from onboarding",
+      "now": "2026-10-09T14:02:00Z",
+      "onboarded_at": "2026-09-18T14:02:01Z",
+      "last_counted_review_at": null,
+      "expect": false
+    },
+    {
+      "id": "R-004",
+      "note": "21 days since the last counted review",
+      "now": "2026-10-09T14:02:00Z",
+      "onboarded_at": "2026-08-01T10:00:00Z",
+      "last_counted_review_at": "2026-09-18T14:02:00Z",
+      "expect": true
+    },
+    {
+      "id": "R-005",
+      "note": "a counted review 19 days ago postpones restart",
+      "now": "2026-10-09T14:02:00Z",
+      "onboarded_at": "2026-08-01T10:00:00Z",
+      "last_counted_review_at": "2026-09-20T10:00:00Z",
+      "expect": false
+    },
+    {
+      "id": "R-006",
+      "note": "never before onboarding, whatever the history",
+      "now": "2026-10-09T14:02:00Z",
+      "onboarded_at": null,
+      "last_counted_review_at": "2026-08-01T10:00:00Z",
+      "expect": false
+    }
+  ],
+  "session_status": [
+    {
+      "id": "SS-001",
+      "end": "finish",
+      "qualifying_activity": true,
+      "expect": "completed"
+    },
+    {
+      "id": "SS-002",
+      "end": "finish",
+      "qualifying_activity": false,
+      "expect": "completed_empty"
+    },
+    {
+      "id": "SS-003",
+      "end": "replace",
+      "qualifying_activity": true,
+      "expect": "partial"
+    },
+    {
+      "id": "SS-004",
+      "end": "replace",
+      "qualifying_activity": false,
+      "expect": "abandoned"
+    },
+    {
+      "id": "SS-005",
+      "end": "idle_close",
+      "qualifying_activity": true,
+      "expect": "partial"
+    },
+    {
+      "id": "SS-006",
+      "end": "idle_close",
+      "qualifying_activity": false,
+      "expect": "abandoned"
+    }
+  ],
+  "idle_close": [
+    {
+      "id": "IC-001",
+      "note": "idle for 7 days closes",
+      "now": "2026-10-09T14:02:00Z",
+      "last_activity_at": "2026-10-02T14:02:00Z",
+      "expect": true
+    },
+    {
+      "id": "IC-002",
+      "note": "one second short of 7 days stays open",
+      "now": "2026-10-09T14:02:00Z",
+      "last_activity_at": "2026-10-02T14:02:01Z",
+      "expect": false
+    }
+  ],
+  "qualifying_activity": [
+    {
+      "id": "QA-001",
+      "note": "one item decision qualifies even with every step skipped",
+      "item_decisions": 1,
+      "steps": {
+        "wins": {
+          "status": "skipped",
+          "finished_empty": false
+        },
+        "summary": {
+          "status": "pending",
+          "finished_empty": false
+        }
+      },
+      "expect": true
+    },
+    {
+      "id": "QA-002",
+      "note": "a step finished with nothing to decide qualifies",
+      "item_decisions": 0,
+      "steps": {
+        "inbox": {
+          "status": "finished",
+          "finished_empty": true
+        }
+      },
+      "expect": true
+    },
+    {
+      "id": "QA-003",
+      "note": "the summary alone never qualifies",
+      "item_decisions": 0,
+      "steps": {
+        "wins": {
+          "status": "skipped",
+          "finished_empty": false
+        },
+        "summary": {
+          "status": "finished",
+          "finished_empty": true
+        }
+      },
+      "expect": false
+    },
+    {
+      "id": "QA-004",
+      "note": "a step finished past items without a decision does not qualify",
+      "item_decisions": 0,
+      "steps": {
+        "waiting": {
+          "status": "finished",
+          "finished_empty": false
+        }
+      },
+      "expect": false
+    },
+    {
+      "id": "QA-005",
+      "note": "every step skipped: no activity (completed without activity)",
+      "item_decisions": 0,
+      "steps": {
+        "wins": {
+          "status": "skipped",
+          "finished_empty": true
+        },
+        "inbox": {
+          "status": "skipped",
+          "finished_empty": true
+        },
+        "decisions": {
+          "status": "skipped",
+          "finished_empty": false
+        }
+      },
+      "expect": false
+    }
+  ],
+  "counted_review": [
+    {
+      "id": "CR-001",
+      "status": "completed",
+      "qualifying_activity": true,
+      "expect": true
+    },
+    {
+      "id": "CR-002",
+      "status": "partial",
+      "qualifying_activity": true,
+      "expect": true
+    },
+    {
+      "id": "CR-003",
+      "status": "open",
+      "qualifying_activity": true,
+      "expect": true
+    },
+    {
+      "id": "CR-004",
+      "status": "open",
+      "qualifying_activity": false,
+      "expect": false
+    },
+    {
+      "id": "CR-005",
+      "status": "completed_empty",
+      "qualifying_activity": false,
+      "expect": false
+    },
+    {
+      "id": "CR-006",
+      "status": "abandoned",
+      "qualifying_activity": false,
+      "expect": false
+    }
+  ],
+  "regularity": [
+    {
+      "id": "RG-001",
+      "note": "latest of completed.ended_at, partial and qualifying open last_activity_at; empty and abandoned never count",
+      "sessions": [
+        {
+          "id": "review_1",
+          "status": "completed",
+          "qualifying_activity": true,
+          "last_activity_at": "2026-09-30T15:39:00Z",
+          "ended_at": "2026-09-30T15:40:00Z"
+        },
+        {
+          "id": "review_2",
+          "status": "partial",
+          "qualifying_activity": true,
+          "last_activity_at": "2026-10-02T10:00:00Z",
+          "ended_at": "2026-10-09T10:00:00Z"
+        },
+        {
+          "id": "review_3",
+          "status": "open",
+          "qualifying_activity": true,
+          "last_activity_at": "2026-10-05T09:00:00Z",
+          "ended_at": null
+        },
+        {
+          "id": "review_4",
+          "status": "completed_empty",
+          "qualifying_activity": false,
+          "last_activity_at": "2026-10-08T09:00:00Z",
+          "ended_at": "2026-10-08T09:01:00Z"
+        },
+        {
+          "id": "review_5",
+          "status": "abandoned",
+          "qualifying_activity": false,
+          "last_activity_at": "2026-10-08T10:00:00Z",
+          "ended_at": "2026-10-08T10:00:00Z"
+        }
+      ],
+      "expect": "2026-10-05T09:00:00Z"
+    },
+    {
+      "id": "RG-002",
+      "note": "a completed review counts from its end, not its last activity; an open review without activity does not count",
+      "sessions": [
+        {
+          "id": "review_1",
+          "status": "completed",
+          "qualifying_activity": true,
+          "last_activity_at": "2026-09-30T15:39:00Z",
+          "ended_at": "2026-09-30T15:40:00Z"
+        },
+        {
+          "id": "review_2",
+          "status": "open",
+          "qualifying_activity": false,
+          "last_activity_at": "2026-10-08T09:00:00Z",
+          "ended_at": null
+        }
+      ],
+      "expect": "2026-09-30T15:40:00Z"
+    },
+    {
+      "id": "RG-003",
+      "note": "only reviews that do not count: no counted review",
+      "sessions": [
+        {
+          "id": "review_4",
+          "status": "completed_empty",
+          "qualifying_activity": false,
+          "last_activity_at": "2026-10-08T09:00:00Z",
+          "ended_at": "2026-10-08T09:01:00Z"
+        },
+        {
+          "id": "review_5",
+          "status": "abandoned",
+          "qualifying_activity": false,
+          "last_activity_at": "2026-10-08T10:00:00Z",
+          "ended_at": "2026-10-08T10:00:00Z"
+        }
+      ],
+      "expect": null
+    }
+  ],
+  "next_review": [
+    {
+      "id": "NR-001",
+      "note": "the coming Friday 16:00 in the stored zone",
+      "settings": {
+        "review_weekday": 5,
+        "review_time": "16:00",
+        "time_zone": "Europe/Berlin"
+      },
+      "now": "2026-10-09T12:00:00Z",
+      "last_counted_review_at": null,
+      "expect": "2026-10-09T14:00:00Z"
+    },
+    {
+      "id": "NR-002",
+      "note": "a slot at exactly now is past: the next one",
+      "settings": {
+        "review_weekday": 5,
+        "review_time": "16:00",
+        "time_zone": "Europe/Berlin"
+      },
+      "now": "2026-10-09T14:00:00Z",
+      "last_counted_review_at": null,
+      "expect": "2026-10-16T14:00:00Z"
+    },
+    {
+      "id": "NR-003",
+      "note": "a counted review 6 days before the slot skips it (FR-036)",
+      "settings": {
+        "review_weekday": 5,
+        "review_time": "16:00",
+        "time_zone": "Europe/Berlin"
+      },
+      "now": "2026-10-09T12:00:00Z",
+      "last_counted_review_at": "2026-10-03T14:00:00Z",
+      "expect": "2026-10-16T14:00:00Z"
+    },
+    {
+      "id": "NR-004",
+      "note": "one second earlier than 6 days does not skip",
+      "settings": {
+        "review_weekday": 5,
+        "review_time": "16:00",
+        "time_zone": "Europe/Berlin"
+      },
+      "now": "2026-10-09T12:00:00Z",
+      "last_counted_review_at": "2026-10-03T13:59:59Z",
+      "expect": "2026-10-09T14:00:00Z"
+    },
+    {
+      "id": "NR-005",
+      "note": "a review earlier on the slot day skips that slot",
+      "settings": {
+        "review_weekday": 5,
+        "review_time": "16:00",
+        "time_zone": "Europe/Berlin"
+      },
+      "now": "2026-10-09T13:00:00Z",
+      "last_counted_review_at": "2026-10-09T12:30:00Z",
+      "expect": "2026-10-16T14:00:00Z"
+    },
+    {
+      "id": "NR-006",
+      "note": "wall time across the DST end (CET after 25 Oct)",
+      "settings": {
+        "review_weekday": 5,
+        "review_time": "16:00",
+        "time_zone": "Europe/Berlin"
+      },
+      "now": "2026-10-24T10:00:00Z",
+      "last_counted_review_at": null,
+      "expect": "2026-10-30T15:00:00Z"
+    },
+    {
+      "id": "NR-007",
+      "note": "Monday 09:30 in New York after its DST end",
+      "settings": {
+        "review_weekday": 1,
+        "review_time": "09:30",
+        "time_zone": "America/New_York"
+      },
+      "now": "2026-11-01T12:00:00Z",
+      "last_counted_review_at": null,
+      "expect": "2026-11-02T14:30:00Z"
+    },
+    {
+      "id": "NR-008",
+      "note": "02:30 does not exist on 29 Mar (DST gap): moves forward by the gap, 03:30 CEST",
+      "settings": {
+        "review_weekday": 7,
+        "review_time": "02:30",
+        "time_zone": "Europe/Berlin"
+      },
+      "now": "2026-03-28T12:00:00Z",
+      "last_counted_review_at": null,
+      "expect": "2026-03-29T01:30:00Z"
+    },
+    {
+      "id": "NR-009",
+      "note": "02:30 happens twice on 25 Oct (fold): the first occurrence, 02:30 CEST",
+      "settings": {
+        "review_weekday": 7,
+        "review_time": "02:30",
+        "time_zone": "Europe/Berlin"
+      },
+      "now": "2026-10-24T12:00:00Z",
+      "last_counted_review_at": null,
+      "expect": "2026-10-25T00:30:00Z"
+    },
+    {
+      "id": "NR-010",
+      "note": "between the two 02:30s the slot has passed: next week, not the repeated hour",
+      "settings": {
+        "review_weekday": 7,
+        "review_time": "02:30",
+        "time_zone": "Europe/Berlin"
+      },
+      "now": "2026-10-25T00:45:00Z",
+      "last_counted_review_at": null,
+      "expect": "2026-11-01T01:30:00Z"
+    }
+  ],
+  "decision_queue": [
+    {
+      "id": "DQ-001",
+      "note": "the session's decision queue: asks, moves tomorrow and not-yet-applied park due, earliest-asking first; ageing, fresh, paused and other lists are out",
+      "settings": {
+        "threshold_days": 14,
+        "time_zone": "Europe/Berlin",
+        "owner_park_floor_at": null,
+        "activated_at": "2026-09-01T08:00:00Z"
+      },
+      "now": "2026-10-20T12:00:00Z",
+      "tasks": [
+        {
+          "id": "task_q1",
+          "state": "next",
+          "formulation_started_at": "2026-10-01T08:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_q2",
+          "state": "next",
+          "formulation_started_at": "2026-09-28T08:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_q3",
+          "state": "next",
+          "formulation_started_at": "2026-10-10T08:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_q4",
+          "state": "next",
+          "formulation_started_at": "2026-10-19T08:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_q5",
+          "state": "next",
+          "formulation_started_at": "2026-09-01T08:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": "2026-10-30",
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_q6",
+          "state": "someday",
+          "formulation_started_at": null,
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        },
+        {
+          "id": "task_q7",
+          "state": "next",
+          "formulation_started_at": "2026-09-29T13:00:00Z",
+          "formulation_extended_at": null,
+          "formulation_park_floor_at": null,
+          "due_date": null,
+          "consecutive_stalled_formulations": 0
+        }
+      ],
+      "expect": [
+        "task_q2",
+        "task_q7",
+        "task_q1"
+      ]
+    }
+  ],
+  "stall_recommendation": [
+    {
+      "id": "SR-001",
+      "stall_reason": "unclear",
+      "expect": "reformulate"
+    },
+    {
+      "id": "SR-002",
+      "stall_reason": "too_big",
+      "expect": "first_step"
+    },
+    {
+      "id": "SR-003",
+      "stall_reason": "missing_info",
+      "expect": "first_step"
+    },
+    {
+      "id": "SR-004",
+      "stall_reason": "no_energy",
+      "expect": "first_step"
+    },
+    {
+      "id": "SR-005",
+      "stall_reason": "waiting_on_someone",
+      "expect": "waiting"
+    },
+    {
+      "id": "SR-006",
+      "stall_reason": "no_longer_matters",
+      "expect": "cancel"
+    },
+    {
+      "id": "SR-007",
+      "stall_reason": null,
+      "expect": null
+    }
+  ],
+  "active_time": [
+    {
+      "id": "AT-001",
+      "note": "a gap of exactly 2 minutes counts, one second more counts 0; time goes to the step on screen",
+      "events": [
+        {
+          "at": "2026-10-09T14:00:00Z",
+          "kind": "enter_step",
+          "step": "wins"
+        },
+        {
+          "at": "2026-10-09T14:01:00Z",
+          "kind": "interaction"
+        },
+        {
+          "at": "2026-10-09T14:03:00Z",
+          "kind": "interaction"
+        },
+        {
+          "at": "2026-10-09T14:05:01Z",
+          "kind": "interaction"
+        },
+        {
+          "at": "2026-10-09T14:05:31Z",
+          "kind": "enter_step",
+          "step": "inbox"
+        },
+        {
+          "at": "2026-10-09T14:06:31Z",
+          "kind": "interaction"
+        }
+      ],
+      "expect": {
+        "wins": 210,
+        "inbox": 60
+      }
+    },
+    {
+      "id": "AT-002",
+      "note": "background time never counts",
+      "events": [
+        {
+          "at": "2026-10-09T14:00:00Z",
+          "kind": "enter_step",
+          "step": "decisions"
+        },
+        {
+          "at": "2026-10-09T14:00:40Z",
+          "kind": "interaction"
+        },
+        {
+          "at": "2026-10-09T14:01:00Z",
+          "kind": "background"
+        },
+        {
+          "at": "2026-10-09T14:30:00Z",
+          "kind": "foreground"
+        },
+        {
+          "at": "2026-10-09T14:30:50Z",
+          "kind": "interaction"
+        }
+      ],
+      "expect": {
+        "decisions": 110
+      }
+    },
+    {
+      "id": "AT-003",
+      "note": "leaving pauses; resuming the next day continues on the resumed step",
+      "events": [
+        {
+          "at": "2026-10-09T14:00:00Z",
+          "kind": "enter_step",
+          "step": "decisions"
+        },
+        {
+          "at": "2026-10-09T14:01:00Z",
+          "kind": "interaction"
+        },
+        {
+          "at": "2026-10-09T14:01:30Z",
+          "kind": "leave"
+        },
+        {
+          "at": "2026-10-10T09:00:00Z",
+          "kind": "resume",
+          "step": "decisions"
+        },
+        {
+          "at": "2026-10-10T09:00:45Z",
+          "kind": "interaction"
+        }
+      ],
+      "expect": {
+        "decisions": 135
+      }
+    },
+    {
+      "id": "AT-004",
+      "note": "per-step attribution across step changes",
+      "events": [
+        {
+          "at": "2026-10-09T14:00:00Z",
+          "kind": "enter_step",
+          "step": "wins"
+        },
+        {
+          "at": "2026-10-09T14:00:50Z",
+          "kind": "enter_step",
+          "step": "inbox"
+        },
+        {
+          "at": "2026-10-09T14:02:00Z",
+          "kind": "enter_step",
+          "step": "decisions"
+        },
+        {
+          "at": "2026-10-09T14:02:10Z",
+          "kind": "leave"
+        }
+      ],
+      "expect": {
+        "wins": 50,
+        "inbox": 70,
+        "decisions": 10
+      }
+    },
+    {
+      "id": "AT-005",
+      "note": "going to the background after a long idle gap adds nothing",
+      "events": [
+        {
+          "at": "2026-10-09T14:00:00Z",
+          "kind": "enter_step",
+          "step": "wins"
+        },
+        {
+          "at": "2026-10-09T14:03:00Z",
+          "kind": "background"
+        }
+      ],
+      "expect": {
+        "wins": 0
+      }
+    }
+  ],
+  "while_away": [
+    {
+      "id": "WA-001",
+      "context": "app_open",
+      "has_unseen": false,
+      "last_shown_day": null,
+      "today": "2026-10-09",
+      "expect": false
+    },
+    {
+      "id": "WA-002",
+      "context": "app_open",
+      "has_unseen": true,
+      "last_shown_day": null,
+      "today": "2026-10-09",
+      "expect": true
+    },
+    {
+      "id": "WA-003",
+      "context": "app_open",
+      "has_unseen": true,
+      "last_shown_day": "2026-10-09",
+      "today": "2026-10-09",
+      "expect": false
+    },
+    {
+      "id": "WA-004",
+      "context": "app_open",
+      "has_unseen": true,
+      "last_shown_day": "2026-10-08",
+      "today": "2026-10-09",
+      "expect": true
+    },
+    {
+      "id": "WA-005",
+      "context": "review_start",
+      "has_unseen": true,
+      "last_shown_day": "2026-10-09",
+      "today": "2026-10-09",
+      "expect": true
+    },
+    {
+      "id": "WA-006",
+      "context": "review_start",
+      "has_unseen": false,
+      "last_shown_day": null,
+      "today": "2026-10-09",
+      "expect": false
+    }
+  ],
+  "duplicate_filter": [
+    {
+      "id": "DF-001",
+      "note": "a 25-task project whose only proposal equals the 21st, unsent title: nothing left (FR-019)",
+      "current_title": "Renovate the bathroom",
+      "project_open_titles": [
+        "Flat step 01",
+        "Flat step 02",
+        "Flat step 03",
+        "Flat step 04",
+        "Flat step 05",
+        "Flat step 06",
+        "Flat step 07",
+        "Flat step 08",
+        "Flat step 09",
+        "Flat step 10",
+        "Flat step 11",
+        "Flat step 12",
+        "Flat step 13",
+        "Flat step 14",
+        "Flat step 15",
+        "Flat step 16",
+        "Flat step 17",
+        "Flat step 18",
+        "Flat step 19",
+        "Flat step 20",
+        "Call the plumber",
+        "Flat step 22",
+        "Flat step 23",
+        "Flat step 24",
+        "Flat step 25"
+      ],
+      "sent_titles": [
+        "Flat step 01",
+        "Flat step 02",
+        "Flat step 03",
+        "Flat step 04",
+        "Flat step 05",
+        "Flat step 06",
+        "Flat step 07",
+        "Flat step 08",
+        "Flat step 09",
+        "Flat step 10",
+        "Flat step 11",
+        "Flat step 12",
+        "Flat step 13",
+        "Flat step 14",
+        "Flat step 15",
+        "Flat step 16",
+        "Flat step 17",
+        "Flat step 18",
+        "Flat step 19",
+        "Flat step 20"
+      ],
+      "proposals": [
+        "call the plumber."
+      ],
+      "expect": []
+    },
+    {
+      "id": "DF-002",
+      "note": "duplicates of the current title, a sibling and each other are dropped by formulation key",
+      "current_title": "Call Bob",
+      "project_open_titles": [
+        "Buy paint"
+      ],
+      "sent_titles": [
+        "Buy paint"
+      ],
+      "proposals": [
+        "Measure the wall",
+        "measure the wall!",
+        "Buy paint",
+        "call bob",
+        "Sand the wall"
+      ],
+      "expect": [
+        "Measure the wall",
+        "Sand the wall"
+      ]
+    },
+    {
+      "id": "DF-003",
+      "note": "a task without a project keeps distinct proposals",
+      "current_title": "Plan the trip",
+      "project_open_titles": [],
+      "sent_titles": [],
+      "proposals": [
+        "Pick the dates",
+        "Book the train"
+      ],
+      "expect": [
+        "Pick the dates",
+        "Book the train"
+      ]
+    }
+  ]
+}

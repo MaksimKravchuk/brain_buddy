@@ -1,0 +1,1435 @@
+{
+  "schema": "brainbuddy-review-wire-fixtures/v1",
+  "format": "Golden wire bodies of contracts/http.md §2 - §7 and the error envelope. 'model' names the schema in backend/app/schemas/review.py (or TaskResponse, ErrorResponse); valid response bodies hold every field; valid request bodies hold the fields a client sends; invalid entries are answered 422. Edit the canonical file and both copies in one commit.",
+  "entries": [
+    {
+      "id": "W-001",
+      "model": "TaskResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "a task while the behaviour slice is not live: formulation and parked are null",
+      "body": {
+        "id": "task_9f3c2a1b4d5e",
+        "title": "Measure the bathroom wall",
+        "details": "Was: Renovate the bathroom",
+        "state": "next",
+        "project_id": "project_1a2b3c4d5e6f",
+        "tag_ids": [],
+        "due_date": null,
+        "priority": "none",
+        "waiting_for": null,
+        "waiting_since": null,
+        "order_key": 7,
+        "source_capture_ids": [],
+        "created_at": "2026-09-24T09:14:00Z",
+        "updated_at": "2026-10-09T14:05:13Z",
+        "completed_at": null,
+        "cancelled_at": null,
+        "revision": 8,
+        "subtasks": [],
+        "comments": [],
+        "formulation": null,
+        "parked": null
+      }
+    },
+    {
+      "id": "W-002",
+      "model": "TaskResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "a Next task with a running clock (http §2)",
+      "body": {
+        "id": "task_9f3c2a1b4d5e",
+        "title": "Measure the bathroom wall",
+        "details": "Was: Renovate the bathroom",
+        "state": "next",
+        "project_id": "project_1a2b3c4d5e6f",
+        "tag_ids": [],
+        "due_date": null,
+        "priority": "none",
+        "waiting_for": null,
+        "waiting_since": null,
+        "order_key": 7,
+        "source_capture_ids": [],
+        "created_at": "2026-09-24T09:14:00Z",
+        "updated_at": "2026-10-09T14:05:13Z",
+        "completed_at": null,
+        "cancelled_at": null,
+        "revision": 8,
+        "subtasks": [],
+        "comments": [],
+        "formulation": {
+          "id": "form_9d2a6c1e-4b7f-4e83-a0d5-7f1b3c8e2a64",
+          "started_at": "2026-10-09T14:05:13Z",
+          "extended_at": null,
+          "extension_reason": null,
+          "park_floor_at": null,
+          "consecutive_stalled": 1,
+          "ageing_at": "2026-10-16T14:05:13Z",
+          "ask_at": "2026-10-23T14:05:13Z",
+          "park_due_at": "2026-10-30T14:05:13Z",
+          "paused_until": null
+        },
+        "parked": null
+      }
+    },
+    {
+      "id": "W-003",
+      "model": "TaskResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "an auto-parked Someday task; clock_before stays server-side (http §2)",
+      "body": {
+        "id": "task_9f3c2a1b4d5e",
+        "title": "Measure the bathroom wall",
+        "details": "Was: Renovate the bathroom",
+        "state": "someday",
+        "project_id": "project_1a2b3c4d5e6f",
+        "tag_ids": [],
+        "due_date": null,
+        "priority": "none",
+        "waiting_for": null,
+        "waiting_since": null,
+        "order_key": 7,
+        "source_capture_ids": [],
+        "created_at": "2026-09-24T09:14:00Z",
+        "updated_at": "2026-10-23T09:14:03Z",
+        "completed_at": null,
+        "cancelled_at": null,
+        "revision": 9,
+        "subtasks": [],
+        "comments": [],
+        "formulation": null,
+        "parked": {
+          "at": "2026-10-23T09:14:03Z",
+          "formulation_id": "form_1c4f7a2e-9b3d-4f60-8a15-2e7c9d0b6f43"
+        }
+      }
+    },
+    {
+      "id": "W-010",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "every field of a decision from iOS (http §3 example)",
+      "body": {
+        "decision_id": "decision_6b1e8a52-3f0c-4e7a-9d21-5c8b0f4a7e19",
+        "type": "first_step",
+        "expected_revision": 7,
+        "formulation_id": "form_1c4f7a2e-9b3d-4f60-8a15-2e7c9d0b6f43",
+        "stall_reason": "too_big",
+        "title": "Measure the bathroom wall",
+        "waiting_for": null,
+        "reason": null,
+        "session_id": "review_3e8f1a6c-5d2b-4c97-b04e-9a7d2f6c1e85",
+        "ai_use": "edited",
+        "navigator_request_id": "4f0c2b7e-8a1d-4e69-b3c5-0d7f9a2e6c81",
+        "client_decided_at": "2026-10-09T14:05:12Z",
+        "new_formulation_id": "form_9d2a6c1e-4b7f-4e83-a0d5-7f1b3c8e2a64",
+        "follow_up_task_id": null
+      }
+    },
+    {
+      "id": "W-011",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "a web decision: no client ids, server mints them",
+      "body": {
+        "type": "complete",
+        "expected_revision": 4
+      }
+    },
+    {
+      "id": "W-012",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "keep 7 more days with a server-minted formulation and session id",
+      "body": {
+        "type": "extend",
+        "expected_revision": 5,
+        "formulation_id": "form_0a1b2c3d4e5f",
+        "reason": "Waiting for the quote",
+        "session_id": "review_4d5e6f7a8b9c"
+      }
+    },
+    {
+      "id": "W-013",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "a follow-up created offline names its new task and formulation",
+      "body": {
+        "decision_id": "decision_0e4b7c2a-6f19-4d38-a5c1-8b2e9d7f3a60",
+        "type": "follow_up",
+        "expected_revision": 2,
+        "title": "Ask Ann about the quote",
+        "new_formulation_id": "form_5b8e2d7a-3c16-4f94-9e0b-6a1d4c7f2e85",
+        "follow_up_task_id": "task_2f6b9d1c-7e4a-4c25-b8f0-3a9e6d2c7b18"
+      }
+    },
+    {
+      "id": "W-014",
+      "model": "DecisionResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "a decision inside a review (http §3)",
+      "body": {
+        "decision": {
+          "id": "decision_6b1e8a52-3f0c-4e7a-9d21-5c8b0f4a7e19",
+          "type": "first_step",
+          "task_id": "task_9f3c2a1b4d5e",
+          "session_id": "review_3e8f1a6c-5d2b-4c97-b04e-9a7d2f6c1e85",
+          "decided_at": "2026-10-09T14:05:13Z",
+          "substantive": true,
+          "stall_reason": "too_big",
+          "ai_use": "edited",
+          "yielded_auto_park": false
+        },
+        "task": {
+          "id": "task_9f3c2a1b4d5e",
+          "title": "Measure the bathroom wall",
+          "details": "Was: Renovate the bathroom",
+          "state": "next",
+          "project_id": "project_1a2b3c4d5e6f",
+          "tag_ids": [],
+          "due_date": null,
+          "priority": "none",
+          "waiting_for": null,
+          "waiting_since": null,
+          "order_key": 7,
+          "source_capture_ids": [],
+          "created_at": "2026-09-24T09:14:00Z",
+          "updated_at": "2026-10-09T14:05:13Z",
+          "completed_at": null,
+          "cancelled_at": null,
+          "revision": 8,
+          "subtasks": [],
+          "comments": [],
+          "formulation": {
+            "id": "form_9d2a6c1e-4b7f-4e83-a0d5-7f1b3c8e2a64",
+            "started_at": "2026-10-09T14:05:13Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "consecutive_stalled": 1,
+            "ageing_at": "2026-10-16T14:05:13Z",
+            "ask_at": "2026-10-23T14:05:13Z",
+            "park_due_at": "2026-10-30T14:05:13Z",
+            "paused_until": null
+          },
+          "parked": null
+        },
+        "created_task": null,
+        "receipt": null,
+        "session_counts": {
+          "done": 0,
+          "reformulated": 0,
+          "first_step": 1,
+          "waiting": 0,
+          "someday": 0,
+          "cancelled": 0,
+          "extended": 0,
+          "inbox_processed": 0,
+          "kept": 0,
+          "moved_to_next": 0
+        }
+      }
+    },
+    {
+      "id": "W-015",
+      "model": "DecisionResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "a decision outside a review with its receipt",
+      "body": {
+        "decision": {
+          "id": "decision_8c4e1a7d2b9f",
+          "type": "keep_someday",
+          "task_id": "task_9f3c2a1b4d5e",
+          "session_id": null,
+          "decided_at": "2026-10-09T14:05:13Z",
+          "substantive": null,
+          "stall_reason": null,
+          "ai_use": "none",
+          "yielded_auto_park": false
+        },
+        "task": {
+          "id": "task_9f3c2a1b4d5e",
+          "title": "Measure the bathroom wall",
+          "details": "Was: Renovate the bathroom",
+          "state": "someday",
+          "project_id": "project_1a2b3c4d5e6f",
+          "tag_ids": [],
+          "due_date": null,
+          "priority": "none",
+          "waiting_for": null,
+          "waiting_since": null,
+          "order_key": 7,
+          "source_capture_ids": [],
+          "created_at": "2026-09-24T09:14:00Z",
+          "updated_at": "2026-10-09T14:05:13Z",
+          "completed_at": null,
+          "cancelled_at": null,
+          "revision": 8,
+          "subtasks": [],
+          "comments": [],
+          "formulation": null,
+          "parked": null
+        },
+        "created_task": null,
+        "receipt": {
+          "task_id": "task_9f3c2a1b4d5e",
+          "kind": "someday",
+          "hidden_until": "2026-11-08T14:05:13Z",
+          "task_revision": 8
+        },
+        "session_counts": null
+      }
+    },
+    {
+      "id": "W-016",
+      "model": "UndoDecisionRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "undo a decision",
+      "body": {
+        "expected_task_revision": 8
+      }
+    },
+    {
+      "id": "W-017",
+      "model": "UndoDecisionResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "undo restores the task and its clock (http §3)",
+      "body": {
+        "task": {
+          "id": "task_9f3c2a1b4d5e",
+          "title": "Renovate the bathroom",
+          "details": null,
+          "state": "next",
+          "project_id": "project_1a2b3c4d5e6f",
+          "tag_ids": [],
+          "due_date": null,
+          "priority": "none",
+          "waiting_for": null,
+          "waiting_since": null,
+          "order_key": 7,
+          "source_capture_ids": [],
+          "created_at": "2026-09-24T09:14:00Z",
+          "updated_at": "2026-10-09T14:05:13Z",
+          "completed_at": null,
+          "cancelled_at": null,
+          "revision": 9,
+          "subtasks": [],
+          "comments": [],
+          "formulation": {
+            "id": "form_1c4f7a2e-9b3d-4f60-8a15-2e7c9d0b6f43",
+            "started_at": "2026-09-24T09:14:00Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "consecutive_stalled": 0,
+            "ageing_at": "2026-10-01T09:14:00Z",
+            "ask_at": "2026-10-08T09:14:00Z",
+            "park_due_at": "2026-10-15T09:14:00Z",
+            "paused_until": null
+          },
+          "parked": null
+        },
+        "undone_decision_id": "decision_6b1e8a52-3f0c-4e7a-9d21-5c8b0f4a7e19",
+        "deleted_task_id": null,
+        "session_counts": {
+          "done": 0,
+          "reformulated": 0,
+          "first_step": 0,
+          "waiting": 0,
+          "someday": 0,
+          "cancelled": 0,
+          "extended": 0,
+          "inbox_processed": 0,
+          "kept": 0,
+          "moved_to_next": 0
+        }
+      }
+    },
+    {
+      "id": "W-020",
+      "model": "AutoParkRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "a park observed on a device",
+      "body": {
+        "formulation_id": "form_1c4f7a2e-9b3d-4f60-8a15-2e7c9d0b6f43"
+      }
+    },
+    {
+      "id": "W-021",
+      "model": "AutoParkResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "the server's own evaluation is not park_due: applied false is a success",
+      "body": {
+        "applied": false,
+        "task": {
+          "id": "task_9f3c2a1b4d5e",
+          "title": "Measure the bathroom wall",
+          "details": "Was: Renovate the bathroom",
+          "state": "next",
+          "project_id": "project_1a2b3c4d5e6f",
+          "tag_ids": [],
+          "due_date": null,
+          "priority": "none",
+          "waiting_for": null,
+          "waiting_since": null,
+          "order_key": 7,
+          "source_capture_ids": [],
+          "created_at": "2026-09-24T09:14:00Z",
+          "updated_at": "2026-10-09T14:05:13Z",
+          "completed_at": null,
+          "cancelled_at": null,
+          "revision": 8,
+          "subtasks": [],
+          "comments": [],
+          "formulation": {
+            "id": "form_9d2a6c1e-4b7f-4e83-a0d5-7f1b3c8e2a64",
+            "started_at": "2026-10-09T14:05:13Z",
+            "extended_at": null,
+            "extension_reason": null,
+            "park_floor_at": null,
+            "consecutive_stalled": 1,
+            "ageing_at": "2026-10-16T14:05:13Z",
+            "ask_at": "2026-10-23T14:05:13Z",
+            "park_due_at": "2026-10-30T14:05:13Z",
+            "paused_until": null
+          },
+          "parked": null
+        }
+      }
+    },
+    {
+      "id": "W-030",
+      "model": "ReviewStateResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "GET /review/state (http §5)",
+      "body": {
+        "settings": {
+          "threshold_days": 14,
+          "review_weekday": 5,
+          "review_time": "16:00",
+          "time_zone": "Europe/Berlin",
+          "onboarded_at": "2026-09-18T10:00:00Z",
+          "activated_at": "2026-09-05T08:00:00Z",
+          "owner_park_floor_at": null,
+          "revision": 3
+        },
+        "explainer_seen": true,
+        "grace_until": "2026-09-19T08:00:00Z",
+        "last_counted_review_at": "2026-09-30T15:40:00Z",
+        "last_counted_review": {
+          "session_id": "review_2b7d9f1c3e5a",
+          "status": "completed",
+          "origin": "ios",
+          "ended_at": "2026-09-30T15:40:00Z",
+          "counts": {
+            "done": 3,
+            "reformulated": 1,
+            "first_step": 1,
+            "waiting": 0,
+            "someday": 1,
+            "cancelled": 0,
+            "extended": 1,
+            "inbox_processed": 4,
+            "kept": 1,
+            "moved_to_next": 0
+          },
+          "clear_start": "yes"
+        },
+        "next_review_at": "2026-10-09T14:00:00Z",
+        "restart_mode": false,
+        "open_session": {
+          "id": "review_3e8f1a6c-5d2b-4c97-b04e-9a7d2f6c1e85",
+          "mode": "quick",
+          "entry": "list",
+          "origin": "ios",
+          "status": "open",
+          "started_at": "2026-10-09T14:00:00Z",
+          "last_activity_at": "2026-10-09T14:05:13Z",
+          "ended_at": null,
+          "current_step": "decisions",
+          "steps": {
+            "wins": "finished",
+            "inbox": "skipped",
+            "decisions": "pending",
+            "summary": "pending"
+          },
+          "active_seconds_by_step": {
+            "wins": 42,
+            "inbox": 0,
+            "decisions": 95
+          },
+          "counts": {
+            "done": 0,
+            "reformulated": 0,
+            "first_step": 1,
+            "waiting": 0,
+            "someday": 0,
+            "cancelled": 0,
+            "extended": 0,
+            "inbox_processed": 0,
+            "kept": 0,
+            "moved_to_next": 0
+          },
+          "set_aside_count": 0,
+          "qualifying_activity": true,
+          "clear_start": null,
+          "revision": 5
+        },
+        "unseen_parks": [
+          {
+            "task_id": "task_7e1a3c5b9d2f",
+            "formulation_id": "form_1c4f7a2e-9b3d-4f60-8a15-2e7c9d0b6f43",
+            "parked_at": "2026-10-08T09:14:03Z"
+          }
+        ],
+        "counts": {
+          "asks_for_decision": 4,
+          "moves_tomorrow": 1
+        },
+        "receipts": [
+          {
+            "task_id": "task_6d2f8b4a1c7e",
+            "kind": "waiting",
+            "hidden_until": "2026-10-12T10:00:00Z",
+            "task_revision": 4
+          }
+        ],
+        "server_now": "2026-10-09T12:00:00Z"
+      }
+    },
+    {
+      "id": "W-031",
+      "model": "ReviewStateResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "a new owner before the explainer: defaults, not activated",
+      "body": {
+        "settings": {
+          "threshold_days": 14,
+          "review_weekday": 5,
+          "review_time": "16:00",
+          "time_zone": "UTC",
+          "onboarded_at": null,
+          "activated_at": null,
+          "owner_park_floor_at": null,
+          "revision": 1
+        },
+        "explainer_seen": false,
+        "grace_until": null,
+        "last_counted_review_at": null,
+        "last_counted_review": null,
+        "next_review_at": "2026-10-09T16:00:00Z",
+        "restart_mode": false,
+        "open_session": null,
+        "unseen_parks": [],
+        "counts": {
+          "asks_for_decision": 0,
+          "moves_tomorrow": 0
+        },
+        "receipts": [],
+        "server_now": "2026-10-09T12:00:00Z"
+      }
+    },
+    {
+      "id": "W-032",
+      "model": "ExplainerAcknowledgeRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "the activating acknowledgement sends the device zone",
+      "body": {
+        "time_zone": "Europe/Berlin"
+      }
+    },
+    {
+      "id": "W-033",
+      "model": "ReviewSettingsUpdateRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "a threshold change",
+      "body": {
+        "threshold_days": 21,
+        "expected_revision": 3
+      }
+    },
+    {
+      "id": "W-034",
+      "model": "ReviewSettingsUpdateRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "the onboarding save",
+      "body": {
+        "review_weekday": 1,
+        "review_time": "09:30",
+        "time_zone": "America/New_York",
+        "onboarded": true,
+        "expected_revision": 4
+      }
+    },
+    {
+      "id": "W-035",
+      "model": "ReviewSettingsResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "PUT /review/settings answer",
+      "body": {
+        "threshold_days": 21,
+        "review_weekday": 5,
+        "review_time": "16:00",
+        "time_zone": "Europe/Berlin",
+        "onboarded_at": "2026-09-18T10:00:00Z",
+        "activated_at": "2026-09-05T08:00:00Z",
+        "owner_park_floor_at": "2026-10-16T12:00:00Z",
+        "revision": 4
+      }
+    },
+    {
+      "id": "W-036",
+      "model": "ParkAcknowledgeRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "the person continued on While you were away",
+      "body": {
+        "items": [
+          {
+            "task_id": "task_7e1a3c5b9d2f",
+            "formulation_id": "form_1c4f7a2e-9b3d-4f60-8a15-2e7c9d0b6f43"
+          }
+        ]
+      }
+    },
+    {
+      "id": "W-040",
+      "model": "SessionStartRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "a review started offline on iOS",
+      "body": {
+        "id": "review_3e8f1a6c-5d2b-4c97-b04e-9a7d2f6c1e85",
+        "mode": "quick",
+        "entry": "widget_decisions",
+        "origin": "ios",
+        "skip_steps": [
+          "wins",
+          "inbox"
+        ],
+        "replace_open": true
+      }
+    },
+    {
+      "id": "W-041",
+      "model": "SessionStartRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "a web review: the server mints the id",
+      "body": {
+        "mode": "full",
+        "entry": "sidebar",
+        "origin": "web",
+        "replace_open": false
+      }
+    },
+    {
+      "id": "W-042",
+      "model": "SessionProgressRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "session progress carries its replay-safe progress_id (http §6)",
+      "body": {
+        "progress_id": "progress_7a1d4e9b-2c6f-4b30-8e57-1d9c4a6f3b02",
+        "current_step": "decisions",
+        "step": {
+          "code": "wins",
+          "status": "finished"
+        },
+        "active_seconds": {
+          "code": "wins",
+          "seconds": 42
+        },
+        "inbox_processed_delta": -1
+      }
+    },
+    {
+      "id": "W-043",
+      "model": "SessionProgressRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "Not now and the decision-queue snapshot",
+      "body": {
+        "progress_id": "progress_1f5a9c3e-7b2d-4e86-a0c4-9d3b7e1f5a26",
+        "set_aside_task_id": "task_6d2f8b4a1c7e",
+        "snapshot_decision_queue": true
+      }
+    },
+    {
+      "id": "W-044",
+      "model": "SessionFinishRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "Done on the summary",
+      "body": {
+        "clear_start": "not_really"
+      }
+    },
+    {
+      "id": "W-045",
+      "model": "SessionResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "SessionResponse: exactly the http §6 field list",
+      "body": {
+        "id": "review_3e8f1a6c-5d2b-4c97-b04e-9a7d2f6c1e85",
+        "mode": "quick",
+        "entry": "list",
+        "origin": "ios",
+        "status": "open",
+        "started_at": "2026-10-09T14:00:00Z",
+        "last_activity_at": "2026-10-09T14:05:13Z",
+        "ended_at": null,
+        "current_step": "decisions",
+        "steps": {
+          "wins": "finished",
+          "inbox": "skipped",
+          "decisions": "pending",
+          "summary": "pending"
+        },
+        "active_seconds_by_step": {
+          "wins": 42,
+          "inbox": 0,
+          "decisions": 95
+        },
+        "counts": {
+          "done": 0,
+          "reformulated": 0,
+          "first_step": 1,
+          "waiting": 0,
+          "someday": 0,
+          "cancelled": 0,
+          "extended": 0,
+          "inbox_processed": 0,
+          "kept": 0,
+          "moved_to_next": 0
+        },
+        "set_aside_count": 0,
+        "qualifying_activity": true,
+        "clear_start": null,
+        "revision": 5
+      }
+    },
+    {
+      "id": "W-046",
+      "model": "SessionResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "a review finished with every step skipped",
+      "body": {
+        "id": "review_3e8f1a6c-5d2b-4c97-b04e-9a7d2f6c1e85",
+        "mode": "quick",
+        "entry": "list",
+        "origin": "ios",
+        "status": "completed_empty",
+        "started_at": "2026-10-09T14:00:00Z",
+        "last_activity_at": "2026-10-09T14:05:13Z",
+        "ended_at": "2026-10-09T14:10:00Z",
+        "current_step": "decisions",
+        "steps": {
+          "wins": "skipped",
+          "inbox": "skipped",
+          "decisions": "skipped",
+          "summary": "finished"
+        },
+        "active_seconds_by_step": {},
+        "counts": {
+          "done": 0,
+          "reformulated": 0,
+          "first_step": 0,
+          "waiting": 0,
+          "someday": 0,
+          "cancelled": 0,
+          "extended": 0,
+          "inbox_processed": 0,
+          "kept": 0,
+          "moved_to_next": 0
+        },
+        "set_aside_count": 0,
+        "qualifying_activity": false,
+        "clear_start": null,
+        "revision": 7
+      }
+    },
+    {
+      "id": "W-047",
+      "model": "QueueResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "wins queue",
+      "body": {
+        "items": [
+          {
+            "id": "task_9f3c2a1b4d5e",
+            "title": "Measure the bathroom wall",
+            "details": "Was: Renovate the bathroom",
+            "state": "completed",
+            "project_id": "project_1a2b3c4d5e6f",
+            "tag_ids": [],
+            "due_date": null,
+            "priority": "none",
+            "waiting_for": null,
+            "waiting_since": null,
+            "order_key": 7,
+            "source_capture_ids": [],
+            "created_at": "2026-09-24T09:14:00Z",
+            "updated_at": "2026-10-09T14:05:13Z",
+            "completed_at": "2026-10-08T17:00:00Z",
+            "cancelled_at": null,
+            "revision": 8,
+            "subtasks": [],
+            "comments": [],
+            "formulation": null,
+            "parked": null
+          }
+        ],
+        "meta": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "id": "W-048",
+      "model": "QueueResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "rest of Next with the capacity mirror (FR-031)",
+      "body": {
+        "items": [],
+        "meta": {
+          "next_count": 41,
+          "weekly_average_4w": 9.0,
+          "weeks_of_history": 9,
+          "implied_weeks": 4.555555555555555
+        }
+      }
+    },
+    {
+      "id": "W-049",
+      "model": "QueueResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "capacity mirror with fewer than 4 weeks of history",
+      "body": {
+        "items": [],
+        "meta": {
+          "next_count": 12,
+          "weekly_average_4w": null,
+          "weeks_of_history": 2,
+          "implied_weeks": null
+        }
+      }
+    },
+    {
+      "id": "W-050",
+      "model": "QueueResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "Someday pass",
+      "body": {
+        "items": [
+          {
+            "id": "task_9f3c2a1b4d5e",
+            "title": "Measure the bathroom wall",
+            "details": "Was: Renovate the bathroom",
+            "state": "someday",
+            "project_id": "project_1a2b3c4d5e6f",
+            "tag_ids": [],
+            "due_date": null,
+            "priority": "none",
+            "waiting_for": null,
+            "waiting_since": null,
+            "order_key": 7,
+            "source_capture_ids": [],
+            "created_at": "2026-09-24T09:14:00Z",
+            "updated_at": "2026-10-09T14:05:13Z",
+            "completed_at": null,
+            "cancelled_at": null,
+            "revision": 8,
+            "subtasks": [],
+            "comments": [],
+            "formulation": null,
+            "parked": null
+          }
+        ],
+        "meta": {
+          "eligible_total": 9,
+          "shown": 1
+        }
+      }
+    },
+    {
+      "id": "W-051",
+      "model": "QueueResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "dates in the next 14 days, grouped by local day",
+      "body": {
+        "items": [
+          {
+            "id": "task_9f3c2a1b4d5e",
+            "title": "Measure the bathroom wall",
+            "details": "Was: Renovate the bathroom",
+            "state": "next",
+            "project_id": "project_1a2b3c4d5e6f",
+            "tag_ids": [],
+            "due_date": "2026-10-12",
+            "priority": "none",
+            "waiting_for": null,
+            "waiting_since": null,
+            "order_key": 7,
+            "source_capture_ids": [],
+            "created_at": "2026-09-24T09:14:00Z",
+            "updated_at": "2026-10-09T14:05:13Z",
+            "completed_at": null,
+            "cancelled_at": null,
+            "revision": 8,
+            "subtasks": [],
+            "comments": [],
+            "formulation": null,
+            "parked": null
+          }
+        ],
+        "meta": {
+          "days": [
+            {
+              "day": "2026-10-12",
+              "task_ids": [
+                "task_9f3c2a1b4d5e"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "W-052",
+      "model": "QueueResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "a queue without step meta (decisions, waiting, inbox, projects)",
+      "body": {
+        "items": [
+          {
+            "id": "task_9f3c2a1b4d5e",
+            "title": "Measure the bathroom wall",
+            "details": "Was: Renovate the bathroom",
+            "state": "next",
+            "project_id": "project_1a2b3c4d5e6f",
+            "tag_ids": [],
+            "due_date": null,
+            "priority": "none",
+            "waiting_for": null,
+            "waiting_since": null,
+            "order_key": 7,
+            "source_capture_ids": [],
+            "created_at": "2026-09-24T09:14:00Z",
+            "updated_at": "2026-10-09T14:05:13Z",
+            "completed_at": null,
+            "cancelled_at": null,
+            "revision": 8,
+            "subtasks": [],
+            "comments": [],
+            "formulation": null,
+            "parked": null
+          }
+        ],
+        "meta": {}
+      }
+    },
+    {
+      "id": "W-053",
+      "model": "BulkReleaseRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "restart release made offline",
+      "body": {
+        "id": "bulk_5c2e9f7a-1b4d-4a68-9c03-6e8b2d5f1a97",
+        "kind": "restart",
+        "session_id": "review_3e8f1a6c-5d2b-4c97-b04e-9a7d2f6c1e85",
+        "items": [
+          {
+            "task_id": "task_9f3c2a1b4d5e",
+            "expected_revision": 8
+          },
+          {
+            "task_id": "task_7e1a3c5b9d2f",
+            "expected_revision": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "W-054",
+      "model": "BulkReleaseResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "partial success is a 200",
+      "body": {
+        "id": "bulk_5c2e9f7a-1b4d-4a68-9c03-6e8b2d5f1a97",
+        "released": [
+          {
+            "task_id": "task_9f3c2a1b4d5e",
+            "revision_after": 9
+          }
+        ],
+        "skipped": [
+          {
+            "task_id": "task_7e1a3c5b9d2f",
+            "reason": "not_eligible"
+          }
+        ]
+      }
+    },
+    {
+      "id": "W-055",
+      "model": "BulkReleaseUndoResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "undone, some skipped",
+      "body": {
+        "restored": [
+          "task_9f3c2a1b4d5e"
+        ],
+        "skipped": [
+          {
+            "task_id": "task_6d2f8b4a1c7e",
+            "reason": "stale"
+          }
+        ]
+      }
+    },
+    {
+      "id": "W-060",
+      "model": "NavigatorStatusResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "GET /review/navigator",
+      "body": {
+        "provider": "openai",
+        "consent": {
+          "granted_at": "2026-10-01T10:00:00Z",
+          "revoked_at": null,
+          "consent_text_version": 1
+        },
+        "consent_current": true,
+        "consent_text_version": 1,
+        "available": true
+      }
+    },
+    {
+      "id": "W-061",
+      "model": "NavigatorStatusResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "operator configured the navigator as disabled",
+      "body": {
+        "provider": null,
+        "consent": null,
+        "consent_current": false,
+        "consent_text_version": 1,
+        "available": false
+      }
+    },
+    {
+      "id": "W-062",
+      "model": "NavigatorConsentGrantRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "grant cloud consent",
+      "body": {
+        "provider": "openai",
+        "consent_text_version": 1
+      }
+    },
+    {
+      "id": "W-063",
+      "model": "NavigatorSuggestionRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "the strict FR-019 input (http §7)",
+      "body": {
+        "kind": "first_step",
+        "consent": {
+          "external_processing_allowed": true,
+          "provider": "openai"
+        },
+        "task": {
+          "title": "Renovate the bathroom",
+          "notes": "Tiles from the old shop",
+          "stall_reason": "too_big"
+        },
+        "project": {
+          "name": "Flat",
+          "open_task_titles": [
+            "Buy paint",
+            "Call the plumber"
+          ]
+        }
+      }
+    },
+    {
+      "id": "W-064",
+      "model": "NavigatorSuggestionRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "a project without a next action has no task",
+      "body": {
+        "kind": "project_next_action",
+        "consent": {
+          "external_processing_allowed": true,
+          "provider": "openai"
+        },
+        "project": {
+          "name": "Flat",
+          "open_task_titles": []
+        }
+      }
+    },
+    {
+      "id": "W-065",
+      "model": "NavigatorSuggestionResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "proposals",
+      "body": {
+        "request_id": "4f0c2b7e-8a1d-4e69-b3c5-0d7f9a2e6c81",
+        "provider": "openai",
+        "notes_truncated": false,
+        "proposals": [
+          "Measure the bathroom wall",
+          "Pick three tile samples"
+        ],
+        "clarifying_question": null
+      }
+    },
+    {
+      "id": "W-066",
+      "model": "NavigatorSuggestionResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "a clarifying question instead of proposals",
+      "body": {
+        "request_id": "4f0c2b7e-8a1d-4e69-b3c5-0d7f9a2e6c81",
+        "provider": "openai",
+        "notes_truncated": true,
+        "proposals": null,
+        "clarifying_question": "Which room comes first?"
+      }
+    },
+    {
+      "id": "W-070",
+      "model": "ErrorResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "a gated read with the flag off (http Gate)",
+      "body": {
+        "message": "Not found",
+        "detail": {
+          "reason": "weekly_review_disabled"
+        },
+        "reference_id": "corr_5f2a9c7e1b3d"
+      }
+    },
+    {
+      "id": "W-071",
+      "model": "ErrorResponse",
+      "kind": "response",
+      "valid": true,
+      "note": "a client id reused by a non-matching record",
+      "body": {
+        "message": "This id is already used by another record.",
+        "detail": {
+          "reason": "id_conflict"
+        },
+        "reference_id": "corr_8b1d4f6a2c9e"
+      }
+    },
+    {
+      "id": "W-R01",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "free text in a client id is refused (no content travels in ids)",
+      "body": {
+        "decision_id": "decision_SENTINEL-title text from a note",
+        "type": "complete",
+        "expected_revision": 4
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R02",
+      "model": "SessionProgressRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "session progress without progress_id is refused (http §6)",
+      "body": {
+        "current_step": "decisions",
+        "active_seconds": {
+          "code": "wins",
+          "seconds": 42
+        }
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R03",
+      "model": "SessionProgressRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "progress_id with another prefix is refused",
+      "body": {
+        "progress_id": "review_7a1d4e9b-2c6f-4b30-8e57-1d9c4a6f3b02",
+        "current_step": "decisions"
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R04",
+      "model": "NavigatorSuggestionRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "a language field is refused (FR-019 strict input)",
+      "body": {
+        "kind": "first_step",
+        "consent": {
+          "external_processing_allowed": true,
+          "provider": "openai"
+        },
+        "task": {
+          "title": "Renovate the bathroom",
+          "notes": null,
+          "stall_reason": null
+        },
+        "language": "ru"
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R05",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "navigator_request_id must be the 36-character UUID",
+      "body": {
+        "type": "complete",
+        "expected_revision": 4,
+        "navigator_request_id": "4f0c2b7e"
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R06",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "keep 7 more days needs a reason",
+      "body": {
+        "type": "extend",
+        "expected_revision": 5,
+        "formulation_id": "form_1c4f7a2e-9b3d-4f60-8a15-2e7c9d0b6f43"
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R07",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "stall reasons are codes from a fixed list",
+      "body": {
+        "type": "complete",
+        "expected_revision": 4,
+        "stall_reason": "lazy"
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R08",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "client ids are lowercase UUIDs",
+      "body": {
+        "type": "complete",
+        "expected_revision": 4,
+        "new_formulation_id": "form_9D2A6C1E-4B7F-4E83-A0D5-7F1B3C8E2A64"
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R09",
+      "model": "SessionResponse",
+      "kind": "response",
+      "valid": false,
+      "note": "set_aside_task_ids stays server-side",
+      "body": {
+        "id": "review_3e8f1a6c-5d2b-4c97-b04e-9a7d2f6c1e85",
+        "mode": "quick",
+        "entry": "list",
+        "origin": "ios",
+        "status": "open",
+        "started_at": "2026-10-09T14:00:00Z",
+        "last_activity_at": "2026-10-09T14:05:13Z",
+        "ended_at": null,
+        "current_step": "decisions",
+        "steps": {
+          "wins": "finished",
+          "inbox": "skipped",
+          "decisions": "pending",
+          "summary": "pending"
+        },
+        "active_seconds_by_step": {
+          "wins": 42,
+          "inbox": 0,
+          "decisions": 95
+        },
+        "counts": {
+          "done": 0,
+          "reformulated": 0,
+          "first_step": 1,
+          "waiting": 0,
+          "someday": 0,
+          "cancelled": 0,
+          "extended": 0,
+          "inbox_processed": 0,
+          "kept": 0,
+          "moved_to_next": 0
+        },
+        "set_aside_count": 0,
+        "qualifying_activity": true,
+        "clear_start": null,
+        "revision": 5,
+        "set_aside_task_ids": []
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R10",
+      "model": "ReviewSettingsUpdateRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "threshold is 7, 14, 21 or 28",
+      "body": {
+        "threshold_days": 10,
+        "expected_revision": 3
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R11",
+      "model": "NavigatorSuggestionResponse",
+      "kind": "response",
+      "valid": false,
+      "note": "exactly one of proposals or clarifying_question",
+      "body": {
+        "request_id": "4f0c2b7e-8a1d-4e69-b3c5-0d7f9a2e6c81",
+        "provider": "openai",
+        "notes_truncated": false,
+        "proposals": [
+          "Measure the wall"
+        ],
+        "clarifying_question": "Which wall?"
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R12",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "references accept only the client or server id shape",
+      "body": {
+        "type": "complete",
+        "expected_revision": 4,
+        "session_id": "sess_42"
+      },
+      "status": 422
+    },
+    {
+      "id": "W-067",
+      "model": "NavigatorSuggestionRequest",
+      "kind": "request",
+      "valid": true,
+      "note": "a fully reduced note: 2 000 + the 3-scalar separator + 4 000 = 6 003 scalars (navigator.md §1)",
+      "body": {
+        "kind": "reformulate",
+        "consent": {
+          "external_processing_allowed": true,
+          "provider": "openai"
+        },
+        "task": {
+          "title": "Renovate the bathroom",
+          "notes": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh\n…\ntttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+          "stall_reason": "unclear"
+        }
+      }
+    },
+    {
+      "id": "W-R13",
+      "model": "NavigatorSuggestionRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "one scalar over the reduced-notes limit",
+      "body": {
+        "kind": "reformulate",
+        "consent": {
+          "external_processing_allowed": true,
+          "provider": "openai"
+        },
+        "task": {
+          "title": "Renovate the bathroom",
+          "notes": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh\n…\nttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+          "stall_reason": "unclear"
+        }
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R14",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "an instant without an offset is refused",
+      "body": {
+        "type": "complete",
+        "expected_revision": 4,
+        "client_decided_at": "2026-10-09T14:05:12"
+      },
+      "status": 422
+    },
+    {
+      "id": "W-R15",
+      "model": "DecisionRequest",
+      "kind": "request",
+      "valid": false,
+      "note": "a whitespace-only extension reason is refused",
+      "body": {
+        "type": "extend",
+        "expected_revision": 5,
+        "formulation_id": "form_1c4f7a2e-9b3d-4f60-8a15-2e7c9d0b6f43",
+        "reason": "   "
+      },
+      "status": 422
+    }
+  ]
+}
