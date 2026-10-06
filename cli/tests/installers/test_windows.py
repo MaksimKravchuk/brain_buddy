@@ -9,7 +9,10 @@ class WindowsInstallerTests(unittest.TestCase):
         binary=os.environ.get("BB_TEST_CLI_BINARY")
         self.assertTrue(binary,"Set BB_TEST_CLI_BINARY to the native release executable")
         fixture=Path(__file__).with_name("windows_fixture.ps1")
-        result=subprocess.run(["powershell.exe","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",str(fixture),"-Binary",binary],capture_output=True,text=True,timeout=120)
+        # The runner invokes Python from PowerShell 7. Windows PowerShell 5 must
+        # build its own module path instead of loading incompatible PS7 modules.
+        fixture_env={key:value for key,value in os.environ.items() if key.casefold()!="psmodulepath"}
+        result=subprocess.run(["powershell.exe","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",str(fixture),"-Binary",binary],capture_output=True,text=True,timeout=120,env=fixture_env)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertIn("5 installer fixtures passed",result.stdout)
 
