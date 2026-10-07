@@ -60,6 +60,7 @@ from .review_domain import (
 )
 from .review_service import (
     SNAPSHOT_RETENTION,
+    USAGE_RETENTION,
     BulkReleaseResultDocument,
     BulkUndoResultDocument,
     ReviewService,
@@ -161,6 +162,9 @@ class ReviewMetrics:
     answered_yes: int
     active_seconds_quick: list[int]
     active_seconds_full: list[int]
+    sc005_since: date
+    """First day of the cloud SC-005 share: ``since``, or the oldest retained
+    ``navigator_usage`` day when ``since`` is older (35 days)."""
     shown_requests: int
     cloud_accepted: int
     device_decisions: int
@@ -359,7 +363,7 @@ class ReviewFlowService:
         if payload.inbox_processed_delta is not None:
             processed = counts.inbox_processed + payload.inbox_processed_delta
             counts = counts.model_copy(update={"inbox_processed": max(0, processed)})
-        if payload.snapshot_decision_queue and not session.decision_queue:
+        if payload.snapshot_decision_queue and session.decision_queue is None:
             update["decision_queue"] = self._snapshot(owner_id, now).asking_ids()
         progress = {
             code: review_rules.StepProgress(step.status, step.finished_empty)
@@ -536,7 +540,10 @@ class ReviewFlowService:
         clear-start answer. SC-004: total active seconds of completed runs per
         mode. SC-005: decisions naming a server request accepted as is or
         edited over the shown requests (``navigator_usage.shown``, so a shown
-        and then abandoned request stays in the denominator), and the
+        and then abandoned request stays in the denominator), both counted
+        from ``sc005_since``: ``navigator_usage`` rows live 35 days, so an
+        older ``since`` would count decisions over a denominator that lost
+        their shown requests (a share above 100%). And the
         on-device share over decisions without a request id that saw a
         proposal (an upper bound: abandoned on-device proposals are unseen).
         Parks: rows parked in the window and how many were returned.
@@ -564,6 +571,9 @@ class ReviewFlowService:
             if d.navigator_request_id is None and d.ai_use != "none"
         ]
         parks = [p for p in repo.list_park_acks(owner_id) if p.parked_at >= start]
+        # Both sides of the cloud share start where the usage rows still exist.
+        sc005_since = max(since, (now - USAGE_RETENTION).date())
+        sc005_start = datetime.combine(sc005_since, dt_time.min, tzinfo=UTC)
         return ReviewMetrics(
             weeks=weeks,
             weeks_with_counted_review=len(counted),
@@ -571,13 +581,16 @@ class ReviewFlowService:
             answered_yes=sum(s.clear_start == "yes" for s in answered),
             active_seconds_quick=_active_seconds(completed, "quick"),
             active_seconds_full=_active_seconds(completed, "full"),
+            sc005_since=sc005_since,
             shown_requests=sum(
                 usage.shown
                 for usage in repo.list_navigator_usage(owner_id)
-                if usage.day >= since
+                if usage.day >= sc005_since
             ),
             cloud_accepted=sum(
-                d.navigator_request_id is not None and d.ai_use in _ACCEPTED
+                d.navigator_request_id is not None
+                and d.ai_use in _ACCEPTED
+                and d.decided_at >= sc005_start
                 for d in decisions
             ),
             device_decisions=len(device),
@@ -861,7 +874,7 @@ def _review_task(task: TaskDocument) -> review_rules.ReviewTask:
 def _decision_ids(session: ReviewSessionDocument | None, view: _Snapshot) -> list[str]:
     """The run's snapshot once taken, else the live aggregate (http §6)."""
 
-    if session is not None and session.decision_queue:
+    if session is not None and session.decision_queue is not None:
         return list(session.decision_queue)
     return view.asking_ids()
 

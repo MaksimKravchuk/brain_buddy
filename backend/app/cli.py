@@ -189,6 +189,17 @@ def _median_minutes(seconds: list[int]) -> str:
     return f"{statistics.median(seconds) / 60:.1f} (n={len(seconds)} completed reviews)"
 
 
+def _sc005_cloud_label(metrics: ReviewMetrics, since: date) -> str:
+    """Names the window the cloud share used when it is shorter than ``since``."""
+
+    if metrics.sc005_since == since:
+        return "SC-005 cloud proposals accepted: "
+    return (
+        f"SC-005 cloud proposals accepted since {metrics.sc005_since.isoformat()} "
+        "(navigator usage is kept 35 days): "
+    )
+
+
 def format_review_metrics(metrics: ReviewMetrics, since: date) -> list[str]:
     """The read-out lines: aggregates with their sample sizes, nothing else."""
 
@@ -208,7 +219,7 @@ def format_review_metrics(metrics: ReviewMetrics, since: date) -> list[str]:
         + _median_minutes(metrics.active_seconds_quick),
         "SC-004 median active minutes, full: "
         + _median_minutes(metrics.active_seconds_full),
-        "SC-005 cloud proposals accepted: "
+        _sc005_cloud_label(metrics, since)
         + _share(
             metrics.cloud_accepted,
             metrics.shown_requests,

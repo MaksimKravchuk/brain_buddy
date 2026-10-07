@@ -77,7 +77,7 @@ with the prefix fixed per field (`id` of a session `review_`, `decision_id`
 `task_`, `progress_id` `progress_`), at most 64 characters, so no free text can travel in an id into tables,
 exports or logs (iOS lowercases `UUID().uuidString`). Fields that refer to an existing
 record (`session_id`, `formulation_id`, task ids in bodies) accept either that shape or
-a server-minted id (`<prefix>_<12 hex>`, `app/utils/identifiers.py`), and nothing else. `navigator_request_id` on a decision is either null or exactly the
+a server-minted id (`<prefix>_<12 hex>`, `app/utils/identifiers.py`), and nothing else; so do the record ids in the §6 paths (`/review/sessions/{id}` and its `/finish`, `/review/bulk-releases/{id}/undo`), where any other shape is 422 before any lookup. `navigator_request_id` on a decision is either null or exactly the
 36-character UUID the server returned as `request_id` (the
 `TitleCompletionAcceptedRequest.request_id` pattern, `schemas/tasks.py:49`). The
 server adopts a supplied id when it creates the record. When no id is supplied (web,
@@ -506,13 +506,16 @@ M-09 / the web dialog without "Continue" sends nothing (the parks stay unseen).
 
 **Session progress is merged, not version-checked**, so two devices moving the same
 review never conflict: `step` statuses merge monotonically (`finished` > `skipped` >
-`pending`); `current_step` is last-writer-wins by server arrival; `set_aside_task_id`
+`pending`); `current_step` is last-writer-wins by server arrival and accepted as sent
+(it is not checked against the session's steps); `set_aside_task_id`
 is added to a set; `inbox_processed_delta` (may be negative, for an Inbox Undo) and
 `active_seconds` are added. The response is the merged session; a client whose local
 step differs from the merged `current_step` shows "review moved on elsewhere" (design
 M-13/D-03). A `set_aside_task_id` that is not an open task of this owner is ignored
-(identical response for unknown and foreign ids). Progress on a finished session is
-accepted and ignored (200, the finished session).
+(identical response for unknown and foreign ids). A `step` or `active_seconds` code
+outside the session's steps is 422 before any of this, whatever the session's status;
+otherwise progress on a finished session is accepted and ignored (200, the finished
+session).
 
 **Progress is replay-safe** (owner decision 2026-10-06 extended to progress, targeted
 re-review): `active_seconds` and `inbox_processed_delta` are additive, so a progress
@@ -521,7 +524,9 @@ processed" count, and a stale `current_step` re-applied late would move the resu
 point back. Every PATCH therefore carries a `progress_id`. The open session keeps a
 server-internal map `applied_progress` (`progress_id` → SHA-256 of the canonical JSON of
 the body without `progress_id`; ids and digests only, no content; data-model E3). Under
-the owner lock, before anything is merged:
+the owner lock, before anything is merged, and after the out-of-mode check (a `step` or
+`active_seconds` code outside the session's steps is 422 first, whatever the session's
+status and whether the `progress_id` is known):
 
 - `progress_id` already in the map with the **same** digest → the change is already
   applied: nothing is merged, `last_activity_at` does not move, and the response is the
@@ -539,7 +544,9 @@ Its size is one entry per progress change of one review.
 
 **Queues**: `decisions` = the session's `decision_queue` snapshot (ids of tasks that
 `asks_for_decision`, formulation-clock §5 order), taken when the step first opens.
-`waiting` = Waiting tasks whose `waiting_since` is more than 7 days ago and that no
+It is taken once: a snapshot taken with nothing asking stays taken and empty, and a
+later `snapshot_decision_queue` changes nothing; until it is taken the queue is the
+live aggregate. `waiting` = Waiting tasks whose `waiting_since` is more than 7 days ago and that no
 current receipt hides, oldest `waiting_since` first. `someday` = Someday tasks that no
 current receipt hides (a person's own release writes a `source: release` Someday
 receipt, data-model E5, so tasks released by the person in the last 30 days are left
@@ -736,7 +743,9 @@ It has two parts:
 1. **Retention** — for **every** owner with review rows, or with an idempotency
    record past its 24 h, whatever the flag state (a flag turned off for rollback must
    not stop retention, FR-043): purge idempotency records older than 24 h
-   (`purge_expired_idempotency`; a decision or bulk-release record holds the whole
+   (`purge_expired_idempotency`, which keeps the brain-dump commit records,
+   `create_native_inbox_task`, until account purge; an owner holding only those is not
+   visited for them; a decision or bulk-release record holds the whole
    result, including titles and `clock_before.extension_reason`, so it must not outlive
    the 7-day snapshots when its owner stops writing); null decision undo
    snapshots older than 7 days; purge bulk-release clock snapshots older than 7 days;

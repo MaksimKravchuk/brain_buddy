@@ -282,6 +282,54 @@ def test_020_SC_003_read_out_below_the_minimum_sample_is_insufficient(
     ]
 
 
+def test_020_SC_005_the_cloud_share_uses_only_the_retained_usage_window(
+    api_client: TestClient, frozen_clock: FrozenClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An 8-week read-out: usage rows live 35 days, so both sides start there.
+
+    Decisions older than the retained ``navigator_usage`` rows would otherwise
+    count in the numerator over a denominator that lost their shown requests.
+    """
+
+    container: Container = api_client.app.state.container  # type: ignore[attr-defined]
+    owner_id: str = api_client.get("/api/auth/me").json()["id"]
+    seeder = Seeder(container, owner_id)
+    now = frozen_clock()
+    since = (now - 56 * DAY).date()
+    retained_from = (now - 35 * DAY).date()
+    old = since + 6 * DAY
+    assert old < retained_from
+    with allure.step("Old cloud decisions whose usage rows the sweep purged"):
+        seeder.usage(old, 30)
+        for _ in range(30):
+            seeder.decision("as_is", request=True, decided=_at(old))
+        container.review_service.run_review_retention(now)
+    assert all(
+        usage.day >= retained_from
+        for usage in container.task_repo.list_navigator_usage(owner_id)
+    )
+    recent = retained_from + 10 * DAY
+    seeder.usage(recent, 20)
+    for index in range(11):
+        seeder.decision(
+            "edited" if index % 2 else "as_is", request=True, decided=_at(recent)
+        )
+    metrics = container.review_flow_service.metrics(owner_id, since=since)
+    assert metrics.sc005_since == retained_from
+    assert metrics.cloud_accepted <= metrics.shown_requests
+    result = _invoke(
+        monkeypatch, container, "--owner", owner_id, "--since", since.isoformat()
+    )
+    assert result.exit_code == 0, result.output
+    line = next(
+        text for text in result.stdout.splitlines() if text.startswith("SC-005 cloud")
+    )
+    assert line == (
+        f"SC-005 cloud proposals accepted since {retained_from.isoformat()} "
+        "(navigator usage is kept 35 days): 55% (11 of 20 shown requests; n=20)"
+    )
+
+
 def test_020_SC_001_read_out_rejects_a_future_or_malformed_since(
     api_client: TestClient, frozen_clock: FrozenClock, monkeypatch: pytest.MonkeyPatch
 ) -> None:

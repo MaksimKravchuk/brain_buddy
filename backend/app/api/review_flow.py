@@ -39,6 +39,7 @@ from app.modules.tasks.review_service import ReviewService
 from app.schemas.api import ErrorResponse
 from app.schemas.auth import User
 from app.schemas.review import (
+    BulkReleaseRef,
     BulkReleaseRequest,
     BulkReleaseResponse,
     BulkReleaseUndoResponse,
@@ -147,7 +148,7 @@ def start_review_session(
     responses=error_responses(401, 404, 422),
 )
 def get_review_session(
-    session_id: str,
+    session_id: SessionRef,
     current_user: User = Depends(require_weekly_review_enabled),
     flow: ReviewFlowService = Depends(get_review_flow_service),
 ) -> SessionResponse:
@@ -160,7 +161,7 @@ def get_review_session(
     responses=error_responses(400, 401, 404, 409, 422),
 )
 def progress_review_session(
-    session_id: str,
+    session_id: SessionRef,
     payload: SessionProgressRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
@@ -198,7 +199,7 @@ def progress_review_session(
     responses=error_responses(400, 401, 404, 409, 422),
 )
 def finish_review_session(
-    session_id: str,
+    session_id: SessionRef,
     payload: SessionFinishRequest | None = None,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
@@ -269,7 +270,7 @@ def bulk_release(
     responses=error_responses(400, 401, 404, 409, 422),
 )
 def undo_bulk_release(
-    bulk_id: str,
+    bulk_id: BulkReleaseRef,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     current_user: User = Depends(get_current_user),
     flow: ReviewFlowService = Depends(get_review_flow_service),

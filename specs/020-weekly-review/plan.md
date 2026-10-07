@@ -761,7 +761,9 @@ widget targets; the web gets one feature folder. Router and module file names av
   `review_due_date_moved` log event (no persisted counter); median formulation age from
   task clocks; median active review time from `active_seconds_by_step`; SC-005
   real-use acceptance from decisions' `ai_use` over `navigator_usage.shown`
-  (contracts/navigator.md §5; on-device use reported separately as an upper bound). The
+  (contracts/navigator.md §5; on-device use reported separately as an upper bound),
+  both counted from the later of `--since` and the oldest retained usage day (usage rows
+  live 35 days), which the read-out prints when it is later than `--since`. The
   read-out is `python -m app.cli review-metrics` (content-free aggregates; Test
   strategy and "Post-release acceptance").
 

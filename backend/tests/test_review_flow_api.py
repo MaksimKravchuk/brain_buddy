@@ -473,16 +473,20 @@ def test_020_FR_050_not_now_sets_a_card_aside_and_leaves_it_asking(
     ],
     ids=["step-finished", "step-skipped", "active-seconds"],
 )
+@pytest.mark.parametrize("ended", [False, True], ids=["open", "ended"])
 def test_020_FR_028_a_quick_run_refuses_progress_for_a_step_outside_its_mode(
-    flow: FlowApi, change: dict[str, Any]
+    flow: FlowApi, change: dict[str, Any], ended: bool
 ) -> None:
     """A step code not in the run's ``steps`` is 422, the validation envelope.
 
     A quick run has four steps; a full-only code would otherwise add a step
-    the run never shows, and could make it qualify (FR-028, FR-029).
+    the run never shows, and could make it qualify (FR-028, FR-029). The
+    check comes first, so an ended run refuses it too instead of ignoring it.
     """
 
     sid = flow.start()["id"]
+    if ended:
+        flow.finish(sid)
     before = flow.stored_session(sid)
     with allure.step("Progress names a step only a full review has"):
         response = flow.progress_raw(sid, **change)
@@ -825,6 +829,59 @@ def test_020_FR_045_a_queue_session_id_of_either_shape_is_looked_up(
     assert response.json()["detail"] == {"resource": "Review session", "id": session_id}
 
 
+_BAD_PATH_IDS = ["SENTINEL free text", "{prefix}_SENTINEL", "{prefix}_" + "0" * 70]
+
+
+@pytest.mark.parametrize("raw_id", _BAD_PATH_IDS, ids=["free-text", "bad", "long"])
+@pytest.mark.parametrize("route", ["get", "progress", "finish", "undo"])
+def test_020_FR_045_a_path_id_of_another_shape_is_422(
+    flow: FlowApi, route: str, raw_id: str
+) -> None:
+    """Path ids are references too (http "Client-supplied ids"): 422, no echo.
+
+    A session path takes a ``SessionRef``; the bulk-release Undo path the
+    ``bulk_`` reference shape. Nothing reaches storage or the 404 body.
+    """
+
+    prefix = "bulk" if route == "undo" else "review"
+    bad = raw_id.format(prefix=prefix)
+    with allure.step(f"{route} with a malformed path id"):
+        if route == "get":
+            response = flow.get_session(bad)
+        elif route == "progress":
+            response = flow.progress_raw(bad, current_step="wins")
+        elif route == "finish":
+            response = flow.finish_raw(bad)
+        else:
+            response = flow.undo_bulk_raw(bad)
+    assert response.status_code == 422, response.text
+    assert response.headers.get("X-Correlation-ID")
+    body = response.json()
+    assert body["message"] == "Request validation failed."
+    name = "bulk_id" if route == "undo" else "session_id"
+    assert [error["loc"] for error in body["detail"]] == [["path", name]]
+    assert "SENTINEL" not in response.text
+
+
+@pytest.mark.parametrize("route", ["get", "finish", "undo"])
+def test_020_FR_045_a_server_minted_path_id_reaches_the_lookup(
+    flow: FlowApi, route: str
+) -> None:
+    """The server-minted ``<prefix>_<12 hex>`` shape is accepted on every path."""
+
+    if route == "undo":
+        response = flow.undo_bulk_raw("bulk_0123456789ab")
+        resource = "Review bulk release"
+    elif route == "get":
+        response = flow.get_session("review_0123456789ab")
+        resource = "Review session"
+    else:
+        response = flow.finish_raw("review_0123456789ab")
+        resource = "Review session"
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"]["resource"] == resource
+
+
 def test_020_FR_042_flag_off_hides_the_reads_and_accepts_the_writes(
     flow: FlowApi,
 ) -> None:
@@ -946,6 +1003,32 @@ def test_020_FR_028_without_a_snapshot_the_queue_is_the_live_aggregate(
     ordered = _asking_seeds(flow)
     sid = flow.start()["id"]
     assert flow.ids(flow.queue("decisions", sid)) == [task.id for task in ordered]
+    assert flow.stored_session(sid).decision_queue is None
+
+
+def test_020_FR_028_020_FR_034_an_empty_snapshot_stays_taken(flow: FlowApi) -> None:
+    """Taken with nothing asking is not "not taken": the queue stays empty.
+
+    A later ``snapshot_decision_queue`` (another device opening the step, a
+    resent change) must not fill it mid-review (http §6, data-model E3).
+    """
+
+    fresh = flow.seed(title="Ten days", formulation_started_at=flow.clock() - 10 * DAY)
+    sid = flow.start()["id"]
+    with allure.step("The decision step opens with nothing asking"):
+        flow.progress(sid, current_step="decisions", snapshot_decision_queue=True)
+    assert flow.stored_session(sid).decision_queue == []
+    assert flow.queue("decisions", sid)["items"] == []
+
+    with allure.step("A task starts asking, then the snapshot is asked for again"):
+        flow.put_settings(threshold_days=7)
+        assert flow.ids(flow.queue("decisions")) == [fresh.id]
+        flow.progress(sid, snapshot_decision_queue=True)
+    assert flow.stored_session(sid).decision_queue == []
+    assert flow.queue("decisions", sid)["items"] == []
+    repo = flow.container.task_repo
+    with repo.command_lock(flow.owner_id):
+        repo.save_review_session(flow.stored_session(sid))
     assert flow.stored_session(sid).decision_queue == []
 
 
