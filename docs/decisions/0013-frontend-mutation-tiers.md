@@ -43,6 +43,10 @@ The frontend gets the same two tiers as the backend, measured with Stryker
   `src/features/brain-dump/brainDumpNavigation.ts`
 - `src/stores/authStore.ts`
 - `src/utils/error.ts`, `src/utils/telemetry.ts`
+- `src/features/review/formulation.ts` — added by spec 020 (research R20,
+  task T067): the web's pure formulation-clock module (substantive-change
+  normalisation and classification over the shared vectors). Observed only;
+  it was not part of the 2026-08-10 measurement below and has no score yet.
 
 **Enforced scope** — the tier that is allowed to gate pull requests
 (`frontend/mutation-enforced-scope.txt`): the modules that clear ADR-0004's 95%
