@@ -1702,8 +1702,8 @@ def _container_with(observer: Any) -> Any:
 
     from app.container import build_container as real_build_container
 
-    def build(config: Any) -> Any:
-        container = real_build_container(config)
+    def build(config: Any, **options: Any) -> Any:
+        container = real_build_container(config, **options)
         container.agent_observer.shutdown()
         return replace(container, agent_observer=observer)
 

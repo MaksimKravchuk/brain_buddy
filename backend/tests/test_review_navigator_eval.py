@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import unicodedata
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -30,6 +29,7 @@ from app.modules.tasks.navigator import (
     MAX_PROPOSAL_CHARS,
     NavigatorInput,
     build_navigator_input,
+    grounding_terms,
     validate_navigator_output,
 )
 from app.schemas.review import NavigatorSuggestionRequest
@@ -76,21 +76,16 @@ def _shape_ok(text: str) -> bool:
     )
 
 
-def _entity_like(token: str, *, first: bool) -> bool:
-    letters = [char for char in token if char.isalpha()]
-    return (
-        (bool(letters) and letters[0].isupper() and not first)
-        or any(char.isdecimal() for char in token)
-        or any(unicodedata.category(char) == "Sc" for char in token)
-    )
-
-
 def invented(text: str, case: dict[str, Any], navigator_input: NavigatorInput) -> bool:
-    """The invented-fact screen: a name, number or amount not covered by the
-    case's ``allowed_entities``, its title, project name or sibling titles.
+    """The invented-fact screen: a name, number, amount or date expression
+    not covered by the case's ``allowed_entities``, its title, project name or
+    sibling titles.
 
-    Facts from the notes count only when the fixture lists them as allowed, so
-    the curated list, not the validator, is the reference here.
+    What counts as a fact is exactly rule 3's trigger (``grounding_terms``:
+    lowercase Russian months and relative dates included, a duration of at
+    most 30 minutes excepted). Facts from the notes count only when the
+    fixture lists them as allowed, so the curated list, not the validator's
+    input, is the reference here.
     """
 
     covered = [
@@ -103,15 +98,10 @@ def invented(text: str, case: dict[str, Any], navigator_input: NavigatorInput) -
         )
         if value
     ]
-    for index, token in enumerate(text.split()):
-        key = formulation_key(token)
-        if (
-            key
-            and _entity_like(token, first=index == 0)
-            and not any(f" {key} " in value for value in covered)
-        ):
-            return True
-    return False
+    return any(
+        not any(f" {term} " in value for value in covered)
+        for term in grounding_terms(text)
+    )
 
 
 def _empty_bucket() -> dict[str, Any]:
@@ -358,6 +348,47 @@ def test_020_FR_021_screens_hold_for_any_recorded_file() -> None:
     with allure.step("the aggregate read-out"):
         attach_report(report)
         print(json.dumps(report, sort_keys=True))
+
+
+def test_020_SC_005_invented_screen_uses_the_rule_3_triggers() -> None:
+    """Advisory 5: the screen flags what rule 3 grounds, including lowercase
+    Russian month and relative date words and English relative dates, and
+    leaves a duration of at most 30 minutes alone (I-2)."""
+
+    case: dict[str, Any] = {
+        "kind": "first_step",
+        "title": "Разобрать гараж",
+        "notes": "Старые коробки",
+        "stall_reason": "no_energy",
+        "project_name": None,
+        "sibling_titles": [],
+        "allowed_entities": [],
+    }
+    navigator_input = case_input(case)
+    with allure.step("screen single proposals"):
+        flagged = {
+            text: invented(text, case, navigator_input)
+            for text in (
+                "Разобрать коробки в июле",
+                "Разобрать коробки завтра",
+                "Разобрать коробки на следующей неделе",
+                "Sort the boxes next week",
+                "Потратить 5 минут на коробки",
+                "Take a 2-minute look at the boxes",
+                "Потратить 40 минут на коробки",
+                "Разобрать коробки",
+            )
+        }
+    assert flagged == {
+        "Разобрать коробки в июле": True,
+        "Разобрать коробки завтра": True,
+        "Разобрать коробки на следующей неделе": True,
+        "Sort the boxes next week": True,
+        "Потратить 5 минут на коробки": False,
+        "Take a 2-minute look at the boxes": False,
+        "Потратить 40 минут на коробки": True,
+        "Разобрать коробки": False,
+    }
 
 
 def attach_report(report: dict[str, Any]) -> None:

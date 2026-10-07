@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import time
 import unicodedata
 from collections.abc import Callable, Sequence
@@ -131,20 +132,42 @@ def system_prompt(kind: NavigatorKind) -> str:
     return _INSTRUCTIONS.format(opening=opening)
 
 
+_DELIMITER_TAGS = (
+    "task_title",
+    "task_notes",
+    "stall_reason",
+    "project_name",
+    "open_tasks",
+    "kind",
+)
+_DELIMITER_OPENING = re.compile(
+    r"<(?=\s*/?\s*(?:" + "|".join(_DELIMITER_TAGS) + r")\b)", re.IGNORECASE
+)
+
+
+def _data(value: str) -> str:
+    """User text for the data role: a ``<`` that would open or close one of
+    the delimiter tags (any case, any spacing) is sent as ``&lt;``, so content
+    can neither end its own field nor forge another (§3)."""
+
+    return _DELIMITER_OPENING.sub("&lt;", value)
+
+
 def user_prompt(navigator_input: NavigatorInput) -> str:
     """The data role: delimited input, never interpolated into instructions."""
 
     lines: list[str] = []
     if navigator_input.task_title is not None:
-        lines.append(f"<task_title>{navigator_input.task_title}</task_title>")
+        lines.append(f"<task_title>{_data(navigator_input.task_title)}</task_title>")
     if navigator_input.task_notes:
-        lines.append(f"<task_notes>{navigator_input.task_notes}</task_notes>")
+        lines.append(f"<task_notes>{_data(navigator_input.task_notes)}</task_notes>")
     if navigator_input.stall_reason is not None:
         lines.append(f"<stall_reason>{navigator_input.stall_reason}</stall_reason>")
     if navigator_input.project_name is not None:
-        lines.append(f"<project_name>{navigator_input.project_name}</project_name>")
+        project = _data(navigator_input.project_name)
+        lines.append(f"<project_name>{project}</project_name>")
     lines.append("<open_tasks>")
-    lines.extend(f"- {title}" for title in navigator_input.open_task_titles)
+    lines.extend(f"- {_data(title)}" for title in navigator_input.open_task_titles)
     lines.append("</open_tasks>")
     lines.append(f"<kind>{navigator_input.kind}</kind>")
     return "\n".join(lines)
@@ -167,18 +190,6 @@ NOTES_SEPARATOR = "\n…\n"
 """U+000A U+2026 U+000A: the one line put between the kept head and tail."""
 
 
-def _is_reduced(notes: str) -> bool:
-    """Whether ``notes`` already is a head ≤ 2 000 + separator + tail ≤ 4 000."""
-
-    start = notes.find(NOTES_SEPARATOR)
-    while start >= 0:
-        tail = len(notes) - start - len(NOTES_SEPARATOR)
-        if start <= NOTES_HEAD_CHARS and tail <= NOTES_TAIL_CHARS:
-            return True
-        start = notes.find(NOTES_SEPARATOR, start + 1)
-    return False
-
-
 def _fitting_count(lines: list[str], budget: int) -> int:
     """How many leading ``lines``, joined by U+000A, fit ``budget`` scalars."""
 
@@ -197,14 +208,13 @@ def reduce_notes(notes: str) -> tuple[str, bool]:
     Notes of at most 6 000 scalars are unchanged. Longer notes keep the first
     whole lines up to 2 000 scalars and the last whole lines up to 4 000,
     joined by ``NOTES_SEPARATOR``; lines are split on U+000A with a preceding
-    U+000D dropped. The second value is ``True`` when a line was dropped. A
-    reduced note is a fixed point (the server's backstop leaves it unchanged),
-    so the result is at most 6 003 scalars, the request limit.
+    U+000D dropped. The second value is ``True`` when a line was dropped; when
+    every line fits, the lines come back rejoined with U+000A only. Notes that
+    already hold a ``…`` line get no special case. The result is at most 6 003
+    scalars, the request limit, and reducing it again returns the same text.
     """
 
-    if len(notes) <= NOTES_BUDGET_CHARS or (
-        len(notes) <= NOTES_BUDGET_CHARS + len(NOTES_SEPARATOR) and _is_reduced(notes)
-    ):
+    if len(notes) <= NOTES_BUDGET_CHARS:
         return notes, False
     lines = [line.removesuffix("\r") for line in notes.split("\n")]
     head = _fitting_count(lines, NOTES_HEAD_CHARS)
@@ -242,6 +252,9 @@ _EN_DATE_WORDS = frozenset(
         "friday",
         "saturday",
         "sunday",
+        "today",
+        "tonight",
+        "tomorrow",
     }
 )
 """Lower-case English date words; "may" is left to the capital-letter rule
@@ -266,7 +279,33 @@ _RU_DATE_STEMS = (
     "суббот",
     "воскресень",
 )
-_RU_DATE_WORDS = frozenset({"мая", "май", "среда", "среду", "среды", "среде", "средой"})
+_RU_DATE_WORDS = frozenset(
+    {
+        "май",
+        "мая",
+        "мае",
+        "маю",
+        "маем",
+        "среда",
+        "среду",
+        "среды",
+        "среде",
+        "средой",
+        "сегодня",
+        "завтра",
+        "послезавтра",
+    }
+)
+_DATE_PHRASES = ("next week", "next month", "this weekend", "на следующей неделе")
+"""Relative date expressions of several words, as ``formulation_key`` words;
+each must occur as a whole in one input field (§2 rule 3)."""
+
+MAX_EXEMPT_DURATION_MINUTES = 30
+"""§2 rule 3: the prompt asks for steps that "would take under 30 minutes" and
+for "a 2-minute starter step", so such a duration needs no grounding."""
+
+_MINUTE_WORDS = frozenset({"min", "mins", "minute", "minutes", "мин"})
+_MINUTE_STEM = "минут"
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,7 +354,10 @@ def _has_smart_add_token(text: str) -> bool:
     return False
 
 
-def _is_date_word(key: str) -> bool:
+def is_date_word(key: str) -> bool:
+    """A month, weekday or relative day word (``formulation_key`` form, §2
+    rule 3), English or Russian, in any case once keyed."""
+
     return (
         key in _EN_DATE_WORDS or key in _RU_DATE_WORDS or key.startswith(_RU_DATE_STEMS)
     )
@@ -331,8 +373,58 @@ def _needs_grounding(token: str, *, first: bool, key: str) -> bool:
         (capitalised and not first)
         or any(char.isdecimal() for char in token)
         or any(unicodedata.category(char) == "Sc" for char in token)
-        or _is_date_word(key)
+        or is_date_word(key)
     )
+
+
+def _is_minute_word(word: str) -> bool:
+    return word in _MINUTE_WORDS or word.startswith(_MINUTE_STEM)
+
+
+def _is_short_minutes(word: str) -> bool:
+    """ASCII digits only, at most ``MAX_EXEMPT_DURATION_MINUTES``."""
+
+    return (
+        word.isascii() and word.isdigit() and int(word) <= MAX_EXEMPT_DURATION_MINUTES
+    )
+
+
+def _duration_tokens(keys: Sequence[str]) -> set[int]:
+    """Indexes of the tokens of a duration of at most 30 minutes: a number
+    joined to its minute word ("2-minute", "10-минутный") or followed by one
+    ("10 minutes", "5 мин", "2 минуты")."""
+
+    exempt: set[int] = set()
+    for index, key in enumerate(keys):
+        words = key.split()
+        if not words or not _is_short_minutes(words[0]):
+            continue
+        if len(words) == 2 and _is_minute_word(words[1]):
+            exempt.add(index)
+        elif len(words) == 1 and index + 1 < len(keys):
+            following = keys[index + 1].split()
+            if following and _is_minute_word(following[0]):
+                exempt.update((index, index + 1))
+    return exempt
+
+
+def grounding_terms(text: str) -> tuple[str, ...]:
+    """What rule 3 must find in the input, as ``formulation_key`` text: each
+    trigger token (a short duration excepted) and each relative date phrase."""
+
+    tokens = text.split()
+    keys = [formulation_key(token) for token in tokens]
+    exempt = _duration_tokens(keys)
+    terms = [
+        key
+        for index, (token, key) in enumerate(zip(tokens, keys, strict=True))
+        if key
+        and index not in exempt
+        and _needs_grounding(token, first=index == 0, key=key)
+    ]
+    keyed = f" {formulation_key(text)} "
+    terms.extend(phrase for phrase in _DATE_PHRASES if f" {phrase} " in keyed)
+    return tuple(terms)
 
 
 def _input_keys(navigator_input: NavigatorInput) -> tuple[str, ...]:
@@ -346,16 +438,13 @@ def _input_keys(navigator_input: NavigatorInput) -> tuple[str, ...]:
 
 
 def _is_grounded(text: str, input_keys: tuple[str, ...]) -> bool:
-    """Rule 3 (FR-021): every trigger token occurs, after ``formulation_key``,
+    """Rule 3 (FR-021): every grounding term occurs, after ``formulation_key``,
     as whole words in one input field (case-insensitively)."""
 
-    for index, token in enumerate(text.split()):
-        key = formulation_key(token)
-        if not key or not _needs_grounding(token, first=index == 0, key=key):
-            continue
-        if not any(f" {key} " in field for field in input_keys):
-            return False
-    return True
+    return all(
+        any(f" {term} " in field for field in input_keys)
+        for term in grounding_terms(text)
+    )
 
 
 def validate_navigator_output(
@@ -776,9 +865,15 @@ class NavigatorService:
         except NavigatorProviderTimeout:
             self._settle(owner_id, day, estimate, actual=0.0, shown=False)
             raise self._fail(record, "navigator_timeout") from None
-        except Exception:  # any provider failure releases the reservation
+        except NavigatorProviderFailure:
             self._settle(owner_id, day, estimate, actual=0.0, shown=False)
             raise self._fail(record, "navigator_provider_error") from None
+        except Exception:
+            # Not a declared port failure but a bug: release the reservation
+            # and let it propagate, so the normal error path logs its
+            # traceback. The outcome stays "error"; the log line has no text.
+            self._settle(owner_id, day, estimate, actual=0.0, shown=False)
+            raise
         record.output_tokens = result.output_tokens
         output = validate_navigator_output(
             navigator_input,
@@ -871,10 +966,13 @@ class NavigatorService:
 __all__ = [
     "CHARS_PER_TOKEN",
     "CONSENT_TEXT_VERSION",
+    "MAX_EXEMPT_DURATION_MINUTES",
     "MAX_PROPOSALS",
     "MAX_PROPOSAL_CHARS",
     "NOTES_BUDGET_CHARS",
+    "NOTES_HEAD_CHARS",
     "NOTES_SEPARATOR",
+    "NOTES_TAIL_CHARS",
     "PROMPT_VERSION",
     "NavigatorInput",
     "NavigatorKind",
@@ -893,6 +991,8 @@ __all__ = [
     "consent_is_current",
     "estimate_input_tokens",
     "granted_consent",
+    "grounding_terms",
+    "is_date_word",
     "navigator_error",
     "reduce_notes",
     "revoked_consent",

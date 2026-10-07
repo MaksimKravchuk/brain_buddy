@@ -21,6 +21,9 @@ variable and never its value. Nothing here logs; the service logs codes only.
 from __future__ import annotations
 
 import json
+import queue
+import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -217,28 +220,75 @@ class OpenAINavigatorProvider:
         }
 
     def suggest(self, navigator_input: NavigatorInput) -> NavigatorProviderResult:
+        """One call bounded by **one** overall deadline of ``timeout_seconds``.
+
+        httpx timeouts apply per phase (connect, each read), so a slow
+        connect followed by a trickling body could take several times the
+        limit. The call therefore runs on a short-lived worker thread that
+        also stops reading once the deadline passes, and this thread waits
+        for it no longer than the deadline.
+        """
+
+        deadline = time.monotonic() + self.timeout_seconds
+        outcome: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+        worker = threading.Thread(
+            target=self._call_into,
+            args=(self.request_body(navigator_input), deadline, outcome),
+            name="review-navigator-call",
+            daemon=True,
+        )
+        worker.start()
         try:
-            with httpx.Client(
-                transport=self.transport, timeout=self.timeout_seconds
-            ) as client:
-                response = client.post(
-                    self.endpoint,
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                    json=self.request_body(navigator_input),
-                )
-                response.raise_for_status()
-        except httpx.TimeoutException:
+            ok, value = outcome.get(timeout=max(0.0, deadline - time.monotonic()))
+        except queue.Empty:
             raise NavigatorProviderTimeout from None
+        if not ok:
+            raise value
+        status, body = value
+        if not 200 <= status < 300:
+            raise NavigatorProviderFailure("provider returned an error status")
+        return _parse_completion(body)
+
+    def _call_into(
+        self,
+        payload: dict[str, Any],
+        deadline: float,
+        outcome: queue.Queue[tuple[bool, Any]],
+    ) -> None:
+        """The worker: ``(True, (status, body))`` or ``(False, exception)``."""
+
+        try:
+            outcome.put((True, self._post(payload, deadline)))
+        except httpx.TimeoutException:
+            outcome.put((False, NavigatorProviderTimeout()))
         except httpx.HTTPError:
-            raise NavigatorProviderFailure("provider transport failed") from None
-        return _parse_completion(response)
+            outcome.put((False, NavigatorProviderFailure("provider transport failed")))
+        except Exception as error:  # noqa: BLE001 - re-raised by the caller
+            outcome.put((False, error))
+
+    def _post(self, payload: dict[str, Any], deadline: float) -> tuple[int, bytes]:
+        chunks: list[bytes] = []
+        with (
+            httpx.Client(transport=self.transport, timeout=self.timeout_seconds) as c,
+            c.stream(
+                "POST",
+                self.endpoint,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json=payload,
+            ) as response,
+        ):
+            for chunk in response.iter_bytes():
+                if time.monotonic() > deadline:
+                    raise httpx.ReadTimeout("navigator deadline passed")
+                chunks.append(chunk)
+            return response.status_code, b"".join(chunks)
 
 
-def _parse_completion(response: httpx.Response) -> NavigatorProviderResult:
+def _parse_completion(raw: bytes) -> NavigatorProviderResult:
     """Read the reply; an unusable body becomes an empty (malformed) result."""
 
     try:
-        body: Any = response.json()
+        body: Any = json.loads(raw)
     except ValueError:
         return NavigatorProviderResult(proposals=(), clarifying_question=None)
     usage = body.get("usage") if isinstance(body, dict) else None

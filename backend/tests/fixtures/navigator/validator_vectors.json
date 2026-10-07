@@ -1,0 +1,1327 @@
+{
+  "schema": "brainbuddy-navigator-validator-vectors/v1",
+  "format": "Canonical file (contracts/navigator.md §2 rules 1-4). 'inputs' are NavigatorInput values by name; each vector names one, gives the raw model output (proposals, clarifying_question) and the expected result: kind 'proposals' (the list shown), 'question' (the trimmed question) or 'malformed'. Every implementation of the validator (navigator.py, NavigatorOutputValidator, the web validator) runs this file; copies are byte-identical.",
+  "inputs": {
+    "bathroom": {
+      "kind": "first_step",
+      "task_title": "Renovate the bathroom",
+      "task_notes": "Tiles from the old shop. Ask Anna.",
+      "stall_reason": null,
+      "project_name": null,
+      "open_task_titles": []
+    },
+    "flat-siblings": {
+      "kind": "first_step",
+      "task_title": "Renovate the bathroom",
+      "task_notes": "Tiles from the old shop",
+      "stall_reason": null,
+      "project_name": "Flat",
+      "open_task_titles": [
+        "Buy paint",
+        "Call the plumber"
+      ]
+    },
+    "facts": {
+      "kind": "first_step",
+      "task_title": "Pay Anna 50 € by Monday",
+      "task_notes": "Invoice 2026-10-12, Сбербанк, до понедельника, IKEA",
+      "stall_reason": null,
+      "project_name": "Flat",
+      "open_task_titles": []
+    },
+    "project-empty": {
+      "kind": "project_next_action",
+      "task_title": null,
+      "task_notes": null,
+      "stall_reason": null,
+      "project_name": "Flat",
+      "open_task_titles": []
+    },
+    "garage": {
+      "kind": "first_step",
+      "task_title": "Разобрать гараж",
+      "task_notes": "Старые коробки",
+      "stall_reason": "no_energy",
+      "project_name": null,
+      "open_task_titles": []
+    },
+    "relative-dates": {
+      "kind": "first_step",
+      "task_title": "Phone the bank",
+      "task_notes": "Visit them next week or tomorrow. Позвонить завтра. Встреча на следующей неделе.",
+      "stall_reason": null,
+      "project_name": null,
+      "open_task_titles": []
+    },
+    "split-words": {
+      "kind": "first_step",
+      "task_title": "Plan the week",
+      "task_notes": "Pick the next tile",
+      "stall_reason": null,
+      "project_name": null,
+      "open_task_titles": []
+    }
+  },
+  "vectors": [
+    {
+      "id": "r1-drop-empty",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "",
+        "Measure the wall"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall"
+        ]
+      }
+    },
+    {
+      "id": "r1-drop-blank",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "   ",
+        "Measure the wall"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall"
+        ]
+      }
+    },
+    {
+      "id": "r1-drop-multi-line",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Measure the wall\nthen tile it",
+        "Measure the wall"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall"
+        ]
+      }
+    },
+    {
+      "id": "r1-drop-carriage-return",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Measure the wall\rthen tile it",
+        "Measure the wall"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall"
+        ]
+      }
+    },
+    {
+      "id": "r1-drop-line-separator",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Measure the wall\u2028then tile it",
+        "Measure the wall"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall"
+        ]
+      }
+    },
+    {
+      "id": "r1-drop-over-200",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+        "Measure the wall"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall"
+        ]
+      }
+    },
+    {
+      "id": "r1-drop-hashtag",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Buy tiles #home",
+        "Measure the wall"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall"
+        ]
+      }
+    },
+    {
+      "id": "r1-drop-at-tag",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Buy tiles @errands",
+        "Measure the wall"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall"
+        ]
+      }
+    },
+    {
+      "id": "r1-drop-quoted-tag",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Buy tiles @\"big shop\"",
+        "Measure the wall"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall"
+        ]
+      }
+    },
+    {
+      "id": "r1-drop-priority-marker",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Buy tiles !1",
+        "Measure the wall"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall"
+        ]
+      }
+    },
+    {
+      "id": "r1-trim-bang-200",
+      "rule": 1,
+      "note": "trimmed; a trailing ! is no priority marker; exactly 200 passes",
+      "input": "bathroom",
+      "proposals": [
+        "  Measure the wall!  ",
+        "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+        "Mail the shop, now!"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall!",
+          "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+          "Mail the shop, now!"
+        ]
+      }
+    },
+    {
+      "id": "r1-keep-hash-at-end",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Measure the wall #"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall #"
+        ]
+      }
+    },
+    {
+      "id": "r1-keep-hash-before-space",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Pay the shop # later"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Pay the shop # later"
+        ]
+      }
+    },
+    {
+      "id": "r1-keep-bang-before-space",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Measure it ! then tile"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure it ! then tile"
+        ]
+      }
+    },
+    {
+      "id": "r1-keep-hash-inside-word",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Write the c# notes"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write the c# notes"
+        ]
+      }
+    },
+    {
+      "id": "r1-keep-at-inside-word",
+      "rule": 1,
+      "input": "bathroom",
+      "proposals": [
+        "Mail the shop@once"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Mail the shop@once"
+        ]
+      }
+    },
+    {
+      "id": "r2-duplicates",
+      "rule": 2,
+      "note": "the current title, a sent open title and an earlier proposal",
+      "input": "flat-siblings",
+      "proposals": [
+        "renovate the BATHROOM.",
+        "Buy  paint!",
+        "Measure the wall",
+        "measure the wall",
+        "Pick tile samples"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall",
+          "Pick tile samples"
+        ]
+      }
+    },
+    {
+      "id": "r3-name-in-notes",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Call Anna about the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Call Anna about the tiles",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-lower-name",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Call anna about the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Call anna about the tiles",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-invented-name",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Call Boris about the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-first-word-capital",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Measure the wall",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-invented-brand",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Visit IKEA for tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-invented-number",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Order 12 tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-invented-amount",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Spend $50 on tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-invented-currency",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Spend €50 on tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-invented-weekday",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Go to the shop on Monday",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-ru-weekday",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Сходить в магазин в понедельник",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-ru-month",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Заказать плитку к марту",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-en-month-lower",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Order tiles in march",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-plain-words",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Visit the old shop",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Visit the old shop",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-grounded-bank",
+      "rule": 3,
+      "input": "facts",
+      "proposals": [
+        "Open the Сбербанк app"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Open the Сбербанк app"
+        ]
+      }
+    },
+    {
+      "id": "r3-grounded-amount",
+      "rule": 3,
+      "input": "facts",
+      "proposals": [
+        "Transfer 50 € to Anna"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Transfer 50 € to Anna"
+        ]
+      }
+    },
+    {
+      "id": "r3-grounded-brand-weekday",
+      "rule": 3,
+      "input": "facts",
+      "proposals": [
+        "Ask IKEA about Monday"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Ask IKEA about Monday"
+        ]
+      }
+    },
+    {
+      "id": "r3-grounded-date",
+      "rule": 3,
+      "input": "facts",
+      "proposals": [
+        "Check the invoice 2026-10-12"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Check the invoice 2026-10-12"
+        ]
+      }
+    },
+    {
+      "id": "r3-grounded-ru-weekday",
+      "rule": 3,
+      "input": "facts",
+      "proposals": [
+        "Позвонить до понедельника"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Позвонить до понедельника"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-2-minutes",
+      "rule": 3,
+      "note": "duration exemption",
+      "input": "bathroom",
+      "proposals": [
+        "Spend 2 minutes measuring the wall",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Spend 2 minutes measuring the wall",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-2-minute-hyphen",
+      "rule": 3,
+      "note": "duration exemption",
+      "input": "bathroom",
+      "proposals": [
+        "Take a 2-minute look at the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Take a 2-minute look at the tiles",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-10-minute",
+      "rule": 3,
+      "note": "duration exemption",
+      "input": "bathroom",
+      "proposals": [
+        "Do a 10 minute tidy of the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Do a 10 minute tidy of the tiles",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-5-min",
+      "rule": 3,
+      "note": "duration exemption",
+      "input": "bathroom",
+      "proposals": [
+        "Sort the tiles for 5 min",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Sort the tiles for 5 min",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-30-minutes",
+      "rule": 3,
+      "note": "duration exemption",
+      "input": "bathroom",
+      "proposals": [
+        "Spend 30 minutes on the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Spend 30 minutes on the tiles",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-31-minutes",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Spend 31 minutes on the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-45-minute",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Book a 45-minute slot for the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-2-hours",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Spend 2 hours on the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-2-tiles",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Measure 2 tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-duration-and-name",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Spend 2 minutes calling Boris",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-ru-5-min",
+      "rule": 3,
+      "note": "duration exemption",
+      "input": "garage",
+      "proposals": [
+        "Потратить 5 мин на коробки",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Потратить 5 мин на коробки",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-ru-2-minuty",
+      "rule": 3,
+      "note": "duration exemption",
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки за 2 минуты",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Разобрать коробки за 2 минуты",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-ru-10-minutnyi",
+      "rule": 3,
+      "note": "duration exemption",
+      "input": "garage",
+      "proposals": [
+        "Сделать 10-минутный разбор коробок",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Сделать 10-минутный разбор коробок",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-ru-40-minut",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Потратить 40 минут на коробки",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-ru-2-boxes",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать 2 коробки",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-tomorrow",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Measure the wall tomorrow",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-today",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Measure the wall today",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-tonight",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Measure the wall tonight",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-next-week",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Buy tiles next week",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-next-month",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Buy tiles next month",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-this-weekend",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Buy tiles this weekend",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-lower-weekday",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Buy tiles on friday",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-zavtra",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки завтра",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-segodnya",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Сегодня разобрать коробки",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-poslezavtra",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки послезавтра",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-next-week",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки на следующей неделе",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-friday",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки в пятницу",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-sunday",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки в воскресенье",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-may",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки в мае",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-march",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки в марте",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-phrase-split-in-input",
+      "rule": 3,
+      "input": "split-words",
+      "proposals": [
+        "Plan the tiles next week",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-other-phrase",
+      "rule": 3,
+      "input": "relative-dates",
+      "proposals": [
+        "Phone them this weekend",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-grounded-tomorrow",
+      "rule": 3,
+      "input": "relative-dates",
+      "proposals": [
+        "Ring the bank tomorrow"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Ring the bank tomorrow"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-grounded-next-week",
+      "rule": 3,
+      "input": "relative-dates",
+      "proposals": [
+        "Plan the visit next week"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Plan the visit next week"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-grounded-ru-zavtra",
+      "rule": 3,
+      "input": "relative-dates",
+      "proposals": [
+        "Позвонить в банк завтра"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Позвонить в банк завтра"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-grounded-ru-next-week",
+      "rule": 3,
+      "input": "relative-dates",
+      "proposals": [
+        "Записаться на следующей неделе"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Записаться на следующей неделе"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-question",
+      "rule": 4,
+      "note": "a question is held to rule 3 too",
+      "input": "bathroom",
+      "proposals": [
+        "Call Boris"
+      ],
+      "clarifying_question": "Should the wall be measured tomorrow?",
+      "expect": {
+        "kind": "malformed"
+      }
+    },
+    {
+      "id": "r4-question",
+      "rule": 4,
+      "input": "bathroom",
+      "proposals": [
+        "Call Boris"
+      ],
+      "clarifying_question": "  Which wall comes first?  ",
+      "expect": {
+        "kind": "question",
+        "clarifying_question": "Which wall comes first?"
+      }
+    },
+    {
+      "id": "r4-proposals-win-cap-3",
+      "rule": 4,
+      "input": "bathroom",
+      "proposals": [
+        "Measure the wall",
+        "Pick tile samples",
+        "Visit the old shop",
+        "Ask Anna"
+      ],
+      "clarifying_question": "Which wall?",
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall",
+          "Pick tile samples",
+          "Visit the old shop"
+        ]
+      }
+    },
+    {
+      "id": "r4-malformed-nothing",
+      "rule": 4,
+      "input": "bathroom",
+      "proposals": [],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "malformed"
+      }
+    },
+    {
+      "id": "r4-malformed-all-dropped",
+      "rule": 4,
+      "input": "bathroom",
+      "proposals": [
+        "Call Boris"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "malformed"
+      }
+    },
+    {
+      "id": "r4-malformed-ungrounded-question",
+      "rule": 4,
+      "input": "bathroom",
+      "proposals": [],
+      "clarifying_question": "Should Boris do it?",
+      "expect": {
+        "kind": "malformed"
+      }
+    },
+    {
+      "id": "r4-malformed-multi-line-question",
+      "rule": 4,
+      "input": "bathroom",
+      "proposals": [],
+      "clarifying_question": "Which wall?\nOr the floor?",
+      "expect": {
+        "kind": "malformed"
+      }
+    },
+    {
+      "id": "r4-malformed-blank-question",
+      "rule": 4,
+      "input": "bathroom",
+      "proposals": [],
+      "clarifying_question": "   ",
+      "expect": {
+        "kind": "malformed"
+      }
+    },
+    {
+      "id": "r4-project-question",
+      "rule": 4,
+      "input": "project-empty",
+      "proposals": [],
+      "clarifying_question": "What is the Flat project for?",
+      "expect": {
+        "kind": "question",
+        "clarifying_question": "What is the Flat project for?"
+      }
+    }
+  ]
+}

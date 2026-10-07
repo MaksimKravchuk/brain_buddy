@@ -258,7 +258,7 @@ def create_app() -> FastAPI:
         redoc_url=f"{config.api_prefix}/redoc",
     )
     app.state.config = config
-    app.state.container = build_container(config)
+    app.state.container = build_container(config, serve_navigator=True)
     _maybe_seed_admin(app.state.container)
     # Retry-safe startup scan: recover any provider lease that expired while
     # no process was running, then purge whatever raw audio/working

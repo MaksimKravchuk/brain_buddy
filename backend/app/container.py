@@ -10,7 +10,10 @@ from functools import partial
 from typing import Never
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
-from app.ai.review_navigator import build_review_navigator_provider
+from app.ai.review_navigator import (
+    DisabledNavigatorProvider,
+    build_review_navigator_provider,
+)
 from app.ai.title_completion import build_title_completion_provider
 from app.core.config import (
     AppConfig,
@@ -344,10 +347,24 @@ def _allowed_external_provider_categories(config: AppConfig) -> frozenset[str]:
     return frozenset(allowed)
 
 
-def build_container(config: AppConfig) -> Container:
+def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Container:
+    """Wire every service for one process.
+
+    Only the web app (``app.main.create_app``) passes ``serve_navigator=True``:
+    it alone serves the navigator, so it alone builds the configured provider
+    and refuses to start when that is misconfigured. The operational CLI, the
+    GDPR purge included, builds with the navigator disabled and never reads
+    its key (account management must always run).
+    """
+
     # First, before any store is opened: a misconfigured navigator must stop
-    # the build (research R13), naming the key variable and never its value.
-    review_navigator_provider = _build_review_navigator_provider(config)
+    # the web app's build (research R13), naming the key variable and never
+    # its value.
+    review_navigator_provider = (
+        _build_review_navigator_provider(config)
+        if serve_navigator
+        else DisabledNavigatorProvider()
+    )
     data_root = config.data_dir
     auth_migration = AuthMigration(data_root, None)
     auth_migration.resume_cleanup()
