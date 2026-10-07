@@ -41,7 +41,9 @@ is at most 6 003 scalars, and that is the request limit for `task.notes` (http �
 nothing is dropped: the lines are rejoined with U+000A (so the U+000D are gone) and
 `truncated = false`. Notes that already contain a `…` line get no special case, so
 client-reduced notes of 6 001–6 003 scalars come back from the server's backstop as
-the same text, usually with `truncated = true`. Title,
+the same text, usually with `truncated = true`. The server reports only what its
+backstop dropped, so a client ORs the response's `notes_truncated` with its own
+reduction's `truncated` before showing the hint. Title,
 stall reason, project name and sibling titles are never dropped. The budget is chosen so
 the reduced input, with instructions and siblings, fits the smallest supported window
 (Apple's 4,096 tokens on iOS 26.x, `research-on-device-model.md` §1) at the
@@ -77,14 +79,15 @@ rule 5 runs on every client after them:
 3. Grounding check (FR-021): drop a proposal containing a **capitalised token
    (other than the first word), number, currency amount or date expression** that does not occur
    (case-insensitively, after `formulation_key`) in the input fields. Date expressions
-   include, in any case, the relative dates `today`, `tonight`, `tomorrow`, `next week`,
-   `next month`, `this weekend`, `сегодня`, `завтра`, `послезавтра` and
-   `на следующей неделе` besides month and weekday names; a phrase must occur whole in
-   one input field. A duration of at most 30 minutes is exempt, because the prompt asks
-   for actions that "would take under 30 minutes" and for "a 2-minute starter step"
-   (§3): ASCII digits for 0–30 joined to or followed by a minute word (`min`, `mins`,
-   `minute`, `minutes`, `мин`, or a word starting `минут`), as in "2-minute",
-   "10 minute", "5 мин", "2 минуты". This is a cheap
+   include, in any case, the relative dates `tonight`, `tomorrow`, `next week`,
+   `next month`, `this weekend`, `завтра`, `послезавтра` and `на следующей неделе`
+   besides month and weekday names; a phrase must occur whole in one input field.
+   Two prompt-sourced expressions are exempt. `today` and `сегодня`, in any case,
+   because the prompt asks for actions that "could be started today" (§3). A duration
+   of at most 30 minutes, because the prompt asks for actions that "would take under
+   30 minutes" and for "a 2-minute starter step" (§3): ASCII digits for 0–30 joined
+   to or followed by a minute word (`min`, `mins`, `minute`, `minutes`, `мин`, or a
+   word starting `минут`), as in "2-minute", "10 minute", "5 мин", "2 минуты". This is a cheap
    deterministic backstop; the prompt is the primary control and SC-005 is measured on
    the evaluation set (§5). Rules 1–4 share the vector file
    `backend/tests/fixtures/navigator/validator_vectors.json`.
