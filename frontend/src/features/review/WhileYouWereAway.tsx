@@ -176,7 +176,9 @@ export function WhileYouWereAway({
   const candidates = tasks.filter(returnable);
   const eligible = projectsKnown ? candidates : [];
   const anyReturned = tasks.some((task) => rows[task.id]?.kind === "returned");
-  // Continue waits for every return to settle, so it never acknowledges a park mid-return.
+  // Continue waits for every return to settle, so it never acknowledges a park
+  // mid-return. Row returns and Return all exclude each other: while Return all
+  // runs no row offers Return or Retry, and while a row returns Return all waits.
   const returning = returningAll || Object.values(rows).some((status) => status.kind === "returning");
 
   const returnAll = async () => {
@@ -337,7 +339,7 @@ export function WhileYouWereAway({
                       <button
                         type="button"
                         aria-label={`Return ${task.title} to Next`}
-                        disabled={!online || !projectsKnown || status?.kind === "returning"}
+                        disabled={!online || !projectsKnown || returningAll || status?.kind === "returning"}
                         className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-800 hover:border-slate-300 disabled:opacity-60"
                         onClick={() => void returnTask(task)}
                       >
@@ -352,7 +354,12 @@ export function WhileYouWereAway({
                     <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-900">
                       <span>{`Couldn't return “${task.title}” to Next. It's still in Someday / maybe.`}</span>
                       {status.referenceId ? <span>Ref {status.referenceId}</span> : null}
-                      <button type="button" className="min-h-11 rounded-lg px-2 font-semibold hover:bg-amber-100" onClick={() => void returnTask(task)}>
+                      <button
+                        type="button"
+                        disabled={!online || returningAll}
+                        className="min-h-11 rounded-lg px-2 font-semibold hover:bg-amber-100 disabled:opacity-60"
+                        onClick={() => void returnTask(task)}
+                      >
                         Retry
                       </button>
                     </div>
@@ -374,7 +381,7 @@ export function WhileYouWereAway({
             {candidates.length >= 2 ? (
               <button
                 type="button"
-                disabled={!online || !projectsKnown || returningAll}
+                disabled={!online || !projectsKnown || returning}
                 className="min-h-11 rounded-lg border border-slate-200 px-4 font-medium text-slate-800 hover:border-slate-300 disabled:opacity-60"
                 onClick={() => void returnAll()}
               >

@@ -230,6 +230,55 @@ describe("020-FR-015 While you were away dialog", () => {
     expect(transitionTask.mock.calls.map(([id]) => id)).toEqual(["task-pt", "task-garage"]);
   });
 
+  it("020-FR-015 while Return all runs, no row offers its own Return or Retry", async () => {
+    const user = userEvent.setup();
+    const releases: Array<() => void> = [];
+    transitionTask
+      .mockRejectedValueOnce(new ApiError("Server Error", 500, null, "corr_row"))
+      .mockImplementation((id, payload) => new Promise((resolve) => {
+        releases.push(() => resolve({ ...[portuguese, garage, cv].find((task) => task.id === id) as TaskResponse, state: "next", parked: null, revision: payload.expected_revision + 1 }));
+      }));
+    renderDialog([portuguese, garage, cv]);
+    // One row failed first, so it shows Retry.
+    await user.click(await screen.findByRole("button", { name: "Return Update the CV to Next" }));
+    const failed = await within(row("Update the CV")).findByRole("alert");
+
+    await user.click(screen.getByRole("button", { name: "Return all 3 to Next" }));
+    await waitFor(() => expect(releases).toHaveLength(1));
+
+    expect(screen.getByRole("button", { name: "Return Clean out the garage to Next" })).toBeDisabled();
+    expect(within(failed).getByRole("button", { name: "Retry" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Return (all|both|the other)/ })).toBeDisabled();
+
+    await act(async () => releases[0]());
+    await waitFor(() => expect(releases).toHaveLength(2));
+    // Between two rows the bulk return still holds every row.
+    expect(screen.getByRole("button", { name: "Return Update the CV to Next" })).toBeDisabled();
+    await act(async () => releases[1]());
+    await waitFor(() => expect(releases).toHaveLength(3));
+    await act(async () => releases[2]());
+
+    expect(await screen.findByText("All 3 are back in Next with a fresh start.")).toBeInTheDocument();
+    expect(transitionTask).toHaveBeenCalledTimes(4);
+    for (const title of ["Learn basic Portuguese", "Clean out the garage", "Update the CV"]) {
+      expect(within(row(title)).getByText("Returned")).toBeInTheDocument();
+    }
+  });
+
+  it("020-FR-015 while a row return is on its way, Return all waits", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => undefined;
+    transitionTask.mockImplementationOnce((_id, payload) => new Promise((resolve) => {
+      release = () => resolve({ ...cv, state: "next", parked: null, revision: payload.expected_revision + 1 });
+    }));
+    renderDialog([portuguese, garage, cv]);
+    await user.click(await screen.findByRole("button", { name: "Return Update the CV to Next" }));
+
+    expect(screen.getByRole("button", { name: /^Return (all|both|the other)/ })).toBeDisabled();
+    await act(async () => release());
+    expect(screen.getByRole("button", { name: "Return both to Next" })).toBeEnabled();
+  });
+
   it("020-FR-015 Continue waits while a row return is on its way", async () => {
     const user = userEvent.setup();
     let release: () => void = () => undefined;
