@@ -18,7 +18,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { AuthUser } from "../../api/auth";
 import { ApiError, apiClient } from "../../api/client";
 import { describeReviewError, newIdempotencyKey, type UnseenPark } from "../../api/review";
-import { applyReviewTask, useAcknowledgeParks, useOnlineStatus } from "../../api/reviewHooks";
+import { applyReviewTask, captureReviewScope, useAcknowledgeParks, useOnlineStatus } from "../../api/reviewHooks";
 import { getTaskCacheScope, taskKeys, useProjects } from "../../api/taskHooks";
 import type { ProjectResponse, TaskResponse, TaskState } from "../../api/taskTypes";
 import { useAuthStore } from "../../stores/authStore";
@@ -103,10 +103,12 @@ export function WhileYouWereAway({
     const key = returnKeys.current.get(task.id) ?? newIdempotencyKey();
     returnKeys.current.set(task.id, key);
     setRow(task.id, { kind: "returning" });
+    // The account that pressed Return: a late answer is not written to another account's caches.
+    const scope = captureReviewScope();
     try {
       const returned = await apiClient.transitionTask(task.id, { action: "move", to_state: "next", expected_revision: task.revision }, key);
       returnKeys.current.delete(task.id);
-      applyReviewTask(queryClient, returned);
+      applyReviewTask(queryClient, returned, scope);
       setRow(task.id, { kind: "returned" });
       return true;
     } catch (error) {

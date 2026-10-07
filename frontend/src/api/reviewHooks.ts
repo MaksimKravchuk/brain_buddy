@@ -50,11 +50,35 @@ export function useReviewState() {
 
 type CachedTaskPages = { pages: Array<{ items: TaskResponse[] }>; pageParams: unknown[] };
 
-/** Put the server's task into the detail and list caches, then refetch both. */
-export function applyReviewTask(queryClient: QueryClient, task: TaskResponse): void {
-  const scope = getTaskCacheScope();
-  queryClient.setQueryData(taskKeys.detail(task.id, scope), task);
-  queryClient.setQueriesData<CachedTaskPages>({ queryKey: taskKeys.lists(scope) }, (cached) =>
+/** The account (and API origin) a review write was started for. */
+export type ReviewWriteScope = ReturnType<typeof getReviewCacheScope>;
+
+/**
+ * Captured when a write starts, so its answer is written to the caches of the
+ * account that sent it, never to whoever is signed in when it arrives.
+ */
+export function captureReviewScope(accountId = useAuthStore.getState().user?.id ?? null): ReviewWriteScope {
+  return getReviewCacheScope(accountId);
+}
+
+/** Whether that account is still the one signed in, against the same API. */
+export function isCurrentReviewScope(scope: ReviewWriteScope): boolean {
+  const current = getReviewCacheScope();
+  return scope.accountId === current.accountId && scope.apiOrigin === current.apiOrigin;
+}
+
+/**
+ * Put the server's task into the detail and list caches of the account that
+ * started the write, then refetch. A late answer for an account that has
+ * signed out (or switched) writes nothing: it is not this session's data.
+ */
+export function applyReviewTask(queryClient: QueryClient, task: TaskResponse, scope: ReviewWriteScope): void {
+  if (!isCurrentReviewScope(scope)) {
+    return;
+  }
+  const taskScope = getTaskCacheScope(scope.accountId);
+  queryClient.setQueryData(taskKeys.detail(task.id, taskScope), task);
+  queryClient.setQueriesData<CachedTaskPages>({ queryKey: taskKeys.lists(taskScope) }, (cached) =>
     cached && {
       ...cached,
       pages: cached.pages.map((page) => ({
@@ -63,10 +87,13 @@ export function applyReviewTask(queryClient: QueryClient, task: TaskResponse): v
       }))
     }
   );
-  refreshAfterReviewWrite(queryClient);
+  refreshAfterReviewWrite(queryClient, scope);
 }
 
-export function refreshAfterReviewWrite(queryClient: QueryClient): void {
+export function refreshAfterReviewWrite(queryClient: QueryClient, scope: ReviewWriteScope): void {
+  if (!isCurrentReviewScope(scope)) {
+    return;
+  }
   void queryClient.invalidateQueries({ queryKey: taskKeys.all });
   void queryClient.invalidateQueries({ queryKey: reviewKeys.all });
 }
@@ -76,7 +103,8 @@ export function useDecideTask() {
   return useMutation({
     mutationFn: ({ taskId, body, idempotencyKey }: { taskId: string; body: DecisionRequest; idempotencyKey: string }) =>
       reviewApi.decide(taskId, body, idempotencyKey),
-    onSuccess: (response) => applyReviewTask(queryClient, response.task)
+    onMutate: () => captureReviewScope(),
+    onSuccess: (response, _variables, scope) => applyReviewTask(queryClient, response.task, scope)
   });
 }
 
@@ -85,9 +113,13 @@ export function useAcknowledgeExplainer() {
   return useMutation({
     mutationFn: ({ timeZone, idempotencyKey }: { timeZone: string; idempotencyKey: string }) =>
       reviewApi.acknowledgeExplainer({ time_zone: timeZone }, idempotencyKey),
-    onSuccess: (state) => {
-      queryClient.setQueryData(reviewKeys.state(), state);
-      refreshAfterReviewWrite(queryClient);
+    onMutate: () => captureReviewScope(),
+    onSuccess: (state, _variables, scope) => {
+      if (!isCurrentReviewScope(scope)) {
+        return;
+      }
+      queryClient.setQueryData(reviewKeys.state(scope), state);
+      refreshAfterReviewWrite(queryClient, scope);
     }
   });
 }
@@ -114,16 +146,19 @@ export function announceThresholdChange(accountId: string, change: Omit<Threshol
 
 export function useUpdateReviewSettings() {
   const queryClient = useQueryClient();
-  const accountId = useAuthStore((store) => store.user?.id);
   return useMutation({
     mutationFn: ({ body, idempotencyKey }: { body: ReviewSettingsUpdate; idempotencyKey: string }) =>
       reviewApi.updateSettings(body, idempotencyKey),
-    onSuccess: (settings, { body }) => {
-      queryClient.setQueryData<ReviewState>(reviewKeys.state(), (state) => state && { ...state, settings });
-      if (body.threshold_days !== undefined) {
-        announceThresholdChange(accountId as string, { threshold_days: settings.threshold_days, floor: settings.owner_park_floor_at as string });
+    onMutate: () => captureReviewScope(),
+    onSuccess: (settings, { body }, scope) => {
+      if (!isCurrentReviewScope(scope)) {
+        return;
       }
-      refreshAfterReviewWrite(queryClient);
+      queryClient.setQueryData<ReviewState>(reviewKeys.state(scope), (state) => state && { ...state, settings });
+      if (body.threshold_days !== undefined) {
+        announceThresholdChange(scope.accountId as string, { threshold_days: settings.threshold_days, floor: settings.owner_park_floor_at as string });
+      }
+      refreshAfterReviewWrite(queryClient, scope);
     }
   });
 }
@@ -133,8 +168,11 @@ export function useAcknowledgeParks() {
   return useMutation({
     mutationFn: ({ body, idempotencyKey }: { body: ParkAcknowledgement; idempotencyKey: string }) =>
       reviewApi.acknowledgeParks(body, idempotencyKey),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: reviewKeys.all });
+    onMutate: () => captureReviewScope(),
+    onSuccess: (_answer, _variables, scope) => {
+      if (isCurrentReviewScope(scope)) {
+        void queryClient.invalidateQueries({ queryKey: reviewKeys.all });
+      }
     }
   });
 }

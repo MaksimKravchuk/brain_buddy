@@ -19,7 +19,15 @@ import { hasFeatureFlag, type AuthUser } from "../../api/auth";
 import { apiClient, getApiBaseUrl } from "../../api/client";
 import { describeReviewError, isDecisionAlreadyUndone, newIdempotencyKey, reviewApi, withReference } from "../../api/review";
 import type { DecisionRequest, DecisionResponse, DecisionType } from "../../api/review";
-import { applyReviewTask, refreshAfterReviewWrite, useDecideTask, useOnlineStatus, useReviewClock } from "../../api/reviewHooks";
+import {
+  applyReviewTask,
+  captureReviewScope,
+  isCurrentReviewScope,
+  refreshAfterReviewWrite,
+  useDecideTask,
+  useOnlineStatus,
+  useReviewClock
+} from "../../api/reviewHooks";
 import type { TaskFormulationResponse, TaskResponse, TaskState } from "../../api/taskTypes";
 import { useShellToast, type ShellNotify } from "../../components/shell/shellToast";
 import { useAuthStore } from "../../stores/authStore";
@@ -143,12 +151,21 @@ function toastMessage(attempt: Attempt, title: string, keptUntil: string): strin
 
 /** Undo after the dialog is gone: the server answers, and its task wins (formulation-clock §3). */
 async function runUndo(notify: ShellNotify, queryClient: QueryClient, response: DecisionResponse, title: string): Promise<void> {
+  // The account that pressed Undo: an answer that arrives after it signed out
+  // writes nothing and says nothing to whoever is signed in now.
+  const scope = captureReviewScope();
   try {
     const undone = await reviewApi.undoDecision(response.decision.id, { expected_task_revision: response.task.revision }, newIdempotencyKey());
-    applyReviewTask(queryClient, undone.task);
+    if (!isCurrentReviewScope(scope)) {
+      return;
+    }
+    applyReviewTask(queryClient, undone.task, scope);
     notify(`“${title}” is back as it was`);
   } catch (error) {
-    refreshAfterReviewWrite(queryClient);
+    if (!isCurrentReviewScope(scope)) {
+      return;
+    }
+    refreshAfterReviewWrite(queryClient, scope);
     const { kind, referenceId } = describeReviewError(error);
     if (isDecisionAlreadyUndone(error, response.decision.id)) {
       // Already undone (a retry whose first delivery applied, http §3). A 404

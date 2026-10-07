@@ -1,11 +1,24 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "../../stores/authStore";
 import { ApiError, setUnauthorizedHandler } from "../client";
-import { useThresholdNotice, useUpdateReviewSettings } from "../reviewHooks";
+import {
+  applyReviewTask,
+  captureReviewScope,
+  getReviewCacheScope,
+  refreshAfterReviewWrite,
+  reviewKeys,
+  useAcknowledgeExplainer,
+  useAcknowledgeParks,
+  useDecideTask,
+  useThresholdNotice,
+  useUpdateReviewSettings
+} from "../reviewHooks";
+import { getTaskCacheScope, taskKeys } from "../taskHooks";
+import type { TaskResponse } from "../taskTypes";
 import {
   describeReviewError,
   isDecisionAlreadyUndone,
@@ -365,6 +378,160 @@ describe("020-FR-039 review settings hook", () => {
     await act(() => result.current.mutateAsync({ body: { expected_revision: 3 }, idempotencyKey: "key" }));
 
     expect(useThresholdNotice.getState().notice).toBeNull();
+  });
+});
+
+describe("020-FR-048 020-FR-042 a review write lands only in the account that started it", () => {
+  const userA = { id: "user_a", email: "a@example.test" };
+  const userB = { id: "user_b", email: "b@example.test" };
+
+  afterEach(() => {
+    act(() => useAuthStore.setState({ user: null, status: "loading" }));
+    useThresholdNotice.setState({ notice: null });
+  });
+
+  function setup<T>(hook: () => T) {
+    act(() => useAuthStore.setState({ user: userA, status: "authed" }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: React.ReactNode }) => createElement(QueryClientProvider, { client }, children);
+    return { client, ...renderHook(hook, { wrapper }) };
+  }
+
+  /** The next fetch answers only when `release` is called. */
+  function deferredAnswer(status: number, payload: unknown): () => void {
+    let release: () => void = () => undefined;
+    fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
+      release = () => resolve(jsonResponse(status, payload));
+    }));
+    return () => release();
+  }
+
+  /** B's caches, seeded before A's answer arrives: none of them may change. */
+  function seedAccountB(client: QueryClient, taskId: string) {
+    const scopeB = getTaskCacheScope(userB.id);
+    const reviewScopeB = getReviewCacheScope(userB.id);
+    const detail = taskKeys.detail(taskId, scopeB);
+    const list = [...taskKeys.lists(scopeB), { state: "next" }];
+    const state = reviewKeys.state(reviewScopeB);
+    client.setQueryData(detail, { id: taskId, title: "B's own copy" });
+    client.setQueryData(list, { pages: [{ items: [{ id: taskId, title: "B's own copy" }] }], pageParams: [null] });
+    client.setQueryData(state, body("W-030"));
+    return {
+      unchanged: () => {
+        expect(client.getQueryData(detail)).toEqual({ id: taskId, title: "B's own copy" });
+        expect(client.getQueryData(list)).toEqual({ pages: [{ items: [{ id: taskId, title: "B's own copy" }] }], pageParams: [null] });
+        expect(client.getQueryData(state)).toEqual(body("W-030"));
+        for (const key of [detail, list, state]) {
+          expect(client.getQueryState(key)?.isInvalidated).toBe(false);
+        }
+      }
+    };
+  }
+
+  it("020-FR-048 a decision answered after A signed out and B signed in leaves B's caches untouched", async () => {
+    const answer = body<{ task: { id: string } }>("W-014");
+    const release = deferredAnswer(200, answer);
+    const { client, result } = setup(() => useDecideTask());
+
+    let settled: Promise<unknown> = Promise.resolve();
+    act(() => {
+      settled = result.current.mutateAsync({ taskId: answer.task.id, body: { type: "complete", expected_revision: 4 }, idempotencyKey: "key" });
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    act(() => useAuthStore.setState({ user: userB, status: "authed" }));
+    const b = seedAccountB(client, answer.task.id);
+    release();
+    await act(async () => {
+      await settled;
+    });
+
+    b.unchanged();
+    expect(client.getQueryData(taskKeys.detail(answer.task.id, getTaskCacheScope(userA.id)))).toBeUndefined();
+  });
+
+  it("020-FR-048 a decision answered while the same account is signed in is written to that account's caches", async () => {
+    const answer = body<{ task: { id: string } }>("W-014");
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, answer));
+    const { client, result } = setup(() => useDecideTask());
+
+    await act(() => result.current.mutateAsync({ taskId: answer.task.id, body: { type: "complete", expected_revision: 4 }, idempotencyKey: "key" }));
+
+    expect(client.getQueryData(taskKeys.detail(answer.task.id, getTaskCacheScope(userA.id)))).toEqual(expect.objectContaining({ id: answer.task.id }));
+  });
+
+  it("020-FR-039 a threshold saved for A after B signed in neither writes B's state nor announces a note", async () => {
+    const release = deferredAnswer(200, body("W-035"));
+    const { client, result } = setup(() => useUpdateReviewSettings());
+
+    let settled: Promise<unknown> = Promise.resolve();
+    act(() => {
+      settled = result.current.mutateAsync({ body: { threshold_days: 21, expected_revision: 3 }, idempotencyKey: "key" });
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    act(() => useAuthStore.setState({ user: userB, status: "authed" }));
+    const b = seedAccountB(client, "task_x");
+    release();
+    await act(async () => {
+      await settled;
+    });
+
+    b.unchanged();
+    expect(useThresholdNotice.getState().notice).toBeNull();
+  });
+
+  it("020-FR-051 an explainer acknowledgement for A answered after B signed in leaves B's state alone", async () => {
+    const release = deferredAnswer(200, body("W-031"));
+    const { client, result } = setup(() => useAcknowledgeExplainer());
+
+    let settled: Promise<unknown> = Promise.resolve();
+    act(() => {
+      settled = result.current.mutateAsync({ timeZone: "Europe/Berlin", idempotencyKey: "key" });
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    act(() => useAuthStore.setState({ user: userB, status: "authed" }));
+    const b = seedAccountB(client, "task_x");
+    release();
+    await act(async () => {
+      await settled;
+    });
+
+    b.unchanged();
+    expect(client.getQueryData(reviewKeys.state(getReviewCacheScope(userA.id)))).toBeUndefined();
+  });
+
+  it("020-FR-015 a park acknowledgement for A answered after B signed in does not refetch B's state", async () => {
+    const release = deferredAnswer(204, null);
+    const { client, result } = setup(() => useAcknowledgeParks());
+
+    let settled: Promise<unknown> = Promise.resolve();
+    act(() => {
+      settled = result.current.mutateAsync({ body: body("W-036"), idempotencyKey: "key" });
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    act(() => useAuthStore.setState({ user: userB, status: "authed" }));
+    const b = seedAccountB(client, "task_x");
+    release();
+    await act(async () => {
+      await settled;
+    });
+
+    b.unchanged();
+  });
+
+  it("020-FR-048 applyReviewTask and refreshAfterReviewWrite do nothing for a scope that is no longer signed in", () => {
+    act(() => useAuthStore.setState({ user: userB, status: "authed" }));
+    const client = new QueryClient();
+    const task = body<TaskResponse>("W-002");
+    const b = seedAccountB(client, task.id);
+
+    applyReviewTask(client, task, captureReviewScope(userA.id));
+    refreshAfterReviewWrite(client, captureReviewScope(userA.id));
+
+    b.unchanged();
+    expect(client.getQueryData(taskKeys.detail(task.id, getTaskCacheScope(userA.id)))).toBeUndefined();
+
+    applyReviewTask(client, task, captureReviewScope());
+    expect(client.getQueryData(taskKeys.detail(task.id, getTaskCacheScope(userB.id)))).toEqual(task);
   });
 });
 

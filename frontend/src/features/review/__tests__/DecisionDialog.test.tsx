@@ -766,6 +766,39 @@ describe("020-FR-048 decision dialog: Undo", () => {
     expect(lastToast()).toEqual(["“Renovate the bathroom” is back as it was"]);
   });
 
+  it.each([
+    ["applied", (release: (task: TaskResponse) => void, _fail: (error: unknown) => void, task: TaskResponse) => release({ ...task, revision: 9 })],
+    ["refused", (_release: (task: TaskResponse) => void, fail: (error: unknown) => void) => fail(new ApiError("Server Error", 500, null, "corr_late"))]
+  ])("020-FR-048 an Undo answered (%s) after the account signed out and another signed in writes and says nothing", async (_label, settle) => {
+    const task = asksTask();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const action = await decideAndGetUndo(task, { state: "someday" }, client);
+    let release: (task: TaskResponse) => void = () => undefined;
+    let fail: (error: unknown) => void = () => undefined;
+    undoDecision.mockReturnValueOnce(new Promise((resolve, reject) => {
+      release = (restored) => resolve({ task: restored, undone_decision_id: "decision_1", deleted_task_id: null, session_counts: null });
+      fail = reject;
+    }));
+    const toastsBefore = notify.mock.calls.length;
+
+    let undoing: Promise<void> = Promise.resolve();
+    act(() => {
+      undoing = Promise.resolve(action.onAction());
+    });
+    act(() => useAuthStore.setState({ user: { id: "user-2", email: "b@example.test" }, status: "authed" }));
+    const scopeB = { accountId: "user-2", apiOrigin: scope.apiOrigin };
+    client.setQueryData(taskKeys.detail(task.id, scopeB), { ...task, title: "B's copy" });
+    await act(async () => {
+      settle(release, fail, task);
+      await undoing;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(client.getQueryData(taskKeys.detail(task.id, scopeB))).toEqual({ ...task, title: "B's copy" });
+    expect(client.getQueryState(taskKeys.detail(task.id, scopeB))?.isInvalidated).toBe(false);
+    expect(notify.mock.calls.length).toBe(toastsBefore);
+  });
+
   it("020-FR-048 an Undo that can no longer apply says where the task is now, with the Ref", async () => {
     const task = asksTask();
     const action = await decideAndGetUndo(task, { state: "someday" });

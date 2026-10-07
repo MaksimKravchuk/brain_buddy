@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiClient } from "../../../api/client";
 import { reviewApi, type UnseenPark } from "../../../api/review";
+import { getTaskCacheScope, taskKeys } from "../../../api/taskHooks";
 import type { ProjectResponse, TaskResponse } from "../../../api/taskTypes";
 import { useAuthStore } from "../../../stores/authStore";
 import { formatReviewDate } from "../formulation";
@@ -73,6 +74,7 @@ function renderDialog(tasks: TaskResponse[], parks: UnseenPark[] = tasks.map(par
       <WhileYouWereAway parks={parks} onDone={onDone} />
     </QueryClientProvider>
   );
+  return client;
 }
 
 const dialog = () => screen.getByRole("dialog", { name: "While you were away" });
@@ -130,6 +132,27 @@ describe("020-FR-015 While you were away dialog", () => {
     expect(within(row("Clean out the garage")).getByText("Returned")).toBeInTheDocument();
     expect(within(row("Clean out the garage")).queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Return both to Next" })).toBeInTheDocument();
+  });
+
+  it("020-FR-015 020-FR-042 a return answered after the account signed out and another signed in leaves the new account's caches alone", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => undefined;
+    transitionTask.mockImplementationOnce((_id, payload) => new Promise((resolve) => {
+      release = () => resolve({ ...cv, state: "next", parked: null, revision: payload.expected_revision + 1 });
+    }));
+    const client = renderDialog([portuguese, cv]);
+    await user.click(await screen.findByRole("button", { name: "Return Update the CV to Next" }));
+
+    act(() => useAuthStore.setState({ user: { id: "user-2", email: "b@example.test", feature_flags: { weekly_review: true } }, status: "authed" }));
+    // B's Someday list, which happens to hold a task with the same id.
+    const listB = [...taskKeys.lists(getTaskCacheScope("user-2")), { state: "someday" }];
+    const seeded = { pages: [{ items: [{ ...cv, title: "B's copy" }] }], pageParams: [null] };
+    client.setQueryData(listB, seeded);
+    await act(async () => release());
+
+    expect(client.getQueryData(listB)).toEqual(seeded);
+    expect(client.getQueryState(listB)?.isInvalidated).toBe(false);
+    expect(client.getQueryData(taskKeys.detail(cv.id, getTaskCacheScope("user-1")))).toEqual(cv);
   });
 
   it("020-FR-045 a failed return says so on its row with the Ref, and Retry resends it", async () => {
