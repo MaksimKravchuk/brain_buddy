@@ -469,7 +469,7 @@ export function DecisionDialog({
               </p>
             ) : null}
             <h2 id={titleId} ref={titleRef} tabIndex={-1} className="mt-1 break-words text-[18px] font-semibold leading-[1.3] text-slate-900 outline-hidden">
-              {task.title}
+              {currentTitle}
             </h2>
             {meta ? <p className="mt-0.5 text-xs text-slate-500">{meta}</p> : null}
           </div>

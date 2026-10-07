@@ -559,6 +559,33 @@ describe("020-FR-011 decision dialog: refusals and failures", () => {
     );
   });
 
+  it("020-FR-011 after a stale answer the heading and the dialog's name show the current title", async () => {
+    const user = userEvent.setup();
+    const now = asksTask({ title: "Get 3 quotes for the bathroom", revision: 9 }, { id: "form_b" });
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "task-1" } }, "corr_stale"));
+    getTask.mockResolvedValueOnce(now);
+    renderDialog(asksTask());
+
+    await user.click(decisionButton(/^Release to Someday/));
+
+    expect(await screen.findByRole("heading", { name: "Task changed elsewhere" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Get 3 quotes for the bathroom" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Get 3 quotes for the bathroom" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Renovate the bathroom" })).not.toBeInTheDocument();
+  });
+
+  it("020-FR-011 a stale card whose current version cannot be loaded keeps the title it showed", async () => {
+    const user = userEvent.setup();
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "task-1" } }, "corr_stale"));
+    getTask.mockRejectedValueOnce(new Error("offline"));
+    renderDialog(asksTask());
+
+    await user.click(decisionButton(/^Release to Someday/));
+
+    expect(await screen.findByRole("heading", { name: "Task changed elsewhere" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Renovate the bathroom" })).toBeInTheDocument();
+  });
+
   it("020-FR-011 a stale card whose task no longer asks says so and keeps only Close", async () => {
     const user = userEvent.setup();
     decide.mockRejectedValueOnce(new ApiError("Conflict", 409, null, "corr_stale"));
