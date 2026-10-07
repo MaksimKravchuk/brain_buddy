@@ -731,10 +731,11 @@ jobs:
             | tee "${RUNNER_TEMP}/macos-swift-build.log"
 
       # A run that executes no test is a failure, not a pass (021 contract
-      # mac-app-host §8, tasks T003). The floor reads XCTest's own summary,
-      # "Executed N tests, with ...", whose largest N is the whole-bundle total;
-      # Swift Testing prints a different line ("Test run with 0 tests ..."
-      # today), so it neither satisfies nor trips the floor. Serial on purpose:
+      # mac-app-host §8, tasks T003). The floor adds both frameworks' own
+      # summaries: XCTest's "Executed N tests, with ..." (the largest N is the
+      # whole-bundle total) and Swift Testing's "Test run with N tests", so the
+      # planned move of the suites to Swift Testing keeps the lane green while
+      # an empty run in both still fails. Serial on purpose:
       # under --parallel SwiftPM prints only per-test progress and drops
       # XCTest's summary for passing tests, so the floor would have nothing to
       # read. It is also the run macos/README.md documents.
@@ -744,13 +745,16 @@ jobs:
         run: |
           log="${RUNNER_TEMP}/macos-swift-test.log"
           swift test --only-use-versions-from-resolved-file 2>&1 | tee "${log}"
-          executed="$(grep -Eo 'Executed [0-9]+ tests?, with' "${log}" \
+          xctest="$(grep -Eo 'Executed [0-9]+ tests?, with' "${log}" \
             | grep -Eo '[0-9]+' | sort -n | tail -n 1 || true)"
-          if [ -z "${executed}" ] || [ "${executed}" -eq 0 ]; then
-            echo "::error::swift test executed no XCTest case; the Mac lane fails rather than skips"
+          swift_testing="$(grep -Eo 'Test run with [0-9]+ tests?' "${log}" \
+            | grep -Eo '[0-9]+' | sort -n | tail -n 1 || true)"
+          executed=$(( ${xctest:-0} + ${swift_testing:-0} ))
+          if [ "${executed}" -eq 0 ]; then
+            echo "::error::swift test executed no test (XCTest or Swift Testing); the Mac lane fails rather than skips"
             exit 1
           fi
-          echo "XCTest executed ${executed} tests"
+          echo "Executed ${executed} tests (XCTest ${xctest:-0}, Swift Testing ${swift_testing:-0})"
 
       - name: Upload build logs
         if: failure() && env.RUN == 'true'
