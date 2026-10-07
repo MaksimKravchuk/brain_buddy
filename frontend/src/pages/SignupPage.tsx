@@ -62,7 +62,7 @@ export default function SignupPage(): React.JSX.Element {
 
   return (
     <AuthLayout title="Create your account">
-      {!legacy ? <><AuthEntry destination="/" /><Button className="mt-4 min-h-11" onClick={() => setLegacy(true)}>Use a password and invite code</Button></> : <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+      {!legacy ? <><AuthEntry destination="/" intent="signup" /><Button variant="secondary" className="mt-4 min-h-11 w-full" onClick={() => setLegacy(true)}>Use a password and invite code</Button></> : <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-slate-700">Email</span>
           <input

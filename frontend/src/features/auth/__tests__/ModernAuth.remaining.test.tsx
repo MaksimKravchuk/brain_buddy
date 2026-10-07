@@ -105,9 +105,19 @@ describe("023-FR-006/008/009/011/013/015/016/021 remaining auth failure and reco
 
   it("a selected Apple sign-in starts one login proof and leaves password access available after failure", async () => {
     vi.mocked(modernAuthApi.startProvider).mockRejectedValue(new ApiError("Unavailable", 503, null)); showEntry();
-    fireEvent.click(await screen.findByRole("button", { name: "Sign in with Apple" })); expect(screen.getByRole("button", { name: "Use your password" })).toBeDisabled();
+    const appleButton = await screen.findByRole("button", { name: "Sign in with Apple" });
+    fireEvent.click(appleButton);
+    expect(appleButton).toBeDisabled();
+    expect(appleButton).toHaveAccessibleName("Sign in with Apple");
+    expect(appleButton).toHaveAttribute("aria-busy", "true");
+    expect(appleButton.querySelector("img")).toHaveAttribute("alt", "");
+    const googleButton = screen.getByRole("button", { name: "Sign in with Google" });
+    expect(googleButton).toBeDisabled();
+    fireEvent.click(appleButton); fireEvent.click(googleButton);
+    expect(screen.getByRole("button", { name: "Use your password" })).toBeDisabled();
     expect(await screen.findByRole("alert")).toHaveTextContent(/Couldn't complete this request/); expect(modernAuthApi.startProvider).toHaveBeenCalledOnce(); expect(modernAuthApi.startProvider).toHaveBeenCalledWith("apple", { purpose: "login", client: "web", client_challenge: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
     expect(screen.getByRole("button", { name: "Use your password" })).toBeEnabled(); expect(sessionStorage.length).toBe(0);
+    expect(appleButton).toBeEnabled(); expect(appleButton).toHaveAttribute("aria-busy", "false");
   });
 
   it("does not duplicate a pending password confirmation and announces busy state immediately", async () => {
