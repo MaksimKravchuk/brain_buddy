@@ -88,9 +88,10 @@ class NavigatorProviderFailure(Exception):
 class NavigatorInternalError(RuntimeError):
     """An undeclared exception from a provider, re-raised without its text.
 
-    The message is the original class name only and the original chain is
-    suppressed (``from None``), so ``logger.exception`` on the request path
-    can never log input or model output echoed in an exception (FR-044).
+    The message is the original class name only, and it is raised outside
+    the handling ``except`` block, so it has no ``__cause__`` and no
+    ``__context__``: no logger, and no framework that re-chains, can reach
+    input or model output echoed in the original (FR-044).
     """
 
 
@@ -859,6 +860,7 @@ class NavigatorService:
             owner_id, day, estimate
         ):
             raise self._fail(record, "navigator_cost_cap")
+        bug: str | None = None
         try:
             result = self.provider.suggest(navigator_input)  # (2) no lock held
         except NavigatorProviderTimeout:
@@ -869,13 +871,15 @@ class NavigatorService:
             raise self._fail(record, "navigator_provider_error") from None
         except Exception as error:
             # Not a declared port failure but a bug: release the reservation
-            # and propagate it as a content-free wrapper (class name only, the
-            # chain suppressed), so the request middleware's logger.exception
-            # cannot log input or model output echoed in its text (FR-044).
+            # and keep only the class name; the wrapper is raised below.
             self._settle(owner_id, day, estimate, actual=0.0, shown=False)
-            raise NavigatorInternalError(
-                f"navigator provider raised {type(error).__name__}"
-            ) from None
+            bug = type(error).__name__
+        if bug is not None:
+            # Raised outside the ``except`` block, so it has no __context__ at
+            # all: ``from None`` only hides one, and a framework that re-chains
+            # (``raise exc from exc.__cause__ or exc.__context__``) would bring
+            # input or model output echoed in the original back (FR-044).
+            raise NavigatorInternalError(f"navigator provider raised {bug}")
         record.output_tokens = result.output_tokens
         output = validate_navigator_output(
             navigator_input,

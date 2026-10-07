@@ -1409,8 +1409,8 @@ def test_020_FR_025_unexpected_adapter_error_releases_and_propagates(
 ) -> None:
     """Codex P2: only ``NavigatorProviderFailure`` is a provider error. Any
     other exception releases the cost reservation and propagates as the
-    content-free ``NavigatorInternalError`` (class name only, original chain
-    suppressed); it is never turned into ``navigator_provider_error``, and
+    content-free ``NavigatorInternalError`` (class name only, no cause and no
+    context at all); it is never turned into ``navigator_provider_error``, and
     the one log line holds no content."""
 
     seen: dict[str, Any] = {}
@@ -1432,7 +1432,7 @@ def test_020_FR_025_unexpected_adapter_error_releases_and_propagates(
         ready.container.navigator_service.suggest(ready.owner_id, request)
     assert str(raised.value) == "navigator provider raised _AdapterBug"
     assert raised.value.__cause__ is None
-    assert raised.value.__suppress_context__ is True
+    assert raised.value.__context__ is None
     assert seen["reserved"] > 0
     (usage,) = ready.usage()
     assert (usage.calls, usage.shown) == (1, 0)
@@ -1518,6 +1518,45 @@ def test_020_FR_044_middleware_logs_navigator_failures_by_class_name_only(
         None,
         None,
     )
+
+
+def test_020_FR_044_internal_error_survives_a_starlette_style_rechain(
+    ready: Nav, caplog: pytest.LogCaptureFixture
+) -> None:
+    """CI regression (starlette ``middleware/base.py``: ``raise app_exc from
+    app_exc.__cause__ or app_exc.__context__``): ``from None`` only hides the
+    original, which stays in ``__context__``, so that re-raise brought the
+    adapter's text back into ``logger.exception``. The wrapper must carry no
+    context or cause at all, so a re-chain and a plain logger leak nothing."""
+
+    def echo_input() -> None:
+        raise _AdapterBug(f"input_value='{SENTINEL_NOTES}' title={SENTINEL_TITLE}")
+
+    ready.spy(SpyProvider(on_call=echo_input))
+    request = NavigatorSuggestionRequest.model_validate(
+        _body(title=SENTINEL_TITLE, notes=SENTINEL_NOTES)
+    )
+    plain = logging.getLogger("tests.navigator.rechain")
+    caplog.set_level(logging.DEBUG)
+    with allure.step("re-chain the service's exception as starlette does"):
+        _evidence(
+            "re-raise", {"pattern": "raise exc from exc.__cause__ or exc.__context__"}
+        )
+        try:
+            try:
+                ready.container.navigator_service.suggest(ready.owner_id, request)
+            except NavigatorInternalError as exc:
+                raise exc from exc.__cause__ or exc.__context__
+        except NavigatorInternalError as rechained:
+            assert rechained.__cause__ is None
+            assert rechained.__context__ is None
+            plain.exception("rechained failure")
+    (record,) = [r for r in caplog.records if r.name == plain.name]
+    text = logging.Formatter("%(message)s").format(record)
+    assert "NavigatorInternalError" in text
+    for sentinel in (SENTINEL_TITLE, SENTINEL_NOTES):
+        assert sentinel not in text
+        assert sentinel not in (record.exc_text or "")
 
 
 def test_020_FR_044_unexpected_adapter_error_logs_no_content(
