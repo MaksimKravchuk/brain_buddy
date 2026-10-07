@@ -464,7 +464,10 @@ document; not repeated here).
   go after 35 days on the same basis. Everything else lives for the account's life
   (intake §6 "same as tasks") and is exported and purged with the tasks store. The
   device copy follows the same 7-day bounds (`runLocalReviewMaintenance`,
-  contracts/ios-commands.md §5), including account-less use. Device-local model and
+  contracts/ios-commands.md §5), including account-less use, with one device-only
+  exception: an unsent decision or bulk release that a queued Undo names keeps its
+  `undoRetained` flag past 7 days (no snapshot is stored; data-model E10, ios-commands
+  §5). Device-local model and
   navigator preference are deleted with the app.
 - **Rationale**: Undo is a seconds-long affordance; keeping old content indefinitely in a
   second place has no purpose.
