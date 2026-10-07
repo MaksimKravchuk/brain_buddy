@@ -34,6 +34,17 @@ SPEC = (
 
 
 class RequirementCoverageTests(unittest.TestCase):
+    def test_script_unit_tests_count_but_product_gate_scripts_do_not(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(tmp, backend_test="")
+            scripts = root / "scripts"
+            scripts.mkdir()
+            (scripts / "test_delivery.py").write_text('"""006-FR-001"""')
+            (scripts / "check_spec.py").write_text("# 006-FR-002")
+            result = self.module.coverage(root, feature_dir)
+            self.assertEqual(result["FR-001"], ["scripts/test_delivery.py"])
+            self.assertEqual(result["FR-002"], [])
+
     def test_rust_integration_tests_count_but_product_source_does_not(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root, feature_dir = self.build(tmp, backend_test="")

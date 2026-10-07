@@ -129,6 +129,8 @@ jobs:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           BUNDLE_ID_PREFIX: ${{ vars.IOS_BUNDLE_ID_PREFIX }}
           BUILD_NUMBER_OFFSET: ${{ vars.IOS_BUILD_NUMBER_OFFSET }}
+          IOS_DEVELOPMENT_CERTIFICATE_BASE64: ${{ secrets.IOS_DEVELOPMENT_CERTIFICATE_BASE64 }}
+          IOS_DEVELOPMENT_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DEVELOPMENT_CERTIFICATE_PASSWORD }}
         run: |
           missing=()
           [ -n "${API_KEY_ID}" ] || missing+=("secret APP_STORE_CONNECT_API_KEY_ID")
@@ -146,6 +148,11 @@ jobs:
             echo "::notice title=TestFlight upload skipped::Configure ${missing[*]} (ios/README.md, TestFlight)."
             echo "configured=false" >> "${GITHUB_OUTPUT}"
             exit 0
+          fi
+
+          if [ -z "${IOS_DEVELOPMENT_CERTIFICATE_BASE64}" ] || [ -z "${IOS_DEVELOPMENT_CERTIFICATE_PASSWORD}" ]; then
+            echo "::error::Configure IOS_DEVELOPMENT_CERTIFICATE_BASE64 and IOS_DEVELOPMENT_CERTIFICATE_PASSWORD in testflight (ios/README.md)."
+            exit 1
           fi
 
           # Present but malformed is a mistake, not "not set up yet": fail.
@@ -214,6 +221,14 @@ jobs:
           (umask 077 && printf '%s\n' "${API_KEY_P8}" > "${key_path}")
           chmod 600 "${key_path}"
 
+      - name: Install the development signing identity
+        if: steps.config.outputs.configured == 'true'
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          IOS_DEVELOPMENT_CERTIFICATE_BASE64: ${{ secrets.IOS_DEVELOPMENT_CERTIFICATE_BASE64 }}
+          IOS_DEVELOPMENT_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DEVELOPMENT_CERTIFICATE_PASSWORD }}
+        run: bash ios/ci/install_signing_identity.sh
+
       - name: Archive for the App Store (Release)
         if: steps.config.outputs.configured == 'true'
         env:
@@ -250,6 +265,22 @@ jobs:
             "${overrides[@]}" 2>&1 \
             | tee "${RUNNER_TEMP}/xcodebuild-archive.log" \
             | if command -v xcbeautify >/dev/null 2>&1; then xcbeautify --renderer github-actions; else cat; fi
+
+      - name: Verify the archive signing identity
+        if: steps.config.outputs.configured == 'true'
+        run: |
+          directory="${RUNNER_TEMP}/brainbuddy-signing"
+          openssl x509 -in "${directory}/development.pem" -outform DER -out "${directory}/expected.der"
+          app="${RUNNER_TEMP}/BrainBuddy.xcarchive/Products/Applications/BrainBuddy.app"
+          for target in "${app}" "${app}/PlugIns/BrainBuddyWidgets.appex"; do
+            codesign --display "--extract-certificates=${directory}/archive-cert-" "${target}" 2>/dev/null
+            if ! cmp -s "${directory}/expected.der" "${directory}/archive-cert-0"; then
+              echo '::error::Archive target did not use the configured development certificate.'
+              exit 1
+            fi
+            rm -f "${directory}"/archive-cert-*
+          done
+          echo 'Verified app and widget match the configured development certificate.'
 
       - name: Export and upload to App Store Connect
         if: steps.config.outputs.configured == 'true'
@@ -296,12 +327,53 @@ jobs:
             --build "$(read_key CFBundleVersion)" \
             --notes "${BRANCH} @ ${COMMIT:0:7}${subject:+ — ${subject}}"
 
-      # The last step that needs the key is above. Delete it now, whatever
-      # happened, so it is gone before any later step runs — above all the
-      # third-party upload-artifact action below.
-      - name: Remove the API key
+      - name: Redact signing identifiers from the logs
+        id: redact
         if: always()
-        run: rm -rf "${RUNNER_TEMP}/private_keys"
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          values = [os.environ.get('API_KEY_ID', ''), os.environ.get('API_ISSUER_ID', ''), str(root), str(Path.cwd())]
+          redactions = root / 'brainbuddy-signing/redactions.txt'
+          if redactions.exists():
+              values.extend(redactions.read_text().splitlines())
+          for log in root.glob('xcodebuild-*.log'):
+              text = log.read_text(errors='replace')
+              for value in sorted(set(values), key=len, reverse=True):
+                  if value:
+                      text = text.replace(value, '[redacted]')
+              log.write_text(text)
+          PY
+
+      # Cleanup attempts every target and blocks artifacts if any material remains.
+      - name: Remove signing material
+        id: cleanup
+        if: always()
+        run: |
+          status=0
+          directory="${RUNNER_TEMP}/brainbuddy-signing"
+          keychain="${directory}/signing.keychain-db"
+          if [ -f "${keychain}" ]; then
+            security delete-keychain "${keychain}" >/dev/null 2>&1 || status=1
+          fi
+          rm -rf "${RUNNER_TEMP}/private_keys" || status=1
+          rm -f "${directory}/development.p12" "${directory}/development.pem" \
+            "${directory}/redactions.txt" "${directory}/expected.der" \
+            "${directory}"/archive-cert-* || status=1
+          for target in "${keychain}" "${RUNNER_TEMP}/private_keys" \
+            "${directory}/development.p12" "${directory}/development.pem" \
+            "${directory}/redactions.txt" "${directory}/expected.der"; do
+            [ ! -e "${target}" ] || status=1
+          done
+          if [ "${status}" -ne 0 ]; then
+            echo '::error::Signing material cleanup failed; artifact upload is blocked.'
+          fi
+          exit "${status}"
 
       - name: Summarize the upload
         if: steps.config.outputs.configured == 'true'
@@ -325,21 +397,8 @@ jobs:
             echo "App Store Connect processes the build before it appears in TestFlight."
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      # xcodebuild echoes its command line, key id and issuer id included, into
-      # the logs. Those are masked in the console but not inside an artifact.
-      - name: Redact API key identifiers from the logs
-        if: failure() && steps.config.outputs.configured == 'true'
-        env:
-          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-        run: |
-          for log in "${RUNNER_TEMP}"/xcodebuild-*.log; do
-            [ -f "${log}" ] || continue
-            sed -i '' -e "s|${API_KEY_ID}|[key id]|g" -e "s|${API_ISSUER_ID}|[issuer id]|g" "${log}"
-          done
-
       - name: Upload archive logs
-        if: failure() && steps.config.outputs.configured == 'true'
+        if: failure() && steps.config.outputs.configured == 'true' && steps.cleanup.outcome == 'success' && steps.redact.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-testflight-logs-${{ github.run_attempt }}

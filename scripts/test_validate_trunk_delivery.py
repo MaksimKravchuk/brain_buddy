@@ -18,7 +18,11 @@ job anywhere holds GITHUB_TOKEN contents: write.
 
 from __future__ import annotations
 
+import base64
 import importlib.util
+import json
+import os
+import sys
 import subprocess
 import tempfile
 import unittest
@@ -1015,6 +1019,319 @@ class DeployContractTest(unittest.TestCase):
         )
         self.assertNotIn("workflow_dispatch", text)
 
+
+class TestFlightSigningTests(unittest.TestCase):
+    """025-FR-001 through 025-FR-004: signing input and cleanup boundaries."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        for command, source in {
+            "openssl": """import os, sys
+args = sys.argv[1:]
+mode = os.environ.get("SIGNING_TEST_MODE", "success")
+if args[0] == "rand": print("synthetic-keychain-password")
+elif args[0] == "pkcs12":
+    if mode == "password": sys.exit(1)
+    if "-nocerts" in args:
+        print("-----BEGIN PRIVATE KEY-----\\nsynthetic\\n-----END PRIVATE KEY-----\\n" * (2 if mode == "multiple" else 1))
+    else:
+        from pathlib import Path
+        Path(args[args.index("-out") + 1]).write_text("-----BEGIN CERTIFICATE-----\\nsynthetic\\n-----END CERTIFICATE-----\\n")
+elif "-subject" in args:
+    team = "OTHERTEAM1" if mode == "team" else "TESTTEAM01"
+    print("subject=\\n    CN=Apple Development: Synthetic Signer\\n    OU=" + team + "\\n    O=Synthetic Signer")
+elif "-fingerprint" in args: print("sha1 Fingerprint=" + "AA:" * 19 + "AA")
+elif "-outform" in args:
+    from pathlib import Path
+    Path(args[args.index("-out") + 1]).write_bytes(b"synthetic-certificate")
+else: sys.exit(1)
+""",
+            "security": """import os, sys
+from pathlib import Path
+args = sys.argv[1:]
+mode = os.environ.get("SIGNING_TEST_MODE", "success")
+with open(os.environ["SIGNING_TEST_CALLS"], "a") as f:
+    f.write(args[0] + "\\n")
+if args[0] == "create-keychain": Path(args[-1]).touch()
+elif args[0] == "delete-keychain":
+    if mode == "cleanup": sys.exit(1)
+    Path(args[-1]).unlink(missing_ok=True)
+elif args[0] == "import" and mode == "import": sys.exit(1)
+elif args[0] == "set-key-partition-list" and mode == "partition": sys.exit(1)
+elif args[0] == "find-identity":
+    if mode in ("expired", "untrusted", "purpose"):
+        print("0 valid identities found")
+    else: print('1) ' + 'AA' * 20 + ' "Apple Development: Synthetic Signer"\\n1 valid identities found')
+elif args[0] == "list-keychains":
+    if "-s" in args:
+        assert "/synthetic/existing.keychain-db" in args
+    else: print('    "/synthetic/existing.keychain-db"')
+""",
+        }.items():
+            path = bin_dir / command
+            path.write_text(f"#!{sys.executable}\n" + source)
+            path.chmod(0o755)
+        codesign = bin_dir / "codesign"
+        codesign.write_text(f"#!{sys.executable}\n" + """import os, sys
+from pathlib import Path
+args = sys.argv[1:]
+prefix = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--extract-certificates="))
+wrong = os.environ.get("SIGNING_TEST_MODE") == "archive-widget" and args[-1].endswith(".appex")
+Path(prefix + "0").write_bytes(b"wrong-certificate" if wrong else b"synthetic-certificate")
+""")
+        codesign.chmod(0o755)
+        self.env = {
+            "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+            "RUNNER_TEMP": str(self.root),
+            "GITHUB_OUTPUT": str(self.root / "output"),
+            "GITHUB_STEP_SUMMARY": str(self.root / "summary"),
+            "GITHUB_RUN_NUMBER": "50",
+            "APPLE_TEAM_ID": "TESTTEAM01",
+            "API_KEY_ID": "synthetic-api-key",
+            "API_ISSUER_ID": "synthetic-issuer",
+            "API_KEY_P8": "synthetic-api-private-key",
+            "BUNDLE_ID_PREFIX": "brainbuddy",
+            "BUILD_NUMBER_OFFSET": "",
+            "IOS_DEVELOPMENT_CERTIFICATE_BASE64": base64.b64encode(
+                b"synthetic-bundle"
+            ).decode(),
+            "IOS_DEVELOPMENT_CERTIFICATE_PASSWORD": "synthetic-p12-password",
+            "SIGNING_TEST_CALLS": str(self.root / "calls"),
+        }
+
+    @staticmethod
+    def workflow_script(name: str) -> str:
+        text = (REPO_ROOT / ".github/workflows/ios.yml").read_text()
+        step = text.split("      - name: " + name + "\n", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+        script = step.split("        run: |\n", 1)[1]
+        return "\n".join(
+            line[10:] if line.startswith("          ") else line
+            for line in script.splitlines()
+        )
+
+    def install(self, mode: str = "success") -> subprocess.CompletedProcess[str]:
+        self.env["SIGNING_TEST_MODE"] = mode
+        return subprocess.run(
+            ["bash", str(REPO_ROOT / "ios/ci/install_signing_identity.sh")],
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+
+    def cleanup(self) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "bash",
+                "-e",
+                "-o",
+                "pipefail",
+                "-c",
+                self.workflow_script("Remove signing material"),
+            ],
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_valid_identity_preserves_search_list_and_removes_bundle(self) -> None:
+        """025-FR-002 025-SC-002: import/search-list lifecycle, synthetic native boundary."""
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.root / "brainbuddy-signing/development.p12").exists())
+        self.assertTrue((self.root / "brainbuddy-signing/signing.keychain-db").exists())
+        self.assertIn("Signing identity installed", result.stdout)
+        self.assertNotIn(
+            self.env["IOS_DEVELOPMENT_CERTIFICATE_PASSWORD"],
+            result.stdout + result.stderr,
+        )
+        self.assertEqual(self.cleanup().returncode, 0)
+        self.assertEqual(self.cleanup().returncode, 0)
+
+    def test_invalid_signing_input_fails_before_search_list_activation(self) -> None:
+        """025-FR-002 025-SC-002: reject password/team/cardinality/trust failures."""
+        for mode in (
+            "password",
+            "team",
+            "multiple",
+            "import",
+            "partition",
+            "expired",
+            "untrusted",
+            "purpose",
+        ):
+            with self.subTest(mode=mode):
+                (self.root / "calls").unlink(missing_ok=True)
+                result = self.install(mode)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(
+                    (self.root / "brainbuddy-signing/development.p12").exists()
+                )
+                self.assertFalse(
+                    (self.root / "brainbuddy-signing/signing.keychain-db").exists()
+                )
+                self.assertNotIn(
+                    "list-keychains",
+                    (
+                        (self.root / "calls").read_text()
+                        if (self.root / "calls").exists()
+                        else ""
+                    ),
+                )
+                self.assertEqual(self.cleanup().returncode, 0)
+
+    def test_malformed_bundle_and_missing_configuration(self) -> None:
+        """025-FR-001: configured uploads fail on either missing signing secret."""
+        self.env["IOS_DEVELOPMENT_CERTIFICATE_BASE64"] = "!invalid!"
+        self.assertNotEqual(self.install().returncode, 0)
+        for secret in (
+            "IOS_DEVELOPMENT_CERTIFICATE_BASE64",
+            "IOS_DEVELOPMENT_CERTIFICATE_PASSWORD",
+        ):
+            old = self.env[secret]
+            self.env[secret] = ""
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-e",
+                    "-o",
+                    "pipefail",
+                    "-c",
+                    self.workflow_script("Check the TestFlight configuration"),
+                ],
+                env=self.env,
+                text=True,
+                capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.env[secret] = old
+        self.env["API_KEY_ID"] = ""
+        result = subprocess.run(
+            [
+                "bash",
+                "-e",
+                "-o",
+                "pipefail",
+                "-c",
+                self.workflow_script("Check the TestFlight configuration"),
+            ],
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("configured=false", (self.root / "output").read_text())
+
+    def test_cleanup_attempts_all_targets_and_fails_on_remaining_keychain(self) -> None:
+        """025-FR-004: partial failure cannot bypass all-target cleanup."""
+        self.assertEqual(self.install().returncode, 0)
+        api = self.root / "private_keys"
+        api.mkdir()
+        (api / "synthetic.p8").write_text("synthetic-private-key")
+        self.env["SIGNING_TEST_MODE"] = "cleanup"
+        result = self.cleanup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(api.exists())
+        self.assertFalse((self.root / "brainbuddy-signing/development.pem").exists())
+        self.assertTrue((self.root / "brainbuddy-signing/signing.keychain-db").exists())
+
+    def test_redaction_and_cancellation_artifact_boundary(self) -> None:
+        """025-FR-004 025-SC-003: security boundary contribution; CI/review also required."""
+        self.assertEqual(self.install().returncode, 0)
+        log = self.root / "xcodebuild-archive.log"
+        log.write_text(
+            "Synthetic Signer "
+            + "AA" * 20
+            + " "
+            + self.env["API_KEY_ID"]
+            + " "
+            + str(self.root)
+            + " compile error"
+        )
+        result = subprocess.run(
+            [
+                "bash",
+                "-e",
+                "-o",
+                "pipefail",
+                "-c",
+                self.workflow_script("Redact signing identifiers from the logs"),
+            ],
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for value in (
+            "Synthetic Signer",
+            "AA" * 20,
+            self.env["API_KEY_ID"],
+            str(self.root),
+        ):
+            self.assertNotIn(value, log.read_text())
+        self.assertIn("compile error", log.read_text())
+        workflow = (REPO_ROOT / ".github/workflows/ios.yml").read_text()
+        cleanup = workflow.split("      - name: Remove signing material\n", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+        self.assertIn("if: always()", cleanup)
+        artifact = workflow.split("      - name: Upload archive logs\n", 1)[1]
+        self.assertIn("steps.cleanup.outcome == 'success'", artifact)
+        self.assertIn("steps.redact.outcome == 'success'", artifact)
+        self.assertLess(
+            workflow.index("Install the development signing identity"),
+            workflow.index("Archive for the App Store"),
+        )
+        self.assertIn("Verify the archive signing identity", workflow)
+
+    def test_archive_leaf_mismatch_blocks_upload(self) -> None:
+        """025-FR-003 025-SC-001: comparison oracle; two actual uploads also required."""
+        self.assertEqual(self.install().returncode, 0)
+        script = self.workflow_script("Verify the archive signing identity")
+        result = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", script],
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("app and widget match", result.stdout)
+        self.env["SIGNING_TEST_MODE"] = "archive-widget"
+        result = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", script],
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("did not use the configured", result.stdout)
+
+    def test_runbook_and_remote_secret_scope_evidence(self) -> None:
+        """025-FR-005 025-SC-004: documented setup and actual metadata readback."""
+        data = json.loads(
+            (
+                REPO_ROOT
+                / "specs/025-testflight-signing/evidence/remote-configuration.json"
+            ).read_text()
+        )
+        names = {
+            "IOS_DEVELOPMENT_CERTIFICATE_BASE64",
+            "IOS_DEVELOPMENT_CERTIFICATE_PASSWORD",
+        }
+        self.assertEqual({item["name"] for item in data["environment_secrets"]}, names)
+        self.assertEqual(data["repository_duplicates"], [])
+        self.assertEqual(data["environment"].lower(), "testflight")
+        self.assertEqual(data["protection_rules"], [])
+        self.assertIsNone(data["deployment_branch_policy"])
+        readme = (REPO_ROOT / "ios/README.md").read_text()
+        for name in names:
+            self.assertIn(name, readme)
+        self.assertIn("CI never revokes certificates automatically", readme)
 
 if __name__ == "__main__":
     unittest.main()

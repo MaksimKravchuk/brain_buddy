@@ -198,10 +198,10 @@ setup below, the `testflight` job writes what is missing to the run summary
    Team keys*: create a key with the **Admin** role. Download the `.p8` (it
    can be downloaded once) and note the key id and the issuer id.
 
-   *Why Admin.* CI signs on a fresh runner that has no certificate of its
-   own, so `xcodebuild -allowProvisioningUpdates` asks App Store Connect for a
-   cloud-managed distribution certificate and the profiles for both targets.
-   With an API key that takes the Admin role; App Manager is not enough.
+   *Why Admin.* Archive imports a reusable Apple Development identity (below)
+   and automatic provisioning obtains/refreshes profiles for both targets.
+   Export uses the cloud-managed distribution certificate through the API key;
+   that takes the Admin role, not App Manager.
 
    *What it can do if it leaks.* A team key is not scoped to this app. Until
    someone revokes it, whoever holds the `.p8`, key id and issuer id acts as
@@ -229,6 +229,14 @@ setup below, the `testflight` job writes what is missing to the run summary
      - `APP_STORE_CONNECT_API_ISSUER_ID`: the issuer id
      - `APP_STORE_CONNECT_API_KEY_P8`: the full contents of the `.p8` file,
        including the `BEGIN`/`END` lines
+     - `IOS_DEVELOPMENT_CERTIFICATE_BASE64`: Base64 of a password-protected
+       `.p12` containing exactly one Apple Development certificate and its
+       private key for `APPLE_TEAM_ID`. Export that certificate from Xcode's
+       *Settings → Accounts → team → Manage Certificates → Export Certificate*,
+       then use `base64 -i /path/to/development.p12 | pbcopy` and paste directly
+       into this environment secret. A downloaded `.cer` contains no private key.
+     - `IOS_DEVELOPMENT_CERTIFICATE_PASSWORD`: the `.p12` export password.
+       Keep both secrets in this environment, with no repository-level duplicates.
    - Variables (environment or repository level):
      - `APPLE_TEAM_ID` (required): the 10-character team id
      - `IOS_BUNDLE_ID_PREFIX` (optional): overrides `BB_BUNDLE_ID_PREFIX`;
@@ -239,6 +247,24 @@ setup below, the `testflight` job writes what is missing to the run summary
    build reaches the group. `ITSAppUsesNonExemptEncryption = false` in the
    Info.plist answers the export-compliance question, so builds are not held
    for it.
+
+The two development-signing secrets are required once the existing Apple API/team
+setup is configured; missing or invalid values fail before archive. CI imports the
+identity into a temporary keychain, verifies the team and trusted certificate,
+and checks app/widget archive leaf certificates match it before export. Decoded
+`.p12` is removed after installation; always-run cleanup removes the keychain and
+API key. Failure logs are redacted and uploaded only after successful cleanup.
+
+Under the existing unrestricted branch policy, repository writers who can run
+branch workflows can extract this reusable private key as well as the Admin API
+key. These are controller-side operational credentials, excluded from BrainBuddy
+account export and unaffected by account deletion. Retain the downloaded public
+`.cer` privately outside the repository to identify the active certificate and
+expiry. Before expiry, replace both environment secrets together with a new
+matching identity. On suspected disclosure or retirement, the owner must match
+and revoke only the affected certificate, replace/remove both secrets, and audit
+the affected runs. Reverting workflow code does not invalidate a disclosed key.
+CI never revokes certificates automatically.
 
 Then run the workflow on a branch (*Actions → iOS TestFlight → Run
 workflow*), or land a change under `ios/`.
@@ -348,9 +374,10 @@ data, or need a sign-in.
 - `Shared/PrivacyInfo.xcprivacy` declares a baseline (UserDefaults, file
   timestamps, account email and user content for app functionality). Keep it
   in step with the code.
-- CI signs automatically on a fresh runner each time, so the team may gain an
-  Apple Development certificate per run. Revoke stale ones in Certificates,
-  Identifiers & Profiles if they pile up.
+- Fresh CI runners reuse the configured Apple Development identity. If archive
+  reports a certificate quota error, check the installation/validity step and
+  configured team; verify the portal inventory before an owner-authorized repair.
+  Routine certificate revocation is not part of the upload workflow.
 - Background refresh is opportunistic (iOS decides when); widgets show the
   state of the last write to the shared store.
 - Weekly review stays deferred; the brain dump is pass 2.
