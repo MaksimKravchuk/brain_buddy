@@ -125,11 +125,15 @@ struct SignInSheet: View {
         switch step {
         case .choice:
             Section {
-                if methods?.google == true { action("Continue with Google") { startProvider(.google) } }
+                if methods?.google == true {
+                    GoogleSignInButton(isBusy: isBusy) { startProvider(.google) }
+                        .disabled(isBusy || !isOnline)
+                }
                 if methods?.apple == true {
-                    Button { startProvider(.apple) } label: {
-                        Label("Sign in with Apple", systemImage: "apple.logo").frame(maxWidth: .infinity, minHeight: 44)
-                    }.disabled(isBusy || !isOnline)
+                    AppleSignInButton { startProvider(.apple) }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .disabled(isBusy || !isOnline)
                 }
                 if methods == nil {
                     Text(availabilityFailed ? "Couldn't load sign-in methods. Try again or use your password." : "Loading sign-in methods…")
