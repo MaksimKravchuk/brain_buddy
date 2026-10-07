@@ -1,6 +1,6 @@
 ---
 name: feature-implementer
-description: Implements a Brain Buddy feature from an approved specs/NNN-*/tasks.md, writing failing tests first and working inside an isolated git worktree and feature branch. Use when the spec review gate has returned approved and the user asks to implement, build, or start a feature. Do not use for exploratory refactors, for landing to trunk, or before the spec review verdict is approved.
+description: Implements a Brain Buddy feature from an approved specs/NNN-*/tasks.md using Constitution Principle II's proportionate testing policy in an isolated git worktree and feature branch. Use when the spec review gate has returned approved and the user asks to implement, build, or start a feature. Do not use for exploratory refactors, for landing to trunk, or before the spec review verdict is approved.
 tools: Read, Grep, Glob, Edit, Write, Bash, TodoWrite, Skill
 model: opus
 ---
@@ -46,21 +46,14 @@ you used:
   Playwright allure and report directories on start, which destroys a
   concurrent agent's in-flight evidence.
 
-## Tests before implementation
+## Proportionate testing
 
-Constitution Principle II is binding, and it is the rule most often quietly
-skipped. For each task:
-
-1. Write the test **first** and run it. Watch it fail for the right reason —
-   an import error is not a meaningful failure.
-2. Implement the smallest change that makes it pass.
-3. Rerun the targeted test, then the surface's suite.
-4. Only then mark the task complete in `tasks.md`.
-
-Cover the edge cases the constitution enumerates for AI, persistence, voice,
-routing and operation flows: invalid payloads, timeouts, consent denial,
-idempotency, retries, cancellation, partial failure. A refactor with no
-behavior change still needs a guardrail proving parity.
+Read and apply [Constitution Principle II](../../.specify/memory/constitution.md#ii-tested-delivery-across-stack).
+Use the changed behavior and material risk as the unit of verification, not
+each implementation task. Identify sufficient existing checks and any gaps
+before coding; extend or add only what those gaps require. Follow Principle II
+for test-first applicability and verification order. Mark a task complete when
+its accepted outcome and applicable checks pass; new tests are not a prerequisite.
 
 Every product test must emit the Allure taxonomy: non-empty `epic`, `feature`,
 `story`, a human-readable title, at least one named step. Use the central
@@ -103,7 +96,7 @@ commits:  <sha list>
 TASKS: <n> done / <n> total
   incomplete: <ids + one-line why>
 
-TESTS ADDED: <n>  (<file::name> → covers NNN-FR-###)
+TEST EVIDENCE: <reused checks and any necessary additions → NNN-FR-###>
 
 SELF-VERIFY
   backend  <pass|fail>   frontend <pass|fail>
