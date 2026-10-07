@@ -1,0 +1,687 @@
+{
+  "artifact_type": "actual_local_headed_auth_browser_evidence",
+  "implementation_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+  "observed_at_utc": "2026-10-06T19:23:53.249291+00:00",
+  "modern_test_cases": 14,
+  "passed": 14,
+  "failed": 0,
+  "flaky": 0,
+  "test_duration_display": "2.2m",
+  "provider_scope": "Real app/SQLite/session/signature checks with signed synthetic Google/Apple upstreams and SMTP capture; not live configured providers or physical iOS.",
+  "legacy_suite": {
+    "passed": 65,
+    "failed": 0,
+    "flaky": 0,
+    "optional_external_model_skipped": 1,
+    "test_duration_display": "10.1m"
+  },
+  "artifact_validation": {
+    "executed_results": 79,
+    "taxonomy_results": 80,
+    "required_native_product_stories": 6,
+    "all": "PASS"
+  },
+  "measurements": [
+    {
+      "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+      "browser": "151.0.7922.173",
+      "os": "linux 6.18.44 x64",
+      "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "cpu_throttle": "none",
+      "action": "Email request",
+      "completion": "held real API response",
+      "real_status": 202,
+      "dispatches": 1,
+      "elapsed_ms": 11.5,
+      "busy": true,
+      "disabled": true,
+      "visible": true,
+      "width": 300,
+      "height": 44,
+      "headless": false,
+      "reduced_motion": false,
+      "visibility": "visible",
+      "focus_reachable": true,
+      "focus_outline_px": 3,
+      "focus_visible": true,
+      "device_pixel_ratio": 1,
+      "horizontal_overflow": false,
+      "viewport": {
+        "width": 390,
+        "height": 851
+      },
+      "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+      "attachment_name": "Email request feedback measurement",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/fed09412-7c82-4b22-9e08-de70895529de-attachment.json"
+    },
+    {
+      "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+      "browser": "151.0.7922.173",
+      "os": "linux 6.18.44 x64",
+      "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "cpu_throttle": "none",
+      "action": "Email verification",
+      "completion": "held real API response",
+      "real_status": 200,
+      "dispatches": 1,
+      "elapsed_ms": 10.100000001490116,
+      "busy": true,
+      "disabled": true,
+      "visible": true,
+      "width": 300,
+      "height": 44,
+      "headless": false,
+      "reduced_motion": false,
+      "visibility": "visible",
+      "focus_reachable": true,
+      "focus_outline_px": 3,
+      "focus_visible": true,
+      "device_pixel_ratio": 1,
+      "horizontal_overflow": false,
+      "viewport": {
+        "width": 390,
+        "height": 851
+      },
+      "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+      "attachment_name": "Email verification feedback measurement",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/1763e309-396f-4628-8247-6dd2e7cc4edf-attachment.json"
+    },
+    {
+      "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+      "browser": "151.0.7922.173",
+      "os": "linux 6.18.44 x64",
+      "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "cpu_throttle": "none",
+      "action": "Provider start",
+      "completion": "held real API response",
+      "real_status": 200,
+      "dispatches": 1,
+      "elapsed_ms": 7.799999997019768,
+      "busy": true,
+      "disabled": true,
+      "visible": true,
+      "width": 300,
+      "height": 44,
+      "headless": false,
+      "reduced_motion": false,
+      "visibility": "visible",
+      "focus_reachable": true,
+      "focus_outline_px": 3,
+      "focus_visible": true,
+      "device_pixel_ratio": 1,
+      "horizontal_overflow": false,
+      "viewport": {
+        "width": 390,
+        "height": 851
+      },
+      "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+      "attachment_name": "Provider start feedback measurement",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/ed96fe14-0969-4797-8c44-b15ec9941c40-attachment.json"
+    },
+    {
+      "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+      "browser": "151.0.7922.173",
+      "os": "linux 6.18.44 x64",
+      "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "cpu_throttle": "none",
+      "action": "Account password mutation",
+      "completion": "held real API response",
+      "real_status": 204,
+      "dispatches": 1,
+      "elapsed_ms": 11.399999998509884,
+      "busy": true,
+      "disabled": true,
+      "visible": true,
+      "width": 350,
+      "height": 44,
+      "headless": false,
+      "reduced_motion": false,
+      "visibility": "visible",
+      "focus_reachable": true,
+      "focus_outline_px": 3,
+      "focus_visible": true,
+      "device_pixel_ratio": 1,
+      "horizontal_overflow": false,
+      "viewport": {
+        "width": 390,
+        "height": 851
+      },
+      "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+      "attachment_name": "Account password mutation feedback measurement",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/20c0c72b-f013-4d09-979f-7a79d2ec6251-attachment.json"
+    },
+    {
+      "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+      "browser": "151.0.7922.173",
+      "os": "linux 6.18.44 x64",
+      "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "cpu_throttle": "none",
+      "action": "Recovery password save",
+      "completion": "held real API response",
+      "real_status": 204,
+      "dispatches": 1,
+      "elapsed_ms": 5.899999998509884,
+      "busy": true,
+      "disabled": true,
+      "visible": true,
+      "width": 300,
+      "height": 44,
+      "headless": false,
+      "reduced_motion": false,
+      "visibility": "visible",
+      "focus_reachable": true,
+      "focus_outline_px": 3,
+      "focus_visible": true,
+      "device_pixel_ratio": 1,
+      "horizontal_overflow": false,
+      "viewport": {
+        "width": 390,
+        "height": 851
+      },
+      "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+      "attachment_name": "Recovery password save feedback measurement",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/3caba9bc-09ab-4247-9b69-55fb7796c0db-attachment.json"
+    },
+    {
+      "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+      "browser": "151.0.7922.173",
+      "os": "linux 6.18.44 x64",
+      "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "cpu_throttle": "none",
+      "action": "Email request",
+      "completion": "held real API response",
+      "real_status": 202,
+      "dispatches": 1,
+      "elapsed_ms": 16.19999999552965,
+      "busy": true,
+      "disabled": true,
+      "visible": true,
+      "width": 326,
+      "height": 44,
+      "headless": false,
+      "reduced_motion": false,
+      "visibility": "visible",
+      "focus_reachable": true,
+      "focus_outline_px": 3,
+      "focus_visible": true,
+      "device_pixel_ratio": 1,
+      "horizontal_overflow": false,
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+      "attachment_name": "Email request feedback measurement",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/a4dbda88-04da-4852-9a09-befc6a85307c-attachment.json"
+    },
+    {
+      "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+      "browser": "151.0.7922.173",
+      "os": "linux 6.18.44 x64",
+      "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "cpu_throttle": "none",
+      "action": "Email verification",
+      "completion": "held real API response",
+      "real_status": 200,
+      "dispatches": 1,
+      "elapsed_ms": 6.5,
+      "busy": true,
+      "disabled": true,
+      "visible": true,
+      "width": 326,
+      "height": 44,
+      "headless": false,
+      "reduced_motion": false,
+      "visibility": "visible",
+      "focus_reachable": true,
+      "focus_outline_px": 3,
+      "focus_visible": true,
+      "device_pixel_ratio": 1,
+      "horizontal_overflow": false,
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+      "attachment_name": "Email verification feedback measurement",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/317f55b7-0872-4835-82a6-68ba38748fb8-attachment.json"
+    },
+    {
+      "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+      "browser": "151.0.7922.173",
+      "os": "linux 6.18.44 x64",
+      "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "cpu_throttle": "none",
+      "action": "Provider start",
+      "completion": "held real API response",
+      "real_status": 200,
+      "dispatches": 1,
+      "elapsed_ms": 7.100000001490116,
+      "busy": true,
+      "disabled": true,
+      "visible": true,
+      "width": 326,
+      "height": 44,
+      "headless": false,
+      "reduced_motion": false,
+      "visibility": "visible",
+      "focus_reachable": true,
+      "focus_outline_px": 3,
+      "focus_visible": true,
+      "device_pixel_ratio": 1,
+      "horizontal_overflow": false,
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+      "attachment_name": "Provider start feedback measurement",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/7aecb555-1d66-4c34-a35f-af10ffe31c8b-attachment.json"
+    },
+    {
+      "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+      "browser": "151.0.7922.173",
+      "os": "linux 6.18.44 x64",
+      "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "cpu_throttle": "none",
+      "action": "Account password mutation",
+      "completion": "held real API response",
+      "real_status": 204,
+      "dispatches": 1,
+      "elapsed_ms": 9.800000004470348,
+      "busy": true,
+      "disabled": true,
+      "visible": true,
+      "width": 430,
+      "height": 44,
+      "headless": false,
+      "reduced_motion": false,
+      "visibility": "visible",
+      "focus_reachable": true,
+      "focus_outline_px": 3,
+      "focus_visible": true,
+      "device_pixel_ratio": 1,
+      "horizontal_overflow": false,
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+      "attachment_name": "Account password mutation feedback measurement",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/eabac379-8fcd-4ebb-a477-e117933f26a0-attachment.json"
+    },
+    {
+      "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+      "browser": "151.0.7922.173",
+      "os": "linux 6.18.44 x64",
+      "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "cpu_throttle": "none",
+      "action": "Recovery password save",
+      "completion": "held real API response",
+      "real_status": 204,
+      "dispatches": 1,
+      "elapsed_ms": 4.399999998509884,
+      "busy": true,
+      "disabled": true,
+      "visible": true,
+      "width": 326,
+      "height": 44,
+      "headless": false,
+      "reduced_motion": false,
+      "visibility": "visible",
+      "focus_reachable": true,
+      "focus_outline_px": 3,
+      "focus_visible": true,
+      "device_pixel_ratio": 1,
+      "horizontal_overflow": false,
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+      "attachment_name": "Recovery password save feedback measurement",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/70fbe9ee-ad84-419e-956d-3bd44e06cb6d-attachment.json"
+    }
+  ],
+  "axe_scans": [
+    {
+      "pathname": "/settings/account",
+      "surface": "Authentication",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 39,
+      "incomplete_rules": 1,
+      "inapplicable_rules": 50,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/39fc4e62-5ef3-4110-ab76-fd414f4ade5d-attachment.json",
+      "sha256": "e10f1e2e25b9e40a4840a73921e00d12fc1192209633ac72186ed1342b7b3f11"
+    },
+    {
+      "pathname": "/login",
+      "surface": "Email request pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 33,
+      "incomplete_rules": 0,
+      "inapplicable_rules": 56,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/ce42cba7-e9f8-4182-a9ec-175705a4450e-attachment.json",
+      "sha256": "2e60ff77848822475310488609b9196f9b83eb77a05ac41ff77b33c4b75f8ba7"
+    },
+    {
+      "pathname": "/login",
+      "surface": "Email verification pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 34,
+      "incomplete_rules": 0,
+      "inapplicable_rules": 55,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/40546190-8817-4110-9c4c-ed1ddce6d041-attachment.json",
+      "sha256": "4ae47f287d940b8f18c801b5f53ec9a4daf317621a5a2641072a20e9d373f139"
+    },
+    {
+      "pathname": "/login",
+      "surface": "Provider start pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 33,
+      "incomplete_rules": 0,
+      "inapplicable_rules": 56,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/63e565f7-bbc0-49e2-bb7e-4104527b8f5e-attachment.json",
+      "sha256": "4c2431e35ee5b39f4694ff23b1c13d53d37900a58ae3b0b82de329672f60d24f"
+    },
+    {
+      "pathname": "/settings/account",
+      "surface": "Account password mutation pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 40,
+      "incomplete_rules": 0,
+      "inapplicable_rules": 49,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/d2c7d7b1-43fa-4bc5-8273-1911c373e5d1-attachment.json",
+      "sha256": "a0c4e38224860dfe26aafe8ecd26770535d4174c51c33c0b4ad8c1fff858e1dc"
+    },
+    {
+      "pathname": "/login",
+      "surface": "Recovery password save pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 34,
+      "incomplete_rules": 0,
+      "inapplicable_rules": 55,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/40e6c646-5bf4-427a-941c-a678249adde0-attachment.json",
+      "sha256": "cf10c5e370596b406c33e355d8ca19e8b494131f24f8dabfb5feda095fa37c44"
+    },
+    {
+      "pathname": "/login",
+      "surface": "Authentication",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 29,
+      "incomplete_rules": 0,
+      "inapplicable_rules": 60,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/dd0cffdb-ae6b-4700-86bf-988dc0505477-attachment.json",
+      "sha256": "14f817c961c179c2576ff387ef319ec320aee0951bed10f8e67e418b60cdd259"
+    },
+    {
+      "pathname": "/login",
+      "surface": "Authentication",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 30,
+      "incomplete_rules": 0,
+      "inapplicable_rules": 59,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/4fbd8de8-97f9-4c5d-9a00-701ab4ab7344-attachment.json",
+      "sha256": "6c3fcda74e626a7a35e789aec5dec9f52efa638c75b4b3c9da499ce9436ef246"
+    },
+    {
+      "pathname": "/login",
+      "surface": "Email request pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 33,
+      "incomplete_rules": 0,
+      "inapplicable_rules": 56,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/9554ae11-ec40-45f6-966c-15c3caab87d5-attachment.json",
+      "sha256": "2e60ff77848822475310488609b9196f9b83eb77a05ac41ff77b33c4b75f8ba7"
+    },
+    {
+      "pathname": "/login",
+      "surface": "Email verification pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 34,
+      "incomplete_rules": 0,
+      "inapplicable_rules": 55,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/ff174eac-af94-4330-85a2-4f591220200c-attachment.json",
+      "sha256": "4ae47f287d940b8f18c801b5f53ec9a4daf317621a5a2641072a20e9d373f139"
+    },
+    {
+      "pathname": "/login",
+      "surface": "Provider start pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 33,
+      "incomplete_rules": 0,
+      "inapplicable_rules": 56,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/161bcd96-108a-4e9f-ad24-896f6e3050fa-attachment.json",
+      "sha256": "4c2431e35ee5b39f4694ff23b1c13d53d37900a58ae3b0b82de329672f60d24f"
+    },
+    {
+      "pathname": "/settings/account",
+      "surface": "Account password mutation pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 42,
+      "incomplete_rules": 1,
+      "inapplicable_rules": 47,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/d65d8188-73fe-45da-a5e6-9741dcdbfb1b-attachment.json",
+      "sha256": "f139830fc6c6d8e8795f77ecced85a6ab9ba4e0d0b5ce9b00a43dff119494bc3"
+    },
+    {
+      "pathname": "/login",
+      "surface": "Recovery password save pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 34,
+      "incomplete_rules": 0,
+      "inapplicable_rules": 55,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/f5b957c5-ec38-4b32-96a7-696a31c2cf8a-attachment.json",
+      "sha256": "cf10c5e370596b406c33e355d8ca19e8b494131f24f8dabfb5feda095fa37c44"
+    },
+    {
+      "pathname": "/settings/account",
+      "surface": "Authentication",
+      "engine": {
+        "name": "axe-core",
+        "version": "4.13.0"
+      },
+      "violations": [],
+      "passed_rules": 39,
+      "incomplete_rules": 1,
+      "inapplicable_rules": 50,
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/a29be58a-53c7-4217-8727-35c2b5522fd4-attachment.json",
+      "sha256": "e10f1e2e25b9e40a4840a73921e00d12fc1192209633ac72186ed1342b7b3f11"
+    }
+  ],
+  "screenshots": [
+    {
+      "name": "Authentication screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/78501875-ca85-4edf-a613-4393a344d3c5-attachment.png",
+      "sha256": "26dc518300b18c4284dd5260bea25432f59512c1e33b4237baefcacd740ee7be",
+      "width": 1440,
+      "height": 1000,
+      "inputs_masked": true
+    },
+    {
+      "name": "Email request pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/af35d457-b2de-4ca5-8743-016442014b9b-attachment.png",
+      "sha256": "5af04f07df8dbd10be6e3e7427787e1044350e0a39bee154a3a9c1154a8f2e26",
+      "width": 390,
+      "height": 851,
+      "inputs_masked": true
+    },
+    {
+      "name": "Email verification pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/2f7f1c62-f81b-42e5-8b84-39fe53f1df92-attachment.png",
+      "sha256": "e01fa47888a882225658bb2c38d04f9d2d0d28a6a555f6cc4b14454c4973a318",
+      "width": 390,
+      "height": 851,
+      "inputs_masked": true
+    },
+    {
+      "name": "Provider start pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/77b0c056-d29f-4ae6-ab61-a967d77ead6c-attachment.png",
+      "sha256": "5bf73a6b1665a8eb7e16ed7a5c10d7c9fa921461823d0dcc0c764668e9508020",
+      "width": 390,
+      "height": 851,
+      "inputs_masked": true
+    },
+    {
+      "name": "Account password mutation pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/8ccf281e-0a73-4eba-ab9e-675d8cf68585-attachment.png",
+      "sha256": "ef448b4a79404ae32ecb989190d84aa0b0600c6c886d0fee2c7f75ad9ec81332",
+      "width": 390,
+      "height": 851,
+      "inputs_masked": true
+    },
+    {
+      "name": "Recovery password save pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/91137074-1cfd-41a8-8765-93020b5d7416-attachment.png",
+      "sha256": "2da691a2c2db587a518913467998aea1bca3bd238b8e3d5e00e86e7f2498d6d2",
+      "width": 390,
+      "height": 851,
+      "inputs_masked": true
+    },
+    {
+      "name": "Authentication screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/4dc51ba9-3fc2-413d-9083-d37a86038e72-attachment.png",
+      "sha256": "9a270ab44411d8cbfa525ddc8f1c05c2b3c6369f05d69963fe77a5f9151edd0d",
+      "width": 1440,
+      "height": 1000,
+      "inputs_masked": true
+    },
+    {
+      "name": "Authentication screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/8218503f-5408-435e-b483-dd6da7d1090c-attachment.png",
+      "sha256": "53db49f108897dc64a18447d01d2dfbfb3c3e7b49e45b1b0041b2f086d4ba4bc",
+      "width": 1440,
+      "height": 1000,
+      "inputs_masked": true
+    },
+    {
+      "name": "Email request pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/3a49dcc1-8f70-4c19-9c0c-1ace89349b60-attachment.png",
+      "sha256": "12df4a7f929b0c0198efe87310a583862338d20cd9a806349675ce8b16a1b46c",
+      "width": 1440,
+      "height": 1000,
+      "inputs_masked": true
+    },
+    {
+      "name": "Email verification pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/23611930-b56d-40ca-a6e0-f9dcf5e7237c-attachment.png",
+      "sha256": "7ff889204aa95b0a1f22e5a8fafde5ccd9b8b4940982b9d30f6666dc315d2349",
+      "width": 1440,
+      "height": 1000,
+      "inputs_masked": true
+    },
+    {
+      "name": "Provider start pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/46948095-e01e-4633-ba0d-11112337e109-attachment.png",
+      "sha256": "8ac1dc0d87c4b037b9d0fe680830b19f3ff4014745d46a270826cb3ab47f524a",
+      "width": 1440,
+      "height": 1000,
+      "inputs_masked": true
+    },
+    {
+      "name": "Account password mutation pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/0f9bf5fd-5f2c-424f-9de7-050a7b574adb-attachment.png",
+      "sha256": "f8b2e05e386fa76843544a6dacbd90ec34066e5e00b50d018d0a0c485501ece4",
+      "width": 1440,
+      "height": 1000,
+      "inputs_masked": true
+    },
+    {
+      "name": "Recovery password save pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/fcc3a78d-5142-4cb3-9a5c-fa1329d11112-attachment.png",
+      "sha256": "747d11a5f281c4a1579645c17142125d6d747dfe12f14f48949a687935bf40ba",
+      "width": 1440,
+      "height": 1000,
+      "inputs_masked": true
+    },
+    {
+      "name": "Authentication screen (inputs masked)",
+      "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/feded282-c7c8-4b4d-8971-a1316544ee9b-attachment.png",
+      "sha256": "dc0924cb4445c96d4572f391ccf864e34d616ce94a93f656ee1ba269f353f15f",
+      "width": 1440,
+      "height": 1000,
+      "inputs_masked": true
+    }
+  ],
+  "source_hash_provenance": "/tmp/modern-auth-frozen-29411eb-v8.json",
+  "raw_log": "/tmp/modern-auth-023-verify-all-final-integrated-v8.log",
+  "visual_inspection": {
+    "reviewer": "root implementing session; not independent QA",
+    "observed_at_utc": "2026-10-06T19:29:29.160349+00:00",
+    "status": "bounded two screenshots inspected",
+    "screens": [
+      {
+        "path": "/tmp/modern-auth-v8-actual/playwright-allure/af35d457-b2de-4ca5-8743-016442014b9b-attachment.png",
+        "sha256": "5af04f07df8dbd10be6e3e7427787e1044350e0a39bee154a3a9c1154a8f2e26"
+      },
+      {
+        "path": "/tmp/modern-auth-v8-actual/playwright-allure/3a49dcc1-8f70-4c19-9c0c-1ace89349b60-attachment.png",
+        "sha256": "12df4a7f929b0c0198efe87310a583862338d20cd9a806349675ce8b16a1b46c"
+      }
+    ],
+    "observation": "Desktop1440x1000/mobile390x851 pending email screen, masked input, visible focus, disabled pending controls; no observed clipping, overlap or horizontal overflow. Physical native not observed."
+  },
+  "aggregate_verify_all": "RUNNING; browser gates complete, backend/frontend in progress.",
+  "legacy_crt": {
+    "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+    "sample_count": 120,
+    "aggregate_p95_ms": 104.5,
+    "within_200ms": 119,
+    "required_within_200ms": 114,
+    "operation_p95_max_ms": 134.6,
+    "unchanged_budgets": true,
+    "source": "crt-runtime/t027-200-card-performance.json"
+  }
+}

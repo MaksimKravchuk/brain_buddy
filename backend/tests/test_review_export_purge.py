@@ -14,6 +14,7 @@ import zipfile
 from datetime import UTC, date, datetime, timedelta
 
 import allure
+import pytest
 from fastapi.testclient import TestClient
 
 from app.container import Container
@@ -195,3 +196,42 @@ def test_020_FR_043_purge_empties_every_review_table_and_is_idempotent(
 
     assert set(_review_row_counts(container, first_id).values()) == {0}
     assert set(_review_row_counts(container, second_id).values()) == {1}
+
+
+@pytest.mark.parametrize("purge_during_exposure", [False, True])
+def test_023_FR_018_review_sweep_cannot_recreate_purged_owner_metadata(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    purge_during_exposure: bool,
+) -> None:
+    """A stale exposure answer cannot recreate the deleted owner's review rows."""
+
+    container = _container(api_client)
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    _seed_review_records(container, owner_id)
+    settings = container.task_repo.get_review_settings(owner_id)
+    assert settings is not None
+    container.task_repo.save_review_settings(
+        settings.model_copy(update={"activated_at": NOW})
+    )
+    container.feature_flag_service.set_mode("weekly_review", "on", operator_id=owner_id)
+    exposed_for_owner = container.review_service.is_exposed
+
+    def exposure_then_purge(candidate_owner: str) -> bool:
+        exposed = exposed_for_owner(candidate_owner)
+        if exposed and purge_during_exposure:
+            # Reproduce the exact interleaving: exposure read, complete purge,
+            # then the sweep takes the owner lock with its stale answer.
+            container.account_service.purge_account(candidate_owner)
+        return exposed
+
+    monkeypatch.setattr(container.review_service, "is_exposed", exposure_then_purge)
+    with allure.step("Evaluate review exposure across a completed account purge"):
+        container.review_service.run_maintenance_sweep()
+        if not purge_during_exposure:
+            container.account_service.purge_account(owner_id)
+
+    with allure.step("Verify neither identity nor any owned review row reappears"):
+        assert container.user_repo.get_by_id(owner_id) is None
+        assert set(_review_row_counts(container, owner_id).values()) == {0}
+        assert owner_id not in container.task_repo.review_owner_ids()

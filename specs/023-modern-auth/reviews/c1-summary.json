@@ -1,0 +1,30 @@
+{
+  "architect_action": "Mandatory review evidence is incomplete (missing reviews: requirements-consistency, architecture-consistency, testability-evidence, privacy-consent-security, ux-accessibility-mobile, adversarial-high-risk). This is not a pass: rerun those lenses through the gate. A partial or hand-written campaign is never reported as clean.",
+  "artifacts_changed_since_preflight": false,
+  "artifacts_digest": "9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c",
+  "declared_risk": "medium",
+  "degraded_lenses": [],
+  "human_signoff": null,
+  "missing_reviewers": [
+    "requirements-consistency",
+    "architecture-consistency",
+    "testability-evidence",
+    "privacy-consent-security",
+    "ux-accessibility-mobile",
+    "adversarial-high-risk"
+  ],
+  "model_unverified_lenses": [],
+  "oracle_unknown_lenses": [],
+  "panel_correlated": false,
+  "panel_oracles": {},
+  "panel_providers": {},
+  "product_decisions": [],
+  "reviewers": [],
+  "risk": "high",
+  "risk_escalated_by_classifier": true,
+  "run_id": "modern-auth-20261006-c1",
+  "single_provider_panel": null,
+  "stale_reviews": [],
+  "status": "escalated",
+  "technical_findings": []
+}

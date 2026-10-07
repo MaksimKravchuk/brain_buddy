@@ -1,0 +1,659 @@
+{
+  "review_type": "independent_bounded_security_code_followup",
+  "reviewer": "review_security_c2; no implementation authorship or separate-model provenance claim",
+  "reviewed_at_utc": "2026-10-06T16:41:42.483455+00:00",
+  "input_sha": "056252da83c790b6c4bcf2a92d29bb5d08285826",
+  "input_tree": "c363c962343ca40b4bf755cbcaaf97d27ae7de4d",
+  "input_manifest_sha256": "52400519dd6a500e53a8dd43166312f4c60cfe25a0ae42631f6ea917adcbf5ff",
+  "source_fingerprints": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "de61dbfdfc72f896298bd145428e30e9e876776118c92b658c909f538baf5d0e"
+    },
+    {
+      "path": ".github/workflows/deploy-fly-production.yml",
+      "sha256": "2ade8b626028972706c784089400c72854cc4bc295eefda293c1f2e768dd6d41"
+    },
+    {
+      "path": ".gitleaks.toml",
+      "sha256": "eb928c9061ee0bf455e3e2230581be17df4fa9bccff208b597eb2e83428fdad8"
+    },
+    {
+      "path": "backend/app/api/account.py",
+      "sha256": "58f574823ad4d6aeae77b5664b179a83f618076d8abe986b93953dd53423b543"
+    },
+    {
+      "path": "backend/app/api/auth.py",
+      "sha256": "d2931ea41b2a6dc844bd25badfc12960b866e729dcb23430bc168b2229dd1d27"
+    },
+    {
+      "path": "backend/app/api/errors.py",
+      "sha256": "5699b6102b8737459843986b271a6118691224e798248fcd46b84da07c9ff176"
+    },
+    {
+      "path": "backend/app/api/mcp.py",
+      "sha256": "5f4fd37a70d065772bb55679204e2a6a14dbe9d765d25bd954a69ed7dca4d3e5"
+    },
+    {
+      "path": "backend/app/api/middleware.py",
+      "sha256": "5213ce33a1e5e2db38871b3a567d504873b18844907ff01d8e09e5c898fc3747"
+    },
+    {
+      "path": "backend/app/api/modern_auth.py",
+      "sha256": "aa1b2bac477b6dc20121a34a27ba56ddd2a7db8fcbd1cc23bdcda7d6b6134b83"
+    },
+    {
+      "path": "backend/app/container.py",
+      "sha256": "0b636a8e224f2dced326a94823f3d82c2a8233c6b6ce8a7458734dea1083bb12"
+    },
+    {
+      "path": "backend/app/core/config.py",
+      "sha256": "630b3d16e9534e3d8ce000cd7eb398b1711d864c5c45153e707e68675bd3480a"
+    },
+    {
+      "path": "backend/app/core/logging.py",
+      "sha256": "b39d279700ab90fa3ffce4c808653e3554ad010c7133d8402758dcd05f29304a"
+    },
+    {
+      "path": "backend/app/main.py",
+      "sha256": "f92e10541218e55986a12a1fecca265369e039076b4b6a75e78be49928e7b2b6"
+    },
+    {
+      "path": "backend/app/modules/tasks/service.py",
+      "sha256": "55fb244eaea6d8b271df852c4f4acd510722733814f953bc3d8a2b185ab85350"
+    },
+    {
+      "path": "backend/app/repositories/auth_metadata.py",
+      "sha256": "b1e05197f0b90850bfae798e17b0a245eb84ca5e44dfb3a4109cfc3edd1ec6a0"
+    },
+    {
+      "path": "backend/app/repositories/auth_store.py",
+      "sha256": "7d67f329f2b6d3c64c0d1250db9ac4f2357ceef9dc3619e1314ea27c1909bc8a"
+    },
+    {
+      "path": "backend/app/repositories/feature_flag.py",
+      "sha256": "54931270c2599ee3995d6a36572611fb467f1643f96d63717b18c7317e15089f"
+    },
+    {
+      "path": "backend/app/repositories/session.py",
+      "sha256": "9fa2f077a167b1db81628fd5a9f3f8c18fc5d190c34c9f487c1712458d44d7d6"
+    },
+    {
+      "path": "backend/app/repositories/user.py",
+      "sha256": "dc0c4729cd5a442a55b61b7914381c60ce9b3ab05f340218853c71c7ff2fa10b"
+    },
+    {
+      "path": "backend/app/schemas/auth.py",
+      "sha256": "d23e56e1d389edcf0e7dd4f59bbcf85e67db0215f28253f74892db32ba691228"
+    },
+    {
+      "path": "backend/app/schemas/modern_auth.py",
+      "sha256": "57c9158a932ec2aa980e819867bea59d08bf15007cabf5264da394afb3165f90"
+    },
+    {
+      "path": "backend/app/services/account_service.py",
+      "sha256": "387dff67d1a181d0237e805a5400c399d6689afda061731c14ec8de024f5f723"
+    },
+    {
+      "path": "backend/app/services/admin_service.py",
+      "sha256": "f3825de385641ab9251ec3348c1134812bbd0ee655117826fff7479c8219faef"
+    },
+    {
+      "path": "backend/app/services/auth_apple_lifecycle.py",
+      "sha256": "3ca0aa43dc0851f4b83cd7486b2fc1e597727c5f59282e29ed40c2b1fd95e3cf"
+    },
+    {
+      "path": "backend/app/services/auth_mail_service.py",
+      "sha256": "8a71e049cb9279bef70913b0a1a2e641d906961204731e64599805948a0a4579"
+    },
+    {
+      "path": "backend/app/services/auth_migration.py",
+      "sha256": "7e6618b96106c33f98527d1963060a142fe6e7ae08a400ecfb44333604b82320"
+    },
+    {
+      "path": "backend/app/services/auth_provider_service.py",
+      "sha256": "6e6e969fe3e986fc064c18fd2b6e15881c6b9e5eaca3a36dc9c59110fa9b4e45"
+    },
+    {
+      "path": "backend/app/services/auth_secret_box.py",
+      "sha256": "ce9a8aa7ea94f94084b28d7299e407e6765f266edda192604dca485b5b5346c3"
+    },
+    {
+      "path": "backend/app/services/auth_service.py",
+      "sha256": "f1a464722698d99f9158b56e174af0802aaf190f5adcb95304d9f9adb55f8c65"
+    },
+    {
+      "path": "backend/app/services/feature_flag_service.py",
+      "sha256": "a802387db0da2e53697e008b3a01df697a60b9fa299d282b37c8f46c89da3f38"
+    },
+    {
+      "path": "backend/app/services/modern_auth_service.py",
+      "sha256": "0c706facb32ffc7570cc0c7831c92d2c047e5e3d82061c6793e7a9fd35b30332"
+    },
+    {
+      "path": "backend/tests/modern_auth_e2e_app.py",
+      "sha256": "5c2259a16444532b3e8846c3c9c54fae2dd24ef7862c4df82ab35a069b5de6ba"
+    },
+    {
+      "path": "backend/tests/test_account_api.py",
+      "sha256": "4a35cc46d7abca1bb545575264b941fc6d044b4f5d33fb028e64d474bca2b6d2"
+    },
+    {
+      "path": "backend/tests/test_auth_apple_lifecycle.py",
+      "sha256": "c3b10713d80c99a0f2542e22360f043e77cb7b8b021b6aa0accd9eb19946bcc8"
+    },
+    {
+      "path": "backend/tests/test_auth_service.py",
+      "sha256": "9c84d8f44208ae8bfcafd74a34217dd31c2f100da49e16fef35c3038431548ea"
+    },
+    {
+      "path": "backend/tests/test_auth_store.py",
+      "sha256": "60b39a17e02eb694fb2501c2edf39b8404dc45eb4154b60f52ff21260e4336c8"
+    },
+    {
+      "path": "backend/tests/test_branch_invariants.py",
+      "sha256": "d5cf905b7a5261ac50b27a9adaf1699187d6b7475f443f3c275949eda1c095bf"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_api.py",
+      "sha256": "cb0bfebdc0dfbadba66e0d598b491027cc1599856cb036baed22b41380cc6cf4"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_api_journeys.py",
+      "sha256": "1f8f0c021d7ce4dec06f21bd3ade30332509294ef2c3fa20e2c0ce789e3822ca"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_apple_integration.py",
+      "sha256": "75c986a17fc77fcf65440932779cfe63a12b8de09bad72f8a01e2a5e66cd5f82"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_authority_edges.py",
+      "sha256": "d6d841ae01b3ef4afbe56e6b549bb689cfe705497a0cc9d6b5d7a24ee54853de"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_authority_remaining.py",
+      "sha256": "7baf631fba22fad570164b7b58003f6b1d0b5c8e36882743f614567e26c449cf"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_storage_remaining.py",
+      "sha256": "56d3ba9e5a2dc989f42c0c19d1c18ae9e0bbac42a12075064dde8f66128b4bd1"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_unlink_authority.py",
+      "sha256": "2c4714578bdb518621f13cb1beea7cf84b4233e7fde3a599a9a22c23cdb88b8a"
+    },
+    {
+      "path": "backend/tests/test_task_mcp.py",
+      "sha256": "525b80cd34db390c20ec940d6e84a830d97d05d2cd9f308c145e6368089bcd73"
+    },
+    {
+      "path": "deploy/nginx/default.conf",
+      "sha256": "f76f63879c055d05e366d2850bc0ad4aebd11d373e73cf62d5de68b64d1002f5"
+    },
+    {
+      "path": "docs/api-compatibility.md",
+      "sha256": "8771c02e67006095eaa61f17e538aef8b0747af88c9369ac4f631590685bb6e6"
+    },
+    {
+      "path": "docs/data-retention.md",
+      "sha256": "59e85b92f5cb633e7be159ca7ed231fa1194cc66de0d8b40e1a51bc8072aac90"
+    },
+    {
+      "path": "docs/decisions/0028-modern-identity-authority.md",
+      "sha256": "d92dc2299d7cfc249dd8d2addd477bc23a2e12cdc35385912b5eaad816931c4d"
+    },
+    {
+      "path": "docs/modern-auth-operations.md",
+      "sha256": "e2d1d2f6a27321fd88a9e0669c94293375e653531b922b98cbd781ebfb29914c"
+    },
+    {
+      "path": "frontend/playwright.modern-auth.config.ts",
+      "sha256": "2d8712f77e1f609f2cdf74fdd536cfd86fa693af6337f5d56167536d1606c1ca"
+    },
+    {
+      "path": "frontend/src/api/__tests__/account.test.ts",
+      "sha256": "af34f15e8577dea12b20d187871a42f822e4c5ac3a9923d7e8c146ba7ffbb0a5"
+    },
+    {
+      "path": "frontend/src/api/__tests__/client.test.ts",
+      "sha256": "8d454c64c8850d3dec1d8e947518e5125e09692c863f0d119dd9bf4300b4be21"
+    },
+    {
+      "path": "frontend/src/api/__tests__/modernAuth.remaining.test.ts",
+      "sha256": "06a8f6d6853474f57dea1b639cb8482347a45c35bd9663757c2fa5891e171137"
+    },
+    {
+      "path": "frontend/src/api/account.ts",
+      "sha256": "493a69f402dd1bcf452243a18047159059ce73e6728bd85f10f928597d14644d"
+    },
+    {
+      "path": "frontend/src/api/accountHooks.ts",
+      "sha256": "64e3fb87a3bd9abbbd8639916dc9f8df2112f76011ba8ef3aa750fc89b9ec198"
+    },
+    {
+      "path": "frontend/src/api/client.ts",
+      "sha256": "dbbe423624d46316e4ff754a80efdf9762bde7383cd3a15e7e8f7b713ed90af4"
+    },
+    {
+      "path": "frontend/src/features/account/AccountSettingsPage.tsx",
+      "sha256": "a2db1df7808533ed7cae974a3eb8a5056084184ac41d82b73ae978025fca52f0"
+    },
+    {
+      "path": "frontend/src/features/account/LegacyAccountActions.tsx",
+      "sha256": "f1521132e60a8ad5a4e220415ecafd5012241dd6c0705bb5015289d1973fac7d"
+    },
+    {
+      "path": "frontend/src/features/account/__tests__/AuthMethods.test.tsx",
+      "sha256": "f0b554c5278af1f7ba380b31c50ff29a87c914074ace21a07d8a60533c71dcdb"
+    },
+    {
+      "path": "frontend/src/features/account/__tests__/LegacyAccountActions.test.tsx",
+      "sha256": "caf232ee45093fd5ceca75b79b1a17cccb2945eb05c4b0c09ad473db9865e39f"
+    },
+    {
+      "path": "frontend/src/features/auth/AccountSecurity.tsx",
+      "sha256": "44ad936d88416fa5b4f558aa1730f6944b442b145f6e2345b45673eec0bd6779"
+    },
+    {
+      "path": "frontend/src/features/auth/ProviderCompletionPage.tsx",
+      "sha256": "b26587c0fd6ef5c5feaceae08bde2ede2a97c069661594d11e0cdd537514930a"
+    },
+    {
+      "path": "frontend/src/features/auth/authFlow.ts",
+      "sha256": "ebb657bca97a44ca5e7a59b3ecdccd92e45fc8f50354b02a135716ccaa1c50f9"
+    },
+    {
+      "path": "frontend/src/pages/PrivacyPolicyPage.tsx",
+      "sha256": "f1ca90539a4f3bd5a8bd215142d34bf969a5a79086fb09809f96c4810a5308f3"
+    },
+    {
+      "path": "frontend/src/pages/__tests__/PrivacyPolicyPage.test.tsx",
+      "sha256": "05f4fca363787385ccf5bbc2f91e39a2ca0d9819ee52de41efe53945d2bd9cf6"
+    },
+    {
+      "path": "frontend/src/stores/authStore.ts",
+      "sha256": "b23b2ffc6a34f9e3fbefc1384a821ffcd79c8d94748f63fb0709c9338ec9c679"
+    },
+    {
+      "path": "frontend/tests/e2e/account.spec.ts",
+      "sha256": "bee205fb90c29cfa48a4efbc15db9618c9a47ff2d012c931b81cd64f6c66f2e0"
+    },
+    {
+      "path": "frontend/tests/e2e/admin-users.spec.ts",
+      "sha256": "e3646bfb2f743ddc05d513e99a1b76b30b1623513eb8df996f99cf7f348898eb"
+    },
+    {
+      "path": "frontend/tests/e2e/auth.spec.ts",
+      "sha256": "21c69aeea65bd61011a193caab1d9a3fcd2826ff157c4d714361d2c7cce6d749"
+    },
+    {
+      "path": "frontend/tests/e2e/crt.spec.ts",
+      "sha256": "6e0ed8042d36d0e70c6526333abc1238779b2849d4b288c651aba31397978d0d"
+    },
+    {
+      "path": "frontend/tests/e2e/gtdHelpers.ts",
+      "sha256": "af1e6c8da57a8cce2bbd2952e372a5409a8f3a533f6497f482f91ced7d752903"
+    },
+    {
+      "path": "frontend/tests/modern-auth.spec.ts",
+      "sha256": "586b577cc4edb198fe49d35b076ceac7a5d948b33d4cd8ac00cea642da4f5654"
+    },
+    {
+      "path": "frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts",
+      "sha256": "798714a9308e09ceaf484ff760d95b5813d6de5a92f01a342249ffe980ec9873"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift",
+      "sha256": "bb7a1287b338ecf93adacf0d4a20773d8f5b27874310909de6b00ecae97bc552"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/SignInSheet.swift",
+      "sha256": "15cb5b66f4bcbebcddb70a738420690b502f0431d0436d5056cf2b4f3468fd1e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPIClient.swift",
+      "sha256": "b05f17d4e031cc56e0e5d728526f38ef5c5b6e6d8712cdb041e90e9f492eb2ec"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthCallback.swift",
+      "sha256": "eb836632880fa0c7a8125177e5f932eed335f63ff3dc841c0e02778c07b40763"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthentication.swift",
+      "sha256": "0698b112eeb3ff9d6e94be1f56c6f8d49848144fb133b05321f7dbd25f2232c3"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/SessionTokenStore.swift",
+      "sha256": "962a4f169772b68dc00f17f58b7098f60343afc02b200ba5e5ff2b70bed1697d"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/BrainBuddySync.swift",
+      "sha256": "4dd0b1e27f7954db1a7b4ddb0246e5bf986c69ad792e13678360b55f3a7f27f0"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+NativeAuthentication.swift",
+      "sha256": "535acf8d13deb2963caf4b1b67aafe30b8d6934f24774bc73376cb83365af552"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Session.swift",
+      "sha256": "74ed9bdd301c8363ae1707c05d4fd7bc4d6b076923895462617d35c64e3a7883"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine.swift",
+      "sha256": "399fae8019ff4ad1fa84e7bf39ff1282a82036faf525d5751097549ffbdd5895"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift",
+      "sha256": "f6cd7566c5285a41b9a582312a8e6e0548c8d4ee8fdc4ffd8ef42b08916160f5"
+    },
+    {
+      "path": "macos/Package.swift",
+      "sha256": "e3c577ae4f6fecff23a53ac1953e0d748a4c1ac7bd17bd2439b68e84039e0ab3"
+    },
+    {
+      "path": "macos/Sources/BrainBuddyMac/APIClient.swift",
+      "sha256": "a62408d96ded67fa1b09a0cbc0c351d017f81e7da2095adf21b1c995f487504e"
+    },
+    {
+      "path": "scripts/auth_migration_guard.py",
+      "sha256": "ea269288c35b7b8558c7e3ce32fb7d2064c37cf08fe1ab7feea84afd00d87ea9"
+    },
+    {
+      "path": "scripts/run_modern_auth_e2e.py",
+      "sha256": "fe685550cf76f8f971f230714daa4b4d518303e71318de772fc0b549df4d9d97"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/http-auth.md",
+      "sha256": "39af037349e69caafdc2b44e440e152eba3fdb24ef95be31e90494e4651d56cc"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/native-auth.md",
+      "sha256": "ad2de655ab54b28337d2ff87caa67d0cee083ca572136f975aa6956fbe1ff3ae"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/persistence-migration.md",
+      "sha256": "6e72632f5912aa3b92b09ff7142fd8edec6bfe1b80bb03b83cfbdf47a9847532"
+    },
+    {
+      "path": "specs/023-modern-auth/data-model.md",
+      "sha256": "a45df6e2cc359d2b9b106bbda8762d19e3e3c41bf96a050712ce9338403d91e7"
+    },
+    {
+      "path": "specs/023-modern-auth/design.md",
+      "sha256": "05933c2026d9a9055ca065d638fe6b4ff31f2f75fa05a06f5fcb81b30749ddc6"
+    },
+    {
+      "path": "specs/023-modern-auth/plan.md",
+      "sha256": "16b4cc29821a5e67d66f8cedf5494d1c9c5c195aecfbbbac167b29bacace6fe5"
+    },
+    {
+      "path": "specs/023-modern-auth/quickstart.md",
+      "sha256": "cc596afa2580c9702222af5cacfffb0d118bb779ec4e74c0d1a6638e4353a30d"
+    },
+    {
+      "path": "specs/023-modern-auth/renumbering-review.json",
+      "sha256": "293fb2ba44e72d6cf635f8c1e911ee2bb8500bffdcc93f10c868bb20c2e79d0f"
+    },
+    {
+      "path": "specs/023-modern-auth/report.md",
+      "sha256": "2d0cf1909a1cfdab01423f6bf31849405ec6bd2d7622caeb8fa9579e6deab6b6"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-5fc4a6a.json",
+      "sha256": "bd154d292129b7ee4bee55b120a12a63f471505e9ed9861eec96b5dd4e0865d7"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-8f3adb83.json",
+      "sha256": "8e9cb4ad6e70f4174f6f2d43c0bd9bec0cf2971bd0eb4912561d90c44bcdf42c"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-e4e4eab3.json",
+      "sha256": "515f6276498a441015b65fd309332725f772afb539491931a0b4a24ee875b068"
+    },
+    {
+      "path": "specs/023-modern-auth/spec.md",
+      "sha256": "92cda091adb146f2f15aed6722da6074a5fc0373af3961878f24390c8c871b02"
+    },
+    {
+      "path": "specs/023-modern-auth/tasks.md",
+      "sha256": "7943a9eeb305b8fec169e40fbb4bded98ab0e13f26cca694c53eb4e7ee1c0121"
+    },
+    {
+      "path": "specs/023-modern-auth/verification.md",
+      "sha256": "a5f2fd2511fd8713592c5957b011baba9a59173e15f74d76fa326e07d74a7ac6"
+    }
+  ],
+  "fingerprint_serialization": "SHA256 over canonical JSON of path-sorted array[{path,sha256}], object keys sorted and compact separators. Every local file byte verified against exact git show input_sha:path. All 99 unchanged manifest entries preserve the previously inspected deac source bytes; only the five listed delta files changed.",
+  "prior_review": {
+    "input_sha": "deacdb8cedd015bfddfd13f9d772d40bc745bff4",
+    "verdict": "request_changes",
+    "artifact": "/tmp/modern-auth-final-code-review-deacdb8.json",
+    "sha256": "1d27a0f27590c1b09670bdb05247b78c17a49042391d76b8862d682638cf28e1",
+    "input_manifest_sha256": "464596f66b8c062638bcede4a264a5145161e16a00073bf93f7e1ea127b8843f",
+    "scope": "Original SEC-FINAL-004 request_changes evidence is retained unchanged; this follow-up does not restamp it or historical planning/code reviews."
+  },
+  "verdict": "approve",
+  "verdict_scope": "The exact five-file local-expiry repair and preservation of previously reviewed code boundaries. No whole-feature, release, delivery or production acceptance.",
+  "feature_acceptance": "not_granted",
+  "production_acceptance": "not_granted",
+  "full_acceptance": false,
+  "summary": "SEC-FINAL-004 is resolved on this exact candidate. The same key-free local expiry implementation now runs in ordinary privacy maintenance independently of delivery readiness. The independently reproduced missing-key case erases the expired Apple binding/job without any remote call. An ordinary privacy sweep during an actual synthetic leased revoke preserves lease serialization and rejects explicit relink 409; terminal cleanup then erases the mapping. The complete bounded unlink/lifecycle run passes 40 tests. No new material defect was found in the five-file delta.",
+  "changed_paths": [
+    "backend/app/main.py",
+    "backend/app/services/modern_auth_service.py",
+    "backend/tests/test_modern_auth_unlink_authority.py",
+    "docs/modern-auth-operations.md",
+    "specs/023-modern-auth/verification.md"
+  ],
+  "findings": [],
+  "original_finding_disposition": [
+    {
+      "id": "SEC-FINAL-004",
+      "original_priority": "P2",
+      "original_input_sha": "deacdb8cedd015bfddfd13f9d772d40bc745bff4",
+      "status": "resolved",
+      "resolved_at_input_sha": "056252da83c790b6c4bcf2a92d29bb5d08285826",
+      "requirements": [
+        "023-FR-018",
+        "023-FR-019",
+        "023-FR-025",
+        "023-SC-005"
+      ],
+      "repair_locations": [
+        {
+          "path": "backend/app/main.py",
+          "line": 29
+        },
+        {
+          "path": "backend/app/services/modern_auth_service.py",
+          "line": 1706
+        }
+      ],
+      "resolution": "Ordinary startup/privacy scheduling now calls the extracted local cleanup helper even when crypto_ready is false. The helper does not require the keyring, mail service or Apple lifecycle adapter. Auth delivery uses the same helper; store errors are caught with a constant warning so later privacy duties run and future sweeps retry.",
+      "independent_evidence": [
+        "test_023_fr018_privacy_sweep_erases_expired_unlink_without_provider_access[missing_keys]",
+        "test_023_fr018_privacy_sweep_erases_expired_unlink_without_provider_access[provider_failure]",
+        "test_023_fr018_auth_cleanup_failure_preserves_other_privacy_duties",
+        "independent_original_missing_key_retention_056252d",
+        "independent_normal_privacy_during_live_apple_revoke_056252d"
+      ],
+      "scope_limit": "A simulated missing-key configuration and real production service/SQLite/sweep functions were exercised; no app restart, live provider or physical device run is claimed."
+    }
+  ],
+  "prior_findings_disposition": [
+    {
+      "id": "SEC-FINAL-001",
+      "status": "previously_resolved_unchanged",
+      "evidence": "Captured-attempt cancellation guard and pre-sheet Task.checkCancellation source bytes unchanged from prior independent approved candidate."
+    },
+    {
+      "id": "SEC-FINAL-002",
+      "status": "previously_resolved_unchanged",
+      "evidence": "Coordinator uses its local Failure instead of inaccessible InvalidCallback initializer; native source bytes unchanged."
+    },
+    {
+      "id": "SEC-FINAL-003",
+      "status": "previously_resolved_retention_scheduling_gap_now_resolved",
+      "evidence": "Unlink authority, explicit owner-bound relink, generation and live lease behavior remain covered in the independently rerun 19 unlink tests. Earlier public-login removal defect is not reintroduced; newly found expiry scheduling gap is tracked separately as SEC-FINAL-004."
+    }
+  ],
+  "inspected_boundaries": [
+    "Complete exact five-file diff from deac inspected, including added regression cases and truthful focused verification/operations documentation.",
+    "Startup _run_maintenance_sweep unconditionally includes ordinary privacy maintenance. Its periodic scheduler remains independent of the crypto_ready delivery gate.",
+    "cleanup_expired_metadata extracts the existing SQL and AuthMetadataRepository expiry logic without introducing key access, provider calls, owner authority changes or altered deadlines.",
+    "AuthMetadataRepository protects a leased Apple cleanup mapping until the lease expires or terminal work settles. Local cleanup erases expired sealed payloads and settled unlink mapping/associated receipts under existing transaction and cascade rules.",
+    "The normal sweep logs a constant bounded warning for an auth-store failure, preserves other privacy duties and retries naturally on a later scheduled sweep.",
+    "All 99 other manifest entries, including accepted contracts, auth/account/native/Mac/provider/mail/storage/lifecycle/migration/logging code, are byte-identical to prior deac review input. No new schema, compatibility, source authority or product surface change is present."
+  ],
+  "verification": {
+    "independently_exercised": [
+      {
+        "name": "bounded_unlink_and_apple_lifecycle_modules",
+        "input_sha": "056252da83c790b6c4bcf2a92d29bb5d08285826",
+        "command": "PYTHONDONTWRITEBYTECODE=1 /workspace/brain_buddy-auth/backend/.venv/bin/python -m pytest tests/test_modern_auth_unlink_authority.py tests/test_auth_apple_lifecycle.py -o addopts='' -p no:cacheprovider --basetemp=/tmp/modern-auth-security-056252d-pytest --junitxml=/tmp/modern-auth-security-056252d.xml",
+        "cwd": "/workspace/brain_buddy-auth-security/backend",
+        "exit_code": 0,
+        "passed": 40,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "reported_seconds": 15.87,
+        "junit": "/tmp/modern-auth-security-056252d.xml",
+        "log": "/tmp/modern-auth-security-056252d.log"
+      },
+      {
+        "name": "independent_original_missing_key_retention_056252d",
+        "input_sha": "056252da83c790b6c4bcf2a92d29bb5d08285826",
+        "exit_code": 0,
+        "reproduction_steps": [
+          "Use actual conftest.container and apple_runtime fixtures in isolated TemporaryDirectory. Seed password-bearing owner and Apple binding/grant via owner_with_binding; call production RemoveApple through remove().",
+          "Advance injected clock 25h. Replace settings with ModernAuthSettings(), set service.box/mail/apple=None and assert crypto_ready=false.",
+          "Call production _run_privacy_maintenance_sweep. Assert binding/job counts 0, no provider revocations and original owner password token remains valid."
+        ],
+        "result": {
+          "after": {
+            "bindings": 0,
+            "jobs": 0,
+            "live_leased_jobs": 0,
+            "state": null
+          },
+          "before": {
+            "bindings": 1,
+            "jobs": 1,
+            "live_leased_jobs": 0,
+            "state": "unlinked"
+          },
+          "crypto_ready": false,
+          "elapsed_hours": 25,
+          "owner_password_session_preserved": true,
+          "provider_and_mail_dispatchers": null,
+          "remote_calls": 0,
+          "scenario": "original_missing_key_retention"
+        }
+      },
+      {
+        "name": "independent_normal_privacy_during_live_apple_revoke_056252d",
+        "input_sha": "056252da83c790b6c4bcf2a92d29bb5d08285826",
+        "exit_code": 0,
+        "reproduction_steps": [
+          "Use a fresh isolated container/apple runtime and password-bearing owner; perform actual RemoveApple.",
+          "Run actual AuthAppleLifecycle.dispatch_one with synthetic revoke callback. Inside callback, advance clock 2s and invoke production ordinary privacy sweep while the committed Apple revoke lease is live.",
+          "Assert mapping remains unlinked, one leased cleanup job remains and fresh explicit same-owner Apple link is rejected 409. Complete the synthetic revoke and assert mapping/job counts0."
+        ],
+        "result": {
+          "after_terminal_revoke": {
+            "bindings": 0,
+            "jobs": 0,
+            "live_leased_jobs": 0,
+            "state": null
+          },
+          "before": {
+            "bindings": 1,
+            "jobs": 1,
+            "live_leased_jobs": 0,
+            "state": "unlinked"
+          },
+          "during": [
+            {
+              "after_normal_privacy": {
+                "bindings": 1,
+                "jobs": 1,
+                "live_leased_jobs": 1,
+                "state": "unlinked"
+              },
+              "explicit_relink_status": 409
+            }
+          ],
+          "remote_calls": 1,
+          "scenario": "normal_privacy_during_live_apple_revoke"
+        }
+      }
+    ],
+    "static_in_this_review": [
+      "Exact full SHA/tree and clean detached worktree verified. 104 file hashes verified against committed bytes; exactly five changed versus prior deac manifest.",
+      "Scheduler wiring, local key independence, transaction/lease guards, constant exception logging and retry isolation inspected."
+    ],
+    "inspected_other_author_evidence": [
+      {
+        "log": "/tmp/modern-auth-retention-red.log",
+        "result": "Original added missing_keys/provider_failure regressions failed 2 before repair. Retained root execution, not independently rerun red here."
+      },
+      {
+        "log": "/tmp/modern-auth-retention-green.log",
+        "result": "Root targeted 34 tests passed 18.38s; separately attributed execution."
+      },
+      {
+        "log": "/tmp/modern-auth-retention-final.log",
+        "result": "Root three final missing-key/provider/failure-isolation cases passed 3.16s; separately attributed execution."
+      },
+      {
+        "log": "/tmp/modern-auth-023-verify-all-final-frozen-v4.log",
+        "result": "Root reports full sequential verify-all started 16:36 UTC on frozen 056252da with matching backend/frontend runtime images. Reviewer observed ongoing backend output only; completion and floors are not claimed."
+      }
+    ],
+    "not_executed": [
+      "No current full verify-all, shared HTTP/Playwright/coverage/build runner or cleanup.",
+      "No provider secrets, network call, physical iOS, publication, production operation or product source edit."
+    ],
+    "missing": [
+      "Completed current exact-candidate full mandatory delivery verification; root full chain is running and remains unverified.",
+      "Physical iOS and live configured Google/Apple/SMTP, Apple notice and remote revocation evidence.",
+      "Current public exact-SHA CI and formal release/migration/production acceptance evidence; prior reported publication approval block is not bypassed."
+    ]
+  },
+  "evidence_fingerprints": [
+    {
+      "path": "/tmp/modern-auth-security-056252d.xml",
+      "sha256": "23e75e3b02b05b42cedb2b21c2e97d2d9d244dce017b4eda63d82bca46cb3a9f"
+    },
+    {
+      "path": "/tmp/modern-auth-security-056252d.log",
+      "sha256": "470b4860bbee27f84b7079095a7f9d708ce224f1e2cc7d1fbd5bb2f093205233"
+    },
+    {
+      "path": "/tmp/modern-auth-security-056252d-independent-repro.log",
+      "sha256": "908ba2d482ce808a256c8183f1edbc5b82e5f83ed2b0ba5536a7aab3717da0d6"
+    },
+    {
+      "path": "/tmp/modern-auth-final-code-review-deacdb8.json",
+      "sha256": "1d27a0f27590c1b09670bdb05247b78c17a49042391d76b8862d682638cf28e1"
+    },
+    {
+      "path": "/tmp/modern-auth-retention-red.log",
+      "sha256": "78136b7985a756a98a64a77158aa7664aeaedfd4521cbae90e0de13e8f524335"
+    },
+    {
+      "path": "/tmp/modern-auth-retention-green.log",
+      "sha256": "0a327c8366e19b0e242bd83d0c8e57b90e62b67ead3865b039967ad33966d84b"
+    },
+    {
+      "path": "/tmp/modern-auth-retention-final.log",
+      "sha256": "3a6ac3729b4569e34207d6c839185b52d109b5c6ce2edc897abc3a287e689cd2"
+    }
+  ],
+  "limitations": [
+    "Approve applies only to actual independently reviewed code and this bounded repair. It is not formal whole-feature acceptance, a six-lens planning review, or a writer self-grade.",
+    "Original deac request_changes JSON and earlier exact-input verdicts remain unchanged. Current closure is supported by actual independent 40-test execution and two isolated production-path synthetic reproductions.",
+    "Live upstream behavior, actual physical native callback/Keychain and current mandatory aggregate delivery evidence remain unverified by this reviewer. No feature or production acceptance is granted."
+  ]
+}

@@ -33,6 +33,12 @@ migration alone.
 
 ## Contract change checklist
 
+Web password-account controls may send `X-BrainBuddy-Expected-Owner` on the
+compatible `/api/account` routes. When present, it must equal the authenticated
+session owner; a mismatch returns the generic 404 error before any account
+read, export or mutation. Requests without the header retain the existing
+password/native wire contract. No client API version bump is required.
+
 1. Update route response declarations and Pydantic schemas so `/api/openapi.json`
    describes the new operation and every intentional status.
 2. Add a TestClient contract test for the externally observable success/error behavior,

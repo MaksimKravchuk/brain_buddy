@@ -1,0 +1,88 @@
+{
+  "findings": [
+    {
+      "category": "measurable-acceptance-evidence",
+      "description": "The 200 ms pending-feedback requirement is measurable in the specification, but the validation plan does not identify a reference environment or a procedure that measures user action to visible loading/disabled feedback on the changed web and native surfaces. Functional loading-state assertions and the static prototype checks cannot establish this timing outcome.",
+      "evidence": [
+        "specs/022-modern-auth/spec.md, FR-022 requires feedback within 200 ms on the supported reference device; SC-007 requires a controlled UI acceptance run.",
+        "specs/022-modern-auth/plan.md, Technical Context names local input/busy feedback <=200 ms but supplies no measurement method.",
+        "specs/022-modern-auth/quickstart.md, Browser journeys specifies viewport, keyboard, zoom, focus and accessibility checks; Native journeys and Mac compatibility specifies device lifecycle/autofill checks, but neither specifies feedback timing evidence.",
+        "specs/022-modern-auth/design.md, Preview verification evidence explicitly limits the recorded checks to the static prototype and excludes native behavior."
+      ],
+      "recommendation": "Add a bounded SC-007 validation procedure chosen by the implementing agent: record the supported web/native reference environments, measure action-to-visible-busy feedback while completion is deliberately held pending, assert <=200 ms together with duplicate-submission prevention and focus preservation, and retain sanitized measurements for the candidate build. Include this evidence in the eventual acceptance task.",
+      "severity": "important"
+    },
+    {
+      "category": "validation-command-alignment",
+      "description": "The runnable final-candidate commands use raw test runners rather than the repository's complete validation targets. They execute tests, but omit the higher coverage-floor validators and some freshness, taxonomy and product-E2E result checks. The plan separately requires exact-SHA full CI, so this does not remove the release gate, but the guide should prevent these commands being reported as equivalent local evidence.",
+      "evidence": [
+        "specs/022-modern-auth/quickstart.md, Automated commands lists uv run pytest, npm run test:coverage and npm run test:e2e, with a separate prose reminder only for backend taxonomy.",
+        "Makefile, test-backend and test-frontend additionally invoke validate_coverage_floor.py and validate_allure_taxonomy.py; test-e2e additionally invokes result freshness and product-e2e-results validators.",
+        "backend/pyproject.toml, pytest addopts has cov-fail-under=95, while backend/coverage-floor.json requires line 0.9847 and branch 0.9561.",
+        "frontend/vite.config.ts, coverage.thresholds is explicitly below frontend/coverage-floor.json.",
+        "specs/022-modern-auth/plan.md, Verification and release still requires full backend/frontend/Swift/repository gates on the candidate."
+      ],
+      "recommendation": "Align the guide with the existing make verification targets, plus the feature-specific requirement coverage and native checks, or enumerate the omitted validators explicitly. Keep raw runners clearly identified as iteration checks and require exact-SHA CI before completion.",
+      "severity": "advisory"
+    }
+  ],
+  "oracle": {
+    "adapter": "external-stdin-v1",
+    "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+    "artifacts_digest": "9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c",
+    "claimed_model": "inherited-model-unverified",
+    "claimed_provider": "openai-codex-collaboration",
+    "configured_integration": "codex",
+    "configured_model": "gpt-5.6-sol",
+    "degraded": true,
+    "executable": "/tmp/modern-auth-review-transport",
+    "integration": "external-unverified",
+    "model": "unverified",
+    "reason": "external reviewer model identity is not verified"
+  },
+  "product_decisions": [],
+  "reviewed_files": [
+    "AGENTS.md",
+    "ios/AGENTS.md",
+    "specs/022-modern-auth/spec.md",
+    "specs/022-modern-auth/plan.md",
+    "specs/022-modern-auth/design.md",
+    "specs/022-modern-auth/research.md",
+    "specs/022-modern-auth/data-model.md",
+    "specs/022-modern-auth/quickstart.md",
+    "specs/022-modern-auth/checklists/requirements.md",
+    "specs/022-modern-auth/contracts/http-auth.md",
+    "specs/022-modern-auth/contracts/native-auth.md",
+    "specs/022-modern-auth/contracts/persistence-migration.md",
+    "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md",
+    "docs/decisions/0011-portable-spec-review-stage.md",
+    "docs/decisions/0017-operator-account-administration-narrow-owner-scoping-exception.md",
+    "docs/decisions/0021-operator-account-lifecycle-administration.md",
+    "docs/decisions/0023-proportionate-fast-lane-for-test-stage-ship-show.md",
+    "Makefile",
+    ".github/workflows/ci.yml",
+    "scripts/check_requirement_coverage.py",
+    "scripts/run_playwright_e2e.sh",
+    "backend/pyproject.toml",
+    "backend/coverage-floor.json",
+    "backend/app/schemas/auth.py",
+    "backend/app/repositories/session.py",
+    "backend/app/repositories/sqlite.py",
+    "backend/app/services/auth_service.py",
+    "backend/tests/test_auth_service.py",
+    "backend/tests/test_auth_routes.py",
+    "backend/tests/test_account_export.py",
+    "backend/tests/test_schemathesis_contract.py",
+    "frontend/package.json",
+    "frontend/vite.config.ts",
+    "frontend/coverage-floor.json",
+    "frontend/playwright.config.ts",
+    "frontend/tests/e2e/auth.spec.ts",
+    "frontend/tests/e2e/account.spec.ts",
+    "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPIClient.swift",
+    "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineSessionTests.swift"
+  ],
+  "role": "testability-evidence",
+  "summary": "The plan provides concrete evidence for provider validation, proof replay and concurrency, migration parity, privacy rights, native owner isolation, legacy compatibility and real-provider acceptance. One measurable acceptance outcome still lacks a defined evidence procedure: the 200 ms feedback requirement. The planned module boundaries support independent adapter and client lanes after the shared transactional and wire contracts are fixed. No product decision is required. This was a read-only planning review; no tests were run.",
+  "verdict": "changes-required"
+}

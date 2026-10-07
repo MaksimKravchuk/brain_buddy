@@ -57,6 +57,23 @@ describe("downloadAccountExport", () => {
     expect(clickSpy).toHaveBeenCalled();
   });
 
+  it("023-FR-018 sends the displayed owner and refuses a late download after account switching", async () => {
+    let finish!: (blob: Blob) => void;
+    const blob = new Promise<Blob>(resolve => { finish = resolve; });
+    fetchMock.mockResolvedValue({ ok: true, headers: new Headers(), blob: () => blob });
+    let currentOwner = "A";
+    const download = downloadAccountExport("A", () => {
+      if (currentOwner !== "A") throw new Error("Account changed");
+    });
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledWith("/api/account/export", expect.objectContaining({ headers: { "X-BrainBuddy-Expected-Owner": "A" } }));
+    currentOwner = "B";
+    finish(new Blob(["private archive"]));
+    await expect(download).rejects.toThrow("Account changed");
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
   it("throws an ApiError carrying the JSON error body and correlation id", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ message: "Authentication required." }), {

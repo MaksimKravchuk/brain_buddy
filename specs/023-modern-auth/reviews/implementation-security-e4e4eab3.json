@@ -1,0 +1,500 @@
+{
+  "review_type": "independent full-path final implementation/code acceptance-readiness review",
+  "reviewer": "privacy-consent-security",
+  "input_sha": "e4e4eab3fe36017a2478590a58abc09f6bc97d99",
+  "input_tree": "dfbc4c3821317d22e9e9250a2765ec503f305985",
+  "input_manifest_sha256": "79c95433babb44b62d5283bf58245446057ea11ec1092c64487dc6ff50be1139",
+  "source_fingerprints": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "de61dbfdfc72f896298bd145428e30e9e876776118c92b658c909f538baf5d0e"
+    },
+    {
+      "path": ".github/workflows/deploy-fly-production.yml",
+      "sha256": "2ade8b626028972706c784089400c72854cc4bc295eefda293c1f2e768dd6d41"
+    },
+    {
+      "path": ".gitleaks.toml",
+      "sha256": "38a8c0cb5e577db4af6eb8c2488a2626f62db919e36e2762625e7b4317f9679e"
+    },
+    {
+      "path": "backend/app/api/auth.py",
+      "sha256": "d2931ea41b2a6dc844bd25badfc12960b866e729dcb23430bc168b2229dd1d27"
+    },
+    {
+      "path": "backend/app/api/errors.py",
+      "sha256": "5699b6102b8737459843986b271a6118691224e798248fcd46b84da07c9ff176"
+    },
+    {
+      "path": "backend/app/api/mcp.py",
+      "sha256": "5f4fd37a70d065772bb55679204e2a6a14dbe9d765d25bd954a69ed7dca4d3e5"
+    },
+    {
+      "path": "backend/app/api/modern_auth.py",
+      "sha256": "aa1b2bac477b6dc20121a34a27ba56ddd2a7db8fcbd1cc23bdcda7d6b6134b83"
+    },
+    {
+      "path": "backend/app/container.py",
+      "sha256": "0b636a8e224f2dced326a94823f3d82c2a8233c6b6ce8a7458734dea1083bb12"
+    },
+    {
+      "path": "backend/app/core/config.py",
+      "sha256": "630b3d16e9534e3d8ce000cd7eb398b1711d864c5c45153e707e68675bd3480a"
+    },
+    {
+      "path": "backend/app/core/logging.py",
+      "sha256": "b39d279700ab90fa3ffce4c808653e3554ad010c7133d8402758dcd05f29304a"
+    },
+    {
+      "path": "backend/app/main.py",
+      "sha256": "52987bab53225eec4e77bfbde512d3eb8fad6c6480dc94ad09616e97f2cfb2bf"
+    },
+    {
+      "path": "backend/app/modules/tasks/service.py",
+      "sha256": "55fb244eaea6d8b271df852c4f4acd510722733814f953bc3d8a2b185ab85350"
+    },
+    {
+      "path": "backend/app/repositories/auth_metadata.py",
+      "sha256": "f349a1acfa9fbd34e9bd1a331d6a105998235ca9e33142093350f4f7e43077db"
+    },
+    {
+      "path": "backend/app/repositories/auth_store.py",
+      "sha256": "7d67f329f2b6d3c64c0d1250db9ac4f2357ceef9dc3619e1314ea27c1909bc8a"
+    },
+    {
+      "path": "backend/app/repositories/feature_flag.py",
+      "sha256": "54931270c2599ee3995d6a36572611fb467f1643f96d63717b18c7317e15089f"
+    },
+    {
+      "path": "backend/app/repositories/session.py",
+      "sha256": "9fa2f077a167b1db81628fd5a9f3f8c18fc5d190c34c9f487c1712458d44d7d6"
+    },
+    {
+      "path": "backend/app/repositories/user.py",
+      "sha256": "dc0c4729cd5a442a55b61b7914381c60ce9b3ab05f340218853c71c7ff2fa10b"
+    },
+    {
+      "path": "backend/app/schemas/auth.py",
+      "sha256": "d23e56e1d389edcf0e7dd4f59bbcf85e67db0215f28253f74892db32ba691228"
+    },
+    {
+      "path": "backend/app/schemas/modern_auth.py",
+      "sha256": "57c9158a932ec2aa980e819867bea59d08bf15007cabf5264da394afb3165f90"
+    },
+    {
+      "path": "backend/app/services/account_service.py",
+      "sha256": "387dff67d1a181d0237e805a5400c399d6689afda061731c14ec8de024f5f723"
+    },
+    {
+      "path": "backend/app/services/admin_service.py",
+      "sha256": "f3825de385641ab9251ec3348c1134812bbd0ee655117826fff7479c8219faef"
+    },
+    {
+      "path": "backend/app/services/auth_apple_lifecycle.py",
+      "sha256": "7679f38e0f05bffe303ae5dd0e54e112143ec0d8c1f980d37dcc30a065a10c46"
+    },
+    {
+      "path": "backend/app/services/auth_mail_service.py",
+      "sha256": "8a71e049cb9279bef70913b0a1a2e641d906961204731e64599805948a0a4579"
+    },
+    {
+      "path": "backend/app/services/auth_migration.py",
+      "sha256": "7e6618b96106c33f98527d1963060a142fe6e7ae08a400ecfb44333604b82320"
+    },
+    {
+      "path": "backend/app/services/auth_provider_service.py",
+      "sha256": "6e6e969fe3e986fc064c18fd2b6e15881c6b9e5eaca3a36dc9c59110fa9b4e45"
+    },
+    {
+      "path": "backend/app/services/auth_secret_box.py",
+      "sha256": "ce9a8aa7ea94f94084b28d7299e407e6765f266edda192604dca485b5b5346c3"
+    },
+    {
+      "path": "backend/app/services/auth_service.py",
+      "sha256": "f1a464722698d99f9158b56e174af0802aaf190f5adcb95304d9f9adb55f8c65"
+    },
+    {
+      "path": "backend/app/services/feature_flag_service.py",
+      "sha256": "a802387db0da2e53697e008b3a01df697a60b9fa299d282b37c8f46c89da3f38"
+    },
+    {
+      "path": "backend/app/services/modern_auth_service.py",
+      "sha256": "dca6aa0fdab42b57ec933b1724ecbf378adc2f2dfcd1f2944aaeea8661bcb220"
+    },
+    {
+      "path": "backend/tests/modern_auth_e2e_app.py",
+      "sha256": "5c2259a16444532b3e8846c3c9c54fae2dd24ef7862c4df82ab35a069b5de6ba"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_api_journeys.py",
+      "sha256": "14462ca017b4aea2154cc5f13526dbd4591db28ac33c65559e4c1905fff43337"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_apple_integration.py",
+      "sha256": "75c986a17fc77fcf65440932779cfe63a12b8de09bad72f8a01e2a5e66cd5f82"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_authority_remaining.py",
+      "sha256": "a5a8ffce02d3b193908cc85083095131e6213b061c7a724fee43a5f783fd8c73"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_storage_remaining.py",
+      "sha256": "56d3ba9e5a2dc989f42c0c19d1c18ae9e0bbac42a12075064dde8f66128b4bd1"
+    },
+    {
+      "path": "backend/tests/test_task_mcp.py",
+      "sha256": "525b80cd34db390c20ec940d6e84a830d97d05d2cd9f308c145e6368089bcd73"
+    },
+    {
+      "path": "deploy/nginx/default.conf",
+      "sha256": "df49866a27394a7494049d63a43559598adb0527e5d54be85efb857be3072683"
+    },
+    {
+      "path": "docs/data-retention.md",
+      "sha256": "abb6afd8cc12ab43b385d1d991f0526448473b7081f82a7453a6bfb79fa3a245"
+    },
+    {
+      "path": "docs/decisions/0028-modern-identity-authority.md",
+      "sha256": "d92dc2299d7cfc249dd8d2addd477bc23a2e12cdc35385912b5eaad816931c4d"
+    },
+    {
+      "path": "docs/modern-auth-operations.md",
+      "sha256": "5cc9f8de76c35b7cba4cc9ea2a9d3ba1cf2028feb98a332309152b071c9a995c"
+    },
+    {
+      "path": "frontend/playwright.modern-auth.config.ts",
+      "sha256": "2d8712f77e1f609f2cdf74fdd536cfd86fa693af6337f5d56167536d1606c1ca"
+    },
+    {
+      "path": "frontend/src/api/__tests__/modernAuth.remaining.test.ts",
+      "sha256": "7fb25765d7eaece21c681a5f92bcab6e4e707ec17b960863775bf95a90a5f847"
+    },
+    {
+      "path": "frontend/src/features/auth/AccountSecurity.tsx",
+      "sha256": "6a06baf7e3ff08cb783c3c266a6747c7e280700b66dbc604df108557f47621ce"
+    },
+    {
+      "path": "frontend/src/features/auth/ProviderCompletionPage.tsx",
+      "sha256": "b26587c0fd6ef5c5feaceae08bde2ede2a97c069661594d11e0cdd537514930a"
+    },
+    {
+      "path": "frontend/src/features/auth/authFlow.ts",
+      "sha256": "ebb657bca97a44ca5e7a59b3ecdccd92e45fc8f50354b02a135716ccaa1c50f9"
+    },
+    {
+      "path": "frontend/src/pages/PrivacyPolicyPage.tsx",
+      "sha256": "494dadf08f6ac54c55f19d6f2148be3cffc335d0c286c2ae779898f5b73ecfbb"
+    },
+    {
+      "path": "frontend/src/stores/authStore.ts",
+      "sha256": "b23b2ffc6a34f9e3fbefc1384a821ffcd79c8d94748f63fb0709c9338ec9c679"
+    },
+    {
+      "path": "frontend/tests/modern-auth.spec.ts",
+      "sha256": "8b7080db0c9a9c66513b019ca8dc5fd026c725ae5f34dc5fd2f4fff4bd831f18"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift",
+      "sha256": "41e5f61e5a2cb9ee23b83ae7c797f15730953e16629b826f30cd68cac9ae0528"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/SignInSheet.swift",
+      "sha256": "15cb5b66f4bcbebcddb70a738420690b502f0431d0436d5056cf2b4f3468fd1e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPIClient.swift",
+      "sha256": "b05f17d4e031cc56e0e5d728526f38ef5c5b6e6d8712cdb041e90e9f492eb2ec"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthCallback.swift",
+      "sha256": "eb836632880fa0c7a8125177e5f932eed335f63ff3dc841c0e02778c07b40763"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthentication.swift",
+      "sha256": "0698b112eeb3ff9d6e94be1f56c6f8d49848144fb133b05321f7dbd25f2232c3"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/SessionTokenStore.swift",
+      "sha256": "962a4f169772b68dc00f17f58b7098f60343afc02b200ba5e5ff2b70bed1697d"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/BrainBuddySync.swift",
+      "sha256": "4dd0b1e27f7954db1a7b4ddb0246e5bf986c69ad792e13678360b55f3a7f27f0"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+NativeAuthentication.swift",
+      "sha256": "535acf8d13deb2963caf4b1b67aafe30b8d6934f24774bc73376cb83365af552"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Session.swift",
+      "sha256": "74ed9bdd301c8363ae1707c05d4fd7bc4d6b076923895462617d35c64e3a7883"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine.swift",
+      "sha256": "399fae8019ff4ad1fa84e7bf39ff1282a82036faf525d5751097549ffbdd5895"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift",
+      "sha256": "f6cd7566c5285a41b9a582312a8e6e0548c8d4ee8fdc4ffd8ef42b08916160f5"
+    },
+    {
+      "path": "macos/Package.swift",
+      "sha256": "e3c577ae4f6fecff23a53ac1953e0d748a4c1ac7bd17bd2439b68e84039e0ab3"
+    },
+    {
+      "path": "macos/Sources/BrainBuddyMac/APIClient.swift",
+      "sha256": "a62408d96ded67fa1b09a0cbc0c351d017f81e7da2095adf21b1c995f487504e"
+    },
+    {
+      "path": "scripts/auth_migration_guard.py",
+      "sha256": "ea269288c35b7b8558c7e3ce32fb7d2064c37cf08fe1ab7feea84afd00d87ea9"
+    },
+    {
+      "path": "scripts/run_modern_auth_e2e.py",
+      "sha256": "fe685550cf76f8f971f230714daa4b4d518303e71318de772fc0b549df4d9d97"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/http-auth.md",
+      "sha256": "39af037349e69caafdc2b44e440e152eba3fdb24ef95be31e90494e4651d56cc"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/native-auth.md",
+      "sha256": "ad2de655ab54b28337d2ff87caa67d0cee083ca572136f975aa6956fbe1ff3ae"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/persistence-migration.md",
+      "sha256": "6e72632f5912aa3b92b09ff7142fd8edec6bfe1b80bb03b83cfbdf47a9847532"
+    },
+    {
+      "path": "specs/023-modern-auth/data-model.md",
+      "sha256": "a45df6e2cc359d2b9b106bbda8762d19e3e3c41bf96a050712ce9338403d91e7"
+    },
+    {
+      "path": "specs/023-modern-auth/design.md",
+      "sha256": "05933c2026d9a9055ca065d638fe6b4ff31f2f75fa05a06f5fcb81b30749ddc6"
+    },
+    {
+      "path": "specs/023-modern-auth/plan.md",
+      "sha256": "16b4cc29821a5e67d66f8cedf5494d1c9c5c195aecfbbbac167b29bacace6fe5"
+    },
+    {
+      "path": "specs/023-modern-auth/renumbering-review.json",
+      "sha256": "293fb2ba44e72d6cf635f8c1e911ee2bb8500bffdcc93f10c868bb20c2e79d0f"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-5fc4a6a.json",
+      "sha256": "bd154d292129b7ee4bee55b120a12a63f471505e9ed9861eec96b5dd4e0865d7"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-8f3adb83.json",
+      "sha256": "8e9cb4ad6e70f4174f6f2d43c0bd9bec0cf2971bd0eb4912561d90c44bcdf42c"
+    },
+    {
+      "path": "specs/023-modern-auth/spec.md",
+      "sha256": "92cda091adb146f2f15aed6722da6074a5fc0373af3961878f24390c8c871b02"
+    },
+    {
+      "path": "specs/023-modern-auth/tasks.md",
+      "sha256": "33895bcf658cf401e8bb12ef0cf94e51bd17b11a801d53d3d861e119cef67d8f"
+    },
+    {
+      "path": "specs/023-modern-auth/verification.md",
+      "sha256": "d7988c30837e6027757b75c5c8905c7baeca88628f57a6e4c88e27a7ad77c5d9"
+    }
+  ],
+  "review_worktree": "/workspace/brain_buddy-auth-security",
+  "verdict": "request_changes",
+  "feature_acceptance": "not_granted",
+  "production_acceptance": "not_granted",
+  "full_acceptance": false,
+  "summary": "The exact e4e4eab candidate has three code defects: delayed unscoped native cancellation can cancel a replacement attempt; the host calls a package error initializer that is not public and cannot compile; and explicit provider Remove retains the binding so a fresh Google login immediately restores the removed identity's account access. The latter was independently reproduced in temporary synthetic SQLite. Prior Apple relay/state/receipt fixes remain intact. Native finalization, account/session/action checks, recovery/collision, provider verification, logging, migration/cleanup, Mac password contracts, MCP coexistence and the ten browser-journey sources were inspected. Full feature/production acceptance is unavailable.",
+  "findings": [
+    {
+      "id": "SEC-FINAL-001",
+      "priority": "P2",
+      "severity": "important",
+      "category": "native attempt generation",
+      "title": "Scope deferred cancellation to the attempt that was cancelled",
+      "locations": [
+        {
+          "file": "ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift",
+          "line": 102
+        }
+      ],
+      "evidence_kind": "static source interleaving; no physical-device reproduction",
+      "description": "authenticate captures an attempt id for result callbacks, but onCancel schedules a new MainActor Task calling unscoped cancel(). If A's cancellation task is queued and replacement B starts first, A's deferred handler clears B's active controller/browser and resumes B's continuation with CancellationError. An already-cancelled caller can also enter authenticate before an initial cancellation check. This is a coordinator-generation defect; no wrong-owner session installation or data loss was demonstrated.",
+      "reproducible_interleaving": [
+        "A waits for platform authentication.",
+        "Cancel A, enqueueing its MainActor cancellation task.",
+        "Start B before that task runs; active and continuation now belong to B.",
+        "Run A's queued task; unscoped cancel clears B."
+      ],
+      "requirement": "023-FR-015/016 and native contract: cancellation/supersession must preserve the current attempt, owner and local work.",
+      "recommendation": "Check Task cancellation before replacing the current attempt; capture A's id and guard active?.id == id on MainActor before applying its deferred cancellation."
+    },
+    {
+      "id": "SEC-FINAL-002",
+      "priority": "P1",
+      "severity": "important",
+      "category": "native build correctness",
+      "title": "Avoid calling an internal synthesized initializer from the iOS host",
+      "locations": [
+        {
+          "file": "ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift",
+          "line": 77
+        },
+        {
+          "file": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthCallback.swift",
+          "line": 4
+        }
+      ],
+      "evidence_kind": "static Swift access-control proof; root separately reported actual Xcode CI failure",
+      "description": "The host invokes NativeAuthCallback.InvalidCallback(). InvalidCallback is a public struct without a public initializer, so its synthesized initializer is internal to BrainBuddyAPI and inaccessible from the iOS app module. This stops the native host build. I did not run Xcode here; the source is decisive and root reported the corresponding real CI diagnostic.",
+      "requirement": "023-FR-001/003/015 and mandatory ios-app compilation.",
+      "recommendation": "Throw the coordinator's existing local Failure for an absent callback URL, or otherwise use an accessible error; no public API expansion is necessary."
+    },
+    {
+      "id": "SEC-FINAL-003",
+      "priority": "P1",
+      "severity": "blocking",
+      "category": "provider authority and unlink erasure",
+      "title": "Explicit Remove must prevent the removed provider from regaining login authority",
+      "locations": [
+        {
+          "file": "backend/app/services/modern_auth_service.py",
+          "line": 1419
+        },
+        {
+          "file": "backend/app/services/modern_auth_service.py",
+          "line": 949
+        },
+        {
+          "file": "backend/app/services/auth_apple_lifecycle.py",
+          "line": 284
+        },
+        {
+          "file": "frontend/src/pages/PrivacyPolicyPage.tsx",
+          "line": 103
+        }
+      ],
+      "evidence_kind": "independently exercised synthetic production-service reproduction at exact input SHA",
+      "description": "unlink changes the binding to disabled, revokes provider sessions/proofs, and retains the subject. Public provider completion treats that retained binding as the old account's identity and reactivates any nonactive state. After password-confirmed Remove Google, an independent brand-new Google callback/login returned signed_in to the same owner and changed the binding to active/generation2. Removing a compromised provider therefore does not remove its access to the BrainBuddy account. The retained personal linkage also never expires: metadata maintenance omits bindings and terminal Apple cleanup erases credential payloads only, contradicting the disconnection retention disclosure.",
+      "actual_results": [
+        "repro_removed_google_retained_binding: {'state': 'disabled', 'subject': 'subject-a', 'generation': 1}",
+        "repro_removed_google_still_signs_in: signed_in True",
+        "repro_removed_google_reactivated: {'state': 'active', 'generation': 2}"
+      ],
+      "reproduction_name": "repro_removed_google_still_signs_in",
+      "reproduction_command": "PYTHONDONTWRITEBYTECODE=1 /workspace/brain_buddy-auth/backend/.venv/bin/python -",
+      "reproduction_cwd": "/workspace/brain_buddy-auth-security/backend",
+      "reproduction_stdin": "from pathlib import Path\nfrom tempfile import TemporaryDirectory\nimport pytest\nfrom tests import conftest\nfrom tests.test_modern_auth_service import make_modern, provider_handoff\nfrom app.schemas.modern_auth import PasswordConfirmRequest, AccountActionRequest\n\nwith TemporaryDirectory(prefix='modern-auth-final-unlink-') as directory:\n    data = Path(directory)/'data'\n    data.mkdir()\n    mp = pytest.MonkeyPatch()\n    generator = conftest.container.__wrapped__(data, mp)\n    container = next(generator)\n    try:\n        service, mail, sent, provider, clock = make_modern(container)\n        owner = container.auth_service.seed_admin(email='new@gmail.com', password='synthetic-long-password')\n        _, password_token, _ = container.auth_service.login(email=owner.email, password='synthetic-long-password')\n        with service.store.transaction() as c:\n            c.execute('INSERT INTO auth_identity_bindings(id,user_id,provider,issuer,namespace,subject,created_at,updated_at,email,email_verified) VALUES(?,?,?,?,?,?,?,?,?,1)', ('google-binding',owner.id,'google','https://accounts.google.com','brainbuddy','subject-a',clock().isoformat(),clock().isoformat(),owner.email))\n        recent = service.confirm_password(PasswordConfirmRequest(current_password='synthetic-long-password', expected_account_id=owner.id, action='unlink:google'),raw_token=password_token)\n        service.unlink('google',AccountActionRequest(expected_account_id=owner.id,recent_proof=recent.recent_proof),raw_token=password_token)\n        with service.store.connection() as c:\n            print('repro_removed_google_retained_binding:',dict(c.execute('SELECT state,subject,generation FROM auth_identity_bindings').fetchone()))\n        resumed = service.complete_provider(provider_handoff(service))\n        print('repro_removed_google_still_signs_in:',resumed.payload.status, resumed.payload.user.id==owner.id)\n        with service.store.connection() as c:\n            print('repro_removed_google_reactivated:',dict(c.execute('SELECT state,generation FROM auth_identity_bindings').fetchone()))\n    finally:\n        try:\n            next(generator)\n        except StopIteration:\n            pass\n        mp.undo()\n",
+      "requirement": "023-FR-005/006/007/018, approved D04 Remove consequences ('You won't be able to sign in with Google'), and removal of relevant bindings/personal metadata on unlink.",
+      "recommendation": "Distinguish signed provider revocation from explicit user unlink. Public fresh or previously staged provider proofs must not restore explicitly removed authority; require authenticated fresh link before it can regain the account. Erase Google linkage immediately and Apple linkage after only the bounded cleanup/active-lease necessity, preserving generation safety, retry and final purge. Invalidate or reject old provider attempts/handoffs, and test explicit relink plus stale/current cleanup races."
+    }
+  ],
+  "inspected_boundaries": [
+    {
+      "boundary": "Owner, session, action and purpose",
+      "result": "Static inspection confirms exact expected-owner/session matching, indistinguishable foreign/missing404 and separate own failed confirmation403. Proof/code consumption and mutation/session issuance occur in Identity transactions with fresh auth-version/binding-generation checks. No new defect found in these checks."
+    },
+    {
+      "boundary": "Recovery, collision and untrusted provider email",
+      "result": "Static inspection confirms verified usable address/password eligibility, one-use client-bound reset, old-session invalidation, operator exclusion, no email auto-link, third-party Google mailbox staging, and direct staged-attempt mailbox finalization."
+    },
+    {
+      "boundary": "Provider and Apple lifecycle",
+      "result": "Pinned issuer/audience/RS256/nonce/state/binder, bounded JWKS/exchanges and AEAD grant contexts remain. Earlier three Apple fixes are unchanged. Native decryption now resides inside the claimed-attempt terminal exception boundary; source and new damaged/retired-key tests align. Explicit unlink is the material defect above."
+    },
+    {
+      "boundary": "Persistence, purge, migration and rollback",
+      "result": "Transactional facades, update-only user writes, marker-first/user-last purge, owned receipt erasure, encrypted bounded backup and fail-closed epoch rollback guard remain. Source files were previously fully reviewed and 29 reviewed product paths are byte-identical since 8f3adb; sensitive transitions were reread. Operational migration/restore was not executed here."
+    },
+    {
+      "boundary": "Logging and disclosures",
+      "result": "Application/uvicorn/nginx query/exception redaction and content-free operator seeding remain. Privacy page includes provider/mail categories and bounded auth/grant/receipt retention; unlink's permanent linkage conflicts with its disconnection promise. No live controller/processor/legal certification asserted."
+    },
+    {
+      "boundary": "Native finalizer and candidate credentials",
+      "result": "Static review confirms in-memory candidate cookie jar, strict immutable-owner check even empty outbox, captured server/attempt gate, atomic document-owner recheck, short commit phase, rollback on storage/token installation failure and candidate-only pending logout. Host cancellation and compilation defects are above."
+    },
+    {
+      "boundary": "Mac PR265 password compatibility",
+      "result": "Compared available local b83d367 reference with candidate: BrainBuddyAPIClient login/me/logout and SessionTokenStore have no diff; old Workspace.signIn and SyncService.signInWithResult contracts remain with additive fail-closed modern defaults. Legacy empty-outbox switching semantics remain. Existing Mac API still uses password/login/me/logout cookies. Latest reported PR head1092334 is not locally available; no network or Mac compilation was performed."
+    },
+    {
+      "boundary": "Main MCP coexistence",
+      "result": "Inspected new MCP adapter and merge deltas. MCP uses the same AuthService revocable opaque session as a bearer header, denies cookie-only auth, rechecks the session and default-OFF cohort before each command, derives owner solely from authenticated user and calls existing owner-scoped task commands. Mount/lifespan and task-clock changes do not replace auth authority. SDK/HTTP exercise was not rerun here."
+    },
+    {
+      "boundary": "Ten synthetic browser journeys",
+      "result": "Inspected all ten test sources and TLS fixture/runner: email one-use/reload; signed Google; signed Apple form_post/stable subject/collision; external mailbox; legacy collision/interrupted link; reset revocation; stolen handoff; passwordless export/delete; another-owner rejection; keyboard pending/duplicate dispatch. Provider HTTP and SMTP are synthetic, real application authority/routes and UI are used. This reviewer did not rerun browser journeys or claim live-provider evidence."
+    }
+  ],
+  "verification": {
+    "exercised_in_this_review": [
+      {
+        "name": "synthetic explicit Google unlink/login",
+        "input_sha": "e4e4eab3fe36017a2478590a58abc09f6bc97d99",
+        "result": "Reproduced SEC-FINAL-003; temporary local database, fake provider boundary, no production/provider/network access."
+      },
+      {
+        "name": "historical planning bytes",
+        "result": "All six c2-final planning JSON files are byte-identical to their original paths at 8f3adb; original input digests and verdicts were not restamped."
+      },
+      {
+        "name": "snapshot fingerprints",
+        "result": "74 input files hashed; detached worktree exact SHA and clean before output."
+      }
+    ],
+    "static_in_this_review": [
+      "Native coordinator/finalizer and shared legacy/Mac contracts",
+      "All auth authority/crypto/provider/mail/lifecycle/migration/logging boundaries, with fingerprint-verified unchanged code from the prior independent session plus current critical-section inspection",
+      "Main MCP auth/owner/feature-gate integration",
+      "Ten browser journey implementations and synthetic transport isolation"
+    ],
+    "prior_exercised_evidence_not_relabelled_current": [
+      {
+        "input_sha": "5fc4a6a803a603e774e1068f06e0f5e276d161ac",
+        "result": "Independent original review: 192 service/store/provider/migration plus55 logging/guard tests; HTTP TestClient attempt incomplete."
+      },
+      {
+        "input_sha": "8f3adb830cae82f4563966d12a6ca1e10a84b483",
+        "result": "Independent targeted review:44 Apple/store tests and web/native consent/purge reproductions passed."
+      }
+    ],
+    "existing_other_author_evidence_inspected": [
+      "verification.md reports10/10 synthetic browser journeys and614 Linux Swift tests; inspected available older9-journey and614-test log endings. These are not claimed as this reviewer's final-candidate executions.",
+      "Full make/exact-SHA CI were being run by root; old aggregate log shows a no-space failure before a complete backend suite, which is not a pass. Root later stopped obsolete verification for the unlink repair."
+    ],
+    "missing": [
+      "Final repaired exact-SHA full mandatory backend/frontend/repository/native CI and browser evidence",
+      "Physical iOS platform cancel/return/autofill/Dynamic Type/pending-feedback evidence",
+      "Real configured Google/Apple/SMTP, relay/grouping/notifications/revocation smoke",
+      "Controller/processor/disclosure operational review, approved stopped-writer migration, exact-SHA ASK release and production smoke"
+    ]
+  },
+  "historical_review_preservation": "Original planning and implementation outputs remain historical. The original request_changes at5fc4a6a and targeted approve at8f3adb remain accurately scoped; this review does not convert them to whole-feature acceptance.",
+  "bounded_followup_4439c00": {
+    "input_sha": "4439c003f63ef501df8c5ae6e582e95531be239e",
+    "evidence_kind": "independent read-only exact diff inspection; no host or Node22 test execution in this review",
+    "resolved_source_findings": [
+      "SEC-FINAL-001: initial Task.checkCancellation plus active-id guard scopes delayed cancellation.",
+      "SEC-FINAL-002: absent URL throws existing local Failure, avoiding inaccessible package initializer."
+    ],
+    "other_paths_checked": [
+      "Export unit assertion retains exact size/MIME/bytes, one object-URL creation, revoke and DOM cleanup without a realm-sensitive Blob constructor check; product export source unchanged.",
+      "Gitleaks adds complete-line exceptions for a public P256 type expression and one immutable historical input SHA; no credential/path-wide exception. Root's actual pinned scan/probes are reported external evidence, not rerun here."
+    ],
+    "remaining_findings": [
+      "SEC-FINAL-003 is unchanged at4439 and is being repaired by a separate implementation lane."
+    ],
+    "verdict": "request_changes",
+    "full_acceptance": false
+  },
+  "limitations": [
+    "No feature or production acceptance is granted.",
+    "Native cancellation finding is static concurrency evidence; the Google unlink finding is an actual bounded synthetic production-service execution.",
+    "No fresh six-lens planning campaign, self-grading, task checkoff, product edits, shared output cleanup, network calls, deployment or production writes were performed."
+  ],
+  "serialization_only_note": "Serialization-only reformat: source_fingerprints is represented as an array of {path, sha256} objects instead of a dictionary. Every original path and SHA256 value, reviewed input SHA, manifest fingerprint, finding, verdict, evidence statement, and acceptance limitation is preserved; no additional review or regrading occurred."
+}

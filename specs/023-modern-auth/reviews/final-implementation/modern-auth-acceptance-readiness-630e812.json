@@ -1,0 +1,1069 @@
+{
+  "artifact_type": "independent_acceptance_readiness_criterion_matrix",
+  "reviewer": "review_security_c2; independent code reviewer, no implementation authorship",
+  "input_sha": "630e812cfb5713b9e1db026ddcf605ed724c351a",
+  "input_tree": "e8145e45179bbc85fcc172375923f46d61906313",
+  "input_manifest_sha256": "ff3b82bea96fad6ab0efcf5908490d64dd002fa584527f4c93527ce6c17338fd",
+  "code_review_artifact": "/tmp/modern-auth-final-code-review-630e812.json",
+  "readiness": "not_ready",
+  "feature_acceptance": "not_graded",
+  "production_acceptance": "not_granted",
+  "full_acceptance": false,
+  "purpose": "Criterion-level evidence inventory for acceptance readiness only. This is not /speckit-accept, a score, a writer self-grade, a task completion update, a planning re-review or a production release approval.",
+  "status_definitions": {
+    "covered": "The bounded implementation criterion is supported by inspected code and meaningful exercised synthetic/regression evidence, preserving actual authors/input SHAs. Covered does not substitute for physical, configured-live or full-delivery preconditions.",
+    "weak": "Evidence exists but is narrower than the entire criterion, or current candidate execution/native/live proof remains incomplete.",
+    "missing": "Mandatory actual evidence required by the criterion is not available."
+  },
+  "evidence_rules": [
+    "Historical independent249 authority/storage/Apple cases executed at3ebabd1 retain that actual input. They are not fabricated as an exact056 full-suite re-execution.",
+    "At 056, independent 40 unlink/lifecycle tests passed 15.87s and two independent synthetic production-path reproductions covered missing-key expiry and ordinary privacy during a live Apple lease. All exercised product/test bytes are unchanged at 850. These remain056 executions, not fabricated850 reruns; SEC-FINAL-004 original deac evidence remains retained.",
+    "Root 35 real HTTP and75 frontend fallback/export/owner tests are separately attributed deac executions; their product/test bytes are unchanged by the five-file056 repair. Logs inspected without claiming independent HTTP/browser execution.",
+    "Historical headed modern browser execution retains actual worker SHA bae4571b768699758958d13d0a248d809d867961,14 journeys,10 timing samples max38.2ms and14 Axe scans0 violations. It is prior evidence; this repaired candidate adds fallback/local-expiry paths, so no current whole-tree/exact056 browser completion is claimed.",
+    "All 136 archived native regular files independently match exact 630. Retained614/65 pass46.211s in owned Swift6.2 container remains historical source-equivalent pure-package evidence; first official script failed VFS ENOSPC. Physical/app-host/current-public exact-SHA proof missing.",
+    "Actual850 full backend 4324 passed1388.83s, floors98.61/95.86 and taxonomy4324 pass. Separate frontend had sandbox 1725pass/1fail, then1726 passed444.07s with floors/taxonomy. Full-chain frontend subsequently1724pass/2fail before browser;850 aggregate remainsFAIL. Current final630 affected-case2 pass6.78s/125 filtered; fresh full630 chain reported running, not completed.",
+    "Statuses are readiness evidence categories only. T033/T041–T044 and real live provider/release prerequisites remain unmet; there is no formal whole-feature accept/reject verdict or writer self-grade.",
+    "Independent exact 850 AST/schema checks confirm six added 404 constants and unchanged strict fixture checks; all production/frontend/native bytes are identical to056. Readiness categories and missing formal/live/device preconditions remain unchanged.",
+    "New630 changes only two test bodies/history. Independent TypeScript comparison preserves all other cases and meaningful busy/focus/neutral/no-resend/local-graph/revision assertions. Backend/product/native bytes unchanged; full/browser current success not inferred."
+  ],
+  "criterion_source_fingerprints": [
+    {
+      "path": "specs/023-modern-auth/quickstart.md",
+      "sha256": "cc596afa2580c9702222af5cacfffb0d118bb779ec4e74c0d1a6638e4353a30d"
+    },
+    {
+      "path": "specs/023-modern-auth/spec.md",
+      "sha256": "92cda091adb146f2f15aed6722da6074a5fc0373af3961878f24390c8c871b02"
+    },
+    {
+      "path": "specs/023-modern-auth/tasks.md",
+      "sha256": "7943a9eeb305b8fec169e40fbb4bded98ab0e13f26cca694c53eb4e7ee1c0121"
+    },
+    {
+      "path": "specs/023-modern-auth/verification.md",
+      "sha256": "a0e24d8bb33185b705a1a4cf137b089374855959f7db49c3487cf46c9bdde56a"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "023-FR-001",
+      "criterion": "Ordinary new users MUST be able to create an account and sign in with configured Google, Apple or email-code methods without an invite or manual account approval.",
+      "status": "weak",
+      "evidence": "Actual synthetic headed browser journeys cover Google, Apple and email signup/return; server proof paths are exercised independently.",
+      "remaining": "Physical iOS and live configured providers remain unexercised.",
+      "inherited_evidence_at_df94": "Actual synthetic headed browser journeys cover Google, Apple and email signup/return; server proof paths are exercised independently.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-002",
+      "criterion": "Existing password login, opaque application sessions, logout, account IDs, owned data and native password/session compatibility MUST remain usable. New methods MUST use the same account/session authority, not a second task owner system. Preserve existing native sign-in interfaces and 021's Keychain/queued logout/client identity integration; additions MUST NOT replace the Mac password flow. A new user MUST be able to add a password after recent confirmation to use the password-only Mac slice.",
+      "status": "weak",
+      "evidence": "Earlier independent legacy opaque-session/account-ID tests remain historical evidence. Current35 root HTTP regressions cover optional expected-owner 404 binding and unchanged headerless password/Mac API. Current75 root frontend regressions cover restored password-bearing unconfigured account rights. Archived native 136-file source comparison matches 056 and retained 614/65 pure package execution is evidenced.",
+      "remaining": "Latest Mac PR265/device integration, current iOS app host/public exact-SHA CI and full delivery evidence remain unverified.",
+      "inherited_evidence_at_df94": "Independent legacy credential/SQLite tests and original source review preserve opaque sessions/account IDs; additive shared API and Mac password/me/logout paths remain unchanged.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-003",
+      "criterion": "The application MUST advertise only configured usable methods. If availability cannot be loaded, show a retry action and the existing password alternative; configuration values and secrets MUST NOT enter the public availability response.",
+      "status": "covered",
+      "evidence": "Current discovery advertises account origin only with usable origins/keyring. Inspected successful-discovery-only legacy fallback requires has_password and every optional methodfalse; failed discovery/passwordless paths do not downgrade. Root 35 HTTP/75 frontend tests cover these paths, and missing-key local expiry is independently exercised.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Discovery/settings and unavailable-method boundaries were inspected; unchanged secret-free configuration response and fail-closed client behavior have prior actual regression evidence.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-004",
+      "criterion": "Provider login MUST prove the intended provider identity and the originating login attempt. A stable provider identity, not a mutable email/name, MUST identify a returning binding; reject unverified or mismatched proofs before state mutation.",
+      "status": "covered",
+      "evidence": "Current independent authority tests reject stale/foreign proofs and handoffs; prior actual pinned provider-crypto tests and inspected signed synthetic browser artifacts cover provider identity binding.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Current independent authority tests reject stale/foreign proofs and handoffs; prior actual pinned provider-crypto tests and inspected signed synthetic browser artifacts cover provider identity binding.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-005",
+      "criterion": "A provider address matching an existing account MUST NOT authorize automatic linking or merging. The user MUST authenticate the existing account and explicitly complete a fresh link flow bound to that account.",
+      "status": "covered",
+      "evidence": "Independent authority/collision tests plus actual inspected Google/Apple matching-email browser journeys require existing-owner authentication and fresh explicit linking.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Independent authority/collision tests plus actual inspected Google/Apple matching-email browser journeys require existing-owner authentication and fresh explicit linking.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-006",
+      "criterion": "A provider identity MUST bind to at most one BrainBuddy account. Linking/unlinking and sensitive account changes MUST require confirmation of the same account within the preceding five minutes, bound to the acting session and intended purpose.",
+      "status": "covered",
+      "evidence": "Prior independent owner/session/action/proof authority cases are retained. Current40 unlink/lifecycle tests and independent normal privacy/live revoke interleaving preserve owner-bound explicit relink 409 until the old lease settles. Optional compatible account expected-owner mismatch 404 precedes reads/mutations in current source.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "249 independently executed authority/SQLite cases include owner/session/action/generation checks, foreign404, fresh links, Remove invalidation and live Apple lease409.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-007",
+      "criterion": "Users MUST see safe connected-method and email-verification metadata and be able to add/remove supported methods. Removing the last usable method MUST fail with an action to establish an alternative; a transient availability response MUST NOT rewrite bindings.",
+      "status": "covered",
+      "evidence": "Prior actual Remove/last-method/collision evidence is retained. Current19 unlink cases cover public-denial/fresh same-owner link and revocation-disabled reconsent distinctions; fallback preserves connected metadata without rewriting bindings on availability failure.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Independent last-method/provider-session/Remove cases pass; actual inspected Google/Apple browser journeys establish an alternative, deny public restoration and freshly reconnect the same owner.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-008",
+      "criterion": "Email login codes MUST be six digits, single use, expire within the ten-minute outer challenge lifetime, be bound to their address/intent and initiating client, and have at most five verification attempts per challenge. Resend MUST NOT extend that outer lifetime; display the actual remaining expiry. No proof may be accepted twice under concurrent requests.",
+      "status": "covered",
+      "evidence": "Independent code/proof consumption and replay boundaries plus previous unchanged mail/service tests support six-digit, one-use, client/intent-bound ten-minute codes and guess/resend limits.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Independent code/proof consumption and replay boundaries plus previous unchanged mail/service tests support six-digit, one-use, client/intent-bound ten-minute codes and guess/resend limits.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-009",
+      "criterion": "Email delivery and verification MUST have persistent per-address and per-client abuse budgets, a minimum 60-second resend interval and bounded challenge cleanup. Creating/resending a challenge MUST NOT reset a shared verification budget; restart MUST NOT erase it.",
+      "status": "covered",
+      "evidence": "Persistent budget and resend implementation remains inspected with prior actual regression evidence. New exact056 key-free local expiry runs from startup/ordinary privacy sweep and keeps expiry active when keys or providers are unavailable; no delivery call is used by this helper.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Persistent abuse-budget and expiry code is unchanged from actual previous tests; current authority tests retain limit/resend/purpose failures without new authority.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-010",
+      "criterion": "Public email login/recovery responses MUST use neutral status/wording independent of account eligibility. Deliver only the proof relevant to the accepted operation; do not log, export or publicly return codes or usable credentials. Delivery errors MUST be actionable without exposing provider internals.",
+      "status": "covered",
+      "evidence": "Neutral email/recovery behavior and no-auto-login cases are independently exercised; unchanged safe mail/provider exceptions and secret exclusion were inspected and previously tested.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Neutral email/recovery behavior and no-auto-login cases are independently exercised; unchanged safe mail/provider exceptions and secret exclusion were inspected and previously tested.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-011",
+      "criterion": "Password recovery MUST prove control of an eligible account address with a one-use, intent-bound proof, expire it after at most ten minutes, enforce the existing password policy and revoke all previous sessions after a successful reset. It MUST NOT silently create an account, bind a provider or cancel a due purge.",
+      "status": "covered",
+      "evidence": "Independent recovery/authority tests preserve one-use client/purpose reset, password policy, old-session revocation, known-owner no-signup and due-purge rejection; inspected browser recovery also passes.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Independent recovery/authority tests preserve one-use client/purpose reset, password policy, old-session revocation, known-owner no-signup and due-purge rejection; inspected browser recovery also passes.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-012",
+      "criterion": "The modern email-change flow MUST require recent proof of the current account plus verification of the new address. Keep the old address until both succeed; reject conflicts/reserved addresses generically and preserve atomic account/index consistency. Existing legacy password-protected email-management API semantics remain compatible, but changing through that path MUST clear mailbox verification and invalidate old-address proofs; it MUST NOT establish email-code/recovery authority without subsequent authenticated verification.",
+      "status": "covered",
+      "evidence": "Independent authority and legacy tests cover fresh current-owner proof, pending-address verification/conflict and verification-clearing legacy paths; account/index mutations remain transactional.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Independent authority and legacy tests cover fresh current-owner proof, pending-address verification/conflict and verification-clearing legacy paths; account/index mutations remain transactional.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-013",
+      "criterion": "Passwordless users MUST retain sensitive account and privacy actions by recent confirmation through a method already bound to the same account. A freshly verified credential MAY satisfy recent confirmation; existing password rechecks remain supported for compatible clients. Set/change password only through the existing password policy; do not count an unset password as a usable method. iOS account settings MUST expose account management and a direct account-deletion destination for the linked account, without placing a usable session credential in a URL or silently signing out/discarding its local work.",
+      "status": "weak",
+      "evidence": "Current inspected passwordless proof-bound paths remain unchanged. Legacy Password/Data/DangerZone actions are restored only for a password-bearing account after successful explicitly unconfigured discovery; no failure/passwordless downgrade. Root 35 HTTP/75 frontend regressions exercise compatibility and captured-owner export guards. Native owner-bound account links and local-work safeguards remain statically intact.",
+      "remaining": "Physical iOS account-management handoff/local-work preservation and current app host execution remain unverified.",
+      "inherited_evidence_at_df94": "Passwordless provider confirmation, safe export/deletion and password-add behavior have independent service evidence and inspected actual browser execution. Native Manage/Delete URLs and expected-owner flow are statically intact.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-014",
+      "criterion": "Legacy unverified addresses MUST NOT be relabelled verified by migration or by a social email match. First email-code access to such an account MUST require proof of the existing account before establishing the verified email method. Recovery for such an account MUST fail neutrally until its address has been verified from an authenticated account; existing password access and operator support remain available. This prevents adding an email recovery authority to previously unverified/possibly mistyped addresses.",
+      "status": "covered",
+      "evidence": "Independent collision/operator/recovery cases retain legacy unverified mailbox boundary; migration and legacy-management source do not grant verification from a provider email match.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Independent collision/operator/recovery cases retain legacy unverified mailbox boundary; migration and legacy-management source do not grant verification from a provider email match.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-015",
+      "criterion": "Modern native sign-in MUST bind the result to the initiating app attempt and its expected immutable account, keep usable application-session/provider credentials out of URLs and server secrets out of client bundles, and reject a different owner before starting sync or altering linked ownership. A short-lived one-use authorization handoff code MAY use the fixed callback only when it also requires the initiating client's secret verifier; it MUST NOT be a session or a poll-retrievable result. Preserve the existing shared legacy password interface for Mac 021. Native app dependencies MUST follow the existing platform constraints.",
+      "status": "weak",
+      "evidence": "Native source byte comparison against all136 archived files matches exact056; retained pure-package614/65 result supports parser/finalizer behavior. Scoped platform cancellation and local Failure fixes remain inspected and unchanged; no usable session token is placed in callback URLs.",
+      "remaining": "Physical iOS browser/Apple returns and callback transport, current app host and public exact-SHA gates are missing.",
+      "inherited_evidence_at_df94": "Strict native parser/finalizer and scoped cancellation fix were independently inspected; pure-package test evidence is preserved at its actual earlier input. URLs carry verifier-bound handoffs rather than sessions.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-016",
+      "criterion": "Offline/interrupted/failed login and provider cancellation MUST preserve local tasks, pending changes and existing owner binding. Remote authentication requires a connection; local capture remains available without sign-in.",
+      "status": "weak",
+      "evidence": "Inspected unchanged native candidate isolation/outbox/generation/cancellation guards are supported by retained source-equivalent pure-package614/65 execution. Legacy frontend export guards avoid a download after account switch.",
+      "remaining": "Actual physical-native offline/interruption/platform-sheet cancellation/autofill and pending-outbox behavior remain unexercised.",
+      "inherited_evidence_at_df94": "Shared finalizer's candidate isolation, owner check, commit gate, failed/stale cleanup and outbox-preserving interfaces are inspected; previous actual pure tests cover cancellation/overlap.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-017",
+      "criterion": "New methods MUST preserve the reserved-operator boundary: ordinary public methods cannot provision or take over a configured operator identity. New external/email methods MUST NOT become a recovery shortcut for the seeded operator account.",
+      "status": "covered",
+      "evidence": "Independent reserved-owner, seed, public provider/email/recovery and foreign-owner authority cases preserve password-only operator controls; no operator shortcut added.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Independent reserved-owner, seed, public provider/email/recovery and foreign-owner authority cases preserve password-only operator controls; no operator shortcut added.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-018",
+      "criterion": "Account export MUST include safe new personal metadata and exclude all auth secrets. Unlink/purge MUST remove the relevant bindings and account-owned proofs, with idempotent retry after partial purge failure; stale proofs MUST NOT resurrect deleted accounts.",
+      "status": "covered",
+      "evidence": "SEC-FINAL-004 original deac scheduler finding is retained and now independently resolved. At25h after actual RemoveApple, ordinary privacy maintenance with no keys/mail/Apple adapter erases mapping/jobs with zero remote calls and preserves owner session. Current40 tests include explicit removal, proofs/handoffs, bounded cleanup, collisions and failure isolation; current export owner guards are inspected and root-tested.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Independent 249 cases and earlier actual purge/export tests cover Remove, sealed metadata erasure, secret-free exports, retry-safe owner purge and no stale-proof resurrection. Final Google and Apple unlink erasure is exercised.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-019",
+      "criterion": "The existing 14-day account-deletion grace period, session revocation and in-grace login cancellation behavior MUST be preserved and disclosed. Past-due accounts MUST remain inaccessible through every new method.",
+      "status": "covered",
+      "evidence": "Prior actual14-day deletion grace, session revocation, in-grace cancellation and due-purge denial evidence is retained. New auth-expiry failure test shows other account deletion duties continue; constant bounded logging enables retry without provider gating or extended deadlines.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Independent authority tests retain14-day deletion grace, all-session revocation, in-grace login cancellation and due-purge denial; provider cleanup does not gate local account erasure.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-020",
+      "criterion": "Privacy/retention documentation MUST identify the new identity/email processing, minimum identity scopes, durable versus short-lived records and cleanup triggers. No consent for AI/content processing is implied by sign-in; actual controller/processor arrangements MUST not be fabricated.",
+      "status": "weak",
+      "evidence": "Final privacy/retention disclosures were independently read and match explicit unlink behavior, minimal scopes, secret exclusions and bounded records without fabricated legal certification.",
+      "remaining": "Actual controller/processor agreements and deployed disclosures remain operationally unverified.",
+      "inherited_evidence_at_df94": "Final privacy/retention disclosures were independently read and match explicit unlink behavior, minimal scopes, secret exclusions and bounded records without fabricated legal certification.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-021",
+      "criterion": "Critical authentication actions MUST emit bounded, content-free outcome metadata through existing safe logging with a correlation identifier where available. Logs/telemetry MUST exclude passwords, codes, tokens, provider assertions, unnecessary email/subject payloads and user content; actionable server errors expose only a safe reference.",
+      "status": "covered",
+      "evidence": "Previous actual seed/redaction/validation/access-log evidence remains historical. New local cleanup error emits only constant Authentication metadata cleanup deferred, with no exception/subject/token content; independently executed failure-isolation case passes. Nginx no longer injects its noncanonical32hex identifier.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Unchanged safe logging and access-log configuration retain prior actual redaction tests; current cleanup logs only coarse outcomes. No new subject/email/token logging path was introduced.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-022",
+      "criterion": "A user action MUST show loading/disabled feedback within 200 ms on the supported reference device, prevent duplicate submission and preserve keyboard focus. Web controls MUST have accessible names, visible focus and keyboard operation; touch targets MUST be at least 44 pt.",
+      "status": "weak",
+      "evidence": "Prior actual headed timings/focus/44 CSS-pixel/duplicate/overflow artifacts retain worker SHA. Current corrected auth test still requires synchronous immediate disabled busy state and actual focus through bounded wait. No production or timing threshold changed. Root final two cases pass; current full/browser run pending.",
+      "remaining": "Physical native44-point/Dynamic Type/feedback and fresh complete630 browser evidence missing.",
+      "inherited_evidence_at_df94": "Inspected actual headed artifacts show ten five-action measurements at both reference sizes, all <=38.2 ms, busy/disabled/one dispatch,44 CSS-pixel targets, visible focus/no overflow, and 14 Axe scans with 0 violations.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-023",
+      "criterion": "The implementation MUST require no new paid authentication-service subscription and MUST document the remaining Google/Apple/mail setup, quota limits and secret rotation. Provider/account purchases or production deployment require their existing explicit authorization; unavailable configuration is not a successful live flow.",
+      "status": "covered",
+      "evidence": "Free pinned JOSE/direct OAuth/SMTP implementation and operational setup/quotas/key-rotation documentation are present. Optional methods fail unavailable rather than claim live success; no auth SaaS purchase is present.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Free pinned JOSE/direct OAuth/SMTP implementation and operational setup/quotas/key-rotation documentation are present. Optional methods fail unavailable rather than claim live success; no auth SaaS purchase is present.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-024",
+      "criterion": "The primary capture → atomic items → clarify/approve → route or CRT candidate → review → evidence semantics MUST remain unchanged. This feature changes private remote access/sync, not task rules, AI consent or Mac UI owned by the concurrent chat.",
+      "status": "covered",
+      "evidence": "Scope/main merge audit and exact unchanged task/native paths show auth remains the owner/session boundary without changing task rules or AI consent; Mac UI remains owned by the concurrent work.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Scope/main merge audit and exact unchanged task/native paths show auth remains the owner/session boundary without changing task rules or AI consent; Mac UI remains owned by the concurrent work.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-FR-025",
+      "criterion": "Apple disconnection/account deletion MUST revoke the relevant provider grant with bounded retry; only revocation-required provider credentials may be retained, protected at rest and excluded from logs/exports. A verified provider revocation notice MUST end the affected provider authority/sessions without automatically deleting BrainBuddy content or granting another account access. Provider failure MUST NOT extend the existing account-purge deadline or prevent local erasure; documentation MUST state credential cleanup and notification validation.",
+      "status": "weak",
+      "evidence": "Current40 independently executed unlink/lifecycle cases and live-lease ordinary privacy reproduction cover bounded erasure, encrypted grants, retained lease serialization, explicit Remove versus provider-revoked reconsent and notifications. Missing-key/provider failure no longer disables local cleanup; remote failure does not block local account erasure.",
+      "remaining": "Actual live Apple revocation, grouping/relay and signed-notification operational smoke remain missing.",
+      "inherited_evidence_at_df94": "41 independently executed Apple/unlink/lifecycle cases plus related authority tests cover generation/lease serialization, revocation-disabled fresh consent versus explicit Remove, encrypted grants, five attempts/deadline, notices and erasure.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-SC-001",
+      "criterion": "New and returning users complete all three configured methods on web and iOS; email login uses two application steps, and ordinary onboarding requires zero invites.",
+      "status": "weak",
+      "evidence": "All three modern methods have earlier actual synthetic headed worker journeys with two-step email and zero invites. This is historical evidence at its real SHA; current mandatory browser lane is pending.",
+      "remaining": "Actual iOS and configured live-provider new/returning journeys, plus current full browser completion, are unavailable.",
+      "inherited_evidence_at_df94": "All three methods have actual synthetic browser journeys with two-step email and no invite.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-SC-002",
+      "criterion": "Every legacy password/session regression fixture preserves its account ID and owned data; the baseline Mac password/session contract remains compatible.",
+      "status": "weak",
+      "evidence": "Actual850 complete backend 4324/floors and separate frontend 1726/floors retained; full850 aggregate failed two frontend fixtures. Current630 changes no product/legacy/native source and retains outcomes.136 native archive matches support retained614/65 pure-package execution.",
+      "remaining": "Fresh full630/browser completion, physical Mac/device integration and current public native/app exact-SHA gates unverified.",
+      "inherited_evidence_at_df94": "Legacy authority/storage regressions pass independently; shared legacy Mac API source matches available reference and current code review.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-SC-003",
+      "criterion": "All defined negative proof, replay, collision, owner-mismatch, reserved-operator and concurrency acceptance cases grant zero unauthorized sessions/bindings or cross-owner uploads.",
+      "status": "weak",
+      "evidence": "Prior249 and05640 independent negative authority/storage/unlink evidence retains actual SHAs. Complete850 backend 4324/floors passed; full850 frontend two failures retained. Independent630 comparison preserves meaningful negative/result assertions and every other case body.",
+      "remaining": "Fresh complete630 required frontend/browser/native/public-CI aggregate pending; no all-defined-cases final completion.",
+      "inherited_evidence_at_df94": "249 independently executed current negative/SQLite/authority tests plus prior provider/logging/purge tests and inspected synthetic browser owner/replay/collision cases grant no unauthorized owner/session.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-SC-004",
+      "criterion": "A verified password user completes recovery, an authenticated user changes email only after verification, and a passwordless user exports/requests deletion without adding a password first.",
+      "status": "covered",
+      "evidence": "Earlier actual recovery/email-change/passwordless export/delete server/web journeys retain provenance. The restored legacy password-only unconfigured action path keeps real current-password checks and safe displayed-owner headers without bypassing modern proof-bound passwordless rights; root75 frontend/35 HTTP evidence supports this correction.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Independent recovery/email-change/passwordless-action boundaries and actual inspected full-stack recovery/export/deletion journeys satisfy the synthetic server/web criterion without adding a password for privacy rights.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-SC-005",
+      "criterion": "Export inspections find zero usable auth secrets; completed account purge leaves zero new account-owned bindings/proofs and remains safe under retry.",
+      "status": "covered",
+      "evidence": "Current independent original missing-key expiry reproduction now erases binding/job without provider access, while a live revoke preserves lease then terminally erases. Current40 tests and earlier actual export/purge/receipt retry evidence retain secret exclusion and idempotent ownership cleanup. Captured-owner export checks precede fetch and follow blob before any download.",
+      "remaining": null,
+      "inherited_evidence_at_df94": "Current independent unlink/cleanup/receipt tests and previous actual export/purge retry checks show auth-owned secrets excluded and mappings/proofs erased without provider-dependent purge delay.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-SC-006",
+      "criterion": "All interrupted/offline/wrong-owner native acceptance cases retain local tasks and pending operations unchanged until the correct account resumes sync.",
+      "status": "weak",
+      "evidence": "Unchanged native finalizer/outbox/candidate guard source matches archived pure package execution; earlier actual overlap/wrong-owner/cancellation test evidence is retained.",
+      "remaining": "Actual interrupted/offline/wrong-owner physical-native acceptance cases remain missing.",
+      "inherited_evidence_at_df94": "Inspected native finalizer and previous pure-test evidence preserve local owner/outbox through wrong-owner/overlap/cancellation failures.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-SC-007",
+      "criterion": "Changed screens pass keyboard/focus and 44-pt checks at desktop and 390×851 mobile sizes with no horizontal overflow; pending feedback appears within 200 ms in the controlled UI acceptance run.",
+      "status": "weak",
+      "evidence": "Prior headed focus/timing/44 CSS-pixel artifacts retain actual worker SHA. Current auth wait requires actual focus; CRT conflict recovery retains graph/revision assertions without production changes. Current browser pending.",
+      "remaining": "Fresh complete630 browser measurements and physical native44-point/Dynamic Type/feedback evidence missing.",
+      "inherited_evidence_at_df94": "Actual headed desktop 1440x1000/mobile 390x851 artifacts show all measured web feedback <200 ms, keyboard/focus,44 CSS-pixel targets and no overflow.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    },
+    {
+      "id": "023-SC-008",
+      "criterion": "Required affected automated suites and independent review pass on the candidate commit; real configured-provider smoke proves each promised live method before production is claimed complete. Mandatory additional auth SaaS subscription cost is €0/month.",
+      "status": "missing",
+      "evidence": "Independent bounded630 review approves two fixture waits/source equivalence. Actual850 backend 4324/floors/taxonomy and separate frontend 1726/floors pass; full850 aggregate fails frontend 1724pass/2fail before browser. Root fresh630 full aggregate reported running/unverified.",
+      "remaining": "Completed current mandatory delivery/browser/native/public exact-SHA CI, live providers, validated receipt/formal acceptance/release evidence absent.",
+      "inherited_evidence_at_df94": "Independent bounded code review approves df94; root full make is running. Earlier public 4439 CI was aggregate-red and cannot certify the repaired candidate. Direct auth SaaS subscription cost remains zero.",
+      "evidence_provenance": "Historical actual executions retain their original SHAs/authors as detailed in evidence_rules; inspected current code bytes and exact-current focused evidence do not imply full acceptance."
+    }
+  ],
+  "mandatory_preconditions": [
+    {
+      "id": "T033",
+      "status": "missing",
+      "criterion": "Physical native/provider return/cancel/autofill/Dynamic Type and current native/Mac integration evidence",
+      "evidence": "All 136 archived native files match current source; retained 614/65 pure-package pass remains actual other-author evidence. Official script attempt failed ENOSPC. Physical iOS/current app host/public exact-SHA and Mac device proof remain absent."
+    },
+    {
+      "id": "T041",
+      "status": "weak",
+      "criterion": "Candidate-bound web/native pending feedback, focus, duplicate submits and touch targets",
+      "evidence": "Prior headed14 journeys/10 samples/max38.2ms/14 Axe scans retain actual worker SHA. New fallback75 frontend regressions support focus/duplicate/dimensions; current mandatory browser lane is pending. Physical-native evidence is absent."
+    },
+    {
+      "id": "T042",
+      "status": "weak",
+      "criterion": "Complete make verify-all, immutable coverage floors, native gates and affected acceptance suites",
+      "evidence": "Actual850 backend 4324/floors/taxonomy and separate frontend 1726/floors pass; full850 aggregate failed2 frontend async fixtures before E2E. Current final630 two affected cases pass with 125 filtered. Fresh630 full chain reported running, no completion."
+    },
+    {
+      "id": "T043",
+      "status": "missing",
+      "criterion": "Final typed writer receipt validation and independent required acceptance review",
+      "evidence": "Bounded independent630 review complete, prior artifacts preserved; final validated receipt/mandatory whole acceptance assessment absent."
+    },
+    {
+      "id": "T044",
+      "status": "missing",
+      "criterion": "Formal whole-feature acceptance/delivery report and approved exact-SHA landing",
+      "evidence": "Formal acceptance is not run while mandatory native/live/delivery preconditions are incomplete. No public final exact-SHA CI, merge or deploy is claimed."
+    },
+    {
+      "id": "LIVE_PROVIDER_SMOKE",
+      "status": "missing",
+      "criterion": "Real configured Google/Apple/SMTP, relay/grouping, notifications and cleanup",
+      "evidence": "Owner account availability and synthetic signatures are not runtime secret/configuration/live proof."
+    },
+    {
+      "id": "LIVE_RELEASE_AND_PRIVACY_OPERATIONS",
+      "status": "missing",
+      "criterion": "Actual processor/controller arrangements, stopped-writer live migration/rollback rehearsal, release authorization and production smoke",
+      "evidence": "Documentation and synthetic migration guards exist; production operational execution and authorization are not asserted."
+    }
+  ],
+  "remaining_blockers": [
+    "Physical iOS/native reference evidence required by T033/T041",
+    "Completed final candidate delivery chain, unchanged coverage gates and exact final public native/CI evidence",
+    "Validated receipt/formal acceptance only after their preconditions are met",
+    "Real configured-provider/mail/privacy/migration/release operations before production completion is claimed"
+  ],
+  "scope_limit": "Missing external/native/delivery evidence is an acceptance-readiness limitation, not a newly fabricated code defect. No additional product expansion or owner approval flow is requested.",
+  "updated_at_utc": "2026-10-06T17:35:40.640274+00:00",
+  "code_review_sha256": "28d1af95a53f3b8ef930298ea6af876b8b103e93113b12bdce5db486960a7daa",
+  "prior_inventory": {
+    "path": "/tmp/modern-auth-acceptance-readiness-df94a042.json",
+    "sha256": "55c0d90e70ddaa8f09bad26467740f95926e9fb9486afbc777e4979913150143",
+    "input_sha": "df94a042208bdba708a25da548f3a81f779893c5",
+    "input_manifest_sha256": "17385460e6a8722189a14856d45034a8f1774d915dd324b04a2b00294ea0d3cc",
+    "preservation": "Original 33 criterion IDs/text/statuses and mandatory gaps retained; actual historical executions retain original authors and SHAs. Original inventory file remains unchanged."
+  },
+  "source_fingerprints": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "de61dbfdfc72f896298bd145428e30e9e876776118c92b658c909f538baf5d0e"
+    },
+    {
+      "path": ".github/workflows/deploy-fly-production.yml",
+      "sha256": "2ade8b626028972706c784089400c72854cc4bc295eefda293c1f2e768dd6d41"
+    },
+    {
+      "path": ".gitleaks.toml",
+      "sha256": "eb928c9061ee0bf455e3e2230581be17df4fa9bccff208b597eb2e83428fdad8"
+    },
+    {
+      "path": "Makefile",
+      "sha256": "d78d0709afd081b51b58a6d97980ceabf8ec9893c0705221fe0a52256eabe9b9"
+    },
+    {
+      "path": "backend/app/api/account.py",
+      "sha256": "58f574823ad4d6aeae77b5664b179a83f618076d8abe986b93953dd53423b543"
+    },
+    {
+      "path": "backend/app/api/auth.py",
+      "sha256": "d2931ea41b2a6dc844bd25badfc12960b866e729dcb23430bc168b2229dd1d27"
+    },
+    {
+      "path": "backend/app/api/errors.py",
+      "sha256": "5699b6102b8737459843986b271a6118691224e798248fcd46b84da07c9ff176"
+    },
+    {
+      "path": "backend/app/api/mcp.py",
+      "sha256": "5f4fd37a70d065772bb55679204e2a6a14dbe9d765d25bd954a69ed7dca4d3e5"
+    },
+    {
+      "path": "backend/app/api/middleware.py",
+      "sha256": "5213ce33a1e5e2db38871b3a567d504873b18844907ff01d8e09e5c898fc3747"
+    },
+    {
+      "path": "backend/app/api/modern_auth.py",
+      "sha256": "aa1b2bac477b6dc20121a34a27ba56ddd2a7db8fcbd1cc23bdcda7d6b6134b83"
+    },
+    {
+      "path": "backend/app/container.py",
+      "sha256": "0b636a8e224f2dced326a94823f3d82c2a8233c6b6ce8a7458734dea1083bb12"
+    },
+    {
+      "path": "backend/app/core/config.py",
+      "sha256": "630b3d16e9534e3d8ce000cd7eb398b1711d864c5c45153e707e68675bd3480a"
+    },
+    {
+      "path": "backend/app/core/logging.py",
+      "sha256": "b39d279700ab90fa3ffce4c808653e3554ad010c7133d8402758dcd05f29304a"
+    },
+    {
+      "path": "backend/app/main.py",
+      "sha256": "f92e10541218e55986a12a1fecca265369e039076b4b6a75e78be49928e7b2b6"
+    },
+    {
+      "path": "backend/app/modules/tasks/service.py",
+      "sha256": "55fb244eaea6d8b271df852c4f4acd510722733814f953bc3d8a2b185ab85350"
+    },
+    {
+      "path": "backend/app/repositories/auth_metadata.py",
+      "sha256": "b1e05197f0b90850bfae798e17b0a245eb84ca5e44dfb3a4109cfc3edd1ec6a0"
+    },
+    {
+      "path": "backend/app/repositories/auth_store.py",
+      "sha256": "7d67f329f2b6d3c64c0d1250db9ac4f2357ceef9dc3619e1314ea27c1909bc8a"
+    },
+    {
+      "path": "backend/app/repositories/feature_flag.py",
+      "sha256": "54931270c2599ee3995d6a36572611fb467f1643f96d63717b18c7317e15089f"
+    },
+    {
+      "path": "backend/app/repositories/session.py",
+      "sha256": "9fa2f077a167b1db81628fd5a9f3f8c18fc5d190c34c9f487c1712458d44d7d6"
+    },
+    {
+      "path": "backend/app/repositories/user.py",
+      "sha256": "dc0c4729cd5a442a55b61b7914381c60ce9b3ab05f340218853c71c7ff2fa10b"
+    },
+    {
+      "path": "backend/app/schemas/auth.py",
+      "sha256": "d23e56e1d389edcf0e7dd4f59bbcf85e67db0215f28253f74892db32ba691228"
+    },
+    {
+      "path": "backend/app/schemas/modern_auth.py",
+      "sha256": "57c9158a932ec2aa980e819867bea59d08bf15007cabf5264da394afb3165f90"
+    },
+    {
+      "path": "backend/app/services/account_service.py",
+      "sha256": "387dff67d1a181d0237e805a5400c399d6689afda061731c14ec8de024f5f723"
+    },
+    {
+      "path": "backend/app/services/admin_service.py",
+      "sha256": "f3825de385641ab9251ec3348c1134812bbd0ee655117826fff7479c8219faef"
+    },
+    {
+      "path": "backend/app/services/auth_apple_lifecycle.py",
+      "sha256": "3ca0aa43dc0851f4b83cd7486b2fc1e597727c5f59282e29ed40c2b1fd95e3cf"
+    },
+    {
+      "path": "backend/app/services/auth_mail_service.py",
+      "sha256": "8a71e049cb9279bef70913b0a1a2e641d906961204731e64599805948a0a4579"
+    },
+    {
+      "path": "backend/app/services/auth_migration.py",
+      "sha256": "7e6618b96106c33f98527d1963060a142fe6e7ae08a400ecfb44333604b82320"
+    },
+    {
+      "path": "backend/app/services/auth_provider_service.py",
+      "sha256": "6e6e969fe3e986fc064c18fd2b6e15881c6b9e5eaca3a36dc9c59110fa9b4e45"
+    },
+    {
+      "path": "backend/app/services/auth_secret_box.py",
+      "sha256": "ce9a8aa7ea94f94084b28d7299e407e6765f266edda192604dca485b5b5346c3"
+    },
+    {
+      "path": "backend/app/services/auth_service.py",
+      "sha256": "f1a464722698d99f9158b56e174af0802aaf190f5adcb95304d9f9adb55f8c65"
+    },
+    {
+      "path": "backend/app/services/feature_flag_service.py",
+      "sha256": "a802387db0da2e53697e008b3a01df697a60b9fa299d282b37c8f46c89da3f38"
+    },
+    {
+      "path": "backend/app/services/modern_auth_service.py",
+      "sha256": "0c706facb32ffc7570cc0c7831c92d2c047e5e3d82061c6793e7a9fd35b30332"
+    },
+    {
+      "path": "backend/tests/modern_auth_e2e_app.py",
+      "sha256": "5c2259a16444532b3e8846c3c9c54fae2dd24ef7862c4df82ab35a069b5de6ba"
+    },
+    {
+      "path": "backend/tests/test_account_api.py",
+      "sha256": "4a35cc46d7abca1bb545575264b941fc6d044b4f5d33fb028e64d474bca2b6d2"
+    },
+    {
+      "path": "backend/tests/test_api_contract.py",
+      "sha256": "fcb6d5061460ba5c0445f46589b885d66c1a76538f3f47508d8fab8a1854e335"
+    },
+    {
+      "path": "backend/tests/test_auth_apple_lifecycle.py",
+      "sha256": "c3b10713d80c99a0f2542e22360f043e77cb7b8b021b6aa0accd9eb19946bcc8"
+    },
+    {
+      "path": "backend/tests/test_auth_service.py",
+      "sha256": "9c84d8f44208ae8bfcafd74a34217dd31c2f100da49e16fef35c3038431548ea"
+    },
+    {
+      "path": "backend/tests/test_auth_store.py",
+      "sha256": "60b39a17e02eb694fb2501c2edf39b8404dc45eb4154b60f52ff21260e4336c8"
+    },
+    {
+      "path": "backend/tests/test_branch_invariants.py",
+      "sha256": "d5cf905b7a5261ac50b27a9adaf1699187d6b7475f443f3c275949eda1c095bf"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_api.py",
+      "sha256": "cb0bfebdc0dfbadba66e0d598b491027cc1599856cb036baed22b41380cc6cf4"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_api_journeys.py",
+      "sha256": "1f8f0c021d7ce4dec06f21bd3ade30332509294ef2c3fa20e2c0ce789e3822ca"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_apple_integration.py",
+      "sha256": "75c986a17fc77fcf65440932779cfe63a12b8de09bad72f8a01e2a5e66cd5f82"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_authority_edges.py",
+      "sha256": "d6d841ae01b3ef4afbe56e6b549bb689cfe705497a0cc9d6b5d7a24ee54853de"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_authority_remaining.py",
+      "sha256": "7baf631fba22fad570164b7b58003f6b1d0b5c8e36882743f614567e26c449cf"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_storage_remaining.py",
+      "sha256": "56d3ba9e5a2dc989f42c0c19d1c18ae9e0bbac42a12075064dde8f66128b4bd1"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_unlink_authority.py",
+      "sha256": "2c4714578bdb518621f13cb1beea7cf84b4233e7fde3a599a9a22c23cdb88b8a"
+    },
+    {
+      "path": "backend/tests/test_task_mcp.py",
+      "sha256": "525b80cd34db390c20ec940d6e84a830d97d05d2cd9f308c145e6368089bcd73"
+    },
+    {
+      "path": "deploy/nginx/default.conf",
+      "sha256": "f76f63879c055d05e366d2850bc0ad4aebd11d373e73cf62d5de68b64d1002f5"
+    },
+    {
+      "path": "docs/api-compatibility.md",
+      "sha256": "8771c02e67006095eaa61f17e538aef8b0747af88c9369ac4f631590685bb6e6"
+    },
+    {
+      "path": "docs/data-retention.md",
+      "sha256": "59e85b92f5cb633e7be159ca7ed231fa1194cc66de0d8b40e1a51bc8072aac90"
+    },
+    {
+      "path": "docs/decisions/0028-modern-identity-authority.md",
+      "sha256": "d92dc2299d7cfc249dd8d2addd477bc23a2e12cdc35385912b5eaad816931c4d"
+    },
+    {
+      "path": "docs/modern-auth-operations.md",
+      "sha256": "e2d1d2f6a27321fd88a9e0669c94293375e653531b922b98cbd781ebfb29914c"
+    },
+    {
+      "path": "frontend/package.json",
+      "sha256": "e2c1ff571b5439b8ad145d848b10ba318e97bee0aef05b7129dfb1820d76b6fb"
+    },
+    {
+      "path": "frontend/playwright.modern-auth.config.ts",
+      "sha256": "2d8712f77e1f609f2cdf74fdd536cfd86fa693af6337f5d56167536d1606c1ca"
+    },
+    {
+      "path": "frontend/src/api/__tests__/account.test.ts",
+      "sha256": "af34f15e8577dea12b20d187871a42f822e4c5ac3a9923d7e8c146ba7ffbb0a5"
+    },
+    {
+      "path": "frontend/src/api/__tests__/client.test.ts",
+      "sha256": "8d454c64c8850d3dec1d8e947518e5125e09692c863f0d119dd9bf4300b4be21"
+    },
+    {
+      "path": "frontend/src/api/__tests__/modernAuth.remaining.test.ts",
+      "sha256": "06a8f6d6853474f57dea1b639cb8482347a45c35bd9663757c2fa5891e171137"
+    },
+    {
+      "path": "frontend/src/api/account.ts",
+      "sha256": "493a69f402dd1bcf452243a18047159059ce73e6728bd85f10f928597d14644d"
+    },
+    {
+      "path": "frontend/src/api/accountHooks.ts",
+      "sha256": "64e3fb87a3bd9abbbd8639916dc9f8df2112f76011ba8ef3aa750fc89b9ec198"
+    },
+    {
+      "path": "frontend/src/api/client.ts",
+      "sha256": "dbbe423624d46316e4ff754a80efdf9762bde7383cd3a15e7e8f7b713ed90af4"
+    },
+    {
+      "path": "frontend/src/features/account/AccountSettingsPage.tsx",
+      "sha256": "a2db1df7808533ed7cae974a3eb8a5056084184ac41d82b73ae978025fca52f0"
+    },
+    {
+      "path": "frontend/src/features/account/LegacyAccountActions.tsx",
+      "sha256": "f1521132e60a8ad5a4e220415ecafd5012241dd6c0705bb5015289d1973fac7d"
+    },
+    {
+      "path": "frontend/src/features/account/__tests__/AuthMethods.test.tsx",
+      "sha256": "f0b554c5278af1f7ba380b31c50ff29a87c914074ace21a07d8a60533c71dcdb"
+    },
+    {
+      "path": "frontend/src/features/account/__tests__/LegacyAccountActions.test.tsx",
+      "sha256": "caf232ee45093fd5ceca75b79b1a17cccb2945eb05c4b0c09ad473db9865e39f"
+    },
+    {
+      "path": "frontend/src/features/auth/AccountSecurity.tsx",
+      "sha256": "44ad936d88416fa5b4f558aa1730f6944b442b145f6e2345b45673eec0bd6779"
+    },
+    {
+      "path": "frontend/src/features/auth/AuthControls.tsx",
+      "sha256": "81150da1ce0f9187de177f5192f2fbea4346165c039e61bf2fbf280dfd7657fe"
+    },
+    {
+      "path": "frontend/src/features/auth/ProviderCompletionPage.tsx",
+      "sha256": "b26587c0fd6ef5c5feaceae08bde2ede2a97c069661594d11e0cdd537514930a"
+    },
+    {
+      "path": "frontend/src/features/auth/__tests__/ModernAuth.test.tsx",
+      "sha256": "f5381e12d442fd665a144b151f13aea6ea8c1feefd6c82938ccda8a818e49c0d"
+    },
+    {
+      "path": "frontend/src/features/auth/authFlow.ts",
+      "sha256": "ebb657bca97a44ca5e7a59b3ecdccd92e45fc8f50354b02a135716ccaa1c50f9"
+    },
+    {
+      "path": "frontend/src/features/crt/CrtWorkspace.tsx",
+      "sha256": "117e6baa12724033157895ce0dee551520c89d90cc89bfd44ae142983b97bc41"
+    },
+    {
+      "path": "frontend/src/features/crt/__tests__/CrtWorkspace.test.tsx",
+      "sha256": "53b7dadf86a2ec456a64a326303d44487951d85c396f86bfdb6ed59654721547"
+    },
+    {
+      "path": "frontend/src/features/crt/crtAutosave.ts",
+      "sha256": "38ab8e6c8f4d43d57bf6ac95a78d586e8a60bb8811d199d27bcb4285696605d1"
+    },
+    {
+      "path": "frontend/src/pages/PrivacyPolicyPage.tsx",
+      "sha256": "f1ca90539a4f3bd5a8bd215142d34bf969a5a79086fb09809f96c4810a5308f3"
+    },
+    {
+      "path": "frontend/src/pages/__tests__/PrivacyPolicyPage.test.tsx",
+      "sha256": "05f4fca363787385ccf5bbc2f91e39a2ca0d9819ee52de41efe53945d2bd9cf6"
+    },
+    {
+      "path": "frontend/src/stores/authStore.ts",
+      "sha256": "b23b2ffc6a34f9e3fbefc1384a821ffcd79c8d94748f63fb0709c9338ec9c679"
+    },
+    {
+      "path": "frontend/tests/e2e/account.spec.ts",
+      "sha256": "bee205fb90c29cfa48a4efbc15db9618c9a47ff2d012c931b81cd64f6c66f2e0"
+    },
+    {
+      "path": "frontend/tests/e2e/admin-users.spec.ts",
+      "sha256": "e3646bfb2f743ddc05d513e99a1b76b30b1623513eb8df996f99cf7f348898eb"
+    },
+    {
+      "path": "frontend/tests/e2e/auth.spec.ts",
+      "sha256": "21c69aeea65bd61011a193caab1d9a3fcd2826ff157c4d714361d2c7cce6d749"
+    },
+    {
+      "path": "frontend/tests/e2e/crt.spec.ts",
+      "sha256": "6e0ed8042d36d0e70c6526333abc1238779b2849d4b288c651aba31397978d0d"
+    },
+    {
+      "path": "frontend/tests/e2e/gtdHelpers.ts",
+      "sha256": "af1e6c8da57a8cce2bbd2952e372a5409a8f3a533f6497f482f91ced7d752903"
+    },
+    {
+      "path": "frontend/tests/modern-auth.spec.ts",
+      "sha256": "586b577cc4edb198fe49d35b076ceac7a5d948b33d4cd8ac00cea642da4f5654"
+    },
+    {
+      "path": "frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts",
+      "sha256": "798714a9308e09ceaf484ff760d95b5813d6de5a92f01a342249ffe980ec9873"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift",
+      "sha256": "bb7a1287b338ecf93adacf0d4a20773d8f5b27874310909de6b00ecae97bc552"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/SignInSheet.swift",
+      "sha256": "15cb5b66f4bcbebcddb70a738420690b502f0431d0436d5056cf2b4f3468fd1e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPIClient.swift",
+      "sha256": "b05f17d4e031cc56e0e5d728526f38ef5c5b6e6d8712cdb041e90e9f492eb2ec"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthCallback.swift",
+      "sha256": "eb836632880fa0c7a8125177e5f932eed335f63ff3dc841c0e02778c07b40763"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthentication.swift",
+      "sha256": "0698b112eeb3ff9d6e94be1f56c6f8d49848144fb133b05321f7dbd25f2232c3"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/SessionTokenStore.swift",
+      "sha256": "962a4f169772b68dc00f17f58b7098f60343afc02b200ba5e5ff2b70bed1697d"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/BrainBuddySync.swift",
+      "sha256": "4dd0b1e27f7954db1a7b4ddb0246e5bf986c69ad792e13678360b55f3a7f27f0"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+NativeAuthentication.swift",
+      "sha256": "535acf8d13deb2963caf4b1b67aafe30b8d6934f24774bc73376cb83365af552"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Session.swift",
+      "sha256": "74ed9bdd301c8363ae1707c05d4fd7bc4d6b076923895462617d35c64e3a7883"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine.swift",
+      "sha256": "399fae8019ff4ad1fa84e7bf39ff1282a82036faf525d5751097549ffbdd5895"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift",
+      "sha256": "f6cd7566c5285a41b9a582312a8e6e0548c8d4ee8fdc4ffd8ef42b08916160f5"
+    },
+    {
+      "path": "macos/Package.swift",
+      "sha256": "e3c577ae4f6fecff23a53ac1953e0d748a4c1ac7bd17bd2439b68e84039e0ab3"
+    },
+    {
+      "path": "macos/Sources/BrainBuddyMac/APIClient.swift",
+      "sha256": "a62408d96ded67fa1b09a0cbc0c351d017f81e7da2095adf21b1c995f487504e"
+    },
+    {
+      "path": "scripts/auth_migration_guard.py",
+      "sha256": "ea269288c35b7b8558c7e3ce32fb7d2064c37cf08fe1ab7feea84afd00d87ea9"
+    },
+    {
+      "path": "scripts/run_modern_auth_e2e.py",
+      "sha256": "fe685550cf76f8f971f230714daa4b4d518303e71318de772fc0b549df4d9d97"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/http-auth.md",
+      "sha256": "39af037349e69caafdc2b44e440e152eba3fdb24ef95be31e90494e4651d56cc"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/native-auth.md",
+      "sha256": "ad2de655ab54b28337d2ff87caa67d0cee083ca572136f975aa6956fbe1ff3ae"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/persistence-migration.md",
+      "sha256": "6e72632f5912aa3b92b09ff7142fd8edec6bfe1b80bb03b83cfbdf47a9847532"
+    },
+    {
+      "path": "specs/023-modern-auth/data-model.md",
+      "sha256": "a45df6e2cc359d2b9b106bbda8762d19e3e3c41bf96a050712ce9338403d91e7"
+    },
+    {
+      "path": "specs/023-modern-auth/design.md",
+      "sha256": "05933c2026d9a9055ca065d638fe6b4ff31f2f75fa05a06f5fcb81b30749ddc6"
+    },
+    {
+      "path": "specs/023-modern-auth/plan.md",
+      "sha256": "16b4cc29821a5e67d66f8cedf5494d1c9c5c195aecfbbbac167b29bacace6fe5"
+    },
+    {
+      "path": "specs/023-modern-auth/quickstart.md",
+      "sha256": "cc596afa2580c9702222af5cacfffb0d118bb779ec4e74c0d1a6638e4353a30d"
+    },
+    {
+      "path": "specs/023-modern-auth/renumbering-review.json",
+      "sha256": "293fb2ba44e72d6cf635f8c1e911ee2bb8500bffdcc93f10c868bb20c2e79d0f"
+    },
+    {
+      "path": "specs/023-modern-auth/report.md",
+      "sha256": "2d0cf1909a1cfdab01423f6bf31849405ec6bd2d7622caeb8fa9579e6deab6b6"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-5fc4a6a.json",
+      "sha256": "bd154d292129b7ee4bee55b120a12a63f471505e9ed9861eec96b5dd4e0865d7"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-8f3adb83.json",
+      "sha256": "8e9cb4ad6e70f4174f6f2d43c0bd9bec0cf2971bd0eb4912561d90c44bcdf42c"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-e4e4eab3.json",
+      "sha256": "515f6276498a441015b65fd309332725f772afb539491931a0b4a24ee875b068"
+    },
+    {
+      "path": "specs/023-modern-auth/spec.md",
+      "sha256": "92cda091adb146f2f15aed6722da6074a5fc0373af3961878f24390c8c871b02"
+    },
+    {
+      "path": "specs/023-modern-auth/tasks.md",
+      "sha256": "7943a9eeb305b8fec169e40fbb4bded98ab0e13f26cca694c53eb4e7ee1c0121"
+    },
+    {
+      "path": "specs/023-modern-auth/verification.md",
+      "sha256": "a0e24d8bb33185b705a1a4cf137b089374855959f7db49c3487cf46c9bdde56a"
+    }
+  ],
+  "fingerprint_serialization": "SHA256 over canonical JSON of path-sorted array[{path,sha256}], object keys sorted and compact separators. Every local file verified against exact committed input bytes. 104 previous entries retain their hashes; only verification.md changes among previous 105. Seven newly inspected source/test/gate files added.",
+  "native_source_comparison": {
+    "input_sha": "630e812cfb5713b9e1db026ddcf605ed724c351a",
+    "archive": "/tmp/modern-auth-023-native-source.tar",
+    "archive_sha256": "246b25a0d8365e2e021af4b5d1804d216305d74e115c52be3bd13cc9c2619331",
+    "matched_regular_files": 136,
+    "mismatches": 0,
+    "source_manifest_sha256": "bd8bc0c82201c74510073412aa643bba6a45def8aab9df52d4598f202f2fa4f1",
+    "archived_execution_log": "/tmp/modern-auth-023-native-final-reused-container.log",
+    "actual_other_author_result": "614 tests/65 suites passed 46.211s in existing owned Swift6.2 container; official script first failed VFS ENOSPC",
+    "physical_or_app_host_evidence": false
+  },
+  "current_delivery_observation": {
+    "input_sha": "630e812cfb5713b9e1db026ddcf605ed724c351a",
+    "status": "running_reported_not_verified",
+    "command_reported_by_root": "make -j2 --eval='test-e2e: verify-backend verify-frontend' verify-all",
+    "observed_scope": "Root reports fresh aggregate; no current completed backend/frontend/browser outcome inspected."
+  },
+  "evidence_fingerprints": [
+    {
+      "path": "/tmp/modern-auth-final-code-review-850f782.json",
+      "sha256": "b54c901643e8fe3b6c893f63e55c59cc4805f72f9835a0f5cb34e5402ec68109"
+    },
+    {
+      "path": "/tmp/modern-auth-acceptance-readiness-850f782.json",
+      "sha256": "3bfacf3293971d05c1a8d0937c9a1d051407b5cb955418c2da77b11f943baf97"
+    },
+    {
+      "path": "/tmp/modern-auth-security-630e812-test-structure-final.log",
+      "sha256": "ab2e6482d33d721c1942f5386ee9ae1cfa2bf2865351a06e41bdbe72ddcb4cdb"
+    },
+    {
+      "path": "/tmp/modern-auth-security-630e812-test-structure.log",
+      "sha256": "935702c95fa8f16567adcbac0b71e3f015d9d46d7d82177ea5d3c0a0f54fc67a"
+    },
+    {
+      "path": "/tmp/modern-auth-security-630e812-structure-inputs.json",
+      "sha256": "c86b68765a7d5242c655c699c5e779c28c13d500cb8e90d4f08f4789b3e4e264"
+    },
+    {
+      "path": "/tmp/modern-auth-async-fixtures-green.log",
+      "sha256": "bd5ad7c2653d6b1f493996ca7a461b82af48ad65169ed2a46f5b3a36363f93d6"
+    },
+    {
+      "path": "/tmp/modern-auth-async-fixtures-final.log",
+      "sha256": "891477d72a2e455ac25ba2648a511a8f38d9f160e32fa1866a55901966b48f8e"
+    },
+    {
+      "path": "/tmp/modern-auth-023-verify-all-final-frozen-v5.log",
+      "sha256": "ef3d43db4ed1c1b4f6bec18ac5a022d84dc36817f8f9e601e30945f4ee7f5292"
+    },
+    {
+      "path": "/tmp/modern-auth-frontend-coverage-850f782-retry.log",
+      "sha256": "b13750dce4557040cbdb3ae07fee99d48723c21a630c4b16f2aabf1a3d61e7c5"
+    },
+    {
+      "path": "/tmp/modern-auth-v5-actual/backend-coverage.xml",
+      "sha256": "953227bfb84b258f4a7b026f1e46920b4dac9f781a9e1dcce7665dd7994905a2"
+    },
+    {
+      "path": "/tmp/modern-auth-frontend-green-850f782/coverage-summary.json",
+      "sha256": "569ad07bfe13a6dea1b83ccd7326b5c0f503b95fef8a80581a492ec2a2f5c26f"
+    },
+    {
+      "path": "/tmp/modern-auth-v5-actual/frontend-failed/allure/7a79ce70-2f66-4c39-a2ca-5ff82210117e-result.json",
+      "sha256": "6852bcbb3a6cbd01ed4b8aa70bfaa095857be4e055a043b8656b43cc5bc94c6b"
+    },
+    {
+      "path": "/tmp/modern-auth-v5-actual/frontend-failed/allure/c2183768-73b7-46d5-8a46-875f10d71ec3-result.json",
+      "sha256": "6001a7e8d06e7649dfaf915d40a2bbee743573a72b23da62980c81cef485570d"
+    },
+    {
+      "path": "/tmp/modern-auth-frontend-sandbox-failed-850f782/allure/d30da55c-d308-4f9f-bf50-17dbdc6b4888-result.json",
+      "sha256": "002798d3e9269544be5df0fbf9a481db4e05c92c89aa299bf153a180036d02d3"
+    },
+    {
+      "path": "/tmp/modern-auth-final-code-review-630e812.json",
+      "sha256": "28d1af95a53f3b8ef930298ea6af876b8b103e93113b12bdce5db486960a7daa"
+    }
+  ],
+  "previous_inventory": {
+    "path": "/tmp/modern-auth-acceptance-readiness-850f782.json",
+    "sha256": "3bfacf3293971d05c1a8d0937c9a1d051407b5cb955418c2da77b11f943baf97",
+    "input_sha": "850f782f476e8574e98406b39f994bc9d67acd0e",
+    "input_manifest_sha256": "4a9a4d204a1c17b4f33b99352d86da94fb5f808aa33de28df88f5bf49f170b07",
+    "preservation": "Prior 850 original inventory unchanged; original33 criterion IDs/text/statuses and mandatory gaps preserved."
+  },
+  "previous_delivery_observation": {
+    "input_sha": "850f782f476e8574e98406b39f994bc9d67acd0e",
+    "log": "/tmp/modern-auth-023-verify-all-final-frozen-v5.log",
+    "status": "failed_before_browser",
+    "backend_passed": 4324,
+    "backend_line_percent": 98.61,
+    "backend_branch_percent": 95.86,
+    "full_frontend_passed": 1724,
+    "full_frontend_failed": 2,
+    "separate_frontend_retry_passed": 1726,
+    "aggregate_pass": false,
+    "archived_allure_inventory": [
+      {
+        "folder": "/tmp/modern-auth-v5-actual/frontend-failed/allure",
+        "counts": {
+          "passed": 1724,
+          "failed": 2
+        },
+        "failures": [
+          {
+            "path": "/tmp/modern-auth-v5-actual/frontend-failed/allure/7a79ce70-2f66-4c39-a2ca-5ff82210117e-result.json",
+            "name": "019-FR-021 exposes conflict refetch and preserves the local graph before explicit rebase",
+            "full_name": "brain-buddy-frontend:src/features/crt/__tests__/CrtWorkspace.test.tsx#CrtWorkspace tree lifecycle 019-FR-021 exposes conflict refetch and preserves the local graph before explicit rebase",
+            "message": "expected undefined to deeply equal ObjectContaining{…}"
+          },
+          {
+            "path": "/tmp/modern-auth-v5-actual/frontend-failed/allure/c2183768-73b7-46d5-8a46-875f10d71ec3-result.json",
+            "name": "requests one code with immediate busy state, actual expiry and no automatic resend",
+            "full_name": "brain-buddy-frontend:src/features/auth/__tests__/ModernAuth.test.tsx#023-FR-001/003/008/009/010/022 configured choice and neutral code flow requests one code with immediate busy state, actual expiry and no automatic resend",
+            "message": "expect(element).toHaveFocus()\n\nExpected element with focus:\n  <input\n  aria-describedby=\"code-expiry\"\n  autocomplete=\"one-time-code\"\n  class=\"min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700 tracking-[.28em]\"\n  inputmode=\"numeric\"\n  maxlength=\"6\"\n  pattern=\"[0-9]{6}\"\n  required=\"\"\n  value=\"\"\n/>\nReceived element with focus:\n  <body>\n  <div>\n    <div\n      class=\"flex flex-col gap-4\"\n    >\n      <p>\n        If this address can be used, you will receive a six-digit code at·\n        <strong>\n          unknown@example.com\n        </strong>\n        .\n      </p>\n      <"
+          }
+        ],
+        "result_manifest_sha256": "148408441238f036025c2818c06234c6a923fe26dd240112ecd08c775d215539"
+      },
+      {
+        "folder": "/tmp/modern-auth-frontend-sandbox-failed-850f782",
+        "counts": {
+          "passed": 1725,
+          "failed": 1
+        },
+        "failures": [
+          {
+            "path": "/tmp/modern-auth-frontend-sandbox-failed-850f782/allure/d30da55c-d308-4f9f-bf50-17dbdc6b4888-result.json",
+            "name": "008-SC-001 passes clean results and rejects a failed result",
+            "full_name": "brain-buddy-frontend:src/test/allureQualityGate.test.ts#008-FR-005 aggregate quality-gate canary 008-SC-001 passes clean results and rejects a failed result",
+            "message": "expected Error: spawnSync node_modules/.bin/allure… { …(5) } to be undefined"
+          }
+        ],
+        "result_manifest_sha256": "72ebfda613750de753fbceeeed4d5529ad5bf3ab65394f5995feb06938e04836"
+      },
+      {
+        "folder": "/tmp/modern-auth-frontend-green-850f782",
+        "counts": {
+          "passed": 1726
+        },
+        "failures": [],
+        "result_manifest_sha256": "982f025898b27b5b02ee9f78719628aab9c5244f3c49762873d88fee58ecf0a2"
+      }
+    ]
+  },
+  "current_test_only_delta": {
+    "base_sha": "850f782f476e8574e98406b39f994bc9d67acd0e",
+    "changed_paths": [
+      "frontend/src/features/auth/__tests__/ModernAuth.test.tsx",
+      "frontend/src/features/crt/__tests__/CrtWorkspace.test.tsx",
+      "specs/023-modern-auth/verification.md"
+    ],
+    "production_source_changed": false,
+    "test_case_count_unchanged": 127,
+    "independent_structure": {
+      "input_sha": "630e812cfb5713b9e1db026ddcf605ed724c351a",
+      "base_sha": "850f782f476e8574e98406b39f994bc9d67acd0e",
+      "results": [
+        {
+          "path": "frontend/src/features/auth/__tests__/ModernAuth.test.tsx",
+          "case": "requests one code with immediate busy state, actual expiry and no automatic resend",
+          "tests_in_file": 5,
+          "outside_affected_case_byte_identical": true,
+          "meaningful_negative_and_result_assertions_preserved": true
+        },
+        {
+          "path": "frontend/src/features/crt/__tests__/CrtWorkspace.test.tsx",
+          "case": "019-FR-021 exposes conflict refetch and preserves the local graph before explicit rebase",
+          "tests_in_file": 122,
+          "outside_affected_case_byte_identical": true,
+          "meaningful_negative_and_result_assertions_preserved": true
+        }
+      ],
+      "execution_scope": "TypeScript parse and independent source structure/assertion comparison; no Vitest/browser/full suite execution"
+    },
+    "root_final_focused_passed": 2,
+    "root_final_focused_filtered": 125,
+    "root_intermediate_two_file_passed": 127,
+    "scope": "Final source differs from intermediate by final explicit UI-ready await;127 intermediate not asserted as final full execution."
+  },
+  "historical_delivery_observations": [
+    {
+      "input_sha": "056252da83c790b6c4bcf2a92d29bb5d08285826",
+      "status": "interrupted_failed_partial",
+      "root_reported_start_utc": "2026-10-06 16:36 UTC",
+      "log": "/tmp/modern-auth-023-verify-all-final-frozen-v4.log",
+      "observed_scope": "One exact API inventory failure; interruption teardown stash error retained. No final aggregate/coverage result.",
+      "runtime_images_reported_by_root": [
+        {
+          "service": "backend",
+          "image_id": "ddc921a945d8afb219fa3322b035b4db04d8d419fd8e5e6db1eda64c382dbc3c"
+        },
+        {
+          "service": "frontend",
+          "image_id": "f4ccf900333933c43df5307e66002f02d090925d03341403f0527060ce22f8f8"
+        }
+      ],
+      "counts": {
+        "failed": 1,
+        "passed": 1994,
+        "skipped": 1
+      },
+      "allure": "/tmp/modern-auth-v4-partial/backend-allure"
+    },
+    {
+      "input_sha": "850f782f476e8574e98406b39f994bc9d67acd0e",
+      "status": "restart_reported_not_verified",
+      "log": null,
+      "observed_scope": "Root reports full restart with matching backend image rebuild. No fresh completed current result, browser evidence or floors independently inspected."
+    }
+  ]
+}
