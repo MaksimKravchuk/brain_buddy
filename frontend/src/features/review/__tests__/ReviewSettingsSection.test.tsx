@@ -1,9 +1,11 @@
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../../api/client";
+import { ProtectedRoute } from "../../../components/auth/ProtectedRoute";
 import { reviewApi, type ReviewSettings, type ReviewState } from "../../../api/review";
 import { useThresholdNotice } from "../../../api/reviewHooks";
 import { useAuthStore } from "../../../stores/authStore";
@@ -201,6 +203,33 @@ describe("020-FR-039 D-04 review threshold setting", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("We couldn't load your review settings.");
     expect(alert).not.toHaveTextContent(/Ref/);
+  });
+
+  it("020-FR-045 020-FR-042 a failed save of one account never carries into the next: no failure, no Retry of the old threshold", async () => {
+    const user = userEvent.setup();
+    updateSettings.mockRejectedValueOnce(new ApiError("Server Error", 500, null, "corr_a"));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/settings/account"]}>
+          <Routes>
+            <Route path="/settings/account" element={<ProtectedRoute><ReviewSettingsSection /></ProtectedRoute>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    await user.click(await screen.findByRole("radio", { name: "21 days" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ref corr_a");
+
+    getState.mockResolvedValue({ ...state, settings: { ...settings, threshold_days: 28, revision: 9 } });
+    act(() => {
+      useAuthStore.setState({ user: { id: "user-2", email: "b@example.test", feature_flags: { weekly_review: true } }, status: "authed" });
+    });
+
+    await waitFor(() => expect(option(28)).toBeChecked());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(updateSettings).toHaveBeenCalledTimes(1);
   });
 
   it("020-FR-042 renders nothing while the weekly_review flag is off", () => {
