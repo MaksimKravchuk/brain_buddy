@@ -181,6 +181,28 @@ describe("020-FR-039 D-04 review threshold setting", () => {
     expect(await screen.findByRole("radiogroup", { name: "Ask for a decision after" })).toBeInTheDocument();
   });
 
+  it("020-FR-045 a failed save without a reference shows no empty Ref line", async () => {
+    const user = userEvent.setup();
+    updateSettings.mockRejectedValueOnce(new Error("socket hang up"));
+    renderSection();
+
+    await user.click(await screen.findByRole("radio", { name: "21 days" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Your new threshold couldn't be saved. It's still 14 days.");
+    expect(alert).not.toHaveTextContent(/Ref/);
+  });
+
+  it("020-FR-045 a failed load without a reference shows no empty Ref line", async () => {
+    getState.mockReset();
+    getState.mockRejectedValueOnce(new Error("socket hang up"));
+    renderSection();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("We couldn't load your review settings.");
+    expect(alert).not.toHaveTextContent(/Ref/);
+  });
+
   it("020-FR-042 renders nothing while the weekly_review flag is off", () => {
     act(() => {
       useAuthStore.setState({ user: { id: "user-1", email: "max@example.test" } });

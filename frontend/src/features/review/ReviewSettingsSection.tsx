@@ -106,10 +106,11 @@ export function ReviewSettingsSection(): React.JSX.Element | null {
 
   let body: React.JSX.Element;
   if (stateQuery.isError) {
+    const loadReference = describeReviewError(stateQuery.error).referenceId;
     body = (
       <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
         <span>{COPY.loadFailed}</span>
-        <span className="text-xs">Ref {describeReviewError(stateQuery.error).referenceId}</span>
+        {loadReference ? <span className="text-xs">Ref {loadReference}</span> : null}
         <button type="button" className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100" onClick={() => void stateQuery.refetch()}>
           Retry
         </button>
@@ -126,7 +127,7 @@ export function ReviewSettingsSection(): React.JSX.Element | null {
         {failure ? (
           <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             <span>{`Your new threshold couldn't be saved. It's still ${settings.threshold_days} days.`}</span>
-            <span className="text-xs">Ref {failure.referenceId}</span>
+            {failure.referenceId ? <span className="text-xs">Ref {failure.referenceId}</span> : null}
             <button
               type="button"
               className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100"
