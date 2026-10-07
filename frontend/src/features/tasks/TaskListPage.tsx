@@ -238,7 +238,8 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const reviewEnabled = useWeeklyReviewEnabled();
   const reviewNow = useReviewClock(reviewEnabled);
   const online = useOnlineStatus();
-  const [decisionTask, setDecisionTask] = useState<TaskResponse | null>(null);
+  // The open decision card belongs to the account (cache scope) it was opened in.
+  const [openDecision, setOpenDecision] = useState<{ task: TaskResponse; scopeKey: string } | null>(null);
   const decisionOriginRef = useRef<HTMLElement | null>(null);
   const reviewFocusRef = useRef<{ kind: "origin" } | { kind: "row"; taskId: string | undefined } | null>(null);
   const [reviewFocusRequest, setReviewFocusRequest] = useState(0);
@@ -251,6 +252,14 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const dismissThresholdNotice = useThresholdNotice((store) => store.dismiss);
   const cacheScope = getTaskCacheScope(accountId ?? null);
   const scopeKey = JSON.stringify(cacheScope);
+  // An account switch while the page stays mounted closes the card for good:
+  // the next account must not see the previous one's task, and the dialog must
+  // not store that task's text under the next account's draft keys (FR-052).
+  if (openDecision !== null && openDecision.scopeKey !== scopeKey) {
+    setOpenDecision(null);
+  }
+  const decisionTask = openDecision?.scopeKey === scopeKey ? openDecision.task : null;
+  const setDecisionTask = (task: TaskResponse | null) => setOpenDecision(task === null ? null : { task, scopeKey });
   const completionAnimation = useTaskCompletionAnimation(scopeKey, JSON.stringify({ state, projectId, tagId, dateView, searchQuery, sort, groupByProject, showCancelled }));
   const isCurrentScope = () => {
     const current = getTaskCacheScope();

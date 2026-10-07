@@ -201,7 +201,9 @@ export function DecisionDialog({
   const user = useAuthStore((state) => state.user);
   const canvasAvailable = hasFeatureFlag(user, "crt_canvas");
   // The dialog is only reachable signed in with the flag on (FR-042).
-  const draftScope = { apiOrigin: getApiBaseUrl(), accountId: (user as AuthUser).id };
+  // Pinned to the account the dialog was opened for: its text never lands under
+  // another account's draft keys, even if the session changes under it.
+  const [draftScope] = useState(() => ({ apiOrigin: getApiBaseUrl(), accountId: (user as AuthUser).id }));
 
   const [current, setCurrent] = useState<TaskResponse | null>(task);
   const [stale, setStale] = useState<{ was: TaskResponse; now: TaskResponse | null } | null>(null);

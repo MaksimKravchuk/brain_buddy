@@ -2810,6 +2810,30 @@ describe("020-FR-004 D-01 Next actions age markers", () => {
     expect(currentLocation()).toBe("/tasks/next?group=off");
   });
 
+  it("020-FR-052 020-FR-042 an account switch closes the open decision card, so the next account never sees it or stores its text", async () => {
+    const user = userEvent.setup();
+    withFlag();
+    renderPage("/tasks/next?group=off");
+    await user.click(await screen.findByRole("button", { name: /Open decision for Renovate the bathroom/ }));
+    await user.click(within(screen.getByRole("group", { name: "Decisions" })).getByRole("button", { name: /^Find a first step/ }));
+    await user.type(screen.getByRole("textbox", { name: "First step" }), "Measure");
+
+    // A session refresh swaps the account while the page stays mounted.
+    act(() => {
+      useAuthStore.setState({ user: { id: "user-2", email: "other@example.test", feature_flags: { weekly_review: true } }, status: "authed" });
+    });
+
+    expect(screen.queryByRole("dialog", { name: "Renovate the bathroom" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Renovate the bathroom", { selector: "h2" })).not.toBeInTheDocument();
+    expect(Object.keys(window.localStorage).filter((key) => key.startsWith("bb.reviewFormDraft.v1.") && key.includes(".user-2."))).toEqual([]);
+
+    // Switching back does not resurrect the card either.
+    act(() => {
+      useAuthStore.setState({ user: { id: "user-1", email: "max@example.test", feature_flags: { weekly_review: true } }, status: "authed" });
+    });
+    expect(screen.queryByRole("dialog", { name: "Renovate the bathroom" })).not.toBeInTheDocument();
+  });
+
   it("020-FR-048 after a decision the shell offers Undo and focus moves to the next row", async () => {
     const user = userEvent.setup();
     withFlag();

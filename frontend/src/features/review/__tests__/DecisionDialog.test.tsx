@@ -1055,6 +1055,22 @@ describe("020-FR-052 decision dialog: drafts and the leave guard", () => {
     expect(screen.getByRole("textbox", { name: "First step" })).toHaveValue("Measure");
   });
 
+  it("020-FR-052 020-FR-042 drafts stay under the account the dialog was opened for, even if the session changes under it", async () => {
+    const user = userEvent.setup();
+    renderDialog(asksTask());
+    await user.click(decisionButton(/^Find a first step/));
+    await user.type(screen.getByRole("textbox", { name: "First step" }), "Mea");
+
+    act(() => {
+      useAuthStore.setState({ user: { id: "user-2", email: "other@example.test" }, status: "authed" });
+    });
+    await user.type(screen.getByRole("textbox", { name: "First step" }), "sure");
+
+    const target = { kind: "task", taskId: "task-1", formulationId: "form_a" } as const;
+    expect(loadReviewDraft({ ...scope, accountId: "user-2" }, target)).toBeNull();
+    expect(loadReviewDraft(scope, target)?.text).toBe("Measure");
+  });
+
   it("020-FR-052 an in-app link with unsaved text asks first, and Discard follows it", async () => {
     const user = userEvent.setup();
     renderDialog(asksTask());
