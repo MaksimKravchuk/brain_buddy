@@ -658,7 +658,8 @@ retry of an old grant arriving after a revoke on another device never grants aga
 and an old revoke retry never cancels a newer grant (FR-024). A grant whose key holds
 another body or another command's record is 409 `idempotency_conflict`. Revoke is never
 refused for its key: a key another command already stored still revokes (that record
-is kept), and revoke stays ungated while `weekly_review` is off. The records are never
+is kept, and the revoke records itself beside it, so its retry replays too), and
+revoke stays ungated while `weekly_review` is off. The records are never
 reconciled (re-applying an old consent choice is the reversal they prevent); they are
 purged by the 24 h retention and with the account (FR-043), like every other
 idempotency record.

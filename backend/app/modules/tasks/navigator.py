@@ -697,6 +697,12 @@ class _NoBody(BaseModel):
 _NO_BODY = _NoBody()
 
 
+def _revoke_collision_key(key: str) -> str:
+    """Where a revoke records itself when another command already owns ``key``."""
+
+    return f"{key}#navigator_consent_revoke"
+
+
 def _grant_result(status: NavigatorStatus) -> NavigatorGrantResultDocument:
     return NavigatorGrantResultDocument(
         provider=status.provider,
@@ -886,19 +892,25 @@ class NavigatorService:
 
         Never gated, also while the feature or the provider is switched off,
         and never refused for its key: a replay of this key is a no-op, and a
-        key some other command stored still revokes (that record is kept).
+        key some other command stored still revokes. That record is kept, so
+        the revoke's own record goes under a derived key, checked first, and
+        a retry of a colliding key is a no-op too.
         """
 
         command = f"navigator_consent_revoke:{owner_id}"
         request_hash = request_fingerprint(command, _NO_BODY)
         record = self.task_repo.get_idempotency(owner_id=owner_id, key=idempotency_key)
-        if (
-            record is not None
-            and record.command == command
-            and record.request_hash == request_hash
-        ):
-            logger.info("navigator_consent outcome=replayed owner_id=%s", owner_id)
-            return
+        collision = self.task_repo.get_idempotency(
+            owner_id=owner_id, key=_revoke_collision_key(idempotency_key)
+        )
+        for stored in (collision, record):
+            if (
+                stored is not None
+                and stored.command == command
+                and stored.request_hash == request_hash
+            ):
+                logger.info("navigator_consent outcome=replayed owner_id=%s", owner_id)
+                return
         revoked = 0
         now = self.clock()
         for consent in self.task_repo.list_navigator_consents(owner_id):
@@ -906,14 +918,17 @@ class NavigatorService:
             if updated != consent:
                 self.task_repo.save_navigator_consent(updated)
                 revoked += 1
-        if record is None:
-            self._store_result(
-                owner_id=owner_id,
-                key=idempotency_key,
-                command=command,
-                request_hash=request_hash,
-                result=NavigatorRevokeResultDocument(revoked_at=now, revoked=revoked),
-            )
+        self._store_result(
+            owner_id=owner_id,
+            key=(
+                idempotency_key
+                if record is None
+                else _revoke_collision_key(idempotency_key)
+            ),
+            command=command,
+            request_hash=request_hash,
+            result=NavigatorRevokeResultDocument(revoked_at=now, revoked=revoked),
+        )
         logger.info(
             "navigator_consent outcome=revoked owner_id=%s revoked=%d",
             owner_id,

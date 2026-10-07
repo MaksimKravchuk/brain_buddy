@@ -1285,6 +1285,24 @@ def test_020_FR_024_a_grant_key_reused_by_a_revoke_still_revokes(nav: Nav) -> No
     assert nav.consent_current() is False
 
 
+def test_020_FR_024_a_colliding_revoke_retry_never_revokes_a_newer_grant(
+    nav: Nav,
+) -> None:
+    """A revoke on a key another command owns still records itself, so a
+    late retry of that revoke replays instead of revoking a newer grant."""
+
+    nav.flag("on")
+    assert nav.grant(key="consent-k1").status_code == 200
+    with allure.step("revoke reusing the grant's K1, then grant again with K3"):
+        assert nav.revoke(key="consent-k1").status_code == 204
+        assert nav.grant(key="consent-k3").status_code == 200
+    assert nav.consent_current() is True
+    with allure.step("a late retry of the colliding revoke replays"):
+        retry = nav.revoke(key="consent-k1")
+    assert retry.status_code == 204, retry.text
+    assert nav.consent_current() is True
+
+
 def test_020_FR_043_consent_keys_expire_after_24_h_and_go_with_the_account(
     nav: Nav, frozen_clock: FrozenClock
 ) -> None:
