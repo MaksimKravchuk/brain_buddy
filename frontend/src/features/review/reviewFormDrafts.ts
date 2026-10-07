@@ -139,17 +139,41 @@ export function removeOtherFormulationDrafts(
   }
 }
 
+/** `bb.review<Name>.v<N>`: the namespace of every browser-local review key. */
+const REVIEW_NAMESPACE = /^bb\.review[A-Za-z]+\.v\d+(?=\.)/;
+
 /**
- * Startup and window-focus sweep: drafts older than 7 days go, and so do the
- * drafts of any other account in this browser (an account switch).
+ * Whether a review key belongs to this account: `<namespace>.<origin>.<account>`
+ * exactly, or followed by `.<more>`. `null` for a key that is not a review key.
  */
-export function sweepReviewDrafts(scope: ReviewDraftScope, now = new Date(), storage = defaultStorage()): void {
-  const own = accountPrefix(scope);
+function ownedBy(key: string, scope: ReviewDraftScope): boolean | null {
+  const namespace = REVIEW_NAMESPACE.exec(key)?.[0];
+  if (namespace === undefined) {
+    return null;
+  }
+  const owner = `.${enc(scope.apiOrigin)}.${enc(scope.accountId)}`;
+  const rest = key.slice(namespace.length);
+  return rest === owner || rest.startsWith(`${owner}.`);
+}
+
+/**
+ * Startup and window-focus sweep, whatever the `weekly_review` flag says:
+ * drafts older than 7 days (or unreadable) go, and with an account signed in
+ * every review key of any other account goes too (drafts, the
+ * While-you-were-away day, the last zone: an account switch). With nobody
+ * signed in only expired drafts are removed, of any account.
+ */
+export function sweepReviewLocalState(scope: ReviewDraftScope | null, now = new Date(), storage = defaultStorage()): void {
   for (const key of keysOf(storage)) {
+    const own = scope === null ? null : ownedBy(key, scope);
+    if (own === false) {
+      attempt(() => storage.removeItem(key), undefined);
+      continue;
+    }
     if (!key.startsWith(`${DRAFT_PREFIX}.`)) {
       continue;
     }
-    const draft = key.startsWith(own) ? parseDraft(attempt(() => storage.getItem(key), null)) : null;
+    const draft = parseDraft(attempt(() => storage.getItem(key), null));
     if (!draft || isExpired(draft, now)) {
       attempt(() => storage.removeItem(key), undefined);
     }
@@ -158,20 +182,46 @@ export function sweepReviewDrafts(scope: ReviewDraftScope, now = new Date(), sto
 
 /** Sign-out or account switch: every browser-local review key of that account. */
 export function clearReviewLocalState(scope: ReviewDraftScope, storage = defaultStorage()): void {
-  const owner = `.${enc(scope.apiOrigin)}.${enc(scope.accountId)}`;
   for (const key of keysOf(storage)) {
-    if (key.startsWith(REVIEW_KEY_PREFIX) && (key.includes(`${owner}.`) || key.endsWith(owner))) {
+    if (key.startsWith(REVIEW_KEY_PREFIX) && ownedBy(key, scope) === true) {
       attempt(() => storage.removeItem(key), undefined);
     }
   }
 }
 
 /** Clears the departing account's review keys whenever the signed-in account changes. */
-export function subscribeReviewLocalCleanup(): () => void {
+export function subscribeReviewLocalCleanup(apiOrigin = getApiBaseUrl()): () => void {
   return useAuthStore.subscribe((state, previous) => {
     const departing = previous.user?.id;
     if (departing !== undefined && departing !== state.user?.id) {
-      clearReviewLocalState({ apiOrigin: getApiBaseUrl(), accountId: departing });
+      clearReviewLocalState({ apiOrigin, accountId: departing });
     }
   });
+}
+
+/**
+ * Production lifecycle binding, started once at app start from `queryClient.ts`
+ * and independent of the `weekly_review` flag and of the shell being mounted
+ * (FR-052, data-model E11): the departing account's keys are cleared on
+ * sign-out, `clearSession` and an account switch; the sweep runs at start,
+ * whenever an account signs in, and on window focus.
+ */
+export function bindReviewLocalState(apiOrigin = getApiBaseUrl()): () => void {
+  const sweep = () => {
+    const accountId = useAuthStore.getState().user?.id;
+    sweepReviewLocalState(accountId === undefined ? null : { apiOrigin, accountId });
+  };
+  sweep();
+  const stopCleanup = subscribeReviewLocalCleanup(apiOrigin);
+  const stopArrivals = useAuthStore.subscribe((state, previous) => {
+    if (state.user !== null && state.user.id !== previous.user?.id) {
+      sweep();
+    }
+  });
+  window.addEventListener("focus", sweep);
+  return () => {
+    stopCleanup();
+    stopArrivals();
+    window.removeEventListener("focus", sweep);
+  };
 }

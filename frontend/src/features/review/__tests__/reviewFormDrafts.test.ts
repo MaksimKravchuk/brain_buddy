@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAuthStore } from "../../../stores/authStore";
 import {
+  bindReviewLocalState,
   clearReviewLocalState,
   DRAFT_MAX_AGE_MS,
   loadReviewDraft,
@@ -11,7 +12,7 @@ import {
   reviewDraftKey,
   saveReviewDraft,
   subscribeReviewLocalCleanup,
-  sweepReviewDrafts
+  sweepReviewLocalState
 } from "../reviewFormDrafts";
 
 const scope = { apiOrigin: "http://localhost:3000/api", accountId: "user_1" };
@@ -56,7 +57,7 @@ describe("020-FR-052 browser-local review form drafts", () => {
   it("020-FR-052 stamps and checks drafts with the current time by default", () => {
     saveReviewDraft(scope, task, { form: "extend", text: "fresh" });
     expect(loadReviewDraft(scope, task)?.text).toBe("fresh");
-    sweepReviewDrafts(scope);
+    sweepReviewLocalState(scope);
     expect(loadReviewDraft(scope, task)?.form).toBe("extend");
   });
 
@@ -94,7 +95,7 @@ describe("020-FR-052 browser-local review form drafts", () => {
     saveReviewDraft(scope, task, { form: "reformulate", text: "old" }, now);
     saveReviewDraft(scope, { ...task, taskId: "task_fresh" }, { form: "reformulate", text: "fresh" }, later);
     window.localStorage.setItem("bb.taskDetailDraft.v1.unrelated", "kept");
-    sweepReviewDrafts(scope, later);
+    sweepReviewLocalState(scope, later);
     expect(loadReviewDraft(scope, task, now)).toBeNull();
     expect(loadReviewDraft(scope, { ...task, taskId: "task_fresh" }, later)?.text).toBe("fresh");
     expect(window.localStorage.getItem("bb.taskDetailDraft.v1.unrelated")).toBe("kept");
@@ -104,10 +105,74 @@ describe("020-FR-052 browser-local review form drafts", () => {
     saveReviewDraft(otherScope, task, { form: "reformulate", text: "someone else's" }, now);
     saveReviewDraft(scope, task, { form: "reformulate", text: "mine" }, now);
 
-    sweepReviewDrafts(scope, now);
+    sweepReviewLocalState(scope, now);
 
     expect(loadReviewDraft(otherScope, task, now)).toBeNull();
     expect(loadReviewDraft(scope, task, now)?.text).toBe("mine");
+  });
+
+  it("020-FR-052 020-FR-015 the sweep also removes another account's While-you-were-away day and last zone", () => {
+    const wywa = (account: string) => `bb.reviewWywaLastShown.v1.http%3A%2F%2Flocalhost%3A3000%2Fapi.${account}`;
+    const zone = (account: string) => `bb.reviewLastZone.v1.http%3A%2F%2Flocalhost%3A3000%2Fapi.${account}`;
+    for (const account of ["user_1", "user_2", "user_10"]) {
+      window.localStorage.setItem(wywa(account), "2026-10-09");
+      window.localStorage.setItem(zone(account), "Europe/Berlin");
+    }
+    window.localStorage.setItem("bb.reviewSomethingUnversioned", "left alone");
+
+    sweepReviewLocalState(scope, now);
+
+    expect(Object.keys(window.localStorage).sort()).toEqual([wywa("user_1"), zone("user_1"), "bb.reviewSomethingUnversioned"].sort());
+  });
+
+  it("020-FR-052 with no account signed in the sweep removes only expired drafts, of any account", () => {
+    const later = new Date(now.getTime() + DRAFT_MAX_AGE_MS);
+    saveReviewDraft(scope, task, { form: "reformulate", text: "old" }, now);
+    saveReviewDraft(otherScope, task, { form: "reformulate", text: "fresh" }, later);
+    window.localStorage.setItem("bb.reviewWywaLastShown.v1.http%3A%2F%2Flocalhost%3A3000%2Fapi.user_1", "2026-10-09");
+
+    sweepReviewLocalState(null, later);
+
+    expect(loadReviewDraft(scope, task, later)).toBeNull();
+    expect(loadReviewDraft(otherScope, task, later)?.text).toBe("fresh");
+    expect(window.localStorage.getItem("bb.reviewWywaLastShown.v1.http%3A%2F%2Flocalhost%3A3000%2Fapi.user_1")).toBe("2026-10-09");
+  });
+
+  it("020-FR-052 020-FR-042 the app-wide binding sweeps at start and cleans up on sign-out whatever the weekly_review flag says", () => {
+    const apiOrigin = "http://localhost:3000/api";
+    const expired = new Date(Date.now() - DRAFT_MAX_AGE_MS - 1000);
+    saveReviewDraft({ apiOrigin, accountId: "user_1" }, task, { form: "reformulate", text: "expired" }, expired);
+    saveReviewDraft({ apiOrigin, accountId: "user_1" }, { ...task, taskId: "task_fresh" }, { form: "reformulate", text: "fresh" });
+    saveReviewDraft({ apiOrigin, accountId: "user_2" }, task, { form: "reformulate", text: "other" });
+    window.localStorage.setItem(`bb.reviewWywaLastShown.v1.${encodeURIComponent(apiOrigin)}.user_2`, "2026-10-09");
+
+    // App start: nobody is signed in yet, and the flag is not known.
+    const unbind = bindReviewLocalState(apiOrigin);
+    expect(loadReviewDraft({ apiOrigin, accountId: "user_1" }, task)).toBeNull();
+    expect(window.localStorage.length).toBe(3);
+
+    // Signed in without the weekly_review flag: another account's keys go.
+    act(() => useAuthStore.setState({ user: { id: "user_1", email: "a@example.test", feature_flags: {} }, status: "authed" }));
+    expect(Object.keys(window.localStorage)).toEqual([reviewDraftKey({ apiOrigin, accountId: "user_1" }, { ...task, taskId: "task_fresh" })]);
+
+    // A window focus sweeps again.
+    window.localStorage.setItem(`bb.reviewLastZone.v1.${encodeURIComponent(apiOrigin)}.user_3`, "UTC");
+    window.dispatchEvent(new Event("focus"));
+    expect(window.localStorage.length).toBe(1);
+
+    // clearSession (the 401 path) clears the departing account's keys, flag or not.
+    window.localStorage.setItem(`bb.reviewWywaLastShown.v1.${encodeURIComponent(apiOrigin)}.user_1`, "2026-10-09");
+    act(() => {
+      useAuthStore.getState().clearSession();
+    });
+    expect(window.localStorage.length).toBe(0);
+
+    unbind();
+    window.dispatchEvent(new Event("focus"));
+    act(() => useAuthStore.setState({ user: { id: "user_4", email: "d@example.test" }, status: "authed" }));
+    saveReviewDraft({ apiOrigin, accountId: "user_4" }, task, { form: "reformulate", text: "kept" });
+    act(() => useAuthStore.setState({ user: null, status: "anon" }));
+    expect(window.localStorage.length).toBe(1);
   });
 
   it("020-FR-052 discards a corrupt or foreign-shaped entry instead of showing it", () => {
@@ -118,7 +183,7 @@ describe("020-FR-052 browser-local review form drafts", () => {
       expect(window.localStorage.getItem(key)).toBeNull();
     }
     window.localStorage.setItem(key, "not json");
-    sweepReviewDrafts(scope, now);
+    sweepReviewLocalState(scope, now);
     expect(window.localStorage.getItem(key)).toBeNull();
   });
 
@@ -167,7 +232,7 @@ describe("020-FR-052 browser-local review form drafts", () => {
     expect(() => saveReviewDraft(scope, task, { form: "reformulate", text: sentinel }, now, refusing)).not.toThrow();
     expect(loadReviewDraft(scope, task, now, refusing)).toBeNull();
     expect(() => removeReviewDraft(scope, task, refusing)).not.toThrow();
-    expect(() => sweepReviewDrafts(scope, now, refusing)).not.toThrow();
+    expect(() => sweepReviewLocalState(scope, now, refusing)).not.toThrow();
     expect(() => clearReviewLocalState(scope, refusing)).not.toThrow();
     expect(() => removeOtherFormulationDrafts(scope, "task_9f3c", "form_a", refusing)).not.toThrow();
 

@@ -3,8 +3,9 @@
  * one-time auto-park explainer D-05 while it has not been seen on any device
  * (FR-051), then "While you were away" when unseen parks exist, at most once
  * per local day (FR-015). Mounted by the shell only while `weekly_review` is
- * effective (FR-042). It also owns the browser-local review keys: the
- * startup/focus draft sweep and the sign-out cleanup (FR-052, data-model E11).
+ * effective (FR-042). The browser-local review keys' sweep and sign-out
+ * cleanup are not here: they run app-wide whatever the flag says
+ * (`bindReviewLocalState`, started from `queryClient.ts`; FR-052, data-model E11).
  */
 import { useEffect, useState } from "react";
 
@@ -14,7 +15,6 @@ import type { UnseenPark } from "../../api/review";
 import { useReviewState } from "../../api/reviewHooks";
 import { useAuthStore } from "../../stores/authStore";
 import { AutoParkExplainer } from "./AutoParkExplainer";
-import { subscribeReviewLocalCleanup, sweepReviewDrafts } from "./reviewFormDrafts";
 import { WhileYouWereAway } from "./WhileYouWereAway";
 import { localDay, markWhileAwayShown, readWhileAwayLastShown, shouldShowWhileAway } from "./wywaPresentation";
 
@@ -39,17 +39,6 @@ export function ReviewStartupDialogs(): React.JSX.Element | null {
   const [explainerLater, setExplainerLater] = useState(() => explainerLaterThisOpen.has(accountId));
   const [whileAway, setWhileAway] = useState<{ accountId: string; parks: UnseenPark[] | null } | null>(null);
   const state = stateQuery.data;
-
-  useEffect(() => {
-    const sweep = () => sweepReviewDrafts({ apiOrigin: getApiBaseUrl(), accountId });
-    sweep();
-    window.addEventListener("focus", sweep);
-    const stopCleanup = subscribeReviewLocalCleanup();
-    return () => {
-      window.removeEventListener("focus", sweep);
-      stopCleanup();
-    };
-  }, [accountId]);
 
   useEffect(() => {
     if (whileAway?.parks) {
