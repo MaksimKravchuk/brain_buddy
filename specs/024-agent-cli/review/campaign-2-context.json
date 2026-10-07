@@ -1,0 +1,20 @@
+{
+  "artifacts_digest": "2c189ad0a6c54769e0f5c3904757a4a14a46add1a1e021e9327a9ff3ab733511",
+  "derived_risk": "high",
+  "feature_dir": "/workspace/brain_buddy-agent-cli/specs/023-agent-cli",
+  "project_root": "/workspace/brain_buddy-agent-cli",
+  "review_artifacts": [
+    "spec.md",
+    "plan.md",
+    "design.md",
+    "tasks.md",
+    "research.md",
+    "data-model.md",
+    "quickstart.md",
+    "checklists/requirements.md",
+    "contracts/cli.md",
+    "contracts/device-auth.md",
+    "contracts/distribution.md",
+    "contracts/rollout.md"
+  ]
+}

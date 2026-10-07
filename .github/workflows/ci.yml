@@ -1320,10 +1320,135 @@ jobs:
   # publish its link while `mutation-gate` was still deciding. The rule is
   # checked by `scripts/validate_ci_artifacts.py workflow`, so a new job cannot
   # quietly start finishing after the report that claims to summarise it.
+  cli-native:
+    name: CLI native (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+      - name: Set up native Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy
+      - name: Configure Linux native store
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gnome-keyring dbus-x11 pkg-config
+          mkdir -m 700 "${RUNNER_TEMP}/bb-keyring" "${RUNNER_TEMP}/bb-runtime"
+      - name: Format, lint, behavioral tests and release binary
+        shell: bash
+        run: |
+          cd cli
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --tests
+          cargo build --locked --release
+      - name: Exercise real backend task journey
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/bin/python -m pip install -e './backend[dev]'
+          BB_TEST_CLI_BINARY="${PWD}/cli/target/release/bb" BB_TEST_BACKEND_PYTHON="${PWD}/backend/.venv/bin/python" cargo test --locked --manifest-path cli/Cargo.toml --test task_journey -- --ignored
+      - name: Execute Linux native credential and installer checks
+        if: runner.os == 'Linux'
+        env:
+          XDG_DATA_HOME: ${{ runner.temp }}/bb-keyring
+          XDG_RUNTIME_DIR: ${{ runner.temp }}/bb-runtime
+        run: |
+          dbus-run-session -- bash -e <<'BB_NATIVE'
+            printf synthetic-native-store-password | gnome-keyring-daemon --unlock --components=secrets
+            python3 scripts/check_cli_native.py --target "${{ matrix.target }}" --source-sha "${CANDIDATE_SHA}" --binary cli/target/release/bb --output cli/target/native-evidence.json
+          BB_NATIVE
+      - name: Execute macOS15 native credential and installer checks
+        if: runner.os == 'macOS'
+        run: |
+          original_keychain=$(security default-keychain -d user | tr -d '"' | xargs)
+          fixture_keychain="${RUNNER_TEMP}/bb-cli.keychain-db"
+          trap 'security default-keychain -d user -s "$original_keychain"; security delete-keychain "$fixture_keychain"' EXIT
+          security create-keychain -p synthetic-native-store-password "$fixture_keychain"
+          security set-keychain-settings -lut 1800 "$fixture_keychain"
+          security unlock-keychain -p synthetic-native-store-password "$fixture_keychain"
+          security default-keychain -d user -s "$fixture_keychain"
+          python3 scripts/check_cli_native.py --target "${{ matrix.target }}" --source-sha "${CANDIDATE_SHA}" --binary cli/target/release/bb --output cli/target/native-evidence.json
+      - name: Execute Windows native credential and installer checks
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python scripts/check_cli_native.py --target "${{ matrix.target }}" --source-sha "$env:CANDIDATE_SHA" --binary cli/target/release/bb.exe --output cli/target/native-evidence.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package exact native output
+        shell: bash
+        run: |
+          binary=cli/target/release/bb
+          if [ "${{ runner.os }}" = Windows ]; then binary=cli/target/release/bb.exe; fi
+          python scripts/build_cli_release.py package --target "${{ matrix.target }}" --source-sha "${CANDIDATE_SHA}" --version 0.1.0 --binary "$binary" --evidence cli/target/native-evidence.json --output cli/target/native-package
+      - name: Upload native archives and checks
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: bb-native-${{ matrix.target }}
+          path: cli/target/native-package/
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+  cli-artifacts:
+    name: CLI release artifacts
+    runs-on: ubuntu-22.04
+    needs: cli-native
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+      - name: Download five native outputs
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: bb-native-*
+          path: cli/target/native-input
+      - name: Validate and assemble versioned release
+        run: |
+          python3 -m unittest scripts/test_build_cli_release.py -v
+          python3 scripts/build_cli_release.py aggregate --source-sha "${CANDIDATE_SHA}" --version 0.1.0 --input cli/target/native-input --output cli/target/release-package
+      - name: Upload reviewed release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: bb-release-0.1.0
+          path: cli/target/release-package/
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
   allure-report:
     name: Allure Report
     runs-on: ubuntu-latest
     needs:
+      - cli-native
+      - cli-artifacts
       - workflow-lint
       - secret-scan
       - changes
@@ -1542,6 +1667,8 @@ jobs:
       - docker
       - e2e
       - allure-report
+      - cli-native
+      - cli-artifacts
     if: always()
     steps:
       - name: Require successful CI, mutation gate, Docker, E2E, and Allure report

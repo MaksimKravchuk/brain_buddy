@@ -125,6 +125,88 @@ describe("authStore", () => {
     expect(useAuthStore.getState().user).toBeNull();
   });
 
+  it.each(["owner lookup", "cleanup", "before logout", "logout", "confirmation"])("confirmed logout preserves an owner change during %s", async boundary => {
+    useAuthStore.setState({ user: { id: "B", email: "b@example.com" }, status: "authed" });
+    let release!: () => void;
+    const cleanup = vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 0 });
+    const logout = vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    const me = vi.spyOn(authApi, "me").mockResolvedValueOnce({ id: "B", email: "b@example.com" }).mockResolvedValueOnce({ id: "B", email: "b@example.com" }).mockResolvedValue(null);
+    if (boundary === "cleanup") cleanup.mockReturnValueOnce(new Promise(resolve => { release = () => resolve({ ok: true, removed: 0 }); }));
+    if (boundary === "logout") logout.mockReturnValueOnce(new Promise(resolve => { release = () => resolve(undefined); }));
+    if (boundary === "owner lookup") me.mockReset().mockReturnValueOnce(new Promise(resolve => { release = () => resolve(null); }));
+    if (boundary === "before logout") me.mockReset().mockResolvedValueOnce({ id: "B", email: "b@example.com" }).mockReturnValueOnce(new Promise(resolve => { release = () => resolve({ id: "B", email: "b@example.com" }); }));
+    if (boundary === "confirmation") me.mockReturnValueOnce(new Promise(resolve => { release = () => resolve(null); }));
+    const pending = useAuthStore.getState().logout({ requireServerConfirmation: true });
+    await vi.waitFor(() => expect(boundary === "cleanup" ? cleanup : boundary === "logout" ? logout : me).toHaveBeenCalledTimes(boundary === "confirmation" ? 3 : boundary === "before logout" ? 2 : 1));
+    // Even direct owner replacement, without a generation bump, invalidates
+    // the explicit action for B and must never clear the new owner C.
+    useAuthStore.setState({ user: { id: "C", email: "c@example.com" }, status: "authed" });
+    release();
+    await expect(pending).resolves.toBe(false);
+    expect(useAuthStore.getState().user?.id).toBe("C");
+    if (["owner lookup", "cleanup", "before logout"].includes(boundary)) expect(logout).not.toHaveBeenCalled();
+    expect(me).toHaveBeenCalledTimes(boundary === "confirmation" ? 3 : ["logout", "before logout"].includes(boundary) ? 2 : 1);
+  });
+
+  it("rejects a stale anonymous confirmation after a newer anonymous transition", async () => {
+    useAuthStore.setState({ user: null, status: "anon" });
+    vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    let release!: (value: null) => void;
+    const me = vi.spyOn(authApi, "me").mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockReturnValue(new Promise(resolve => { release = resolve; }));
+    const pending = useAuthStore.getState().logout({ requireServerConfirmation: true });
+    await vi.waitFor(() => expect(me).toHaveBeenCalledTimes(3));
+    useAuthStore.getState().clearSession();
+    release(null);
+    await expect(pending).resolves.toBe(false);
+    expect(useAuthStore.getState().status).toBe("anon");
+  });
+
+  it.each([true, false])("confirmed logout cleans the actual shared-cookie owner and fails closed on cleanup refusal %s", async succeeds => {
+    useAuthStore.setState({ user: null, status: "anon" });
+    const cleanup = vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue(succeeds ? { ok: true, removed: 1 } : { ok: false, reason: "cleanup-failed" });
+    const me = vi.spyOn(authApi, "me").mockResolvedValueOnce({ id: "C", email: "c@example.com" }).mockResolvedValueOnce({ id: "C", email: "c@example.com" }).mockResolvedValue(null);
+    const logout = vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    await expect(useAuthStore.getState().logout({ requireServerConfirmation: true })).resolves.toBe(succeeds);
+    expect(cleanup).toHaveBeenCalledWith("C", window.location.origin);
+    expect(logout).toHaveBeenCalledTimes(succeeds ? 1 : 0);
+    expect(me).toHaveBeenCalledTimes(succeeds ? 3 : 1);
+  });
+
+  it("does not end a shared session when its actual owner cannot be read", async () => {
+    useAuthStore.setState({ user: null, status: "anon" });
+    vi.spyOn(authApi, "me").mockRejectedValue(new Error("offline"));
+    const logout = vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    await expect(useAuthStore.getState().logout({ requireServerConfirmation: true })).rejects.toThrow("offline");
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it("refuses to log out a cookie owner that changed while the observed owner's CRT cleanup was awaited", async () => {
+    useAuthStore.setState({ user: null, status: "anon" });
+    let finish!: () => void;
+    const cleanup = vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockReturnValue(new Promise(resolve => { finish = () => resolve({ ok: true, removed: 1 }); }));
+    vi.spyOn(authApi, "me").mockResolvedValueOnce({ id: "C", email: "c@example.com" }).mockResolvedValue({ id: "D", email: "d@example.com" });
+    const logout = vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    const pending = useAuthStore.getState().logout({ requireServerConfirmation: true });
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledWith("C", window.location.origin));
+    finish();
+    await expect(pending).rejects.toThrow(/session changed/i);
+    expect(logout).not.toHaveBeenCalled(); expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState().status).toBe("anon");
+  });
+
+  it("keeps a newer local session when foreign-cookie CRT cleanup finishes", async () => {
+    useAuthStore.setState({ user: null, status: "anon" });
+    let finish!: () => void;
+    const cleanup = vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockReturnValue(new Promise(resolve => { finish = () => resolve({ ok: true, removed: 1 }); }));
+    vi.spyOn(authApi, "me").mockResolvedValue({ id: "C", email: "c@example.com" });
+    const logout = vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    const pending = useAuthStore.getState().logout({ requireServerConfirmation: true });
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledWith("C", window.location.origin));
+    useAuthStore.setState({ status: "authed", user: { id: "D", email: "d@example.com" } });
+    finish(); await expect(pending).resolves.toBe(false);
+    expect(logout).not.toHaveBeenCalled(); expect(useAuthStore.getState().user?.id).toBe("D");
+  });
+
   it("signup stores the returned user and marks the session authed", async () => {
     vi.spyOn(authApi, "signup").mockResolvedValue({ id: "u2", email: "new@example.com" });
     await useAuthStore.getState().signup({ email: "new@example.com", password: "secret", invite_code: "invite" });

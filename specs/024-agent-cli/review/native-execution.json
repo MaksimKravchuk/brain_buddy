@@ -1,0 +1,23 @@
+{
+  "run_id": "cli-023-r2",
+  "transport": "native-collaboration",
+  "owner_execution_channel_override": true,
+  "artifacts_digest": "2c189ad0a6c54769e0f5c3904757a4a14a46add1a1e021e9327a9ff3ab733511",
+  "digest_verified_before_and_after": true,
+  "configured_model": "gpt-5.6-sol",
+  "requested_reasoning_effort": "xhigh",
+  "actual_provider_model_identity_verified": false,
+  "correlated": true,
+  "executed_default_cli": false,
+  "executed_external_adapter": false,
+  "gate_oracle_status": "unknown; native transport not representable by unchanged CLI/adapter schema",
+  "human_risk_signoff": false,
+  "reviewers": {
+    "requirements-consistency": "/root/cli_r2_requirements",
+    "architecture-consistency": "/root/cli_r2_architecture",
+    "testability-evidence": "/root/cli_r2_evidence",
+    "privacy-consent-security": "/root/cli_r2_security",
+    "ux-accessibility-mobile": "/root/cli_r2_ux",
+    "adversarial-high-risk": "/root/cli_r2_adversarial"
+  }
+}

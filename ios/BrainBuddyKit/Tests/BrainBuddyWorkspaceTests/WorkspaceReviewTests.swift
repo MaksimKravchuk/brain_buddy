@@ -580,8 +580,8 @@ import Testing
         #expect(phone.workspace.issues.isEmpty && tablet.workspace.issues.isEmpty)
     }
 
-    @Test("020-FR-014 020-FR-040 linking an account-less install: local parks stay in Someday, extensions dropped and listed")
-    func accountLinking() async throws {
+    @Test("020-FR-014 020-FR-040 linking an account-less install: local parks stay in Someday, extensions dropped and listed", arguments: [false, true])
+    func accountLinking(modern: Bool) async throws {
         let world = World()
         world.server.setWeeklyReview(email: World.email, enabled: true)
         let phone = await world.device()
@@ -602,12 +602,18 @@ import Testing
         try workspace.dismissWhileAway()
         // The newer ones ask (15 days in): two decisions and an extension.
         world.clock.advance(by: 3 * Self.day)
+        let attempt = modern ? try await workspace.beginSignIn(serverURL: FakeBrainBuddyServer.baseURL) : nil
         try workspace.decide(.reformulate, on: reformulate, title: "Measure the bathroom wall")
         try workspace.decide(.waiting, on: waiting, waitingFor: "Ann")
         try workspace.decide(.extend, on: extended, reason: "The landlord is away")
         await workspace.flush()
 
-        try await phone.signIn()
+        if let attempt {
+            let outcome = try await workspace.completeSignIn(attempt, credential: .password(email: World.email, password: World.password))
+            guard case .signedIn = outcome else { Issue.record("Expected signed in"); return }
+        } else {
+            try await phone.signIn()
+        }
         await phone.workspace.syncNow()
 
         let server = world.snapshot.tasks.values
@@ -713,10 +719,15 @@ import Testing
         #expect((0..<501).allSatisfy { workspace.task(TaskID("i\($0)"))?.state == .inbox })
     }
 
-    @Test("020-FR-014 a failed linking step stops sign-in and leaves the device account-less and consistent")
-    func linkingFailureStopsSignIn() async throws {
+    @Test("020-FR-014 a failed linking step stops sign-in and leaves the device account-less and consistent", arguments: [false, true])
+    func linkingFailureStopsSignIn(modern: Bool) async throws {
         let store = ControlledStore()
-        let sync = FakeSyncService(store: store)
+        let legacy = FakeSyncService(store: store)
+        let server = FakeBrainBuddyServer()
+        _ = server.addAccount(email: "ana@example.com", password: "pw")
+        let transport = server.makeTransport()
+        let engine = SyncEngine(store: store, tokenStore: InMemorySessionTokenStore(), transport: transport)
+        let sync: any SyncService = modern ? engine : legacy
         let clock = TestClock()
         let workspace = makeWorkspace(store: store, sync: sync, clock: clock)
         await workspace.load()
@@ -729,13 +740,19 @@ import Testing
         clock.advance(by: Self.day)
         #expect(workspace.applyDueAutoParks() == 1)
         await workspace.flush()
+        let attempt = modern ? try await workspace.beginSignIn(serverURL: FakeBrainBuddyServer.baseURL) : nil
         let before = try #require(try await store.load())
 
         await store.failWrites(with: .io("disk full"))
         await #expect(throws: WorkspaceError.self) {
-            try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "pw")
+            if let attempt {
+                _ = try await workspace.completeSignIn(attempt, credential: .password(email: "ana@example.com", password: "pw"))
+            } else {
+                try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "pw")
+            }
         }
-        #expect(await sync.calls.allSatisfy { if case .signIn = $0 { false } else { true } }, "nothing is uploaded")
+        #expect(await legacy.calls.allSatisfy { if case .signIn = $0 { false } else { true } }, "nothing is uploaded")
+        #expect(!transport.requests.contains { $0.url.path == "/api/auth/login" }, "conversion fails before authentication or upload")
         #expect(workspace.account == nil)
         await store.failWrites(with: nil)
         let after = try #require(try await store.load())

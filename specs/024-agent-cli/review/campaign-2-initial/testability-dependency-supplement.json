@@ -1,0 +1,64 @@
+{
+  "document_type": "bounded-supplemental-review-note",
+  "campaign": "cli-023-r2",
+  "role": "testability-evidence",
+  "supplements_original_report": true,
+  "supersedes_original_report": false,
+  "frozen_artifacts_digest": "2c189ad0a6c54769e0f5c3904757a4a14a46add1a1e021e9327a9ff3ab733511",
+  "digest_reverified_unchanged": true,
+  "dependency": {
+    "ref": "origin/feat/modern-auth",
+    "commit": "bc7fc72",
+    "origin_main_observed": "21f08d2",
+    "status": "Published dependency branch; not claimed merged into origin/main.",
+    "provenance": "Read-only commit inspection only. No native feature execution or adapter provenance claim."
+  },
+  "status": "changes-required-before-implementation",
+  "scope": "Compatibility delta caused solely by the newly published modern-auth dependency.",
+  "reviewed_dependency_files": [
+    "docs/decisions/0028-modern-identity-authority.md",
+    "backend/app/repositories/auth_store.py",
+    "backend/app/repositories/session.py",
+    "backend/app/repositories/user.py",
+    "backend/app/schemas/auth.py",
+    "backend/app/services/auth_service.py",
+    "backend/app/services/modern_auth_service.py",
+    "backend/tests/test_auth_store.py",
+    "backend/tests/test_modern_auth_authority_edges.py",
+    "backend/tests/test_modern_auth_authority_remaining.py",
+    "specs/022-modern-auth/contracts/http-auth.md",
+    "specs/022-modern-auth/contracts/persistence-migration.md",
+    "specs/022-modern-auth/data-model.md"
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "category": "Obsolete Identity persistence and concurrency evidence",
+      "description": "The frozen CLI plan’s JSON device-grant repository, process RLock/flock, consume-before-mint crash behavior, and parent-directory fsync evidence conflict with the newly accepted single transactional Identity authority. Those tests would validate a persistence design that ADR-0028 now prohibits.",
+      "evidence": [
+        "Frozen plan.md:17 and plan.md:60 place device grants in bounded Identity JSON and require a shared file lock; contracts/device-auth.md:45-59 requires flock, atomic JSON replacement, consume-before-mint, and parent-directory fsync tests.",
+        "bc7fc72 docs/decisions/0028-modern-identity-authority.md:14-20 makes one auth.sqlite3 authoritative and requires account, version, session, owner, proof consumption, and session changes to share a transaction.",
+        "bc7fc72 backend/app/repositories/auth_store.py:18-61 stores users and sessions in the shared SQLite schema, while lines 297-319 implement outermost BEGIN IMMEDIATE commit or rollback.",
+        "bc7fc72 specs/022-modern-auth/data-model.md:23-24 requires shared-store nested transactions, database uniqueness and foreign keys for cross-process races, and atomic fresh-check, proof consumption, and session issuance.",
+        "bc7fc72 backend/tests/test_auth_store.py:274-302 demonstrates the relevant two-authority-connection consume-once test seam; backend/tests/test_modern_auth_authority_remaining.py:561-602 demonstrates rollback evidence when durable consumption is refused.",
+        "The frozen CLI proposal also claims ADR number 0028, while bc7fc72 contains the accepted ADR-0028 for the Identity authority."
+      ],
+      "required_correction": "Rebase the CLI design on the accepted Identity authority and renumber its decision as an amendment to ADR-0028. Model device grants inside auth.sqlite3 with owner, source-session, auth_version, expiry/state, and applicable provider-binding foreign keys. Exchange must conditionally consume the grant and insert the CLI session in one AuthStore transaction. Replace JSON/flock/fsync tests with barrier-controlled independent-connection and independent-process SQLite tests covering exactly-one issuance, transaction rollback with neither consumption nor session committed, restart persistence, source revoke, account purge, expiry, and lock release after process termination. Do not retain the obsolete file-durability suite alongside the SQLite suite."
+    },
+    {
+      "severity": "blocking",
+      "category": "Derived-session authority evidence",
+      "description": "The frozen device-flow tests do not account for the modern session authority fields. A CLI session minted with the legacy default password provenance could survive provider unlink or an auth_version change even though the approving browser session’s authority has been retired.",
+      "evidence": [
+        "bc7fc72 backend/app/repositories/auth_store.py:48-60 stores session auth_version, auth_method, and provider_binding_id as indexed authority.",
+        "bc7fc72 backend/app/schemas/auth.py:49-71 exposes the same authority fields on Session.",
+        "bc7fc72 backend/app/services/auth_service.py:153-177 stamps new sessions with the current account auth_version and issuing method/binding; lines 179-212 reject stale versions, deleted owners, reserved-account method violations, and inactive provider bindings.",
+        "bc7fc72 backend/tests/test_modern_auth_authority_edges.py:876-901 proves provider unlink revokes every session derived from that provider while preserving independent email authority.",
+        "The frozen tasks.md:36-38 and contracts/device-auth.md:47 test source-session and owner freshness but do not require provider lineage or auth_version assertions for the resulting CLI session."
+      ],
+      "required_correction": "Add device-flow tests proving that approval and exchange re-read the current source session and account inside the transaction, bind the grant and issued CLI session to the current auth_version, and retain the applicable provider method/binding lineage. Prove provider unlink or revocation invalidates the derived CLI session while preserving independently issued password/email sessions; an auth_version increment, source logout, deletion marker, or stale provider generation must prevent issuance. Retain the existing cookie name, opaque-token transport, and MeResponse assertions."
+    }
+  ],
+  "product_decisions": [],
+  "approval_claims": []
+}

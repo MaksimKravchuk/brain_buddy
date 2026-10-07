@@ -36,12 +36,14 @@ test.describe("account & data rights acceptance", () => {
     });
 
     await test.step("rotate the password with re-authentication", async () => {
-      const section = sectionByHeading(page, "Password");
-      await section.getByLabel("Current password", { exact: true }).fill(password);
-      await section.getByLabel("New password", { exact: true }).fill(newPassword);
-      await section.getByLabel("Confirm new password").fill(newPassword);
-      await section.getByRole("button", { name: "Change password" }).click();
-      await expect(section.getByText(/other devices have been signed out/i)).toBeVisible();
+      await page.getByRole("button", { name: "Change password", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("New password", { exact: true }).fill(newPassword);
+      await dialog.getByLabel("Repeat password").fill(newPassword);
+      await dialog.getByRole("button", { name: "Confirm and save" }).click();
+      await dialog.getByLabel("Current password", { exact: true }).fill(password);
+      await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
+      await expect(page.getByText(/other devices have been signed out/i)).toBeVisible();
     });
 
     await test.step("sign out through the account menu", async () => {
@@ -105,9 +107,13 @@ test.describe("account & data rights acceptance", () => {
     await openAccountSettings(page, email);
 
     await test.step("download the export archive", async () => {
-      const downloadPromise = page.waitForEvent("download");
-      await page.getByRole("button", { name: /download my data/i }).click();
-      const download = await downloadPromise;
+      await page.getByRole("button", { name: "Export", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("Current password").fill(password);
+      const [download] = await Promise.all([
+        page.waitForEvent("download"),
+        dialog.getByRole("button", { name: "Confirm", exact: true }).click()
+      ]);
       // A bare sync expect records a zero-duration Allure step with no
       // evidence, which the taxonomy validator rejects; attach the actual
       // filename as evidence and assert with an explicit throw instead.
@@ -126,11 +132,12 @@ test.describe("account & data rights acceptance", () => {
     await openAccountSettings(page, email);
 
     await test.step("request deletion through the confirmation dialog", async () => {
-      await sectionByHeading(page, "Danger zone").getByRole("button", { name: /delete account/i }).click();
+      await page.getByRole("button", { name: /delete account/i }).click();
       const dialog = page.getByRole("dialog");
       await expect(dialog.getByRole("heading", { name: "Delete your account?" })).toBeVisible();
-      await dialog.getByLabel("Confirm with your password").fill(password);
-      await dialog.getByRole("button", { name: "Delete my account" }).click();
+      await dialog.getByRole("button", { name: "Confirm and delete" }).click();
+      await dialog.getByLabel("Current password").fill(password);
+      await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
     });
 
     await test.step("land on login with the scheduled purge notice", async () => {

@@ -625,6 +625,7 @@ class ModernAuthService:
         *,
         code: str,
         state: str,
+        error: str = "",
         binder: str | None = None,
     ) -> ProviderCallbackResult:
         identifier, lease = "", secrets.token_urlsafe(32)
@@ -651,6 +652,20 @@ class ModernAuthService:
                 if provider == "apple" and row["channel"] != "web":
                     raise ModernAuthError()
                 identifier = row["id"]
+                if error:
+                    connection.execute(
+                        "UPDATE auth_attempts SET status='failed',sealed_payload=NULL,key_id=NULL,lease_id=NULL,lease_expires_at=NULL WHERE id=?",
+                        (identifier,),
+                    )
+                    query = urlencode(
+                        {"attempt": identifier, "state": state, "error": "cancelled"}
+                    )
+                    url = (
+                        f"{self.settings.public_origin}/auth/complete#{query}"
+                        if row["channel"] == "web"
+                        else f"brainbuddy://auth/callback?{query}"
+                    )
+                    return ProviderCallbackResult(url)
                 start = json.loads(
                     self._box().open(
                         row["sealed_payload"],
