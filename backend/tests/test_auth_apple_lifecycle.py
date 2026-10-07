@@ -256,7 +256,9 @@ def test_022_fr025_notices_revoke_only_matching_provider_authority(fixture, even
                 token_hash=digest,
                 user_id="owner",
                 created_at=NOW,
-                expires_at=NOW + timedelta(days=1),
+                # SessionRepository.get() checks expiry against the wall clock,
+                # not the fixture clock, so a near-NOW expiry turns into a time bomb.
+                expires_at=NOW + timedelta(days=36500),
                 auth_method=method,
                 provider_binding_id=binding,
             )
