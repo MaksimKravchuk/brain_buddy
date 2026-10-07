@@ -207,6 +207,20 @@ public struct ReviewSettings: Hashable, Sendable, Codable {
     /// The grace date of FR-016: `activated_at + 14 d`.
     public var graceUntil: Date? { activatedAt?.addingTimeInterval(FormulationRule.activationGrace) }
 
+    /// Server settings as the device keeps them (FR-039, M-01): the wire
+    /// carries no `threshold_changed_at`, so the instant of this device's own
+    /// threshold change, which keys the dismissible "threshold just changed"
+    /// note and its dismissal, is kept while the server's threshold is the one
+    /// `held` (what the device shows, queued changes included) has. A
+    /// threshold this device did not set takes the server's value.
+    public func keepingThresholdChange(of held: ReviewSettings) -> ReviewSettings {
+        var merged = self
+        if merged.thresholdChangedAt == nil, held.thresholdDays == thresholdDays {
+            merged.thresholdChangedAt = held.thresholdChangedAt
+        }
+        return merged
+    }
+
     enum CodingKeys: String, CodingKey {
         case thresholdDays, reviewWeekday, reviewTime, timeZone, onboardedAt, activatedAt, ownerParkFloorAt
         case thresholdChangedAt, revision

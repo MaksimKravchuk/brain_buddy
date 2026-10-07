@@ -163,7 +163,15 @@ private struct MainTabView: View {
     /// capture. Never over another presentation (a capture, Process inbox, a
     /// decision card, a move or tags sheet, a dialog): UIKit would refuse it
     /// and nothing would retry, so while one is up this checks again shortly.
+    /// When the review stops being exposed (the flag turned off), an open
+    /// startup sheet goes at once (Core's `sheetToKeep`); its dismissal
+    /// records nothing as shown or acknowledged.
     private func presentStartupSheetIfDue() {
+        let kept = ReviewStartupPlanner.sheetToKeep(startupSheet, reviewExposed: workspace.reviewExposed)
+        if kept != startupSheet {
+            startupSheet = kept
+            return
+        }
         guard startupSheet == nil, workspace.isLoaded else { return }
         // These two re-run this check themselves when they close (onChange).
         let ownPresentation = router.isProcessingInbox || captureOnScreen
@@ -214,7 +222,7 @@ private struct MainTabView: View {
     private func startupSheetDidAppear(_ sheet: ReviewStartupSheet) {
         startupSheetAppeared = true
         // Shown today, whether it is continued or swiped away; recorded only
-        // once it is really on screen.
+        // once it is really on screen (and never while the review is hidden).
         if sheet == .whileAway { workspace.markWhileAwayShown() }
     }
 

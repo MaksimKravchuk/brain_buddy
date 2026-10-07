@@ -285,7 +285,8 @@ private struct ProjectStatusRow: View {
 /// M-01 "threshold just changed" (FR-039): after a threshold change, one
 /// dismissible note says how many tasks ask now and the date before which
 /// nothing moves to Someday (the owner park floor Core set). It shows until
-/// dismissed for that change, or until that date has passed.
+/// dismissed for that change, or until that date has passed
+/// (`ThresholdChangeNote`); sync keeps the change instant this device set.
 private struct ReviewThresholdNote: View {
     @Environment(Workspace.self) private var workspace
     /// The `thresholdChangedAt` (seconds since 1970) whose note was dismissed.
@@ -295,9 +296,11 @@ private struct ReviewThresholdNote: View {
 
     var body: some View {
         let settings = workspace.state.review.settings
-        if workspace.reviewExposed, let changedAt = settings.thresholdChangedAt,
-            changedAt.timeIntervalSince1970 != dismissedChange, let floor = settings.ownerParkFloorAt,
-            floor > workspace.reviewNow
+        if workspace.reviewExposed,
+            let changedAt = ThresholdChangeNote.change(
+                settings: settings, dismissedChange: dismissedChange, now: workspace.reviewNow
+            ),
+            let floor = settings.ownerParkFloorAt
         {
             HStack(alignment: .firstTextBaseline, spacing: BBSpacing.s3) {
                 Text(

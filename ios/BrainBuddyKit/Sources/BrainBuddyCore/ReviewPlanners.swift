@@ -158,6 +158,15 @@ public enum ReviewStartupPlanner {
         return nil
     }
 
+    /// The startup sheet that may stay up: one that is open when the review
+    /// stops being exposed (the flag turned off, `weekly_review_disabled`)
+    /// goes at once, so nothing of the review stays actionable (ios/AGENTS.md
+    /// "a non-interactive off state", FR-042). Taking it away records
+    /// nothing: the explainer is acknowledged only by "Got it" or Close.
+    public static func sheetToKeep(_ sheet: ReviewStartupSheet?, reviewExposed: Bool) -> ReviewStartupSheet? {
+        reviewExposed ? sheet : nil
+    }
+
     /// Whether a requested capture may be presented: one on screen stays;
     /// otherwise not while a startup sheet is up or the explainer is due.
     public static func captureMayPresent(
@@ -165,6 +174,23 @@ public enum ReviewStartupPlanner {
     ) -> Bool {
         if captureOnScreen { return true }
         return startupSheet == nil && !(reviewExposed && explainerNeeded)
+    }
+}
+
+/// M-01 "threshold just changed" (FR-039, design M-01 / M-23): after this
+/// device changed the threshold, one dismissible note on Next until it is
+/// dismissed for that change or the date before which nothing moves to
+/// Someday (`ownerParkFloorAt`) has passed. A dismissal is keyed by the
+/// change instant (`thresholdChangedAt`), which sync keeps while the
+/// server's threshold is the one this device set.
+public enum ThresholdChangeNote {
+    /// The change the note is about, or nil when no note shows.
+    /// `dismissedChange` is the dismissed change's `timeIntervalSince1970`.
+    public static func change(settings: ReviewSettings, dismissedChange: TimeInterval?, now: Date) -> Date? {
+        guard let changedAt = settings.thresholdChangedAt, changedAt.timeIntervalSince1970 != dismissedChange,
+            let floor = settings.ownerParkFloorAt, floor > now
+        else { return nil }
+        return changedAt
     }
 }
 

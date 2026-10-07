@@ -155,6 +155,34 @@ import Testing
         #expect(try await workspace.store.load()?.local.linkedExtensionNotices == [])
     }
 
+    @Test("020-FR-042 020-FR-015 While you were away taken away by the review switching off records nothing")
+    func whileAwayTakenAwayWhenHidden() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let parked = try nextTask("Clean out the garage", in: workspace)
+        clock.advance(by: 21 * Self.day)
+        #expect(workspace.applyDueAutoParks() == 0)
+        clock.advance(by: Self.day)
+        #expect(workspace.applyDueAutoParks() == 1)
+        let extended = try nextTask("Call the landlord", in: workspace)
+        workspace.edit { $0.local.linkedExtensionNotices = [extended] }
+        #expect(workspace.whileAwayShouldShowAtAppOpen())
+
+        // The release switch (signed in: the flag) goes off while M-09 is
+        // presented: the sheet is taken away, and its appear and close
+        // callbacks must not record it.
+        workspace.accountlessReviewEnabled = false
+        #expect(!workspace.reviewExposed)
+        workspace.markWhileAwayShown()
+        workspace.closeWhileAway()
+        #expect(workspace.localReview.wywaLastShownDay == nil, "not shown")
+        #expect(workspace.linkedExtensionNotices == [extended], "the once-only notices are kept")
+        #expect(workspace.unseenParks().map(\.id) == [parked], "not seen")
+
+        workspace.accountlessReviewEnabled = true
+        #expect(workspace.whileAwayShouldShowAtAppOpen(), "back on: it shows, the same day")
+    }
+
     @Test("020-FR-011 a follow-up decision mints task_ and form_ client ids")
     func followUpIDs() async throws {
         let workspace = try await activatedWorkspace()

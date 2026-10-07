@@ -231,8 +231,11 @@ extension Workspace {
 
     // MARK: - While you were away
 
-    /// Marks "While you were away" as shown today (at app open).
+    /// Marks "While you were away" as shown today (at app open). Nothing is
+    /// recorded while the review is not exposed: a sheet the flag took away
+    /// was not shown.
     public func markWhileAwayShown() {
+        guard reviewExposed else { return }
         let day = today
         edit { $0.local.wywaLastShownDay = day }
     }
@@ -258,8 +261,11 @@ extension Workspace {
 
     /// Close or swipe-down on "While you were away" (M-09): the parks stay
     /// unseen and come back another day (FR-015); the account-linking
-    /// notices are information, shown once, so they go (T093).
+    /// notices are information, shown once, so they go (T093). A close
+    /// caused by the review no longer being exposed (the flag turned off
+    /// while the sheet was up) records nothing.
     public func closeWhileAway() {
+        guard reviewExposed else { return }
         let day = today
         edit { document in
             document.local.linkedExtensionNotices = []

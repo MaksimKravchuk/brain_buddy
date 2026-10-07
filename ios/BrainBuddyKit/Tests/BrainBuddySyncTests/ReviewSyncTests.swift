@@ -768,6 +768,71 @@ struct ReviewSyncTests {
         #expect(puts.compactMap(\.statusCode) == [409, 200])
     }
 
+    /// The M-01 "threshold just changed" note's inputs on the device: the
+    /// change instant (which also keys its dismissal) and the floor date.
+    private func thresholdNote(on device: Device) async throws -> (changedAt: Date?, floor: Date?, days: Int) {
+        let settings = try await device.current().review.settings
+        return (settings.thresholdChangedAt, settings.ownerParkFloorAt, settings.thresholdDays)
+    }
+
+    @Test("020-FR-039 the threshold-changed note outlives the settings acknowledgement and later pulls")
+    func thresholdNoteSurvivesSync() async throws {
+        let (harness, phone) = try await activated()
+        try await phone.review(.review(.updateSettings(ReviewSettingsChange(thresholdDays: 7))))
+        let changedAt = try #require(try await thresholdNote(on: phone).changedAt, "the optimistic change sets it")
+
+        await phone.sync()
+        #expect(try await phone.document().outbox.isEmpty, "the PUT was acknowledged")
+        var note = try await thresholdNote(on: phone)
+        #expect(note.days == 7)
+        #expect(note.changedAt == changedAt, "the server settings do not carry it; the device keeps its own")
+        #expect(note.floor == changedAt.addingTimeInterval(7 * Self.day))
+
+        harness.clock.advance(by: 3_600)
+        await phone.sync()
+        note = try await thresholdNote(on: phone)
+        #expect(note.changedAt == changedAt, "a later pull keeps it too, so a dismissal stays keyed to it")
+        let settings = try await phone.current().review.settings
+        let now = harness.clock.now()
+        #expect(ThresholdChangeNote.change(settings: settings, dismissedChange: nil, now: now) == changedAt, "it shows")
+        let dismissed = changedAt.timeIntervalSince1970
+        #expect(ThresholdChangeNote.change(settings: settings, dismissedChange: dismissed, now: now) == nil, "until dismissed")
+    }
+
+    @Test("020-FR-039 the note survives a settings answer lost before a pull, and the resend")
+    func thresholdNoteSurvivesLostAnswer() async throws {
+        let (harness, phone) = try await activated()
+        try await phone.review(.review(.updateSettings(ReviewSettingsChange(thresholdDays: 21))))
+        let changedAt = try #require(try await thresholdNote(on: phone).changedAt)
+        try await loseResponse(on: phone, matching: FakeServerTransport.path("review/settings", method: .put))
+
+        harness.clock.advance(by: 3_600)
+        await phone.sync()
+        #expect(try await phone.document().outbox.isEmpty)
+        let note = try await thresholdNote(on: phone)
+        #expect(note.days == 21)
+        #expect(note.changedAt == changedAt, "the pull found the threshold this device set")
+    }
+
+    @Test("020-FR-039 a threshold another device set replaces this device's note")
+    func thresholdNoteReplacedByOtherDevice() async throws {
+        let (harness, phone) = try await activated()
+        try await phone.review(.review(.updateSettings(ReviewSettingsChange(thresholdDays: 7))))
+        await phone.sync()
+        #expect(try await thresholdNote(on: phone).changedAt != nil)
+
+        let tablet = await harness.device()
+        try await tablet.signIn()
+        harness.clock.advance(by: 3_600)
+        try await tablet.review(.review(.updateSettings(ReviewSettingsChange(thresholdDays: 28))))
+        await tablet.sync()
+        harness.clock.advance(by: 3_600)
+        await phone.sync()
+        let note = try await thresholdNote(on: phone)
+        #expect(note.days == 28)
+        #expect(note.changedAt == nil, "this device did not set 28 days")
+    }
+
     @Test("020-FR-024 consent grant and revoke are idempotent; a revoke blocks cloud use at once, offline")
     func consent() async throws {
         let (harness, phone) = try await activated()

@@ -219,6 +219,53 @@ struct ReviewPlannersTests {
         )
     }
 
+    @Test("020-FR-042 020-FR-051 020-FR-015 an open startup sheet goes when the review stops being exposed")
+    func startupSheetGoesWhenHidden() {
+        for sheet in [ReviewStartupSheet.explainer, .whileAway] {
+            #expect(ReviewStartupPlanner.sheetToKeep(sheet, reviewExposed: true) == sheet, "exposed: it stays")
+            #expect(ReviewStartupPlanner.sheetToKeep(sheet, reviewExposed: false) == nil, "\(sheet) is taken away")
+        }
+        #expect(ReviewStartupPlanner.sheetToKeep(nil, reviewExposed: false) == nil)
+        #expect(ReviewStartupPlanner.sheetToKeep(nil, reviewExposed: true) == nil)
+        // Taken away, the waiting capture is no longer held back, and nothing re-presents.
+        #expect(
+            ReviewStartupPlanner.captureMayPresent(
+                startupSheet: ReviewStartupPlanner.sheetToKeep(.explainer, reviewExposed: false), captureOnScreen: false,
+                reviewExposed: false, explainerNeeded: true
+            )
+        )
+        let hidden = ReviewStartupPlanner.Context(
+            reviewExposed: false, explainerNeeded: true, whileAwayDue: true, captureRequested: false, screenBusy: false
+        )
+        #expect(ReviewStartupPlanner.sheetToPresent(hidden) == nil)
+    }
+
+    @Test("020-FR-039 the threshold note shows after a change until dismissed for it or until its floor date passes")
+    func thresholdChangeNote() {
+        let changedAt = Date(timeIntervalSince1970: 1_791_000_000)
+        let floor = changedAt.addingTimeInterval(7 * 86_400)
+        let settings = ReviewSettings(thresholdDays: 7, ownerParkFloorAt: floor, thresholdChangedAt: changedAt)
+        #expect(ThresholdChangeNote.change(settings: settings, dismissedChange: nil, now: changedAt) == changedAt)
+        #expect(ThresholdChangeNote.change(settings: settings, dismissedChange: 0, now: changedAt) == changedAt)
+        #expect(
+            ThresholdChangeNote.change(settings: settings, dismissedChange: changedAt.timeIntervalSince1970, now: changedAt)
+                == nil,
+            "dismissed for this change"
+        )
+        let earlier = changedAt.addingTimeInterval(-86_400).timeIntervalSince1970
+        #expect(
+            ThresholdChangeNote.change(settings: settings, dismissedChange: earlier, now: changedAt) == changedAt,
+            "a dismissal of an earlier change does not hide a new one"
+        )
+        #expect(ThresholdChangeNote.change(settings: settings, dismissedChange: nil, now: floor) == nil, "the date passed")
+        var unchanged = settings
+        unchanged.thresholdChangedAt = nil
+        #expect(ThresholdChangeNote.change(settings: unchanged, dismissedChange: nil, now: changedAt) == nil)
+        var noFloor = settings
+        noFloor.ownerParkFloorAt = nil
+        #expect(ThresholdChangeNote.change(settings: noFloor, dismissedChange: nil, now: changedAt) == nil)
+    }
+
     // MARK: Active time (SC-004)
 
     @Test(
