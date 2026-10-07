@@ -21,6 +21,7 @@
 - Keep comments purposeful; leverage existing store/service patterns when extending features.
 
 ## Testing Guidelines
+- Follow [Constitution Principle II](.specify/memory/constitution.md#ii-tested-delivery-across-stack) when planning, implementing, reviewing, or delegating work. Define the outcome before coding, reuse sufficient checks, and add only missing behavior/risk coverage at the least costly reliable level. New tests per task or layer are not required; test-first applies to the cases defined there.
 - Backend uses pytest with FastAPI TestClient; mirror test names after module under test (`test_tree_service.py`).
 - Frontend leverages Vitest + Testing Library; place component specs beside feature folders.
 - Every pytest, Vitest, and Playwright product test must emit Allure Report 3 taxonomy: non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Use the central helpers in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; override explicitly only when a test needs narrower labels. See `docs/test-allure-taxonomy.md`.
@@ -34,8 +35,15 @@
 - Read the relevant code first and reuse existing mechanisms. Do not create parallel implementations, speculative future-proofing, or unrelated cleanup.
 - Default to one bounded serial path. Split work only when independent coordination is genuinely required; make trivial documentation, prompt, and configuration edits directly without creating Kanban work.
 - Apply ADR-0023's fast lane to eligible SHIP/SHOW changes: use the lightweight brief above, one risk-selected independent gate, exact-SHA CI, verified landing, and production smoke. Use the full Spec Kit and multi-gate path only when its risk triggers apply.
-- Run the smallest relevant existing checks first. Add tests only when changed behavior is not already protected, and keep them limited to that behavior and its critical failure mode. Do not introduce unrelated test infrastructure.
+- Run the smallest relevant existing checks first, following Constitution Principle II. Use affected checks while iterating and full applicable verification on the prepared candidate; do not rerun the whole suite after each technical task without a new reason.
 - If code, tests, artifacts, or task count grows without increasing the accepted outcome, stop, remove the extra construction, and return adjacent improvements to backlog.
+- Treat review comments as claims to validate against the code and accepted requirements. Fix confirmed defects with the smallest coherent change; a review comment alone does not authorize new functionality or broader scope. Leave optional improvements for a separate owner decision.
+
+## Code Review Rules
+
+- Report consequential defects introduced or newly exposed by the diff. Identify the reachable trigger, the violated acceptance criterion or existing contract, and the concrete impact, supported by code or test evidence. Include realistic boundary, security, and data-loss failures even when they are outside the happy path; do not invent requirements or assume unsupported future consumers.
+- Respect the accepted scope and explicit non-goals. Do not request new features, broader platform/API support, speculative hardening, architectural cleanup, style changes, or additional tests unless they are necessary to address a specific consequential defect or an applicable binding repository gate. Reuse sufficient existing test evidence under Constitution Principle II.
+- Set priority from demonstrated impact and realistic likelihood. Do not inflate severity to make an optional improvement reportable, repeat mechanical lint/format findings handled by CI, or produce findings to meet a quota. No actionable findings is a valid review result.
 
 ## Definition of Done
 
@@ -107,7 +115,7 @@ These criteria apply only when rendered UI, copy, navigation, interaction, respo
 - When the full path applies, the portable artifact sequence is constitution → `/speckit-interview` (business requirements, human) → `/speckit-specify` (what/why) → `/speckit-clarify` (human) → `/speckit-design` (screens + numbered state inventory) → `/speckit-plan` (how/architecture; MUST cite `design.md`) → `/speckit-review` (five-lens gate, ADR-0011) → `/speckit-checklist` → `/speckit-tasks` → `/speckit-analyze` → `/speckit-implement` → `/speckit-accept` → `/speckit-report`. Amend an existing spec first whenever implementation intent changes.
 - On that full path, `/speckit-design` and `/speckit-review` are **mandatory**, not advisory: `.specify/extensions.yml` registers them as `optional: false` hooks on `after_clarify` and `after_plan`. Implementation must not start unless the review verdict is `approved` or `founder-accepted`. `/speckit-assess-*` is an optional stage 0 that can kill an idea before any requirement is elicited.
 - Feature numbers are reserved across every git ref. Two branches that each claim `specs/NNN-` merge without a git conflict and then satisfy each other's requirement-coverage gate, because `scripts/check_requirement_coverage.py` matches `NNN[-_]FR[-_]nnn` repository-wide. `scripts/check_spec_kit_specs.py` rejects duplicates.
-- Spec Kit owns versioned planning artifacts under `specs/` plus `.specify/`. Generated `tasks.md` is planning input, not permission to bypass isolated worktrees, TDD, independent review, CI, landing, or release gates. For a feature deliberately split into several PRs, agree on the `## PR-срезы` section in `specs/NNN-<slug>/tasks.md` before coding; each PR gets only its named tasks, write paths, tests, branch and worktree. See `docs/spec-kit-workflow.md`.
+- Spec Kit owns versioned planning artifacts under `specs/` plus `.specify/`. Generated `tasks.md` is planning input, not permission to bypass isolated worktrees, Constitution Principle II's testing policy, independent review, CI, landing, or release gates. For a feature deliberately split into several PRs, agree on the `## PR-срезы` section in `specs/NNN-<slug>/tasks.md` before coding; each PR gets only its named tasks, write paths, tests, branch and worktree. See `docs/spec-kit-workflow.md`.
 - Execution tooling is selected by the work context. Standalone agents may implement from the validated artifacts; opt-in Hermes-managed outcomes additionally follow `.hermes.md`, ADR-0010, and `docs/spec-driven-kanban.md`.
 - Before adding or changing a feature spec, run `python3 scripts/check_spec_kit_specs.py` (or `make check-specs`) and preserve documented grandfathering for historical specs.
 
