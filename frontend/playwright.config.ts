@@ -26,7 +26,9 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testMatch: /(?:e2e\/(?!mobile).*|native-tasks-voice-brain-dump\.compose|claude-design-shell)\.spec\.ts/,
+      // Account confirmation requires the real shared-auth HTTPS origin and
+      // runs in playwright.modern-auth.config.ts, after the Compose suite.
+      testMatch: /(?:e2e\/(?!mobile|account\.spec).*|native-tasks-voice-brain-dump\.compose|claude-design-shell)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] }
     },
     {

@@ -25,7 +25,7 @@ test.use({
   contextOptions: { reducedMotion: "no-preference" },
   launchOptions: {
     ...(process.env.BRAIN_BUDDY_MODERN_E2E_CHROMIUM ? { executablePath: process.env.BRAIN_BUDDY_MODERN_E2E_CHROMIUM } : {}),
-    args: [`--host-resolver-rules=MAP ${new URL(origin).hostname} 127.0.0.1`, "--no-proxy-server"]
+    args: [`--host-resolver-rules=MAP ${new URL(origin).hostname} 127.0.0.1`]
   }
 });
 
@@ -185,6 +185,37 @@ async function fakeGoogle(page: Page, email: string, subject: string): Promise<v
 async function finishGoogle(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "Synthetic Google sign-in" })).toBeVisible();
   await page.getByRole("button", { name: "Continue as synthetic identity" }).click();
+}
+
+for (const provider of ["google", "apple"] as const) {
+  test(`023-FR-004 024-FR-013 ${provider} cancellation returns to recoverable sign-in without a session`, async ({ page }, testInfo) => {
+    const upstream = provider === "google" ? "https://accounts.google.com/o/oauth2/v2/auth?**" : "https://appleid.apple.com/auth/authorize?**";
+    await page.route(upstream, async route => {
+      const authorization = new URL(route.request().url());
+      await route.fulfill({ contentType: "text/html", body: `<html><body><h1>Cancel synthetic sign-in</h1><form action="${escapeHtml(authorization.searchParams.get("redirect_uri")!)}" method="${provider === "google" ? "get" : "post"}"><input type="hidden" name="state" value="${escapeHtml(authorization.searchParams.get("state")!)}"><input type="hidden" name="error" value="access_denied"><button type="submit">Cancel authorization</button></form></body></html>` });
+    });
+    await test.step("cancel a real bound provider attempt without returning any code", async () => {
+      await page.goto("/login");
+      await page.getByRole("button", { name: provider === "google" ? "Sign in with Google" : "Sign in with Apple", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Cancel synthetic sign-in" })).toBeVisible();
+      const callback = page.waitForResponse(response => new URL(response.url()).pathname === `/api/auth/providers/${provider}/callback`);
+      await page.getByRole("button", { name: "Cancel authorization" }).click();
+      expect((await callback).status()).toBe(303);
+      await expect(page.getByRole("alert")).toHaveText(/Sign-in cancelled/);
+      expect(new URL(page.url()).hash).toBe("");
+      expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+      expect((await page.context().cookies()).some(cookie => cookie.name === "brainbuddy_auth_binder")).toBe(false);
+      expect((await api(page, "/auth/me")).status).toBe(401);
+      await accessible(page);
+      await page.screenshot({ path: testInfo.outputPath(`${provider}-cancel.png`) });
+    });
+    await test.step("return to enabled sign-in choices for a fresh attempt", async () => {
+      await page.getByRole("link", { name: "Back to sign in" }).click();
+      await expect(page.getByRole("button", { name: "Sign in with Google", exact: true })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Sign in with Apple", exact: true })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Continue with email", exact: true })).toBeEnabled();
+    });
+  });
 }
 
 async function fakeApple(page: Page, email: string | null, subject: string): Promise<void> {
@@ -366,6 +397,113 @@ test.beforeEach(async ({ page }, testInfo) => {
   // fails closed instead of reaching a real provider, font host, or account.
   await page.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort("blockedbyclient"));
 });
+
+for (const method of ["email", "google", "email-code"] as const) {
+  test(`023-FR-013 023-FR-018 ${method} owner management recovers from another browser account`, async ({ page, context }) => {
+    const email = `linked-switch-${method}-modern-e2e@gmail.com`;
+    await page.setViewportSize({ width: 390, height: 844 });
+    await fakeGoogle(page, email, `linked-switch-${method}-subject`);
+    let owner: Me;
+    let previousCookies: Awaited<ReturnType<typeof context.cookies>>;
+    await test.step("establish a passwordless linked owner and a different current browser account", async () => {
+      // A verified provider creates the passwordless owner without spending
+      // the mailbox login quota needed by the email recovery path below.
+      await page.goto("/login");
+      await page.getByRole("button", { name: "Sign in with Google", exact: true }).click();
+      await finishGoogle(page);
+      await expect(page.getByRole("heading", { name: "Next actions", exact: true })).toBeVisible();
+      owner = (await api<Me>(page, "/auth/me")).body;
+      expect((await api<AccountMethods>(page, "/account/auth-methods")).body.has_password).toBe(false);
+      expect((await api(page, "/auth/logout", {})).status).toBe(204);
+      await passwordLogin(page, otherEmail);
+      previousCookies = await context.cookies();
+      expect((await api<Me>(page, "/auth/me")).body.id).not.toBe(owner.id);
+    });
+    await test.step("withhold sign-in until explicit server-confirmed sign-out, including offline retry", async () => {
+      const pathname = method === "google" ? "/settings/account" : "/settings/account/delete";
+      await page.goto(`${pathname}?expected_owner=${encodeURIComponent(owner.id)}`);
+      const switchButton = page.getByRole("button", { name: "Sign out and use linked account", exact: true });
+      await expect(switchButton).toBeVisible();
+      await expect(page.getByRole("button", { name: "Sign in with Google", exact: true })).toHaveCount(0);
+      await expect(page.getByLabel("Email address", { exact: true })).toHaveCount(0);
+      await accessible(page);
+      await page.route("**/api/auth/logout", route => route.abort("failed"), { times: 1 });
+      await switchButton.focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("alert")).toContainText("Couldn't confirm sign-out");
+      expect((await api<Me>(page, "/auth/me")).body.email).toBe(otherEmail);
+      await expect(page.getByLabel("Email address", { exact: true })).toHaveCount(0);
+      await accessible(page);
+      await switchButton.click();
+      await expect(page.getByRole("button", { name: "Continue with email", exact: true })).toBeVisible();
+      expect((await api(page, "/auth/me")).status).toBe(401);
+      const sibling = await context.newPage();
+      await sibling.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort("blockedbyclient"));
+      let signInPosts = 0;
+      page.on("request", request => {
+        if (request.method() === "POST" && ["/api/auth/email/request", "/api/auth/providers/google/start", "/api/auth/email/verify"].includes(new URL(request.url()).pathname)) signInPosts += 1;
+      });
+      try {
+        await passwordLogin(sibling, otherEmail);
+        if (method !== "google") {
+          await page.getByLabel("Email address", { exact: true }).fill(email);
+          await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+        } else await page.getByRole("button", { name: "Sign in with Google", exact: true }).click();
+        await expect(switchButton).toBeVisible();
+        expect(signInPosts).toBe(0);
+        expect((await api<Me>(page, "/auth/me")).body.email).toBe(otherEmail);
+        await accessible(page);
+        await switchButton.click();
+        await expect(page.getByRole("button", { name: "Continue with email", exact: true })).toBeVisible();
+        expect((await api(page, "/auth/me")).status).toBe(401);
+        if (method === "email-code") {
+          await page.getByLabel("Email address", { exact: true }).fill(email);
+          await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+          await expect(page.getByLabel("Email code", { exact: true })).toBeVisible();
+          await passwordLogin(sibling, otherEmail);
+          await page.getByLabel("Email code", { exact: true }).fill("123456");
+          await page.getByRole("button", { name: "Verify and continue", exact: true }).click();
+          await expect(switchButton).toBeVisible();
+          expect(signInPosts).toBe(1);
+          expect((await api<Me>(page, "/auth/me")).body.email).toBe(otherEmail);
+          await switchButton.click();
+          await expect(page.getByRole("button", { name: "Continue with email", exact: true })).toBeVisible();
+        }
+      } finally { await sibling.close(); }
+      if (method === "email") {
+        await page.getByLabel("Email address", { exact: true }).fill(email);
+        await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+        await enterCode(page, email, "login");
+      } else {
+        if (method === "email-code") {
+          // Abandoning a proof must not bypass the real mailbox cooldown.
+          // A fresh connected provider remains a usable recovery method.
+          await page.getByLabel("Email address", { exact: true }).fill(email);
+          const limited = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/email/request");
+          await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+          expect((await limited).status()).toBe(429);
+          await expect(page.getByRole("alert")).toContainText("Too many attempts");
+          await accessible(page);
+        }
+        await page.getByRole("button", { name: "Sign in with Google", exact: true }).click();
+        await finishGoogle(page);
+      }
+      await expect(page.getByRole("heading", { name: "Account settings", exact: true })).toBeVisible();
+      expect(new URL(page.url()).pathname).toBe(pathname);
+      expect(new URL(page.url()).searchParams.get("expected_owner")).toBe(owner.id);
+      expect((await api<Me>(page, "/auth/me")).body.id).toBe(owner.id);
+    });
+    await test.step("read back revocation of the previous browser session while retaining the linked owner", async () => {
+      const currentCookies = await context.cookies();
+      await context.clearCookies();
+      await context.addCookies(previousCookies);
+      expect((await api(page, "/auth/me")).status).toBe(401);
+      await context.clearCookies();
+      await context.addCookies(currentCookies);
+      expect((await api<Me>(page, "/auth/me")).body.id).toBe(owner.id);
+    });
+  });
+}
 
 test("023-FR-001 023-FR-008 023-SC-001 email signup commits one session and survives reload", async ({ page }) => {
   const email = "signup-modern-e2e@example.com";

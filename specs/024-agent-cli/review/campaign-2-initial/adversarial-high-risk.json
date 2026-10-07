@@ -1,0 +1,141 @@
+{
+  "role": "adversarial-high-risk",
+  "verdict": "changes-required",
+  "summary": "Reviewed the twelve frozen planning artifacts at digest 2c189ad0a6c54769e0f5c3904757a4a14a46add1a1e021e9327a9ff3ab733511. The corrected CLI contracts remain blocked by six bounded integration defects exposed by origin/feat/modern-auth@bc7fc72 and origin/main@21f08d2: the accepted transactional Identity authority supersedes the JSON grant/flock design; derived CLI sessions do not preserve provider-bound authority; rollback is not gated on completion of the modern-auth migration; the shared login return path rejects /cli/authorize and drops its code fragment; the required flag baseline is now six rows rather than five; and ADR-0028 is already allocated. This was a native read-only review in the current session; no CLI adapter execution, executable pin, independent-provider identity, or native product execution is claimed.",
+  "reviewed_files": [
+    ".specify/workflows/runs/cli-023-r2/planning-context.json",
+    "specs/023-agent-cli/spec.md",
+    "specs/023-agent-cli/plan.md",
+    "specs/023-agent-cli/design.md",
+    "specs/023-agent-cli/tasks.md",
+    "specs/023-agent-cli/research.md",
+    "specs/023-agent-cli/data-model.md",
+    "specs/023-agent-cli/quickstart.md",
+    "specs/023-agent-cli/checklists/requirements.md",
+    "specs/023-agent-cli/contracts/cli.md",
+    "specs/023-agent-cli/contracts/device-auth.md",
+    "specs/023-agent-cli/contracts/distribution.md",
+    "specs/023-agent-cli/contracts/rollout.md",
+    "specs/023-agent-cli/auth-integration.md",
+    "docs/decisions/0028-runtime-managed-cli-authentication.md",
+    "origin/feat/modern-auth@bc7fc72:docs/decisions/0028-modern-identity-authority.md",
+    "origin/feat/modern-auth@bc7fc72:backend/app/repositories/auth_store.py",
+    "origin/feat/modern-auth@bc7fc72:backend/app/repositories/session.py",
+    "origin/feat/modern-auth@bc7fc72:backend/app/services/auth_service.py",
+    "origin/feat/modern-auth@bc7fc72:backend/app/schemas/auth.py",
+    "origin/feat/modern-auth@bc7fc72:frontend/src/features/auth/authFlow.ts",
+    "origin/feat/modern-auth@bc7fc72:frontend/src/components/auth/ProtectedRoute.tsx",
+    "origin/feat/modern-auth@bc7fc72:frontend/src/pages/LoginPage.tsx",
+    "origin/main@21f08d2:backend/app/core/config.py",
+    "origin/main@21f08d2:backend/app/repositories/feature_flag.py",
+    "origin/main@21f08d2:backend/app/services/feature_flag_service.py"
+  ],
+  "findings": [
+    {
+      "severity": "blocking",
+      "category": "authentication persistence and concurrency",
+      "description": "The frozen plan makes device grants a second JSON Identity authority, coordinates them with session files through RLock/flock, and commits grant consumption before a separate session mint. The now-accepted modern Identity ADR instead makes auth.sqlite3 authoritative and requires proof consumption and session issuance to share one transaction. Retaining the frozen design would violate that authority, preserve a cross-store failure boundary, and make the fsync protocol obsolete rather than sufficient.",
+      "evidence": [
+        "specs/023-agent-cli/plan.md:17",
+        "specs/023-agent-cli/plan.md:58",
+        "specs/023-agent-cli/research.md:25",
+        "specs/023-agent-cli/data-model.md:7",
+        "specs/023-agent-cli/contracts/device-auth.md:43",
+        "specs/023-agent-cli/contracts/device-auth.md:59",
+        "origin/feat/modern-auth@bc7fc72:docs/decisions/0028-modern-identity-authority.md:10",
+        "origin/feat/modern-auth@bc7fc72:backend/app/repositories/auth_store.py:18",
+        "origin/feat/modern-auth@bc7fc72:backend/app/repositories/auth_store.py:232"
+      ],
+      "recommendation": "Replace DeviceAuthorization JSON files, the authorization flock, parent-directory fsync work, and their crash protocol with an Identity-owned device-grant table in AuthStore. Use foreign keys for approving user/source session, store auth_version, and perform fresh source-session/user/deletion/provider checks, grant consumption, and CLI session insertion in one AuthStore.transaction. Check exposure before the transaction and again before returning the cookie; if the post-commit exposure check fails, delete the new session and return failure. Extend AuthMetadata cleanup, account purge, export exclusion, bounded admission, restart, concurrency, and injected-transaction-failure tests for the new table."
+    },
+    {
+      "severity": "blocking",
+      "category": "provider-bound session revocation",
+      "description": "The device contract says to call existing session minting but never defines how the new CLI session inherits the approving session's auth_method, provider_binding_id, and auth_version. In the published implementation, _create_session defaults to auth_method=password and provider_binding_id=null, while provider unlink enforcement only applies to google/apple sessions carrying their binding. A provider-approved CLI credential minted with those defaults can outlive unlinking of the provider authority that created it.",
+      "evidence": [
+        "specs/023-agent-cli/contracts/device-auth.md:45",
+        "specs/023-agent-cli/contracts/device-auth.md:47",
+        "specs/023-agent-cli/data-model.md:16",
+        "specs/023-agent-cli/data-model.md:18",
+        "origin/feat/modern-auth@bc7fc72:backend/app/services/auth_service.py:153",
+        "origin/feat/modern-auth@bc7fc72:backend/app/services/auth_service.py:179",
+        "origin/feat/modern-auth@bc7fc72:backend/app/schemas/auth.py:62",
+        "origin/feat/modern-auth@bc7fc72:backend/app/repositories/auth_store.py:48"
+      ],
+      "recommendation": "Specify and test the derived-session authority contract. Inside the shared transaction, copy or equivalently bind the source session's current auth_method, provider_binding_id, user_id, and auth_version into the CLI session; reject a missing, revoked, expired, deleting, version-stale, or inactive-provider source. Preserve the foreign-key/cascade relationship so provider unlink and source/bulk revocation invalidate pending grants and provider-derived CLI sessions, while password/email sessions retain their actual provenance."
+    },
+    {
+      "severity": "blocking",
+      "category": "dependency and rollback safety",
+      "description": "The frozen research predates the published modern-auth implementation, and the plan still permits one CLI candidate whose initial failure rolls back to its predecessor. The accepted modern-auth ADR migrates Identity to auth.sqlite3, removes JSON authority, and explicitly refuses old/unverified backend rollback after import; that implementation is on origin/feat/modern-auth and is not present on origin/main. Without an explicit landed-and-deployed dependency gate, the CLI candidate can combine an irreversible auth migration with a rollback procedure that assumes no such migration occurred.",
+      "evidence": [
+        "specs/023-agent-cli/research.md:15",
+        "specs/023-agent-cli/research.md:21",
+        "specs/023-agent-cli/plan.md:7",
+        "specs/023-agent-cli/plan.md:80",
+        "specs/023-agent-cli/tasks.md:10",
+        "specs/023-agent-cli/contracts/rollout.md:7",
+        "specs/023-agent-cli/contracts/rollout.md:9",
+        "origin/feat/modern-auth@bc7fc72:docs/decisions/0028-modern-identity-authority.md:10",
+        "origin/feat/modern-auth@bc7fc72:docs/decisions/0028-modern-identity-authority.md:17",
+        "origin/main@21f08d2:backend/app/repositories/session.py:1"
+      ],
+      "recommendation": "Make the modern-auth exact SHA an explicit implementation-base and rollout dependency for US4. Require its accepted ADR, merged code, completed stopped-writer migration/cleanup, deployed readiness, and compatible rollback floor before the CLI auth candidate may deploy or activate. If the changes must ship together, remove the predecessor-image rollback claim and adopt the accepted forward-repair/storage-epoch procedure. Amend the stale research and re-review the integrated base before implementation."
+    },
+    {
+      "severity": "blocking",
+      "category": "shared-login return contract",
+      "description": "The frozen browser contract depends on preserving /cli/authorize#user_code=..., including across authentication. The published safeAuthDestination allow-list rejects /cli/authorize and its return value omits every hash; ProtectedRoute also builds and stores only pathname plus search, and LoginPage reconstructs only those fields. A signed-out owner, including one using Google or Apple, is therefore returned to / or loses the verification code and cannot complete SC-006 through the specified shared entry flow.",
+      "evidence": [
+        "specs/023-agent-cli/spec.md:74",
+        "specs/023-agent-cli/design.md:77",
+        "specs/023-agent-cli/design.md:91",
+        "specs/023-agent-cli/plan.md:64",
+        "specs/023-agent-cli/contracts/device-auth.md:11",
+        "origin/feat/modern-auth@bc7fc72:frontend/src/features/auth/authFlow.ts:10",
+        "origin/feat/modern-auth@bc7fc72:frontend/src/features/auth/authFlow.ts:17",
+        "origin/feat/modern-auth@bc7fc72:frontend/src/components/auth/ProtectedRoute.tsx:15",
+        "origin/feat/modern-auth@bc7fc72:frontend/src/components/auth/ProtectedRoute.tsx:28",
+        "origin/feat/modern-auth@bc7fc72:frontend/src/pages/LoginPage.tsx:12"
+      ],
+      "recommendation": "Extend the single shared destination validator to allow exactly /cli/authorize and preserve only its validated #user_code=<normalized-code> fragment. Carry pathname, search, and hash through ProtectedRoute, LoginPage, AuthEntry, provider sessionStorage, and callback navigation; clear the fragment from history only after CliAuthorizePage has read it. Add signed-out password, email-code, Google, and Apple return tests plus invalid/external/protocol-relative destination rejection and manual-code recovery tests."
+    },
+    {
+      "severity": "blocking",
+      "category": "feature-flag migration and rollback",
+      "description": "The frozen ADR and rollout contract define five required rows plus optional cli_auth as a sixth row. origin/main now has six required runtime-managed rows, including task_mcp, and its repository treats exact row-set equality as health while general mutations rewrite every managed row. The modern-auth branch still reflects the older five-row inventory. Applying the frozen counts or merging either baseline without reconciliation can degrade all flags, drop task_mcp, or cause an unrelated mutation to materialize cli_auth before the rollback floor.",
+      "evidence": [
+        "docs/decisions/0028-runtime-managed-cli-authentication.md:13",
+        "docs/decisions/0028-runtime-managed-cli-authentication.md:17",
+        "docs/decisions/0028-runtime-managed-cli-authentication.md:28",
+        "specs/023-agent-cli/plan.md:62",
+        "specs/023-agent-cli/contracts/rollout.md:5",
+        "specs/023-agent-cli/contracts/rollout.md:13",
+        "origin/main@21f08d2:backend/app/core/config.py:86",
+        "origin/main@21f08d2:backend/app/repositories/feature_flag.py:83",
+        "origin/main@21f08d2:backend/app/repositories/feature_flag.py:101",
+        "origin/main@21f08d2:backend/app/repositories/feature_flag.py:572",
+        "origin/main@21f08d2:backend/app/repositories/feature_flag.py:654",
+        "origin/feat/modern-auth@bc7fc72:backend/app/repositories/feature_flag.py:83"
+      ],
+      "recommendation": "Rebase/reconcile both dependencies first, then define six required rows plus optional cli_auth as the seventh row. Update exact-set health logic, upgrade-source sets, metadata, service projection, admin mutation, scrub, tests, and rollback evidence so all reads and unrelated writes preserve optional absence; only an explicit authorized cli_auth mutation may insert it. Prove task_mcp survives seed, upgrade, mutation, scrub, modern-auth integration, initial old-reader rollback, later seven-row compatible rollback, and account purge."
+    },
+    {
+      "severity": "blocking",
+      "category": "ADR identity and architecture governance",
+      "description": "The CLI proposal is bound to a proposed ADR-0028, but the published modern-auth dependency already contains an accepted ADR-0028 for the Identity authority that the CLI must use. Accepting or citing both under the same identifier would make implementation, review, rollback, and future supersession references ambiguous; the CLI ADR's statement that it preserves ADR-0001 is also stale where the accepted modern Identity ADR supersedes JSON-backed Identity assumptions.",
+      "evidence": [
+        "docs/decisions/0028-runtime-managed-cli-authentication.md:1",
+        "docs/decisions/0028-runtime-managed-cli-authentication.md:4",
+        "docs/decisions/0028-runtime-managed-cli-authentication.md:6",
+        "specs/023-agent-cli/plan.md:38",
+        "specs/023-agent-cli/contracts/rollout.md:3",
+        "specs/023-agent-cli/contracts/rollout.md:15",
+        "origin/feat/modern-auth@bc7fc72:docs/decisions/0028-modern-identity-authority.md:1",
+        "origin/feat/modern-auth@bc7fc72:docs/decisions/0028-modern-identity-authority.md:4"
+      ],
+      "recommendation": "Reserve a nonconflicting ADR number across current refs for the CLI rollout decision, rewrite it to amend the accepted modern Identity ADR and the current six-row feature-flag baseline, and update every plan/task/contract reference plus the reviewed source hash. Because these edits change frozen review artifacts, generate a new digest and bind subsequent sign-off to that exact digest."
+    }
+  ],
+  "product_decisions": []
+}

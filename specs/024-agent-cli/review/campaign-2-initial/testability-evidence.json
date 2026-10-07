@@ -1,0 +1,60 @@
+{
+  "role": "testability-evidence",
+  "verdict": "changes-required",
+  "summary": "At artifact digest 2c189ad0a6c54769e0f5c3904757a4a14a46add1a1e021e9327a9ff3ab733511, SC-001 through SC-006 have meaningful, bounded planned evidence. The existing Playwright projects will collect the proposed desktop and mobile tests; the Compose plan derives and injects the per-run trusted origin and provisions and reads back account exposure. The artifacts explicitly require independent-process, restart, termination, and parent-directory-fsync ordering evidence; cross-process prompt-free native-store checks; five native executable jobs; installer failure preservation; and published Unix/Windows installer evidence bound to the exact reviewed SHA. Existing coverage floors and Allure enforcement remain unchanged. One concrete CI traceability gap remains. No native execution, shell-adapter execution, or verified provenance is claimed; campaign provenance remains correlated and unverified.",
+  "reviewed_files": [
+    ".specify/workflows/runs/cli-023-r2/planning-context.json",
+    ".specify/workflows/speckit/review.schema.json",
+    "specs/023-agent-cli/spec.md",
+    "specs/023-agent-cli/plan.md",
+    "specs/023-agent-cli/design.md",
+    "specs/023-agent-cli/tasks.md",
+    "specs/023-agent-cli/research.md",
+    "specs/023-agent-cli/data-model.md",
+    "specs/023-agent-cli/quickstart.md",
+    "specs/023-agent-cli/checklists/requirements.md",
+    "specs/023-agent-cli/contracts/cli.md",
+    "specs/023-agent-cli/contracts/device-auth.md",
+    "specs/023-agent-cli/contracts/distribution.md",
+    "specs/023-agent-cli/contracts/rollout.md",
+    "specs/023-agent-cli/review-status.md",
+    "docs/decisions/0028-runtime-managed-cli-authentication.md",
+    ".github/workflows/ci.yml",
+    "Makefile",
+    "compose.yaml",
+    ".env.example",
+    "frontend/playwright.config.ts",
+    "frontend/tests/allure.fixtures.ts",
+    "frontend/src/test/allureTaxonomy.ts",
+    "backend/tests/allure_taxonomy.py",
+    "backend/tests/test_feature_flag_repository.py",
+    "scripts/run_playwright_e2e.sh",
+    "scripts/check_requirement_coverage.py",
+    "scripts/test_check_requirement_coverage.py",
+    "scripts/check_gate_integrity.py",
+    "scripts/test_check_gate_integrity.py",
+    "scripts/validate_ci_artifacts.py",
+    "scripts/test_validate_ci_artifacts.py",
+    "scripts/validate_allure_taxonomy.py",
+    "scripts/validate_coverage_floor.py",
+    "backend/coverage-floor.json",
+    "frontend/coverage-floor.json",
+    ".specify/gate-integrity.json",
+    ".specify/templates/pre-freeze-receipt.schema.json"
+  ],
+  "findings": [
+    {
+      "severity": "important",
+      "category": "CI requirement-traceability enforcement",
+      "description": "The plan extends the requirement-coverage scanner to recognize Rust tests, but it never explicitly wires a full feature-023 coverage invocation into the authoritative check-specs target. Following the tasks literally can therefore leave all 023-FR/SC markers unenforced while make verify-all and Full CI remain green.",
+      "evidence": [
+        "scripts/check_requirement_coverage.py:71-84 currently scans no cli/tests tree and accepts no .rs suffix; tasks.md:11 correctly plans to extend this scanner.",
+        "Makefile:150-160 runs full requirement coverage only for specs/019-miro-like-crt-canvas; there is no invocation for specs/023-agent-cli.",
+        "tasks.md:11 mentions extending the scanner and updating gate hashes, but does not require adding `python3 scripts/check_requirement_coverage.py specs/023-agent-cli` to check-specs.",
+        "tasks.md:58 relies on make verify-all and general spec/gate checks for final evidence, while Makefile:171 defines verify-all through the presently incomplete check-specs target."
+      ],
+      "recommendation": "Amend T002 and plan.md to require three linked changes: scan cli/tests as a dedicated test tree with .rs support, add unit tests for that behavior, and add an unfiltered `python3 scripts/check_requirement_coverage.py specs/023-agent-cli` invocation to Makefile check-specs. Pin that invocation with the corresponding gate-integrity invariant/test and regenerate the manifest. Keep the existing coverage floors and Allure rules unchanged."
+    }
+  ],
+  "product_decisions": []
+}

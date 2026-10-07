@@ -3,14 +3,14 @@
 import logging
 import os
 import threading
-from collections.abc import Awaitable, Callable
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 
 from app.api import api_router
 from app.api.account import router as account_router
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
+from app.api.cli_auth import router as cli_auth_router
 from app.api.errors import register_exception_handlers
 from app.api.mcp import install_task_mcp
 from app.api.middleware import CorrelationIdMiddleware
@@ -40,6 +40,10 @@ def _run_privacy_maintenance_sweep(container: Container) -> tuple[int, int, int]
         container.auth_migration.cleanup_expired_backup()
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
         logger.warning("Authentication backup cleanup deferred")
+    try:
+        container.cli_auth_service.cleanup()
+    except Exception:  # noqa: BLE001 - coarse diagnostics never contain grant data
+        logger.warning("CLI authorization cleanup deferred")
 
     purged_accounts = 0
     try:
@@ -346,21 +350,8 @@ def create_app() -> FastAPI:
             if app.state.privacy_maintenance_thread is not None:
                 app.state.privacy_maintenance_thread.join(timeout=5)
 
-    app.add_middleware(CorrelationIdMiddleware)
+    app.add_middleware(CorrelationIdMiddleware, api_prefix=config.api_prefix)
     register_exception_handlers(app)
-
-    @app.middleware("http")
-    async def auth_privacy_headers(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        response = await call_next(request)
-        path = request.url.path
-        if path.startswith(
-            (f"{config.api_prefix}/auth/", f"{config.api_prefix}/account/")
-        ):
-            response.headers["Cache-Control"] = "no-store"
-            response.headers["Referrer-Policy"] = "no-referrer"
-        return response
 
     @app.on_event("shutdown")
     def close_auth_provider() -> None:
@@ -370,6 +361,7 @@ def create_app() -> FastAPI:
         app.state.container.modern_auth_service.provider.close()
 
     app.include_router(modern_auth_router, prefix=config.api_prefix)
+    app.include_router(cli_auth_router, prefix=config.api_prefix)
     register_review_exception_handlers(app)
     app.include_router(auth_router, prefix=f"{config.api_prefix}/auth")
     app.include_router(account_router, prefix=f"{config.api_prefix}/account")

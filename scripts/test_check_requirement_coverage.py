@@ -34,6 +34,19 @@ SPEC = (
 
 
 class RequirementCoverageTests(unittest.TestCase):
+    def test_rust_integration_tests_count_but_product_source_does_not(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(tmp, backend_test="")
+            tests = root / "cli/tests"
+            tests.mkdir(parents=True)
+            (tests / "journey.rs").write_text("fn journey_006_fr_001() {}")
+            source = root / "cli/src"
+            source.mkdir(parents=True)
+            (source / "main.rs").write_text("// 006-FR-002")
+            result = self.module.coverage(root, feature_dir)
+            self.assertEqual(result["FR-001"], ["cli/tests/journey.rs"])
+            self.assertEqual(result["FR-002"], [])
+
     def setUp(self) -> None:
         self.module = load_module()
 

@@ -1,0 +1,24 @@
+{
+  "role": "privacy-consent-security",
+  "verdict": "pass",
+  "summary": "Bounded correction verification of only the two findings from the original privacy-consent-security review against current artifact digest c5778eef47ef975a22cdd239ad289973151f6a9b07d422ecbf3269bd4a9e8ddd passed. The artifacts now place device grants in the existing AuthStore and require fresh owner, source, auth_version, and provider-generation checks, conditional grant consumption, and lineage-preserving session insertion in one transaction, with rollback before any secret, provider and bulk revocation, foreign keys, expiry, purge, and export exclusion; the JSON and flock sidecar design is removed. The decision is uniquely ADR-0029, extends accepted ADR-0028 and ADR-0019, and its reviewed hash matches. Browser return storage retains only the short user code and a deadline of no more than 600 seconds after immediate history clearing, never the private proof. The plan gates release on actual modern-auth landing, release, and import plus a SQLite-capable predecessor and does not claim the shared-auth dependency is merged. No original finding remains. This is not a fresh broad review and makes no implementation, native-runtime, production, independence, executable, adapter, or model-provenance claim.",
+  "reviewed_files": [
+    ".specify/workflows/runs/cli-023-r2/planning-context.json",
+    "specs/023-agent-cli/spec.md",
+    "specs/023-agent-cli/plan.md",
+    "specs/023-agent-cli/design.md",
+    "specs/023-agent-cli/tasks.md",
+    "specs/023-agent-cli/research.md",
+    "specs/023-agent-cli/data-model.md",
+    "specs/023-agent-cli/quickstart.md",
+    "specs/023-agent-cli/checklists/requirements.md",
+    "specs/023-agent-cli/contracts/cli.md",
+    "specs/023-agent-cli/contracts/device-auth.md",
+    "specs/023-agent-cli/contracts/distribution.md",
+    "specs/023-agent-cli/contracts/rollout.md",
+    "specs/023-agent-cli/review-status.md",
+    "docs/decisions/0029-runtime-managed-cli-authentication.md"
+  ],
+  "findings": [],
+  "product_decisions": []
+}

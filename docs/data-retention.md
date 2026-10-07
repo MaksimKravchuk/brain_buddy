@@ -10,6 +10,7 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 
 | Data | Where | Retention | Enforced by |
 |---|---|---|---|
+| **CLI authorization grants** (only hashed private proof/short code and source authority) | Identity `auth.sqlite3` | 600 seconds in every state; next privacy sweep after expiry, including OFF/startup after downtime | Shared AuthStore secure-delete/WAL checkpoint; source/session/provider/user cascades; excluded from export |
 | Account record (email, display name, Argon2id password hash, mailbox verification) | `data/auth.sqlite3` for new or explicitly migrated roots; legacy user JSON/index only before the stopped-writer migration | Life of account + 14-day deletion grace | Account purge (below) |
 | Sessions (opaque token hashes, never the raw cookie) | `data/auth.sqlite3`; legacy session JSON only before migration | 30 days, or logout / revocation | Lazy delete on read; bulk revoke on password change & deletion |
 | Connected Google/Apple identities (stable provider identifier, minimal email/profile metadata and connection state) | Identity-owned `auth.sqlite3` tables | Active connection lifetime. Explicit Remove ends its authority and erases profile metadata; Google mapping is deleted immediately. Apple retains only minimal disconnected linkage while bounded revocation settles, at most 24 hours and never beyond account purge | Explicit unlink / Apple cleanup / metadata expiry sweep / account purge (spec 023) |
