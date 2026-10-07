@@ -198,6 +198,38 @@ describe("020-FR-015 While you were away dialog", () => {
     expect(screen.getByRole("button", { name: "Return both to Next" })).toBeEnabled();
   });
 
+  it("020-FR-015 020-FR-011 a task that already left Someday, or no longer carries this park, is not offered Return and says where it is", async () => {
+    const user = userEvent.setup();
+    const backInNext = { ...garage, state: "next" as const, parked: null, revision: 6 };
+    const waiting = { ...cv, state: "waiting" as const, parked: null, revision: 6 };
+    const parkedAgain = { ...router, project_id: "project-home", parked: { at: "2026-10-09T09:00:00Z", formulation_id: "form_newer" } };
+    renderDialog([portuguese, backInNext, waiting, parkedAgain], [park(portuguese), park(garage), park(cv), park(router)]);
+
+    await screen.findByText("Learn basic Portuguese");
+    expect(await within(row("Clean out the garage")).findByText("Now in Next actions")).toBeInTheDocument();
+    expect(within(row("Clean out the garage")).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(row("Update the CV")).getByText("Now in Waiting for")).toBeInTheDocument();
+    expect(within(row("Update the CV")).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(row("Return the old router")).getByText("Now in Someday / maybe")).toBeInTheDocument();
+    expect(within(row("Return the old router")).queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Return all|Return both/ })).not.toBeInTheDocument();
+
+    await user.click(await screen.findByRole("button", { name: "Return Learn basic Portuguese to Next" }));
+    await within(row("Learn basic Portuguese")).findByText("Returned");
+    expect(transitionTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("020-FR-015 Return all skips a task that already left Someday and still says all are back", async () => {
+    const user = userEvent.setup();
+    const backInNext = { ...cv, state: "next" as const, parked: null, revision: 6 };
+    renderDialog([portuguese, garage, backInNext], [park(portuguese), park(garage), park(cv)]);
+
+    await user.click(await screen.findByRole("button", { name: "Return both to Next" }));
+
+    expect(await screen.findByText("All 2 are back in Next with a fresh start.")).toBeInTheDocument();
+    expect(transitionTask.mock.calls.map(([id]) => id)).toEqual(["task-pt", "task-garage"]);
+  });
+
   it("020-FR-015 Continue waits while a row return is on its way", async () => {
     const user = userEvent.setup();
     let release: () => void = () => undefined;

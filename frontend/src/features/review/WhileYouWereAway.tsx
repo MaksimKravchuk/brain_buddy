@@ -111,6 +111,19 @@ export function WhileYouWereAway({
   const projectOf = (task: TaskResponse): ProjectResponse | undefined => projects.find((project) => project.id === task.project_id);
   const archived = (task: TaskResponse) => projectOf(task)?.state === "archived";
   const setRow = (taskId: string, status: RowStatus) => setRows((current) => ({ ...current, [taskId]: status }));
+  const parkOf = new Map(loaded.map(({ park, task }) => [task.id, park]));
+  /**
+   * The task is no longer this park's: it left Someday (another device, or
+   * returned before) or was parked again later. It is shown where it is now
+   * and never offered Return. A row returned or refused here keeps its status.
+   */
+  const movedElsewhere = (task: TaskResponse): boolean => {
+    const status = rows[task.id]?.kind;
+    if (status === "returned" || status === "stale") {
+      return false;
+    }
+    return task.state !== "someday" || task.parked?.formulation_id !== parkOf.get(task.id)?.formulation_id;
+  };
 
   // The account that pressed Return (begun before the first await): an answer
   // after the session switched account changes no row and writes no cache.
@@ -157,7 +170,7 @@ export function WhileYouWereAway({
 
   const returnable = (task: TaskResponse) => {
     const status = rows[task.id]?.kind;
-    return !archived(task) && (status === undefined || status === "failed");
+    return !movedElsewhere(task) && !archived(task) && (status === undefined || status === "failed");
   };
   // What "Return all" would cover once the projects are known; nothing goes back before.
   const candidates = tasks.filter(returnable);
@@ -169,6 +182,8 @@ export function WhileYouWereAway({
   const returnAll = async () => {
     const run = beginReviewContinuation();
     const alreadyBack = tasks.filter((task) => rows[task.id]?.kind === "returned").length;
+    // The tasks this dialog can still speak for: not those already elsewhere.
+    const inPlay = tasks.filter((task) => !movedElsewhere(task));
     let returnedNow = 0;
     setReturningAll(true);
     for (const task of eligible) {
@@ -180,14 +195,14 @@ export function WhileYouWereAway({
       }
     }
     setReturningAll(false);
-    const held = tasks.filter(archived);
+    const held = inPlay.filter(archived);
     const backInNext = alreadyBack + returnedNow;
     if (held.length > 0) {
       const back = `${backInNext} ${backInNext === 1 ? "task is" : "tasks are"} back in Next.`;
       const reasons = held.map((task) => ` “${task.title}” stayed in Someday because its project “${(projectOf(task) as ProjectResponse).name}” is archived. Restore the project first to bring it back.`);
       setSummary(`${back}${reasons.join("")}`);
-    } else if (backInNext === tasks.length) {
-      setSummary(`All ${tasks.length} are back in Next with a fresh start.`);
+    } else if (backInNext === inPlay.length) {
+      setSummary(`All ${inPlay.length} are back in Next with a fresh start.`);
     }
   };
 
@@ -287,6 +302,7 @@ export function WhileYouWereAway({
               const status = rows[task.id];
               const project = projectOf(task);
               const titleId = `${headingId}-${task.id}`;
+              const elsewhere = movedElsewhere(task);
               return (
                 <li key={task.id} aria-labelledby={titleId} className="flex flex-col gap-1 px-3 py-2.5">
                   <div className="flex flex-wrap items-center gap-2">
@@ -296,6 +312,8 @@ export function WhileYouWereAway({
                         <p className="m-0 text-xs text-slate-600">Back in Next with a fresh start</p>
                       ) : status?.kind === "stale" ? (
                         <p className="m-0 text-xs text-slate-600">{`Now in ${LIST_NAMES[status.current?.state ?? "someday"]}`}</p>
+                      ) : elsewhere ? (
+                        <p className="m-0 text-xs text-slate-600">{`Now in ${LIST_NAMES[task.state]}`}</p>
                       ) : (
                         <p className="m-0 text-xs text-slate-500">
                           {projectsKnown
@@ -306,7 +324,7 @@ export function WhileYouWereAway({
                     </div>
                     {status?.kind === "returned" ? (
                       <span className="text-xs font-semibold text-slate-600">Returned</span>
-                    ) : status?.kind === "stale" ? null : archived(task) ? (
+                    ) : status?.kind === "stale" || elsewhere ? null : archived(task) ? (
                       <button
                         type="button"
                         aria-disabled="true"
