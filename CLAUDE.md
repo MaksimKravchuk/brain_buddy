@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Before planning, implementing, or delegating, read `AGENTS.md` and the applicable
+nested instructions. Test selection and test-first applicability are governed by
+[Constitution Principle II](.specify/memory/constitution.md#ii-tested-delivery-across-stack),
+including when generating tasks or handing work to another agent.
+
 ## Commands
 
 Targets live in the `Makefile`; per-package scripts in `frontend/package.json`.

@@ -147,10 +147,10 @@ marker string that upstream cannot contain — and runs in `make check-specs`.
 |---|---|
 | `.specify/templates/spec-template.md` | consent/local-first and mobile-first callouts required by the constitution |
 | `.specify/templates/plan-template.md` | real repository source tree; Constitution Check including the requirement to cite `design.md` |
-| `.specify/templates/tasks-template.md` | delivery gates restated: worktree, TDD, independent acceptance, ADR-0008 landing |
+| `.specify/templates/tasks-template.md` | delivery gates restated: worktree, Constitution Principle II testing, independent acceptance, ADR-0008 landing |
 | `.specify/templates/checklist-template.md` | BrainBuddy constitution gates |
 | `.specify/agent-commands/speckit-implement/SKILL.md` | implements one explicitly selected PR slice from `tasks.md` under BrainBuddy's worktree and quality gates |
-| `.specify/agent-commands/speckit-tasks/SKILL.md` | obtains approval of PR-sized task boundaries before implementation |
+| `.specify/agent-commands/speckit-tasks/SKILL.md` | applies Constitution Principle II to test tasks; obtains approval of PR-sized task boundaries before implementation |
 
 Run `python3 scripts/check_speckit_manifests.py --list` to see the markers.
 
@@ -489,7 +489,7 @@ Generated `tasks.md` is planning input only. It is not permission to bypass:
 
 - assigned ownership and agreed scope;
 - isolated worktrees and branch discipline;
-- tests-before-implementation expectations;
+- [Constitution Principle II's testing policy](../.specify/memory/constitution.md#ii-tested-delivery-across-stack), including reuse and test-first applicability;
 - independent review and `review-required` handoffs;
 - CI, merge, and Fly release gates.
 
