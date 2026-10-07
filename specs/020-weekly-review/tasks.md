@@ -631,6 +631,8 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
     unknown state with Retry, not "Now in Someday / maybe";
   - backend (#278): replay repair in `_complete_session` keeps the recorded activity
     time for `last_activity_at` instead of the retry time;
+  - backend (#272): reject a blank `BRAIN_BUDDY_REVIEW_NAVIGATOR_MODEL` at startup so
+    the navigator fails fast instead of reporting itself available;
   - carried over: the iOS visible-content staleness check, the design.md M-02 copy
     amendment, a PR-04 deviations line, the TR-005 message, and the
     `/review/decisions/{id}/undo` path parameter taking the reference shape.
