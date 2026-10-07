@@ -1,18 +1,18 @@
 {
   "schema": "brainbuddy-project-archive-traces/v1",
-  "description": "Golden traces of the project archive, unarchive, listing, tolerant task PATCH and desired-outcome contract (spec 021, contracts/kit-commands.md section 7). Verified by backend/tests/test_project_archive_traces.py against the real API, so a fake server replaying them cannot drift from the backend. They describe the PR-02 behaviour: archive still clears members and sets the marker.",
+  "description": "Golden traces of the project archive, unarchive, listing, tolerant task PATCH and desired-outcome contract (spec 021, contracts/kit-commands.md section 7). Verified by backend/tests/test_project_archive_traces.py against the real API, so a fake server replaying them cannot drift from the backend. They describe the lossless archive of ADR-0020: archive keeps every member and clears the marker.",
   "conventions": {
     "owner": "Two signed-in accounts share one server. `as` on a request is `second` to use the other account; the default is the first.",
     "request": "`path` is under the server origin; `key` is the Idempotency-Key header (omitted for reads); `{name}` in a path or body is replaced by a captured value.",
     "expect": "`status` is exact. `body` is a subset match: every listed key must be present and equal, recursively; a list must have the same length and match element-wise; the string `$present` matches any non-null value.",
     "capture": "Maps a variable name to a dotted path in the response body.",
-    "seed": "A state the API cannot reach yet. `archive_keeping_members` archives the project and stamps `archived_at` without touching its tasks (what lossless archive will do). `pre_feature_archive` archives it with `archived_at` null and the marker true (what an archive made before this feature looks like). Both add one revision."
+    "seed": "A state set straight in the store. `archive_keeping_members` archives the project and stamps `archived_at` without touching its tasks (what lossless archive does). `pre_feature_archive` archives it with `archived_at` null and the marker true (what an archive made before this feature looks like). Both add one revision."
   },
   "traces": [
     {
       "id": "TR-P01",
-      "title": "archive clears the members and sets the marker",
-      "requirements": ["021-FR-027"],
+      "title": "archive keeps the members and clears the marker",
+      "requirements": ["021-FR-024", "021-FR-027"],
       "steps": [
         {
           "name": "a project",
@@ -29,12 +29,12 @@
         {
           "name": "archive",
           "request": {"method": "POST", "path": "/api/projects/{pid}/archive", "key": "p01-archive", "body": {"expected_revision": 1}},
-          "expect": {"status": 200, "body": {"state": "archived", "revision": 2, "archived_at": null, "archived_before_lossless": true, "open_task_count": 0}}
+          "expect": {"status": 200, "body": {"state": "archived", "revision": 2, "archived_at": "$present", "archived_before_lossless": false, "open_task_count": 1}}
         },
         {
-          "name": "the task lost its project",
+          "name": "the task kept its project",
           "request": {"method": "GET", "path": "/api/tasks/{tid}"},
-          "expect": {"status": 200, "body": {"project_id": null, "revision": 2}}
+          "expect": {"status": 200, "body": {"project_id": "{pid}", "revision": 1}}
         }
       ]
     },

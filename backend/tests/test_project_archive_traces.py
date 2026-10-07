@@ -66,7 +66,7 @@ def _run_step(
 @pytest.mark.parametrize(
     "trace", TRACES["traces"], ids=[trace["id"] for trace in TRACES["traces"]]
 )
-def test_021_FR_025_021_FR_026_021_FR_027_021_FR_028_golden_trace_replays(
+def test_021_FR_024_021_FR_025_021_FR_026_021_FR_027_021_FR_028_golden_trace_replays(
     second_api_client: tuple[TestClient, TestClient], trace: dict[str, Any]
 ) -> None:
     """Every recorded status and response holds against the backend."""
@@ -85,4 +85,10 @@ def test_021_FR_025_trace_file_names_its_requirements() -> None:
     ids = [trace["id"] for trace in TRACES["traces"]]
     assert len(ids) == len(set(ids))
     covered = {req for trace in TRACES["traces"] for req in trace["requirements"]}
-    assert covered == {"021-FR-025", "021-FR-026", "021-FR-027", "021-FR-028"}
+    assert covered == {
+        "021-FR-024",
+        "021-FR-025",
+        "021-FR-026",
+        "021-FR-027",
+        "021-FR-028",
+    }

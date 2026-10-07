@@ -1318,25 +1318,21 @@ class TaskService:
             "Project", project.id, project.revision, payload.expected_revision
         )
         now = self.clock()
-        # A repeat archive changes only the revision and the timestamp: the
-        # marker is the one signal a pre-feature archive has (data-model E1).
+        # Archiving keeps every membership (ADR-0020). A repeat archive changes
+        # only the revision and the timestamp: archived_at and the marker are
+        # the one signal a pre-feature archive has (data-model E1).
         repeat = project.state == "archived"
         updated_project = project.model_copy(
             update={
                 "state": "archived",
                 "updated_at": now,
                 "revision": project.revision + 1,
-                **({} if repeat else {"archived_before_lossless": True}),
+                **(
+                    {}
+                    if repeat
+                    else {"archived_at": now, "archived_before_lossless": False}
+                ),
             }
-        )
-        affected = (
-            []
-            if repeat
-            else [
-                task
-                for task in self.task_repo.list_for_owner(owner_id=owner_id)
-                if task.project_id == project_id
-            ]
         )
         self._store_idempotency(
             owner_id=owner_id,
@@ -1347,16 +1343,6 @@ class TaskService:
             response=updated_project,
         )
         self.task_repo.save_project(updated_project)
-        for task in affected:
-            self.task_repo.save(
-                task.model_copy(
-                    update={
-                        "project_id": None,
-                        "updated_at": now,
-                        "revision": task.revision + 1,
-                    }
-                )
-            )
         return updated_project
 
     @_serialized_write
