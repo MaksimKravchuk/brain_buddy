@@ -158,7 +158,9 @@ struct DecisionCardSheet: View {
         }
         let title = task.title
         do {
-            let decisionID = try workspace.decide(decision, on: taskID, stallReason: stallReason)
+            let decisionID = try workspace.decide(
+                decision, on: taskID, stallReason: stallReason, formulationID: opened?.formulationID
+            )
             finish(decisionID, decision: decision, title: title)
         } catch {
             switch error {
@@ -221,7 +223,7 @@ struct DecisionCardModel: Hashable {
     var meta: String
     /// FR-005: the third formulation in a row that stalled.
     var thirdStall: Bool
-    /// Core's card decisions, in the design's order.
+    /// Core's card decisions, in the design's order (M-03).
     var decisions: [DecisionType]
     /// FR-009: "Keep 7 more days" was used on this wording.
     var extensionUsed: Bool
@@ -235,81 +237,21 @@ extension DecisionCardModel {
         let extendedAt = task.formulation?.extendedAt
         var parts: [String] = []
         if let started = task.formulation?.startedAt {
-            parts.append(DecisionCardCopy.daysInNext(since: started, now: workspace.reviewNow))
+            parts.append(ReviewCopy.daysInNext(since: started, now: workspace.reviewNow))
         }
-        parts.append(task.projectID.flatMap { workspace.project($0)?.name } ?? "no project")
+        parts.append(task.projectID.flatMap { workspace.project($0)?.name } ?? ReviewCopy.noProject)
         if let extendedAt {
-            parts.append("kept 7 more days on \(ReviewCopy.day(extendedAt, in: .current))")
+            // Shown in the device's current zone (ios-commands §6).
+            parts.append(ReviewCopy.keptMoreDays(on: ReviewCopy.day(extendedAt, in: .current)))
         }
         let offline: Bool
         if case .offline = workspace.syncStatus { offline = true } else { offline = false }
         self.init(
             title: task.title, marker: kind, meta: parts.joined(separator: " · "),
-            thirdStall: kind.asksForDecision && task.consecutiveStalledFormulations >= FormulationRule.stallsBeforeThird,
-            decisions: DecisionCardCopy.inDesignOrder(
-                StallReasonRecommendation.cardDecisions(extensionUsed: extendedAt != nil)
-            ),
+            thirdStall: workspace.isThirdStall(task.id),
+            decisions: StallReasonRecommendation.cardDecisions(extensionUsed: extendedAt != nil),
             extensionUsed: extendedAt != nil, isOffline: offline
         )
-    }
-}
-
-/// The card's own words (design M-03), next to Core's `ReviewCopy`.
-enum DecisionCardCopy {
-    static let reasonsHeading = "What got in the way? · optional"
-    static let decisionsHeading = "What now?"
-    static let decideAgain = "Decide again if it still needs it."
-    static let noLongerAsks = "This task no longer asks for a decision. You can close the card."
-
-    /// The order the design shows (and the web numbers 1 – 7).
-    static let designOrder: [DecisionType] = [.complete, .reformulate, .firstStep, .waiting, .someday, .cancel, .extend]
-
-    /// The reasons in the order of the design.
-    static let reasonOrder: [StallReason] = [.unclear, .tooBig, .missingInfo, .waitingOnSomeone, .noLongerMatters, .noEnergy]
-
-    static func inDesignOrder(_ decisions: [DecisionType]) -> [DecisionType] {
-        decisions.sorted { (designOrder.firstIndex(of: $0) ?? Int.max) < (designOrder.firstIndex(of: $1) ?? Int.max) }
-    }
-
-    static func title(_ decision: DecisionType) -> String {
-        switch decision {
-        case .complete: "Done"
-        case .reformulate: "Reformulate"
-        case .firstStep: "Find a first step"
-        case .waiting: "Move to Waiting for…"
-        case .someday: "Release to Someday"
-        case .cancel: "Cancel task"
-        case .extend: "Keep 7 more days"
-        case .keepWaiting, .followUp, .returnToNext, .keepSomeday: ReviewCopy.name(of: decision)
-        }
-    }
-
-    static func subtitle(_ decision: DecisionType) -> String? {
-        switch decision {
-        case .reformulate: "Say what you'll actually do"
-        case .firstStep: "Something you could start in 10 minutes"
-        case .someday: "Not now. You can bring it back any time"
-        case .cancel: "Stays findable under Cancelled"
-        case .extend: "Once for this wording, with a reason"
-        case .complete, .waiting, .keepWaiting, .followUp, .returnToNext, .keepSomeday: nil
-        }
-    }
-
-    static func reason(_ reason: StallReason) -> String {
-        switch reason {
-        case .unclear: "Unclear"
-        case .tooBig: "Too big"
-        case .missingInfo: "Missing information"
-        case .waitingOnSomeone: "Waiting on someone"
-        case .noLongerMatters: "No longer matters"
-        case .noEnergy: "Unpleasant / no energy"
-        }
-    }
-
-    /// "15 days in Next" (whole days since the wording started).
-    static func daysInNext(since start: Date, now: Date) -> String {
-        let days = max(0, Int((now.timeIntervalSince(start) / FormulationRule.day).rounded(.down)))
-        return "\(ReviewCopy.ageInDays(days)) in Next"
     }
 }
 
@@ -401,7 +343,7 @@ struct DecisionCardContent: View {
             Button {
                 onChoose(.someday)
             } label: {
-                Text(DecisionCardCopy.title(.someday))
+                Text(ReviewCopy.cardTitle(.someday))
                     .frame(maxWidth: .infinity, minHeight: BBMetrics.hitTarget)
             }
             .buttonStyle(.bordered)
@@ -412,12 +354,12 @@ struct DecisionCardContent: View {
 
     private var reasons: some View {
         VStack(alignment: .leading, spacing: BBSpacing.s2) {
-            Text(DecisionCardCopy.reasonsHeading)
+            Text(ReviewCopy.cardReasonsHeading)
                 .font(BBFont.subtitle)
                 .foregroundStyle(BBColor.textSecondary)
             BBFlowLayout(spacing: BBSpacing.s2, lineSpacing: BBSpacing.s2) {
-                ForEach(DecisionCardCopy.reasonOrder, id: \.self) { reason in
-                    ReasonChip(title: DecisionCardCopy.reason(reason), isSelected: stallReason == reason) {
+                ForEach(ReviewCopy.stallReasonOrder, id: \.self) { reason in
+                    ReasonChip(title: ReviewCopy.stallReasonLabel(reason), isSelected: stallReason == reason) {
                         // Tapping the chosen reason again clears it.
                         stallReason = stallReason == reason ? nil : reason
                     }
@@ -428,13 +370,13 @@ struct DecisionCardContent: View {
 
     private var decisions: some View {
         VStack(alignment: .leading, spacing: BBSpacing.s2) {
-            Text(DecisionCardCopy.decisionsHeading)
+            Text(ReviewCopy.cardDecisionsHeading)
                 .font(BBFont.subtitle)
                 .foregroundStyle(BBColor.textSecondary)
                 .accessibilityAddTraits(.isHeader)
             ForEach(model.decisions, id: \.self) { decision in
                 DecisionRow(
-                    title: DecisionCardCopy.title(decision), subtitle: DecisionCardCopy.subtitle(decision),
+                    title: ReviewCopy.cardTitle(decision), subtitle: ReviewCopy.cardSubtitle(decision),
                     isRecommended: decision == recommended, stacksBadge: dynamicTypeSize.isAccessibilitySize
                 ) {
                     onChoose(decision)
@@ -554,22 +496,22 @@ struct DecisionCardStaleView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: BBSpacing.s4) {
-                Text(stillAsks ? "\(ReviewCopy.stale) \(DecisionCardCopy.decideAgain)" : ReviewCopy.stale)
+                Text(stillAsks ? "\(ReviewCopy.stale) \(ReviewCopy.decideAgainHint)" : ReviewCopy.stale)
                     .font(BBFont.secondary)
                     .foregroundStyle(BBColor.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityFocused($isMessageFocused)
                 VStack(alignment: .leading, spacing: BBSpacing.s2) {
-                    LabeledContent("Was", value: was)
+                    LabeledContent(ReviewCopy.staleWas, value: was)
                     if let now {
-                        LabeledContent("Now", value: now)
+                        LabeledContent(ReviewCopy.staleNow, value: now)
                     }
                 }
                 .font(BBFont.secondary)
                 .padding(BBSpacing.s4)
                 .bbCard()
                 if !stillAsks {
-                    Text(DecisionCardCopy.noLongerAsks)
+                    Text(ReviewCopy.noLongerAsks)
                         .font(BBFont.meta)
                         .foregroundStyle(BBColor.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -577,7 +519,7 @@ struct DecisionCardStaleView: View {
                 Button {
                     if stillAsks { onDecideAgain() } else { onClose() }
                 } label: {
-                    Text(stillAsks ? "Decide again" : "Close")
+                    Text(stillAsks ? ReviewCopy.decideAgain : "Close")
                         .frame(maxWidth: .infinity, minHeight: BBMetrics.hitTarget)
                 }
                 .buttonStyle(.borderedProminent)
@@ -594,7 +536,7 @@ struct DecisionCardStaleView: View {
 private extension DecisionCardModel {
     static let sample = DecisionCardModel(
         title: "Renovate the bathroom", marker: .asks, meta: "15 days in Next · Home", thirdStall: false,
-        decisions: DecisionCardCopy.inDesignOrder(StallReasonRecommendation.cardDecisions(extensionUsed: false)),
+        decisions: StallReasonRecommendation.cardDecisions(extensionUsed: false),
         extensionUsed: false, isOffline: false
     )
 
@@ -603,7 +545,7 @@ private extension DecisionCardModel {
         model.title = "Order the new kitchen tap"
         model.meta = "21 days in Next · Home · kept 7 more days on Mon 5 Oct"
         model.extensionUsed = true
-        model.decisions = DecisionCardCopy.inDesignOrder(StallReasonRecommendation.cardDecisions(extensionUsed: true))
+        model.decisions = StallReasonRecommendation.cardDecisions(extensionUsed: true)
         return model
     }
 

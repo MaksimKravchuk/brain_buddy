@@ -54,18 +54,33 @@ struct RootView: View {
 /// bottom buttons, so an Undo never covers the controls.
 ///
 /// Weekly review (spec 020): at app open, before anything else, the auto-park
-/// explainer (M-26) while it is needed, then "While you were away" (M-09)
-/// when unseen parks exist and it was not shown today. A capture asked for
-/// meanwhile (a deep link, ⌘N) waits until they close.
+/// explainer (M-26) while it is needed, a capture deep link that has not been
+/// shown yet included (T092), then "While you were away" (M-09) when unseen
+/// parks exist and it was not shown today. A capture asked for meanwhile (a
+/// deep link, ⌘N) waits until they close. The order is Core's
+/// (`ReviewStartupPlanner`); neither sheet is presented over another one.
 private struct MainTabView: View {
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.scenePhase) private var scenePhase
     @State private var startupSheet: ReviewStartupSheet?
+    /// The startup sheet's content appeared: UIKit really presented it.
+    @State private var startupSheetAppeared = false
+    /// The capture sheet is on screen; a flag arriving meanwhile never takes it away.
+    @State private var captureOnScreen = false
+    /// A re-check is scheduled while a due startup sheet waits for the screen.
+    @State private var startupRetryPending = false
+    @State private var presentationProbe = PresentationProbe()
 
     var body: some View {
         @Bindable var router = router
+        // Read here, so the sheet follows the explainer and the startup sheet.
+        let captureItem =
+            ReviewStartupPlanner.captureMayPresent(
+                startupSheet: startupSheet, captureOnScreen: captureOnScreen, reviewExposed: workspace.reviewExposed,
+                explainerNeeded: workspace.explainerNeeded
+            ) ? router.capture : nil
         TabView(selection: $router.selectedTab) {
             Tab(AppTab.inbox.title, systemImage: AppTab.inbox.symbolName, value: AppTab.inbox) {
                 TabRootView(tab: .inbox)
@@ -96,26 +111,34 @@ private struct MainTabView: View {
         .tabViewSidebarBottomBar {
             CaptureAccessory(drawsGlass: true)
         }
-        // A capture waits while a review startup sheet is up, then shows.
+        .background(PresentationProbeView(probe: presentationProbe))
+        // A capture waits while the explainer is due or a review startup
+        // sheet is up, then shows.
         .sheet(
             item: Binding(
-                get: { startupSheet == nil ? self.router.capture : nil },
+                get: { captureItem },
                 set: { self.router.capture = $0 }
             )
         ) { context in
             CaptureSheet(context: context)
+                .onAppear { captureOnScreen = true }
+                .onDisappear { captureOnScreen = false }
         }
         .sheet(item: $startupSheet, onDismiss: startupSheetDismissed) { sheet in
-            switch sheet {
-            case .explainer: AutoParkExplainerSheet()
-            case .whileAway: WhileYouWereAwaySheet()
+            Group {
+                switch sheet {
+                case .explainer: AutoParkExplainerSheet()
+                case .whileAway: WhileYouWereAwaySheet()
+                }
             }
+            .onAppear { startupSheetDidAppear(sheet) }
         }
         .task { presentStartupSheetIfDue() }
         .onChange(of: workspace.reviewExposed) { _, _ in presentStartupSheetIfDue() }
         .onChange(of: workspace.explainerNeeded) { _, _ in presentStartupSheetIfDue() }
         .onChange(of: workspace.unseenParks().count) { _, _ in presentStartupSheetIfDue() }
         .onChange(of: router.capture == nil) { _, _ in presentStartupSheetIfDue() }
+        .onChange(of: captureOnScreen) { _, _ in presentStartupSheetIfDue() }
         .onChange(of: router.isProcessingInbox) { _, _ in presentStartupSheetIfDue() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { presentStartupSheetIfDue() }
@@ -134,23 +157,69 @@ private struct MainTabView: View {
 
     // MARK: Review startup sheets (M-26, M-09)
 
-    /// Presents the explainer while it is needed (FR-051), otherwise "While
-    /// you were away" once a calendar day while parks are unseen (FR-015),
-    /// never over a capture or Process inbox.
+    /// Presents the explainer while it is needed (FR-051), before a capture
+    /// that is not on screen yet; otherwise "While you were away" once a
+    /// calendar day while parks are unseen (FR-015), after a requested
+    /// capture. Never over another presentation (a capture, Process inbox, a
+    /// decision card, a move or tags sheet, a dialog): UIKit would refuse it
+    /// and nothing would retry, so while one is up this checks again shortly.
     private func presentStartupSheetIfDue() {
-        guard startupSheet == nil, router.capture == nil, !router.isProcessingInbox, workspace.isLoaded,
-            workspace.reviewExposed
-        else { return }
-        if workspace.explainerNeeded {
-            startupSheet = .explainer
-        } else if workspace.whileAwayShouldShowAtAppOpen() {
-            // Shown today, whether it is continued or swiped away.
-            workspace.markWhileAwayShown()
-            startupSheet = .whileAway
+        guard startupSheet == nil, workspace.isLoaded else { return }
+        // These two re-run this check themselves when they close (onChange).
+        let ownPresentation = router.isProcessingInbox || captureOnScreen
+        let othersPresent = presentationProbe.isPresenting
+        var context = ReviewStartupPlanner.Context(
+            reviewExposed: workspace.reviewExposed, explainerNeeded: workspace.explainerNeeded,
+            whileAwayDue: workspace.whileAwayShouldShowAtAppOpen(),
+            captureRequested: router.capture != nil || captureOnScreen,
+            screenBusy: ownPresentation || othersPresent
+        )
+        if let sheet = ReviewStartupPlanner.sheetToPresent(context) {
+            present(sheet)
+            return
+        }
+        // Held back only by a sheet or dialog of a screen (a decision card,
+        // Move, Tags, Settings): nothing tells this view when it closes.
+        context.screenBusy = false
+        if !ownPresentation, othersPresent, ReviewStartupPlanner.sheetToPresent(context) != nil {
+            scheduleStartupRetry()
         }
     }
 
+    private func present(_ sheet: ReviewStartupSheet) {
+        startupSheetAppeared = false
+        startupSheet = sheet
+        // If UIKit refused the presentation after all (another modal won the
+        // race), nothing is on screen: let go, so a capture is not held
+        // back, and try again once the screen is free.
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard startupSheet == sheet, !startupSheetAppeared else { return }
+            startupSheet = nil
+            scheduleStartupRetry()
+        }
+    }
+
+    /// Checks again in a moment; at most one check is pending.
+    private func scheduleStartupRetry() {
+        guard !startupRetryPending, scenePhase == .active else { return }
+        startupRetryPending = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            startupRetryPending = false
+            presentStartupSheetIfDue()
+        }
+    }
+
+    private func startupSheetDidAppear(_ sheet: ReviewStartupSheet) {
+        startupSheetAppeared = true
+        // Shown today, whether it is continued or swiped away; recorded only
+        // once it is really on screen.
+        if sheet == .whileAway { workspace.markWhileAwayShown() }
+    }
+
     private func startupSheetDismissed() {
+        startupSheetAppeared = false
         // The sheet appeared without a tap: VoiceOver goes back to the
         // screen, starting at its navigation title (design "Keyboard and focus").
         UIAccessibility.post(notification: .screenChanged, argument: nil)
@@ -158,14 +227,31 @@ private struct MainTabView: View {
     }
 }
 
-/// A sheet the weekly review shows at app open, in this order.
-private enum ReviewStartupSheet: String, Identifiable {
-    /// M-26.
-    case explainer
-    /// M-09.
-    case whileAway
+/// Answers whether this window already presents something (a sheet, a
+/// full-screen cover, a dialog), so a startup sheet is not presented over it:
+/// UIKit presents one modal at a time and silently drops a second.
+@MainActor
+private final class PresentationProbe {
+    weak var view: UIView?
 
-    var id: String { rawValue }
+    var isPresenting: Bool { view?.window?.rootViewController?.presentedViewController != nil }
+}
+
+/// An invisible view that hands its window to `PresentationProbe`.
+private struct PresentationProbeView: UIViewRepresentable {
+    let probe: PresentationProbe
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        probe.view = view
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        probe.view = uiView
+    }
 }
 
 /// One tab: its navigation stack, the shared route table, and the toast host.

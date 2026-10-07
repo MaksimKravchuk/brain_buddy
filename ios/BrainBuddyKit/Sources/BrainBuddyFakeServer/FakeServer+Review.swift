@@ -736,13 +736,14 @@ extension ServerState {
         if let zone, TimeZone(identifier: zone) == nil { throw .reason(400, "invalid_time_zone", "Unknown time zone.") }
         return try idempotentReview(request, body: body, owner: owner, command: "review_settings", now: now) { data throws(FakeHTTPError) in
             var settings = data.review.settings
-            // `ConflictError("Review settings", owner_id, …)` in the backend:
-            // detail `{resource: "Review settings", id: <owner>}` (golden
-            // trace TR-005). NOTE: the backend's message reads "Review
-            // settings have newer changes; …", which `APIError.conflictKind`
-            // does not recognise as stale (it matches "has newer changes");
-            // the fake keeps the suffix the client and http.md expect.
-            guard settings.revision == expected else { throw .stale("Review settings", owner) }
+            // `ReviewService.update_settings` raises `ConflictError("Review
+            // settings", owner_id, "Review settings have newer changes; reload
+            // before saving.")`: exactly that message, detail `{resource:
+            // "Review settings", id: <owner>}` and no `reason` (golden trace
+            // TR-005). `APIError.conflictKind` recognises it as stale.
+            guard settings.revision == expected else {
+                throw .conflict("Review settings", owner, "Review settings have newer changes; reload before saving.")
+            }
             var changed = false
             if let threshold, threshold != settings.thresholdDays {
                 settings.thresholdDays = threshold

@@ -173,6 +173,79 @@ struct QueriesReviewTests {
         #expect(GTDQueries.formulationClass(of: task, now: justAfterBerlinMidnight, settings: settings, timeZone: "Europe/Berlin") == .fresh)
     }
 
+    @Test("020-FR-005 the third stalled wording: asking, with two stalled wordings before it")
+    func thirdStall() {
+        let settings = Review.settings()
+        let asking = Review.now.addingTimeInterval(-15 * Review.day)
+        let twice = Review.nextTask("t1", started: asking, stalled: 2)
+        #expect(GTDQueries.isThirdStall(twice, now: Review.now, settings: settings))
+        #expect(!GTDQueries.isThirdStall(Review.nextTask("t2", started: asking, stalled: 1), now: Review.now, settings: settings))
+        let fresh = Review.nextTask("t3", started: Review.now.addingTimeInterval(-2 * Review.day), stalled: 2)
+        #expect(!GTDQueries.isThirdStall(fresh, now: Review.now, settings: settings), "not asking yet")
+        // A clock that started before activation is clamped to it (FR-016):
+        // 40 days in Next but only 10 since activation does not ask yet.
+        let clamped = Review.nextTask("t4", started: Review.now.addingTimeInterval(-40 * Review.day), stalled: 2)
+        let late = Review.settings(activatedAt: Review.now.addingTimeInterval(-10 * Review.day))
+        #expect(!GTDQueries.isThirdStall(clamped, now: Review.now, settings: late))
+    }
+
+    @Test("020-FR-009 keep 7 more days previews its dates: asks again 7 days from now, moves 7 days after that")
+    func extensionPreview() throws {
+        let settings = Review.settings()
+        let task = Review.nextTask("t1", started: Review.now.addingTimeInterval(-15 * Review.day))
+        let instants = try #require(GTDQueries.extensionInstants(of: task, now: Review.now, settings: settings))
+        #expect(instants.askAt == Review.now.addingTimeInterval(7 * Review.day))
+        #expect(instants.parkDueAt == Review.now.addingTimeInterval(14 * Review.day))
+        let fresh = Review.nextTask("t2", started: Review.now.addingTimeInterval(-2 * Review.day))
+        #expect(GTDQueries.extensionInstants(of: fresh, now: Review.now, settings: settings) == nil, "not due yet")
+        let used = Review.nextTask("t3", started: Review.now.addingTimeInterval(-30 * Review.day), extendedAt: Review.now)
+        #expect(GTDQueries.extensionInstants(of: used, now: Review.now, settings: settings) == nil, "used once")
+        // The classification zone moves a due date's clock start (§6): the
+        // preview follows the zone it is asked with.
+        let due = CalendarDay(year: 2026, month: 9, day: 20)!
+        let dueTask = Review.nextTask("t4", started: Review.instant("2026-09-02T09:00:00Z"), due: due)
+        let berlin = try #require(GTDQueries.extensionInstants(of: dueTask, now: Review.now, settings: settings))
+        let honolulu = try #require(
+            GTDQueries.extensionInstants(of: dueTask, now: Review.now, settings: settings, timeZone: "Pacific/Honolulu")
+        )
+        #expect(berlin.start != honolulu.start)
+    }
+
+    @Test("020-FR-012 a park's age comes from its own clock: after the activation grace or an extension too; unknown without it")
+    func parkedAge() {
+        let started = Review.instant("2026-09-01T08:00:00Z")
+        var parked = Review.task("t1", title: "Call Bob", state: .someday)
+        // Kept 7 more days, then parked 28 days and 6 hours after the start.
+        let at = started.addingTimeInterval(28 * Review.day + 6 * 3_600)
+        parked.parked = ParkMarker(
+            at: at, formulationID: Review.form(1),
+            clockBefore: FormulationClock(id: Review.form(1), startedAt: started, extendedAt: started.addingTimeInterval(14 * Review.day))
+        )
+        #expect(GTDQueries.parkedAfterDays(parked) == 28)
+        // A park pulled from the server carries no clock (http §3): no guess.
+        parked.parked = ParkMarker(at: at, formulationID: Review.form(1))
+        #expect(GTDQueries.parkedAfterDays(parked) == nil)
+        #expect(GTDQueries.parkedAfterDays(Review.task("t2", title: "Plan", state: .someday)) == nil, "not parked")
+    }
+
+    @Test("020-FR-015 returning a park to Next: open unless its project is archived or it changed elsewhere")
+    func parkReturn() {
+        let now = Review.now
+        var parked = Review.task("t1", title: "Return the old router", state: .someday)
+        parked.parked = ParkMarker(at: now, formulationID: Review.form(1))
+        var state = Review.state([parked, Review.task("t2", title: "Update the CV", state: .next)])
+        #expect(GTDQueries.parkReturnProblem(of: "t1", in: state) == nil)
+        state.projects["p1"] = ProjectRecord(id: "p1", name: "Old flat", state: .archived, createdAt: now)
+        state.tasks["t1"]?.projectID = "p1"
+        #expect(GTDQueries.parkReturnProblem(of: "t1", in: state) == .projectArchived(name: "Old flat"))
+        state.projects["p1"]?.state = .active
+        #expect(GTDQueries.parkReturnProblem(of: "t1", in: state) == nil)
+        #expect(GTDQueries.parkReturnProblem(of: "t2", in: state) == .changedElsewhere, "back in Next already")
+        #expect(GTDQueries.parkReturnProblem(of: "gone", in: state) == .changedElsewhere)
+        state.tasks["t1"]?.parked = nil
+        #expect(GTDQueries.parkReturnProblem(of: "t1", in: state) == .changedElsewhere, "no longer parked")
+    }
+
     @Test("020-FR-028 wins, capacity, Waiting and Someday due, projects without a next action and restart candidates over a state")
     func stateQueries() {
         let now = Review.now

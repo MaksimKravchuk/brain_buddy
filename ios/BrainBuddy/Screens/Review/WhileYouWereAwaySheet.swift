@@ -4,13 +4,15 @@ import SwiftUI
 
 /// M-09 (spec 020, FR-015): the auto-parked tasks this person has not seen,
 /// at app open (at most once a calendar day, `WhileAwayPresentation`) with a
-/// one-tap "Return to Next" per row and "Return all N". "Continue" marks them
-/// seen (`Workspace.dismissWhileAway()`); a swipe-down does not, so they show
-/// again on a later day. A return is the ordinary move to Next, which starts a
-/// fresh formulation (US2-4). When the device's safety valve held more parks
-/// back, Continue applies and shows the next batch. Rows for an unsent "Keep
-/// 7 more days" that account linking dropped are information only, shown
-/// once. Everything is local, so it works offline.
+/// one-tap "Return to Next" per row and "Return all N to Next". "Continue"
+/// marks them seen (`Workspace.dismissWhileAway()`); Close and a swipe-down
+/// do not (`Workspace.closeWhileAway()`), so they show again on a later day.
+/// A return is the ordinary move to Next, which starts a fresh formulation
+/// (US2-4); whether a row can return is Core's (`parkReturnProblem`). When
+/// the device's safety valve held more parks back, Continue applies and shows
+/// the next batch. Rows for an unsent "Keep 7 more days" that account linking
+/// dropped are information only, shown once: any close clears them.
+/// Everything is local, so it works offline.
 struct WhileYouWereAwaySheet: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.dismiss) private var dismiss
@@ -33,6 +35,12 @@ struct WhileYouWereAwaySheet: View {
                 morePending: workspace.localReview.parkBatchWaiting, isOffline: isOffline,
                 onReturn: { _ = returnTask($0) }, onReturnAll: returnAll, onContinue: continueReview
             )
+            .toolbar {
+                // Close is a swipe-down: not "seen" (design M-09 "closed without Continue").
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
         }
         .presentationDetents([.large])
         .onAppear(perform: load)
@@ -45,18 +53,21 @@ struct WhileYouWereAwaySheet: View {
     }
 
     private var rows: [WhileAwayRow] {
+        // Shown in the device's current zone (ios-commands §6).
         let zone = TimeZone.current
         let parks = parkIDs.compactMap { id -> WhileAwayRow? in
             guard let task = workspace.task(id) else { return nil }
-            let project = task.projectID.flatMap { workspace.project($0) }
-            var place = project?.name ?? "no project"
-            if project?.state == .archived { place += " (archived)" }
-            let parkedOn = task.parked.map { "Parked \(ReviewCopy.day($0.at, in: zone)) · \(place)" } ?? place
-            let archived = project?.state == .archived ? project?.name : nil
-            return WhileAwayRow(
-                id: id, title: task.title, detail: parkedOn,
-                outcome: outcomes[id] ?? (archived.map { WhileAwayRow.Outcome.archived(project: $0) } ?? .waiting)
-            )
+            let blocked = workspace.parkReturnProblem(of: id)
+            var place = task.projectID.flatMap { workspace.project($0)?.name } ?? ReviewCopy.noProject
+            if case .projectArchived(let name)? = blocked { place = ReviewCopy.archivedPlace(name) }
+            let detail = task.parked.map { ReviewCopy.parkedRow(day: ReviewCopy.day($0.at, in: zone), place: place) } ?? place
+            let initial: WhileAwayRow.Outcome
+            if case .projectArchived(let name)? = blocked {
+                initial = .archived(project: name)
+            } else {
+                initial = .waiting
+            }
+            return WhileAwayRow(id: id, title: task.title, detail: detail, outcome: outcomes[id] ?? initial)
         }
         let notices = noticeIDs.compactMap { id -> WhileAwayRow? in
             guard let task = workspace.task(id) else { return nil }
@@ -83,18 +94,20 @@ struct WhileYouWereAwaySheet: View {
     // MARK: Returning
 
     /// Returns one task with the ordinary move to Next; says why when it
-    /// cannot (archived project, changed elsewhere).
+    /// cannot (archived project, changed elsewhere), as Core answers it.
     @discardableResult
     private func returnTask(_ id: TaskID) -> Bool {
         problem = nil
-        guard let task = workspace.task(id), task.state == .someday, task.parked != nil else {
+        switch workspace.parkReturnProblem(of: id) {
+        case .changedElsewhere?:
             outcomes[id] = .changedElsewhere
             if let task = workspace.task(id) { summary = ReviewCopy.returnChangedElsewhere(title: task.title) }
             return false
-        }
-        if let project = task.projectID.flatMap({ workspace.project($0) }), project.state == .archived {
-            outcomes[id] = .archived(project: project.name)
+        case .projectArchived(let name)?:
+            outcomes[id] = .archived(project: name)
             return false
+        case nil:
+            break
         }
         do {
             try workspace.moveTask(id, to: .next)
@@ -102,7 +115,7 @@ struct WhileYouWereAwaySheet: View {
             return true
         } catch {
             if error == .projectArchived || error == .projectNotActive {
-                let name = task.projectID.flatMap { workspace.project($0)?.name } ?? ""
+                let name = workspace.task(id)?.projectID.flatMap { workspace.project($0)?.name } ?? ""
                 outcomes[id] = .archived(project: name)
             } else {
                 problem = error.message
@@ -125,8 +138,8 @@ struct WhileYouWereAwaySheet: View {
         if archivedRows.isEmpty, blocked.isEmpty {
             summary = ReviewCopy.allReturned(returned)
         } else if !archivedRows.isEmpty {
-            let lead = returned == 1 ? "1 task is back in Next." : "\(returned) tasks are back in Next."
-            summary = ([lead] + archivedRows + ["Restore the project first to bring it back."]).joined(separator: " ")
+            summary = ([ReviewCopy.backInNext(returned)] + archivedRows + [ReviewCopy.restoreProjectFirst])
+                .joined(separator: " ")
         }
     }
 
@@ -151,11 +164,12 @@ struct WhileYouWereAwaySheet: View {
         dismiss()
     }
 
-    /// Swiping down is not "seen" (FR-015): parks stay unseen. Information
-    /// rows alone have nothing to acknowledge and are shown once.
+    /// Close and swipe-down are not "seen" (FR-015): parks stay unseen and
+    /// come back another day. The linking notices are information, shown
+    /// once, so any close clears them (T093).
     private func closedWithoutContinue() {
-        guard !hasContinued, workspace.unseenParks().isEmpty, !workspace.linkedExtensionNotices.isEmpty else { return }
-        try? workspace.dismissWhileAway()
+        guard !hasContinued else { return }
+        workspace.closeWhileAway()
     }
 }
 
@@ -210,6 +224,8 @@ struct WhileAwayContent: View {
 
     private var parkCount: Int { rows.filter { $0.outcome != .notice }.count }
     private var returnable: Int { rows.filter { $0.outcome == .waiting }.count }
+    /// "Return the other 3 to Next" once a row was returned (design M-09).
+    private var someReturned: Bool { rows.contains { $0.outcome == .returned } }
 
     var body: some View {
         let actionsScroll = dynamicTypeSize.isAccessibilitySize
@@ -240,7 +256,7 @@ struct WhileAwayContent: View {
                     InlineProblemText(message: problem)
                 }
                 if isOffline {
-                    Label("Offline. Changes are saved on this iPhone and sync later.", systemImage: "icloud.slash")
+                    Label(ReviewCopy.offlineWhileAway, systemImage: "icloud.slash")
                         .font(BBFont.meta)
                         .foregroundStyle(BBColor.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -271,7 +287,7 @@ struct WhileAwayContent: View {
         VStack(spacing: BBSpacing.s2) {
             if returnable > 1 {
                 Button(action: onReturnAll) {
-                    Text(ReviewCopy.returnAll(returnable))
+                    Text(ReviewCopy.returnAll(returnable, othersReturned: someReturned))
                         .frame(maxWidth: .infinity, minHeight: BBMetrics.hitTarget)
                 }
                 .buttonStyle(.bordered)
@@ -330,18 +346,18 @@ private struct WhileAwayRowView: View {
             Button(ReviewCopy.returnToNext, action: onReturn)
                 .buttonStyle(.bordered)
                 .frame(minHeight: BBMetrics.hitTarget)
-                .accessibilityLabel("Return \(row.title) to Next")
+                .accessibilityLabel(ReviewCopy.returnTask(title: row.title))
         case .returned:
-            Text("Returned")
+            Text(ReviewCopy.rowReturned)
                 .font(BBFont.meta.weight(.semibold))
                 .foregroundStyle(BBColor.successText)
         case .archived(let project):
-            Text("Project archived")
+            Text(ReviewCopy.rowProjectArchived)
                 .font(BBFont.meta)
                 .foregroundStyle(BBColor.textTertiary)
-                .accessibilityLabel("Return unavailable: project \(project) is archived")
+                .accessibilityLabel(ReviewCopy.returnUnavailable(project: project))
         case .changedElsewhere:
-            Text("Changed elsewhere")
+            Text(ReviewCopy.rowChangedElsewhere)
                 .font(BBFont.meta)
                 .foregroundStyle(BBColor.textTertiary)
         case .notice:

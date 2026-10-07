@@ -46,6 +46,14 @@ public struct DueDay: Hashable, Sendable {
     public var tasks: [TaskRecord]
 }
 
+/// Why a parked task cannot return to Next (M-09).
+public enum ParkReturnProblem: Hashable, Sendable {
+    /// No longer parked in Someday: it was moved or returned elsewhere.
+    case changedElsewhere
+    /// Its project is archived; restore the project first.
+    case projectArchived(name: String)
+}
+
 /// The pure review-flow rules, run against `review_flow_vectors.json` like
 /// `backend/app/modules/tasks/review_rules.py`.
 public enum ReviewRules {
@@ -249,6 +257,44 @@ extension GTDQueries {
     public static func lastCountedReview(in state: GTDState) -> Date? {
         [ReviewSession.lastCountedReviewAt(state.review.sessions.values), state.review.server?.lastCountedReviewAt]
             .compactMap { $0 }.max()
+    }
+
+    /// FR-005: the card's third-stall offer, evaluated as the classification is.
+    public static func isThirdStall(_ task: TaskRecord, now: Date, settings: ReviewSettings, timeZone: String? = nil) -> Bool {
+        let clock = settings.clockSettings(timeZone: timeZone)
+        return FormulationRule.isThirdStall(GTDReducer.evaluationView(task, settings: clock), settings: clock, now: now)
+    }
+
+    /// FR-009: the instants "Keep 7 more days" would give if chosen at `now`
+    /// (M-04 "Asks again on …", "Keep until …"); nil when it is not allowed.
+    public static func extensionInstants(
+        of task: TaskRecord, now: Date, settings: ReviewSettings, timeZone: String? = nil
+    ) -> DerivedInstants? {
+        let clock = settings.clockSettings(timeZone: timeZone)
+        let view = GTDReducer.evaluationView(task, settings: clock)
+        guard let extended = try? FormulationRule.extend(view, reason: "", settings: clock, now: now) else { return nil }
+        return FormulationRule.derivedInstants(of: extended, settings: clock)
+    }
+
+    /// FR-012 (M-02 "after N days in Next"): whole days from the parked
+    /// wording's start to the park, from the clock the park stored. A park
+    /// pulled from the server carries no clock (http §3 `parked`): nil, so
+    /// the copy says no number rather than a guessed one.
+    public static func parkedAfterDays(_ task: TaskRecord) -> Int? {
+        guard let marker = task.parked, let started = marker.clockBefore?.startedAt else { return nil }
+        return max(0, Int((marker.at.timeIntervalSince(started) / FormulationRule.day).rounded(.down)))
+    }
+
+    /// FR-015 (M-09 "Return to Next"): why a park cannot go back to Next
+    /// now, or nil. A task no longer parked in Someday changed elsewhere; a
+    /// park in an archived project needs the project restored first (spec
+    /// edge case "Task in an archived project"; http.md `project_archived`).
+    public static func parkReturnProblem(of id: TaskID, in state: GTDState) -> ParkReturnProblem? {
+        guard let task = state.tasks[id], task.state == .someday, task.parked != nil else { return .changedElsewhere }
+        if let projectID = task.projectID, let project = state.projects[projectID], project.state != .active {
+            return .projectArchived(name: project.name)
+        }
+        return nil
     }
 
     /// FR-051: the explainer is shown until an activation instant is known or

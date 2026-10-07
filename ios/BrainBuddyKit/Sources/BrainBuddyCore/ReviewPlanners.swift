@@ -65,10 +65,12 @@ public enum StallReasonRecommendation {
         }
     }
 
-    /// The card's seven decisions for a task in Next, in fixed order; `extend`
-    /// only while the formulation was not extended yet.
+    /// The card's seven decisions for a task in Next, in the fixed order of
+    /// design M-03 (the web numbers them 1 – 7 in this order): Done first,
+    /// "Keep 7 more days" last and only while the formulation was not
+    /// extended yet.
     public static func cardDecisions(extensionUsed: Bool) -> [DecisionType] {
-        let all: [DecisionType] = [.reformulate, .firstStep, .waiting, .someday, .complete, .cancel, .extend]
+        let all: [DecisionType] = [.complete, .reformulate, .firstStep, .waiting, .someday, .cancel, .extend]
         return extensionUsed ? all.filter { $0 != .extend } : all
     }
 }
@@ -108,6 +110,61 @@ public enum WhileAwayPresentation {
 
     public static func shouldShowAtAppOpen(lastShownDay: CalendarDay?, today: CalendarDay, hasUnseen: Bool) -> Bool {
         shouldShow(context: .appOpen, hasUnseen: hasUnseen, lastShownDay: lastShownDay, today: today)
+    }
+}
+
+/// A sheet the weekly review shows at app open (T092, T093), in this order.
+public enum ReviewStartupSheet: String, Hashable, Sendable, Identifiable {
+    /// M-26.
+    case explainer
+    /// M-09.
+    case whileAway
+
+    public var id: String { rawValue }
+}
+
+/// What the app shows at open, and when a capture asked for meanwhile (a
+/// `brainbuddy://capture` deep link, ⌘N, the capture bar) may show (design
+/// "Entry order", T092): the explainer (M-26) before anything else, a capture
+/// deep link that is not on screen yet included; then "While you were away"
+/// (M-09), which yields to a requested capture and follows it. Neither is
+/// presented over another sheet (one modal at a time), and a capture already
+/// on screen is never taken away.
+public enum ReviewStartupPlanner {
+    public struct Context: Hashable, Sendable {
+        public var reviewExposed: Bool
+        public var explainerNeeded: Bool
+        /// `WhileAwayPresentation.shouldShowAtAppOpen` for today.
+        public var whileAwayDue: Bool
+        /// A capture was asked for (shown or waiting).
+        public var captureRequested: Bool
+        /// Something is already presented (a sheet, a cover, a dialog).
+        public var screenBusy: Bool
+
+        public init(reviewExposed: Bool, explainerNeeded: Bool, whileAwayDue: Bool, captureRequested: Bool, screenBusy: Bool) {
+            self.reviewExposed = reviewExposed
+            self.explainerNeeded = explainerNeeded
+            self.whileAwayDue = whileAwayDue
+            self.captureRequested = captureRequested
+            self.screenBusy = screenBusy
+        }
+    }
+
+    /// The startup sheet to present now, or nil.
+    public static func sheetToPresent(_ context: Context) -> ReviewStartupSheet? {
+        guard context.reviewExposed, !context.screenBusy else { return nil }
+        if context.explainerNeeded { return .explainer }
+        if context.whileAwayDue, !context.captureRequested { return .whileAway }
+        return nil
+    }
+
+    /// Whether a requested capture may be presented: one on screen stays;
+    /// otherwise not while a startup sheet is up or the explainer is due.
+    public static func captureMayPresent(
+        startupSheet: ReviewStartupSheet?, captureOnScreen: Bool, reviewExposed: Bool, explainerNeeded: Bool
+    ) -> Bool {
+        if captureOnScreen { return true }
+        return startupSheet == nil && !(reviewExposed && explainerNeeded)
     }
 }
 

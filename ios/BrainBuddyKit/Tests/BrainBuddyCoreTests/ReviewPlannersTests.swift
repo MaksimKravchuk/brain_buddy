@@ -66,6 +66,53 @@ struct ReviewPlannersTests {
         #expect(!StallReasonRecommendation.cardDecisions(extensionUsed: true).contains(.extend), "FR-009")
     }
 
+    @Test("020-FR-006 the card's decisions come in the M-03 order, Done first and Keep 7 more days last")
+    func cardDecisionOrder() {
+        #expect(
+            StallReasonRecommendation.cardDecisions(extensionUsed: false)
+                == [.complete, .reformulate, .firstStep, .waiting, .someday, .cancel, .extend]
+        )
+        #expect(
+            StallReasonRecommendation.cardDecisions(extensionUsed: true)
+                == [.complete, .reformulate, .firstStep, .waiting, .someday, .cancel],
+            "the order holds without Keep 7 more days"
+        )
+    }
+
+    @Test("020-FR-006 the card's words: decision titles, subtitles, reasons and the days in Next")
+    func cardCopy() {
+        #expect(
+            StallReasonRecommendation.cardDecisions(extensionUsed: false).map(ReviewCopy.cardTitle)
+                == [
+                    "Done", "Reformulate", "Find a first step", "Move to Waiting for…", "Release to Someday",
+                    "Cancel task", "Keep 7 more days",
+                ]
+        )
+        #expect(ReviewCopy.cardSubtitle(.complete) == nil)
+        #expect(ReviewCopy.cardSubtitle(.extend) == "Once for this wording, with a reason")
+        #expect(ReviewCopy.stallReasonOrder == [.unclear, .tooBig, .missingInfo, .waitingOnSomeone, .noLongerMatters, .noEnergy])
+        #expect(Set(ReviewCopy.stallReasonOrder) == Set(StallReason.allCases), "every reason is offered")
+        #expect(
+            ReviewCopy.stallReasonOrder.map(ReviewCopy.stallReasonLabel)
+                == [
+                    "Unclear", "Too big", "Missing information", "Waiting on someone", "No longer matters",
+                    "Unpleasant / no energy",
+                ]
+        )
+        let start = Review.now
+        #expect(ReviewCopy.daysInNext(since: start, now: start.addingTimeInterval(15 * Review.day + 3_600)) == "15 days in Next")
+        #expect(ReviewCopy.daysInNext(since: start, now: start.addingTimeInterval(Review.day)) == "1 day in Next")
+        #expect(ReviewCopy.daysInNext(since: start, now: start.addingTimeInterval(-60)) == "0 days in Next", "never negative")
+    }
+
+    @Test("020-FR-015 M-09 counts the returns left: Return all 4 to Next, then Return the other 3 to Next")
+    func whileAwayReturnAllCopy() {
+        #expect(ReviewCopy.returnAll(4) == "Return all 4 to Next")
+        #expect(ReviewCopy.returnAll(3, othersReturned: true) == "Return the other 3 to Next")
+        #expect(ReviewCopy.backInNext(1) == "1 task is back in Next.")
+        #expect(ReviewCopy.backInNext(3) == "3 tasks are back in Next.")
+    }
+
     @Test("020-FR-048 the Undo window is about 5 s, at least 10 s with VoiceOver or Switch Control")
     func undoWindow() {
         #expect(UndoWindowPolicy.duration(voiceOver: false, switchControl: false) == 5)
@@ -101,6 +148,75 @@ struct ReviewPlannersTests {
         #expect(!WhileAwayPresentation.shouldShowAtAppOpen(lastShownDay: today, today: today, hasUnseen: true))
         #expect(WhileAwayPresentation.shouldShowAtAppOpen(lastShownDay: today, today: today.adding(days: 1), hasUnseen: true))
         #expect(WhileAwayPresentation.shouldShow(context: .reviewStart, hasUnseen: true, lastShownDay: today, today: today))
+    }
+
+    // MARK: App-open sheets (M-26, M-09; T092, T093)
+
+    @Test("020-FR-051 the explainer comes before anything else, a capture deep link that is not on screen yet included")
+    func startupExplainerFirst() {
+        let coldCaptureLink = ReviewStartupPlanner.Context(
+            reviewExposed: true, explainerNeeded: true, whileAwayDue: true, captureRequested: true, screenBusy: false
+        )
+        #expect(ReviewStartupPlanner.sheetToPresent(coldCaptureLink) == .explainer)
+        #expect(
+            !ReviewStartupPlanner.captureMayPresent(
+                startupSheet: nil, captureOnScreen: false, reviewExposed: true, explainerNeeded: true
+            ),
+            "the capture waits for the explainer"
+        )
+        #expect(
+            !ReviewStartupPlanner.captureMayPresent(
+                startupSheet: .explainer, captureOnScreen: false, reviewExposed: true, explainerNeeded: true
+            )
+        )
+        // Acknowledged: the explainer is gone and the waiting capture shows.
+        #expect(
+            ReviewStartupPlanner.captureMayPresent(
+                startupSheet: nil, captureOnScreen: false, reviewExposed: true, explainerNeeded: false
+            )
+        )
+        // Not exposed: nothing of the review shows, the capture is not held.
+        #expect(
+            ReviewStartupPlanner.captureMayPresent(
+                startupSheet: nil, captureOnScreen: false, reviewExposed: false, explainerNeeded: true
+            )
+        )
+        var hidden = coldCaptureLink
+        hidden.reviewExposed = false
+        #expect(ReviewStartupPlanner.sheetToPresent(hidden) == nil)
+    }
+
+    @Test("020-FR-015 While you were away follows the explainer and yields to a requested capture")
+    func startupWhileAway() {
+        var context = ReviewStartupPlanner.Context(
+            reviewExposed: true, explainerNeeded: false, whileAwayDue: true, captureRequested: false, screenBusy: false
+        )
+        #expect(ReviewStartupPlanner.sheetToPresent(context) == .whileAway)
+        context.captureRequested = true
+        #expect(ReviewStartupPlanner.sheetToPresent(context) == nil, "the capture first, M-09 after it closes")
+        context.captureRequested = false
+        context.whileAwayDue = false
+        #expect(ReviewStartupPlanner.sheetToPresent(context) == nil)
+    }
+
+    @Test("020-FR-051 020-FR-015 nothing is presented over another sheet; a capture already on screen is never taken away")
+    func startupNeverOverAnotherSheet() {
+        let busy = ReviewStartupPlanner.Context(
+            reviewExposed: true, explainerNeeded: true, whileAwayDue: true, captureRequested: false, screenBusy: true
+        )
+        #expect(ReviewStartupPlanner.sheetToPresent(busy) == nil, "UIKit presents one sheet at a time")
+        // The flag arrives while a capture is on screen: it stays.
+        #expect(
+            ReviewStartupPlanner.captureMayPresent(
+                startupSheet: nil, captureOnScreen: true, reviewExposed: true, explainerNeeded: true
+            )
+        )
+        #expect(
+            !ReviewStartupPlanner.captureMayPresent(
+                startupSheet: .whileAway, captureOnScreen: false, reviewExposed: true, explainerNeeded: false
+            ),
+            "a capture asked for meanwhile waits until M-09 closes"
+        )
     }
 
     // MARK: Active time (SC-004)

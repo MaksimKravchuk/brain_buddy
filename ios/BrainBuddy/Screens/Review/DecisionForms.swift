@@ -69,6 +69,9 @@ struct DecisionFormView: View {
     @State private var problem: String?
     @State private var confirmsDiscard = false
     @State private var leaveTarget = LeaveTarget.back
+    /// The decision was saved (and its drafts removed): a debounced or
+    /// background draft write must not bring the text back.
+    @State private var didSave = false
     @FocusState private var isFieldFocused: Bool
 
     private enum LeaveTarget {
@@ -118,7 +121,7 @@ struct DecisionFormView: View {
                             .font(BBFont.meta)
                             .foregroundStyle(BBColor.textTertiary)
                         Spacer(minLength: BBSpacing.s2)
-                        Button("Clear", action: clearDraft)
+                        Button(ReviewCopy.clearDraft, action: clearDraft)
                             .frame(minWidth: BBMetrics.hitTarget, minHeight: BBMetrics.hitTarget)
                     }
                 }
@@ -184,14 +187,7 @@ struct DecisionFormView: View {
 
     // MARK: Copy (design M-04)
 
-    private var navigationTitle: String {
-        switch form {
-        case .reformulate: "Reformulate"
-        case .firstStep: "First step"
-        case .waiting: "Waiting for"
-        case .extend: ReviewCopy.name(of: .extend)
-        }
-    }
+    private var navigationTitle: String { ReviewCopy.formTitle(form.decision) }
 
     private var prompt: String {
         switch form {
@@ -202,22 +198,15 @@ struct DecisionFormView: View {
         }
     }
 
-    private var placeholder: String {
-        switch form {
-        case .reformulate: "New wording"
-        case .firstStep: "Something you could start in 10 minutes"
-        case .waiting: "A person, an event or a reply"
-        case .extend: "One line is enough"
-        }
-    }
+    private var placeholder: String { ReviewCopy.formPlaceholder(form.decision) }
 
     private func subheader(_ task: TaskRecord?) -> String {
         guard let task else { return "" }
         var parts = [task.title]
         if form == .firstStep, let stallReason {
-            parts.append("reason: \(DecisionCardCopy.reason(stallReason).lowercased())")
+            parts.append(ReviewCopy.reasonMeta(stallReason))
         } else if form != .waiting, let started = task.formulation?.startedAt {
-            parts.append(DecisionCardCopy.daysInNext(since: started, now: workspace.reviewNow))
+            parts.append(ReviewCopy.daysInNext(since: started, now: workspace.reviewNow))
         }
         return parts.joined(separator: " · ")
     }
@@ -232,31 +221,31 @@ struct DecisionFormView: View {
     private func footerText(_ task: TaskRecord?) -> String? {
         switch form {
         case .reformulate:
-            return isCosmetic(task) ? ReviewCopy.cosmeticEdit : "Name a visible action. " + ReviewCopy.reformulateHint
+            return isCosmetic(task) ? ReviewCopy.cosmeticEdit : ReviewCopy.reformulateFooter
         case .firstStep:
-            return "The old wording stays in this task's notes as \"" + ReviewCopy.was(task?.title ?? "") + "\"."
+            return ReviewCopy.firstStepFooter(oldTitle: task?.title ?? "")
         case .waiting:
-            return "It moves to Waiting for. The review checks in on it after 7 days."
+            return ReviewCopy.waitingFooter
         case .extend:
+            // Dates are shown in the device's current zone (ios-commands §6).
             guard let dates = extensionDates(task) else { return nil }
-            let asksAgain = ReviewCopy.day(dates.asksAgain, in: .current)
-            let moves = ReviewCopy.day(dates.moves, in: .current)
-            return "Asks again on \(asksAgain). If still undecided, it moves to Someday on \(moves). "
-                + "You can do this once for this wording."
+            return ReviewCopy.extendFooter(
+                asksAgain: ReviewCopy.day(dates.askAt, in: .current), moves: ReviewCopy.day(dates.parkDueAt, in: .current)
+            )
         }
     }
 
     private func saveTitle(_ task: TaskRecord?) -> String {
         switch form {
         case .reformulate:
-            return isCosmetic(task) ? ReviewCopy.saveAnyway : "Save new wording"
+            return isCosmetic(task) ? ReviewCopy.saveAnyway : ReviewCopy.saveNewWording
         case .firstStep:
-            return "Save first step"
+            return ReviewCopy.saveFirstStep
         case .waiting:
-            return "Move to Waiting for"
+            return ReviewCopy.moveToWaitingFor
         case .extend:
             guard canSave(task), let dates = extensionDates(task) else { return ReviewCopy.extendNeedsReason }
-            return ReviewCopy.keepUntil(ReviewCopy.day(dates.asksAgain, in: .current))
+            return ReviewCopy.keepUntil(ReviewCopy.day(dates.askAt, in: .current))
         }
     }
 
@@ -282,19 +271,12 @@ struct DecisionFormView: View {
         }
     }
 
-    /// The dates "Keep 7 more days" would give, from Core's rule (FR-009):
-    /// asks again 7 days from now, moves to Someday after that, floors kept.
-    private func extensionDates(_ task: TaskRecord?) -> (asksAgain: Date, moves: Date)? {
+    /// The instants "Keep 7 more days" would give (FR-009), asked of Core in
+    /// the workspace's classification zone: asks again 7 days from now,
+    /// moves to Someday after that, floors kept.
+    private func extensionDates(_ task: TaskRecord?) -> DerivedInstants? {
         guard let task else { return nil }
-        let now = workspace.reviewNow
-        // Classification zone: the stored one signed in, the device's without
-        // an account (contracts/ios-commands.md §6).
-        let zone = workspace.account == nil ? TimeZone.current.identifier : nil
-        let settings = workspace.state.review.settings.clockSettings(timeZone: zone)
-        guard let extended = try? FormulationRule.extend(task.clocked, reason: "-", settings: settings, now: now),
-            let instants = FormulationRule.derivedInstants(of: extended, settings: settings)
-        else { return nil }
-        return (instants.askAt, instants.parkDueAt)
+        return workspace.extensionInstants(of: task.id)
     }
 
     /// Unsaved text: a changed wording, or anything typed in the other forms.
@@ -327,7 +309,7 @@ struct DecisionFormView: View {
     }
 
     private func persistDraft() {
-        guard hasLoaded, seedText == nil else { return }
+        guard hasLoaded, seedText == nil, !didSave else { return }
         let title = workspace.task(taskID)?.title ?? ""
         if Self.hasUnsavedText(text, form: form, title: title) {
             workspace.saveDraft(text, for: draftKey)
@@ -368,22 +350,36 @@ struct DecisionFormView: View {
 
     // MARK: Saving
 
+    /// Saves on the wording the card was opened on (`formulationID`): when a
+    /// sync or another window reformulated the task meanwhile, the reducer
+    /// refuses it (`.formulationChanged`), nothing is applied and the card
+    /// shows the stale state (FR-011).
     private func save() {
-        guard let task = workspace.task(taskID), canSave(task) else { return }
+        guard !didSave, let task = workspace.task(taskID), canSave(task) else { return }
         let value = trimmed
         problem = nil
         do {
             let decisionID: DecisionID
             switch form {
             case .reformulate:
-                decisionID = try workspace.decide(.reformulate, on: taskID, title: value, stallReason: stallReason)
+                decisionID = try workspace.decide(
+                    .reformulate, on: taskID, title: value, stallReason: stallReason, formulationID: formulationID
+                )
             case .firstStep:
-                decisionID = try workspace.decide(.firstStep, on: taskID, title: value, stallReason: stallReason)
+                decisionID = try workspace.decide(
+                    .firstStep, on: taskID, title: value, stallReason: stallReason, formulationID: formulationID
+                )
             case .waiting:
-                decisionID = try workspace.decide(.waiting, on: taskID, waitingFor: value, stallReason: stallReason)
+                decisionID = try workspace.decide(
+                    .waiting, on: taskID, waitingFor: value, stallReason: stallReason, formulationID: formulationID
+                )
             case .extend:
-                decisionID = try workspace.decide(.extend, on: taskID, reason: value, stallReason: stallReason)
+                decisionID = try workspace.decide(
+                    .extend, on: taskID, reason: value, stallReason: stallReason, formulationID: formulationID
+                )
             }
+            // `decide` removed the drafts; nothing may write them back.
+            didSave = true
             isDirty = false
             // The toast names the new wording when there is one.
             let shown = form == .reformulate || form == .firstStep ? value : task.title

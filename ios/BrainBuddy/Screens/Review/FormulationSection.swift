@@ -9,12 +9,16 @@ import SwiftUI
 /// the device from Core (`Workspace.formulationClass`, `derivedInstants`), so
 /// it has no loading, error or offline state of its own. Hidden while the
 /// weekly review is not exposed, before activation (FR-051) and for tasks
-/// with no clock.
+/// with no clock. It follows the clock while the screen stays open (as
+/// `TaskRow`'s `TimelineView`): the marker, the age and "Decide" are
+/// re-evaluated every minute.
 struct FormulationSection: View {
     let task: TaskRecord
     let onDecide: () -> Void
 
     @Environment(Workspace.self) private var workspace
+    /// Bumped every minute while the section is shown.
+    @State private var minute = 0
 
     init(task: TaskRecord, onDecide: @escaping () -> Void) {
         self.task = task
@@ -22,12 +26,28 @@ struct FormulationSection: View {
     }
 
     var body: some View {
+        // Read, so each tick re-evaluates the state against the clock.
+        let _ = minute
         if let state = FormulationSectionState(task: task, workspace: workspace) {
             Section {
                 FormulationSectionContent(state: state, onDecide: onDecide)
             } header: {
-                Text("This wording")
+                // One clock per section (a modifier on the Section itself
+                // would run once per row).
+                Text(ReviewCopy.thisWordingHeader)
+                    .task(id: task.id) { await tickEveryMinute() }
             }
+        }
+    }
+
+    private func tickEveryMinute() async {
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: .seconds(60))
+            } catch {
+                return
+            }
+            minute &+= 1
         }
     }
 }
@@ -41,7 +61,9 @@ struct FormulationSectionState: Hashable {
         case fresh
         case paused(until: String)
         case kept(reason: String?, keptOn: String, asksAgain: String, moves: String)
-        case parked(on: String, at: String, afterDays: Int, archivedProject: String?)
+        /// `afterDays` is nil for a park whose clock this device does not
+        /// hold (pulled from the server): the copy then gives no number.
+        case parked(on: String, at: String, afterDays: Int?, archivedProject: String?)
     }
 
     var kind: Kind
@@ -50,24 +72,23 @@ struct FormulationSectionState: Hashable {
 }
 
 extension FormulationSectionState {
-    /// Nil when the section is not shown.
+    /// Nil when the section is not shown. Dates and times are shown in the
+    /// device's current zone (ios-commands §6); every rule is Core's.
     @MainActor
     init?(task: TaskRecord, workspace: Workspace) {
         guard workspace.reviewExposed else { return nil }
         let zone = TimeZone.current
         if task.state == .someday, let parked = task.parked {
-            // A pulled park carries no `clockBefore`; then the age is the
-            // rule's: threshold plus the 7 days of asking.
-            let threshold = workspace.state.review.settings.thresholdDays
-            let started = parked.clockBefore?.startedAt
-            let days =
-                started.map { Int((parked.at.timeIntervalSince($0) / FormulationRule.day).rounded(.down)) }
-                ?? threshold + Int(FormulationRule.parkAfterAsk / FormulationRule.day)
-            let archived = task.projectID.flatMap { workspace.project($0) }.flatMap { $0.state == .archived ? $0.name : nil }
+            let archived: String?
+            if case .projectArchived(let name)? = workspace.parkReturnProblem(of: task.id) {
+                archived = name
+            } else {
+                archived = nil
+            }
             self.init(
                 kind: .parked(
-                    on: ReviewCopy.day(parked.at, in: zone), at: ReviewCopy.time(parked.at, in: zone), afterDays: days,
-                    archivedProject: archived
+                    on: ReviewCopy.day(parked.at, in: zone), at: ReviewCopy.time(parked.at, in: zone),
+                    afterDays: GTDQueries.parkedAfterDays(task), archivedProject: archived
                 ),
                 age: nil
             )
@@ -76,7 +97,7 @@ extension FormulationSectionState {
         guard task.state == .next, let clock = task.formulation, let kind = workspace.formulationClass(of: task.id),
             let instants = workspace.derivedInstants(of: task.id)
         else { return nil }
-        let age = DecisionCardCopy.daysInNext(since: clock.startedAt, now: workspace.reviewNow)
+        let age = ReviewCopy.daysInNext(since: clock.startedAt, now: workspace.reviewNow)
         switch kind {
         case .none:
             return nil
@@ -150,7 +171,7 @@ struct FormulationSectionContent: View {
         .accessibilityElement(children: .combine)
         if state.showsDecide {
             Button(action: onDecide) {
-                Label("Decide", systemImage: "questionmark.circle")
+                Label(ReviewCopy.decide, systemImage: "questionmark.circle")
                     .frame(minHeight: BBMetrics.hitTarget)
             }
         }
@@ -173,7 +194,7 @@ struct FormulationSectionContent: View {
                 text: ReviewCopy.counterLabel(.extended), symbol: "clock.arrow.circlepath", role: .neutral
             )
         case .parked:
-            return ReviewMarkerChip(text: "Parked automatically", symbol: "archivebox", role: .neutral)
+            return ReviewMarkerChip(text: ReviewCopy.markerParked, symbol: "archivebox", role: .neutral)
         }
     }
 
@@ -196,14 +217,19 @@ struct FormulationSectionContent: View {
         case .paused(let until):
             ReviewCopy.thisWordingPaused(until: until)
         case .kept(_, let keptOn, let asksAgain, let moves):
-            ReviewCopy.thisWordingKept(on: keptOn, asksAgain: asksAgain, moves: moves)
-                + " This wording can't be extended again."
+            ReviewCopy.thisWordingKept(on: keptOn, asksAgain: asksAgain, moves: moves) + " "
+                + ReviewCopy.cannotExtendAgain
         case .parked(let on, let at, let afterDays, let archivedProject):
-            archivedProject.map {
-                ReviewCopy.thisWordingParked(on: on, at: at, afterDays: afterDays) + " "
-                    + ReviewCopy.thisWordingParkedProjectArchived(project: $0)
-            } ?? ReviewCopy.thisWordingParked(on: on, at: at, afterDays: afterDays)
+            Self.parkedExplanation(on: on, at: at, afterDays: afterDays, archivedProject: archivedProject)
         }
+    }
+
+    private static func parkedExplanation(on: String, at: String, afterDays: Int?, archivedProject: String?) -> String {
+        let parked =
+            afterDays.map { ReviewCopy.thisWordingParked(on: on, at: at, afterDays: $0) }
+            ?? ReviewCopy.thisWordingParked(on: on, at: at)
+        guard let archivedProject else { return parked }
+        return parked + " " + ReviewCopy.thisWordingParkedProjectArchived(project: archivedProject)
     }
 }
 
@@ -257,6 +283,12 @@ private func formulationPreview(_ state: FormulationSectionState) -> some View {
 #Preview("M-02 parked automatically") {
     formulationPreview(
         FormulationSectionState(kind: .parked(on: "Thu 8 Oct", at: "09:14", afterDays: 21, archivedProject: nil), age: nil)
+    )
+}
+
+#Preview("M-02 parked on another device (no clock here)") {
+    formulationPreview(
+        FormulationSectionState(kind: .parked(on: "Thu 8 Oct", at: "09:14", afterDays: nil, archivedProject: nil), age: nil)
     )
 }
 

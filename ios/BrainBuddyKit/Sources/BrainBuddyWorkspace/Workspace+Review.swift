@@ -77,6 +77,24 @@ extension Workspace {
     public func lastCountedReview() -> Date? { GTDQueries.lastCountedReview(in: state) }
     public var explainerNeeded: Bool { GTDQueries.explainerNeeded(in: state, local: local) }
 
+    /// FR-005: whether the card shows the third-stall offer for `id`.
+    public func isThirdStall(_ id: TaskID) -> Bool {
+        guard let task = state.tasks[id] else { return false }
+        return GTDQueries.isThirdStall(task, now: reviewNow, settings: state.review.settings, timeZone: classificationZone)
+    }
+
+    /// FR-009: what "Keep 7 more days" would give `id` now (M-04), in the
+    /// classification zone; nil when it is not allowed.
+    public func extensionInstants(of id: TaskID) -> DerivedInstants? {
+        guard let task = state.tasks[id] else { return nil }
+        return GTDQueries.extensionInstants(
+            of: task, now: reviewNow, settings: state.review.settings, timeZone: classificationZone
+        )
+    }
+
+    /// FR-015: why `id` cannot return to Next from "While you were away".
+    public func parkReturnProblem(of id: TaskID) -> ParkReturnProblem? { GTDQueries.parkReturnProblem(of: id, in: state) }
+
     /// Tasks listed once on "While you were away" because linking dropped
     /// their unsent "Keep 7 more days" (ios-commands §7).
     public var linkedExtensionNotices: [TaskID] { local.linkedExtensionNotices }
@@ -112,20 +130,25 @@ extension Workspace {
     // MARK: - Decisions
 
     /// Records a decision on `taskID` (http §3) and returns its id. Next-only
-    /// decisions are made on the task's current formulation. Saving removes
-    /// the task's decision-form drafts (FR-052).
+    /// decisions are made on `formulationID`, the wording the card or form
+    /// was opened on, when given (FR-011): if the task was reformulated since
+    /// (a sync, another window), the reducer refuses it with
+    /// `.formulationChanged` and nothing is applied, so text written for the
+    /// old wording never lands on the new one. Without it, the task's current
+    /// formulation. Saving removes the task's decision-form drafts (FR-052).
     @discardableResult
     public func decide(
         _ type: DecisionType, on taskID: TaskID, title: String? = nil, waitingFor: String? = nil, reason: String? = nil,
         stallReason: StallReason? = nil, aiUse: AIUse = .none, navigatorRequestID: String? = nil,
-        sessionID: ReviewSessionID? = nil
+        sessionID: ReviewSessionID? = nil, formulationID opened: FormulationID? = nil
     ) throws(GTDValidationError) -> DecisionID {
         guard let task = state.tasks[taskID] else { throw .taskNotFound }
         let decisionID = DecisionID.make(makeID())
         let startsFormulation: Set<DecisionType> = [.reformulate, .firstStep, .returnToNext, .followUp]
+        let current = task.formulation?.id ?? task.parked?.formulationID
         let command = GTDCommand.DecideTask(
             decisionID: decisionID, taskID: taskID, type: type,
-            formulationID: type.decidesOnFormulation ? (task.formulation?.id ?? task.parked?.formulationID) : nil,
+            formulationID: type.decidesOnFormulation ? (opened ?? current) : nil,
             newFormulationID: startsFormulation.contains(type) ? FormulationID.make(makeID()) : nil,
             stallReason: stallReason, title: title, waitingFor: waitingFor, reason: reason, sessionID: sessionID,
             aiUse: aiUse, navigatorRequestID: navigatorRequestID,
@@ -229,6 +252,17 @@ extension Workspace {
         edit { document in
             document.local.linkedExtensionNotices = []
             document.local.parkBatchWaiting = false
+            document.local.wywaLastShownDay = day
+        }
+    }
+
+    /// Close or swipe-down on "While you were away" (M-09): the parks stay
+    /// unseen and come back another day (FR-015); the account-linking
+    /// notices are information, shown once, so they go (T093).
+    public func closeWhileAway() {
+        let day = today
+        edit { document in
+            document.local.linkedExtensionNotices = []
             document.local.wywaLastShownDay = day
         }
     }

@@ -172,6 +172,11 @@ private struct TaskDetailForm: View {
             titleSection
             // Spec 020, M-02: the wording's age and "Decide" (only while exposed).
             FormulationSection(task: task) {
+                // Leave the field first: a title still focused under the card
+                // would be committed later with its old text and overwrite
+                // the card's new wording (the field only follows the stored
+                // title while it is not being edited).
+                focus = nil
                 commitAll()
                 isDeciding = true
             }

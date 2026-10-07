@@ -85,6 +85,76 @@ import Testing
         #expect(workspace.state == workspace.replayedState)
     }
 
+    @Test("020-FR-011 020-FR-052 a form decision is bound to the wording it was opened on: a reformulation elsewhere refuses it")
+    func decisionBoundToOpenedFormulation() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        clock.advance(by: 15 * Self.day)
+        let opened = try #require(workspace.task(task)?.formulation?.id)
+        // Another window (or a sync) reformulates while the form is open.
+        try workspace.updateTask(task, TaskChanges(title: .set("Get 3 quotes for the bathroom")))
+        let current = try #require(workspace.task(task))
+        #expect(current.formulation?.id != opened)
+        clock.advance(by: 15 * Self.day)
+
+        #expect(throws: GTDValidationError.formulationChanged) {
+            try workspace.decide(.reformulate, on: task, title: "Measure the bathroom wall", formulationID: opened)
+        }
+        #expect(throws: GTDValidationError.formulationChanged) {
+            try workspace.decide(.extend, on: task, reason: "Waiting for the plumber", formulationID: opened)
+        }
+        #expect(workspace.task(task) == current, "nothing was applied")
+        await workspace.flush()
+        #expect(!workspace.document.outbox.contains { if case .decideTask = $0.command { true } else { false } })
+
+        // The same decision on the current wording goes through.
+        try workspace.decide(.extend, on: task, reason: "Waiting for the plumber", formulationID: current.formulation?.id)
+        #expect(workspace.task(task)?.formulation?.extendedAt != nil)
+    }
+
+    @Test("020-FR-005 020-FR-009 the card's third-stall offer and the extension preview use the classification zone")
+    func cardQueries() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        #expect(workspace.extensionInstants(of: task) == nil, "fresh: nothing to extend")
+        #expect(workspace.isThirdStall(task) == false)
+        clock.advance(by: 15 * Self.day)
+        let record = try #require(workspace.task(task))
+        let expected = GTDQueries.extensionInstants(
+            of: record, now: workspace.reviewNow, settings: workspace.state.review.settings, timeZone: "Europe/Berlin"
+        )
+        #expect(workspace.extensionInstants(of: task) == expected)
+        #expect(workspace.extensionInstants(of: task)?.askAt == workspace.reviewNow.addingTimeInterval(7 * Self.day))
+        #expect(workspace.isThirdStall(task) == false, "the first wording")
+        #expect(workspace.extensionInstants(of: "missing") == nil)
+    }
+
+    @Test("020-FR-015 closing While you were away without Continue keeps the parks unseen and shows the linking notices once")
+    func closeWhileAwayClearsNotices() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let parked = try nextTask("Clean out the garage", in: workspace)
+        clock.advance(by: 21 * Self.day)
+        #expect(workspace.applyDueAutoParks() == 0)
+        clock.advance(by: Self.day)
+        #expect(workspace.applyDueAutoParks() == 1)
+        let extended = try nextTask("Call the landlord", in: workspace)
+        workspace.edit { $0.local.linkedExtensionNotices = [extended] }
+        #expect(workspace.parkReturnProblem(of: parked) == nil)
+        #expect(workspace.linkedExtensionNotices == [extended])
+
+        workspace.closeWhileAway()
+        #expect(workspace.linkedExtensionNotices.isEmpty, "notices are shown once")
+        #expect(workspace.unseenParks().map(\.id).contains(parked), "a swipe-down is not seen")
+        #expect(!workspace.whileAwayShouldShowAtAppOpen(), "not again today")
+        clock.advance(by: Self.day)
+        #expect(workspace.whileAwayShouldShowAtAppOpen(), "the parks come back another day")
+        await workspace.flush()
+        #expect(try await workspace.store.load()?.local.linkedExtensionNotices == [])
+    }
+
     @Test("020-FR-011 a follow-up decision mints task_ and form_ client ids")
     func followUpIDs() async throws {
         let workspace = try await activatedWorkspace()
