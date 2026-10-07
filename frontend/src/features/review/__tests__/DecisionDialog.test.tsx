@@ -774,26 +774,30 @@ describe("020-FR-005 decision dialog: the third stalled wording", () => {
       useAuthStore.setState({ user: { id: "user-1", email: "max@example.test", feature_flags: { crt_canvas: true } } });
     });
     window.history.replaceState(null, "", "/tasks/next");
-    let opened = false;
-    function NextPage(): React.JSX.Element {
-      const [open, setOpen] = useState(() => !opened);
-      opened = true;
+    // The open state lives above the routes, so coming back to the list does not reopen the card.
+    function App(): React.JSX.Element {
+      const [open, setOpen] = useState(true);
       return (
-        <>
-          <h1>Next actions</h1>
-          {open ? <DecisionDialog task={asksTask({}, { consecutive_stalled: 3 })} projectName="Home" onClose={() => setOpen(false)} /> : null}
-        </>
+        <BrowserRouter>
+          <Routes>
+            <Route
+              path="/tasks/next"
+              element={
+                <>
+                  <h1>Next actions</h1>
+                  {open ? <DecisionDialog task={asksTask({}, { consecutive_stalled: 3 })} projectName="Home" onClose={() => setOpen(false)} /> : null}
+                </>
+              }
+            />
+            <Route path="/crt" element={<h1>Thinking canvas</h1>} />
+          </Routes>
+        </BrowserRouter>
       );
     }
     render(
       <QueryClientProvider client={new QueryClient()}>
         <ShellToastContext.Provider value={notify}>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/tasks/next" element={<NextPage />} />
-              <Route path="/crt" element={<h1>Thinking canvas</h1>} />
-            </Routes>
-          </BrowserRouter>
+          <App />
         </ShellToastContext.Provider>
       </QueryClientProvider>
     );
