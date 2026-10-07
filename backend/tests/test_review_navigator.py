@@ -40,6 +40,7 @@ from app.container import Container, build_container
 from app.core import get_config
 from app.core.rate_limit import navigator_rate_limiter
 from app.main import create_app
+from app.modules.tasks.formulation import formulation_key
 from app.modules.tasks.navigator import (
     CONSENT_TEXT_VERSION,
     NOTES_BUDGET_CHARS,
@@ -54,6 +55,7 @@ from app.modules.tasks.navigator import (
     NavigatorProviderResult,
     NavigatorProviderTimeout,
     consent_is_current,
+    grounding_terms,
     reduce_notes,
     system_prompt,
     user_prompt,
@@ -628,6 +630,8 @@ def test_020_FR_021_validator_vectors_cover_the_rule_3_amendment() -> None:
         "r3-duration-ru-2-minuty",
         "r3-duration-31-minutes",
         "r3-date-tomorrow",
+        "r3-today-en",
+        "r3-today-ru",
         "r3-date-next-week",
         "r3-date-this-weekend",
         "r3-date-ru-zavtra",
@@ -753,32 +757,40 @@ def test_020_FR_019_user_content_cannot_close_or_open_a_delimiter(tag: str) -> N
 
 
 def test_020_FR_021_prompt_and_rule_3_agree_on_durations_and_dates() -> None:
-    """I-2: the prompt asks for steps "under 30 minutes" and "a 2-minute
-    starter step", so a duration of at most 30 minutes needs no grounding; it
-    forbids invented dates, so a relative date word not in the input drops."""
+    """I-2: the prompt asks for steps "under 30 minutes" that "could be
+    started today" and for "a 2-minute starter step", so such a duration and
+    "today" / "сегодня" need no grounding; it forbids invented dates, so any
+    other relative date word not in the input drops."""
 
     instructions = " ".join(system_prompt("first_step").split())
     assert "would take under 30 minutes each" in instructions
+    assert "could be started today" in instructions
     assert "no_energy → a 2-minute starter step" in instructions
     assert "Never invent people, places, amounts, dates," in instructions
     navigator_input = _input(notes="Tiles from the old shop", stall_reason="no_energy")
+    assert "today" not in formulation_key(navigator_input.task_notes or "")
     output = validate_navigator_output(
         navigator_input,
         proposals=[
-            "Take a 2-minute look at the tiles",
+            "Take a 2-minute look at the tiles today",
             "Spend 30 minutes on the tiles",
             "Spend 31 minutes on the tiles",
             "Look at the tiles tomorrow",
+            "Посмотреть плитку сегодня",
         ],
         clarifying_question=None,
     )
     assert output == NavigatorOutput(
         proposals=(
-            "Take a 2-minute look at the tiles",
+            "Take a 2-minute look at the tiles today",
             "Spend 30 minutes on the tiles",
+            "Посмотреть плитку сегодня",
         ),
         clarifying_question=None,
     )
+    assert grounding_terms("Start it today") == ()
+    assert grounding_terms("Сделай сегодня") == ()
+    assert grounding_terms("Start it tomorrow") == ("tomorrow",)
 
 
 # ----------------------------------------------------------- T101 consent

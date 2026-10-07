@@ -899,22 +899,6 @@
       }
     },
     {
-      "id": "r3-date-today",
-      "rule": 3,
-      "input": "bathroom",
-      "proposals": [
-        "Measure the wall today",
-        "Write down the next step"
-      ],
-      "clarifying_question": null,
-      "expect": {
-        "kind": "proposals",
-        "proposals": [
-          "Write down the next step"
-        ]
-      }
-    },
-    {
       "id": "r3-date-tonight",
       "rule": 3,
       "input": "bathroom",
@@ -1000,22 +984,6 @@
       "input": "garage",
       "proposals": [
         "Разобрать коробки завтра",
-        "Write down the next step"
-      ],
-      "clarifying_question": null,
-      "expect": {
-        "kind": "proposals",
-        "proposals": [
-          "Write down the next step"
-        ]
-      }
-    },
-    {
-      "id": "r3-date-ru-segodnya",
-      "rule": 3,
-      "input": "garage",
-      "proposals": [
-        "Сегодня разобрать коробки",
         "Write down the next step"
       ],
       "clarifying_question": null,
@@ -1150,6 +1118,78 @@
       "expect": {
         "kind": "proposals",
         "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-today-en",
+      "rule": 3,
+      "note": "today exemption",
+      "input": "bathroom",
+      "proposals": [
+        "Start it today",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Start it today",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-today-en-capitalised",
+      "rule": 3,
+      "note": "today exemption",
+      "input": "bathroom",
+      "proposals": [
+        "Measure the wall Today",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Measure the wall Today",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-today-ru",
+      "rule": 3,
+      "note": "today exemption",
+      "input": "garage",
+      "proposals": [
+        "Сделай сегодня",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Сделай сегодня",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-today-ru-first-word",
+      "rule": 3,
+      "note": "today exemption",
+      "input": "garage",
+      "proposals": [
+        "Сегодня разобрать коробки",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Сегодня разобрать коробки",
           "Write down the next step"
         ]
       }

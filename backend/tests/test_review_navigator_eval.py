@@ -353,7 +353,8 @@ def test_020_FR_021_screens_hold_for_any_recorded_file() -> None:
 def test_020_SC_005_invented_screen_uses_the_rule_3_triggers() -> None:
     """Advisory 5: the screen flags what rule 3 grounds, including lowercase
     Russian month and relative date words and English relative dates, and
-    leaves a duration of at most 30 minutes alone (I-2)."""
+    leaves a duration of at most 30 minutes and "today" / "сегодня" alone
+    (I-2)."""
 
     case: dict[str, Any] = {
         "kind": "first_step",
@@ -377,6 +378,9 @@ def test_020_SC_005_invented_screen_uses_the_rule_3_triggers() -> None:
                 "Take a 2-minute look at the boxes",
                 "Потратить 40 минут на коробки",
                 "Разобрать коробки",
+                "Разобрать коробки сегодня",
+                "Sort the boxes today",
+                "Sort the boxes tomorrow",
             )
         }
         allure.attach(
@@ -393,6 +397,9 @@ def test_020_SC_005_invented_screen_uses_the_rule_3_triggers() -> None:
         "Take a 2-minute look at the boxes": False,
         "Потратить 40 минут на коробки": True,
         "Разобрать коробки": False,
+        "Разобрать коробки сегодня": False,
+        "Sort the boxes today": False,
+        "Sort the boxes tomorrow": True,
     }
 
 

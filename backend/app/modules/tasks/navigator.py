@@ -252,7 +252,6 @@ _EN_DATE_WORDS = frozenset(
         "friday",
         "saturday",
         "sunday",
-        "today",
         "tonight",
         "tomorrow",
     }
@@ -291,7 +290,6 @@ _RU_DATE_WORDS = frozenset(
         "среды",
         "среде",
         "средой",
-        "сегодня",
         "завтра",
         "послезавтра",
     }
@@ -303,6 +301,10 @@ each must occur as a whole in one input field (§2 rule 3)."""
 MAX_EXEMPT_DURATION_MINUTES = 30
 """§2 rule 3: the prompt asks for steps that "would take under 30 minutes" and
 for "a 2-minute starter step", so such a duration needs no grounding."""
+
+_PROMPT_SOURCED_WORDS = frozenset({"today", "сегодня"})
+"""§2 rule 3: the prompt asks for actions that "could be started today", so
+"today" needs no grounding, in either language and in any case."""
 
 _MINUTE_WORDS = frozenset({"min", "mins", "minute", "minutes", "мин"})
 _MINUTE_STEM = "минут"
@@ -410,11 +412,13 @@ def _duration_tokens(keys: Sequence[str]) -> set[int]:
 
 def grounding_terms(text: str) -> tuple[str, ...]:
     """What rule 3 must find in the input, as ``formulation_key`` text: each
-    trigger token (a short duration excepted) and each relative date phrase."""
+    trigger token (a short duration and "today" excepted) and each relative
+    date phrase."""
 
     tokens = text.split()
     keys = [formulation_key(token) for token in tokens]
     exempt = _duration_tokens(keys)
+    exempt.update(i for i, key in enumerate(keys) if key in _PROMPT_SOURCED_WORDS)
     terms = [
         key
         for index, (token, key) in enumerate(zip(tokens, keys, strict=True))
