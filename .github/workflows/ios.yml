@@ -91,8 +91,9 @@ jobs:
           echo "upload=${upload}" >> "${GITHUB_OUTPUT}"
           echo "commit ${sha}: upload=${upload}"
 
-  # Signs with automatic, cloud-managed signing through an App Store Connect
-  # API key and uploads the archive. Until the owner configures the
+  # Archives with an imported development identity, then uses automatic
+  # cloud-managed distribution signing through the App Store Connect API key.
+  # Until the owner configures the
   # `testflight` environment the job reports what is missing and stays green.
   # That environment's branch policy must allow the branches you upload from
   # (ios/README.md); anyone with write access can dispatch a branch and get it
@@ -126,6 +127,8 @@ jobs:
           API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
           API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           BUNDLE_ID_PREFIX: ${{ vars.IOS_BUNDLE_ID_PREFIX }}
           BUILD_NUMBER_OFFSET: ${{ vars.IOS_BUILD_NUMBER_OFFSET }}
@@ -149,6 +152,11 @@ jobs:
           fi
 
           # Present but malformed is a mistake, not "not set up yet": fail.
+          if [ -z "${BUILD_CERTIFICATE_BASE64}" ] || [ -z "${P12_PASSWORD}" ]; then
+            echo "::error::Configure BUILD_CERTIFICATE_BASE64 and P12_PASSWORD in the testflight environment to reuse an existing Apple Development identity (ios/README.md)."
+            exit 1
+          fi
+
           if ! [[ "${APPLE_TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
             echo "::error::APPLE_TEAM_ID must be the 10-character Apple team id."
             exit 1
@@ -214,6 +222,15 @@ jobs:
           (umask 077 && printf '%s\n' "${API_KEY_P8}" > "${key_path}")
           chmod 600 "${key_path}"
 
+      - name: Import the existing development signing identity
+        id: signing
+        if: steps.config.outputs.configured == 'true'
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: bash ios/ci/install_signing_identity.sh
+
       - name: Archive for the App Store (Release)
         if: steps.config.outputs.configured == 'true'
         env:
@@ -224,6 +241,7 @@ jobs:
           BUILD_NUMBER: ${{ steps.config.outputs.build-number }}
           BRANCH: ${{ needs.decide.outputs.branch }}
           COMMIT: ${{ needs.decide.outputs.sha }}
+          SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
         # Automatic signing archives with a development profile (so the team
         # needs one registered device, README step 1) and the export below
         # re-signs for the App Store. Forcing CODE_SIGN_IDENTITY to Apple
@@ -231,6 +249,7 @@ jobs:
         run: |
           overrides=(
             "DEVELOPMENT_TEAM=${APPLE_TEAM_ID}"
+            "CODE_SIGN_IDENTITY=${SIGNING_IDENTITY}"
             "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}"
             "BB_BUILD_LABEL=${BRANCH} @ ${COMMIT:0:7}"
           )
@@ -250,6 +269,42 @@ jobs:
             "${overrides[@]}" 2>&1 \
             | tee "${RUNNER_TEMP}/xcodebuild-archive.log" \
             | if command -v xcbeautify >/dev/null 2>&1; then xcbeautify --renderer github-actions; else cat; fi
+
+      - name: Verify the archived app and widget signatures
+        if: steps.config.outputs.configured == 'true'
+        env:
+          SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          BUNDLE_ID_PREFIX: ${{ vars.IOS_BUNDLE_ID_PREFIX }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import plistlib
+          import subprocess
+          import tempfile
+
+          prefix = os.environ.get("BUNDLE_ID_PREFIX") or "brainbuddy"
+          group = f"group.{prefix}.ios"
+          app = Path(os.environ["RUNNER_TEMP"]) / "BrainBuddy.xcarchive/Products/Applications/BrainBuddy.app"
+          for bundle, suffix in ((app, "ios"), (app / "PlugIns/BrainBuddyWidgets.appex", "ios.widgets")):
+              subprocess.run(["codesign", "--verify", "--strict", str(bundle)], check=True, capture_output=True)
+              with tempfile.TemporaryDirectory(dir=os.environ["RUNNER_TEMP"]) as directory:
+                  certificate = Path(directory) / "certificate"
+                  subprocess.run(["codesign", "--display", "--extract-certificates", str(certificate), str(bundle)], check=True, capture_output=True)
+                  fingerprint = hashlib.sha1(Path(str(certificate) + "0").read_bytes()).hexdigest().upper()
+                  if fingerprint != os.environ["SIGNING_IDENTITY"]:
+                      raise SystemExit("Archived bundle used a different development signing identity.")
+              entitlements = plistlib.loads(subprocess.check_output(["codesign", "--display", "--entitlements", "-", str(bundle)], stderr=subprocess.PIPE))
+              with (bundle / "Info.plist").open("rb") as source:
+                  info = plistlib.load(source)
+              if info["CFBundleIdentifier"] != f"{prefix}.{suffix}" or entitlements.get("com.apple.developer.team-identifier") != os.environ["APPLE_TEAM_ID"] or entitlements.get("com.apple.security.application-groups") != [group]:
+                  raise SystemExit("Archived bundle identifiers, team or App Group do not match the configured targets.")
+              if suffix == "ios" and entitlements.get("com.apple.developer.applesignin") != ["Default"]:
+                  raise SystemExit("Archived app is missing its Apple sign-in entitlement.")
+          print("Archived app and widget reuse the validated development identity; configured entitlements verified.")
+          PY
 
       - name: Export and upload to App Store Connect
         if: steps.config.outputs.configured == 'true'
@@ -272,7 +327,7 @@ jobs:
             | tee "${RUNNER_TEMP}/xcodebuild-export.log"
 
       # Best effort: a build without notes is still a good build, so a failure
-      # here only warns. Runs before the key is removed, and uses only the
+      # here only warns. Runs before signing credentials are removed, and uses only the
       # system python3 and openssl, so no third-party code sees the key.
       - name: Write the branch into TestFlight's What to Test
         if: steps.config.outputs.configured == 'true'
@@ -296,12 +351,19 @@ jobs:
             --build "$(read_key CFBundleVersion)" \
             --notes "${BRANCH} @ ${COMMIT:0:7}${subject:+ — ${subject}}"
 
-      # The last step that needs the key is above. Delete it now, whatever
-      # happened, so it is gone before any later step runs — above all the
+      # The last step that needs signing credentials is above. Delete them,
+      # whatever happened, before any later step runs — above all the
       # third-party upload-artifact action below.
-      - name: Remove the API key
+      - name: Remove signing credentials
+        id: credentials_cleanup
         if: always()
-        run: rm -rf "${RUNNER_TEMP}/private_keys"
+        run: |
+          rm -rf "${RUNNER_TEMP}/private_keys"
+          rm -f "${RUNNER_TEMP}/brainbuddy-development.p12" "${RUNNER_TEMP}/brainbuddy-development.pem"
+          keychain="${RUNNER_TEMP}/brainbuddy-development.keychain-db"
+          if [ -f "${keychain}" ]; then
+            security delete-keychain "${keychain}"
+          fi
 
       - name: Summarize the upload
         if: steps.config.outputs.configured == 'true'
@@ -339,7 +401,7 @@ jobs:
           done
 
       - name: Upload archive logs
-        if: failure() && steps.config.outputs.configured == 'true'
+        if: failure() && steps.config.outputs.configured == 'true' && steps.credentials_cleanup.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ios-testflight-logs-${{ github.run_attempt }}

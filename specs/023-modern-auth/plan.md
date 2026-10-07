@@ -120,6 +120,41 @@ Disclose actual provider/mail categories, scopes/retention/transfers without inv
 
 Before production: configure actual provider IDs/keyring/SMTP through secret storage, verify Apple grouping/relay/notifications, run provider smoke and rehearse migration/rollback with synthetic data. ASK PR carries review and exact-SHA CI; release still needs named-owner approval/audited landing. Until live deployment evidence passes, report implementation/local verification accurately.
 
+### 2026-10-07 release repair — reuse the iOS development identity
+
+The provider-button follow-up (#279) builds in Xcode CI, but the signed archive
+on a fresh TestFlight runner can request a new Apple Development certificate
+each time. Run 37634408487 exhausted Apple's certificate limit. The accepted
+outcome is to reuse an existing team development identity for the archive,
+then retain the existing automatic App Store export, app/widget identifiers,
+entitlements, API key permissions, and upload serialization. Authentication
+and application code are outside this repair.
+
+Import a password-protected PKCS#12 identity from two `testflight` environment
+secrets into a temporary runner keychain. Require exactly one valid Apple
+Development identity for `APPLE_TEAM_ID`, and pin the archive to its SHA-1
+identity selector. Refuse missing, invalid, ambiguous, or wrong-team identities
+before archive/provisioning. Remove the decoded PKCS#12 immediately and remove
+the keychain and App Store API key before artifact upload, including failures.
+Add no certificate creation/revocation commands and never upload private signing
+material as artifacts. Apple's existing cloud-managed distribution signing and
+rotation during export remain in place.
+The owner supplies the existing private key through GitHub secrets; this cannot
+be recovered from the public certificate or a destroyed prior runner.
+
+Use Apple's [identity export instructions](https://developer.apple.com/documentation/xcode/sharing-your-teams-signing-certificates)
+and GitHub's [runner keychain installation pattern](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications).
+Verify input/identity failures and cleanup with isolated synthetic command
+fixtures, run shell/workflow checks and exact-SHA CI, and obtain independent
+planning and implementation review. Actual archive, export, App Group/widget
+entitlements, and TestFlight upload require the configured macOS release job;
+Linux fixtures and Simulator builds do not establish signing success.
+
+This is an ASK release-infrastructure repair. A reviewed PR and exact-SHA CI
+precede landing. After landing, check the signed upload rather than inferring
+release from a green configuration/no-op job. The web button release proceeds
+independently through the existing main CI / Fly workflow and production smoke.
+
 ## Complexity Tracking
 
 | addition | required for | rejected simpler alternative |

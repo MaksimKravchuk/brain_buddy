@@ -198,9 +198,9 @@ setup below, the `testflight` job writes what is missing to the run summary
    Team keys*: create a key with the **Admin** role. Download the `.p8` (it
    can be downloaded once) and note the key id and the issuer id.
 
-   *Why Admin.* CI signs on a fresh runner that has no certificate of its
-   own, so `xcodebuild -allowProvisioningUpdates` asks App Store Connect for a
-   cloud-managed distribution certificate and the profiles for both targets.
+   *Why Admin.* CI imports the existing development identity for archive;
+   `xcodebuild -allowProvisioningUpdates` obtains the profiles for both targets
+   and uses Apple's cloud-managed distribution signing during export.
    With an API key that takes the Admin role; App Manager is not enough.
 
    *What it can do if it leaks.* A team key is not scoped to this app. Until
@@ -229,6 +229,10 @@ setup below, the `testflight` job writes what is missing to the run summary
      - `APP_STORE_CONNECT_API_ISSUER_ID`: the issuer id
      - `APP_STORE_CONNECT_API_KEY_P8`: the full contents of the `.p8` file,
        including the `BEGIN`/`END` lines
+     - `BUILD_CERTIFICATE_BASE64`: an existing **Apple Development** signing
+       identity exported as password-protected `.p12`, including its private
+       key, encoded with `base64 -i Development.p12 | tr -d '\n'`
+     - `P12_PASSWORD`: that `.p12` export password
    - Variables (environment or repository level):
      - `APPLE_TEAM_ID` (required): the 10-character team id
      - `IOS_BUNDLE_ID_PREFIX` (optional): overrides `BB_BUNDLE_ID_PREFIX`;
@@ -247,11 +251,13 @@ workflow*), or land a change under `ios/`.
 
 1. Selects the newest Xcode 26, installs the pinned XcodeGen and generates the project.
 2. Writes the key to `$RUNNER_TEMP/private_keys/AuthKey_<key id>.p8` (mode 600).
+   Imports the existing development identity into a temporary runner keychain.
 3. `xcodebuild archive` (Release, `generic/platform=iOS`) with
    `DEVELOPMENT_TEAM`, `CURRENT_PROJECT_VERSION`, `BB_BUILD_LABEL` and, if set,
    `BB_BUNDLE_ID_PREFIX` on the command line, and `-allowProvisioningUpdates`
-   with the API key: automatic signing creates or refreshes the certificates
-   and profiles it needs.
+   with the API key. The archive uses the validated `CODE_SIGN_IDENTITY`
+   fingerprint and automatic provisioning. Before export, verify both bundle
+   signatures, their actual certificate fingerprints and configured entitlements.
 4. `xcodebuild -exportArchive` with `ci/ExportOptions.plist` (the team id is
    added to a temporary copy): method `app-store-connect`, destination
    `upload`, so the export uploads the build and its symbols directly.
@@ -259,11 +265,11 @@ workflow*), or land a change under `ios/`.
    through the App Store Connect API (`ci/testflight_notes.py`: standard
    library and the system `openssl` only, polls up to 15 minutes for the
    build to appear; a failure only warns).
-6. Deletes the key, whatever happened, as soon as those steps are over:
+6. Deletes the key and temporary signing keychain, whatever happened:
    before the summary, the log redaction and the artifact upload.
 7. Writes the bundle id, version, build, branch and commit to the run summary. On
    failure it uploads the archive and export logs, with the key id and issuer
-   id redacted.
+   id redacted, only after successful credential cleanup.
 
 ### Build numbers and versions
 
@@ -348,9 +354,20 @@ data, or need a sign-in.
 - `Shared/PrivacyInfo.xcprivacy` declares a baseline (UserDefaults, file
   timestamps, account email and user content for app functionality). Keep it
   in step with the code.
-- CI signs automatically on a fresh runner each time, so the team may gain an
-  Apple Development certificate per run. Revoke stale ones in Certificates,
-  Identifiers & Profiles if they pile up.
+- CI imports the existing Apple Development identity from the `testflight`
+  environment into a temporary keychain, then uses automatic provisioning and
+  App Store distribution export. It verifies the actual app/widget certificate
+  fingerprints and App Group / Apple sign-in entitlements before export.
+  The decoded `.p12` is removed immediately; the keychain and `.p8` are removed
+  before log artifacts, including after failures. A cleanup failure blocks
+  artifact upload.
+- Missing, expired, untrusted, ambiguous, wrong-team or public-only signing
+  material stops the archive. Export the existing identity in **Xcode → Settings
+  → Accounts → Manage Certificates → Export Certificate** and update the two
+  environment secrets above. A downloaded `.cer` does not include its private
+  key; the App Store API `.p8` is a separate identity. See
+  [Apple's export instructions](https://developer.apple.com/documentation/xcode/sharing-your-teams-signing-certificates)
+  and [GitHub's runner keychain guide](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications).
 - Background refresh is opportunistic (iOS decides when); widgets show the
   state of the last write to the shared store.
 - Weekly review stays deferred; the brain dump is pass 2.
