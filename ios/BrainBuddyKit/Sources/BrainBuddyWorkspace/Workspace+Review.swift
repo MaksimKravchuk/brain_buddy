@@ -23,9 +23,17 @@ extension Workspace {
 
     /// Whether the weekly review is shown (§8): signed in, the `weekly_review`
     /// flag answered on `GET /review/state`; account-less, the release switch.
+    /// Core's `ReviewState.isExposed` with the same input the reducer gets.
     public var reviewExposed: Bool {
-        account != nil ? state.review.server?.exposed == true : accountlessReviewEnabled
+        var review = state.review
+        review.accountlessReleaseSwitch = accountlessReleaseSwitch
+        return review.isExposed
     }
+
+    /// Core's exposure input (`ReviewState.accountlessReleaseSwitch`): the
+    /// account-less release switch, nil when signed in (the pulled
+    /// `review.server.exposed`, persisted in the base, decides).
+    var accountlessReleaseSwitch: Bool? { account == nil ? accountlessReviewEnabled : nil }
 
     /// The instant the rule is evaluated at: signed in, the device clock plus
     /// the last observed `server_now − device time` (http §5).
@@ -139,8 +147,8 @@ extension Workspace {
     /// old wording never lands on the new one. Without it, the task's current
     /// formulation. `expectedTask` is the task as the card showed it: any
     /// change since (notes, dates, project, tags, subtasks, a cosmetic title
-    /// edit) is refused the same way. While the review is not exposed every
-    /// decision is refused with `.reviewUnavailable`. Saving removes the
+    /// edit) is refused the same way. While the review is not exposed the
+    /// reducer refuses it with `.reviewUnavailable`. Saving removes the
     /// task's decision-form drafts (FR-052); a refusal keeps them.
     @discardableResult
     public func decide(
@@ -148,9 +156,6 @@ extension Workspace {
         stallReason: StallReason? = nil, aiUse: AIUse = .none, navigatorRequestID: String? = nil,
         sessionID: ReviewSessionID? = nil, formulationID opened: FormulationID? = nil, expectedTask: TaskStamp? = nil
     ) throws(GTDValidationError) -> DecisionID {
-        // Nothing of the review acts while it is not exposed (the flag or
-        // release switch turned off with a card or form open); drafts stay.
-        guard reviewExposed else { throw .reviewUnavailable }
         guard let task = state.tasks[taskID] else { throw .taskNotFound }
         let decisionID = DecisionID.make(makeID())
         let startsFormulation: Set<DecisionType> = [.reformulate, .firstStep, .returnToNext, .followUp]

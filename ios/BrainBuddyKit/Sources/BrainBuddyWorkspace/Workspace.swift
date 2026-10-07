@@ -555,9 +555,14 @@ extension Workspace {
         let commands =
             reviewExposed ? commands.map { Self.stampingFormulationID($0) { FormulationID.make(makeID()) } } : commands
         var next = state
+        // The device's exposure input for Core's review rules (the reducer
+        // refuses a person's review actions while it is hidden); never kept
+        // in `state` or stored.
+        next.review.accountlessReleaseSwitch = accountlessReleaseSwitch
         for command in commands {
             try GTDReducer.apply(command, at: issuedAt, to: &next, mode: .interactive)
         }
+        next.review.accountlessReleaseSwitch = nil
         ReviewActivation.apply(
             to: &next, activatedAt: next.review.settings.activatedAt ?? local.activatedAt,
             startsMissingClocks: next.review.server == nil

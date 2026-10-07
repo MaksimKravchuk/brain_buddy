@@ -861,6 +861,9 @@ extension Device {
         let date = clock.now()
         return try await store.update { doc in
             var state = OutboxReplayer.replay(doc.outbox, onto: doc.base, activatedAt: doc.local.activatedAt).state
+            // This helper stands for a workspace showing the review (tests turn
+            // the flag off on the server, which the next pull brings).
+            if !state.review.isExposed { state.review.accountlessReleaseSwitch = true }
             try GTDReducer.apply(command, at: date, to: &state)
             doc.outbox = OutboxCompactor.appending(
                 PendingOperation(command: command, issuedAt: date), to: doc.outbox, clockAware: true

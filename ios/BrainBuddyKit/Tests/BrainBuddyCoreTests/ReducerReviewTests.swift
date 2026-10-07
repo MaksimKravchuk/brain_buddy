@@ -233,6 +233,70 @@ struct ReducerReviewTests {
         #expect(replayed.tasks["t1"]?.state == .completed)
     }
 
+    @Test("020-FR-042 while the review is hidden a person's review actions are refused; replay still follows the server")
+    func hiddenReviewRefusesInteractiveActions() throws {
+        let asking = Review.nextTask("t1", started: t0, serverRevision: 4)
+        var parked = Review.task("t2", title: "Update the CV", state: .someday)
+        parked.parked = ParkMarker(at: t0, formulationID: Review.form(2))
+        let refused: [(String, GTDCommand)] = [
+            ("decision", decide(.someday, shown: asking)),
+            ("review start", .review(.startSession(StartSession(sessionID: Review.session(1), mode: .quick, entry: .list)))),
+            ("bulk release", .bulkRelease(.init(bulkID: Review.bulk(1), kind: .restart, taskIDs: ["t1"]))),
+            ("park acknowledgement", .review(.acknowledgeParks([ParkAck(taskID: "t2", formulationID: Review.form(2), parkedAt: t0)]))),
+            ("explainer", .review(.acknowledgeExplainer(timeZone: "UTC"))),
+        ]
+        // Signed in, the last gated read said the flag is off; account-less, the release switch is off.
+        var signedIn = Review.state([asking, parked])
+        signedIn.review.accountlessReleaseSwitch = nil
+        signedIn.review.server = ReviewServerFacts(exposed: false)
+        var accountless = Review.state([asking, parked])
+        accountless.review.accountlessReleaseSwitch = false
+        for hidden in [signedIn, accountless] {
+            #expect(!hidden.review.isExposed)
+            for (what, command) in refused {
+                var state = hidden
+                #expect(Review.error { try Review.apply(command, to: &state) } == .reviewUnavailable, "\(what)")
+                #expect(state == hidden, "\(what): nothing applied")
+            }
+            // Replay of a command queued before the flag went off still applies (FR-040).
+            var replayed = hidden
+            try Review.apply(decide(.someday, shown: asking), to: &replayed, mode: .replay)
+            #expect(replayed.tasks["t1"]?.state == .someday)
+        }
+
+        // Not refused while hidden: Undo of the person's own action, consent revocation, settings.
+        var state = accountless
+        state.review.navigatorConsents["openai"] = NavigatorConsent(
+            provider: "openai", grantedAt: t0, revokedAt: nil, consentTextVersion: 1
+        )
+        try Review.apply(.review(.revokeNavigatorConsent(provider: "openai")), to: &state)
+        #expect(state.review.navigatorConsents["openai"]?.allowsCloud == false, "a revocation always works")
+        try Review.apply(.review(.updateSettings(ReviewSettingsChange(reviewWeekday: 2))), to: &state)
+        #expect(state.review.settings.reviewWeekday == 2)
+
+        // Exposed (either way): the decision applies.
+        var exposedSignedIn = Review.state([asking])
+        exposedSignedIn.review.accountlessReleaseSwitch = nil
+        exposedSignedIn.review.server = ReviewServerFacts(exposed: true)
+        var exposedAccountless = Review.state([asking])
+        exposedAccountless.review.accountlessReleaseSwitch = true
+        exposedAccountless.review.server = ReviewServerFacts(exposed: false)
+        for var exposed in [exposedSignedIn, exposedAccountless] {
+            #expect(exposed.review.isExposed, "account-less: the switch, not a stale server fact")
+            try Review.apply(decide(.someday, shown: asking), to: &exposed)
+            #expect(exposed.tasks["t1"]?.state == .someday)
+        }
+    }
+
+    @Test("020-FR-042 the release switch is a device input: it is never encoded with the review state")
+    func releaseSwitchIsNotEncoded() throws {
+        var review = ReviewState()
+        review.accountlessReleaseSwitch = true
+        let data = try JSONEncoder().encode(review)
+        #expect(!String(decoding: data, as: UTF8.self).contains("accountlessReleaseSwitch"))
+        #expect(try JSONDecoder().decode(ReviewState.self, from: data).accountlessReleaseSwitch == nil)
+    }
+
     @Test("020-FR-011 the stamp a card showed is local: it is never encoded into the queued command")
     func expectedTaskIsNotEncoded() throws {
         let shown = Review.nextTask("t1", started: t0, serverRevision: 4)

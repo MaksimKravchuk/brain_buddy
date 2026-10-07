@@ -721,6 +721,18 @@ public struct ReviewState: Hashable, Sendable, Codable {
     /// Set once `GET /review/state` was read: the server keeps the clocks, so
     /// a Next task it holds without one stays unclassified until it repairs it.
     public var server: ReviewServerFacts?
+    /// Account-less only: the build's weekly-review release switch
+    /// (`BBWeeklyReviewLocal`, ADR-0027), set by the workspace on every state
+    /// it builds; nil when signed in, where `server.exposed` (pulled,
+    /// persisted in the base, merged by every pull) decides. A device input,
+    /// never encoded: the build, not the store, decides it.
+    public var accountlessReleaseSwitch: Bool? = nil
+
+    /// Whether the weekly review is exposed on this device: signed in, the
+    /// account's `weekly_review` flag as the last gated read answered;
+    /// account-less, the release switch. While it is not, the reducer refuses
+    /// a person's review actions (`GTDReducer`, `.reviewUnavailable`).
+    public var isExposed: Bool { accountlessReleaseSwitch ?? (server?.exposed == true) }
 
     public init(
         settings: ReviewSettings = ReviewSettings(), sessions: [ReviewSessionID: ReviewSession] = [:],
