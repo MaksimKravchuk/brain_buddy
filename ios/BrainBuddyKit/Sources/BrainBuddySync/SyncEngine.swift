@@ -75,6 +75,10 @@ public actor SyncEngine: SyncService {
     /// account would carry the session being created), and stale sessions
     /// are not discarded.
     var signInsInProgress = 0
+    var nativeSignIn: NativeSignInContext?
+    let nativeSignInGate = NativeSignInGate()
+    var nativeCommitInProgress = false
+    var nativeCommitWaiters: [CheckedContinuation<Void, Never>] = []
     /// Sending logouts that waited for the network.
     var logoutWork: Task<Void, Never>?
     /// False once the token store had no pending logouts (saves Keychain reads).
@@ -111,6 +115,8 @@ public actor SyncEngine: SyncService {
     }
 
     public func start(account: LinkedAccount) async {
+        await waitForNativeCommit()
+        invalidateNativeSignIn()
         await stopWork()
         epoch += 1
         self.account = account
@@ -152,6 +158,8 @@ public actor SyncEngine: SyncService {
     private func linkAccount(
         serverURL: URL, email: String, password: String
     ) async throws(SignInFailure) -> SignInResult {
+        await waitForNativeCommit()
+        invalidateNativeSignIn()
         guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
             throw SignInFailure(message: "Use an https server address.")
         }
@@ -215,6 +223,8 @@ public actor SyncEngine: SyncService {
     }
 
     public func signOut() async {
+        await waitForNativeCommit()
+        invalidateNativeSignIn()
         let signedOut = account
         await stopWork()
         epoch += 1
@@ -395,7 +405,7 @@ public actor SyncEngine: SyncService {
     }
 
     /// Cancels timers and stops the running cycle before the account changes.
-    private func stopWork() async {
+    func stopWork() async {
         debounceWork?.cancel()
         debounceWork = nil
         retryWork?.cancel()

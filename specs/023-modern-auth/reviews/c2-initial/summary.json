@@ -1,0 +1,304 @@
+{
+  "architect_action": "Resolve the technical findings and rerun the review campaign once. The cap is two campaigns. Panel note: requirements-consistency, architecture-consistency, testability-evidence, privacy-consent-security, ux-accessibility-mobile, adversarial-high-risk ran on a fallback oracle or an explicitly selected external adapter. Check the stamped provenance: a claimed provider/model is not verified independent evidence, and no unavailable default runtime was silently replaced.",
+  "artifacts_changed_since_preflight": false,
+  "artifacts_digest": "9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c",
+  "declared_risk": "medium",
+  "degraded_lenses": [
+    "requirements-consistency",
+    "architecture-consistency",
+    "testability-evidence",
+    "privacy-consent-security",
+    "ux-accessibility-mobile",
+    "adversarial-high-risk"
+  ],
+  "human_signoff": null,
+  "missing_reviewers": [],
+  "model_unverified_lenses": [
+    "requirements-consistency",
+    "architecture-consistency",
+    "testability-evidence",
+    "privacy-consent-security",
+    "ux-accessibility-mobile",
+    "adversarial-high-risk"
+  ],
+  "oracle_unknown_lenses": [],
+  "panel_correlated": null,
+  "panel_oracles": {},
+  "panel_providers": {},
+  "product_decisions": [],
+  "reviewers": [
+    {
+      "oracle": {
+        "adapter": "external-stdin-v1",
+        "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+        "artifacts_digest": "9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c",
+        "claimed_model": "inherited-model-unverified",
+        "claimed_provider": "openai-codex-collaboration",
+        "configured_integration": "codex",
+        "configured_model": "gpt-5.6-sol",
+        "degraded": true,
+        "executable": "/tmp/modern-auth-review-transport",
+        "integration": "external-unverified",
+        "model": "unverified",
+        "reason": "external reviewer model identity is not verified"
+      },
+      "role": "requirements-consistency",
+      "summary": "The specification, approved design, implementation plan and contracts consistently cover the accepted web/iOS authentication scope, legacy password and Mac compatibility, immutable ownership, operator restrictions, privacy rights and zero additional auth SaaS subscription cost. No material requirements contradiction or missing acceptance behavior was identified. Migration rehearsal, current Mac integration and real configured-provider evidence remain explicit implementation/release gates; this review establishes no implementation or production acceptance.",
+      "verdict": "pass"
+    },
+    {
+      "oracle": {
+        "adapter": "external-stdin-v1",
+        "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+        "artifacts_digest": "9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c",
+        "claimed_model": "inherited-model-unverified",
+        "claimed_provider": "openai-codex-collaboration",
+        "configured_integration": "codex",
+        "configured_model": "gpt-5.6-sol",
+        "degraded": true,
+        "executable": "/tmp/modern-auth-review-transport",
+        "integration": "external-unverified",
+        "model": "unverified",
+        "reason": "external reviewer model identity is not verified"
+      },
+      "role": "architecture-consistency",
+      "summary": "The plan preserves Identity ownership and the existing password/native interfaces, but the migration rollback mechanism and provider-mailbox continuation contract require concrete reconciliation. Both are implementation decisions; no product decision is required.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "adapter": "external-stdin-v1",
+        "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+        "artifacts_digest": "9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c",
+        "claimed_model": "inherited-model-unverified",
+        "claimed_provider": "openai-codex-collaboration",
+        "configured_integration": "codex",
+        "configured_model": "gpt-5.6-sol",
+        "degraded": true,
+        "executable": "/tmp/modern-auth-review-transport",
+        "integration": "external-unverified",
+        "model": "unverified",
+        "reason": "external reviewer model identity is not verified"
+      },
+      "role": "testability-evidence",
+      "summary": "The plan provides concrete evidence for provider validation, proof replay and concurrency, migration parity, privacy rights, native owner isolation, legacy compatibility and real-provider acceptance. One measurable acceptance outcome still lacks a defined evidence procedure: the 200 ms feedback requirement. The planned module boundaries support independent adapter and client lanes after the shared transactional and wire contracts are fixed. No product decision is required. This was a read-only planning review; no tests were run.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "adapter": "external-stdin-v1",
+        "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+        "artifacts_digest": "9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c",
+        "claimed_model": "inherited-model-unverified",
+        "claimed_provider": "openai-codex-collaboration",
+        "configured_integration": "codex",
+        "configured_model": "gpt-5.6-sol",
+        "degraded": true,
+        "executable": "/tmp/modern-auth-review-transport",
+        "integration": "external-unverified",
+        "model": "unverified",
+        "reason": "external reviewer model identity is not verified"
+      },
+      "role": "privacy-consent-security",
+      "summary": "The artifacts define strong consent separation, account-bound proofs, bounded provider cleanup, export exclusions and purge coverage. Two technical corrections remain: explicit wrong-owner 404 semantics and remediation of email-bearing logs in the reused identity-seeding path. No product decision is required. This was a read-only planning review; no implementation or tests were run.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "adapter": "external-stdin-v1",
+        "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+        "artifacts_digest": "9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c",
+        "claimed_model": "inherited-model-unverified",
+        "claimed_provider": "openai-codex-collaboration",
+        "configured_integration": "codex",
+        "configured_model": "gpt-5.6-sol",
+        "degraded": true,
+        "executable": "/tmp/modern-auth-review-transport",
+        "integration": "external-unverified",
+        "model": "unverified",
+        "reason": "external reviewer model identity is not verified"
+      },
+      "role": "ux-accessibility-mobile",
+      "summary": "The approved design covers the main authentication surfaces, mobile sizing, keyboard behavior, local-work preservation and requirement mapping. Planning still needs explicit unlink consequences, truthful uncertain-completion states, Apple cleanup partial-failure copy and a recovery success state consistent with the contracts. These corrections can be resolved by the implementing agent; no product decision is required.",
+      "verdict": "changes-required"
+    },
+    {
+      "oracle": {
+        "adapter": "external-stdin-v1",
+        "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+        "artifacts_digest": "9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c",
+        "claimed_model": "inherited-model-unverified",
+        "claimed_provider": "openai-codex-collaboration",
+        "configured_integration": "codex",
+        "configured_model": "gpt-5.6-sol",
+        "degraded": true,
+        "executable": "/tmp/modern-auth-review-transport",
+        "integration": "external-unverified",
+        "model": "unverified",
+        "reason": "external reviewer model identity is not verified"
+      },
+      "role": "adversarial-high-risk",
+      "summary": "Read-only review completed against artifact digest 9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c, independently recomputed and matched. The plan provides substantial safeguards for transactional authority, migration, replay, operator isolation and native ownership. One passwordless-account timing regression needs an explicit technical correction. No product decision is required; implementation, tests and release readiness were not validated.",
+      "verdict": "changes-required"
+    }
+  ],
+  "risk": "high",
+  "risk_escalated_by_classifier": true,
+  "run_id": "modern-auth-20261006-c2",
+  "single_provider_panel": null,
+  "stale_reviews": [],
+  "status": "technical-changes-required",
+  "technical_findings": [
+    {
+      "category": "migration-and-rollback",
+      "description": "The migration forbids automatic rollback to a JSON-only binary, but the preserved release workflow captures the previously released backend image and automatically redeploys it after deployment or smoke failure. The plan does not specify how the first Identity migration establishes a compatible captured rollback target or prevents the existing automatic rollback from selecting the JSON-only predecessor. Merely documenting a compatible image does not change that workflow. Once source credentials are removed, this rollback cannot preserve account/session authority.",
+      "evidence": [
+        "specs/022-modern-auth/contracts/persistence-migration.md:13-15 requires stopped old writers, migration before readiness, and preservation of the release gates.",
+        "specs/022-modern-auth/contracts/persistence-migration.md:24 removes original credential files after import commitment.",
+        "specs/022-modern-auth/contracts/persistence-migration.md:29 forbids an old JSON image as automatic rollback and requires a SQLite-capable binary.",
+        "specs/022-modern-auth/plan.md:72 states the compatible-binary requirement; Verification and release preserves the existing release workflow.",
+        ".github/workflows/deploy-fly-production.yml:341-375 captures the actual previous release images; Roll back to the captured images and verify at lines 624-659 automatically restores PREVIOUS_BACKEND_IMAGE.",
+        "backend/app/repositories/user.py:UserRepository and backend/app/repositories/session.py:SessionRepository currently use JSON files."
+      ],
+      "recommendation": "Specify an executable, gate-preserving transition sequence that establishes and verifies the compatible rollback target before import commitment. Choose an explicit compatibility rollout or an audited migration-aware rollback selection/guard, identify the affected implementation paths, and rehearse failure after import commit, source cleanup, and resumed auth writes through the actual release rollback mechanism.",
+      "reviewer": "architecture-consistency",
+      "severity": "blocking"
+    },
+    {
+      "category": "contracts-and-state-machine",
+      "description": "The external-Google-email flow has no fully specified transition from mailbox verification to signed-in completion. Provider completion returns verify_mailbox, while email verification declares provider_mailbox_verified and permits session creation only for signed_in. The only provider completion request requires the original one-use handoff code, whose lifetime is at most 60 seconds, whereas mailbox verification may take up to ten minutes. The contracts do not identify a finalizing response or a replacement continuation authority, so clients cannot implement this journey consistently after the original handoff expires or is consumed.",
+      "evidence": [
+        "specs/022-modern-auth/plan.md:94 requires mailbox proof before durable creation for new Google third-party addresses.",
+        "specs/022-modern-auth/contracts/http-auth.md:33 lists provider_mailbox_verified and states that only signed_in may create a session.",
+        "specs/022-modern-auth/contracts/http-auth.md:42 requires handoff_code for provider completion; line 48 makes it one-use and at most 60 seconds.",
+        "specs/022-modern-auth/contracts/http-auth.md:56 lists verify_mailbox as a provider completion outcome.",
+        "specs/022-modern-auth/data-model.md:10-12 defines mailbox-required attempts, 60-second handoffs, and ten-minute challenges without an explicit continuation transition."
+      ],
+      "recommendation": "Define the exact mailbox-required completion edge and matching web/native response contract. For example, consume the callback handoff when entering the client-bound mailbox-required state, then let successful mailbox verification atomically finalize that same staged provider attempt and return signed_in. Alternatively, specify a bounded replacement continuation proof and its endpoint. Preserve the original callback evidence, client binding, attempt lifetime, uniqueness checks, and one-use semantics.",
+      "reviewer": "architecture-consistency",
+      "severity": "important"
+    },
+    {
+      "category": "measurable-acceptance-evidence",
+      "description": "The 200 ms pending-feedback requirement is measurable in the specification, but the validation plan does not identify a reference environment or a procedure that measures user action to visible loading/disabled feedback on the changed web and native surfaces. Functional loading-state assertions and the static prototype checks cannot establish this timing outcome.",
+      "evidence": [
+        "specs/022-modern-auth/spec.md, FR-022 requires feedback within 200 ms on the supported reference device; SC-007 requires a controlled UI acceptance run.",
+        "specs/022-modern-auth/plan.md, Technical Context names local input/busy feedback <=200 ms but supplies no measurement method.",
+        "specs/022-modern-auth/quickstart.md, Browser journeys specifies viewport, keyboard, zoom, focus and accessibility checks; Native journeys and Mac compatibility specifies device lifecycle/autofill checks, but neither specifies feedback timing evidence.",
+        "specs/022-modern-auth/design.md, Preview verification evidence explicitly limits the recorded checks to the static prototype and excludes native behavior."
+      ],
+      "recommendation": "Add a bounded SC-007 validation procedure chosen by the implementing agent: record the supported web/native reference environments, measure action-to-visible-busy feedback while completion is deliberately held pending, assert <=200 ms together with duplicate-submission prevention and focus preservation, and retain sanitized measurements for the candidate build. Include this evidence in the eventual acceptance task.",
+      "reviewer": "testability-evidence",
+      "severity": "important"
+    },
+    {
+      "category": "validation-command-alignment",
+      "description": "The runnable final-candidate commands use raw test runners rather than the repository's complete validation targets. They execute tests, but omit the higher coverage-floor validators and some freshness, taxonomy and product-E2E result checks. The plan separately requires exact-SHA full CI, so this does not remove the release gate, but the guide should prevent these commands being reported as equivalent local evidence.",
+      "evidence": [
+        "specs/022-modern-auth/quickstart.md, Automated commands lists uv run pytest, npm run test:coverage and npm run test:e2e, with a separate prose reminder only for backend taxonomy.",
+        "Makefile, test-backend and test-frontend additionally invoke validate_coverage_floor.py and validate_allure_taxonomy.py; test-e2e additionally invokes result freshness and product-e2e-results validators.",
+        "backend/pyproject.toml, pytest addopts has cov-fail-under=95, while backend/coverage-floor.json requires line 0.9847 and branch 0.9561.",
+        "frontend/vite.config.ts, coverage.thresholds is explicitly below frontend/coverage-floor.json.",
+        "specs/022-modern-auth/plan.md, Verification and release still requires full backend/frontend/Swift/repository gates on the candidate."
+      ],
+      "recommendation": "Align the guide with the existing make verification targets, plus the feature-specific requirement coverage and native checks, or enumerate the omitted validators explicitly. Keep raw runners clearly identified as iteration checks and require exact-SHA CI before completion.",
+      "reviewer": "testability-evidence",
+      "severity": "advisory"
+    },
+    {
+      "category": "ownership-and-authorization",
+      "description": "The new HTTP contract requires owner/session/client checks but does not specify 404 for a resource belonging to another caller. It declares owner_mismatch and includes 403 among new failures, while omitting 404 entirely. This leaves the distinction between failed same-account reauthentication and wrong-owner resource access undefined.",
+      "evidence": [
+        "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md: Authorization and privacy assumptions requires owner-scoped reads, transitions, references and lists, with 404 for a wrong owner.",
+        ".specify/review-rubrics/security-privacy-reviewer.md: Ownership and authorization explicitly classifies unstated wrong-owner 404 semantics as at least important.",
+        "specs/022-modern-auth/contracts/http-auth.md: Common rules defines owner_mismatch without a status mapping; Email and recovery, Providers and Additive account management declare failures without 404."
+      ],
+      "recommendation": "Add an explicit contract rule and endpoint status declarations for owner-restricted lookups: foreign resources and nonexistent resources return indistinguishable 404 responses before disclosure or mutation. Preserve 403 for failed reauthentication of the caller's own account. Specify any expected-owner mismatch rejected before lookup separately, and require negative evidence that foreign account, attempt and challenge references neither disclose existence nor mutate authority.",
+      "reviewer": "privacy-consent-security",
+      "severity": "important"
+    },
+    {
+      "category": "pii-in-logs",
+      "description": "The identity-seeding path reused and modified by this plan currently logs the normalized operator email during creation, password rotation and the already-current case. The plan describes existing logging as safe and explicitly addresses callback redaction, but does not identify this existing email emission for remediation. Leaving that path intact violates the constitution's prohibition on real user data in logs.",
+      "evidence": [
+        ".specify/memory/constitution.md: Principle I prohibits real user data in logs, metrics, committed fixtures and PR evidence.",
+        "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md: Authorization and privacy assumptions explicitly excludes emails from logs and analytics.",
+        "backend/app/services/auth_service.py:350,358,361 — AuthService.seed_admin passes normalized email to logger.info/logger.debug.",
+        "specs/022-modern-auth/plan.md: Phase 1 A and contracts/persistence-migration.md: Store facade retain and change seeding; Constitution Check describes existing safe logging and callback-query redaction."
+      ],
+      "recommendation": "Explicitly include the seed_admin email-log correction in the planned privacy work. Require content-free creation/rotation/current outcomes using permitted opaque IDs and coarse metadata, and extend leakage acceptance evidence to these startup paths at INFO and DEBUG levels.",
+      "reviewer": "privacy-consent-security",
+      "severity": "blocking"
+    },
+    {
+      "category": "destructive-action-confirmation",
+      "description": "Removing a connected method has no specified confirmation that names the method and explains what access will be lost. The generic recent-authentication screen confirms account ownership, but does not disclose that this method will stop working or that provider-origin sessions, potentially including the caller, will end.",
+      "evidence": [
+        "specs/022-modern-auth/design.md:79 — D-04/M-04 inventories last-method rejection and account-deletion confirmation, but no unlink confirmation with consequences.",
+        "specs/022-modern-auth/design/auth.html:64 — the connected Google row exposes Remove.",
+        "specs/022-modern-auth/design/auth.html:75 — D-05/M-05 only says 'Sign in again before changing your account.'",
+        "specs/022-modern-auth/design/auth.html:149 — Remove routes to the generic recent-confirmation screen.",
+        "specs/022-modern-auth/plan.md:96 — unlink revokes provider-origin sessions and may clear the caller's cookie."
+      ],
+      "recommendation": "Add a stable D-04/M-04 unlink-confirmation state, or an action-specific D-05/M-05 variant, naming the provider, explaining the lost sign-in method and affected sessions, and offering explicit Remove and Keep method actions. Specify the remaining-method sign-in destination when the caller is signed out.",
+      "reviewer": "ux-accessibility-mobile",
+      "severity": "blocking"
+    },
+    {
+      "category": "interruption-and-uncertain-outcome",
+      "description": "Interrupted verification, password reset and account changes are described with 'Nothing was changed' even when the request may have committed before its response was lost. Atomic server writes do not make the outcome observable to the client. The design also directs users to retry without distinguishing an unsubmitted action from a consumed one-use proof.",
+      "evidence": [
+        "specs/022-modern-auth/design.md:62 — D-02/M-02 lost-network state says 'Nothing was changed. Reconnect, then try again.'",
+        "specs/022-modern-auth/design.md:76 — D-03/M-03 explicitly says not to assume reset success but supplies 'Nothing was changed' copy.",
+        "specs/022-modern-auth/design.md:89 — D-04/M-04 connection-loss state also says 'Nothing was changed'.",
+        "specs/022-modern-auth/contracts/http-auth.md:24 — reset changes the password and revokes sessions atomically.",
+        "specs/022-modern-auth/contracts/native-auth.md:19 — a lost completion response requires a fresh attempt rather than replaying the consumed proof."
+      ],
+      "recommendation": "Add stable completion-unknown states for D/M-02, D/M-03 and D/M-04. Use copy such as 'We couldn't confirm whether this finished. Your local tasks are kept.' Specify the next safe action for each flow: check current account state or sign in again through the same account, and obtain fresh proof when necessary. Reserve 'Nothing was changed' for confirmed rejection or cancellation before mutation.",
+      "reviewer": "ux-accessibility-mobile",
+      "severity": "important"
+    },
+    {
+      "category": "partial-failure-state",
+      "description": "The Apple unlink/deletion flow has a planned local-success/remote-cleanup-failure outcome, but the design supplies no stable state or user-facing copy for it. D-04/M-04 partial failure only covers loading method metadata, and its generic update error claims existing methods were retained, which would be false after successful local unlink.",
+      "evidence": [
+        "specs/022-modern-auth/plan.md:110 — Apple cleanup retries are bounded and unconfirmed remote revocation must be disclosed without delaying local erasure.",
+        "specs/022-modern-auth/contracts/http-auth.md — 'Apple notices/cleanup' separates local authority removal from remote revocation and requires credential erasure at the retry/purge bound.",
+        "specs/022-modern-auth/design.md:87 — generic account error says 'Your existing sign-in methods are kept.'",
+        "specs/022-modern-auth/design.md:88 — the only D-04/M-04 partial-failure state concerns method-list loading.",
+        "specs/022-modern-auth/design.md:164 — FR-025 refers to truthful Remove/Delete results, but does not define their cleanup-pending or cleanup-unconfirmed copy."
+      ],
+      "recommendation": "Define stable unlink/deletion result variants for remote revocation pending and unconfirmed. State that BrainBuddy access removal or deletion scheduling succeeded, that Apple cleanup is being retried or could not be confirmed, and that the purge deadline remains unchanged. Specify where this disclosure appears if the action ends the caller's session.",
+      "reviewer": "ux-accessibility-mobile",
+      "severity": "important"
+    },
+    {
+      "category": "recovery-success-copy-and-traceability",
+      "description": "The approved prototype promises automatic sign-in after password reset and navigates directly to account security, while both contracts require returning to sign-in without issuing a session. The state inventory does not define a recovery-success state that resolves this visible contradiction.",
+      "evidence": [
+        "specs/022-modern-auth/design/auth.html:54 — recovery CTA reads 'Save password and sign in'.",
+        "specs/022-modern-auth/design/auth.html:144 — save-password navigates directly to the security screen.",
+        "specs/022-modern-auth/contracts/http-auth.md:24 — successful reset returns 204 with 'no automatic login'.",
+        "specs/022-modern-auth/contracts/native-auth.md:37 — recovery saves the password and returns to sign-in.",
+        "specs/022-modern-auth/design.md:66 — D-03/M-03 inventories the new-password form but no reset-success transition."
+      ],
+      "recommendation": "Align the prototype with the planned contracts: label the submission 'Save password', add D-03/M-03.reset-success with copy such as 'Password reset. Sign in with your new password.', and route to D-01/M-01 while retaining the expected native owner and local work.",
+      "reviewer": "ux-accessibility-mobile",
+      "severity": "important"
+    },
+    {
+      "category": "privacy-account-enumeration",
+      "description": "The proposed empty password_hash representation introduces a timing oracle through the preserved public password-login endpoint unless its verification path changes explicitly. Current verification rejects an empty hash immediately as InvalidHashError, whereas an unknown account performs an expensive Argon2 dummy verification. An attacker could distinguish passwordless registered addresses from unknown addresses despite identical error responses. The plan specifies the new representation but does not specify the compensating verification behavior or its regression evidence.",
+      "evidence": [
+        "specs/022-modern-auth/plan.md, Phase 1 A: password_hash remains a mandatory string, with \"\" representing an unset password; the known dummy timing hash must never be assigned.",
+        "specs/022-modern-auth/data-model.md, users row and Authority invariants: passwordless accounts use an empty password hash.",
+        "backend/app/services/auth_service.py, AuthService._verify_password: InvalidHashError returns False immediately; AuthService.login performs dummy Argon2 verification only when the user lookup returns None.",
+        "docs/auth.md, decision 5: password login must not disclose account existence through response wording or verification timing.",
+        "specs/022-modern-auth/quickstart.md, Browser journeys: the planned negative evidence does not cover passwordless-versus-unknown password verification cost."
+      ],
+      "recommendation": "Amend the technical plan and validation matrix so unset or invalid password hashes perform comparable dummy Argon2 verification work and then reject unconditionally. Keep the dummy hash outside account persistence and never treat matching its known password as successful authentication. Add a focused deterministic regression check proving unknown and passwordless accounts both invoke the expensive verification path and that every passwordless password attempt fails without issuing a session.",
+      "reviewer": "adversarial-high-risk",
+      "severity": "important"
+    }
+  ]
+}

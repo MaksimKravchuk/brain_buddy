@@ -1,0 +1,676 @@
+{
+  "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+  "tree_sha": "f18354fc38044c040906134e48e2dc0461d5f2a2",
+  "base_sha": "143f1e813a466a7a000cd1f7e39bf4aae06c268d",
+  "inventory": [
+    {
+      "path": ".env.example",
+      "sha256": "d6323386d46862129cfa8c5ec417a9c3057291efb718caa676db692420a3e0b2"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "de61dbfdfc72f896298bd145428e30e9e876776118c92b658c909f538baf5d0e"
+    },
+    {
+      "path": ".github/workflows/deploy-fly-production.yml",
+      "sha256": "2ade8b626028972706c784089400c72854cc4bc295eefda293c1f2e768dd6d41"
+    },
+    {
+      "path": ".gitleaks.toml",
+      "sha256": "eb928c9061ee0bf455e3e2230581be17df4fa9bccff208b597eb2e83428fdad8"
+    },
+    {
+      "path": ".specify/gate-integrity.json",
+      "sha256": "22224c7e8254b1237cf4cbae07bd09189152b7741fc60b9a311a81f8ea88a2a5"
+    },
+    {
+      "path": "Makefile",
+      "sha256": "d78d0709afd081b51b58a6d97980ceabf8ec9893c0705221fe0a52256eabe9b9"
+    },
+    {
+      "path": "backend/app/api/account.py",
+      "sha256": "58f574823ad4d6aeae77b5664b179a83f618076d8abe986b93953dd53423b543"
+    },
+    {
+      "path": "backend/app/api/errors.py",
+      "sha256": "5699b6102b8737459843986b271a6118691224e798248fcd46b84da07c9ff176"
+    },
+    {
+      "path": "backend/app/api/modern_auth.py",
+      "sha256": "aa1b2bac477b6dc20121a34a27ba56ddd2a7db8fcbd1cc23bdcda7d6b6134b83"
+    },
+    {
+      "path": "backend/app/cli.py",
+      "sha256": "f52006dfef353a2e7e2f02ed87bd25ee3f2a1c5348010986669ffc7a7096d63a"
+    },
+    {
+      "path": "backend/app/container.py",
+      "sha256": "0b636a8e224f2dced326a94823f3d82c2a8233c6b6ce8a7458734dea1083bb12"
+    },
+    {
+      "path": "backend/app/core/config.py",
+      "sha256": "630b3d16e9534e3d8ce000cd7eb398b1711d864c5c45153e707e68675bd3480a"
+    },
+    {
+      "path": "backend/app/core/logging.py",
+      "sha256": "b39d279700ab90fa3ffce4c808653e3554ad010c7133d8402758dcd05f29304a"
+    },
+    {
+      "path": "backend/app/main.py",
+      "sha256": "f92e10541218e55986a12a1fecca265369e039076b4b6a75e78be49928e7b2b6"
+    },
+    {
+      "path": "backend/app/repositories/auth_metadata.py",
+      "sha256": "b1e05197f0b90850bfae798e17b0a245eb84ca5e44dfb3a4109cfc3edd1ec6a0"
+    },
+    {
+      "path": "backend/app/repositories/auth_store.py",
+      "sha256": "7d67f329f2b6d3c64c0d1250db9ac4f2357ceef9dc3619e1314ea27c1909bc8a"
+    },
+    {
+      "path": "backend/app/repositories/session.py",
+      "sha256": "9fa2f077a167b1db81628fd5a9f3f8c18fc5d190c34c9f487c1712458d44d7d6"
+    },
+    {
+      "path": "backend/app/repositories/user.py",
+      "sha256": "dc0c4729cd5a442a55b61b7914381c60ce9b3ab05f340218853c71c7ff2fa10b"
+    },
+    {
+      "path": "backend/app/schemas/auth.py",
+      "sha256": "d23e56e1d389edcf0e7dd4f59bbcf85e67db0215f28253f74892db32ba691228"
+    },
+    {
+      "path": "backend/app/schemas/modern_auth.py",
+      "sha256": "57c9158a932ec2aa980e819867bea59d08bf15007cabf5264da394afb3165f90"
+    },
+    {
+      "path": "backend/app/services/account_service.py",
+      "sha256": "387dff67d1a181d0237e805a5400c399d6689afda061731c14ec8de024f5f723"
+    },
+    {
+      "path": "backend/app/services/admin_service.py",
+      "sha256": "f3825de385641ab9251ec3348c1134812bbd0ee655117826fff7479c8219faef"
+    },
+    {
+      "path": "backend/app/services/auth_apple_lifecycle.py",
+      "sha256": "3ca0aa43dc0851f4b83cd7486b2fc1e597727c5f59282e29ed40c2b1fd95e3cf"
+    },
+    {
+      "path": "backend/app/services/auth_mail_service.py",
+      "sha256": "8a71e049cb9279bef70913b0a1a2e641d906961204731e64599805948a0a4579"
+    },
+    {
+      "path": "backend/app/services/auth_migration.py",
+      "sha256": "7e6618b96106c33f98527d1963060a142fe6e7ae08a400ecfb44333604b82320"
+    },
+    {
+      "path": "backend/app/services/auth_provider_service.py",
+      "sha256": "6e6e969fe3e986fc064c18fd2b6e15881c6b9e5eaca3a36dc9c59110fa9b4e45"
+    },
+    {
+      "path": "backend/app/services/auth_secret_box.py",
+      "sha256": "ce9a8aa7ea94f94084b28d7299e407e6765f266edda192604dca485b5b5346c3"
+    },
+    {
+      "path": "backend/app/services/auth_service.py",
+      "sha256": "f1a464722698d99f9158b56e174af0802aaf190f5adcb95304d9f9adb55f8c65"
+    },
+    {
+      "path": "backend/app/services/modern_auth_service.py",
+      "sha256": "0c706facb32ffc7570cc0c7831c92d2c047e5e3d82061c6793e7a9fd35b30332"
+    },
+    {
+      "path": "backend/pyproject.toml",
+      "sha256": "75412b6b8eaf61de4b1a155e9f252d913415bc755f3da8c6dade671ec7a878f9"
+    },
+    {
+      "path": "backend/tests/allure_taxonomy.py",
+      "sha256": "d7dd1375a46c8fd17970798bcc828c2f8235c5a446e983bb24a8b8ca15de9fb9"
+    },
+    {
+      "path": "backend/tests/conftest.py",
+      "sha256": "0e7922167dc6cf24885254e9fc6a142de90d8d923ca602629dec2f3e77d2c8ad"
+    },
+    {
+      "path": "backend/tests/modern_auth_e2e_app.py",
+      "sha256": "5c2259a16444532b3e8846c3c9c54fae2dd24ef7862c4df82ab35a069b5de6ba"
+    },
+    {
+      "path": "backend/tests/test_account_api.py",
+      "sha256": "4a35cc46d7abca1bb545575264b941fc6d044b4f5d33fb028e64d474bca2b6d2"
+    },
+    {
+      "path": "backend/tests/test_admin_deploy_contract.py",
+      "sha256": "83e38c38edbb767dff2acf7df8a5f20ee54c0d10bb55db774aee3314fa8944cb"
+    },
+    {
+      "path": "backend/tests/test_admin_service.py",
+      "sha256": "84d35ac2c0dad1b4633dbe602ee6bf8fc06cad29b0773c29c7b720dd8f5ea550"
+    },
+    {
+      "path": "backend/tests/test_api_contract.py",
+      "sha256": "fcb6d5061460ba5c0445f46589b885d66c1a76538f3f47508d8fab8a1854e335"
+    },
+    {
+      "path": "backend/tests/test_auth_apple_lifecycle.py",
+      "sha256": "c3b10713d80c99a0f2542e22360f043e77cb7b8b021b6aa0accd9eb19946bcc8"
+    },
+    {
+      "path": "backend/tests/test_auth_legacy_atomic.py",
+      "sha256": "13bf60506c576242c79cc455a921199f1996a170d23e352df4631ff9fd6ab6d3"
+    },
+    {
+      "path": "backend/tests/test_auth_logging.py",
+      "sha256": "3cd04122219d12b30247a32255bbac0353f9381c01cbaf4991bee649a4a7dda7"
+    },
+    {
+      "path": "backend/tests/test_auth_mail_service.py",
+      "sha256": "7ceda3eb2eab08c2eda996b69fd669b96e0d2ce373fa54a7bf5d68cc4339e640"
+    },
+    {
+      "path": "backend/tests/test_auth_migration.py",
+      "sha256": "0e5bf2c9fdae471522574cf823b996f5e12b765567b975341e499bce9e437c74"
+    },
+    {
+      "path": "backend/tests/test_auth_migration_integration.py",
+      "sha256": "57887bf5e17c89543eab422cdef650c90d32e722a56989d39515c06ffe942a49"
+    },
+    {
+      "path": "backend/tests/test_auth_provider_service.py",
+      "sha256": "9f2dc90bf076c8e75f0be6d94b16e631c41f1fd19efd6fde6f23b00493d6ee35"
+    },
+    {
+      "path": "backend/tests/test_auth_secret_box.py",
+      "sha256": "84d0018644eb0b2576962f25a0d05db904cd268926fa67b340aef17f817937ef"
+    },
+    {
+      "path": "backend/tests/test_auth_service.py",
+      "sha256": "9c84d8f44208ae8bfcafd74a34217dd31c2f100da49e16fef35c3038431548ea"
+    },
+    {
+      "path": "backend/tests/test_auth_store.py",
+      "sha256": "60b39a17e02eb694fb2501c2edf39b8404dc45eb4154b60f52ff21260e4336c8"
+    },
+    {
+      "path": "backend/tests/test_branch_invariants.py",
+      "sha256": "d5cf905b7a5261ac50b27a9adaf1699187d6b7475f443f3c275949eda1c095bf"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_api.py",
+      "sha256": "cb0bfebdc0dfbadba66e0d598b491027cc1599856cb036baed22b41380cc6cf4"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_api_journeys.py",
+      "sha256": "1f8f0c021d7ce4dec06f21bd3ade30332509294ef2c3fa20e2c0ce789e3822ca"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_apple_integration.py",
+      "sha256": "75c986a17fc77fcf65440932779cfe63a12b8de09bad72f8a01e2a5e66cd5f82"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_authority_edges.py",
+      "sha256": "d6d841ae01b3ef4afbe56e6b549bb689cfe705497a0cc9d6b5d7a24ee54853de"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_authority_remaining.py",
+      "sha256": "7baf631fba22fad570164b7b58003f6b1d0b5c8e36882743f614567e26c449cf"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_config.py",
+      "sha256": "c1576a936577762014916ca3880fbfd01eeed82bb2a44f3e28afdaafa857d4da"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_schemas.py",
+      "sha256": "24aebf5c313ec64f38b8d8430506bfa246156845c4e306ab61311588a05ac4c7"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_service.py",
+      "sha256": "420466f3502261f79163c77c6971975353b47bf1e8f911f1c4768eebfab0f8ba"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_storage_remaining.py",
+      "sha256": "56d3ba9e5a2dc989f42c0c19d1c18ae9e0bbac42a12075064dde8f66128b4bd1"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_unlink_authority.py",
+      "sha256": "2c4714578bdb518621f13cb1beea7cf84b4233e7fde3a599a9a22c23cdb88b8a"
+    },
+    {
+      "path": "backend/tests/test_repository_and_cli_edges.py",
+      "sha256": "6c5a25d00b268bda96da60535136d772f388480f3e6798d1b16362d40e5b4578"
+    },
+    {
+      "path": "backend/uv.lock",
+      "sha256": "99d97246eef2d1d78c029822688fbff3b4adc806f79370ca0dce17fbb0938ed9"
+    },
+    {
+      "path": "deploy/nginx/default.conf",
+      "sha256": "f76f63879c055d05e366d2850bc0ad4aebd11d373e73cf62d5de68b64d1002f5"
+    },
+    {
+      "path": "docs/api-compatibility.md",
+      "sha256": "8771c02e67006095eaa61f17e538aef8b0747af88c9369ac4f631590685bb6e6"
+    },
+    {
+      "path": "docs/autonomous-delivery-runbook.md",
+      "sha256": "b5190f852c60da819a6cf882abff41abbaabe885e9a17690eb1e99e6f66d8138"
+    },
+    {
+      "path": "docs/data-retention.md",
+      "sha256": "59e85b92f5cb633e7be159ca7ed231fa1194cc66de0d8b40e1a51bc8072aac90"
+    },
+    {
+      "path": "docs/decisions/0028-modern-identity-authority.md",
+      "sha256": "d92dc2299d7cfc249dd8d2addd477bc23a2e12cdc35385912b5eaad816931c4d"
+    },
+    {
+      "path": "docs/modern-auth-operations.md",
+      "sha256": "e2d1d2f6a27321fd88a9e0669c94293375e653531b922b98cbd781ebfb29914c"
+    },
+    {
+      "path": "frontend/playwright.modern-auth.config.ts",
+      "sha256": "2d8712f77e1f609f2cdf74fdd536cfd86fa693af6337f5d56167536d1606c1ca"
+    },
+    {
+      "path": "frontend/src/api/__tests__/account.test.ts",
+      "sha256": "af34f15e8577dea12b20d187871a42f822e4c5ac3a9923d7e8c146ba7ffbb0a5"
+    },
+    {
+      "path": "frontend/src/api/__tests__/client.test.ts",
+      "sha256": "8d454c64c8850d3dec1d8e947518e5125e09692c863f0d119dd9bf4300b4be21"
+    },
+    {
+      "path": "frontend/src/api/__tests__/modernAuth.remaining.test.ts",
+      "sha256": "06a8f6d6853474f57dea1b639cb8482347a45c35bd9663757c2fa5891e171137"
+    },
+    {
+      "path": "frontend/src/api/__tests__/modernAuth.test.ts",
+      "sha256": "cd240e8028f0d966556f8b611848afbaacbbd646fa1c72139bcc409af467dba6"
+    },
+    {
+      "path": "frontend/src/api/account.ts",
+      "sha256": "493a69f402dd1bcf452243a18047159059ce73e6728bd85f10f928597d14644d"
+    },
+    {
+      "path": "frontend/src/api/client.ts",
+      "sha256": "dbbe423624d46316e4ff754a80efdf9762bde7383cd3a15e7e8f7b713ed90af4"
+    },
+    {
+      "path": "frontend/src/api/modernAuth.ts",
+      "sha256": "e2d5319d42899b21045c252f40bd25afac2ddb1aed8270537e2b10f1a42ed3d6"
+    },
+    {
+      "path": "frontend/src/app/AppRoutes.test.tsx",
+      "sha256": "f34939214ad40753503f7cb0acc1dbc336c52542022afaa927a5cdb8d5f13f1d"
+    },
+    {
+      "path": "frontend/src/app/AppRoutes.tsx",
+      "sha256": "6ae3c85dda2976def2069efa753b07ccde6547cee638edc8325378a72823bbcd"
+    },
+    {
+      "path": "frontend/src/components/auth/ProtectedRoute.tsx",
+      "sha256": "f4ca939e5541c53148ba69c63201b36d9a1d0dbb177eeb0a86ec1e44a616fd87"
+    },
+    {
+      "path": "frontend/src/components/auth/__tests__/ProtectedRoute.test.tsx",
+      "sha256": "c09fc5459f004df64d8c980b862810e52034b073eb7fb3fbbd1064792cafa0de"
+    },
+    {
+      "path": "frontend/src/features/account/AccountSettingsPage.tsx",
+      "sha256": "a2db1df7808533ed7cae974a3eb8a5056084184ac41d82b73ae978025fca52f0"
+    },
+    {
+      "path": "frontend/src/features/account/LegacyAccountActions.tsx",
+      "sha256": "f1521132e60a8ad5a4e220415ecafd5012241dd6c0705bb5015289d1973fac7d"
+    },
+    {
+      "path": "frontend/src/features/account/__tests__/AccountSettingsPage.test.tsx",
+      "sha256": "a248e3f83e5e59be90ba452fbc640a8c708f59edec062fd6bbd4447fd0039ade"
+    },
+    {
+      "path": "frontend/src/features/account/__tests__/AuthMethods.test.tsx",
+      "sha256": "f0b554c5278af1f7ba380b31c50ff29a87c914074ace21a07d8a60533c71dcdb"
+    },
+    {
+      "path": "frontend/src/features/account/__tests__/LegacyAccountActions.test.tsx",
+      "sha256": "caf232ee45093fd5ceca75b79b1a17cccb2945eb05c4b0c09ad473db9865e39f"
+    },
+    {
+      "path": "frontend/src/features/auth/AccountSecurity.tsx",
+      "sha256": "44ad936d88416fa5b4f558aa1730f6944b442b145f6e2345b45673eec0bd6779"
+    },
+    {
+      "path": "frontend/src/features/auth/AuthControls.tsx",
+      "sha256": "81150da1ce0f9187de177f5192f2fbea4346165c039e61bf2fbf280dfd7657fe"
+    },
+    {
+      "path": "frontend/src/features/auth/AuthEntry.tsx",
+      "sha256": "4507409ad3759f2aae266ce95027bea34da52938d8832766a9642d5a47506337"
+    },
+    {
+      "path": "frontend/src/features/auth/ConfirmAccount.tsx",
+      "sha256": "993a2cc9c17ff7f6237abad2a875eb2547ead9d5842974c8b7fe1efbedc0552c"
+    },
+    {
+      "path": "frontend/src/features/auth/ProviderCompletionPage.tsx",
+      "sha256": "b26587c0fd6ef5c5feaceae08bde2ede2a97c069661594d11e0cdd537514930a"
+    },
+    {
+      "path": "frontend/src/features/auth/__tests__/ModernAuth.remaining.test.tsx",
+      "sha256": "86263ba2487a5a4db558615876801103899b0a83a584ab25e1dd062509716e12"
+    },
+    {
+      "path": "frontend/src/features/auth/__tests__/ModernAuth.test.tsx",
+      "sha256": "f5381e12d442fd665a144b151f13aea6ea8c1feefd6c82938ccda8a818e49c0d"
+    },
+    {
+      "path": "frontend/src/features/auth/__tests__/ProviderCompletion.test.tsx",
+      "sha256": "da0d2acc6b4abd2ac8c4dde9b683569ece1a0a2260033791312e5fed01fb8ff2"
+    },
+    {
+      "path": "frontend/src/features/auth/__tests__/authFlow.test.ts",
+      "sha256": "71e839364aa896d54a91eea0a7d2d74ef0ffc7dab56271783d7add0fafb4b8f2"
+    },
+    {
+      "path": "frontend/src/features/auth/authFlow.ts",
+      "sha256": "ebb657bca97a44ca5e7a59b3ecdccd92e45fc8f50354b02a135716ccaa1c50f9"
+    },
+    {
+      "path": "frontend/src/features/auth/authOperation.ts",
+      "sha256": "1ded22a5e5ed3598a317c5496dbcc7c0d4c6a47c188f26349307ab7211356f3a"
+    },
+    {
+      "path": "frontend/src/features/crt/__tests__/CrtWorkspace.test.tsx",
+      "sha256": "53b7dadf86a2ec456a64a326303d44487951d85c396f86bfdb6ed59654721547"
+    },
+    {
+      "path": "frontend/src/pages/LoginPage.tsx",
+      "sha256": "435dbe6a5dcaf0c8913e707cd999e4491b04f7fae0d0487b56607f296e617358"
+    },
+    {
+      "path": "frontend/src/pages/PrivacyPolicyPage.tsx",
+      "sha256": "f1ca90539a4f3bd5a8bd215142d34bf969a5a79086fb09809f96c4810a5308f3"
+    },
+    {
+      "path": "frontend/src/pages/SignupPage.tsx",
+      "sha256": "fe98a41a0a48d7cad45439da4afc952705e840f54689ffb0163ede5d46bade72"
+    },
+    {
+      "path": "frontend/src/pages/__tests__/LoginPage.test.tsx",
+      "sha256": "0b7dcc795e8475c5fc1e6f6ee63e5c7b1f3ef797d894164a42734f02bebeb682"
+    },
+    {
+      "path": "frontend/src/pages/__tests__/PrivacyPolicyPage.test.tsx",
+      "sha256": "05f4fca363787385ccf5bbc2f91e39a2ca0d9819ee52de41efe53945d2bd9cf6"
+    },
+    {
+      "path": "frontend/src/pages/__tests__/SignupPage.test.tsx",
+      "sha256": "589eeaf59cc19d9a0e57822a2af5307dfdebedef6f965d4e02e520cbbff6157c"
+    },
+    {
+      "path": "frontend/tests/e2e/account.spec.ts",
+      "sha256": "bee205fb90c29cfa48a4efbc15db9618c9a47ff2d012c931b81cd64f6c66f2e0"
+    },
+    {
+      "path": "frontend/tests/e2e/admin-users.spec.ts",
+      "sha256": "e3646bfb2f743ddc05d513e99a1b76b30b1623513eb8df996f99cf7f348898eb"
+    },
+    {
+      "path": "frontend/tests/e2e/auth.spec.ts",
+      "sha256": "21c69aeea65bd61011a193caab1d9a3fcd2826ff157c4d714361d2c7cce6d749"
+    },
+    {
+      "path": "frontend/tests/e2e/crt.spec.ts",
+      "sha256": "6e0ed8042d36d0e70c6526333abc1238779b2849d4b288c651aba31397978d0d"
+    },
+    {
+      "path": "frontend/tests/e2e/gtdHelpers.ts",
+      "sha256": "af1e6c8da57a8cce2bbd2952e372a5409a8f3a533f6497f482f91ced7d752903"
+    },
+    {
+      "path": "frontend/tests/modern-auth.spec.ts",
+      "sha256": "586b577cc4edb198fe49d35b076ceac7a5d948b33d4cd8ac00cea642da4f5654"
+    },
+    {
+      "path": "frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts",
+      "sha256": "798714a9308e09ceaf484ff760d95b5813d6de5a92f01a342249ffe980ec9873"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift",
+      "sha256": "bb7a1287b338ecf93adacf0d4a20773d8f5b27874310909de6b00ecae97bc552"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/SettingsScreen.swift",
+      "sha256": "ff093c2076ba8680c4c011324962bd4fc6e78ef5d16d8e66f816aefe5b503559"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/SignInSheet.swift",
+      "sha256": "15cb5b66f4bcbebcddb70a738420690b502f0431d0436d5056cf2b4f3468fd1e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthCallback.swift",
+      "sha256": "eb836632880fa0c7a8125177e5f932eed335f63ff3dc841c0e02778c07b40763"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthentication.swift",
+      "sha256": "0698b112eeb3ff9d6e94be1f56c6f8d49848144fb133b05321f7dbd25f2232c3"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/BrainBuddySync.swift",
+      "sha256": "4dd0b1e27f7954db1a7b4ddb0246e5bf986c69ad792e13678360b55f3a7f27f0"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+NativeAuthentication.swift",
+      "sha256": "535acf8d13deb2963caf4b1b67aafe30b8d6934f24774bc73376cb83365af552"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine.swift",
+      "sha256": "399fae8019ff4ad1fa84e7bf39ff1282a82036faf525d5751097549ffbdd5895"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift",
+      "sha256": "4497b9d6936d268012267d44b91f02d9e49704122c1b9bb6e3342fffe5a87995"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/ModernAuthTests.swift",
+      "sha256": "44f4b1ba049c1c7eb605e4b06e44d029b5de933a5aa23d221b05956e3871e90c"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ModernAuthSessionTests.swift",
+      "sha256": "7c67c09bc883a6bd586032456a79fe7c2089a00e0fd9ba01edcbae15a49769c1"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceModernAuthTests.swift",
+      "sha256": "0f696da2c0a16e807319ba1fb3be7653a78f4d9d54b51adede72965a3525141f"
+    },
+    {
+      "path": "ios/project.yml",
+      "sha256": "18ddb656856b62afbcad05b23e38b3e37fad676deb465d099837b6db2928e2a9"
+    },
+    {
+      "path": "scripts/auth_migration_guard.py",
+      "sha256": "ea269288c35b7b8558c7e3ce32fb7d2064c37cf08fe1ab7feea84afd00d87ea9"
+    },
+    {
+      "path": "scripts/run_modern_auth_e2e.py",
+      "sha256": "fe685550cf76f8f971f230714daa4b4d518303e71318de772fc0b549df4d9d97"
+    },
+    {
+      "path": "scripts/test_auth_migration_guard.py",
+      "sha256": "6ec2b7d7885fedfb79abaf3ddadaa4eb136396de97466b0cee5b7363d9812f6b"
+    },
+    {
+      "path": "specs/023-modern-auth/checklists/auth-quality.md",
+      "sha256": "f5783b3ff35a95fdf8cd3ded6bb262bb97bb1ac6611f96da8f83f5673e41e0c3"
+    },
+    {
+      "path": "specs/023-modern-auth/checklists/requirements.md",
+      "sha256": "e1233ab1eede452309653b5aff1bf3a0df8c52aceda567ac99ab55feab15057e"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/http-auth.md",
+      "sha256": "39af037349e69caafdc2b44e440e152eba3fdb24ef95be31e90494e4651d56cc"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/native-auth.md",
+      "sha256": "ad2de655ab54b28337d2ff87caa67d0cee083ca572136f975aa6956fbe1ff3ae"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/persistence-migration.md",
+      "sha256": "6e72632f5912aa3b92b09ff7142fd8edec6bfe1b80bb03b83cfbdf47a9847532"
+    },
+    {
+      "path": "specs/023-modern-auth/data-model.md",
+      "sha256": "a45df6e2cc359d2b9b106bbda8762d19e3e3c41bf96a050712ce9338403d91e7"
+    },
+    {
+      "path": "specs/023-modern-auth/design.md",
+      "sha256": "05933c2026d9a9055ca065d638fe6b4ff31f2f75fa05a06f5fcb81b30749ddc6"
+    },
+    {
+      "path": "specs/023-modern-auth/design/apple-cleanup-pending.png",
+      "sha256": "715cb1559cbbc1477949dbe287f33cdb6a29ed3ac765deb835630be6432db8e5"
+    },
+    {
+      "path": "specs/023-modern-auth/design/auth.html",
+      "sha256": "3effd3cab53f1cc60223657956b578972e0e7c3de3ac5f24a347d897bf6fcd91"
+    },
+    {
+      "path": "specs/023-modern-auth/design/completion-unknown.png",
+      "sha256": "af6bfcaaf6ecacbdee1ef014ec25cc26090844581ec1d41342b8172f3ec360f3"
+    },
+    {
+      "path": "specs/023-modern-auth/design/iphone-sign-in.png",
+      "sha256": "20cf37d0e4f079b0e8c5588c4b297055135ca0a30135c99188ca930cf1f2a76d"
+    },
+    {
+      "path": "specs/023-modern-auth/design/overview.png",
+      "sha256": "31b6ba98a152fcd7df54c7a26d35bb44df81050a7f0073876ba3030c529751b6"
+    },
+    {
+      "path": "specs/023-modern-auth/design/preview-check.json",
+      "sha256": "7d26e4f22fc79f2308bad87afe4492f2c5f5e4d159bdf92233d19c81ff89888b"
+    },
+    {
+      "path": "specs/023-modern-auth/design/reset-success.png",
+      "sha256": "8dfc250b840170e84904e1c0b235e1d203898ad2014775b12a469b80c5e9fa13"
+    },
+    {
+      "path": "specs/023-modern-auth/design/unlink-confirmation.png",
+      "sha256": "5751130180600143789132535d4ebd17c983595dff048df36b3f1adc8e1a8999"
+    },
+    {
+      "path": "specs/023-modern-auth/intake.md",
+      "sha256": "5d05c52e1958aee014fa7924d6d4de048ae6a6be83cc0fac541fbdb4d6ca4604"
+    },
+    {
+      "path": "specs/023-modern-auth/plan.md",
+      "sha256": "16b4cc29821a5e67d66f8cedf5494d1c9c5c195aecfbbbac167b29bacace6fe5"
+    },
+    {
+      "path": "specs/023-modern-auth/planning-review.json",
+      "sha256": "593e86286e26e9460aa5af1ae83c9b8223f662eb6804f07ab45f7ef6a79402f4"
+    },
+    {
+      "path": "specs/023-modern-auth/quickstart.md",
+      "sha256": "cc596afa2580c9702222af5cacfffb0d118bb779ec4e74c0d1a6638e4353a30d"
+    },
+    {
+      "path": "specs/023-modern-auth/renumbering-review.json",
+      "sha256": "293fb2ba44e72d6cf635f8c1e911ee2bb8500bffdcc93f10c868bb20c2e79d0f"
+    },
+    {
+      "path": "specs/023-modern-auth/report.md",
+      "sha256": "2d0cf1909a1cfdab01423f6bf31849405ec6bd2d7622caeb8fa9579e6deab6b6"
+    },
+    {
+      "path": "specs/023-modern-auth/research.md",
+      "sha256": "bd3e8ef27965a79e037d7cd808caa2fc941e0d119693a05ad8cdf07e75c6e8b3"
+    },
+    {
+      "path": "specs/023-modern-auth/review-execution.md",
+      "sha256": "53bf5f5d7e498e5cd036fbedd79c81989b0bfc4bec8ab710ece6bf92f84655c5"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c1-summary.json",
+      "sha256": "a275ec5b83c3f82e1e6ab0db12314b9ec197e7fe5495fb07e58d542c72ce05e6"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-final/adversarial-high-risk.json",
+      "sha256": "6c9a5e307418aaf34768956d994937868c488d4792b3249edd0e428720fa697c"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-final/architecture-consistency.json",
+      "sha256": "a1a29c14ec31bde5d6fad2480453b3ab22a8cc5d701a135af9c1ff6216931b95"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-final/privacy-consent-security.json",
+      "sha256": "20472a1be3278b3175f90481d4b949f6ddfe9907851d2d0aa2893081a0f563c7"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-final/requirements-consistency.json",
+      "sha256": "9f42c915f15bf43f752ae123e43321bc28a8f3ddadd5aff05bffeecddc86d3a5"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-final/testability-evidence.json",
+      "sha256": "bd085f534ab1af2a2185575d9e5076054a313ea70dea16af347587c2a155e48a"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-final/ux-accessibility-mobile.json",
+      "sha256": "dd335d0ce88454cdf0a2e1eb3c6b28df2b83aa7597800d87428b34b70068430d"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-initial/adversarial-high-risk.json",
+      "sha256": "20abd591519ee5b9916e810d78ab8fef91d94caafd24add116a3905f8b699d43"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-initial/architecture-consistency.json",
+      "sha256": "a934990f1da4d5a8217d92111b89caddb40237c711a87c8f60a12ce299a1bb4e"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-initial/privacy-consent-security.json",
+      "sha256": "787067cd597b7be2a300edb69ac393476c5b13b010c25d7d1e10979f7ce1c6da"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-initial/requirements-consistency.json",
+      "sha256": "bc637387bb1ecfd74d3fcde2820b9deec71a03b325157b2297789321ba1eca13"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-initial/summary.json",
+      "sha256": "c0aa7c433b72d82f5cf0a5393d936375bdf070d64f26b44f161945cbc657988d"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-initial/testability-evidence.json",
+      "sha256": "1ec5ed195a8a3603e2714faa8da778e018744018efc596fa026abfceba4c3390"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/c2-initial/ux-accessibility-mobile.json",
+      "sha256": "b2903698fc5f9f725e48814bc35349d46bce63499c3a8b88a36416cda8531bbd"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-5fc4a6a.json",
+      "sha256": "bd154d292129b7ee4bee55b120a12a63f471505e9ed9861eec96b5dd4e0865d7"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-8f3adb83.json",
+      "sha256": "8e9cb4ad6e70f4174f6f2d43c0bd9bec0cf2971bd0eb4912561d90c44bcdf42c"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-e4e4eab3.json",
+      "sha256": "515f6276498a441015b65fd309332725f772afb539491931a0b4a24ee875b068"
+    },
+    {
+      "path": "specs/023-modern-auth/spec.md",
+      "sha256": "92cda091adb146f2f15aed6722da6074a5fc0373af3961878f24390c8c871b02"
+    },
+    {
+      "path": "specs/023-modern-auth/tasks.md",
+      "sha256": "7943a9eeb305b8fec169e40fbb4bded98ab0e13f26cca694c53eb4e7ee1c0121"
+    },
+    {
+      "path": "specs/023-modern-auth/verification.md",
+      "sha256": "b213fe83b21085dd0c9c864314fcd9aeb083575bb25f04941ed571e0a70912dd"
+    }
+  ],
+  "note": "Frozen merged candidate inputs. Browser/backend/frontend production source unchanged from completed630; fresh integrated verification still required."
+}

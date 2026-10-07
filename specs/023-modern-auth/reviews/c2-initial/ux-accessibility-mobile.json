@@ -1,0 +1,104 @@
+{
+  "findings": [
+    {
+      "category": "destructive-action-confirmation",
+      "description": "Removing a connected method has no specified confirmation that names the method and explains what access will be lost. The generic recent-authentication screen confirms account ownership, but does not disclose that this method will stop working or that provider-origin sessions, potentially including the caller, will end.",
+      "evidence": [
+        "specs/022-modern-auth/design.md:79 — D-04/M-04 inventories last-method rejection and account-deletion confirmation, but no unlink confirmation with consequences.",
+        "specs/022-modern-auth/design/auth.html:64 — the connected Google row exposes Remove.",
+        "specs/022-modern-auth/design/auth.html:75 — D-05/M-05 only says 'Sign in again before changing your account.'",
+        "specs/022-modern-auth/design/auth.html:149 — Remove routes to the generic recent-confirmation screen.",
+        "specs/022-modern-auth/plan.md:96 — unlink revokes provider-origin sessions and may clear the caller's cookie."
+      ],
+      "recommendation": "Add a stable D-04/M-04 unlink-confirmation state, or an action-specific D-05/M-05 variant, naming the provider, explaining the lost sign-in method and affected sessions, and offering explicit Remove and Keep method actions. Specify the remaining-method sign-in destination when the caller is signed out.",
+      "severity": "blocking"
+    },
+    {
+      "category": "interruption-and-uncertain-outcome",
+      "description": "Interrupted verification, password reset and account changes are described with 'Nothing was changed' even when the request may have committed before its response was lost. Atomic server writes do not make the outcome observable to the client. The design also directs users to retry without distinguishing an unsubmitted action from a consumed one-use proof.",
+      "evidence": [
+        "specs/022-modern-auth/design.md:62 — D-02/M-02 lost-network state says 'Nothing was changed. Reconnect, then try again.'",
+        "specs/022-modern-auth/design.md:76 — D-03/M-03 explicitly says not to assume reset success but supplies 'Nothing was changed' copy.",
+        "specs/022-modern-auth/design.md:89 — D-04/M-04 connection-loss state also says 'Nothing was changed'.",
+        "specs/022-modern-auth/contracts/http-auth.md:24 — reset changes the password and revokes sessions atomically.",
+        "specs/022-modern-auth/contracts/native-auth.md:19 — a lost completion response requires a fresh attempt rather than replaying the consumed proof."
+      ],
+      "recommendation": "Add stable completion-unknown states for D/M-02, D/M-03 and D/M-04. Use copy such as 'We couldn't confirm whether this finished. Your local tasks are kept.' Specify the next safe action for each flow: check current account state or sign in again through the same account, and obtain fresh proof when necessary. Reserve 'Nothing was changed' for confirmed rejection or cancellation before mutation.",
+      "severity": "important"
+    },
+    {
+      "category": "partial-failure-state",
+      "description": "The Apple unlink/deletion flow has a planned local-success/remote-cleanup-failure outcome, but the design supplies no stable state or user-facing copy for it. D-04/M-04 partial failure only covers loading method metadata, and its generic update error claims existing methods were retained, which would be false after successful local unlink.",
+      "evidence": [
+        "specs/022-modern-auth/plan.md:110 — Apple cleanup retries are bounded and unconfirmed remote revocation must be disclosed without delaying local erasure.",
+        "specs/022-modern-auth/contracts/http-auth.md — 'Apple notices/cleanup' separates local authority removal from remote revocation and requires credential erasure at the retry/purge bound.",
+        "specs/022-modern-auth/design.md:87 — generic account error says 'Your existing sign-in methods are kept.'",
+        "specs/022-modern-auth/design.md:88 — the only D-04/M-04 partial-failure state concerns method-list loading.",
+        "specs/022-modern-auth/design.md:164 — FR-025 refers to truthful Remove/Delete results, but does not define their cleanup-pending or cleanup-unconfirmed copy."
+      ],
+      "recommendation": "Define stable unlink/deletion result variants for remote revocation pending and unconfirmed. State that BrainBuddy access removal or deletion scheduling succeeded, that Apple cleanup is being retried or could not be confirmed, and that the purge deadline remains unchanged. Specify where this disclosure appears if the action ends the caller's session.",
+      "severity": "important"
+    },
+    {
+      "category": "recovery-success-copy-and-traceability",
+      "description": "The approved prototype promises automatic sign-in after password reset and navigates directly to account security, while both contracts require returning to sign-in without issuing a session. The state inventory does not define a recovery-success state that resolves this visible contradiction.",
+      "evidence": [
+        "specs/022-modern-auth/design/auth.html:54 — recovery CTA reads 'Save password and sign in'.",
+        "specs/022-modern-auth/design/auth.html:144 — save-password navigates directly to the security screen.",
+        "specs/022-modern-auth/contracts/http-auth.md:24 — successful reset returns 204 with 'no automatic login'.",
+        "specs/022-modern-auth/contracts/native-auth.md:37 — recovery saves the password and returns to sign-in.",
+        "specs/022-modern-auth/design.md:66 — D-03/M-03 inventories the new-password form but no reset-success transition."
+      ],
+      "recommendation": "Align the prototype with the planned contracts: label the submission 'Save password', add D-03/M-03.reset-success with copy such as 'Password reset. Sign in with your new password.', and route to D-01/M-01 while retaining the expected native owner and local work.",
+      "severity": "important"
+    }
+  ],
+  "oracle": {
+    "adapter": "external-stdin-v1",
+    "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+    "artifacts_digest": "9fd7ea2418a64fa1f8f95403dae7c9cf808d1ef14a806db10984fea44b20a24c",
+    "claimed_model": "inherited-model-unverified",
+    "claimed_provider": "openai-codex-collaboration",
+    "configured_integration": "codex",
+    "configured_model": "gpt-5.6-sol",
+    "degraded": true,
+    "executable": "/tmp/modern-auth-review-transport",
+    "integration": "external-unverified",
+    "model": "unverified",
+    "reason": "external reviewer model identity is not verified"
+  },
+  "product_decisions": [],
+  "reviewed_files": [
+    ".specify/workflows/runs/modern-auth-20261006-c2/requests/ux-accessibility-mobile.txt",
+    ".specify/workflows/speckit/review.schema.json",
+    ".specify/review-rubrics/ux-a11y-reviewer.md",
+    "AGENTS.md",
+    "ios/AGENTS.md",
+    ".specify/memory/constitution.md",
+    "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md",
+    "docs/decisions/0002-async-voice-operation-substrate.md",
+    "docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md",
+    "docs/e2e-acceptance-charter.md",
+    "specs/022-modern-auth/spec.md",
+    "specs/022-modern-auth/plan.md",
+    "specs/022-modern-auth/design.md",
+    "specs/022-modern-auth/research.md",
+    "specs/022-modern-auth/data-model.md",
+    "specs/022-modern-auth/quickstart.md",
+    "specs/022-modern-auth/checklists/requirements.md",
+    "specs/022-modern-auth/contracts/http-auth.md",
+    "specs/022-modern-auth/contracts/native-auth.md",
+    "specs/022-modern-auth/contracts/persistence-migration.md",
+    "specs/022-modern-auth/design/auth.html",
+    "specs/022-modern-auth/design/preview-check.json",
+    "frontend/src/pages/LoginPage.tsx",
+    "frontend/src/pages/SignupPage.tsx",
+    "frontend/src/features/account/AccountSettingsPage.tsx",
+    "frontend/src/components/ui/Overlay.tsx",
+    "ios/BrainBuddy/Screens/Settings/SignInSheet.swift",
+    "ios/BrainBuddy/Screens/Settings/SettingsScreen.swift"
+  ],
+  "role": "ux-accessibility-mobile",
+  "summary": "The approved design covers the main authentication surfaces, mobile sizing, keyboard behavior, local-work preservation and requirement mapping. Planning still needs explicit unlink consequences, truthful uncertain-completion states, Apple cleanup partial-failure copy and a recovery success state consistent with the contracts. These corrections can be resolved by the implementing agent; no product decision is required.",
+  "verdict": "changes-required"
+}

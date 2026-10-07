@@ -37,6 +37,7 @@ requirement-coverage gate can see it.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -338,7 +339,13 @@ def fake_flyctl(tmp_path: Path) -> Path:
     calls_file = tmp_path / "flyctl_calls.txt"
     flyctl_stub = bin_dir / "flyctl"
     flyctl_stub.write_text(
-        "#!/bin/sh\n" f'printf "%s\\n" "$*" >> "{calls_file}"\n' "exit 0\n",
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{calls_file}"\n'
+        'if [ "$1 $2" = "machines list" ]; then\n'
+        '  printf \'%s\\n\' \'[{"id":"0123456789abcd","config":{"image":"registry.fly.io/brain-buddy-backend:previous"}}]\'\n'
+        'elif [ "$1 $2" = "ssh console" ]; then\n'
+        '  printf \'%s\\n\' \'{"schema_epoch":0,"import_committed":false,"cleanup_complete":true,"image_schema_epoch":0,"legacy_auth_present":false}\'\n'
+        "fi\nexit 0\n",
         encoding="utf-8",
     )
     flyctl_stub.chmod(0o755)
@@ -362,6 +369,7 @@ def _run_step(
         text=True,
         timeout=30,
         env=full_env,
+        cwd=REPO_ROOT,
         check=False,
     )
 
@@ -487,6 +495,18 @@ def test_ADR_0019_automatic_rollback_still_restages_the_exact_previous_string(
 
     script = _step_script(workflow_text, validator, validator.ROLLBACK_STEP)
     calls_file = tmp_path / "flyctl_calls.txt"
+    captured = tmp_path / "auth-rollback.json"
+    captured.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "app": "brain-buddy-backend",
+                "image": "registry.fly.io/brain-buddy-backend:previous",
+                "image_schema_epoch": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
     result = _run_step(
         script,
         env={
@@ -498,6 +518,7 @@ def test_ADR_0019_automatic_rollback_still_restages_the_exact_previous_string(
             "PREVIOUS_FRONTEND_IMAGE": "registry.fly.io/brain-buddy-frontend:previous",
             "PREVIOUS_BACKEND_IMAGE": "registry.fly.io/brain-buddy-backend:previous",
             "TESTED_SHA": "0" * 40,
+            "AUTH_MIGRATION_CAPTURE": str(captured),
         },
         fake_flyctl=fake_flyctl,
     )

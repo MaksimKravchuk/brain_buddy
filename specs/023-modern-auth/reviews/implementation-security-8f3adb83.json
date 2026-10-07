@@ -1,0 +1,114 @@
+{
+  "review_type": "independent targeted implementation security rereview",
+  "reviewer": "privacy-consent-security",
+  "input_sha": "8f3adb830cae82f4563966d12a6ca1e10a84b483",
+  "previous_input_sha": "5fc4a6a803a603e774e1068f06e0f5e276d161ac",
+  "previous_review": "specs/022-modern-auth/reviews/implementation-security-5fc4a6a.json",
+  "review_worktree": "/workspace/brain_buddy-auth-security",
+  "verdict": "approve",
+  "full_acceptance": false,
+  "scope": "Bounded independent verification of SEC-001, SEC-002 and SEC-003 and the affected Apple error/transaction paths. This does not review every added authority-edge test or constitute a fresh full campaign.",
+  "summary": "All three original findings are resolved at the exact rereview SHA. Disabled relay delivery is ineligible; revoked methods serialize safely; fresh web/native Apple consent restores the same owner with a new generation while equal-time consent remains rejected; full account purge erases associated receipts. No remaining material issue was found within this targeted scope.",
+  "reviewed_files": [
+    "backend/app/repositories/user.py",
+    "backend/app/services/modern_auth_service.py",
+    "backend/app/services/auth_apple_lifecycle.py",
+    "backend/app/api/modern_auth.py",
+    "backend/app/api/errors.py",
+    "backend/app/repositories/auth_store.py",
+    "backend/tests/test_modern_auth_apple_integration.py",
+    "backend/tests/test_auth_apple_lifecycle.py",
+    "backend/tests/test_auth_store.py",
+    "specs/022-modern-auth/contracts/http-auth.md",
+    "specs/022-modern-auth/contracts/persistence-migration.md",
+    "specs/022-modern-auth/data-model.md"
+  ],
+  "findings": [],
+  "resolved_findings": [
+    {
+      "id": "SEC-001",
+      "status": "resolved",
+      "evidence": [
+        "_email_usable now reads email_delivery_disabled written by validated notifications.",
+        "Independent web-flow reproduction: _email_usable=False; dispatch_one=False; no post-notice code login dispatched.",
+        "test_022_FR_019_relay_disabled_notice_removes_mail_login_and_reauth passed and verifies disabled methods plus login and reauthentication ineligibility."
+      ]
+    },
+    {
+      "id": "SEC-002",
+      "status": "resolved",
+      "evidence": [
+        "Nonactive persisted binding states map to the allowed public disabled state.",
+        "Both login and explicit-link finalization reactivate only after the lifecycle consent checks can commit; a transaction failure rolls generation/state back.",
+        "Independent web callback completion after strictly newer consent returned signed_in; binding active, generation=2.",
+        "Independent native equal-time consent returned invalid_proof/400; binding remained revoked/generation=1, with zero sessions and grants and a failed terminal attempt. Strictly newer native consent returned signed_in for the same immutable owner.",
+        "test_022_FR_019_revoked_binding_has_safe_wire_state_and_fresh_consent_reactivates and existing stale-generation/equal-revocation/cleanup-lease tests passed."
+      ]
+    },
+    {
+      "id": "SEC-003",
+      "status": "resolved",
+      "evidence": [
+        "UserRepository.delete removes matching namespace/subject-fingerprint receipts before binding/user cascade in the same transaction.",
+        "Independent complete purge reproduction: receipts before=2, after=0, users=0.",
+        "test_022_SC_005_purge_erases_personal_notice_receipts_under_retry passed, including a second complete purge call."
+      ]
+    }
+  ],
+  "verification": [
+    {
+      "name": "exact_snapshot",
+      "command": "git rev-parse HEAD; git status --short",
+      "working_directory": "/workspace/brain_buddy-auth-security",
+      "status": "passed",
+      "result": "HEAD=8f3adb830cae82f4563966d12a6ca1e10a84b483; clean detached worktree."
+    },
+    {
+      "name": "targeted_apple_and_store_regressions",
+      "command": "PYTHONDONTWRITEBYTECODE=1 /workspace/brain_buddy-auth/backend/.venv/bin/python -m pytest -o addopts='' -p no:cacheprovider tests/test_modern_auth_apple_integration.py tests/test_auth_apple_lifecycle.py tests/test_auth_store.py",
+      "working_directory": "/workspace/brain_buddy-auth-security/backend",
+      "status": "passed",
+      "result": "44 passed, 5 warnings in 1.97s."
+    },
+    {
+      "name": "independent_web_callback_recheck",
+      "command": "PYTHONDONTWRITEBYTECODE=1 /workspace/brain_buddy-auth/backend/.venv/bin/python -",
+      "working_directory": "/workspace/brain_buddy-auth-security/backend",
+      "status": "passed",
+      "stdin": "from pathlib import Path\nfrom tempfile import TemporaryDirectory\nfrom datetime import timedelta\nfrom urllib.parse import parse_qs, urlsplit\nimport pytest\nfrom pydantic import SecretStr, ValidationError\nfrom cryptography.hazmat.primitives.asymmetric import ec\nfrom cryptography.hazmat.primitives import serialization\nfrom tests import conftest\nfrom tests.test_modern_auth_service import make_modern, request, verify, challenge, VERIFIER\nfrom tests.test_auth_apple_lifecycle import Gateway, APPLE\nfrom app.services.auth_apple_lifecycle import AuthAppleLifecycle\nfrom app.services.auth_provider_service import AppleNotification, ProviderIdentity, ProviderTokens\nfrom app.schemas.modern_auth import ProviderStartRequest, ProviderCompleteRequest\n\nwith TemporaryDirectory(prefix='auth-security-review-') as directory:\n    data = Path(directory) / 'data'\n    data.mkdir()\n    mp = pytest.MonkeyPatch()\n    cg = conftest.container.__wrapped__(data, mp)\n    container = next(cg)\n    try:\n        service, mail, sent, provider, clock = make_modern(container)\n        owner = container.auth_service.seed_admin(email='relay@example.com', password='synthetic-long-password')\n        owner = container.user_repo.mutate(owner.id, lambda user: user.model_copy(update={'email_verified_at':clock()}))\n        _, token, _ = container.auth_service.login(email=owner.email, password='synthetic-long-password')\n        created = (clock() - timedelta(days=1)).isoformat()\n        with service.store.transaction() as c:\n            c.execute('INSERT INTO auth_identity_bindings(id,user_id,provider,issuer,namespace,subject,created_at,updated_at,email,is_private_email) VALUES(?,?,?,?,?,?,?,?,?,1)', ('apple-binding', owner.id, 'apple', APPLE, 'brainbuddy', 'apple-subject', created, clock().isoformat(), owner.email))\n        gateway = Gateway()\n        lifecycle = AuthAppleLifecycle(service.store, service.box, gateway, clock=clock)\n        service.apple = lifecycle\n        event_time = int(clock().timestamp())\n        gateway.notification = AppleNotification('delivery-review', 'email-disabled', 'apple-subject', 'com.example.web', event_time, event_time, owner.email, True)\n        lifecycle.process_notification('signed synthetic fixture')\n        print('repro_disabled_relay_email_stays_usable:', service._email_usable(owner))\n        pending = request(service, owner.email)\n        dispatched = mail.dispatch_one()\n        print('recheck_disabled_relay_dispatch:', dispatched)\n        if dispatched:\n            result = verify(service, pending.challenge_id, sent[-1][1])\n            print('repro_disabled_relay_login_result:', result.payload.status)\n        else:\n            print('repro_disabled_relay_login_result: not_dispatched')\n        gateway.notification = AppleNotification('revocation-review', 'consent-revoked', 'apple-subject', 'com.example.web', event_time, event_time)\n        lifecycle.process_notification('signed synthetic fixture')\n        try:\n            methods = service.account_methods(raw_token=token)\n            print('recheck_revoked_binding_safe_methods:', [(method.method, method.state, method.usable) for method in methods.methods])\n        except ValidationError as error:\n            print('repro_revoked_binding_breaks_account_methods:', [(e['loc'], e['type']) for e in error.errors(include_input=False)])\n        clock.now += timedelta(seconds=1)\n        key = ec.generate_private_key(ec.SECP256R1()).private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()\n        service.settings = service.settings.model_copy(update={'apple_team_id':'ABCDEFGHIJ','apple_key_id':'KLMNOPQRST','apple_private_key':SecretStr(key),'apple_services_id':'com.example.web','apple_native_app_id':'com.example.native'})\n        identity = ProviderIdentity('apple', APPLE, 'apple-subject', owner.email, True, True, 'com.example.web', int(clock().timestamp()))\n        provider.exchange_apple = lambda _code, **_kw: ProviderTokens(identity, 'com.example.web', SecretStr('synthetic-refresh'), 'refresh_token')\n        started = service.start_provider('apple', ProviderStartRequest(purpose='login', client='web', client_challenge=challenge()))\n        returned = service.provider_callback('apple', code='synthetic-code', state=started.payload.state, binder=started.binder)\n        parameters = parse_qs(urlsplit(returned.url).fragment)\n        try:\n            result = service.complete_provider(ProviderCompleteRequest(attempt_id=parameters['attempt'][0], state=parameters['state'][0], handoff_code=parameters['grant'][0], client_verifier=VERIFIER))\n            print('repro_fresh_apple_login_after_revocation:', result.payload.status)\n        except Exception as error:\n            print('repro_fresh_apple_login_after_revocation:', type(error).__name__)\n        with service.store.connection() as c:\n            print('recheck_binding_after_fresh_apple_login:', dict(c.execute('SELECT state,generation FROM auth_identity_bindings WHERE id=?', ('apple-binding',)).fetchone()))\n            before = c.execute('SELECT COUNT(*) FROM auth_apple_notification_receipts').fetchone()[0]\n        container.account_service.purge_account(owner.id)\n        with service.store.connection() as c:\n            print('repro_notification_receipts_after_complete_purge:', {'before':before, 'after':c.execute('SELECT COUNT(*) FROM auth_apple_notification_receipts').fetchone()[0], 'users':c.execute('SELECT COUNT(*) FROM users').fetchone()[0]})\n    finally:\n        try:\n            next(cg)\n        except StopIteration:\n            pass\n        mp.undo()\n",
+      "result": [
+        "repro_disabled_relay_email_stays_usable: False",
+        "recheck_disabled_relay_dispatch: False",
+        "repro_disabled_relay_login_result: not_dispatched",
+        "recheck_revoked_binding_safe_methods: [('password', 'active', True), ('email', 'disabled', False), ('apple', 'disabled', False)]",
+        "repro_fresh_apple_login_after_revocation: signed_in",
+        "recheck_binding_after_fresh_apple_login: {'state': 'active', 'generation': 2}",
+        "repro_notification_receipts_after_complete_purge: {'before': 2, 'after': 0, 'users': 0}"
+      ]
+    },
+    {
+      "name": "independent_native_stale_consent_recheck",
+      "command": "PYTHONDONTWRITEBYTECODE=1 /workspace/brain_buddy-auth/backend/.venv/bin/python -",
+      "working_directory": "/workspace/brain_buddy-auth-security/backend",
+      "status": "passed",
+      "stdin": "from pathlib import Path\nfrom tempfile import TemporaryDirectory\nfrom datetime import timedelta\nfrom dataclasses import replace\nimport pytest\nfrom tests import conftest\nfrom tests.test_modern_auth_apple_integration import apple_runtime, native_login\nfrom app.services.modern_auth_service import ModernAuthError\n\nwith TemporaryDirectory(prefix='auth-security-stale-consent-') as directory:\n    data = Path(directory) / 'data'\n    data.mkdir()\n    mp = pytest.MonkeyPatch()\n    cg = conftest.container.__wrapped__(data, mp)\n    container = next(cg)\n    try:\n        service, mail, sent, provider, clock = apple_runtime.__wrapped__(container)\n        first, _, _ = native_login(service)\n        service.process_apple_notification('signed synthetic notice')\n        clock.now += timedelta(seconds=2)\n        provider.identity = replace(provider.identity, issued_at=provider.notification.event_time, email=None)\n        try:\n            native_login(service)\n            print('recheck_equal_time_consent: unexpectedly accepted')\n        except ModernAuthError as error:\n            print('recheck_equal_time_consent:', error.code, error.status_code)\n        with service.store.connection() as c:\n            print('recheck_failed_consent_authority:', {'binding':dict(c.execute('SELECT state,generation FROM auth_identity_bindings').fetchone()),'sessions':c.execute('SELECT COUNT(*) FROM sessions').fetchone()[0], 'grants':c.execute('SELECT COUNT(*) FROM auth_apple_grants').fetchone()[0], 'last_attempt':c.execute('SELECT status FROM auth_attempts ORDER BY created_at DESC LIMIT 1').fetchone()[0]})\n        provider.identity = replace(provider.identity, issued_at=int(clock().timestamp()))\n        fresh, _, _ = native_login(service)\n        print('recheck_strictly_newer_consent:', fresh.payload.status, fresh.payload.user.id == first.payload.user.id)\n    finally:\n        try:\n            next(cg)\n        except StopIteration:\n            pass\n        mp.undo()\n",
+      "result": [
+        "recheck_equal_time_consent: invalid_proof 400",
+        "recheck_failed_consent_authority: {'binding': {'state': 'revoked', 'generation': 1}, 'sessions': 0, 'grants': 0, 'last_attempt': 'failed'}",
+        "recheck_strictly_newer_consent: signed_in True"
+      ]
+    }
+  ],
+  "acceptance_limits": [
+    "This approves the reviewed code fixes within the targeted security scope; it is not speckit-accept grading or full delivery acceptance.",
+    "No real provider, SMTP/Apple relay, notification-signing/grouping, device, native build, deployment or remote probe was exercised.",
+    "Full backend/repository CI, web journeys, native CI/device and live-provider operational evidence remain separate acceptance requirements.",
+    "The original HTTP TestClient run remains recorded as incomplete in the original review; it was not relabeled as passing."
+  ],
+  "mutations": [
+    "Advanced the authorized detached review worktree to the exact rereview SHA.",
+    "Ran local tests and temporary synthetic reproductions.",
+    "Wrote this separate generated evidence JSON; left the original review unchanged.",
+    "No product/planning/test source edits, commits, production writes, deployment, network calls or remote comments."
+  ]
+}
