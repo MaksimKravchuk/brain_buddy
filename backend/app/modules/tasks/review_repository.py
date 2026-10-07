@@ -517,6 +517,27 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
                 owners.update(row["owner_id"] for row in rows)
         return owners
 
+    def idempotency_owner_ids(self, *, created_before: datetime) -> set[str]:
+        """Owners holding an idempotency record ``purge_expired_idempotency``
+        would drop at the cutoff ``created_before`` (FR-043).
+
+        The retention part of the sweep visits them too, so a record past its
+        24 h goes even when its owner never writes again. The brain-dump
+        commit records the purge keeps (``create_native_inbox_task``) are left
+        out here the same way, so an owner holding only those is not visited.
+        """
+
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("Idempotency-Key", "*"),
+        ):
+            rows = conn.execute(
+                "SELECT DISTINCT owner_id FROM idempotency_records "
+                "WHERE created_at < ? AND command != 'create_native_inbox_task'",
+                (created_before.isoformat(),),
+            ).fetchall()
+        return {row["owner_id"] for row in rows}
+
     def list_next_tasks(self, owner_id: str) -> list[TaskDocument]:
         """The owner's Next tasks: the sweep's candidate query (http §9)."""
 

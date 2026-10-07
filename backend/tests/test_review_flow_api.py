@@ -464,6 +464,53 @@ def test_020_FR_050_not_now_sets_a_card_aside_and_leaves_it_asking(
     )
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"step": {"code": "dates", "status": "finished"}},
+        {"step": {"code": "mind_sweep", "status": "skipped"}},
+        {"active_seconds": {"code": "rest_of_next", "seconds": 30}},
+    ],
+    ids=["step-finished", "step-skipped", "active-seconds"],
+)
+def test_020_FR_028_a_quick_run_refuses_progress_for_a_step_outside_its_mode(
+    flow: FlowApi, change: dict[str, Any]
+) -> None:
+    """A step code not in the run's ``steps`` is 422, the validation envelope.
+
+    A quick run has four steps; a full-only code would otherwise add a step
+    the run never shows, and could make it qualify (FR-028, FR-029).
+    """
+
+    sid = flow.start()["id"]
+    before = flow.stored_session(sid)
+    with allure.step("Progress names a step only a full review has"):
+        response = flow.progress_raw(sid, **change)
+    assert response.status_code == 422, response.text
+    assert response.headers.get("X-Correlation-ID")
+    body = response.json()
+    assert body["message"] == "Request validation failed."
+    field = next(iter(change))
+    assert [error["loc"] for error in body["detail"]] == [["body", field, "code"]]
+    assert flow.stored_session(sid) == before
+
+    with allure.step("A full review accepts the same change"):
+        full = flow.start(mode="full", replace_open=True)["id"]
+        accepted = flow.progress_raw(full, **change)
+    assert accepted.status_code == 200, accepted.text
+
+
+def test_020_FR_028_a_quick_run_accepts_its_own_steps(flow: FlowApi) -> None:
+    sid = flow.start()["id"]
+    for code in QUICK:
+        flow.progress(sid, active_seconds={"code": code, "seconds": 1})
+        flow.progress(sid, step={"code": code, "status": "skipped"})
+    stored = flow.stored_session(sid)
+    assert stored.active_seconds_by_step == dict.fromkeys(QUICK, 1)
+    assert set(stored.steps) == set(QUICK)
+    assert {step.status for step in stored.steps.values()} == {"skipped"}
+
+
 def test_020_FR_029_progress_without_a_progress_id_is_422(flow: FlowApi) -> None:
     session = flow.start()
     response = flow.client.patch(
@@ -588,6 +635,72 @@ def test_020_FR_029_a_step_with_items_left_to_decide_does_not_qualify(
     assert flow.finish(sid)["status"] == "completed_empty"
 
 
+def _display_step_seeds(flow: FlowApi) -> None:
+    """Something in every display step's view, and a project left stuck.
+
+    The stuck project (no Next task) makes the deciding-step fallthrough of
+    ``_nothing_to_decide`` answer "something to decide", so a display step
+    that lost its always-true rule cannot pass by falling through.
+    """
+
+    now = flow.clock()
+    flow.seed("completed", title="Won this week", completed_at=now - 2 * DAY)
+    flow.seed(title="Fresh Next task", formulation_started_at=now - 2 * DAY)
+    flow.seed(
+        "waiting", title="Due soon", waiting_for="Ann", due_date=(now + 3 * DAY).date()
+    )
+    flow.seed("inbox", title="Captured in the mind sweep")
+    response = flow.client.post(
+        "/api/projects", json={"name": "Kitchen"}, headers=flow.key()
+    )
+    assert response.status_code == 201, response.text
+
+
+@pytest.mark.parametrize("step", ["wins", "mind_sweep", "rest_of_next", "dates"])
+def test_020_FR_029_display_steps_always_nothing_to_decide(
+    flow: FlowApi, step: str
+) -> None:
+    """Owner decision 2026-10-07: a display step finished is a counted review.
+
+    Wins, Mind sweep, Rest of Next and Dates show items but ask for no
+    decision, so finishing only that step, with items in its queue, is
+    qualifying activity (data-model E3, FR-029).
+    """
+
+    start = flow.clock()
+    flow.clock.set(start - 22 * DAY)
+    flow.put_settings(onboarded=True)
+    flow.clock.set(start)
+    _display_step_seeds(flow)
+    before = flow.state()
+    assert before["restart_mode"] is True
+    assert before["last_counted_review_at"] is None
+    sid = flow.start(mode="full")["id"]
+    if step != "mind_sweep":
+        assert flow.queue(step, sid)["items"], f"{step} queue must not be empty"
+    assert flow.queue("projects", sid)["items"] == []
+    assert flow.container.review_service.tasks.list_projects(owner_id=flow.owner_id)
+
+    with allure.step(f"Finish only the {step} step"):
+        merged = flow.progress(
+            sid, current_step=step, step={"code": step, "status": "finished"}
+        )
+    assert merged["qualifying_activity"] is True
+    assert sum(merged["counts"].values()) == 0
+    assert [
+        code for code, status in merged["steps"].items() if status != "pending"
+    ] == [step]
+
+    flow.clock.advance(minutes=3)
+    with allure.step("Done on the summary"):
+        finished = flow.finish(sid)
+    assert finished["status"] == "completed"
+    after = flow.state()
+    assert after["last_counted_review_at"] is not None
+    assert norm(after["last_counted_review_at"]) == norm(finished["ended_at"])
+    assert after["restart_mode"] is False
+
+
 def test_020_FR_029_020_SC_001_leaving_keeps_the_run_open_and_counted_once_it_qualifies(
     flow: FlowApi,
 ) -> None:
@@ -646,7 +759,7 @@ def test_020_FR_045_unknown_and_foreign_session_ids_give_the_same_404(
         unknown = other.queue_raw(step, unknown_id)
         assert foreign.status_code == unknown.status_code == 404
         assert foreign.json()["detail"] == {
-            "resource": "review_session",
+            "resource": "Review session",
             "id": foreign_id,
         }
         assert _without_reference(foreign, foreign_id) == _without_reference(
@@ -661,10 +774,55 @@ def test_020_FR_045_unknown_and_foreign_session_ids_give_the_same_404(
         foreign = call(foreign_id)
         unknown = call(unknown_id)
         assert foreign.status_code == unknown.status_code == 404
+        assert foreign.json()["detail"] == {
+            "resource": "Review session",
+            "id": foreign_id,
+        }
         assert _without_reference(foreign, foreign_id) == _without_reference(
             unknown, unknown_id
         )
     assert owner.stored_session(foreign_id).status == "open"
+
+
+@pytest.mark.parametrize(
+    "session_id",
+    [
+        "SENTINEL free text",
+        "review_SENTINEL",
+        f"decision_{uuid.uuid4()}",
+        f"review_{str(uuid.uuid4()).upper()}",
+        "review_" + "0" * 70,
+    ],
+    ids=["free-text", "bad-suffix", "other-prefix", "uppercase", "too-long"],
+)
+def test_020_FR_045_a_queue_session_id_of_another_shape_is_422(
+    flow: FlowApi, session_id: str
+) -> None:
+    """The query ``session_id`` is a ``SessionRef`` (http "Client-supplied ids")."""
+
+    with allure.step("Ask for a queue with a malformed session id"):
+        response = flow.queue_raw("decisions", session_id)
+    assert response.status_code == 422, response.text
+    assert response.headers.get("X-Correlation-ID")
+    body = response.json()
+    assert body["message"] == "Request validation failed."
+    assert [error["loc"] for error in body["detail"]] == [["query", "session_id"]]
+    assert "SENTINEL" not in response.text
+
+
+@pytest.mark.parametrize(
+    "session_id",
+    [f"review_{uuid.uuid4()}", "review_0123456789ab"],
+    ids=["client-shape", "server-shape"],
+)
+def test_020_FR_045_a_queue_session_id_of_either_shape_is_looked_up(
+    flow: FlowApi, session_id: str
+) -> None:
+    """Both accepted shapes pass validation and reach the ownership 404."""
+
+    response = flow.queue_raw("wins", session_id)
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"] == {"resource": "Review session", "id": session_id}
 
 
 def test_020_FR_042_flag_off_hides_the_reads_and_accepts_the_writes(
@@ -1262,6 +1420,134 @@ def test_020_FR_017_undo_is_unavailable_once_the_snapshot_was_purged(
     assert flow.stored(seeds["extended"].id).state == "someday"
 
 
+def _assert_record_purged_by_the_sweep(
+    flow: FlowApi, headers: dict[str, str], sentinel: str
+) -> None:
+    """The record holds ``sentinel`` until a sweep 8 days later removes it.
+
+    The flag is off so only the retention part runs: the exposure part's own
+    purge (and every later write's) cannot hide a missing retention purge.
+    """
+
+    repo = flow.container.task_repo
+    key = headers["Idempotency-Key"]
+    record = repo.get_idempotency(owner_id=flow.owner_id, key=key)
+    assert record is not None
+    assert sentinel in json.dumps(record.response_body)
+    mirror = repo.idempotency_path(flow.owner_id, key)
+    assert mirror.exists()
+    flow.flag("off")
+    flow.clock.advance(days=8)
+    with allure.step("The maintenance sweep runs 8 days later, with no write"):
+        sweep(flow.container)
+    assert repo.get_idempotency(owner_id=flow.owner_id, key=key) is None
+    assert not mirror.exists()
+    stored = repo.list_idempotency_for_owner(owner_id=flow.owner_id)
+    assert sentinel not in json.dumps([item.response_body for item in stored])
+
+
+def test_020_FR_043_the_sweep_purges_a_bulk_release_idempotency_record(
+    flow: FlowApi,
+) -> None:
+    """The record's ``clock_before`` holds the extension reason (E7, FR-043)."""
+
+    seeds = _restart_seeds(flow)
+    headers = flow.key()
+    response = flow.bulk_raw("restart", _items(seeds["extended"]), headers=headers)
+    assert response.status_code == 200, response.text
+    _assert_record_purged_by_the_sweep(flow, headers, "Waiting for the quote")
+    release = flow.container.task_repo.get_bulk_release(
+        flow.owner_id, response.json()["id"]
+    )
+    assert release is not None
+    assert [item.clock_before for item in release.released] == [None]
+
+
+def test_020_FR_043_the_sweep_purges_a_decision_idempotency_record(
+    flow: FlowApi,
+) -> None:
+    """A "keep 7 more days" record carries its reason text (FR-043)."""
+
+    now = flow.clock()
+    asking = flow.seed(title="Asks", formulation_started_at=now - 15 * DAY)
+    headers = flow.key()
+    response = flow.decide_raw(
+        flow.task(asking.id), "extend", reason="SENTINEL-EXTEND-REASON", headers=headers
+    )
+    assert response.status_code == 200, response.text
+    _assert_record_purged_by_the_sweep(flow, headers, "SENTINEL-EXTEND-REASON")
+
+
+def test_020_FR_043_the_sweep_keeps_a_record_inside_its_24_hours(
+    flow: FlowApi,
+) -> None:
+    capture = flow.create("Capture")
+    headers = flow.key()
+    flow.bulk_raw("inbox_remainder", _items(capture), headers=headers)
+    flow.flag("off")
+    flow.clock.advance(hours=23)
+    sweep(flow.container)
+    key = headers["Idempotency-Key"]
+    repo = flow.container.task_repo
+    assert repo.get_idempotency(owner_id=flow.owner_id, key=key) is not None
+
+
+def test_020_FR_043_the_sweep_purges_records_of_an_owner_without_review_rows(
+    api_client: TestClient, frozen_clock: FrozenClock
+) -> None:
+    """docs/data-retention.md "Task idempotency records": 24 h, by the sweep."""
+
+    container = api_client.app.state.container  # type: ignore[attr-defined]
+    owner_id = api_client.get("/api/auth/me").json()["id"]
+    key = f"key-{uuid.uuid4()}"
+    created = api_client.post(
+        "/api/tasks", json={"title": "SENTINEL-TITLE"}, headers={"Idempotency-Key": key}
+    )
+    assert created.status_code == 201, created.text
+    repo = container.task_repo
+    assert owner_id not in repo.review_owner_ids()
+    assert repo.get_idempotency(owner_id=owner_id, key=key) is not None
+    frozen_clock.advance(RETENTION_PASSED)
+    with allure.step("The maintenance sweep runs a day later, with no write"):
+        sweep(container)
+    assert repo.get_idempotency(owner_id=owner_id, key=key) is None
+    assert not repo.idempotency_path(owner_id, key).exists()
+
+
+def test_020_FR_043_the_sweep_visits_only_owners_with_a_purgeable_record(
+    flow: FlowApi,
+) -> None:
+    """The owner query mirrors the purge: the cutoff, and the brain-dump exemption."""
+
+    repo = flow.container.task_repo
+    now = flow.clock()
+    rows = {
+        "user_expired": ("create_task", now - RETENTION_PASSED),
+        "user_fresh": ("create_task", now - timedelta(hours=23)),
+        "user_exempt": ("create_native_inbox_task", now - 30 * DAY),
+    }
+    for owner_id, (command, created_at) in rows.items():
+        with repo.command_lock(owner_id):
+            repo.save_idempotency(
+                owner_id=owner_id,
+                record=IdempotencyRecord(
+                    key=f"key-{owner_id}",
+                    command=command,
+                    request_hash="0" * 64,
+                    resource_id="x",
+                    response_body={},
+                    created_at=created_at,
+                ),
+            )
+    cutoff = now - IDEMPOTENCY_RETENTION
+    assert repo.idempotency_owner_ids(created_before=cutoff) == {"user_expired"}
+    flow.flag("off")
+    sweep(flow.container)
+    for owner_id in rows:
+        kept = repo.get_idempotency(owner_id=owner_id, key=f"key-{owner_id}")
+        assert (kept is None) is (owner_id == "user_expired")
+
+
 def test_020_FR_030_an_inbox_release_undo_is_unavailable_after_seven_days(
     flow: FlowApi,
 ) -> None:
@@ -1349,6 +1635,10 @@ def test_020_FR_045_bulk_ids_of_another_owner_answer_like_unknown_ids(
     missing_id = new_id("bulk")
     unknown_undo = other.undo_bulk_raw(missing_id)
     assert foreign_undo.status_code == unknown_undo.status_code == 404
+    assert foreign_undo.json()["detail"] == {
+        "resource": "Review bulk release",
+        "id": release["id"],
+    }
     assert _without_reference(foreign_undo, release["id"]) == _without_reference(
         unknown_undo, missing_id
     )

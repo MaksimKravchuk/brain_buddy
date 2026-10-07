@@ -88,6 +88,19 @@ class OpenSessionExistsError(ReviewRequestError):
         self.session_id = session_id
 
 
+class StepOutsideRunError(Exception):
+    """A progress ``step`` or ``active_seconds`` code the run does not have.
+
+    Rendered by the route as the 422 request-validation envelope with ``loc``
+    ``["body", field, "code"]`` (http §6): a quick run has four steps, and a
+    full-only code would add a step it never shows and could make it qualify.
+    """
+
+    def __init__(self, field: Literal["step", "active_seconds"]) -> None:
+        super().__init__(f"{field}.code is not a step of this review")
+        self.field = field
+
+
 class _NoBody(BaseModel):
     """The bulk-release Undo has no body: its fingerprint is the command alone."""
 
@@ -252,7 +265,7 @@ class ReviewFlowService:
 
         session = self.task_repo.get_review_session(owner_id, session_id)
         if session is None:
-            raise NotFoundError("review_session", session_id)
+            raise NotFoundError("Review session", session_id)
         return session
 
     @serialized_write
@@ -269,7 +282,9 @@ class ReviewFlowService:
         Replay-safe by ``progress_id`` at any age (http §6): a known id with
         the same body digest merges nothing and answers the current run; with
         another digest it is ``id_conflict``. Progress on an ended run is
-        accepted and ignored.
+        accepted and ignored. A ``step`` or ``active_seconds`` code that is not
+        one of the run's steps is refused first (``StepOutsideRunError``,
+        422), whatever the run's status: the mode never changes.
         """
 
         started = time.monotonic()
@@ -281,6 +296,7 @@ class ReviewFlowService:
         if record is not None:
             return SessionResultDocument.model_validate(record.response_body).session
         session = self.get_session(session_id, owner_id=owner_id)
+        _require_run_steps(session, payload)
         digest = progress_digest(payload)
         known = session.applied_progress.get(payload.progress_id)
         if known is not None and known != digest:
@@ -710,7 +726,7 @@ class ReviewFlowService:
             return dict(stored.release.undo_result or {})
         release = self.task_repo.get_bulk_release(owner_id, bulk_id)
         if release is None:
-            raise NotFoundError("review_bulk_release", bulk_id)
+            raise NotFoundError("Review bulk release", bulk_id)
         if release.undone_at is not None and release.undo_result is not None:
             _log_bulk(release, event="undo", outcome="already_undone", t0=started)
             return dict(release.undo_result)
@@ -777,6 +793,20 @@ def progress_digest(payload: SessionProgressRequest) -> str:
     body = payload.model_dump(mode="json", exclude={"progress_id"}, exclude_none=True)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _require_run_steps(
+    session: ReviewSessionDocument, payload: SessionProgressRequest
+) -> None:
+    """Refuse a progress change naming a step outside the run's mode (http §6)."""
+
+    if payload.step is not None and payload.step.code not in session.steps:
+        _log_refusal(session.owner_id, session.id, "step_outside_run")
+        raise StepOutsideRunError("step")
+    active = payload.active_seconds
+    if active is not None and active.code not in session.steps:
+        _log_refusal(session.owner_id, session.id, "step_outside_run")
+        raise StepOutsideRunError("active_seconds")
 
 
 def _ended(
@@ -1081,5 +1111,6 @@ __all__ = [
     "QueueView",
     "ReviewFlowService",
     "ReviewMetrics",
+    "StepOutsideRunError",
     "progress_digest",
 ]

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.api.contracts import error_responses
@@ -32,6 +33,7 @@ from app.modules.tasks.review_flow import (
     OpenSessionExistsError,
     QueueView,
     ReviewFlowService,
+    StepOutsideRunError,
 )
 from app.modules.tasks.review_service import ReviewService
 from app.schemas.api import ErrorResponse
@@ -46,6 +48,7 @@ from app.schemas.review import (
     RestOfNextQueueMeta,
     SessionFinishRequest,
     SessionProgressRequest,
+    SessionRef,
     SessionResponse,
     SessionStartRequest,
     SomedayQueueMeta,
@@ -163,16 +166,30 @@ def progress_review_session(
     current_user: User = Depends(get_current_user),
     flow: ReviewFlowService = Depends(get_review_flow_service),
 ) -> SessionResponse:
-    """Merged progress, replay-safe by ``progress_id`` (http §6); not gated."""
+    """Merged progress, replay-safe by ``progress_id`` (http §6); not gated.
 
-    return session_response(
-        flow.progress_session(
+    A step code outside the run's mode is 422 with the same envelope as a
+    schema validation failure (``loc`` ``["body", field, "code"]``).
+    """
+
+    try:
+        session = flow.progress_session(
             session_id,
             payload,
             owner_id=current_user.id,
             idempotency_key=require_idempotency_key(idempotency_key),
         )
-    )
+    except StepOutsideRunError as exc:
+        raise RequestValidationError(
+            [
+                {
+                    "type": "step_outside_run",
+                    "loc": ("body", exc.field, "code"),
+                    "msg": "The step is not part of this review's mode.",
+                }
+            ]
+        ) from exc
+    return session_response(session)
 
 
 @router.post(
@@ -206,12 +223,16 @@ def finish_review_session(
 )
 def get_review_queue(
     step: StepCode,
-    session_id: str | None = Query(default=None),
+    session_id: SessionRef | None = Query(default=None),
     current_user: User = Depends(require_weekly_review_enabled),
     flow: ReviewFlowService = Depends(get_review_flow_service),
     review_service: ReviewService = Depends(get_review_service),
 ) -> QueueResponse:
-    """One step's items in order, with its meta (http §6)."""
+    """One step's items in order, with its meta (http §6).
+
+    ``session_id`` is a ``SessionRef`` (http "Client-supplied ids"): any other
+    shape is 422 before a lookup, so no free text reaches a query or a log.
+    """
 
     view = flow.queue(step, owner_id=current_user.id, session_id=session_id)
     items = tasks_with_formulation(review_service, current_user.id, None, *view.items)

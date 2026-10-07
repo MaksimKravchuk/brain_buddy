@@ -40,7 +40,7 @@ from app.utils.identifiers import generate_id
 
 from . import formulation, review_rules
 from .domain import FormulationSettingsDocument, IdempotencyRecord, TaskDocument
-from .repository import TaskRepository
+from .repository import IDEMPOTENCY_RETENTION, TaskRepository
 from .review_domain import (
     REVIEW_COMMAND_PREFIXES,
     REVIEW_COUNTS_AS,
@@ -1144,14 +1144,21 @@ class ReviewService:
         return result
 
     def run_review_retention(self, now: datetime) -> tuple[int, int]:
-        """Null 7-day snapshots, drop 35-day usage rows, close idle runs.
+        """Null 7-day snapshots, drop 35-day usage rows, close idle runs, and
+        purge idempotency records past their 24 h.
 
-        Runs for every owner holding review rows whatever the flag state, so a
-        rollback never suspends the bound (FR-043, research R15).
+        Runs for every owner holding review rows, or an expired idempotency
+        record, whatever the flag state, so a rollback never suspends the
+        bound and an owner who stops writing still loses the copies (FR-043,
+        research R15, docs/data-retention.md).
         """
 
+        owners = self.task_repo.review_owner_ids()
+        owners |= self.task_repo.idempotency_owner_ids(
+            created_before=now - IDEMPOTENCY_RETENTION
+        )
         nulled = closed = 0
-        for owner_id in sorted(self.task_repo.review_owner_ids()):
+        for owner_id in sorted(owners):
             try:
                 nulled += self._retain(owner_id, now)
                 closed += self.idle_session_closer(owner_id, now)
@@ -1177,6 +1184,9 @@ class ReviewService:
         ]
         nulled = 0
         with self.task_repo.command_lock(owner_id):
+            # The records hold whole result documents (titles, notes, an
+            # extension reason in ``clock_before``): they go at 24 h, not 7 d.
+            self.task_repo.purge_expired_idempotency(owner_id=owner_id, now=now)
             for decision_id in decisions:
                 decision = self.task_repo.get_review_decision(owner_id, decision_id)
                 if decision is not None and decision.undo is not None:

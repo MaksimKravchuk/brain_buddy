@@ -55,7 +55,8 @@ never an authorization input. Concurrency uses `expected_revision` in the body.
 403. The same holds for an id in a **query parameter** (`session_id` on
 `GET /review/queues/{step}`): unknown and foreign give the same 404
 `{"resource": "Review session", "id": …}` body (the backend's resource-name
-convention, as `"Review decision"` in §3). **Task ids inside a request body**
+convention, as `"Review decision"` in §3; a bulk release's Undo path names
+`"Review bulk release"`, §6). **Task ids inside a request body**
 (bulk-release `items`, `set_aside_task_id`, park acknowledgements) never produce a
 404: an id that does not exist and an id of another owner are treated identically
 (reported as `not_eligible`, or ignored), so the response is byte-identical for both
@@ -499,9 +500,9 @@ M-09 / the web dialog without "Continue" sends nothing (the parks stay unseen).
 |---|---|---|---|
 | POST | `/review/sessions` | `{id?, mode, entry, origin, skip_steps?: [step], replace_open: bool}` | 201 session; with `replace_open` an open session is finished first (partial or abandoned by the E3 rule; the device that had it shows "review ended elsewhere"); without it and an open session exists → 409 `{"reason": "open_session_exists", "session_id": …}`. Within the 24 h retention, replay is by Idempotency-Key ("Mutations"); an `id` already used under another key → 409 `id_conflict`, unless the stored session matches (same owner, `id`, `mode` and `origin`), which answers 201 with the stored session as already applied and replaces nothing, checked before `replace_open` ("Retry after the idempotency retention"). iOS always pushes an offline-started session with `replace_open: true` (ios-commands §4) and keeps its key until the request succeeds, so a queued review is never set aside |
 | GET | `/review/sessions/{id}` | — | session |
-| PATCH | `/review/sessions/{id}` | `{progress_id, current_step?, step?: {code, status}, active_seconds?: {code, seconds}, set_aside_task_id?, inbox_processed_delta?, snapshot_decision_queue?: true}` | merged session (rules below); no version conflict. `progress_id` (`progress_<uuid>`, minted by the client once per progress change, iOS and web alike, and reused unchanged on every retry of that change) is required (422 without it) |
+| PATCH | `/review/sessions/{id}` | `{progress_id, current_step?, step?: {code, status}, active_seconds?: {code, seconds}, set_aside_task_id?, inbox_processed_delta?, snapshot_decision_queue?: true}` | merged session (rules below); no version conflict. `progress_id` (`progress_<uuid>`, minted by the client once per progress change, iOS and web alike, and reused unchanged on every retry of that change) is required (422 without it). A `step` or `active_seconds` `code` that is not one of the session's steps (a full-only step on a quick review) → 422, the request-validation envelope with `loc` `["body", "step" \| "active_seconds", "code"]`, nothing merged, whatever the session's status |
 | POST | `/review/sessions/{id}/finish` | `{clear_start?: yes \| not_really}` | the person tapped Done on the summary: status `completed` or `completed_empty` per data-model E3. There is no "left" outcome: leaving only pauses a review (FR-029); it ends without Done only by replacement or the 7-day idle close. Idempotent: finishing an already finished session returns it unchanged (200) |
-| GET | `/review/queues/{step}` | query `session_id` | `{items: TaskResponse[], meta}`; `meta` per step: `wins` `{count}`; `rest_of_next` `{next_count, weekly_average_4w, weeks_of_history, implied_weeks}` (`weekly_average_4w` and `implied_weeks` are `null` when `weeks_of_history < 4` or there were no completions in them, FR-031); `someday` `{eligible_total, shown ≤ 7}`; `dates` `{days: [{day: YYYY-MM-DD, task_ids: [id]}]}`: one entry per local day, in the stored zone, from today to today + 13 that has at least one open task due, ascending; within a day `task_ids` follow the Next list's manual order (`order_key`, then `id`); `items` holds those tasks in the same order. A device in another zone computes its own window (ios-commands §6) and may differ by one day at either edge, which is accepted; other steps' `meta` is `{}`. Unknown or foreign `session_id` → the same 404 ("Ownership") |
+| GET | `/review/queues/{step}` | query `session_id` (a session reference, "Client-supplied ids"; any other shape → 422) | `{items: TaskResponse[], meta}`; `meta` per step: `wins` `{count}`; `rest_of_next` `{next_count, weekly_average_4w, weeks_of_history, implied_weeks}` (`weekly_average_4w` and `implied_weeks` are `null` when `weeks_of_history < 4` or there were no completions in them, FR-031); `someday` `{eligible_total, shown ≤ 7}`; `dates` `{days: [{day: YYYY-MM-DD, task_ids: [id]}]}`: one entry per local day, in the stored zone, from today to today + 13 that has at least one open task due, ascending; within a day `task_ids` follow the Next list's manual order (`order_key`, then `id`); `items` holds those tasks in the same order. A device in another zone computes its own window (ios-commands §6) and may differ by one day at either edge, which is accepted; other steps' `meta` is `{}`. Unknown or foreign `session_id` → the same 404 ("Ownership") |
 
 **Session progress is merged, not version-checked**, so two devices moving the same
 review never conflict: `step` statuses merge monotonically (`finished` > `skipped` >
@@ -582,7 +583,8 @@ record keeps `undone_at` and the result as task ids and reason codes (data-model
 An undo of a release that is **already undone** changes nothing and answers 200 with
 that stored result, at any age, so a retried undo whose response was lost is a
 success. 409 `{"reason": "undo_unavailable"}` only when the release was never undone
-and its snapshot was purged (7 days). The server keeps no
+and its snapshot was purged (7 days). An unknown or foreign release id → 404
+`{"resource": "Review bulk release", "id": …}` ("Ownership"). The server keeps no
 shorter window: when Undo stops being offered is a client rule (until the person moves
 on from the restart screen or leaves the Inbox step, FR-017, FR-030).
 
@@ -731,8 +733,12 @@ changing that function's 3-tuple return value**, which
 
 It has two parts:
 
-1. **Retention** — for **every** owner with review rows, whatever the flag state
-   (a flag turned off for rollback must not stop retention, FR-043): null decision undo
+1. **Retention** — for **every** owner with review rows, or with an idempotency
+   record past its 24 h, whatever the flag state (a flag turned off for rollback must
+   not stop retention, FR-043): purge idempotency records older than 24 h
+   (`purge_expired_idempotency`; a decision or bulk-release record holds the whole
+   result, including titles and `clock_before.extension_reason`, so it must not outlive
+   the 7-day snapshots when its owner stops writing); null decision undo
    snapshots older than 7 days; purge bulk-release clock snapshots older than 7 days;
    close sessions idle ≥ 7 days (partial or abandoned, E3); delete `navigator_usage`
    rows older than 35 days.
