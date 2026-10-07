@@ -621,5 +621,47 @@ class PanelProvenanceTests(RendersSectionFive, unittest.TestCase):
         self.assertNotIn("**Single-provider panel**: undetermined", rendered)
 
 
+class ScreenIdTests(unittest.TestCase):
+    """Design gap G-7 of 021-mac-sync: the Mac screens are `X-` ids.
+
+    A report that counts only `D-` and `M-` ids tells the reader a Mac design
+    has no screens, and acceptance then has nothing to trace them to.
+    """
+
+    DESIGN = (
+        "# Design\n\n"
+        "## X-01 Main window\n\nSee X-09 for the unreadable workspace.\n\n"
+        "## M-01 iPhone list\n\n## D-01 Web list\n\n"
+        "X-01 is named twice and still counts once.\n"
+    )
+
+    def setUp(self) -> None:
+        self.module = load_module()
+
+    def test_mac_ids_are_screen_ids_beside_mobile_and_desktop(self) -> None:
+        self.assertEqual(
+            sorted(set(self.module.SCREEN_ID_RE.findall(self.DESIGN))),
+            ["D-01", "M-01", "X-01", "X-09"],
+        )
+
+    def test_ids_of_other_shapes_are_not_screens(self) -> None:
+        # A gap id, a review finding and a longer token must not be counted.
+        text = "G-07, F-22, XX-01, X-1, X-012 and AX-01 are not screens."
+        self.assertEqual(self.module.SCREEN_ID_RE.findall(text), [])
+
+    def test_the_report_counts_four_screen_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            feature_dir = root / "specs" / "021-example"
+            feature_dir.mkdir(parents=True)
+            (feature_dir / "design.md").write_text(self.DESIGN, encoding="utf-8")
+            with mock.patch.object(self.module, "REPO_ROOT", root), mock.patch.object(
+                self.module, "RUNS_DIR", root / ".specify" / "workflows" / "runs"
+            ):
+                report = self.module.render(feature_dir)
+
+        self.assertIn("4 screen/state ids (D-01, M-01, X-01, X-09)", report)
+
+
 if __name__ == "__main__":
     unittest.main()
