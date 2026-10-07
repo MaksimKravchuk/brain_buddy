@@ -31,7 +31,7 @@ from app.modules.tasks.repository import IDEMPOTENCY_RETENTION
 from app.utils.time import from_isoformat
 
 from .conftest import FrozenClock
-from .test_review_auto_park import sweep
+from .test_review_auto_park import keep_alive, sweep
 from .test_review_decisions_api import ReviewApi, new_id, norm
 
 DAY = timedelta(days=1)
@@ -1785,6 +1785,196 @@ def test_020_FR_011_lost_bulk_writes_are_repaired_by_their_replay(
     assert flow.stored(capture["id"]).state == "inbox"
     record = repo.get_bulk_release(flow.owner_id, result["id"])
     assert record is not None and record.undone_at is not None
+
+
+def _hidden_from_someday_for_30_days(flow: FlowApi, task_id: str) -> None:
+    """A released task stays out of the Someday step until its receipt ends."""
+
+    start = flow.clock()
+    sid = flow.start(mode="full", replace_open=True)["id"]
+    assert task_id not in flow.ids(flow.queue("someday", sid))
+    flow.clock.set(start + 29 * DAY)
+    assert task_id not in flow.ids(flow.queue("someday", sid))
+    flow.clock.set(start + 31 * DAY)
+    assert task_id in flow.ids(flow.queue("someday", sid))
+
+
+def test_020_FR_032_a_release_interrupted_after_a_task_write_keeps_its_receipt(
+    flow: FlowApi, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The receipt save fails after the task save; the retry leaves it hidden.
+
+    The command runs in one owner-locked SQLite transaction, so the failure
+    rolls the task and the record back and the retry applies the release
+    whole.
+    """
+
+    capture = flow.create("Capture")
+    headers = flow.key()
+    repo = flow.container.task_repo
+    real_save = repo.save_review_receipt
+
+    def failing(receipt: rd.ReviewReceiptDocument) -> None:
+        raise RuntimeError("storage stopped")
+
+    monkeypatch.setattr(repo, "save_review_receipt", failing)
+    with allure.step("The receipt write fails after the task write"):
+        try:
+            failed = flow.bulk_raw("inbox_remainder", _items(capture), headers=headers)
+        except RuntimeError:
+            failed = None
+    assert failed is None or failed.status_code >= 500
+    monkeypatch.setattr(repo, "save_review_receipt", real_save)
+    with allure.step("The same request is retried with its key"):
+        retry = flow.bulk_raw("inbox_remainder", _items(capture), headers=headers)
+    assert retry.status_code == 200, retry.text
+    receipt = repo.get_review_receipt(flow.owner_id, capture["id"], "someday")
+    assert receipt is not None and receipt.bulk_id == retry.json()["id"]
+    _hidden_from_someday_for_30_days(flow, capture["id"])
+
+
+def test_020_FR_011_020_FR_032_a_release_replay_restores_a_receipt_it_lost(
+    flow: FlowApi,
+) -> None:
+    """The record and the task survived, the receipt and the release row not.
+
+    The task is already at its released revision, so it is not written again,
+    but its receipt is recreated before the release row is saved.
+    """
+
+    capture = flow.create("Capture")
+    headers = flow.key()
+    result = flow.bulk_raw("inbox_remainder", _items(capture), headers=headers).json()
+    repo = flow.container.task_repo
+    released = flow.stored(capture["id"])
+    with repo.command_lock(flow.owner_id):
+        repo.delete_review_receipt(flow.owner_id, capture["id"], "someday")
+        repo._review_execute(  # simulate the lost rows
+            "Bulk release",
+            "DELETE FROM review_bulk_releases WHERE owner_id = ? AND id = ?",
+            (flow.owner_id, result["id"]),
+        )
+    with allure.step("The release is retried with its key"):
+        replay = flow.bulk_raw("inbox_remainder", _items(capture), headers=headers)
+    assert replay.json() == result
+    assert flow.stored(capture["id"]).revision == released.revision
+    receipt = repo.get_review_receipt(flow.owner_id, capture["id"], "someday")
+    assert receipt is not None and receipt.bulk_id == result["id"]
+    assert repo.get_bulk_release(flow.owner_id, result["id"]) is not None
+    _hidden_from_someday_for_30_days(flow, capture["id"])
+
+
+def test_020_FR_011_a_release_undo_replay_drops_a_receipt_it_left(
+    flow: FlowApi,
+) -> None:
+    capture = flow.create("Capture")
+    result = flow.bulk("inbox_remainder", _items(capture))
+    repo = flow.container.task_repo
+    receipt = repo.get_review_receipt(flow.owner_id, capture["id"], "someday")
+    release = repo.get_bulk_release(flow.owner_id, result["id"])
+    assert receipt is not None and release is not None
+    headers = flow.key()
+    undone = flow.undo_bulk_raw(result["id"], headers=headers).json()
+    with repo.command_lock(flow.owner_id):
+        repo.save_review_receipt(receipt)
+        repo.save_bulk_release(release)
+    again = flow.undo_bulk_raw(result["id"], headers=headers)
+    assert again.json() == undone
+    assert flow.stored(capture["id"]).state == "inbox"
+    assert repo.get_review_receipt(flow.owner_id, capture["id"], "someday") is None
+    stored = repo.get_bulk_release(flow.owner_id, result["id"])
+    assert stored is not None and stored.undone_at is not None
+
+
+def test_020_FR_011_020_FR_029_a_decision_replay_restores_rows_it_lost(
+    flow: FlowApi,
+) -> None:
+    """Task written, decision row, receipt and run counts lost: all restored."""
+
+    now = flow.clock()
+    asking = flow.seed(title="Asks", formulation_started_at=now - 15 * DAY)
+    sid = flow.start()["id"]
+    headers = flow.key()
+    card = flow.task(asking.id)
+    response = flow.decide_raw(card, "someday", session_id=sid, headers=headers)
+    assert response.status_code == 200, response.text
+    repo = flow.container.task_repo
+    decision_id = response.json()["decision"]["id"]
+    decided = flow.stored(asking.id)
+    counted = flow.stored_session(sid)
+    with repo.command_lock(flow.owner_id):
+        repo.delete_review_decision(flow.owner_id, decision_id)
+        repo.delete_review_receipt(flow.owner_id, asking.id, "someday")
+        repo.save_review_session(
+            counted.model_copy(
+                update={"counts": rd.SessionCountsDocument(), "revision": 1}
+            )
+        )
+    with allure.step("The decision is retried with its key"):
+        replay = flow.decide_raw(card, "someday", session_id=sid, headers=headers)
+    assert replay.status_code == 200, replay.text
+    assert flow.stored(asking.id).revision == decided.revision
+    assert repo.get_review_decision(flow.owner_id, decision_id) is not None
+    receipt = repo.get_review_receipt(flow.owner_id, asking.id, "someday")
+    assert receipt is not None and receipt.decision_id == decision_id
+    assert flow.stored_session(sid).counts == counted.counts
+
+
+def test_020_FR_048_an_undo_replay_finishes_the_rows_it_left(flow: FlowApi) -> None:
+    """Task restored, decision row and receipt left: both removed on replay."""
+
+    now = flow.clock()
+    asking = flow.seed(title="Asks", formulation_started_at=now - 15 * DAY)
+    decided = flow.decide(flow.task(asking.id), "someday")
+    repo = flow.container.task_repo
+    decision_id = decided["decision"]["id"]
+    decision = repo.get_review_decision(flow.owner_id, decision_id)
+    receipt = repo.get_review_receipt(flow.owner_id, asking.id, "someday")
+    assert decision is not None and receipt is not None
+    headers = flow.key()
+    undo = flow.undo_raw(decision_id, decided["task"]["revision"], headers=headers)
+    assert undo.status_code == 200, undo.text
+    restored = flow.stored(asking.id)
+    with repo.command_lock(flow.owner_id):
+        repo.save_review_decision(decision)
+        repo.save_review_receipt(receipt)
+    with allure.step("The Undo is retried with its key"):
+        again = flow.undo_raw(decision_id, decided["task"]["revision"], headers=headers)
+    assert again.status_code == 200, again.text
+    assert flow.stored(asking.id).revision == restored.revision
+    assert repo.get_review_decision(flow.owner_id, decision_id) is None
+    assert repo.get_review_receipt(flow.owner_id, asking.id, "someday") is None
+
+
+def test_020_FR_013_an_auto_park_replay_restores_a_park_row_it_lost(
+    flow: FlowApi,
+) -> None:
+    """Task parked, park acknowledgement row lost: recreated on replay (E6)."""
+
+    task = flow.create("Call Bob", state="next")
+    flow.clock.advance(days=21)
+    keep_alive(flow.container)
+    task = flow.task(task["id"])
+    headers = flow.key()
+    path = f"/api/tasks/{task['id']}/auto-park"
+    body = {"formulation_id": task["formulation"]["id"]}
+    first = flow.client.post(path, json=body, headers=headers)
+    assert first.status_code == 200, first.text
+    parked = flow.stored(task["id"])
+    assert parked.state == "someday"
+    repo = flow.container.task_repo
+    with repo.command_lock(flow.owner_id):
+        repo._review_execute(  # simulate the lost row
+            "Park",
+            "DELETE FROM review_park_acks WHERE owner_id = ? AND task_id = ?",
+            (flow.owner_id, task["id"]),
+        )
+    with allure.step("The park is retried with its key"):
+        replay = flow.client.post(path, json=body, headers=headers)
+    assert replay.status_code == 200, replay.text
+    assert flow.stored(task["id"]).revision == parked.revision
+    ack = repo.get_park_ack(flow.owner_id, task["id"], body["formulation_id"])
+    assert ack is not None and ack.seen_at is None
 
 
 def test_020_FR_011_flow_reconcilers_leave_an_unreadable_record_alone(
