@@ -169,7 +169,16 @@ describe("020-FR-052 leave guard for the decision dialog", () => {
     expect(onNavigate).toHaveBeenCalledTimes(1);
 
     rerender(<Links dirty={false} onNavigate={onNavigate} />);
-    expect(fireEvent.click(internal)).toBe(true);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("020-FR-052 020-FR-005 sends a clean in-app link through the guard too, so the dialog can hand over its history entry", () => {
+    const onNavigate = vi.fn();
+    render(<Links dirty={false} onNavigate={onNavigate} />);
+
+    expect(fireEvent.click(screen.getByRole("link", { name: "Think it through" }))).toBe(false);
+    expect(onNavigate).toHaveBeenCalledWith("/crt");
+    expect(fireEvent.click(screen.getByRole("link", { name: "Elsewhere" }))).toBe(true);
     expect(onNavigate).toHaveBeenCalledTimes(1);
   });
 

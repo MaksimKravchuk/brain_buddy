@@ -8,8 +8,9 @@
  * reported as `onBack`, which the dialog treats exactly like Close (asking
  * first when a field is dirty, and calling `rearm` on "Keep editing"). Closing
  * any other way pops the entry again. While a field is dirty, a tab close or
- * reload gets the browser's leave warning, and in-app links are reported as
- * `onNavigate` instead of being followed.
+ * reload gets the browser's leave warning. In-app links, dirty or not, are
+ * reported as `onNavigate` instead of being followed, so the dialog can
+ * replace its entry with the link's route.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
@@ -37,7 +38,10 @@ export function useLeaveGuard({
   dirty: boolean;
   /** Browser Back left the dialog's entry: handle it as Close. */
   onBack: () => void;
-  /** An in-app link was clicked while dirty; the link was not followed. */
+  /**
+   * A same-origin link was clicked; it was not followed. The caller asks
+   * first when dirty, then calls `release` and navigates with `replace`.
+   */
   onNavigate?: (href: string) => void;
   target?: LeaveGuardTarget;
 }): { rearm: () => void; release: () => void } {
@@ -71,10 +75,13 @@ export function useLeaveGuard({
         event.returnValue = "";
       }
     };
+    // Every same-origin link goes through `onNavigate`, dirty or not: the
+    // dialog decides whether to ask, and then replaces its own entry with the
+    // link's route, so Back afterwards does not land on that entry first.
     const onClick = (event: MouseEvent) => {
-      const { dirty: isDirty, onNavigate: navigate } = latest.current;
+      const navigate = latest.current.onNavigate;
       const modified = event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
-      if (!isDirty || !navigate || event.defaultPrevented || modified) {
+      if (!navigate || event.defaultPrevented || modified) {
         return;
       }
       const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;

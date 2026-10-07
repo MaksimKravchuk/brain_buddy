@@ -1,7 +1,8 @@
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { useState } from "react";
+import { BrowserRouter, Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiClient } from "../../../api/client";
@@ -738,6 +739,48 @@ describe("020-FR-005 decision dialog: the third stalled wording", () => {
     });
     renderDialog(asksTask({}, { consecutive_stalled: 3 }));
     expect(screen.getByRole("link", { name: "Think it through" })).toHaveAttribute("href", "/crt");
+  });
+
+  it("020-FR-005 020-FR-052 Think it through on a clean card replaces the dialog's history entry, so one Back returns to the list", async () => {
+    const user = userEvent.setup();
+    act(() => {
+      useAuthStore.setState({ user: { id: "user-1", email: "max@example.test", feature_flags: { crt_canvas: true } } });
+    });
+    window.history.replaceState(null, "", "/tasks/next");
+    const before = window.history.length;
+    let opened = false;
+    function NextPage(): React.JSX.Element {
+      const [open, setOpen] = useState(() => !opened);
+      opened = true;
+      return (
+        <>
+          <h1>Next actions</h1>
+          {open ? <DecisionDialog task={asksTask({}, { consecutive_stalled: 3 })} projectName="Home" onClose={() => setOpen(false)} /> : null}
+        </>
+      );
+    }
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ShellToastContext.Provider value={notify}>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/tasks/next" element={<NextPage />} />
+              <Route path="/crt" element={<h1>Thinking canvas</h1>} />
+            </Routes>
+          </BrowserRouter>
+        </ShellToastContext.Provider>
+      </QueryClientProvider>
+    );
+    expect(window.history.length).toBe(before + 1);
+
+    await user.click(screen.getByRole("link", { name: "Think it through" }));
+
+    expect(await screen.findByRole("heading", { name: "Thinking canvas" })).toBeInTheDocument();
+    expect(window.history.length).toBe(before + 1);
+    act(() => window.history.back());
+    expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/tasks/next");
+    expect((window.history.state as Record<string, unknown> | null)?.bbReviewDialog).toBeUndefined();
   });
 });
 
